@@ -194,6 +194,14 @@ fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
             "DCS filter is outside the platform-authenticated compiler cohort",
         ));
     }
+    if matches!(
+        typed_settings.conditional_appearance(),
+        DcsChildParseOutcome::Unsupported(_)
+    ) {
+        return Err(DcsCodecError::UnsupportedSource(
+            "DCS conditional appearance is outside the platform-authenticated compiler cohort",
+        ));
+    }
     let first = xml_document(&format!("{SCHEMA_FILE_OPEN}\r\n{inner}\r\n</SchemaFile>"));
     let second = xml_document(&settings);
     let third = xml_document(&format!(

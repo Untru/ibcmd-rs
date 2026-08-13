@@ -64,6 +64,7 @@
     "maxEmittedItems": 1,
     "supportedViewModes": ["Normal"],
     "metadataOnlyUserSettingId": "88619765-ccb3-46c6-ac52-38e9c992ebd4",
+    "storageRecordTypeUuid": "11743ff3-2db3-4cfc-9404-90ed8209437f",
     "propertylessEmptyOrderEmission": "unsupported",
     "metadataOnlyOrderEmission": "requires-viewMode-and-userSettingID",
     "rootAutoEmission": "unsupported"

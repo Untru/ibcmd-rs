@@ -1,6 +1,7 @@
 use super::*;
 use ibcmd_core::dcs::{
-    DcsBuildError, DcsFilter, DcsOrder, DcsSelection, DcsSettingsBuilder, DcsSettingsEnvelope,
+    DcsBuildError, DcsConditionalAppearance, DcsFilter, DcsOrder, DcsSelection, DcsSettingsBuilder,
+    DcsSettingsEnvelope,
 };
 use ibcmd_core::diagnostic::{PathSegment, PropertyPath};
 use ibcmd_core::opaque::OpaqueFacets;
@@ -76,6 +77,7 @@ pub(super) struct CanonicalDcsSettingsInput<'a> {
     pub(super) selection: Option<&'a DcsSelection>,
     pub(super) filter: Option<&'a DcsFilter>,
     pub(super) order: Option<&'a DcsOrder>,
+    pub(super) conditional_appearance: Option<&'a DcsConditionalAppearance>,
     pub(super) items_view_mode: Option<&'a str>,
     pub(super) items_user_setting_id: Option<&'a str>,
 }
@@ -101,6 +103,7 @@ pub(super) fn emit_canonical_dcs_settings_children(
     let mut output = parts.selection().unwrap_or_default().to_owned();
     output.push_str(parts.filter().unwrap_or_default());
     output.push_str(parts.order().unwrap_or_default());
+    output.push_str(parts.conditional_appearance().unwrap_or_default());
     output.push_str(parts.tail());
     Ok(output)
 }
@@ -143,6 +146,7 @@ pub(super) fn emit_canonical_dcs_settings_parts(
         .selection(input.selection.cloned())
         .filter(input.filter.cloned())
         .order(input.order.cloned())
+        .conditional_appearance(input.conditional_appearance.cloned())
         .items_user_setting_id(items_user_setting_id)
         .items_view_mode(items_view_mode)
         .opaque_extensions(OpaqueFacets::new(Vec::new()).expect("empty opaque facets are valid"))
@@ -1128,6 +1132,11 @@ fn canonicalize_data_composition_settings_document(
                 ibcmd_xml::DcsChildParseOutcome::Absent
                 | ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => None,
             },
+            conditional_appearance: match children.conditional_appearance() {
+                ibcmd_xml::DcsChildParseOutcome::Typed(value) => Some(value),
+                ibcmd_xml::DcsChildParseOutcome::Absent => None,
+                ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => return None,
+            },
             items_view_mode: children.items_view_mode(),
             items_user_setting_id: children.items_user_setting_id(),
         },
@@ -1144,69 +1153,6 @@ fn canonicalize_data_composition_settings_document(
         .trim_start_matches(['\r', '\n', '\t'])
         .to_string();
     Some(indent_data_composition_settings(&settings))
-}
-
-pub(crate) fn canonicalize_form_data_composition_fragment(
-    document: &str,
-    expected_root_local: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let mut reader = NsReader::from_str(document);
-    reader.config_mut().trim_text(false);
-    let mut depth = 0usize;
-    let mut saw_root = false;
-    loop {
-        match reader.read_event().ok()? {
-            Event::Start(event) => {
-                let (namespace, local) = reader.resolve_element(event.name());
-                if depth == 0 {
-                    if saw_root
-                        || namespace_ref(&namespace) != Some(DCS_SETTINGS_NS)
-                        || local.as_ref() != expected_root_local.as_bytes()
-                        || !event.attributes().with_checks(false).all(|attribute| {
-                            attribute
-                                .is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref()))
-                        })
-                    {
-                        return None;
-                    }
-                    saw_root = true;
-                }
-                depth = depth.checked_add(1)?;
-            }
-            Event::Empty(event) if depth == 0 => {
-                let (namespace, local) = reader.resolve_element(event.name());
-                if saw_root
-                    || namespace_ref(&namespace) != Some(DCS_SETTINGS_NS)
-                    || local.as_ref() != expected_root_local.as_bytes()
-                    || !event.attributes().with_checks(false).all(|attribute| {
-                        attribute.is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref()))
-                    })
-                {
-                    return None;
-                }
-                saw_root = true;
-            }
-            Event::End(_) => depth = depth.checked_sub(1)?,
-            Event::Text(event) if depth == 0 => {
-                if !is_xml_whitespace(std::str::from_utf8(event.as_ref()).ok()?) {
-                    return None;
-                }
-            }
-            Event::CData(_) | Event::GeneralRef(_) if depth == 0 => return None,
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    if !saw_root || depth != 0 {
-        return None;
-    }
-    let mut writer = DataCompositionXmlWriter::new(object_refs);
-    writer.write_document(
-        document,
-        DataCompositionDocumentMode::FormServerStateFragment,
-    )?;
-    writer.element_stack.is_empty().then_some(writer.output)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

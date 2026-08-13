@@ -9,14 +9,17 @@ use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
-use ibcmd_core::dcs::{DcsFilter, DcsOrder};
+use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 use ibcmd_schema::{
-    FormTextDocumentContextMenuMultiplicity, bundled_dcs_filter_policy,
+    FormTextDocumentContextMenuMultiplicity, bundled_dcs_conditional_appearance_policy,
+    bundled_dcs_filter_policy, bundled_dcs_order_policy,
     form_layout_single_child_item_slot_indices, parse_form_text_document_context_menu_multiplicity,
 };
 use ibcmd_xml::{
-    DcsChildParseOutcome, emit_dcs_filter_storage_document, emit_dcs_order_storage_document,
-    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
+    DcsChildParseOutcome, emit_dcs_conditional_appearance_storage_document,
+    emit_dcs_filter_storage_document, emit_dcs_order_storage_document,
+    parse_dcs_conditional_appearance_storage_document, parse_dcs_filter_storage_document,
+    parse_dcs_order_storage_document, parse_form_list_settings_conditional_appearances,
     parse_form_list_settings_filters, parse_form_list_settings_orders,
 };
 use quick_xml::Reader;
@@ -223,7 +226,7 @@ struct FormXmlDynamicListField {
 struct FormXmlListSettings {
     filter: Option<FormXmlListSettingsFilter>,
     order: Option<FormXmlListSettingsOrder>,
-    conditional_appearance: Option<FormXmlListSettingsStandardSection>,
+    conditional_appearance: Option<DcsConditionalAppearance>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
 }
@@ -231,18 +234,6 @@ struct FormXmlListSettings {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlListSettingsFilter {
     canonical: DcsFilter,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct FormXmlListSettingsStandardSection {
-    items: Vec<FormXmlListSettingsFieldItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct FormXmlListSettingsFieldItem {
-    field: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -6571,6 +6562,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let canonical_orders = parse_form_list_settings_orders(xml)
         .map_err(|error| anyhow!("cannot parse Form ListSettings order: {error}"))?;
     let mut canonical_orders = canonical_orders.into_iter();
+    let canonical_conditional_appearances = parse_form_list_settings_conditional_appearances(xml)
+        .map_err(|error| {
+        anyhow!("cannot parse Form ListSettings conditional appearance: {error}")
+    })?;
+    let mut canonical_conditional_appearances = canonical_conditional_appearances.into_iter();
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
@@ -6584,7 +6580,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_attribute = None::<FormXmlAttribute>;
     let mut current_parameter = None::<FormXmlParameter>;
     let mut current_dynamic_list_field = None::<FormXmlDynamicListField>;
-    let mut current_list_settings_field_item = None::<FormXmlListSettingsFieldItem>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
     let mut current_child_localized_section = None::<String>;
@@ -6794,21 +6789,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Settings"])
                 {
                     current_dynamic_list_field = Some(FormXmlDynamicListField::default());
-                } else if local == "item"
-                    && path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
-                        ],
-                    )
-                {
-                    current_list_settings_field_item =
-                        Some(FormXmlListSettingsFieldItem::default());
                 } else if local == "Item"
                     && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
                 {
@@ -7139,7 +7119,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "userSettingID",
                         ],
                     )
-                    || path_ends_with_form_list_settings_standard_item_field(&path)
                     || path_ends_with(
                         &path,
                         &[
@@ -7187,31 +7166,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Settings",
                             "ListSettings",
                             "order",
-                            "userSettingID",
-                        ],
-                    )
-                    || path_ends_with_form_list_settings_standard_item_field(&path)
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
-                            "viewMode",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
                             "userSettingID",
                         ],
                     )
@@ -7711,30 +7665,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Settings",
                             "ListSettings",
                             "order",
-                            "userSettingID",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
-                            "viewMode",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
                             "userSettingID",
                         ],
                     )
@@ -8727,11 +8657,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             settings.fields.push(field);
                         }
                     }
-                    "field" if path_ends_with_form_list_settings_standard_item_field(&path) => {
-                        if let Some(item) = current_list_settings_field_item.as_mut() {
-                            item.field = Some(text_value.trim().to_string());
-                        }
-                    }
                     "filter"
                         if path_ends_with(
                             &path,
@@ -8766,7 +8691,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some(FormXmlListSettingsFilter { canonical });
                         }
                     }
-                    "item"
+                    "conditionalAppearance"
                         if path_ends_with(
                             &path,
                             &[
@@ -8776,22 +8701,27 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Settings",
                                 "ListSettings",
                                 "conditionalAppearance",
-                                "item",
                             ],
                         ) =>
                     {
-                        if let Some(item) = current_list_settings_field_item.take()
-                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                            && let Some(settings) = current_attribute
-                                .as_mut()
-                                .and_then(|attribute| attribute.settings.as_mut())
+                        let canonical = match canonical_conditional_appearances.next() {
+                            Some(DcsChildParseOutcome::Typed(value)) => value,
+                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
+                                return Err(anyhow!(
+                                    "unsupported Form ListSettings conditional appearance: {reason}"
+                                ));
+                            }
+                            Some(DcsChildParseOutcome::Absent) | None => {
+                                return Err(anyhow!(
+                                    "Form ListSettings conditional appearance has no canonical parse result"
+                                ));
+                            }
+                        };
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
                         {
-                            settings
-                                .list_settings
-                                .conditional_appearance
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .items
-                                .push(item);
+                            settings.list_settings.conditional_appearance = Some(canonical);
                         }
                     }
                     "order"
@@ -8826,56 +8756,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         {
                             settings.list_settings.order =
                                 Some(FormXmlListSettingsOrder { canonical });
-                        }
-                    }
-                    "viewMode"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "conditionalAppearance",
-                                "viewMode",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .conditional_appearance
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .view_mode = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "userSettingID"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "conditionalAppearance",
-                                "userSettingID",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .conditional_appearance
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .user_setting_id = Some(text_value.trim().to_string());
                         }
                     }
                     "itemsViewMode"
@@ -10150,23 +10030,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             "Form ListSettings order parse results were not consumed by the Form structure"
         ));
     }
+    if canonical_conditional_appearances.next().is_some() {
+        return Err(anyhow!(
+            "Form ListSettings conditional-appearance parse results were not consumed by the Form structure"
+        ));
+    }
     Ok(properties)
-}
-
-fn path_ends_with_form_list_settings_standard_item_field(path: &[String]) -> bool {
-    path_ends_with(
-        path,
-        &[
-            "Form",
-            "Attributes",
-            "Attribute",
-            "Settings",
-            "ListSettings",
-            "conditionalAppearance",
-            "item",
-            "field",
-        ],
-    )
 }
 
 fn parse_form_auto_command_bar_xml(
@@ -18283,6 +18152,8 @@ fn format_form_dynamic_list_settings_new(
     settings: &FormXmlDynamicListSettings,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    let conditional_appearance_policy = bundled_dcs_conditional_appearance_policy()
+        .map_err(|error| anyhow!("cannot load DCS conditional-appearance policy: {error}"))?;
     let mut pairs = Vec::<(&str, String)>::new();
     if let Some(query_text) = &settings.query_text {
         pairs.push(("QueryText", format_form_setting_string(query_text)));
@@ -18319,15 +18190,10 @@ fn format_form_dynamic_list_settings_new(
         pairs.push(("Order", format_form_setting_dcs_order(order, "", "Order")?));
     }
     if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
-        pairs.push((
-            "ConditionalAppearance",
-            format_form_setting_dcs_standard_section(
-                conditional_appearance,
-                "ConditionalAppearance",
-                "",
-                "ConditionalAppearance",
-            )?,
-        ));
+        if let Some(value) = format_form_setting_dcs_conditional_appearance(conditional_appearance)?
+        {
+            pairs.push((conditional_appearance_policy.storage_property_name(), value));
+        }
     }
     if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
         pairs.push(("ItemsViewMode", format_form_setting_string(items_view_mode)));
@@ -18398,6 +18264,9 @@ fn patch_form_dynamic_list_settings(
     if let Some(filter) = &settings.list_settings.filter {
         patch_form_setting_dcs_filter(text, "Filter", filter)?;
     }
+    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
+        patch_form_setting_dcs_conditional_appearance(text, conditional_appearance)?;
+    }
     let mut list_replacements = Vec::new();
     let list_settings_text = text.clone();
     if let Some(order) = &settings.list_settings.order {
@@ -18405,15 +18274,6 @@ fn patch_form_dynamic_list_settings(
             &list_settings_text,
             "Order",
             order,
-            &mut list_replacements,
-        )?;
-    }
-    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
-        push_form_setting_dcs_standard_replacement(
-            &list_settings_text,
-            "ConditionalAppearance",
-            conditional_appearance,
-            "ConditionalAppearance",
             &mut list_replacements,
         )?;
     }
@@ -18473,6 +18333,28 @@ fn patch_form_setting_dcs_filter(
             if let Some(range) = find_form_setting_value_range(text, key)
                 && find_form_setting_ref_uuid(text, key).as_deref() == Some(expected_uuid.as_str())
                 && form_existing_dcs_filter_matches(&text[range.clone()], filter)?
+            {
+                return Ok(());
+            }
+            upsert_form_setting_pair(text, key, &replacement)
+        }
+        None => remove_form_setting_pair(text, key),
+    }
+}
+
+fn patch_form_setting_dcs_conditional_appearance(
+    text: &mut String,
+    value: &DcsConditionalAppearance,
+) -> Result<()> {
+    let policy = bundled_dcs_conditional_appearance_policy()
+        .map_err(|error| anyhow!("cannot load DCS conditional-appearance policy: {error}"))?;
+    let key = policy.storage_property_name();
+    match format_form_setting_dcs_conditional_appearance(value)? {
+        Some(replacement) => {
+            if let Some(range) = find_form_setting_value_range(text, key)
+                && find_form_setting_ref_uuid(text, key).as_deref()
+                    == Some(policy.storage_record_type_uuid())
+                && form_existing_dcs_conditional_appearance_matches(&text[range.clone()], value)?
             {
                 return Ok(());
             }
@@ -18623,26 +18505,6 @@ fn push_form_setting_replacement(
     Ok(())
 }
 
-fn push_form_setting_dcs_standard_replacement(
-    text: &str,
-    key: &str,
-    section: &FormXmlListSettingsStandardSection,
-    root_name: &str,
-    replacements: &mut Vec<(Range<usize>, String)>,
-) -> Result<()> {
-    if let Some(range) = find_form_setting_value_range(text, key)
-        && form_existing_dcs_standard_section_matches(&text[range.clone()], section)?
-    {
-        return Ok(());
-    }
-    push_form_setting_replacement(
-        text,
-        key,
-        format_form_setting_dcs_standard_section(section, root_name, text, key)?,
-        replacements,
-    )
-}
-
 fn push_form_setting_dcs_order_replacement(
     text: &str,
     key: &str,
@@ -18687,38 +18549,16 @@ fn form_existing_dcs_filter_matches(
     Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == filter.canonical))
 }
 
-fn form_existing_dcs_standard_section_matches(
+fn form_existing_dcs_conditional_appearance_matches(
     existing: &str,
-    section: &FormXmlListSettingsStandardSection,
+    expected: &DcsConditionalAppearance,
 ) -> Result<bool> {
     let Some(xml) = form_setting_base64_xml(existing)? else {
         return Ok(false);
     };
-    let parsed = parse_form_dcs_standard_section_xml(&xml)?;
-    let view_mode_matches = section
-        .view_mode
-        .as_deref()
-        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
-    let user_setting_matches = section
-        .user_setting_id
-        .as_deref()
-        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
-    let items_match = if section.items.is_empty() {
-        true
-    } else {
-        parsed.items.len() == section.items.len()
-            && section
-                .items
-                .iter()
-                .zip(parsed.items.iter())
-                .all(|(expected, actual)| {
-                    expected
-                        .field
-                        .as_deref()
-                        .is_none_or(|field| actual.field.as_deref() == Some(field))
-                })
-    };
-    Ok(items_match && view_mode_matches && user_setting_matches)
+    let parsed = parse_dcs_conditional_appearance_storage_document(xml.as_bytes())
+        .map_err(|error| anyhow!("invalid existing Form Appearance document: {error}"))?;
+    Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == *expected))
 }
 
 fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
@@ -18738,91 +18578,6 @@ fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
         return Ok(Some(xml.trim_start_matches('\u{feff}').to_string()));
     }
     Ok(None)
-}
-
-#[derive(Default)]
-struct ParsedFormDcsStandardSection {
-    items: Vec<ParsedFormDcsFieldItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
-}
-
-#[derive(Default)]
-struct ParsedFormDcsFieldItem {
-    field: Option<String>,
-}
-
-fn parse_form_dcs_standard_section_xml(xml: &str) -> Result<ParsedFormDcsStandardSection> {
-    let mut reader = Reader::from_reader(xml.as_bytes());
-    let mut buffer = Vec::new();
-    let mut current = None::<String>;
-    let mut text = String::new();
-    let mut parsed = ParsedFormDcsStandardSection::default();
-    let mut current_item = None::<ParsedFormDcsFieldItem>;
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if local == "item" {
-                    current_item = Some(ParsedFormDcsFieldItem::default());
-                } else if matches!(local.as_str(), "field" | "viewMode" | "userSettingID") {
-                    current = Some(local);
-                    text.clear();
-                }
-            }
-            Ok(Event::Text(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::CData(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::GeneralRef(reference)) => {
-                if current.is_some() {
-                    let value = if let Some(ch) = reference.resolve_char_ref()? {
-                        ch.to_string()
-                    } else {
-                        let entity = reference.decode()?;
-                        resolve_xml_entity(entity.as_ref())
-                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
-                            .to_string()
-                    };
-                    text.push_str(&value);
-                }
-            }
-            Ok(Event::End(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if current.as_deref() == Some(local.as_str()) {
-                    match local.as_str() {
-                        "field" => {
-                            if let Some(item) = current_item.as_mut() {
-                                item.field = Some(text.trim().to_string());
-                            }
-                        }
-                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
-                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
-                        _ => {}
-                    }
-                    current = None;
-                    text.clear();
-                }
-                if local == "item"
-                    && let Some(item) = current_item.take()
-                    && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                {
-                    parsed.items.push(item);
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(error) => return Err(error.into()),
-            _ => {}
-        }
-        buffer.clear();
-    }
-    Ok(parsed)
 }
 
 fn find_form_setting_value_range(text: &str, key: &str) -> Option<Range<usize>> {
@@ -18960,8 +18715,12 @@ fn format_form_setting_dcs_order(
     settings_text: &str,
     key: &str,
 ) -> Result<String> {
-    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
-        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key).unwrap_or(
+        bundled_dcs_order_policy()
+            .map_err(|error| anyhow!("cannot load DCS order storage policy: {error}"))?
+            .storage_record_type_uuid()
+            .to_string(),
+    );
     let canonical = canonical_form_xml_list_settings_order(order)?;
     let bytes = emit_dcs_order_storage_document(&canonical)
         .map_err(|error| anyhow!("cannot emit canonical Form Order document: {error}"))?;
@@ -18987,33 +18746,21 @@ fn format_form_setting_dcs_filter(filter: &FormXmlListSettingsFilter) -> Result<
     )))
 }
 
-fn format_form_setting_dcs_standard_section(
-    section: &FormXmlListSettingsStandardSection,
-    root_name: &str,
-    settings_text: &str,
-    key: &str,
-) -> Result<String> {
-    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
-        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
-    let existing_xml = find_form_setting_value_range(settings_text, key).and_then(|range| {
-        form_setting_base64_xml(&settings_text[range])
-            .ok()
-            .flatten()
-    });
-    let xml = format_form_dcs_standard_section_xml(section, root_name, existing_xml.as_deref())?;
-    let mut bytes = b"\xEF\xBB\xBF".to_vec();
-    bytes.extend_from_slice(xml.as_bytes());
-    Ok(format!(
-        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+fn format_form_setting_dcs_conditional_appearance(
+    value: &DcsConditionalAppearance,
+) -> Result<Option<String>> {
+    let Some(bytes) = emit_dcs_conditional_appearance_storage_document(value)
+        .map_err(|error| anyhow!("cannot emit canonical Form Appearance document: {error}"))?
+    else {
+        return Ok(None);
+    };
+    let policy = bundled_dcs_conditional_appearance_policy()
+        .map_err(|error| anyhow!("cannot load DCS conditional-appearance policy: {error}"))?;
+    Ok(Some(format!(
+        "{{\"#\",{},{{#base64:{}}}}}",
+        policy.storage_record_type_uuid(),
         encode_base64(&bytes)
-    ))
-}
-
-fn default_form_setting_ref_uuid(key: &str) -> &'static str {
-    match key {
-        "ConditionalAppearance" => "31743ff3-2db3-4cfc-9404-90ed8209437f",
-        _ => "11743ff3-2db3-4cfc-9404-90ed8209437f",
-    }
+    )))
 }
 
 fn find_form_setting_ref_uuid(text: &str, key: &str) -> Option<String> {
@@ -19044,153 +18791,6 @@ fn parse_non_zero_uuid(value: &str) -> Option<String> {
 
 fn canonical_form_xml_list_settings_order(order: &FormXmlListSettingsOrder) -> Result<DcsOrder> {
     Ok(order.canonical.clone())
-}
-
-fn format_form_dcs_standard_section_xml(
-    section: &FormXmlListSettingsStandardSection,
-    root_name: &str,
-    existing_xml: Option<&str>,
-) -> Result<String> {
-    let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<{root_name} xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
-    );
-    for item in &section.items {
-        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
-            continue;
-        };
-        xml.push_str("\t<item xsi:type=\"FieldItem\">\r\n");
-        xml.push_str(&format!(
-            "\t\t<field>{}</field>\r\n",
-            escape_xml_text(field)
-        ));
-        xml.push_str("\t</item>\r\n");
-    }
-    if let Some(existing_xml) = existing_xml {
-        let replacement_fields = section
-            .items
-            .iter()
-            .filter_map(|item| item.field.as_deref())
-            .collect::<BTreeSet<_>>();
-        for block in form_dcs_direct_item_blocks(existing_xml)? {
-            if block
-                .field
-                .as_deref()
-                .is_some_and(|field| replacement_fields.contains(field))
-            {
-                continue;
-            }
-            xml.push('\t');
-            xml.push_str(block.xml.trim());
-            xml.push_str("\r\n");
-        }
-    }
-    if let Some(view_mode) = section
-        .view_mode
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        xml.push_str(&format!(
-            "\t<viewMode>{}</viewMode>\r\n",
-            escape_xml_text(view_mode)
-        ));
-    }
-    if let Some(user_setting_id) = section
-        .user_setting_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        xml.push_str(&format!(
-            "\t<userSettingID>{}</userSettingID>\r\n",
-            escape_xml_text(user_setting_id)
-        ));
-    }
-    xml.push_str(&format!("</{root_name}>"));
-    Ok(xml)
-}
-
-struct FormDcsDirectItemBlock {
-    xml: String,
-    field: Option<String>,
-}
-
-fn form_dcs_direct_item_blocks(xml: &str) -> Result<Vec<FormDcsDirectItemBlock>> {
-    let mut blocks = Vec::new();
-    let mut depth = 0usize;
-    let mut offset = 0usize;
-    let mut current_start = None::<usize>;
-    while let Some(relative_start) = xml[offset..].find('<') {
-        let start = offset + relative_start;
-        let Some(relative_end) = xml[start..].find('>') else {
-            break;
-        };
-        let end = start + relative_end + 1;
-        let tag = &xml[start + 1..end - 1];
-        let tag = tag.trim();
-        if tag.starts_with('?') || tag.starts_with('!') {
-            offset = end;
-            continue;
-        }
-        let closing = tag.starts_with('/');
-        let empty = tag.ends_with('/');
-        let name = tag
-            .trim_start_matches('/')
-            .trim_end_matches('/')
-            .split_ascii_whitespace()
-            .next()
-            .unwrap_or_default();
-        let local = name.rsplit(':').next().unwrap_or(name);
-        if closing {
-            if local == "item"
-                && depth == 2
-                && let Some(block_start) = current_start.take()
-            {
-                let block_xml = xml[block_start..end].to_string();
-                blocks.push(FormDcsDirectItemBlock {
-                    field: parse_form_dcs_direct_item_field(&block_xml)?,
-                    xml: block_xml,
-                });
-            }
-            depth = depth.saturating_sub(1);
-        } else {
-            if local == "item" && depth == 1 {
-                current_start = Some(start);
-            }
-            if !empty {
-                depth += 1;
-            } else if local == "item" && depth == 1 {
-                current_start = None;
-                blocks.push(FormDcsDirectItemBlock {
-                    field: None,
-                    xml: xml[start..end].to_string(),
-                });
-            }
-        }
-        offset = end;
-    }
-    Ok(blocks)
-}
-
-fn parse_form_dcs_direct_item_field(xml: &str) -> Result<Option<String>> {
-    let wrapper = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Items>{xml}</Items>");
-    Ok(parse_form_dcs_standard_section_xml(&wrapper)?
-        .items
-        .into_iter()
-        .find_map(|item| item.field))
-}
-
-fn escape_xml_text(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '&' => output.push_str("&amp;"),
-            '<' => output.push_str("&lt;"),
-            '>' => output.push_str("&gt;"),
-            '"' => output.push_str("&quot;"),
-            _ => output.push(ch),
-        }
-    }
-    output
 }
 
 fn patch_form_body_command(
@@ -30971,6 +30571,43 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn conditional_appearance_fixture_drives_form_storage_in_both_directions() -> anyhow::Result<()>
+    {
+        let embedded = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/form-embedded-conditional-appearance.xml.b64"
+        ))?;
+        let embedded = String::from_utf8(embedded)?;
+        let form = format!(
+            r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20"><Attributes><Attribute name="List" id="1"><Type><v8:Type>cfg:DynamicList</v8:Type></Type><Settings xsi:type="DynamicList"><ListSettings>{embedded}</ListSettings></Settings></Attribute></Attributes></Form>"#
+        );
+        let storage = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/form-storage-conditional-appearance.xml.b64"
+        ))?;
+        let parsed = super::parse_form_xml_body_properties(form.as_bytes())?;
+        let value = parsed
+            .attributes
+            .iter()
+            .filter_map(|attribute| attribute.settings.as_ref())
+            .filter_map(|settings| settings.list_settings.conditional_appearance.as_ref())
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("fixture conditional appearance was not parsed"))?;
+
+        assert_eq!(
+            ibcmd_xml::emit_dcs_conditional_appearance_storage_document(value)?
+                .ok_or_else(|| anyhow::anyhow!("rich appearance storage was omitted"))?,
+            storage
+        );
+        let encoded = super::format_form_setting_dcs_conditional_appearance(value)?
+            .ok_or_else(|| anyhow::anyhow!("rich appearance setting was omitted"))?;
+        let policy = ibcmd_schema::bundled_dcs_conditional_appearance_policy()?;
+        assert!(encoded.contains(policy.storage_record_type_uuid()));
+
+        let default = ibcmd_xml::platform_default_form_list_settings_conditional_appearance()?;
+        assert!(super::format_form_setting_dcs_conditional_appearance(&default)?.is_none());
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_existing_attributes() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-form-main-table-source-{}",
@@ -31012,8 +30649,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
 					</dcsset:order>
 					<dcsset:conditionalAppearance>
-						<dcsset:viewMode>Compact</dcsset:viewMode>
-						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>
 					</dcsset:conditionalAppearance>
 					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
 					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
@@ -31043,7 +30680,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
         assert_eq!(parsed.module_text, "Old module");
         assert!(parsed.trailing[0].contains(r#""Список""#));
-        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,8,"#));
         assert!(
             parsed.trailing[0]
                 .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
@@ -31063,16 +30699,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             order_xml.contains("<orderType>Asc</orderType>"),
             "{order_xml}"
         );
-        assert!(parsed.trailing[0].contains(
-            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
-        ));
-        let appearance_xml =
-            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
-        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
-        assert!(
-            appearance_xml
-                .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Appearance\""));
         assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
         assert!(
             parsed.trailing[0]
@@ -31510,8 +31137,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
 					</dcsset:order>
 					<dcsset:conditionalAppearance>
-						<dcsset:viewMode>Compact</dcsset:viewMode>
-						<dcsset:userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>
 					</dcsset:conditionalAppearance>
 					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
 					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
@@ -31563,15 +31190,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             order_xml
                 .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
         );
-        assert!(parsed.trailing[0].contains(
-            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
-        ));
-        let appearance_xml =
-            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
-        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
+        let conditional_appearance_policy =
+            ibcmd_schema::bundled_dcs_conditional_appearance_policy()?;
         assert!(
-            appearance_xml
-                .contains("<userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</userSettingID>")
+            !parsed.trailing[0].contains(conditional_appearance_policy.storage_property_name()),
+            "the platform-authenticated metadata-only shell has no physical storage record"
         );
         assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
         assert!(

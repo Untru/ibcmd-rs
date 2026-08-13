@@ -501,6 +501,7 @@ Assert-Equal (@($dcsOrderPolicy.policy.supportedOrderTypes) -join ',') 'Asc,Desc
 Assert-Equal $dcsOrderPolicy.sources.unicaDesc.repositoryRevision $dcsOrderManifest.form.cross_evidence.unica_desc.revision 'DCS order Unica revision binding'
 Assert-Equal (@($dcsOrderPolicy.policy.supportedViewModes) -join ',') 'Normal' 'DCS order emission view modes'
 Assert-Equal $dcsOrderPolicy.policy.maxEmittedItems 1 'DCS order emission cardinality'
+Assert-Equal $dcsOrderPolicy.policy.storageRecordTypeUuid '11743ff3-2db3-4cfc-9404-90ed8209437f' 'DCS order storage UUID'
 
 $dcsFilterRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-filter'
 $dcsFilterManifestPath = Join-Path $dcsFilterRoot 'manifest.json'
@@ -565,6 +566,64 @@ Assert-Equal (@($dcsFilterPolicy.policy.supportedComparisonTypes) -join ',') 'Eq
 Assert-Equal (@($dcsFilterPolicy.policy.supportedRightTypes) -join ',') 'string' 'DCS filter right type'
 Assert-Equal $dcsFilterPolicy.policy.maxEmittedItems 1 'DCS filter emission cardinality'
 
+$dcsConditionalRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance'
+$dcsConditionalManifestPath = Join-Path $dcsConditionalRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsConditionalManifestPath -PathType Leaf)) {
+    throw "DCS conditional-appearance evidence manifest is missing: $dcsConditionalManifestPath"
+}
+$dcsConditionalManifest = Get-Content -LiteralPath $dcsConditionalManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsConditionalManifest.schema_version 1 'DCS conditional-appearance manifest schema version'
+Assert-Equal $dcsConditionalManifest.issue 283 'DCS conditional-appearance issue'
+Assert-Equal $dcsConditionalManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-conditional-appearance' 'DCS conditional-appearance fixture ID'
+Assert-Equal $dcsConditionalManifest.evidence.platform_line '8.3.27' 'DCS conditional-appearance platform line'
+Assert-Equal $dcsConditionalManifest.evidence.platform_version '8.3.27.2214' 'DCS conditional-appearance platform version'
+Assert-Equal $dcsConditionalManifest.evidence.source_version '2.20' 'DCS conditional-appearance source version'
+Assert-Equal $dcsConditionalManifest.rounds.selected_native_equal_between_rounds $true 'DCS conditional-appearance native equality'
+Assert-Equal $dcsConditionalManifest.rounds.packed_rows_equal_between_rounds $true 'DCS conditional-appearance packed-row equality'
+Assert-Equal $dcsConditionalManifest.rounds.unpacked_rows_equal_between_rounds $true 'DCS conditional-appearance unpacked-row equality'
+foreach ($seed in @($dcsConditionalManifest.seed.objects_definition, $dcsConditionalManifest.seed.dcs_definition)) {
+    $seedPath = Resolve-FixturePath $seed.path $dcsConditionalRoot
+    Assert-Equal (Get-Item -LiteralPath $seedPath).Length ([long]$seed.size) "$($seed.path) size"
+    Assert-Equal (Get-FileSha256Hex $seedPath) $seed.sha256 "$($seed.path) SHA-256"
+}
+$dcsConditionalCfBytes = Get-Base64EvidenceBytes $dcsConditionalManifest.configuration_cf $dcsConditionalRoot
+foreach ($fragment in @(
+    $dcsConditionalManifest.form.native_xml,
+    $dcsConditionalManifest.form.embedded_conditional_appearance,
+    $dcsConditionalManifest.form.storage_conditional_appearance,
+    $dcsConditionalManifest.standalone.native_xml,
+    $dcsConditionalManifest.standalone.conditional_appearance
+)) {
+    $null = Get-Base64EvidenceBytes $fragment $dcsConditionalRoot
+}
+
+$dcsConditionalPolicyPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json'
+if (-not (Test-Path -LiteralPath $dcsConditionalPolicyPath -PathType Leaf)) {
+    throw "DCS conditional-appearance policy evidence is missing: $dcsConditionalPolicyPath"
+}
+$dcsConditionalPolicy = Get-Content -LiteralPath $dcsConditionalPolicyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsConditionalPolicy.schemaVersion 1 'DCS conditional-appearance policy schema version'
+Assert-Equal $dcsConditionalPolicy.contract $dcsConditionalManifest.contract 'DCS conditional-appearance contract binding'
+Assert-Equal $dcsConditionalPolicy.source.product '1C:Enterprise Platform' 'DCS conditional-appearance contract product'
+Assert-Equal $dcsConditionalPolicy.sources.platformLine $dcsConditionalManifest.evidence.platform_line 'DCS conditional-appearance platform-line binding'
+Assert-Equal $dcsConditionalPolicy.sources.sourceVersion $dcsConditionalManifest.evidence.source_version 'DCS conditional-appearance source-version binding'
+Assert-Equal $dcsConditionalPolicy.sources.ibcmdSha256 $dcsConditionalManifest.evidence.ibcmd_sha256 'DCS conditional-appearance ibcmd binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.fixtureId $dcsConditionalManifest.fixture_id 'DCS conditional-appearance fixture binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.roundTrips 2 'DCS conditional-appearance round-trip binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.formRawBodySha256 $dcsConditionalManifest.form.body_row.unpacked_sha256 'DCS conditional-appearance Form body binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.formNativeXmlSha256 $dcsConditionalManifest.form.native_xml.sha256 'DCS conditional-appearance Form XML binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.formStorageSha256 $dcsConditionalManifest.form.storage_conditional_appearance.sha256 'DCS conditional-appearance storage binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.formEmbeddedSha256 $dcsConditionalManifest.form.embedded_conditional_appearance.sha256 'DCS conditional-appearance embedded binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.standaloneRawBodySha256 $dcsConditionalManifest.standalone.body_row.unpacked_sha256 'DCS conditional-appearance standalone body binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.standaloneNativeXmlSha256 $dcsConditionalManifest.standalone.native_xml.sha256 'DCS conditional-appearance standalone XML binding'
+Assert-Equal $dcsConditionalPolicy.sources.comparison.standaloneFragmentSha256 $dcsConditionalManifest.standalone.conditional_appearance.sha256 'DCS conditional-appearance standalone fragment binding'
+Assert-Equal $dcsConditionalPolicy.sources.metadataOnly.formEmbeddedSha256 $dcsConditionalManifest.form.metadata_only_baseline.embedded_fragment_sha256 'DCS conditional-appearance metadata-only binding'
+Assert-Equal $dcsConditionalPolicy.policy.storagePropertyName $dcsConditionalManifest.form.storage_property_name 'DCS conditional-appearance storage property binding'
+Assert-Equal $dcsConditionalPolicy.policy.storageRecordTypeUuid $dcsConditionalManifest.form.storage_record_type_uuid 'DCS conditional-appearance storage UUID binding'
+Assert-Equal (@($dcsConditionalPolicy.policy.supportedParameters) -join ',') 'TextColor' 'DCS conditional-appearance parameter cohort'
+Assert-Equal (@($dcsConditionalPolicy.policy.supportedValues) -join ',') 'WebRed' 'DCS conditional-appearance value cohort'
+Assert-Equal $dcsConditionalPolicy.policy.maxEmittedItems 1 'DCS conditional-appearance emission cardinality'
+
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
     $BinaryPath = Join-Path $RepositoryRoot $BinaryPath
 }
@@ -581,6 +640,8 @@ $dcsFilterComparisonCfPath = Join-Path $temporaryRoot 'dcs-filter-comparison.cf'
 $dcsFilterComparisonOutputRoot = Join-Path $temporaryRoot 'dcs-filter-comparison-export'
 $dcsFilterMetadataCfPath = Join-Path $temporaryRoot 'dcs-filter-metadata-only.cf'
 $dcsFilterMetadataOutputRoot = Join-Path $temporaryRoot 'dcs-filter-metadata-only-export'
+$dcsConditionalCfPath = Join-Path $temporaryRoot 'dcs-conditional-appearance.cf'
+$dcsConditionalOutputRoot = Join-Path $temporaryRoot 'dcs-conditional-appearance-export'
 $stderrPath = Join-Path $temporaryRoot 'stderr.txt'
 [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
 
@@ -681,10 +742,48 @@ try {
         throw "DCS filter metadata-only raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
     }
     Assert-Equal ((($verifyMetadata -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS filter metadata-only raw row'
+
+    [IO.File]::WriteAllBytes($dcsConditionalCfPath, $dcsConditionalCfBytes)
+    $dcsConditionalStdout = & $BinaryPath cf export --source-version 2.20 $dcsConditionalCfPath $dcsConditionalOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+        throw "DCS conditional-appearance CF export failed with exit code $LASTEXITCODE. $stderr"
+    }
+    $dcsConditionalReport = ($dcsConditionalStdout -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $dcsConditionalReport.ok $true 'DCS conditional-appearance export status'
+    Assert-Equal $dcsConditionalReport.export.storage.failed 0 'DCS conditional-appearance failed storage entries'
+    foreach ($expected in @($dcsConditionalManifest.selected_native_files)) {
+        if ($expected.path -eq 'Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml') {
+            continue
+        }
+        $candidatePath = Join-Path $dcsConditionalOutputRoot ($expected.path.Replace('/', [IO.Path]::DirectorySeparatorChar))
+        if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+            throw "Exported DCS conditional-appearance output is missing: $($expected.path)"
+        }
+        Assert-Equal (Get-Item -LiteralPath $candidatePath).Length ([long]$expected.size) "$($expected.path) exported size"
+        Assert-Equal (Get-FileSha256Hex $candidatePath) $expected.sha256 "$($expected.path) exported SHA-256"
+    }
+    $conditionalFormPath = Join-Path $dcsConditionalOutputRoot 'Catalogs\FilterProbe\Forms\ListForm\Ext\Form.xml'
+    $conditionalEmbeddedBytes = Get-Utf8XmlFragmentBytes $conditionalFormPath '<dcsset:conditionalAppearance>' '</dcsset:conditionalAppearance>'
+    Assert-Equal $conditionalEmbeddedBytes.Length ([long]$dcsConditionalManifest.form.embedded_conditional_appearance.decoded_size) 'DCS conditional-appearance embedded fragment exported size'
+    Assert-Equal (Get-Sha256Hex $conditionalEmbeddedBytes) $dcsConditionalManifest.form.embedded_conditional_appearance.sha256 'DCS conditional-appearance embedded fragment exported SHA-256'
+    $conditionalTemplatePath = Join-Path $dcsConditionalOutputRoot 'Reports\FilterProbeReport\Templates\MainSchema\Ext\Template.xml'
+    $conditionalStandaloneBytes = Get-Utf8XmlFragmentBytes $conditionalTemplatePath '<dcsset:conditionalAppearance>' '</dcsset:conditionalAppearance>'
+    Assert-Equal $conditionalStandaloneBytes.Length ([long]$dcsConditionalManifest.standalone.conditional_appearance.decoded_size) 'DCS conditional-appearance standalone fragment exported size'
+    Assert-Equal (Get-Sha256Hex $conditionalStandaloneBytes) $dcsConditionalManifest.standalone.conditional_appearance.sha256 'DCS conditional-appearance standalone fragment exported SHA-256'
+    $verifyConditional = & $BinaryPath cf verify $dcsConditionalCfPath --compression raw-deflate `
+        --element $dcsConditionalManifest.form.body_key `
+        --element $dcsConditionalManifest.standalone.body_key `
+        --expect-sha256 "$($dcsConditionalManifest.form.body_key)=$($dcsConditionalManifest.form.body_row.unpacked_sha256)" `
+        --expect-sha256 "$($dcsConditionalManifest.standalone.body_key)=$($dcsConditionalManifest.standalone.body_row.unpacked_sha256)" 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS conditional-appearance raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($verifyConditional -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS conditional-appearance raw rows'
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter/conditionalAppearance + ChartOfCharacteristicTypes + register and plan generated types.'

@@ -9,18 +9,20 @@ use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::dcs::{
-    DcsFilter, DcsFilterComparison, DcsFilterComparisonType, DcsFilterItem, DcsFilterValue,
-    DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType, DcsSelectedField, DcsSelectedItem,
-    DcsSelection, DcsSettingsEnvelope, MAX_DCS_FILTER_ITEMS, MAX_DCS_ORDER_ITEMS,
+    DcsAppearanceColor, DcsAppearanceParameter, DcsConditionalAppearance,
+    DcsConditionalAppearanceItem, DcsFilter, DcsFilterComparison, DcsFilterComparisonType,
+    DcsFilterItem, DcsFilterValue, DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType,
+    DcsSelectedField, DcsSelectedItem, DcsSelection, DcsSettingsEnvelope,
+    MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS, MAX_DCS_FILTER_ITEMS, MAX_DCS_ORDER_ITEMS,
     MAX_DCS_RETAINED_BYTES,
 };
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_schema::{
     DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
-    WriterRuleCorpus, WriterRuleKey, bundled_dcs_filter_policy,
-    bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy, bundled_dcs_selection_policy,
-    bundled_dcs_settings_serialization_policy, bundled_writer_rules,
+    WriterRuleCorpus, WriterRuleKey, bundled_dcs_conditional_appearance_policy,
+    bundled_dcs_filter_policy, bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy,
+    bundled_dcs_selection_policy, bundled_dcs_settings_serialization_policy, bundled_writer_rules,
 };
 use quick_xml::Reader as QuickXmlReader;
 use quick_xml::escape::escape;
@@ -80,6 +82,10 @@ pub enum DcsWriterDecision {
     RootFilterPolicy,
     /// Form `ListSettings` embedded/storage/default filter ingress.
     FormListSettingsFilterIngress,
+    /// Root conditional-appearance item shape, ordering, and placement.
+    RootConditionalAppearancePolicy,
+    /// Form embedded/storage/default conditional-appearance ingress.
+    FormListSettingsConditionalAppearanceIngress,
     /// Placement of retained opaque XML relative to typed settings children.
     OpaqueExtensionPlacement,
     /// EDT delegation from Form `ListSettings` into the DCS serializer.
@@ -114,6 +120,12 @@ impl DcsWriterDecision {
             Self::RootFilterPolicy => "dcs.DataCompositionSettings.filter.policy",
             Self::FormListSettingsFilterIngress => {
                 "form.DynamicListExtInfo.listSettings.filter.ingress"
+            }
+            Self::RootConditionalAppearancePolicy => {
+                "dcs.DataCompositionSettings.conditionalAppearance.policy"
+            }
+            Self::FormListSettingsConditionalAppearanceIngress => {
+                "form.DynamicListExtInfo.listSettings.conditionalAppearance.ingress"
             }
             Self::OpaqueExtensionPlacement => {
                 "dcs.DataCompositionSettings.opaque-extension.placement"
@@ -220,6 +232,16 @@ pub const DCS_WRITER_EVIDENCE: &[DcsWriterEvidence] = &[
         decision: DcsWriterDecision::FormListSettingsFilterIngress,
         status: DcsWriterEvidenceStatus::Verified,
         source: "native-evidence:8.3.27.2214-xml-2.20-dcs-filter/form",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::RootConditionalAppearancePolicy,
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "native-evidence:8.3.27.2214-xml-2.20-dcs-conditional-appearance/standalone",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::FormListSettingsConditionalAppearanceIngress,
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "native-evidence:8.3.27.2214-xml-2.20-dcs-conditional-appearance/form",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::OpaqueExtensionPlacement,
@@ -332,6 +354,7 @@ pub struct DcsSettingsTypedChildren {
     selection: Option<DcsSelection>,
     filter: DcsChildParseOutcome<DcsFilter>,
     order: DcsChildParseOutcome<DcsOrder>,
+    conditional_appearance: DcsChildParseOutcome<DcsConditionalAppearance>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
 }
@@ -350,6 +373,11 @@ impl DcsSettingsTypedChildren {
     /// Returns the presence-aware root order parse result.
     pub const fn order(&self) -> &DcsChildParseOutcome<DcsOrder> {
         &self.order
+    }
+
+    /// Returns the presence-aware root conditional-appearance parse result.
+    pub const fn conditional_appearance(&self) -> &DcsChildParseOutcome<DcsConditionalAppearance> {
+        &self.conditional_appearance
     }
 
     /// Returns the direct `itemsViewMode` value, if present.
@@ -502,6 +530,7 @@ pub fn emit_dcs_settings_children(
     let mut output = parts.selection.unwrap_or_default();
     output.push_str(parts.filter.as_deref().unwrap_or_default());
     output.push_str(parts.order.as_deref().unwrap_or_default());
+    output.push_str(parts.conditional_appearance.as_deref().unwrap_or_default());
     output.push_str(&parts.tail);
     Ok(output)
 }
@@ -514,6 +543,7 @@ pub struct DcsSettingsChildrenParts {
     selection: Option<String>,
     filter: Option<String>,
     order: Option<String>,
+    conditional_appearance: Option<String>,
     tail: String,
 }
 
@@ -526,6 +556,9 @@ impl DcsSettingsChildrenParts {
     }
     pub fn order(&self) -> Option<&str> {
         self.order.as_deref()
+    }
+    pub fn conditional_appearance(&self) -> Option<&str> {
+        self.conditional_appearance.as_deref()
     }
     pub fn tail(&self) -> &str {
         &self.tail
@@ -554,6 +587,10 @@ pub fn emit_dcs_settings_children_parts(
         .order()
         .map(|order| emit_dcs_order_fragment(order, prefix, indent))
         .transpose()?;
+    let conditional_appearance = settings
+        .conditional_appearance()
+        .map(|value| emit_dcs_conditional_appearance_fragment(value, prefix, indent))
+        .transpose()?;
     let tail = emit_form_list_settings_tail(
         settings.items_view_mode().map(|value| value.as_str()),
         settings.items_user_setting_id().map(|value| value.as_str()),
@@ -565,6 +602,7 @@ pub fn emit_dcs_settings_children_parts(
         selection,
         filter,
         order,
+        conditional_appearance,
         tail,
     })
 }
@@ -841,6 +879,246 @@ fn emit_dcs_filter_contents(
     Ok(output)
 }
 
+/// Emits an embedded standalone/Form conditional-appearance child.
+pub fn emit_dcs_conditional_appearance_fragment(
+    value: &DcsConditionalAppearance,
+    prefix: &str,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    if !is_xml_prefix(prefix)
+        || indent.len() > 64
+        || !indent.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "conditional-appearance prefix or indent is invalid",
+        )
+        .into());
+    }
+    validate_dcs_conditional_appearance_for_emission(value)?;
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(DcsListSettingsTailError::from)?;
+    let root = expanded_local_name(policy.conditional_appearance_qname())?;
+    let item_name = expanded_local_name(policy.item_qname())?;
+    let selection_name = expanded_local_name(policy.selection_qname())?;
+    let field_name = expanded_local_name(policy.field_qname())?;
+    let appearance_name = expanded_local_name(policy.appearance_qname())?;
+    let parameter_type = expanded_local_name(policy.parameter_value_type_qname())?;
+    let item_indent = format!("{indent}\t");
+    let body_indent = format!("{item_indent}\t");
+    let value_indent = format!("{body_indent}\t");
+    let scalar_indent = format!("{value_indent}\t");
+    let mut output = format!("{indent}<{prefix}:{root}>\r\n");
+    for item in value.items() {
+        output.push_str(&format!("{item_indent}<{prefix}:{item_name}>\r\n"));
+        output.push_str(&format!("{body_indent}<{prefix}:{selection_name}>\r\n"));
+        output.push_str(&format!("{value_indent}<{prefix}:{item_name}>\r\n"));
+        output.push_str(&format!(
+            "{scalar_indent}<{prefix}:{field_name}>{}</{prefix}:{field_name}>\r\n",
+            escape(item.selected_field().as_str())
+        ));
+        output.push_str(&format!("{value_indent}</{prefix}:{item_name}>\r\n"));
+        output.push_str(&format!("{body_indent}</{prefix}:{selection_name}>\r\n"));
+        let nested_filter = DcsFilter::new(
+            vec![DcsFilterItem::Comparison(item.filter().clone())],
+            None,
+            None,
+        )
+        .map_err(|_| {
+            DcsListSettingsTailError::InvalidFormat(
+                "conditional-appearance nested filter violates canonical bounds",
+            )
+        })?;
+        output.push_str(&emit_dcs_filter(
+            &nested_filter,
+            Some(prefix),
+            &body_indent,
+        )?);
+        output.push_str(&format!("{body_indent}<{prefix}:{appearance_name}>\r\n"));
+        output.push_str(&format!(
+            "{value_indent}<dcscor:item xsi:type=\"{prefix}:{parameter_type}\">\r\n"
+        ));
+        let (parameter, color) = match item.appearance() {
+            DcsAppearanceParameter::TextColor(DcsAppearanceColor::WebRed) => {
+                ("ЦветТекста", "web:Red")
+            }
+        };
+        output.push_str(&format!(
+            "{scalar_indent}<dcscor:parameter>{parameter}</dcscor:parameter>\r\n"
+        ));
+        output.push_str(&format!(
+            "{scalar_indent}<dcscor:value xsi:type=\"v8ui:Color\">{color}</dcscor:value>\r\n"
+        ));
+        output.push_str(&format!("{value_indent}</dcscor:item>\r\n"));
+        output.push_str(&format!("{body_indent}</{prefix}:{appearance_name}>\r\n"));
+        output.push_str(&format!("{item_indent}</{prefix}:{item_name}>\r\n"));
+    }
+    for (qname, scalar) in [
+        (
+            policy.view_mode_qname(),
+            value.view_mode().map(|value| value.as_str()),
+        ),
+        (
+            policy.user_setting_id_qname(),
+            value.user_setting_id().map(|value| value.as_str()),
+        ),
+    ] {
+        if let Some(scalar) = scalar {
+            let local = expanded_local_name(qname)?;
+            output.push_str(&format!(
+                "{item_indent}<{prefix}:{local}>{}</{prefix}:{local}>\r\n",
+                escape(scalar)
+            ));
+        }
+    }
+    output.push_str(&format!("{indent}</{prefix}:{root}>\r\n"));
+    Ok(output)
+}
+
+/// Emits the physical BOM XML stored under the Form Appearance property.
+/// Metadata-only values return None because storage omits that property.
+pub fn emit_dcs_conditional_appearance_storage_document(
+    value: &DcsConditionalAppearance,
+) -> Result<Option<Vec<u8>>, DcsSettingsChildrenError> {
+    validate_dcs_conditional_appearance_for_emission(value)?;
+    if value.items().is_empty() {
+        return Ok(None);
+    }
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(DcsListSettingsTailError::from)?;
+    let root = expanded_local_name(policy.storage_conditional_appearance_qname())?;
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<{root} xmlns=\"{}\" xmlns:xs=\"{}\" xmlns:xsi=\"{XSI_NAMESPACE}\">\r\n",
+        policy.namespace_uri(),
+        policy.xml_schema_namespace_uri()
+    );
+    let item = value.items().first().expect("nonempty checked above");
+    xml.push_str("\t<item>\r\n\t\t<selection>\r\n\t\t\t<item>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<field>{}</field>\r\n",
+        escape(item.selected_field().as_str())
+    ));
+    xml.push_str("\t\t\t</item>\r\n\t\t</selection>\r\n");
+    let nested_filter = DcsFilter::new(
+        vec![DcsFilterItem::Comparison(item.filter().clone())],
+        None,
+        None,
+    )
+    .map_err(|_| {
+        DcsListSettingsTailError::InvalidFormat(
+            "conditional-appearance nested filter violates canonical bounds",
+        )
+    })?;
+    xml.push_str(&emit_dcs_filter(&nested_filter, None, "\t\t")?);
+    xml.push_str("\t\t<appearance>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t<item xmlns=\"{}\" xmlns:dcsset=\"{}\" xsi:type=\"dcsset:SettingsParameterValue\">\r\n",
+        policy.core_namespace_uri(),
+        policy.namespace_uri()
+    ));
+    xml.push_str("\t\t\t\t<parameter>ЦветТекста</parameter>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<value xmlns:d5p1=\"{}\" xmlns:d5p2=\"{}\" xsi:type=\"d5p1:Color\">d5p2:Red</value>\r\n",
+        policy.ui_namespace_uri(),
+        policy.web_color_namespace_uri()
+    ));
+    xml.push_str("\t\t\t</item>\r\n\t\t</appearance>\r\n\t</item>\r\n");
+    if let Some(view_mode) = value.view_mode() {
+        xml.push_str(&format!(
+            "\t<viewMode>{}</viewMode>\r\n",
+            escape(view_mode.as_str())
+        ));
+    }
+    if let Some(user_setting_id) = value.user_setting_id() {
+        xml.push_str(&format!(
+            "\t<userSettingID>{}</userSettingID>\r\n",
+            escape(user_setting_id.as_str())
+        ));
+    }
+    xml.push_str(&format!("</{root}>"));
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(Some(bytes))
+}
+
+/// Builds the exact metadata-only Form shell reconstructed by the platform.
+pub fn platform_default_form_list_settings_conditional_appearance()
+-> Result<DcsConditionalAppearance, DcsSettingsChildrenError> {
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(DcsListSettingsTailError::from)?;
+    let view_mode = EnumToken::new(policy.supported_view_modes().first().ok_or(
+        DcsListSettingsTailError::InvalidFormat(
+            "metadata-only conditional-appearance viewMode is not evidenced",
+        ),
+    )?)
+    .map_err(|_| DcsListSettingsTailError::InvalidValue("conditionalAppearance viewMode"))?;
+    let user_setting_id =
+        CanonicalText::new(policy.metadata_only_user_setting_id()).map_err(|_| {
+            DcsListSettingsTailError::InvalidValue("conditionalAppearance userSettingID")
+        })?;
+    DcsConditionalAppearance::new(Vec::new(), Some(view_mode), Some(user_setting_id)).map_err(
+        |_| {
+            DcsListSettingsTailError::InvalidFormat(
+                "metadata-only conditional appearance violates canonical bounds",
+            )
+            .into()
+        },
+    )
+}
+
+fn validate_dcs_conditional_appearance_for_emission(
+    value: &DcsConditionalAppearance,
+) -> Result<(), DcsSettingsChildrenError> {
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(DcsListSettingsTailError::from)?;
+    if !policy.follows_filter_and_order_and_precedes_structure_items()
+        || !policy.empty_nested_filter_is_unsupported()
+        || value.items().len() > policy.max_emitted_items()
+        || (value.items().is_empty()
+            && (value.view_mode().is_none() || value.user_setting_id().is_none()))
+        || value.view_mode().is_some() != value.user_setting_id().is_some()
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "conditional-appearance cardinality, metadata, or placement is unsupported",
+        )
+        .into());
+    }
+    if let Some(view_mode) = value.view_mode()
+        && !policy
+            .supported_view_modes()
+            .iter()
+            .any(|item| item == view_mode.as_str())
+    {
+        return Err(
+            DcsListSettingsTailError::InvalidValue("conditionalAppearance viewMode").into(),
+        );
+    }
+    if let Some(user_setting_id) = value.user_setting_id()
+        && user_setting_id.as_str() != policy.metadata_only_user_setting_id()
+    {
+        return Err(
+            DcsListSettingsTailError::InvalidValue("conditionalAppearance userSettingID").into(),
+        );
+    }
+    for item in value.items() {
+        if item.selected_field() != item.filter().field()
+            || item.filter().use_value().is_some()
+            || item.filter().comparison_type() != DcsFilterComparisonType::Equal
+            || item.filter().right().as_string().as_str().is_empty()
+            || item
+                .selected_field()
+                .as_str()
+                .chars()
+                .any(|value| !is_xml_1_0_char(value))
+        {
+            return Err(DcsListSettingsTailError::InvalidFormat(
+                "conditional-appearance rule is outside the authenticated cohort",
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Emits an embedded standalone/Form order child from the shared canonical
 /// semantics. The caller owns only its surrounding physical wrapper.
 pub fn emit_dcs_order_fragment(
@@ -1088,6 +1366,10 @@ pub fn parse_dcs_settings_children_strict(
     let mut order_placement_is_unsupported = false;
     let mut order_window_closed = false;
     let mut saw_order = false;
+    let mut conditional_appearance_candidate = None;
+    let mut conditional_appearance_placement_is_unsupported = false;
+    let mut conditional_appearance_window_closed = false;
+    let mut saw_conditional_appearance = false;
     for node in root.children() {
         let XmlNode::Element(element) = node else {
             continue;
@@ -1098,6 +1380,11 @@ pub fn parse_dcs_settings_children_strict(
             }
             if saw_order && xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE) {
                 order_placement_is_unsupported = true;
+            }
+            if saw_conditional_appearance
+                && xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
+            {
+                conditional_appearance_placement_is_unsupported = true;
             }
             if selection_candidate.replace(element).is_some() {
                 selection_is_ambiguous = true;
@@ -1114,6 +1401,9 @@ pub fn parse_dcs_settings_children_strict(
                 filter_placement_is_unsupported = true;
             }
             saw_filter = true;
+            if saw_conditional_appearance {
+                conditional_appearance_placement_is_unsupported = true;
+            }
             continue;
         }
         if element.name().local() == "order" {
@@ -1126,14 +1416,30 @@ pub fn parse_dcs_settings_children_strict(
                 order_placement_is_unsupported = true;
             }
             saw_order = true;
+            if saw_conditional_appearance {
+                conditional_appearance_placement_is_unsupported = true;
+            }
             filter_window_closed = true;
+            continue;
+        }
+        if element.name().local() == "conditionalAppearance" {
+            if conditional_appearance_candidate.replace(element).is_some() {
+                return Err(DcsSettingsParseError {
+                    reason: "duplicate direct conditionalAppearance child",
+                });
+            }
+            if conditional_appearance_window_closed {
+                conditional_appearance_placement_is_unsupported = true;
+            }
+            saw_conditional_appearance = true;
+            filter_window_closed = true;
+            order_window_closed = true;
             continue;
         }
         if xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
             && matches!(
                 element.name().local(),
                 "dataParameters"
-                    | "conditionalAppearance"
                     | "outputParameters"
                     | "item"
                     | "additionalProperties"
@@ -1144,6 +1450,7 @@ pub fn parse_dcs_settings_children_strict(
         {
             filter_window_closed = true;
             order_window_closed = true;
+            conditional_appearance_window_closed = true;
         }
         let target = match element.name().local() {
             "itemsViewMode" => &mut children.items_view_mode,
@@ -1202,6 +1509,26 @@ pub fn parse_dcs_settings_children_strict(
         {
             children.order = DcsChildParseOutcome::Unsupported(
                 "root order placement is outside the evidenced settings sequence",
+            );
+        }
+    }
+    if let Some(element) = conditional_appearance_candidate {
+        children.conditional_appearance = parse_dcs_conditional_appearance(element, root)?;
+        if conditional_appearance_placement_is_unsupported
+            && matches!(
+                &children.conditional_appearance,
+                DcsChildParseOutcome::Typed(_)
+            )
+        {
+            children.conditional_appearance = DcsChildParseOutcome::Unsupported(
+                "root conditionalAppearance placement is outside the evidenced settings sequence",
+            );
+        }
+        if let DcsChildParseOutcome::Typed(value) = &children.conditional_appearance
+            && (value.view_mode().is_some() || value.user_setting_id().is_some())
+        {
+            children.conditional_appearance = DcsChildParseOutcome::Unsupported(
+                "standalone conditionalAppearance metadata is outside the evidenced cohort",
             );
         }
     }
@@ -1578,6 +1905,463 @@ fn collect_form_list_settings_filters(
     for child in element.children() {
         if let XmlNode::Element(child) = child {
             collect_form_list_settings_filters(child, root, filters)?;
+        }
+    }
+    Ok(())
+}
+
+fn parse_dcs_conditional_appearance(
+    element: &XmlElement,
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearance>, DcsSettingsParseError> {
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(|_| DcsSettingsParseError {
+            reason: "bundled conditional-appearance evidence is invalid",
+        })?;
+    if !xml_element_uses_namespace(element, root, policy.namespace_uri()) {
+        return Err(DcsSettingsParseError {
+            reason: "conditionalAppearance child uses the wrong namespace",
+        });
+    }
+    if element
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditionalAppearance attributes are unsupported",
+        ));
+    }
+    let mut items = Vec::new();
+    let mut view_mode = None;
+    let mut user_setting_id = None;
+    let mut tail_started = false;
+    for node in element.children() {
+        let child = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(child) => child,
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "conditionalAppearance contains non-element content",
+                });
+            }
+        };
+        if !xml_element_uses_namespace(child, root, policy.namespace_uri()) {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "conditionalAppearance child namespace is unsupported",
+            ));
+        }
+        match child.name().local() {
+            "item" if !tail_started => match parse_dcs_conditional_appearance_item(child, root)? {
+                DcsChildParseOutcome::Typed(item) => items.push(item),
+                DcsChildParseOutcome::Unsupported(reason) => {
+                    return Ok(DcsChildParseOutcome::Unsupported(reason));
+                }
+                DcsChildParseOutcome::Absent => {
+                    return Err(DcsSettingsParseError {
+                        reason: "conditional-appearance item parser returned absence",
+                    });
+                }
+            },
+            "viewMode" if view_mode.is_none() && user_setting_id.is_none() => {
+                tail_started = true;
+                view_mode = Some(parse_simple_filter_child(child)?);
+            }
+            "userSettingID" if user_setting_id.is_none() => {
+                tail_started = true;
+                user_setting_id = Some(parse_simple_filter_child(child)?);
+            }
+            "item" | "viewMode" | "userSettingID" => {
+                return Err(DcsSettingsParseError {
+                    reason: "conditionalAppearance child is duplicated or out of sequence",
+                });
+            }
+            _ => {
+                return Ok(DcsChildParseOutcome::Unsupported(
+                    "conditionalAppearance child kind is unsupported",
+                ));
+            }
+        }
+        if items.len() > MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "conditionalAppearance cardinality is outside the authenticated cohort",
+            ));
+        }
+    }
+    if items.is_empty() && (view_mode.is_none() || user_setting_id.is_none()) {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "metadata-only conditionalAppearance requires both viewMode and userSettingID",
+        ));
+    }
+    if view_mode.is_some() != user_setting_id.is_some() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditionalAppearance metadata is outside the complete pair",
+        ));
+    }
+    if let Some(value) = view_mode.as_deref()
+        && !policy
+            .supported_view_modes()
+            .iter()
+            .any(|supported| supported == value)
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditionalAppearance viewMode is outside the authenticated set",
+        ));
+    }
+    if let Some(value) = user_setting_id.as_deref()
+        && value != policy.metadata_only_user_setting_id()
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditionalAppearance userSettingID is outside the authenticated value",
+        ));
+    }
+    let view_mode = view_mode
+        .as_deref()
+        .map(EnumToken::new)
+        .transpose()
+        .map_err(|_| DcsSettingsParseError {
+            reason: "conditionalAppearance viewMode is invalid",
+        })?;
+    let user_setting_id = user_setting_id
+        .as_deref()
+        .map(CanonicalText::new)
+        .transpose()
+        .map_err(|_| DcsSettingsParseError {
+            reason: "conditionalAppearance userSettingID is invalid",
+        })?;
+    DcsConditionalAppearance::new(items, view_mode, user_setting_id)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "conditionalAppearance violates canonical bounds",
+        })
+}
+
+fn parse_dcs_conditional_appearance_item(
+    item: &XmlElement,
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearanceItem>, DcsSettingsParseError> {
+    if item
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance item attributes are unsupported",
+        ));
+    }
+    let mut elements = item.children().iter().filter_map(|node| match node {
+        XmlNode::Element(element) => Some(Ok(element)),
+        XmlNode::Text(text) if text.value().trim().is_empty() => None,
+        XmlNode::CData(text) if text.value().trim().is_empty() => None,
+        _ => Some(Err(DcsSettingsParseError {
+            reason: "conditional-appearance item contains non-element content",
+        })),
+    });
+    let selection = elements.next().transpose()?.ok_or(DcsSettingsParseError {
+        reason: "conditional-appearance item lacks selection",
+    })?;
+    let filter = elements.next().transpose()?.ok_or(DcsSettingsParseError {
+        reason: "conditional-appearance item lacks filter",
+    })?;
+    let appearance = elements.next().transpose()?.ok_or(DcsSettingsParseError {
+        reason: "conditional-appearance item lacks appearance",
+    })?;
+    if elements.next().transpose()?.is_some() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance item has unsupported extra children",
+        ));
+    }
+    if selection.name().local() != "selection"
+        || filter.name().local() != "filter"
+        || appearance.name().local() != "appearance"
+    {
+        return Err(DcsSettingsParseError {
+            reason: "conditional-appearance item children are out of sequence",
+        });
+    }
+    let selected_field = match parse_dcs_conditional_selection(selection, root)? {
+        DcsChildParseOutcome::Typed(value) => value,
+        DcsChildParseOutcome::Unsupported(reason) => {
+            return Ok(DcsChildParseOutcome::Unsupported(reason));
+        }
+        DcsChildParseOutcome::Absent => unreachable!(),
+    };
+    let comparison = match parse_dcs_filter(filter, root)? {
+        DcsChildParseOutcome::Typed(value)
+            if value.items().len() == 1
+                && value.view_mode().is_none()
+                && value.user_setting_id().is_none() =>
+        {
+            let DcsFilterItem::Comparison(value) = &value.items()[0];
+            value.clone()
+        }
+        DcsChildParseOutcome::Typed(_) | DcsChildParseOutcome::Unsupported(_) => {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "conditional-appearance nested filter is outside the complete one-comparison cohort",
+            ));
+        }
+        DcsChildParseOutcome::Absent => unreachable!(),
+    };
+    let appearance = match parse_dcs_appearance_value(appearance, root)? {
+        DcsChildParseOutcome::Typed(value) => value,
+        DcsChildParseOutcome::Unsupported(reason) => {
+            return Ok(DcsChildParseOutcome::Unsupported(reason));
+        }
+        DcsChildParseOutcome::Absent => unreachable!(),
+    };
+    DcsConditionalAppearanceItem::new(selected_field, comparison, appearance)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "conditional-appearance item violates canonical bounds",
+        })
+}
+
+fn parse_dcs_conditional_selection(
+    selection: &XmlElement,
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<CanonicalText>, DcsSettingsParseError> {
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(|_| DcsSettingsParseError {
+            reason: "bundled conditional-appearance evidence is invalid",
+        })?;
+    if !xml_element_uses_namespace(selection, root, policy.namespace_uri())
+        || selection
+            .attributes()
+            .iter()
+            .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance selection namespace or attributes are unsupported",
+        ));
+    }
+    let Some(selected_item) = one_direct_element_child(selection)? else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "empty conditional-appearance selection is unsupported",
+        ));
+    };
+    if selected_item.name().local() != "item"
+        || !xml_element_uses_namespace(selected_item, root, policy.namespace_uri())
+        || selected_item
+            .attributes()
+            .iter()
+            .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance selection item is unsupported",
+        ));
+    }
+    let Some(field) = one_direct_element_child(selected_item)? else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance selection lacks a field",
+        ));
+    };
+    if field.name().local() != "field"
+        || !xml_element_uses_namespace(field, root, policy.namespace_uri())
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance selected field is unsupported",
+        ));
+    }
+    CanonicalText::new(&parse_simple_filter_child(field)?)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "conditional-appearance selected field is invalid",
+        })
+}
+
+fn parse_dcs_appearance_value(
+    appearance: &XmlElement,
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsAppearanceParameter>, DcsSettingsParseError> {
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(|_| DcsSettingsParseError {
+            reason: "bundled conditional-appearance evidence is invalid",
+        })?;
+    if !xml_element_uses_namespace(appearance, root, policy.namespace_uri()) {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "appearance container namespace is unsupported",
+        ));
+    }
+    let Some(item) = one_direct_element_child(appearance)? else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "empty appearance is unsupported",
+        ));
+    };
+    if !xml_element_uses_namespace(item, root, policy.core_namespace_uri())
+        || resolved_xsi_type(item, root).as_deref() != Some(policy.parameter_value_type_qname())
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "appearance parameter item type is unsupported",
+        ));
+    }
+    let mut children = item.children().iter().filter_map(|node| match node {
+        XmlNode::Element(element) => Some(Ok(element)),
+        XmlNode::Text(text) if text.value().trim().is_empty() => None,
+        XmlNode::CData(text) if text.value().trim().is_empty() => None,
+        _ => Some(Err(DcsSettingsParseError {
+            reason: "appearance item contains non-element content",
+        })),
+    });
+    let parameter = children.next().transpose()?.ok_or(DcsSettingsParseError {
+        reason: "appearance item lacks parameter",
+    })?;
+    let value = children.next().transpose()?.ok_or(DcsSettingsParseError {
+        reason: "appearance item lacks value",
+    })?;
+    if children.next().transpose()?.is_some()
+        || parameter.name().local() != "parameter"
+        || value.name().local() != "value"
+        || !xml_element_uses_namespace(parameter, root, policy.core_namespace_uri())
+        || !xml_element_uses_namespace(value, root, policy.core_namespace_uri())
+    {
+        return Err(DcsSettingsParseError {
+            reason: "appearance item children are duplicated or out of sequence",
+        });
+    }
+    if parse_simple_filter_child(parameter)? != "ЦветТекста"
+        || resolved_xsi_type(value, root).as_deref() != Some(policy.color_type_qname())
+        || resolved_qname_text(value, root).as_deref()
+            != Some(format!("{{{}}}Red", policy.web_color_namespace_uri()).as_str())
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "appearance parameter or color is outside the authenticated cohort",
+        ));
+    }
+    Ok(DcsChildParseOutcome::Typed(
+        DcsAppearanceParameter::TextColor(DcsAppearanceColor::WebRed),
+    ))
+}
+
+fn one_direct_element_child(
+    parent: &XmlElement,
+) -> Result<Option<&XmlElement>, DcsSettingsParseError> {
+    let mut result = None;
+    for node in parent.children() {
+        match node {
+            XmlNode::Element(element) if result.replace(element).is_none() => {}
+            XmlNode::Element(_) => {
+                return Err(DcsSettingsParseError {
+                    reason: "container has more than one direct element child",
+                });
+            }
+            XmlNode::Text(text) if text.value().trim().is_empty() => {}
+            XmlNode::CData(text) if text.value().trim().is_empty() => {}
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "container has non-element content",
+                });
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn resolved_qname_text(element: &XmlElement, root: &XmlElement) -> Option<String> {
+    let value = simple_element_text(element)?;
+    let (prefix, local) = value
+        .split_once(':')
+        .map_or((None, value.as_str()), |(prefix, local)| {
+            (Some(prefix), local)
+        });
+    if local.is_empty() || (prefix.is_some() && value.matches(':').count() != 1) {
+        return None;
+    }
+    let namespace = namespace_for_prefix(element, root, prefix)?;
+    Some(format!("{{{namespace}}}{local}"))
+}
+
+/// Parses the physical BOM ConditionalAppearance storage document.
+pub fn parse_dcs_conditional_appearance_storage_document(
+    bytes: &[u8],
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearance>, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "storage ConditionalAppearance exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "storage ConditionalAppearance is not well-formed XML",
+    })?;
+    let root = document.root();
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(|_| DcsSettingsParseError {
+            reason: "bundled conditional-appearance evidence is invalid",
+        })?;
+    if root.name().local() != "ConditionalAppearance"
+        || !xml_element_uses_namespace(root, root, policy.namespace_uri())
+    {
+        return Err(DcsSettingsParseError {
+            reason: "storage root is not ConditionalAppearance in the settings namespace",
+        });
+    }
+    let outcome = parse_dcs_conditional_appearance(root, root)?;
+    if matches!(&outcome, DcsChildParseOutcome::Typed(value) if value.items().is_empty()) {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "metadata-only ConditionalAppearance is absent from platform storage",
+        ));
+    }
+    Ok(outcome)
+}
+
+/// Extracts every direct Form ListSettings conditionalAppearance in order.
+pub fn parse_form_list_settings_conditional_appearances(
+    bytes: &[u8],
+) -> Result<Vec<DcsChildParseOutcome<DcsConditionalAppearance>>, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "Form document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "Form document is not well-formed XML",
+    })?;
+    let root = document.root();
+    let mut values = Vec::new();
+    collect_form_list_settings_conditional_appearances(root, root, &mut values)?;
+    Ok(values)
+}
+
+fn collect_form_list_settings_conditional_appearances(
+    element: &XmlElement,
+    root: &XmlElement,
+    values: &mut Vec<DcsChildParseOutcome<DcsConditionalAppearance>>,
+) -> Result<(), DcsSettingsParseError> {
+    if element.name().local() == "ListSettings" {
+        if !xml_element_uses_namespace(element, root, FORM_LOG_NAMESPACE) {
+            return Err(DcsSettingsParseError {
+                reason: "Form ListSettings uses the wrong namespace",
+            });
+        }
+        let mut value = None;
+        for child in element.children() {
+            let XmlNode::Element(child) = child else {
+                continue;
+            };
+            if child.name().local() == "conditionalAppearance" {
+                if value.is_some() {
+                    return Err(DcsSettingsParseError {
+                        reason: "duplicate direct Form ListSettings conditionalAppearance child",
+                    });
+                }
+                value = Some(parse_dcs_conditional_appearance(child, root)?);
+            }
+        }
+        if let Some(mut value) = value {
+            if let DcsChildParseOutcome::Typed(typed) = &value
+                && (typed.view_mode().is_none() || typed.user_setting_id().is_none())
+            {
+                value = DcsChildParseOutcome::Unsupported(
+                    "Form conditionalAppearance requires the exact metadata pair",
+                );
+            }
+            values.push(value);
+        }
+        return Ok(());
+    }
+    for child in element.children() {
+        if let XmlNode::Element(child) = child {
+            collect_form_list_settings_conditional_appearances(child, root, values)?;
         }
     }
     Ok(())
@@ -2035,6 +2819,20 @@ pub fn rewrite_dcs_settings_children(
             }
         }
     }
+    match children.conditional_appearance() {
+        DcsChildParseOutcome::Typed(_) => {
+            replace_direct_canonical_dcs_child(
+                &mut rewritten,
+                "conditionalAppearance",
+                serialized.conditional_appearance()?,
+            )?;
+        }
+        DcsChildParseOutcome::Absent | DcsChildParseOutcome::Unsupported(_) => {
+            if serialized.conditional_appearance().is_some() {
+                return None;
+            }
+        }
+    }
     for (remove, local) in [
         (children.items_view_mode.is_some(), "itemsViewMode"),
         (
@@ -2287,6 +3085,10 @@ pub fn preflight_dcs_settings_serialization(
         bundled_dcs_order_policy()
             .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
     }
+    if settings.conditional_appearance().is_some() {
+        bundled_dcs_conditional_appearance_policy()
+            .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    }
 
     if matches!(envelope, DcsSettingsEnvelope::ListSettings(_)) {
         if settings.selection().is_some() {
@@ -2312,6 +3114,26 @@ pub fn preflight_dcs_settings_serialization(
                 &"standalone root filter metadata is outside the evidenced cohort",
             ));
         }
+    }
+    if let Some(value) = settings.conditional_appearance() {
+        let form_context = matches!(envelope, DcsSettingsEnvelope::ListSettings(_));
+        let has_metadata = value.view_mode().is_some() || value.user_setting_id().is_some();
+        if form_context && !has_metadata {
+            return Err(invalid_evidence(
+                envelope,
+                target_profile,
+                &"Form conditionalAppearance requires the exact platform-authenticated metadata pair",
+            ));
+        }
+        if !form_context && has_metadata {
+            return Err(invalid_evidence(
+                envelope,
+                target_profile,
+                &"standalone conditionalAppearance metadata is outside the evidenced cohort",
+            ));
+        }
+        validate_dcs_conditional_appearance_for_emission(value)
+            .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
     }
 
     Ok(DcsSerializationPermit {
@@ -2341,11 +3163,15 @@ pub fn emit_dcs_settings_envelope(
         invalid_evidence(envelope, target_profile, &"invalid verified wrapper QName")
     })?;
     let settings = envelope.as_settings();
-    if settings.selection().is_some() || settings.filter().is_some() || settings.order().is_some() {
+    if settings.selection().is_some()
+        || settings.filter().is_some()
+        || settings.order().is_some()
+        || settings.conditional_appearance().is_some()
+    {
         return Err(invalid_evidence(
             envelope,
             target_profile,
-            &"complete envelope selection/filter/order requires caller-owned namespace prefix and placement",
+            &"complete envelope structured DCS children require caller-owned namespace prefix and placement",
         ));
     }
     for (field, value) in [
@@ -2684,7 +3510,7 @@ mod tests {
 
     #[test]
     fn every_dcs_writer_decision_is_explicitly_verified_or_pending() {
-        assert_eq!(DCS_WRITER_EVIDENCE.len(), 17);
+        assert_eq!(DCS_WRITER_EVIDENCE.len(), 19);
         assert!(
             DCS_WRITER_EVIDENCE
                 .iter()
@@ -2711,6 +3537,8 @@ mod tests {
                 DcsWriterDecision::FormListSettingsOrderIngress,
                 DcsWriterDecision::RootFilterPolicy,
                 DcsWriterDecision::FormListSettingsFilterIngress,
+                DcsWriterDecision::RootConditionalAppearancePolicy,
+                DcsWriterDecision::FormListSettingsConditionalAppearanceIngress,
                 DcsWriterDecision::OpaqueExtensionPlacement,
                 DcsWriterDecision::FormListSettingsDelegate,
             ]
@@ -2919,6 +3747,7 @@ mod tests {
             selection: None,
             filter: None,
             order: None,
+            conditional_appearance: None,
             tail: concat!(
                 "\t<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>\r\n",
                 "\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n"
@@ -3329,6 +4158,7 @@ mod tests {
                     selection: Some(selection),
                     filter: None,
                     order: Some(order),
+                    conditional_appearance: None,
                     tail: "\t<dcsset:itemsViewMode>Normal</dcsset:itemsViewMode>\r\n".to_owned(),
                 },
             )
@@ -3487,5 +4317,78 @@ mod tests {
                 assert!(error.missing_decisions().is_empty());
             }
         }
+    }
+
+    #[test]
+    fn dcs_conditional_appearance_fixture_round_trips_all_three_physical_contexts() {
+        let storage = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/form-storage-conditional-appearance.xml.b64"
+        ));
+        let storage_value =
+            match parse_dcs_conditional_appearance_storage_document(&storage).unwrap() {
+                DcsChildParseOutcome::Typed(value) => value,
+                other => panic!("expected typed storage value, got {other:?}"),
+            };
+        assert_eq!(
+            emit_dcs_conditional_appearance_storage_document(&storage_value)
+                .unwrap()
+                .unwrap(),
+            storage
+        );
+
+        let form = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/native-form.xml.b64"
+        ));
+        let form_values = parse_form_list_settings_conditional_appearances(&form).unwrap();
+        let DcsChildParseOutcome::Typed(form_value) = &form_values[0] else {
+            panic!("expected typed Form conditional appearance")
+        };
+        assert_eq!(form_value, &storage_value);
+        let embedded = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/form-embedded-conditional-appearance.xml.b64"
+        ));
+        let form_indent = "\t\t\t\t\t";
+        let emitted_form =
+            emit_dcs_conditional_appearance_fragment(form_value, "dcsset", form_indent).unwrap();
+        assert_eq!(
+            emitted_form
+                .strip_prefix(form_indent)
+                .unwrap()
+                .strip_suffix("\r\n")
+                .unwrap()
+                .as_bytes(),
+            embedded
+        );
+
+        let standalone_fragment = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/standalone-conditional-appearance.xml.b64"
+        ));
+        let standalone_fragment = String::from_utf8(standalone_fragment).unwrap();
+        let wrapped = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{standalone_fragment}</Settings>"
+        );
+        let standalone = parse_dcs_settings_children_strict(&wrapped).unwrap();
+        let DcsChildParseOutcome::Typed(standalone_value) = standalone.conditional_appearance()
+        else {
+            panic!("expected typed standalone conditional appearance")
+        };
+        assert_eq!(standalone_value.items(), form_value.items());
+        assert!(standalone_value.view_mode().is_none());
+        assert_eq!(
+            emit_dcs_conditional_appearance_fragment(standalone_value, "dcsset", "\t\t\t")
+                .unwrap()
+                .strip_prefix("\t\t\t")
+                .unwrap()
+                .strip_suffix("\r\n")
+                .unwrap(),
+            standalone_fragment
+        );
+
+        let metadata = platform_default_form_list_settings_conditional_appearance().unwrap();
+        assert!(metadata.items().is_empty());
+        assert_eq!(
+            emit_dcs_conditional_appearance_storage_document(&metadata).unwrap(),
+            None
+        );
     }
 }

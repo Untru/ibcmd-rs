@@ -8461,7 +8461,9 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
             .list_settings
             .conditional_appearance
             .as_ref()
-            .and_then(|v| v.view_mode.as_deref()),
+            .and_then(FormListSettingsConditionalAppearance::typed)
+            .and_then(|value| value.view_mode())
+            .map(|value| value.as_str()),
         Some("Normal")
     );
     assert_eq!(
@@ -8469,7 +8471,9 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
             .list_settings
             .conditional_appearance
             .as_ref()
-            .and_then(|v| v.user_setting_id.as_deref()),
+            .and_then(FormListSettingsConditionalAppearance::typed)
+            .and_then(|value| value.user_setting_id())
+            .map(CanonicalText::as_str),
         Some("b75fecce-942b-4aed-abc9-e6a02e460fb3")
     );
     assert_eq!(
@@ -8713,11 +8717,9 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
                 )
                 .unwrap(),
             )),
-            conditional_appearance: Some(FormListSettingsStandardSection {
-                view_mode: None,
-                user_setting_id: Some("e5c7c4de-2fd3-4479-9d17-62e044522edd".to_string()),
-                raw_xml: None,
-            }),
+            conditional_appearance: Some(FormListSettingsConditionalAppearance::Typed(
+                ibcmd_xml::platform_default_form_list_settings_conditional_appearance().unwrap(),
+            )),
             items_view_mode: None,
             items_user_setting_id: Some("971fd96e-2ae3-41d5-9d7a-bad772efb890".to_string()),
         },
@@ -8759,7 +8761,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
         "<dcsset:userSettingID>f5abd21c-a9fb-4b17-8ed5-0505541ef807</dcsset:userSettingID>"
     ));
     assert!(xml.contains(
-        "<dcsset:userSettingID>e5c7c4de-2fd3-4479-9d17-62e044522edd</dcsset:userSettingID>"
+        "<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>"
     ));
     assert!(xml.contains(
             "<dcsset:itemsUserSettingID>971fd96e-2ae3-41d5-9d7a-bad772efb890</dcsset:itemsUserSettingID>"
@@ -8787,13 +8789,7 @@ fn rejects_opaque_order_before_formatting_list_settings() {
             bytes: b"<Order><item>opaque-order</item></Order>".to_vec(),
             reason: "unsupported test order",
         }),
-        conditional_appearance: Some(FormListSettingsStandardSection {
-            raw_xml: Some(
-                "<dcsset:conditionalAppearance><dcsset:item>opaque-appearance</dcsset:item></dcsset:conditionalAppearance>"
-                    .to_string(),
-            ),
-            ..FormListSettingsStandardSection::default()
-        }),
+        conditional_appearance: None,
         ..FormListSettings::default()
     };
     assert!(matches!(
@@ -8901,14 +8897,10 @@ fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
             .map(CanonicalText::as_str),
         Some("f5abd21c-a9fb-4b17-8ed5-0505541ef807")
     );
-    assert_eq!(
-        settings
-            .list_settings
-            .conditional_appearance
-            .as_ref()
-            .and_then(|section| section.user_setting_id.as_deref()),
-        Some("e5c7c4de-2fd3-4479-9d17-62e044522edd")
-    );
+    assert!(matches!(
+        settings.list_settings.conditional_appearance,
+        Some(FormListSettingsConditionalAppearance::OpaqueStorage { .. })
+    ));
     assert_eq!(
         settings.list_settings.items_user_setting_id.as_deref(),
         Some("971fd96e-2ae3-41d5-9d7a-bad772efb890")
@@ -8917,7 +8909,7 @@ fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
 }
 
 #[test]
-fn canonicalizes_dynamic_list_appearance_nested_default_namespaces() {
+fn rejects_unproven_dynamic_list_appearance_value_from_canonical_path() {
     let xml = concat!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
         r#"<ConditionalAppearance xmlns="http://v8.1c.ru/8.1/data-composition-system/settings" "#,
@@ -8934,29 +8926,10 @@ fn canonicalizes_dynamic_list_appearance_nested_default_namespaces() {
         "</ConditionalAppearance>",
     );
 
-    let normalized = normalize_form_list_settings_section_xml(
-        xml,
-        "ConditionalAppearance",
-        "conditionalAppearance",
-        &BTreeMap::new(),
-        true,
-    )
-    .expect("normalized conditional appearance");
-
-    assert!(
-        normalized.contains(r#"<dcscor:item xsi:type="dcsset:SettingsParameterValue">"#),
-        "{normalized}"
-    );
-    assert!(
-        normalized.contains("<dcscor:parameter>ЦветТекста</dcscor:parameter>"),
-        "{normalized}"
-    );
-    assert!(
-        normalized.contains(r#"<dcscor:value xsi:type="v8ui:Color">web:FireBrick</dcscor:value>"#),
-        "{normalized}"
-    );
-    assert!(!normalized.contains("xmlns"), "{normalized}");
-    assert!(!normalized.contains("d5p"), "{normalized}");
+    assert!(!matches!(
+        ibcmd_xml::parse_dcs_conditional_appearance_storage_document(xml.as_bytes()),
+        Ok(ibcmd_xml::DcsChildParseOutcome::Typed(_))
+    ));
 }
 
 #[test]
@@ -8967,14 +8940,10 @@ fn rejects_non_dcs_or_malformed_dynamic_list_appearance() {
         r#"<ConditionalAppearance xmlns="http://v8.1c.ru/8.1/data-composition-system/settings" custom="value"><item/></ConditionalAppearance>"#,
     ] {
         assert!(
-            normalize_form_list_settings_section_xml(
-                xml,
-                "ConditionalAppearance",
-                "conditionalAppearance",
-                &BTreeMap::new(),
-                true,
-            )
-            .is_none(),
+            !matches!(
+                ibcmd_xml::parse_dcs_conditional_appearance_storage_document(xml.as_bytes()),
+                Ok(ibcmd_xml::DcsChildParseOutcome::Typed(_))
+            ),
             "{xml}"
         );
     }

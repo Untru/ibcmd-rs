@@ -44,7 +44,7 @@ use crate::form_schema::{
     form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
     form_tooltip_representation_xml_order,
 };
-use ibcmd_core::dcs::{DcsFilter, DcsOrder};
+use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 #[cfg(test)]
 use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_item;
 #[cfg(test)]
@@ -59,8 +59,9 @@ use ibcmd_schema::{
     FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
     GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
     MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
-    bundled_writer_rules, form_choice_parameter_cluster_order,
-    form_text_document_context_menu_owner_fields, parse_form_choice_list,
+    bundled_dcs_conditional_appearance_policy, bundled_writer_rules,
+    form_choice_parameter_cluster_order, form_text_document_context_menu_owner_fields,
+    parse_form_choice_list,
     parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
@@ -68,9 +69,10 @@ use ibcmd_schema::{
 };
 use ibcmd_xml::{
     DcsChildParseOutcome, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
-    emit_form_choice_parameters, parse_dcs_filter_storage_document,
-    parse_dcs_order_storage_document, platform_default_form_list_settings_filter,
-    platform_default_form_list_settings_order,
+    emit_form_choice_parameters, parse_dcs_conditional_appearance_storage_document,
+    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
+    platform_default_form_list_settings_conditional_appearance,
+    platform_default_form_list_settings_filter, platform_default_form_list_settings_order,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -795,16 +797,28 @@ pub(super) struct FormAttributesSection {
 pub(super) struct FormListSettings {
     pub(super) filter: Option<FormListSettingsFilter>,
     pub(super) order: Option<FormListSettingsOrder>,
-    pub(super) conditional_appearance: Option<FormListSettingsStandardSection>,
+    pub(super) conditional_appearance: Option<FormListSettingsConditionalAppearance>,
     pub(super) items_view_mode: Option<String>,
     pub(super) items_user_setting_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(super) struct FormListSettingsStandardSection {
-    pub(super) view_mode: Option<String>,
-    pub(super) user_setting_id: Option<String>,
-    pub(super) raw_xml: Option<String>,
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormListSettingsConditionalAppearance {
+    Typed(DcsConditionalAppearance),
+    OpaqueStorage {
+        bytes: Vec<u8>,
+        reason: &'static str,
+    },
+}
+
+impl FormListSettingsConditionalAppearance {
+    #[cfg(test)]
+    pub(super) const fn typed(&self) -> Option<&DcsConditionalAppearance> {
+        match self {
+            Self::Typed(value) => Some(value),
+            Self::OpaqueStorage { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1273,6 +1287,9 @@ pub(super) enum FormSchemaWriteError {
     OpaqueDcsFilter {
         reason: &'static str,
     },
+    OpaqueDcsConditionalAppearance {
+        reason: &'static str,
+    },
 }
 
 impl From<WriterRuleLookupError> for FormSchemaWriteError {
@@ -1464,6 +1481,14 @@ fn preflight_form_writer_paths_with_dcs_profiles(
             }
             None => None,
         };
+        let canonical_conditional_appearance =
+            match settings.list_settings.conditional_appearance.as_ref() {
+                Some(FormListSettingsConditionalAppearance::Typed(value)) => Some(value),
+                Some(FormListSettingsConditionalAppearance::OpaqueStorage { reason, .. }) => {
+                    return Err(FormSchemaWriteError::OpaqueDcsConditionalAppearance { reason });
+                }
+                None => None,
+            };
         // This is the only fallible DynamicList/ListSettings formatter path. It returns its
         // complete fragment atomically and has no output or filesystem side effects.
         drop(emit_canonical_dcs_settings_children(
@@ -1471,6 +1496,7 @@ fn preflight_form_writer_paths_with_dcs_profiles(
             CanonicalDcsSettingsInput {
                 filter: canonical_filter,
                 order: canonical_order,
+                conditional_appearance: canonical_conditional_appearance,
                 items_view_mode: settings.list_settings.items_view_mode.as_deref(),
                 items_user_setting_id: settings.list_settings.items_user_setting_id.as_deref(),
                 ..CanonicalDcsSettingsInput::default()
@@ -3008,11 +3034,10 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
         list_settings.order = Some(FormListSettingsOrder::Typed(
             default_form_list_settings_order(),
         ));
-        list_settings.conditional_appearance = Some(FormListSettingsStandardSection {
-            view_mode: Some("Normal".to_string()),
-            user_setting_id: Some("b75fecce-942b-4aed-abc9-e6a02e460fb3".to_string()),
-            raw_xml: None,
-        });
+        list_settings.conditional_appearance = Some(FormListSettingsConditionalAppearance::Typed(
+            platform_default_form_list_settings_conditional_appearance()
+                .expect("bundled conditional-appearance default is valid"),
+        ));
         list_settings.items_view_mode = Some("Normal".to_string());
         list_settings.items_user_setting_id =
             Some("911b6018-f537-43e8-a417-da56b22f9aec".to_string());
@@ -3030,11 +3055,11 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
             ));
         }
         if list_settings.conditional_appearance.is_none() {
-            list_settings.conditional_appearance = Some(FormListSettingsStandardSection {
-                view_mode: Some("Normal".to_string()),
-                user_setting_id: Some("b75fecce-942b-4aed-abc9-e6a02e460fb3".to_string()),
-                raw_xml: None,
-            });
+            list_settings.conditional_appearance =
+                Some(FormListSettingsConditionalAppearance::Typed(
+                    platform_default_form_list_settings_conditional_appearance()
+                        .expect("bundled conditional-appearance default is valid"),
+                ));
         }
     }
     if list_settings.items_user_setting_id.is_none() {
@@ -3484,6 +3509,10 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
     let mut fields = Vec::new();
     let mut server_state_xml = None;
     let mut list_settings = FormListSettings::default();
+    let conditional_appearance_property = bundled_dcs_conditional_appearance_policy()
+        .ok()?
+        .storage_property_name()
+        .to_owned();
     for window in settings_fields.windows(2) {
         let key = parse_1c_quoted_string_with_len(window[0].trim())
             .map(|(value, _)| value)
@@ -3510,21 +3539,9 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             }
             "Filter" => list_settings.filter = parse_form_list_settings_filter(window[1]),
             "Order" => list_settings.order = parse_form_list_settings_order(window[1], object_refs),
-            "ConditionalAppearance" => {
-                list_settings.conditional_appearance = parse_form_list_settings_standard_section(
-                    window[1],
-                    "ConditionalAppearance",
-                    "conditionalAppearance",
-                    object_refs,
-                )
-            }
-            "Appearance" => {
-                list_settings.conditional_appearance = parse_form_list_settings_standard_section(
-                    window[1],
-                    "ConditionalAppearance",
-                    "conditionalAppearance",
-                    object_refs,
-                )
+            property if property == conditional_appearance_property => {
+                list_settings.conditional_appearance =
+                    parse_form_list_settings_conditional_appearance(window[1])
             }
             "ItemsViewMode" => list_settings.items_view_mode = parse_form_setting_string(window[1]),
             "ItemsUserSettingID" => {
@@ -3976,22 +3993,6 @@ pub(super) fn prefix_default_xml_tags(fragment: &str, prefix: &str) -> String {
     output
 }
 
-pub(super) fn xml_local_name(name: &[u8]) -> String {
-    let name = std::str::from_utf8(name).unwrap_or_default();
-    name.rsplit_once(':')
-        .map(|(_, local)| local)
-        .unwrap_or(name)
-        .to_string()
-}
-
-pub(super) fn path_ends_with(path: &[String], suffix: &[&str]) -> bool {
-    path.len() >= suffix.len()
-        && path[path.len() - suffix.len()..]
-            .iter()
-            .map(String::as_str)
-            .eq(suffix.iter().copied())
-}
-
 pub(super) fn parse_form_list_settings_order(
     field: &str,
     _object_refs: &BTreeMap<String, String>,
@@ -4035,99 +4036,29 @@ pub(super) fn parse_form_list_settings_filter(field: &str) -> Option<FormListSet
     }
 }
 
-pub(super) fn parse_form_list_settings_standard_section(
+pub(super) fn parse_form_list_settings_conditional_appearance(
     field: &str,
-    root_name: &str,
-    emitted_name: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<FormListSettingsStandardSection> {
+) -> Option<FormListSettingsConditionalAppearance> {
     let payload = extract_base64_payload(field)?;
-    let xml = decode_base64_mime(payload)?;
-    let xml = String::from_utf8(xml).ok()?;
-    let mut section =
-        parse_form_list_settings_standard_section_xml(&xml, root_name).unwrap_or_default();
-    section.raw_xml = normalize_form_list_settings_section_xml(
-        &xml,
-        root_name,
-        emitted_name,
-        object_refs,
-        root_name == "ConditionalAppearance",
-    );
-    Some(section)
-}
-
-pub(super) fn normalize_form_list_settings_section_xml(
-    xml: &str,
-    root_name: &str,
-    emitted_name: &str,
-    object_refs: &BTreeMap<String, String>,
-    normalize_text_values: bool,
-) -> Option<String> {
-    let repaired_xml = repair_utf8_mojibake(xml).unwrap_or_else(|| xml.to_string());
-    let xml = repaired_xml.trim_start_matches('\u{feff}');
-    let xml = if let Some(stripped) = xml.strip_prefix("<?xml") {
-        let declaration_end = stripped.find("?>")?;
-        stripped[declaration_end + 2..].trim_start_matches(['\r', '\n'])
-    } else {
-        xml
-    };
-    if normalize_text_values {
-        let canonical = canonicalize_form_data_composition_fragment(xml, root_name, object_refs)?;
-        let inner = extract_canonical_form_list_settings_inner(&canonical, root_name)?;
-        return Some(normalize_form_list_settings_raw_fragment(&format!(
-            "<dcsset:{emitted_name}>{inner}</dcsset:{emitted_name}>"
-        )));
+    let bytes = decode_base64_mime(payload)?;
+    match parse_dcs_conditional_appearance_storage_document(&bytes) {
+        Ok(DcsChildParseOutcome::Typed(canonical)) => {
+            Some(FormListSettingsConditionalAppearance::Typed(canonical))
+        }
+        Ok(DcsChildParseOutcome::Unsupported(reason)) => {
+            Some(FormListSettingsConditionalAppearance::OpaqueStorage { bytes, reason })
+        }
+        Ok(DcsChildParseOutcome::Absent) => {
+            Some(FormListSettingsConditionalAppearance::OpaqueStorage {
+                bytes,
+                reason: "present storage conditional-appearance payload parsed as absent",
+            })
+        }
+        Err(error) => Some(FormListSettingsConditionalAppearance::OpaqueStorage {
+            bytes,
+            reason: error.reason(),
+        }),
     }
-    let root_start = xml.find(&format!("<{root_name}"))?;
-    let closing_tag = format!("</{root_name}>");
-    let root_open_end = xml[root_start..].find('>')? + root_start + 1;
-    let root_close_start = xml.rfind(&closing_tag)?;
-    let inner = xml[root_open_end..root_close_start].trim();
-    if inner.is_empty() {
-        return None;
-    }
-    let inner = if normalize_text_values {
-        normalize_form_conditional_appearance_text_values(inner, object_refs)
-    } else {
-        inner.to_string()
-    };
-    let inner = prefix_default_xml_tags(&inner, "dcsset");
-    let inner = prefix_unqualified_xsi_type_values(&inner, "dcsset");
-    let inner = normalize_form_list_settings_raw_fragment(&inner);
-    Some(normalize_form_list_settings_raw_fragment(&format!(
-        "<dcsset:{emitted_name}>{inner}</dcsset:{emitted_name}>"
-    )))
-}
-
-fn extract_canonical_form_list_settings_inner<'a>(
-    canonical: &'a str,
-    root_name: &str,
-) -> Option<&'a str> {
-    let opening = format!("<dcsset:{root_name}");
-    let root_start = canonical.find(&opening)?;
-    let root_open_end = canonical[root_start..].find('>')? + root_start + 1;
-    let closing = format!("</dcsset:{root_name}>");
-    let root_close_start = canonical.rfind(&closing)?;
-    (root_open_end <= root_close_start).then(|| canonical[root_open_end..root_close_start].trim())
-}
-
-pub(super) fn normalize_form_list_settings_raw_fragment(fragment: &str) -> String {
-    split_adjacent_xml_tags(
-        &fragment
-            .replace(
-                r#" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core""#,
-                "",
-            )
-            .replace(
-                r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#,
-                "",
-            )
-            .replace(r#" xmlns:xs="http://www.w3.org/2001/XMLSchema""#, "")
-            .replace(
-                r#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#,
-                "",
-            ),
-    )
 }
 
 pub(super) fn extract_form_attributes_conditional_appearance_xml(
@@ -4504,67 +4435,6 @@ fn rewrite_form_server_state_type_ids(xml: &mut String, dcs_type_index: &DcsType
     }
     rewritten.push_str(&xml[cursor..]);
     *xml = rewritten;
-}
-
-pub(super) fn parse_form_list_settings_standard_section_xml(
-    xml: &str,
-    root_name: &str,
-) -> Option<FormListSettingsStandardSection> {
-    let mut reader = Reader::from_str(xml.trim_start_matches('\u{feff}'));
-    reader.config_mut().trim_text(true);
-    let mut buffer = Vec::new();
-    let mut path = Vec::<String>::new();
-    let mut text = String::new();
-    let mut section = FormListSettingsStandardSection::default();
-
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if matches!(local.as_str(), "viewMode" | "userSettingID") {
-                    text.clear();
-                }
-                path.push(local);
-            }
-            Ok(Event::Text(value)) => {
-                if path_ends_with(&path, &[root_name, "viewMode"])
-                    || path_ends_with(&path, &[root_name, "userSettingID"])
-                {
-                    text.push_str(value.xml_content().ok()?.as_ref());
-                }
-            }
-            Ok(Event::CData(value)) => {
-                if path_ends_with(&path, &[root_name, "viewMode"])
-                    || path_ends_with(&path, &[root_name, "userSettingID"])
-                {
-                    text.push_str(value.xml_content().ok()?.as_ref());
-                }
-            }
-            Ok(Event::End(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                match local.as_str() {
-                    "viewMode" if path_ends_with(&path, &[root_name, "viewMode"]) => {
-                        section.view_mode = Some(text.trim().to_string());
-                    }
-                    "userSettingID" if path_ends_with(&path, &[root_name, "userSettingID"]) => {
-                        section.user_setting_id = Some(text.trim().to_string());
-                    }
-                    _ => {}
-                }
-                let _ = path.pop();
-                if matches!(local.as_str(), "viewMode" | "userSettingID") {
-                    text.clear();
-                }
-            }
-            Ok(Event::Eof) => break,
-            Ok(_) => {}
-            Err(_) => return None,
-        }
-        buffer.clear();
-    }
-
-    (section.view_mode.is_some() || section.user_setting_id.is_some() || section.raw_xml.is_some())
-        .then_some(section)
 }
 
 pub(super) fn parse_form_main_table_ref(
@@ -17789,11 +17659,19 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         }
         None => None,
     };
+    let canonical_conditional_appearance = match settings.conditional_appearance.as_ref() {
+        Some(FormListSettingsConditionalAppearance::Typed(value)) => Some(value),
+        Some(FormListSettingsConditionalAppearance::OpaqueStorage { reason, .. }) => {
+            return Err(FormSchemaWriteError::OpaqueDcsConditionalAppearance { reason });
+        }
+        None => None,
+    };
     let canonical_parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::FormListSettings,
         CanonicalDcsSettingsInput {
             filter: canonical_filter,
             order: canonical_order,
+            conditional_appearance: canonical_conditional_appearance,
             items_view_mode: settings.items_view_mode.as_deref(),
             items_user_setting_id: settings.items_user_setting_id.as_deref(),
             ..CanonicalDcsSettingsInput::default()
@@ -17806,7 +17684,9 @@ fn format_form_list_settings_xml_with_dcs_profiles(
     )?;
     if !form_list_settings_filter_has_output(settings.filter.as_ref())
         && !form_list_settings_order_has_output(settings.order.as_ref())
-        && !form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
+        && !form_list_settings_conditional_appearance_has_output(
+            settings.conditional_appearance.as_ref(),
+        )
         && canonical_parts.tail().is_empty()
     {
         return Ok(String::new());
@@ -17820,17 +17700,10 @@ fn format_form_list_settings_xml_with_dcs_profiles(
     if form_list_settings_order_has_output(settings.order.as_ref()) && settings.order.is_some() {
         xml.push_str(canonical_parts.order().unwrap_or_default());
     }
-    if form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
-        && let Some(conditional_appearance) = &settings.conditional_appearance
-    {
-        if let Some(raw_xml) = &conditional_appearance.raw_xml {
-            xml.push_str(&indent_xml_fragment(raw_xml, "\t\t\t\t\t"));
-        } else {
-            xml.push_str(&format_form_list_settings_standard_section_xml(
-                "conditionalAppearance",
-                conditional_appearance,
-            ));
-        }
+    if form_list_settings_conditional_appearance_has_output(
+        settings.conditional_appearance.as_ref(),
+    ) {
+        xml.push_str(canonical_parts.conditional_appearance().unwrap_or_default());
     }
     xml.push_str(canonical_parts.tail());
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
@@ -17843,39 +17716,14 @@ pub(super) fn form_list_settings_filter_has_output(
     filter.is_some()
 }
 
-pub(super) fn form_list_settings_standard_section_has_output(
-    section: Option<&FormListSettingsStandardSection>,
+pub(super) fn form_list_settings_conditional_appearance_has_output(
+    value: Option<&FormListSettingsConditionalAppearance>,
 ) -> bool {
-    section.is_some_and(|section| {
-        section.raw_xml.is_some()
-            || section.view_mode.is_some()
-            || section.user_setting_id.is_some()
-    })
+    value.is_some()
 }
 
 pub(super) fn form_list_settings_order_has_output(order: Option<&FormListSettingsOrder>) -> bool {
     order.is_some()
-}
-
-pub(super) fn format_form_list_settings_standard_section_xml(
-    name: &str,
-    section: &FormListSettingsStandardSection,
-) -> String {
-    let mut xml = format!("\t\t\t\t\t<dcsset:{name}>\r\n");
-    if let Some(view_mode) = &section.view_mode {
-        xml.push_str(&format!(
-            "\t\t\t\t\t\t<dcsset:viewMode>{}</dcsset:viewMode>\r\n",
-            escape_xml_text(view_mode)
-        ));
-    }
-    if let Some(user_setting_id) = &section.user_setting_id {
-        xml.push_str(&format!(
-            "\t\t\t\t\t\t<dcsset:userSettingID>{}</dcsset:userSettingID>\r\n",
-            escape_xml_text(user_setting_id)
-        ));
-    }
-    xml.push_str(&format!("\t\t\t\t\t</dcsset:{name}>\r\n"));
-    xml
 }
 
 pub(super) fn indent_xml_fragment(fragment: &str, indent: &str) -> String {

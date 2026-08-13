@@ -327,6 +327,7 @@ $typedCoverageDefinitions = @(
     @{ classifier = 'DataCompositionSettings'; feature = 'selection'; canonicalType = 'DcsSettings'; canonicalField = 'selection'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json' },
     @{ classifier = 'DataCompositionSettings'; feature = 'order'; canonicalType = 'DcsSettings'; canonicalField = 'order'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
     @{ classifier = 'DataCompositionSettings'; feature = 'filter'; canonicalType = 'DcsSettings'; canonicalField = 'filter'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionSettings'; feature = 'conditionalAppearance'; canonicalType = 'DcsSettings'; canonicalField = 'conditional_appearance'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
     @{ classifier = 'DataCompositionSelectedFields'; feature = 'items'; canonicalType = 'DcsSelection'; canonicalField = 'items'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json' },
     @{ classifier = 'DataCompositionSelectedField'; feature = 'field'; canonicalType = 'DcsSelectedField'; canonicalField = 'field'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json' },
     @{ classifier = 'DataCompositionOrder'; feature = 'items'; canonicalType = 'DcsOrder'; canonicalField = 'items'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
@@ -340,7 +341,13 @@ $typedCoverageDefinitions = @(
     @{ classifier = 'DataCompositionFilter'; feature = 'userSettingID'; canonicalType = 'DcsFilter'; canonicalField = 'user_setting_id'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
     @{ classifier = 'DataCompositionFilterItem'; feature = 'comparisonType'; canonicalType = 'DcsFilterComparison'; canonicalField = 'comparison_type'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
     @{ classifier = 'DataCompositionFilterItem'; feature = 'left'; canonicalType = 'DcsFilterComparison'; canonicalField = 'field'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
-    @{ classifier = 'DataCompositionFilterItem'; feature = 'right'; canonicalType = 'DcsFilterComparison'; canonicalField = 'right'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' }
+    @{ classifier = 'DataCompositionFilterItem'; feature = 'right'; canonicalType = 'DcsFilterComparison'; canonicalField = 'right'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionConditionalAppearance'; feature = 'items'; canonicalType = 'DcsConditionalAppearance'; canonicalField = 'items'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
+    @{ classifier = 'DataCompositionConditionalAppearance'; feature = 'viewMode'; canonicalType = 'DcsConditionalAppearance'; canonicalField = 'view_mode'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
+    @{ classifier = 'DataCompositionConditionalAppearance'; feature = 'userSettingID'; canonicalType = 'DcsConditionalAppearance'; canonicalField = 'user_setting_id'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
+    @{ classifier = 'DataCompositionConditionalAppearanceItem'; feature = 'selection'; canonicalType = 'DcsConditionalAppearanceItem'; canonicalField = 'selected_field'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
+    @{ classifier = 'DataCompositionConditionalAppearanceItem'; feature = 'filter'; canonicalType = 'DcsConditionalAppearanceItem'; canonicalField = 'filter'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
+    @{ classifier = 'DataCompositionConditionalAppearanceItem'; feature = 'appearance'; canonicalType = 'DcsConditionalAppearanceItem'; canonicalField = 'appearance'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' }
 )
 $typedCoverageMappings = [System.Collections.Generic.Dictionary[string, object]]::new(
     [System.StringComparer]::Ordinal
@@ -541,6 +548,18 @@ $corpus = [ordered]@{
 }
 
 $json = ($corpus | ConvertTo-Json -Depth 16).Replace("`r`n", "`n") + "`n"
+$indentLevel = 0
+$json = (($json.Split("`n") | ForEach-Object {
+    $trimmed = $_.TrimStart()
+    if ($trimmed.StartsWith('}') -or $trimmed.StartsWith(']')) {
+        $indentLevel--
+    }
+    $line = (' ' * (2 * $indentLevel)) + $trimmed.Replace('":  ', '": ')
+    if ($trimmed.EndsWith('{') -or $trimmed.EndsWith('[')) {
+        $indentLevel++
+    }
+    $line
+}) -join "`n")
 if ($json -match '(?i)(?:^|[^A-Za-z0-9_])[A-Z]:[\\/]|\\\\[^\\]|file:') {
     throw 'Refusing to write non-portable absolute path to canonical coverage.'
 }

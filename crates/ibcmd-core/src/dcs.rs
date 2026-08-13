@@ -25,6 +25,9 @@ pub const MAX_DCS_SELECTION_ITEMS: usize = 16_384;
 pub const MAX_DCS_ORDER_ITEMS: usize = 16_384;
 /// Maximum filter items retained by one DCS settings filter.
 pub const MAX_DCS_FILTER_ITEMS: usize = 16_384;
+/// Maximum conditional-appearance items admitted by the first authenticated
+/// standalone/Form cohort.
+pub const MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS: usize = 1;
 /// Maximum aggregate variable-sized data retained by one DCS settings value.
 pub const MAX_DCS_RETAINED_BYTES: usize = 67_108_864;
 
@@ -72,6 +75,20 @@ pub enum DcsBuildError {
     },
     /// No explicit `use` value is authenticated for the first filter cohort.
     UnsupportedFilterUse,
+    /// A conditional-appearance container had neither the one supported rule
+    /// nor the complete platform-generated metadata pair.
+    EmptyConditionalAppearance,
+    /// The authenticated first cohort contains exactly one rule.
+    TooManyConditionalAppearanceItems {
+        /// Maximum accepted items.
+        maximum: usize,
+        /// Actual items.
+        actual: usize,
+    },
+    /// The selected field of a conditional-appearance rule was empty.
+    EmptyConditionalAppearanceField,
+    /// The nested comparison must address the same field as the selection.
+    ConditionalAppearanceFieldMismatch,
     /// The opaque extension collection exceeded its DCS-specific item bound.
     TooManyOpaqueExtensions {
         /// Maximum accepted extensions.
@@ -149,6 +166,19 @@ impl Display for DcsBuildError {
             ),
             Self::UnsupportedFilterUse => formatter.write_str(
                 "DCS filter explicit use is not evidence-backed; preserve it at the owning boundary",
+            ),
+            Self::EmptyConditionalAppearance => formatter.write_str(
+                "DCS conditional appearance has neither the evidenced rule nor the complete metadata-only pair",
+            ),
+            Self::TooManyConditionalAppearanceItems { maximum, actual } => write!(
+                formatter,
+                "DCS conditional appearance exceeds {maximum} items (actual {actual})"
+            ),
+            Self::EmptyConditionalAppearanceField => {
+                formatter.write_str("DCS conditional-appearance selected field path is empty")
+            }
+            Self::ConditionalAppearanceFieldMismatch => formatter.write_str(
+                "DCS conditional-appearance selection and nested filter address different fields",
             ),
             Self::TooManyOpaqueExtensions { maximum, actual } => write!(
                 formatter,
@@ -750,6 +780,148 @@ impl<'de> Deserialize<'de> for DcsFilter {
     }
 }
 
+/// The single appearance value authenticated for the initial 8.3.27 cohort.
+/// XML lexical values and namespace prefixes remain schema/XML concerns.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DcsAppearanceColor {
+    /// The web palette's red color.
+    WebRed,
+}
+
+/// Appearance parameters authenticated for canonical emission.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DcsAppearanceParameter {
+    /// Text color in the pinned platform's source model.
+    TextColor(DcsAppearanceColor),
+}
+
+/// One bounded conditional-appearance rule.
+///
+/// This type keeps the conditional selection's untyped XML item distinct
+/// from the root selection while reusing the proven filter comparison model.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsConditionalAppearanceItem {
+    selected_field: CanonicalText,
+    filter: DcsFilterComparison,
+    appearance: DcsAppearanceParameter,
+}
+
+impl DcsConditionalAppearanceItem {
+    pub fn new(
+        selected_field: CanonicalText,
+        filter: DcsFilterComparison,
+        appearance: DcsAppearanceParameter,
+    ) -> Result<Self, DcsBuildError> {
+        if selected_field.as_str().is_empty() {
+            return Err(DcsBuildError::EmptyConditionalAppearanceField);
+        }
+        if filter.field() != &selected_field {
+            return Err(DcsBuildError::ConditionalAppearanceFieldMismatch);
+        }
+        Ok(Self {
+            selected_field,
+            filter,
+            appearance,
+        })
+    }
+
+    pub const fn selected_field(&self) -> &CanonicalText {
+        &self.selected_field
+    }
+
+    pub const fn filter(&self) -> &DcsFilterComparison {
+        &self.filter
+    }
+
+    pub const fn appearance(&self) -> DcsAppearanceParameter {
+        self.appearance
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsConditionalAppearanceItemWire {
+    selected_field: CanonicalText,
+    filter: DcsFilterComparison,
+    appearance: DcsAppearanceParameter,
+}
+
+impl<'de> Deserialize<'de> for DcsConditionalAppearanceItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsConditionalAppearanceItemWire::deserialize(deserializer)?;
+        Self::new(wire.selected_field, wire.filter, wire.appearance).map_err(de::Error::custom)
+    }
+}
+
+/// Bounded conditional-appearance settings. Empty items are admitted only
+/// together with the exact metadata pair reconstructed by the platform.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsConditionalAppearance {
+    items: Vec<DcsConditionalAppearanceItem>,
+    view_mode: Option<EnumToken>,
+    user_setting_id: Option<CanonicalText>,
+}
+
+impl DcsConditionalAppearance {
+    pub fn new(
+        items: Vec<DcsConditionalAppearanceItem>,
+        view_mode: Option<EnumToken>,
+        user_setting_id: Option<CanonicalText>,
+    ) -> Result<Self, DcsBuildError> {
+        if items.is_empty() && (view_mode.is_none() || user_setting_id.is_none()) {
+            return Err(DcsBuildError::EmptyConditionalAppearance);
+        }
+        if items.len() > MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS {
+            return Err(DcsBuildError::TooManyConditionalAppearanceItems {
+                maximum: MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS,
+                actual: items.len(),
+            });
+        }
+        Ok(Self {
+            items,
+            view_mode,
+            user_setting_id,
+        })
+    }
+
+    pub fn items(&self) -> &[DcsConditionalAppearanceItem] {
+        &self.items
+    }
+
+    pub const fn view_mode(&self) -> Option<&EnumToken> {
+        self.view_mode.as_ref()
+    }
+
+    pub const fn user_setting_id(&self) -> Option<&CanonicalText> {
+        self.user_setting_id.as_ref()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsConditionalAppearanceWire {
+    items: Vec<DcsConditionalAppearanceItem>,
+    view_mode: Option<EnumToken>,
+    user_setting_id: Option<CanonicalText>,
+}
+
+impl<'de> Deserialize<'de> for DcsConditionalAppearance {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsConditionalAppearanceWire::deserialize(deserializer)?;
+        Self::new(wire.items, wire.view_mode, wire.user_setting_id).map_err(de::Error::custom)
+    }
+}
+
 /// Verified typed minimum of `DataCompositionSettings`.
 ///
 /// The optional root selection and scalar fields are structural model
@@ -762,6 +934,7 @@ pub struct DcsSettings {
     selection: Option<DcsSelection>,
     filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
+    conditional_appearance: Option<DcsConditionalAppearance>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: OpaqueFacets,
@@ -769,35 +942,6 @@ pub struct DcsSettings {
 }
 
 impl DcsSettings {
-    fn from_parts(
-        selection: Option<DcsSelection>,
-        filter: Option<DcsFilter>,
-        order: Option<DcsOrder>,
-        items_user_setting_id: Option<CanonicalText>,
-        items_view_mode: Option<EnumToken>,
-        opaque_extensions: OpaqueFacets,
-        provenance: SourceProvenance,
-    ) -> Result<Self, DcsBuildError> {
-        validate_settings(
-            selection.as_ref(),
-            filter.as_ref(),
-            order.as_ref(),
-            items_user_setting_id.as_ref(),
-            items_view_mode.as_ref(),
-            &opaque_extensions,
-            &provenance,
-        )?;
-        Ok(Self {
-            selection,
-            filter,
-            order,
-            items_user_setting_id,
-            items_view_mode,
-            opaque_extensions,
-            provenance,
-        })
-    }
-
     /// Returns the optional root selection.
     pub const fn selection(&self) -> Option<&DcsSelection> {
         self.selection.as_ref()
@@ -811,6 +955,11 @@ impl DcsSettings {
     /// Returns the optional root order.
     pub const fn order(&self) -> Option<&DcsOrder> {
         self.order.as_ref()
+    }
+
+    /// Returns the optional root/Form conditional-appearance settings.
+    pub const fn conditional_appearance(&self) -> Option<&DcsConditionalAppearance> {
+        self.conditional_appearance.as_ref()
     }
 
     /// Returns the optional exact user-setting identifier.
@@ -842,6 +991,7 @@ pub struct DcsSettingsBuilder {
     selection: Option<DcsSelection>,
     filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
+    conditional_appearance: Option<DcsConditionalAppearance>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: OpaqueFacets,
@@ -854,6 +1004,7 @@ impl DcsSettingsBuilder {
             selection: None,
             filter: None,
             order: None,
+            conditional_appearance: None,
             items_user_setting_id: None,
             items_view_mode: None,
             opaque_extensions: OpaqueFacets::new(Vec::new())
@@ -877,6 +1028,11 @@ impl DcsSettingsBuilder {
         self
     }
 
+    pub fn conditional_appearance(mut self, value: Option<DcsConditionalAppearance>) -> Self {
+        self.conditional_appearance = value;
+        self
+    }
+
     pub fn items_user_setting_id(mut self, value: Option<CanonicalText>) -> Self {
         self.items_user_setting_id = value;
         self
@@ -893,15 +1049,18 @@ impl DcsSettingsBuilder {
     }
 
     pub fn build(self) -> Result<DcsSettings, DcsBuildError> {
-        DcsSettings::from_parts(
-            self.selection,
-            self.filter,
-            self.order,
-            self.items_user_setting_id,
-            self.items_view_mode,
-            self.opaque_extensions,
-            self.provenance,
-        )
+        let settings = DcsSettings {
+            selection: self.selection,
+            filter: self.filter,
+            order: self.order,
+            conditional_appearance: self.conditional_appearance,
+            items_user_setting_id: self.items_user_setting_id,
+            items_view_mode: self.items_view_mode,
+            opaque_extensions: self.opaque_extensions,
+            provenance: self.provenance,
+        };
+        validate_settings(&settings)?;
+        Ok(settings)
     }
 }
 
@@ -911,6 +1070,7 @@ struct DcsSettingsWire {
     selection: Option<DcsSelection>,
     filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
+    conditional_appearance: Option<DcsConditionalAppearance>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: DcsOpaqueFacetsWire,
@@ -989,6 +1149,7 @@ impl<'de> Deserialize<'de> for DcsSettings {
             .selection(wire.selection)
             .filter(wire.filter)
             .order(wire.order)
+            .conditional_appearance(wire.conditional_appearance)
             .items_user_setting_id(wire.items_user_setting_id)
             .items_view_mode(wire.items_view_mode)
             .opaque_extensions(
@@ -1036,15 +1197,17 @@ impl DcsSettingsEnvelope {
     }
 }
 
-fn validate_settings(
-    selection: Option<&DcsSelection>,
-    filter: Option<&DcsFilter>,
-    order: Option<&DcsOrder>,
-    items_user_setting_id: Option<&CanonicalText>,
-    items_view_mode: Option<&EnumToken>,
-    opaque_extensions: &OpaqueFacets,
-    provenance: &SourceProvenance,
-) -> Result<(), DcsBuildError> {
+fn validate_settings(settings: &DcsSettings) -> Result<(), DcsBuildError> {
+    let DcsSettings {
+        selection,
+        filter,
+        order,
+        conditional_appearance,
+        items_user_setting_id,
+        items_view_mode,
+        opaque_extensions,
+        provenance,
+    } = settings;
     if opaque_extensions.len() > MAX_DCS_OPAQUE_EXTENSIONS {
         return Err(DcsBuildError::TooManyOpaqueExtensions {
             maximum: MAX_DCS_OPAQUE_EXTENSIONS,
@@ -1139,6 +1302,40 @@ fn validate_settings(
             retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
         }
         if let Some(value) = order.user_setting_id() {
+            retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
+        }
+    }
+    if let Some(conditional_appearance) = conditional_appearance {
+        if conditional_appearance.items().is_empty()
+            && (conditional_appearance.view_mode().is_none()
+                || conditional_appearance.user_setting_id().is_none())
+        {
+            return Err(DcsBuildError::EmptyConditionalAppearance);
+        }
+        if conditional_appearance.items().len() > MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS {
+            return Err(DcsBuildError::TooManyConditionalAppearanceItems {
+                maximum: MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS,
+                actual: conditional_appearance.items().len(),
+            });
+        }
+        for item in conditional_appearance.items() {
+            if item.selected_field().as_str().is_empty() {
+                return Err(DcsBuildError::EmptyConditionalAppearanceField);
+            }
+            if item.filter().field() != item.selected_field() {
+                return Err(DcsBuildError::ConditionalAppearanceFieldMismatch);
+            }
+            retained_bytes =
+                checked_retained_bytes(retained_bytes, item.selected_field().as_str().len())?;
+            retained_bytes = checked_retained_bytes(
+                retained_bytes,
+                item.filter().right().as_string().as_str().len(),
+            )?;
+        }
+        if let Some(value) = conditional_appearance.view_mode() {
+            retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
+        }
+        if let Some(value) = conditional_appearance.user_setting_id() {
             retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
         }
     }
@@ -1272,16 +1469,18 @@ mod tests {
         )
     }
 
-    fn filter_comparison(field: &str, right: &str) -> DcsFilterItem {
-        DcsFilterItem::Comparison(
-            DcsFilterComparison::new(
-                None,
-                CanonicalText::new(field).unwrap(),
-                DcsFilterComparisonType::Equal,
-                DcsFilterValue::string(CanonicalText::new(right).unwrap()).unwrap(),
-            )
-            .unwrap(),
+    fn filter_comparison_value(field: &str, right: &str) -> DcsFilterComparison {
+        DcsFilterComparison::new(
+            None,
+            CanonicalText::new(field).unwrap(),
+            DcsFilterComparisonType::Equal,
+            DcsFilterValue::string(CanonicalText::new(right).unwrap()).unwrap(),
         )
+        .unwrap()
+    }
+
+    fn filter_comparison(field: &str, right: &str) -> DcsFilterItem {
+        DcsFilterItem::Comparison(filter_comparison_value(field, right))
     }
 
     #[test]
@@ -1523,6 +1722,67 @@ mod tests {
                 .to_string()
                 .contains("exceeds 16384 items")
         );
+    }
+
+    #[test]
+    fn conditional_appearance_reuses_the_proven_filter_semantics_and_wire_shape() {
+        let item = DcsConditionalAppearanceItem::new(
+            CanonicalText::new("SortKey").unwrap(),
+            filter_comparison_value("SortKey", "A"),
+            DcsAppearanceParameter::TextColor(DcsAppearanceColor::WebRed),
+        )
+        .unwrap();
+        let appearance = DcsConditionalAppearance::new(vec![item], None, None).unwrap();
+        let settings = DcsSettingsBuilder::new(provenance("platform:8.3.27", "settings"))
+            .conditional_appearance(Some(appearance))
+            .build()
+            .unwrap();
+        let value = settings.conditional_appearance().unwrap();
+        assert_eq!(value.items()[0].selected_field().as_str(), "SortKey");
+        assert_eq!(value.items()[0].filter().field().as_str(), "SortKey");
+        assert_eq!(
+            serde_json::from_str::<DcsSettings>(&serde_json::to_string(&settings).unwrap())
+                .unwrap(),
+            settings
+        );
+
+        let metadata_only = DcsConditionalAppearance::new(
+            Vec::new(),
+            Some(EnumToken::new("Normal").unwrap()),
+            Some(CanonicalText::new("b75fecce-942b-4aed-abc9-e6a02e460fb3").unwrap()),
+        )
+        .unwrap();
+        assert!(metadata_only.items().is_empty());
+    }
+
+    #[test]
+    fn unsupported_conditional_appearance_shapes_fail_closed() {
+        assert_eq!(
+            DcsConditionalAppearance::new(Vec::new(), None, None),
+            Err(DcsBuildError::EmptyConditionalAppearance)
+        );
+        assert_eq!(
+            DcsConditionalAppearanceItem::new(
+                CanonicalText::new("Other").unwrap(),
+                filter_comparison_value("SortKey", "A"),
+                DcsAppearanceParameter::TextColor(DcsAppearanceColor::WebRed),
+            ),
+            Err(DcsBuildError::ConditionalAppearanceFieldMismatch)
+        );
+        let item = DcsConditionalAppearanceItem::new(
+            CanonicalText::new("SortKey").unwrap(),
+            filter_comparison_value("SortKey", "A"),
+            DcsAppearanceParameter::TextColor(DcsAppearanceColor::WebRed),
+        )
+        .unwrap();
+        assert!(matches!(
+            DcsConditionalAppearance::new(
+                vec![item; MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS + 1],
+                None,
+                None,
+            ),
+            Err(DcsBuildError::TooManyConditionalAppearanceItems { .. })
+        ));
     }
 
     #[test]

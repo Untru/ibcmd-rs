@@ -2632,6 +2632,10 @@ pub const BUNDLED_DCS_ORDER_EVIDENCE_JSON: &str =
 /// Embedded platform-authenticated policy for the shared DCS filter cohort.
 pub const BUNDLED_DCS_FILTER_EVIDENCE_JSON: &str =
     include_str!("../data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json");
+/// Embedded platform-authenticated policy for the bounded shared DCS
+/// conditional-appearance cohort.
+pub const BUNDLED_DCS_CONDITIONAL_APPEARANCE_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json");
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3311,6 +3315,7 @@ pub struct DcsOrderPolicy {
     max_emitted_items: usize,
     supported_view_modes: Vec<String>,
     metadata_only_user_setting_id: String,
+    storage_record_type_uuid: String,
 }
 
 /// Exact filter QName, type, ordering, default, and storage policy proven by
@@ -3417,6 +3422,120 @@ impl DcsFilterPolicy {
     }
 }
 
+/// Exact conditional-appearance QName, type, default, placement, and storage
+/// policy proven by one clean-room standalone/Form two-round cohort.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsConditionalAppearancePolicy {
+    namespace_uri: String,
+    core_namespace_uri: String,
+    ui_namespace_uri: String,
+    web_color_namespace_uri: String,
+    xml_schema_namespace_uri: String,
+    conditional_appearance_qname: String,
+    storage_conditional_appearance_qname: String,
+    item_qname: String,
+    selection_qname: String,
+    field_qname: String,
+    filter_qname: String,
+    appearance_qname: String,
+    core_item_qname: String,
+    parameter_qname: String,
+    value_qname: String,
+    view_mode_qname: String,
+    user_setting_id_qname: String,
+    parameter_value_type_qname: String,
+    color_type_qname: String,
+    max_emitted_items: usize,
+    supported_view_modes: Vec<String>,
+    metadata_only_user_setting_id: String,
+    storage_property_name: String,
+    storage_record_type_uuid: String,
+}
+
+impl DcsConditionalAppearancePolicy {
+    pub fn namespace_uri(&self) -> &str {
+        &self.namespace_uri
+    }
+    pub fn core_namespace_uri(&self) -> &str {
+        &self.core_namespace_uri
+    }
+    pub fn ui_namespace_uri(&self) -> &str {
+        &self.ui_namespace_uri
+    }
+    pub fn web_color_namespace_uri(&self) -> &str {
+        &self.web_color_namespace_uri
+    }
+    pub fn xml_schema_namespace_uri(&self) -> &str {
+        &self.xml_schema_namespace_uri
+    }
+    pub fn conditional_appearance_qname(&self) -> &str {
+        &self.conditional_appearance_qname
+    }
+    pub fn storage_conditional_appearance_qname(&self) -> &str {
+        &self.storage_conditional_appearance_qname
+    }
+    pub fn item_qname(&self) -> &str {
+        &self.item_qname
+    }
+    pub fn selection_qname(&self) -> &str {
+        &self.selection_qname
+    }
+    pub fn field_qname(&self) -> &str {
+        &self.field_qname
+    }
+    pub fn filter_qname(&self) -> &str {
+        &self.filter_qname
+    }
+    pub fn appearance_qname(&self) -> &str {
+        &self.appearance_qname
+    }
+    pub fn core_item_qname(&self) -> &str {
+        &self.core_item_qname
+    }
+    pub fn parameter_qname(&self) -> &str {
+        &self.parameter_qname
+    }
+    pub fn value_qname(&self) -> &str {
+        &self.value_qname
+    }
+    pub fn view_mode_qname(&self) -> &str {
+        &self.view_mode_qname
+    }
+    pub fn user_setting_id_qname(&self) -> &str {
+        &self.user_setting_id_qname
+    }
+    pub fn parameter_value_type_qname(&self) -> &str {
+        &self.parameter_value_type_qname
+    }
+    pub fn color_type_qname(&self) -> &str {
+        &self.color_type_qname
+    }
+    pub const fn max_emitted_items(&self) -> usize {
+        self.max_emitted_items
+    }
+    pub fn supported_view_modes(&self) -> &[String] {
+        &self.supported_view_modes
+    }
+    pub fn metadata_only_user_setting_id(&self) -> &str {
+        &self.metadata_only_user_setting_id
+    }
+    pub fn storage_property_name(&self) -> &str {
+        &self.storage_property_name
+    }
+    pub fn storage_record_type_uuid(&self) -> &str {
+        &self.storage_record_type_uuid
+    }
+    pub const fn follows_filter_and_order_and_precedes_structure_items(&self) -> bool {
+        true
+    }
+    pub const fn metadata_only_storage_property_is_absent(&self) -> bool {
+        true
+    }
+    pub const fn empty_nested_filter_is_unsupported(&self) -> bool {
+        true
+    }
+}
+
 impl DcsOrderPolicy {
     pub fn namespace_uri(&self) -> &str {
         &self.namespace_uri
@@ -3474,6 +3593,9 @@ impl DcsOrderPolicy {
     }
     pub fn metadata_only_user_setting_id(&self) -> &str {
         &self.metadata_only_user_setting_id
+    }
+    pub fn storage_record_type_uuid(&self) -> &str {
+        &self.storage_record_type_uuid
     }
 }
 
@@ -3639,6 +3761,7 @@ struct DcsOrderEvidencePolicy {
     max_emitted_items: usize,
     supported_view_modes: Vec<String>,
     metadata_only_user_setting_id: String,
+    storage_record_type_uuid: String,
     propertyless_empty_order_emission: String,
     metadata_only_order_emission: String,
     root_auto_emission: String,
@@ -3744,6 +3867,104 @@ struct DcsFilterEvidencePolicy {
     metadata_only_embedded_emission: String,
     metadata_only_storage_representation: String,
     propertyless_empty_filter_emission: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsConditionalAppearanceEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    source: DcsConditionalAppearanceContractSource,
+    sources: DcsConditionalAppearanceEvidenceSources,
+    policy: DcsConditionalAppearanceEvidencePolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsConditionalAppearanceContractSource {
+    product: String,
+    release: String,
+    derivation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsConditionalAppearanceEvidenceSources {
+    comparison: DcsConditionalAppearanceComparisonSource,
+    metadata_only: DcsConditionalAppearanceMetadataOnlySource,
+    unica_cross_evidence: DcsFilterUnicaEvidenceSource,
+    source_version: String,
+    platform_line: String,
+    ibcmd_sha256: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsConditionalAppearanceComparisonSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    form_raw_body_sha256: String,
+    form_native_xml_sha256: String,
+    form_storage_sha256: String,
+    form_embedded_sha256: String,
+    standalone_raw_body_sha256: String,
+    standalone_native_xml_sha256: String,
+    standalone_fragment_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsConditionalAppearanceMetadataOnlySource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    form_embedded_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsConditionalAppearanceEvidencePolicy {
+    namespace: String,
+    core_namespace: String,
+    ui_namespace: String,
+    web_color_namespace: String,
+    xml_schema_namespace: String,
+    conditional_appearance_qname: String,
+    storage_conditional_appearance_qname: String,
+    item_qname: String,
+    selection_qname: String,
+    field_qname: String,
+    filter_qname: String,
+    appearance_qname: String,
+    core_item_qname: String,
+    parameter_qname: String,
+    value_qname: String,
+    view_mode_qname: String,
+    user_setting_id_qname: String,
+    parameter_value_type_qname: String,
+    color_type_qname: String,
+    settings_placement: String,
+    item_child_order: Vec<String>,
+    selection_child_order: Vec<String>,
+    appearance_child_order: Vec<String>,
+    container_child_order: Vec<String>,
+    supported_parameters: Vec<String>,
+    supported_values: Vec<String>,
+    max_emitted_items: usize,
+    max_selected_fields: usize,
+    max_appearance_values: usize,
+    supported_view_modes: Vec<String>,
+    metadata_only_user_setting_id: String,
+    storage_property_name: String,
+    storage_record_type_uuid: String,
+    metadata_only_embedded_emission: String,
+    metadata_only_storage_representation: String,
+    empty_nested_filter_emission: String,
 }
 
 impl DcsSelectionEvidenceCorpus {
@@ -4017,6 +4238,12 @@ impl DcsOrderEvidenceCorpus {
                 self.policy.metadata_only_user_setting_id == "88619765-ccb3-46c6-ac52-38e9c992ebd4",
             ),
             (
+                "storage UUID",
+                self.policy.storage_record_type_uuid == "11743ff3-2db3-4cfc-9404-90ed8209437f"
+                    && Uuid::parse_str(&self.policy.storage_record_type_uuid)
+                        .is_ok_and(|value| !value.is_nil()),
+            ),
+            (
                 "propertyless empty order emission",
                 self.policy.propertyless_empty_order_emission == "unsupported",
             ),
@@ -4088,6 +4315,7 @@ impl DcsOrderEvidenceCorpus {
             max_emitted_items: self.policy.max_emitted_items,
             supported_view_modes: self.policy.supported_view_modes,
             metadata_only_user_setting_id: self.policy.metadata_only_user_setting_id,
+            storage_record_type_uuid: self.policy.storage_record_type_uuid,
         }
     }
 }
@@ -4359,6 +4587,285 @@ impl DcsFilterEvidenceCorpus {
             supported_view_modes: self.policy.supported_view_modes,
             metadata_only_user_setting_id: self.policy.metadata_only_user_setting_id,
             comparison_storage_record_type_uuid: self.policy.comparison_storage_record_type_uuid,
+        }
+    }
+}
+
+impl DcsConditionalAppearanceEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 32 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "conditional-appearance evidence exceeds 32768 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        const NS: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+        const CORE_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/core";
+        const UI_NS: &str = "http://v8.1c.ru/8.1/data/ui";
+        const WEB_NS: &str = "http://v8.1c.ru/8.1/data/ui/colors/web";
+        const XS_NS: &str = "http://www.w3.org/2001/XMLSchema";
+        let comparison = &self.sources.comparison;
+        let metadata = &self.sources.metadata_only;
+        let unica = &self.sources.unica_cross_evidence;
+        let expected = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-settings-conditional-appearance-v1",
+            ),
+            (
+                "contract source product",
+                self.source.product == "1C:Enterprise Platform",
+            ),
+            (
+                "contract source release",
+                self.source.release == "8.3.27 / XML 2.20",
+            ),
+            (
+                "contract source derivation",
+                !self.source.derivation.trim().is_empty(),
+            ),
+            ("platform line", self.sources.platform_line == "8.3.27"),
+            ("source version", self.sources.source_version == "2.20"),
+            (
+                "comparison product",
+                comparison.product == "1C:Enterprise Platform",
+            ),
+            (
+                "metadata product",
+                metadata.product == "1C:Enterprise Platform",
+            ),
+            ("comparison release", comparison.release == "8.3.27.2214"),
+            ("metadata release", metadata.release == comparison.release),
+            (
+                "fixture",
+                comparison.fixture_id == "8.3.27.2214-xml-2.20-dcs-conditional-appearance",
+            ),
+            (
+                "metadata fixture",
+                metadata.fixture_id == "8.3.27.2214-xml-2.20-dcs-filter",
+            ),
+            (
+                "comparison derivation",
+                !comparison.derivation.trim().is_empty(),
+            ),
+            (
+                "metadata derivation",
+                !metadata.derivation.trim().is_empty(),
+            ),
+            ("comparison rounds", comparison.round_trips >= 2),
+            ("metadata rounds", metadata.round_trips >= 2),
+            ("Unica rounds", unica.round_trips >= 2),
+            ("Unica release", unica.release == "8.3.27.2074"),
+            (
+                "Unica revision",
+                unica.repository_revision == "a527d40962d047c6922c903b37510b30f697da42",
+            ),
+            ("namespace", self.policy.namespace == NS),
+            ("core namespace", self.policy.core_namespace == CORE_NS),
+            ("UI namespace", self.policy.ui_namespace == UI_NS),
+            ("web namespace", self.policy.web_color_namespace == WEB_NS),
+            (
+                "XML Schema namespace",
+                self.policy.xml_schema_namespace == XS_NS,
+            ),
+            (
+                "conditional appearance QName",
+                self.policy.conditional_appearance_qname
+                    == format!("{{{NS}}}conditionalAppearance"),
+            ),
+            (
+                "storage QName",
+                self.policy.storage_conditional_appearance_qname
+                    == format!("{{{NS}}}ConditionalAppearance"),
+            ),
+            (
+                "item QName",
+                self.policy.item_qname == format!("{{{NS}}}item"),
+            ),
+            (
+                "selection QName",
+                self.policy.selection_qname == format!("{{{NS}}}selection"),
+            ),
+            (
+                "field QName",
+                self.policy.field_qname == format!("{{{NS}}}field"),
+            ),
+            (
+                "filter QName",
+                self.policy.filter_qname == format!("{{{NS}}}filter"),
+            ),
+            (
+                "appearance QName",
+                self.policy.appearance_qname == format!("{{{NS}}}appearance"),
+            ),
+            (
+                "core item QName",
+                self.policy.core_item_qname == format!("{{{CORE_NS}}}item"),
+            ),
+            (
+                "parameter QName",
+                self.policy.parameter_qname == format!("{{{CORE_NS}}}parameter"),
+            ),
+            (
+                "value QName",
+                self.policy.value_qname == format!("{{{CORE_NS}}}value"),
+            ),
+            (
+                "view mode QName",
+                self.policy.view_mode_qname == format!("{{{NS}}}viewMode"),
+            ),
+            (
+                "user setting QName",
+                self.policy.user_setting_id_qname == format!("{{{NS}}}userSettingID"),
+            ),
+            (
+                "parameter value type",
+                self.policy.parameter_value_type_qname == format!("{{{NS}}}SettingsParameterValue"),
+            ),
+            (
+                "color type",
+                self.policy.color_type_qname == format!("{{{UI_NS}}}Color"),
+            ),
+            (
+                "settings placement",
+                self.policy.settings_placement == "after-filter-and-order-before-structure-items",
+            ),
+            (
+                "item order",
+                self.policy.item_child_order == ["selection", "filter", "appearance"],
+            ),
+            (
+                "selection order",
+                self.policy.selection_child_order == ["item(field)"],
+            ),
+            (
+                "appearance order",
+                self.policy.appearance_child_order == ["coreItem(parameter,value)"],
+            ),
+            (
+                "container order",
+                self.policy.container_child_order == ["items", "viewMode?", "userSettingID?"],
+            ),
+            (
+                "supported parameter",
+                self.policy.supported_parameters == ["TextColor"],
+            ),
+            (
+                "supported value",
+                self.policy.supported_values == ["WebRed"],
+            ),
+            ("maximum items", self.policy.max_emitted_items == 1),
+            (
+                "maximum selected fields",
+                self.policy.max_selected_fields == 1,
+            ),
+            ("maximum values", self.policy.max_appearance_values == 1),
+            (
+                "supported view modes",
+                self.policy.supported_view_modes == ["Normal"],
+            ),
+            (
+                "metadata ID",
+                self.policy.metadata_only_user_setting_id == "b75fecce-942b-4aed-abc9-e6a02e460fb3",
+            ),
+            (
+                "storage property",
+                self.policy.storage_property_name == "Appearance",
+            ),
+            (
+                "storage UUID",
+                Uuid::parse_str(&self.policy.storage_record_type_uuid)
+                    .is_ok_and(|value| !value.is_nil()),
+            ),
+            (
+                "metadata emission",
+                self.policy.metadata_only_embedded_emission
+                    == "requires-viewMode-and-userSettingID",
+            ),
+            (
+                "metadata storage",
+                self.policy.metadata_only_storage_representation
+                    == "Appearance-property-absent-when-AutoSaveUserSettings-true",
+            ),
+            (
+                "empty nested filter",
+                self.policy.empty_nested_filter_emission == "unsupported",
+            ),
+        ];
+        if let Some((field, _)) = expected.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS conditional appearance {field} drifted"
+            )));
+        }
+        for (field, digest) in [
+            ("ibcmd", self.sources.ibcmd_sha256.as_str()),
+            ("Form raw body", comparison.form_raw_body_sha256.as_str()),
+            (
+                "Form native XML",
+                comparison.form_native_xml_sha256.as_str(),
+            ),
+            ("Form storage", comparison.form_storage_sha256.as_str()),
+            ("Form embedded", comparison.form_embedded_sha256.as_str()),
+            (
+                "standalone raw body",
+                comparison.standalone_raw_body_sha256.as_str(),
+            ),
+            (
+                "standalone native XML",
+                comparison.standalone_native_xml_sha256.as_str(),
+            ),
+            (
+                "standalone fragment",
+                comparison.standalone_fragment_sha256.as_str(),
+            ),
+            ("metadata embedded", metadata.form_embedded_sha256.as_str()),
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                    "DCS conditional appearance {field} SHA-256 is invalid"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsConditionalAppearancePolicy {
+        DcsConditionalAppearancePolicy {
+            namespace_uri: self.policy.namespace,
+            core_namespace_uri: self.policy.core_namespace,
+            ui_namespace_uri: self.policy.ui_namespace,
+            web_color_namespace_uri: self.policy.web_color_namespace,
+            xml_schema_namespace_uri: self.policy.xml_schema_namespace,
+            conditional_appearance_qname: self.policy.conditional_appearance_qname,
+            storage_conditional_appearance_qname: self.policy.storage_conditional_appearance_qname,
+            item_qname: self.policy.item_qname,
+            selection_qname: self.policy.selection_qname,
+            field_qname: self.policy.field_qname,
+            filter_qname: self.policy.filter_qname,
+            appearance_qname: self.policy.appearance_qname,
+            core_item_qname: self.policy.core_item_qname,
+            parameter_qname: self.policy.parameter_qname,
+            value_qname: self.policy.value_qname,
+            view_mode_qname: self.policy.view_mode_qname,
+            user_setting_id_qname: self.policy.user_setting_id_qname,
+            parameter_value_type_qname: self.policy.parameter_value_type_qname,
+            color_type_qname: self.policy.color_type_qname,
+            max_emitted_items: self.policy.max_emitted_items,
+            supported_view_modes: self.policy.supported_view_modes,
+            metadata_only_user_setting_id: self.policy.metadata_only_user_setting_id,
+            storage_property_name: self.policy.storage_property_name,
+            storage_record_type_uuid: self.policy.storage_record_type_uuid,
         }
     }
 }
@@ -7396,6 +7903,21 @@ pub fn bundled_dcs_filter_policy() -> Result<DcsFilterPolicy, SchemaError> {
         .clone()
 }
 
+/// Returns the immutable platform-authenticated standalone/Form
+/// conditional-appearance policy.
+pub fn bundled_dcs_conditional_appearance_policy()
+-> Result<DcsConditionalAppearancePolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsConditionalAppearancePolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsConditionalAppearanceEvidenceCorpus::parse(
+                BUNDLED_DCS_CONDITIONAL_APPEARANCE_EVIDENCE_JSON,
+            )
+            .map(DcsConditionalAppearanceEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsListSettingsTailPolicy, SchemaError>> = OnceLock::new();
     POLICY
@@ -8708,9 +9230,9 @@ mod tests {
         let corpus = bundled_canonical_coverage().unwrap();
         assert_eq!(corpus.source.release, "2025.2.3+30");
         assert_eq!(corpus.summary.entries, 4_966);
-        assert_eq!(corpus.summary.typed, 20);
+        assert_eq!(corpus.summary.typed, 27);
         assert_eq!(corpus.summary.opaque_lossless, 0);
-        assert_eq!(corpus.summary.unsupported, 4_946);
+        assert_eq!(corpus.summary.unsupported, 4_939);
         assert_eq!(corpus.summary.platform_only, 0);
 
         let family_count = |family: &str| {
@@ -8742,7 +9264,7 @@ mod tests {
                 .iter()
                 .map(|item| item.features)
                 .sum::<usize>(),
-            4_946
+            4_939
         );
         assert!(
             corpus
@@ -8762,6 +9284,32 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             [
+                ("DataCompositionConditionalAppearance", "items", "items"),
+                (
+                    "DataCompositionConditionalAppearance",
+                    "userSettingID",
+                    "user_setting_id"
+                ),
+                (
+                    "DataCompositionConditionalAppearance",
+                    "viewMode",
+                    "view_mode"
+                ),
+                (
+                    "DataCompositionConditionalAppearanceItem",
+                    "appearance",
+                    "appearance"
+                ),
+                (
+                    "DataCompositionConditionalAppearanceItem",
+                    "filter",
+                    "filter"
+                ),
+                (
+                    "DataCompositionConditionalAppearanceItem",
+                    "selection",
+                    "selected_field"
+                ),
                 ("DataCompositionFilter", "items", "items"),
                 ("DataCompositionFilter", "userSettingID", "user_setting_id"),
                 ("DataCompositionFilter", "viewMode", "view_mode"),
@@ -8780,6 +9328,11 @@ mod tests {
                 ("DataCompositionOrderItem", "use", "use_value"),
                 ("DataCompositionSelectedField", "field", "field"),
                 ("DataCompositionSelectedFields", "items", "items"),
+                (
+                    "DataCompositionSettings",
+                    "conditionalAppearance",
+                    "conditional_appearance"
+                ),
                 ("DataCompositionSettings", "filter", "filter"),
                 (
                     "DataCompositionSettings",
@@ -9244,6 +9797,10 @@ mod tests {
             policy.metadata_only_user_setting_id(),
             "88619765-ccb3-46c6-ac52-38e9c992ebd4"
         );
+        assert_eq!(
+            policy.storage_record_type_uuid(),
+            "11743ff3-2db3-4cfc-9404-90ed8209437f"
+        );
         assert!(policy.follows_selection_and_precedes_structure_items());
         assert!(policy.propertyless_empty_order_is_unsupported());
         assert!(policy.metadata_only_order_requires_view_mode_and_user_setting_id());
@@ -9306,6 +9863,50 @@ mod tests {
             DcsFilterEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("item child order drifted")
+        ));
+    }
+
+    #[test]
+    fn bundled_platform_dcs_conditional_appearance_policy_binds_dual_form_protocol() {
+        let policy = bundled_dcs_conditional_appearance_policy().unwrap();
+        assert_eq!(
+            policy.conditional_appearance_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}conditionalAppearance"
+        );
+        assert_eq!(
+            policy.storage_conditional_appearance_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}ConditionalAppearance"
+        );
+        assert_eq!(
+            policy.parameter_value_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}SettingsParameterValue"
+        );
+        assert_eq!(
+            policy.color_type_qname(),
+            "{http://v8.1c.ru/8.1/data/ui}Color"
+        );
+        assert_eq!(policy.max_emitted_items(), 1);
+        assert_eq!(policy.supported_view_modes(), &["Normal"]);
+        assert_eq!(policy.storage_property_name(), "Appearance");
+        assert_eq!(
+            policy.storage_record_type_uuid(),
+            "93de27ad-a2d8-4b10-a82b-483c9b0648fe"
+        );
+        assert!(policy.follows_filter_and_order_and_precedes_structure_items());
+        assert!(policy.metadata_only_storage_property_is_absent());
+        assert!(policy.empty_nested_filter_is_unsupported());
+
+        let mut drift = serde_json::from_str::<serde_json::Value>(
+            BUNDLED_DCS_CONDITIONAL_APPEARANCE_EVIDENCE_JSON,
+        )
+        .unwrap();
+        drift["policy"]["storagePropertyName"] = serde_json::json!("ConditionalAppearance");
+        assert!(matches!(
+            DcsConditionalAppearanceEvidenceCorpus::parse(
+                &serde_json::to_string(&drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("storage property drifted")
         ));
     }
 

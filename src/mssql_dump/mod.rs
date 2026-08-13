@@ -25,9 +25,9 @@ use ibcmd_xml::{
     order_produced_type_values, render_cct_characteristics_xml,
     render_metadata_characteristics_xml,
 };
+use quick_xml::NsReader;
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
-use quick_xml::{NsReader, Reader};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;

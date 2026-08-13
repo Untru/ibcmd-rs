@@ -63,8 +63,9 @@ function Get-TrackedFiles {
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $git.Source
-    $startInfo.WorkingDirectory = [System.IO.Path]::GetFullPath($Root)
-    $startInfo.Arguments = '-c core.quotePath=false ls-files -z'
+    $safeRoot = [System.IO.Path]::GetFullPath($Root)
+    $startInfo.WorkingDirectory = $safeRoot
+    $startInfo.Arguments = "-c safe.directory=`"$safeRoot`" -c core.quotePath=false ls-files -z"
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
