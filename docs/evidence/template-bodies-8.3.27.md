@@ -1,7 +1,7 @@
 # Template bodies on 8.3.27
 
 Status: bounded evidence for the standalone compiler profile
-`platform-8.3.27.1989`, with an additional DCS-only two-round attestation on
+`platform-8.3.27.1989`, with additional DCS-only two-round attestations on
 `8.3.27.2214` / XML `2.20`.
 
 The native layouts were recovered from the independently retained inflated
@@ -47,26 +47,31 @@ to XML. Unknown headers and roots are hard errors.
 
 ## DataCompositionSchema / DCS
 
-An observed DCS schema plaintext starts with a 24-byte little-endian header:
+An observed DCS schema plaintext starts with a variable-size little-endian
+header of `8 + 8 * (settings_count + 1)` bytes:
 
 1. `u32` marker `0`;
-2. `u32` layout version `1`;
-3. `u64` byte length of the first XML document;
-4. `u64` byte length of the second XML document.
+2. `u32` count of external `Settings` documents;
+3. `settings_count + 1` `u64` byte lengths, first for the primary
+   `SchemaFile`, followed by one length for every external `Settings`
+   document.
 
-Three UTF-8-BOM XML documents follow: the main `SchemaFile`, one `Settings`
-document and a trailing `SchemaFile`. The third document occupies the
-remaining bytes. The compiler extracts the single source `settingsVariant`
-settings block into document two, including non-empty filter/settings content;
-the existing exporter inserts it back into the same variant. Header lengths,
-BOMs, roots, namespaces, XML balance, depth and node counts are validated
-before a body is accepted.
+The primary `SchemaFile` and positional external `Settings` documents follow,
+then a terminal `SchemaFile` occupies the remaining bytes. A body with one
+external settings document therefore has a 24-byte header and three XML
+documents; the evidenced two-variant body has a 32-byte header and four XML
+documents. The current reverse compiler extracts the single source
+`settingsVariant` settings block into document two, including non-empty
+filter/settings content; the existing exporter inserts it back into the same
+variant. Header lengths, BOMs, roots, namespaces, XML balance, depth and node
+counts are validated before a body is accepted.
 
-The evidenced layout has one settings variant. Missing/multiple variants and
-inline `AreaTemplate` values that require the separately indexed native area
-document remain explicit blockers. Historical direct-XML DCS rows remain
-readable only through the named compatibility decoder; the profile-selected
-writer and strict decoder accept only the three-document layout.
+The reverse compiler's evidenced emission cohort has one settings variant.
+Missing or multiple variants and inline `AreaTemplate` values that require the
+separately indexed native area document remain explicit compiler blockers.
+Historical direct-XML DCS rows remain readable only through the named
+compatibility decoder; the profile-selected writer remains limited to the
+single-variant cohort.
 
 The diagnostic fixture under
 `tests/fixtures/native-evidence/8.3.27.2214/dcs-core` independently confirms
@@ -88,6 +93,19 @@ byte-for-byte. The compiler body is intentionally not byte-identical to the
 lexical placement; the platform canonicalizes both to the same source XML.
 Therefore byte-identical reverse storage spelling is not a correctness gate
 for this slice.
+
+The additional diagnostic fixture under
+`tests/fixtures/native-evidence/8.3.27.2214/dcs-multi-variant-envelope`
+confirms the physical envelope for two direct root `settingsVariant` values.
+Its second header field is `2`, its header is 32 bytes, its stored document
+lengths are `3467`, `1142`, and `826`, and the 263-byte terminal `SchemaFile`
+occupies the remainder. Two external `Settings` documents bind positionally
+to the two source variants. Selected XML, packed body, and unpacked body are
+byte-identical across two fresh platform rounds, and the retained CF drives
+the normal offline `cf export` and raw-row verifier paths. This proves the
+envelope and delegation shape only; it does not claim a multi-variant reverse
+compiler, a full typed schema model, alternate bindings, or cross-profile
+replay.
 
 ## Retained evidence
 

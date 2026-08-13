@@ -37,7 +37,14 @@
 
 **Статус:** `[ ]`
 
-- [ ] DCS schema/settings/template покрыты общим layer.
+- [x] Physical schema/template envelope подтверждён для одного и двух прямых
+  root `settingsVariant`: `u32@4` — число внешних `Settings`, далее идут
+  `settings_count + 1` длин `u64`, а внешние documents связываются с variants
+  позиционно и возвращаются inline в source XML.
+- [ ] Общий canonical schema/template API и multi-variant reverse compiler не
+  реализованы.
+- [ ] `defaultSettings`, nested variants, `AreaTemplate` и остальные schema
+  branches остаются вне доказанного общего layer.
 
 ## Задача 5: Проверить evidence
 

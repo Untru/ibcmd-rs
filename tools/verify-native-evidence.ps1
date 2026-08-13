@@ -122,6 +122,20 @@ function Get-Utf8XmlFragmentBytes {
     return ,[Text.Encoding]::UTF8.GetBytes($fragment)
 }
 
+function Get-XmlDocumentFromBytes {
+    param([byte[]]$Bytes)
+
+    $document = New-Object Xml.XmlDocument
+    $document.PreserveWhitespace = $true
+    $stream = New-Object IO.MemoryStream(,($Bytes))
+    try {
+        $document.Load($stream)
+    } finally {
+        $stream.Dispose()
+    }
+    return ,$document
+}
+
 function Assert-RawNativeEvidenceFixture {
     param(
         [string]$RelativePath,
@@ -594,6 +608,234 @@ Assert-Equal $dcsDataParametersCoverageEntries[0].diagnosticCode $dcsDataParamet
 Assert-Equal $dcsDataParametersCoverageEntries[0].opaquePlacement $null 'DCS dataParameters canonical opaque-placement absence'
 Assert-Equal $dcsCanonicalCoverage.summary.opaqueLossless 0 'canonical coverage opaque-lossless count'
 
+$dcsMultiVariantRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-multi-variant-envelope'
+$dcsMultiVariantManifestPath = Join-Path $dcsMultiVariantRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsMultiVariantManifestPath -PathType Leaf)) {
+    throw "DCS multi-variant evidence manifest is missing: $dcsMultiVariantManifestPath"
+}
+$dcsMultiVariantManifest = Get-Content -LiteralPath $dcsMultiVariantManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsMultiVariantManifest.schema_version 1 'DCS multi-variant manifest schema version'
+Assert-Equal $dcsMultiVariantManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-multi-variant-envelope' 'DCS multi-variant fixture ID'
+Assert-Equal $dcsMultiVariantManifest.issue 283 'DCS multi-variant issue'
+Assert-Equal $dcsMultiVariantManifest.contract 'dcs-schema-template-envelope-positional-settings-v1' 'DCS multi-variant contract'
+Assert-Equal $dcsMultiVariantManifest.evidence.platform_line '8.3.27' 'DCS multi-variant platform line'
+Assert-Equal $dcsMultiVariantManifest.evidence.platform_version '8.3.27.2214' 'DCS multi-variant exact platform provenance'
+Assert-Equal $dcsMultiVariantManifest.evidence.source_version '2.20' 'DCS multi-variant source version'
+Assert-Equal $dcsMultiVariantManifest.evidence.database_locale 'ru_RU' 'DCS multi-variant database locale'
+Assert-Equal $dcsMultiVariantManifest.rounds.selected_native_tree_inventory_equal_between_rounds $true 'DCS multi-variant selected-tree inventory equality'
+Assert-Equal (@($dcsMultiVariantManifest.rounds.selected_native_tree_inventory).Count) 5 'DCS multi-variant selected-tree inventory cardinality'
+Assert-Equal $dcsMultiVariantManifest.rounds.template_equal_between_rounds $true 'DCS multi-variant Template round equality'
+Assert-Equal $dcsMultiVariantManifest.rounds.packed_equal_between_rounds $true 'DCS multi-variant packed round equality'
+Assert-Equal $dcsMultiVariantManifest.rounds.unpacked_equal_between_rounds $true 'DCS multi-variant unpacked round equality'
+Assert-Equal $dcsMultiVariantManifest.rounds.round_1_template_sha256 $dcsMultiVariantManifest.rounds.round_2_template_sha256 'DCS multi-variant Template round hashes'
+Assert-Equal $dcsMultiVariantManifest.rounds.round_1_packed_sha256 $dcsMultiVariantManifest.rounds.round_2_packed_sha256 'DCS multi-variant packed round hashes'
+Assert-Equal $dcsMultiVariantManifest.rounds.round_1_unpacked_sha256 $dcsMultiVariantManifest.rounds.round_2_unpacked_sha256 'DCS multi-variant unpacked round hashes'
+Assert-FileEvidence $dcsMultiVariantManifest.seed $dcsMultiVariantRoot
+
+$dcsMultiVariantCfBytes = Get-Base64EvidenceBytes $dcsMultiVariantManifest.configuration_cf $dcsMultiVariantRoot
+$dcsMultiVariantTemplateBytes = Get-Base64EvidenceBytes $dcsMultiVariantManifest.template.native_xml $dcsMultiVariantRoot
+$dcsMultiVariantPackedBytes = Get-Base64EvidenceBytes $dcsMultiVariantManifest.template.raw_entry.packed $dcsMultiVariantRoot
+$dcsMultiVariantUnpackedBytes = Get-Base64EvidenceBytes $dcsMultiVariantManifest.template.raw_entry.unpacked $dcsMultiVariantRoot
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantCfBytes) $dcsMultiVariantManifest.rounds.round_2_cf.sha256 'DCS multi-variant retained round-2 CF SHA-256'
+Assert-Equal $dcsMultiVariantCfBytes.Length ([long]$dcsMultiVariantManifest.rounds.round_2_cf.size) 'DCS multi-variant retained round-2 CF size'
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantTemplateBytes) $dcsMultiVariantManifest.rounds.round_1_template_sha256 'DCS multi-variant retained Template/round-1 binding'
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantTemplateBytes) $dcsMultiVariantManifest.rounds.round_2_template_sha256 'DCS multi-variant retained Template/round-2 binding'
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantPackedBytes) $dcsMultiVariantManifest.rounds.round_1_packed_sha256 'DCS multi-variant retained packed/round-1 binding'
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantPackedBytes) $dcsMultiVariantManifest.rounds.round_2_packed_sha256 'DCS multi-variant retained packed/round-2 binding'
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantUnpackedBytes) $dcsMultiVariantManifest.rounds.round_1_unpacked_sha256 'DCS multi-variant retained unpacked/round-1 binding'
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantUnpackedBytes) $dcsMultiVariantManifest.rounds.round_2_unpacked_sha256 'DCS multi-variant retained unpacked/round-2 binding'
+
+$dcsMultiVariantCompressedStream = New-Object IO.MemoryStream(,($dcsMultiVariantPackedBytes))
+$dcsMultiVariantDecompressedStream = New-Object IO.MemoryStream
+$dcsMultiVariantDeflateStream = New-Object IO.Compression.DeflateStream(
+    $dcsMultiVariantCompressedStream,
+    [IO.Compression.CompressionMode]::Decompress
+)
+try {
+    $dcsMultiVariantDeflateStream.CopyTo($dcsMultiVariantDecompressedStream)
+} finally {
+    $dcsMultiVariantDeflateStream.Dispose()
+    $dcsMultiVariantCompressedStream.Dispose()
+}
+try {
+    $dcsMultiVariantDecompressed = $dcsMultiVariantDecompressedStream.ToArray()
+} finally {
+    $dcsMultiVariantDecompressedStream.Dispose()
+}
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantDecompressed) (Get-Sha256Hex $dcsMultiVariantUnpackedBytes) 'DCS multi-variant packed/unpacked pair'
+Assert-Equal ([BitConverter]::ToUInt32($dcsMultiVariantUnpackedBytes, 0)) ([uint32]$dcsMultiVariantManifest.proven_shape.header_marker) 'DCS multi-variant header marker'
+$dcsMultiVariantSettingsCount = [int][BitConverter]::ToUInt32($dcsMultiVariantUnpackedBytes, 4)
+Assert-Equal $dcsMultiVariantSettingsCount ([int]$dcsMultiVariantManifest.proven_shape.settings_document_count) 'DCS multi-variant external Settings document count'
+$dcsMultiVariantHeaderBytes = 8 + (8 * ($dcsMultiVariantSettingsCount + 1))
+Assert-Equal $dcsMultiVariantHeaderBytes ([int]$dcsMultiVariantManifest.proven_shape.header_bytes) 'DCS multi-variant header size'
+Assert-Equal $dcsMultiVariantManifest.proven_shape.body_layout 'dcs-schema-positional-settings-v1' 'DCS multi-variant body layout'
+Assert-Equal (@($dcsMultiVariantManifest.proven_shape.stored_document_lengths).Count) ($dcsMultiVariantSettingsCount + 1) 'DCS multi-variant stored-length count'
+Assert-Equal (@($dcsMultiVariantManifest.proven_shape.document_roles).Count) ($dcsMultiVariantSettingsCount + 2) 'DCS multi-variant document-role count'
+Assert-Equal (@($dcsMultiVariantManifest.proven_shape.document_sha256).Count) ($dcsMultiVariantSettingsCount + 2) 'DCS multi-variant document-hash count'
+Assert-Equal (@($dcsMultiVariantManifest.proven_shape.variant_names).Count) $dcsMultiVariantSettingsCount 'DCS multi-variant variant-name count'
+Assert-Equal (@($dcsMultiVariantManifest.proven_shape.document_roles) -join ',') 'PrimarySchemaFile,Settings[0],Settings[1],TerminalSchemaFile' 'DCS multi-variant document roles'
+
+$dcsMultiVariantDocuments = @()
+$dcsMultiVariantDocumentOffset = $dcsMultiVariantHeaderBytes
+for ($index = 0; $index -lt $dcsMultiVariantSettingsCount + 1; $index++) {
+    $storedLength = [int]$dcsMultiVariantManifest.proven_shape.stored_document_lengths[$index]
+    Assert-Equal ([BitConverter]::ToUInt64($dcsMultiVariantUnpackedBytes, 8 + (8 * $index))) ([uint64]$storedLength) "DCS multi-variant stored document $($index + 1) length"
+    $dcsMultiVariantDocuments += ,(Get-ByteSlice $dcsMultiVariantUnpackedBytes $dcsMultiVariantDocumentOffset $storedLength)
+    $dcsMultiVariantDocumentOffset += $storedLength
+}
+$dcsMultiVariantTrailingLength = $dcsMultiVariantUnpackedBytes.Length - $dcsMultiVariantDocumentOffset
+Assert-Equal $dcsMultiVariantTrailingLength ([int]$dcsMultiVariantManifest.proven_shape.trailing_document_length) 'DCS multi-variant trailing document length'
+$dcsMultiVariantDocuments += ,(Get-ByteSlice $dcsMultiVariantUnpackedBytes $dcsMultiVariantDocumentOffset $dcsMultiVariantTrailingLength)
+Assert-Equal ($dcsMultiVariantHeaderBytes + ($dcsMultiVariantManifest.proven_shape.stored_document_lengths | Measure-Object -Sum).Sum + $dcsMultiVariantTrailingLength) $dcsMultiVariantUnpackedBytes.Length 'DCS multi-variant complete framing'
+for ($index = 0; $index -lt $dcsMultiVariantDocuments.Count; $index++) {
+    Assert-Equal (Get-Sha256Hex $dcsMultiVariantDocuments[$index]) $dcsMultiVariantManifest.proven_shape.document_sha256[$index] "DCS multi-variant document $($index + 1) SHA-256"
+    Assert-Equal ([BitConverter]::ToString($dcsMultiVariantDocuments[$index], 0, 3)) 'EF-BB-BF' "DCS multi-variant document $($index + 1) UTF-8 BOM"
+}
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantDocuments[1]) (Get-Sha256Hex (Get-ByteSlice $dcsDecompressed (24 + $dcsBaseFirstLength) $dcsBaseSecondLength)) 'DCS multi-variant/base primary Settings equality'
+Assert-Equal (Get-Sha256Hex $dcsMultiVariantDocuments[3]) (Get-Sha256Hex (Get-ByteSlice $dcsDecompressed $dcsBaseThirdOffset $dcsBaseThirdLength)) 'DCS multi-variant/base terminal SchemaFile equality'
+
+$dcsMultiVariantStorageDocument = Get-XmlDocumentFromBytes $dcsMultiVariantDocuments[0]
+$dcsMultiVariantStorageNamespaces = New-Object Xml.XmlNamespaceManager($dcsMultiVariantStorageDocument.NameTable)
+$dcsMultiVariantStorageNamespaces.AddNamespace('dcs', 'http://v8.1c.ru/8.1/data-composition-system/schema')
+$dcsMultiVariantStorageNamespaces.AddNamespace('dcsset', 'http://v8.1c.ru/8.1/data-composition-system/settings')
+$dcsMultiVariantStorageVariants = @($dcsMultiVariantStorageDocument.SelectNodes('/SchemaFile/dcs:dataCompositionSchema/dcs:settingsVariant', $dcsMultiVariantStorageNamespaces))
+Assert-Equal $dcsMultiVariantStorageVariants.Count $dcsMultiVariantSettingsCount 'DCS multi-variant storage shell count'
+
+$dcsMultiVariantTemplateDocument = Get-XmlDocumentFromBytes $dcsMultiVariantTemplateBytes
+$dcsMultiVariantTemplateNamespaces = New-Object Xml.XmlNamespaceManager($dcsMultiVariantTemplateDocument.NameTable)
+$dcsMultiVariantTemplateNamespaces.AddNamespace('dcs', 'http://v8.1c.ru/8.1/data-composition-system/schema')
+$dcsMultiVariantTemplateNamespaces.AddNamespace('dcsset', 'http://v8.1c.ru/8.1/data-composition-system/settings')
+$dcsMultiVariantTemplateNamespaces.AddNamespace('v8', 'http://v8.1c.ru/8.1/data/core')
+$dcsMultiVariantTemplateNamespaces.AddNamespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
+$dcsMultiVariantSourceVariants = @($dcsMultiVariantTemplateDocument.SelectNodes('/dcs:DataCompositionSchema/dcs:settingsVariant', $dcsMultiVariantTemplateNamespaces))
+Assert-Equal $dcsMultiVariantSourceVariants.Count $dcsMultiVariantSettingsCount 'DCS multi-variant source variant count'
+Assert-Equal $dcsMultiVariantManifest.proven_shape.source_variant_order_matches_external_settings_order $true 'DCS multi-variant positional-binding claim'
+
+for ($index = 0; $index -lt $dcsMultiVariantSettingsCount; $index++) {
+    $expectedName = $dcsMultiVariantManifest.proven_shape.variant_names[$index]
+    $storageVariant = $dcsMultiVariantStorageVariants[$index]
+    $storageChildren = @($storageVariant.ChildNodes | Where-Object { $_.NodeType -eq [Xml.XmlNodeType]::Element })
+    Assert-Equal (($storageChildren | ForEach-Object { $_.LocalName }) -join ',') 'name,presentation' "DCS multi-variant storage shell $($index + 1) child order"
+    Assert-Equal $storageChildren[0].NamespaceURI 'http://v8.1c.ru/8.1/data-composition-system/settings' "DCS multi-variant storage name $($index + 1) namespace"
+    Assert-Equal $storageChildren[0].InnerText $expectedName "DCS multi-variant storage name $($index + 1)"
+
+    $sourceVariant = $dcsMultiVariantSourceVariants[$index]
+    $sourceChildren = @($sourceVariant.ChildNodes | Where-Object { $_.NodeType -eq [Xml.XmlNodeType]::Element })
+    Assert-Equal (($sourceChildren | ForEach-Object { $_.LocalName }) -join ',') 'name,presentation,settings' "DCS multi-variant source variant $($index + 1) child order"
+    Assert-Equal $sourceChildren[0].NamespaceURI 'http://v8.1c.ru/8.1/data-composition-system/settings' "DCS multi-variant source name $($index + 1) namespace"
+    Assert-Equal $sourceChildren[0].InnerText $expectedName "DCS multi-variant source name $($index + 1)"
+    Assert-Equal $sourceChildren[2].NamespaceURI 'http://v8.1c.ru/8.1/data-composition-system/settings' "DCS multi-variant source settings $($index + 1) namespace"
+    $presentationLanguage = $sourceChildren[1].SelectSingleNode('v8:item/v8:lang', $dcsMultiVariantTemplateNamespaces)
+    $presentationContent = $sourceChildren[1].SelectSingleNode('v8:item/v8:content', $dcsMultiVariantTemplateNamespaces)
+    Assert-Equal $presentationLanguage.InnerText 'ru' "DCS multi-variant presentation $($index + 1) language"
+    Assert-Equal $presentationContent.InnerText $expectedName "DCS multi-variant presentation $($index + 1) content"
+
+    $externalSettingsDocument = Get-XmlDocumentFromBytes $dcsMultiVariantDocuments[$index + 1]
+    Assert-Equal $externalSettingsDocument.DocumentElement.LocalName 'Settings' "DCS multi-variant external Settings $($index + 1) root"
+    Assert-Equal $externalSettingsDocument.DocumentElement.NamespaceURI 'http://v8.1c.ru/8.1/data-composition-system/settings' "DCS multi-variant external Settings $($index + 1) namespace"
+    $externalSettingsChildren = @($externalSettingsDocument.DocumentElement.ChildNodes | Where-Object { $_.NodeType -eq [Xml.XmlNodeType]::Element })
+    $sourceSettingsChildren = @($sourceChildren[2].ChildNodes | Where-Object { $_.NodeType -eq [Xml.XmlNodeType]::Element })
+    Assert-Equal (($sourceSettingsChildren | ForEach-Object { $_.LocalName }) -join ',') (($externalSettingsChildren | ForEach-Object { $_.LocalName }) -join ',') "DCS multi-variant Settings $($index + 1) child-order binding"
+
+    $externalNamespaces = New-Object Xml.XmlNamespaceManager($externalSettingsDocument.NameTable)
+    $externalNamespaces.AddNamespace('dcsset', 'http://v8.1c.ru/8.1/data-composition-system/settings')
+    $externalNamespaces.AddNamespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
+    $sourceSelectionItems = @($sourceChildren[2].SelectNodes('dcsset:selection/dcsset:item', $dcsMultiVariantTemplateNamespaces))
+    $externalSelectionItems = @($externalSettingsDocument.DocumentElement.SelectNodes('dcsset:selection/dcsset:item', $externalNamespaces))
+    Assert-Equal $sourceSelectionItems.Count $externalSelectionItems.Count "DCS multi-variant Settings $($index + 1) selection cardinality"
+    for ($itemIndex = 0; $itemIndex -lt $sourceSelectionItems.Count; $itemIndex++) {
+        $sourceType = $sourceSelectionItems[$itemIndex].GetAttribute('type', 'http://www.w3.org/2001/XMLSchema-instance').Split(':')[-1]
+        $externalType = $externalSelectionItems[$itemIndex].GetAttribute('type', 'http://www.w3.org/2001/XMLSchema-instance').Split(':')[-1]
+        Assert-Equal $sourceType $externalType "DCS multi-variant Settings $($index + 1) selection item $($itemIndex + 1) type"
+        $sourceField = $sourceSelectionItems[$itemIndex].SelectSingleNode('dcsset:field', $dcsMultiVariantTemplateNamespaces)
+        $externalField = $externalSelectionItems[$itemIndex].SelectSingleNode('dcsset:field', $externalNamespaces)
+        $sourceFieldText = if ($null -eq $sourceField) { '' } else { $sourceField.InnerText }
+        $externalFieldText = if ($null -eq $externalField) { '' } else { $externalField.InnerText }
+        Assert-Equal $sourceFieldText $externalFieldText "DCS multi-variant Settings $($index + 1) selection item $($itemIndex + 1) field"
+    }
+}
+
+$dcsMultiVariantTerminalDocument = Get-XmlDocumentFromBytes $dcsMultiVariantDocuments[3]
+$dcsMultiVariantTerminalNamespaces = New-Object Xml.XmlNamespaceManager($dcsMultiVariantTerminalDocument.NameTable)
+$dcsMultiVariantTerminalNamespaces.AddNamespace('dcs', 'http://v8.1c.ru/8.1/data-composition-system/schema')
+$dcsMultiVariantTerminalSchema = $dcsMultiVariantTerminalDocument.SelectSingleNode('/SchemaFile/dcs:dataCompositionSchema', $dcsMultiVariantTerminalNamespaces)
+if ($null -eq $dcsMultiVariantTerminalSchema) {
+    throw 'DCS multi-variant terminal SchemaFile has no dataCompositionSchema child.'
+}
+Assert-Equal (@($dcsMultiVariantTerminalSchema.ChildNodes | Where-Object { $_.NodeType -eq [Xml.XmlNodeType]::Element }).Count) 0 'DCS multi-variant terminal SchemaFile emptiness'
+Assert-Equal $dcsMultiVariantManifest.proven_shape.terminal_schema_file_is_empty $true 'DCS multi-variant terminal SchemaFile claim'
+
+$dcsMultiVariantPolicyPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-schema-template-envelope-evidence.json'
+if (-not (Test-Path -LiteralPath $dcsMultiVariantPolicyPath -PathType Leaf)) {
+    throw "DCS schema-template envelope policy evidence is missing: $dcsMultiVariantPolicyPath"
+}
+$dcsMultiVariantPolicy = Get-Content -LiteralPath $dcsMultiVariantPolicyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsMultiVariantPolicy.schemaVersion 1 'DCS schema-template envelope policy schema version'
+Assert-Equal $dcsMultiVariantPolicy.contract '8.3.27-xml-2.20-dcs-schema-template-envelope-v1' 'DCS schema-template envelope policy contract'
+Assert-Equal $dcsMultiVariantPolicy.source.product '1C:Enterprise Platform' 'DCS schema-template envelope policy product'
+Assert-Equal $dcsMultiVariantPolicy.source.release '8.3.27 / XML 2.20' 'DCS schema-template envelope policy release'
+Assert-Equal $dcsMultiVariantPolicy.fixture.fixtureId $dcsMultiVariantManifest.fixture_id 'DCS schema-template envelope fixture binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.platformLine $dcsMultiVariantManifest.evidence.platform_line 'DCS schema-template envelope platform-line binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.platformVersion $dcsMultiVariantManifest.evidence.platform_version 'DCS schema-template envelope platform-version binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.sourceVersion $dcsMultiVariantManifest.evidence.source_version 'DCS schema-template envelope source-version binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.ibcmdSha256 $dcsMultiVariantManifest.evidence.ibcmd_sha256 'DCS schema-template envelope ibcmd binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.extractorIdentity $dcsMultiVariantManifest.evidence.extractor.identity 'DCS schema-template envelope extractor identity binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.extractorPath $dcsMultiVariantManifest.evidence.extractor.path 'DCS schema-template envelope extractor path binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.extractorSha256 $dcsMultiVariantManifest.evidence.extractor.sha256 'DCS schema-template envelope extractor binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.seedSha256 $dcsMultiVariantManifest.seed.sha256 'DCS schema-template envelope seed binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round1CfSha256 $dcsMultiVariantManifest.rounds.round_1_cf.sha256 'DCS schema-template envelope round-1 CF binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round2CfSha256 $dcsMultiVariantManifest.rounds.round_2_cf.sha256 'DCS schema-template envelope round-2 CF binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round1TemplateSha256 $dcsMultiVariantManifest.rounds.round_1_template_sha256 'DCS schema-template envelope round-1 Template binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round2TemplateSha256 $dcsMultiVariantManifest.rounds.round_2_template_sha256 'DCS schema-template envelope round-2 Template binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round1PackedSha256 $dcsMultiVariantManifest.rounds.round_1_packed_sha256 'DCS schema-template envelope round-1 packed binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round2PackedSha256 $dcsMultiVariantManifest.rounds.round_2_packed_sha256 'DCS schema-template envelope round-2 packed binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round1UnpackedSha256 $dcsMultiVariantManifest.rounds.round_1_unpacked_sha256 'DCS schema-template envelope round-1 unpacked binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.round2UnpackedSha256 $dcsMultiVariantManifest.rounds.round_2_unpacked_sha256 'DCS schema-template envelope round-2 unpacked binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.configurationEncodedSha256 $dcsMultiVariantManifest.configuration_cf.encoded_sha256 'DCS schema-template envelope encoded CF binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.configurationDecodedSha256 $dcsMultiVariantManifest.configuration_cf.decoded_sha256 'DCS schema-template envelope decoded CF binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.rawPackedEncodedSha256 $dcsMultiVariantManifest.template.raw_entry.packed.encoded_sha256 'DCS schema-template envelope encoded packed binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.rawPackedDecodedSha256 $dcsMultiVariantManifest.template.raw_entry.packed.decoded_sha256 'DCS schema-template envelope decoded packed binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.rawUnpackedEncodedSha256 $dcsMultiVariantManifest.template.raw_entry.unpacked.encoded_sha256 'DCS schema-template envelope encoded unpacked binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.rawUnpackedDecodedSha256 $dcsMultiVariantManifest.template.raw_entry.unpacked.decoded_sha256 'DCS schema-template envelope decoded unpacked binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.nativeXmlEncodedSha256 $dcsMultiVariantManifest.template.native_xml.encoded_sha256 'DCS schema-template envelope encoded native XML binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.nativeXmlDecodedSha256 $dcsMultiVariantManifest.template.native_xml.decoded_sha256 'DCS schema-template envelope decoded native XML binding'
+Assert-Equal $dcsMultiVariantPolicy.fixture.roundTrips 2 'DCS schema-template envelope round-trip count'
+Assert-Equal $dcsMultiVariantPolicy.policy.schemaNamespace 'http://v8.1c.ru/8.1/data-composition-system/schema' 'DCS schema-template envelope schema namespace'
+Assert-Equal $dcsMultiVariantPolicy.policy.settingsNamespace 'http://v8.1c.ru/8.1/data-composition-system/settings' 'DCS schema-template envelope settings namespace'
+Assert-Equal $dcsMultiVariantPolicy.policy.sourceRootQname '{http://v8.1c.ru/8.1/data-composition-system/schema}DataCompositionSchema' 'DCS schema-template envelope source root QName'
+Assert-Equal $dcsMultiVariantPolicy.policy.sourceSettingsVariantQname '{http://v8.1c.ru/8.1/data-composition-system/schema}settingsVariant' 'DCS schema-template envelope source variant QName'
+Assert-Equal $dcsMultiVariantPolicy.policy.sourceInlineSettingsQname '{http://v8.1c.ru/8.1/data-composition-system/settings}settings' 'DCS schema-template envelope source settings QName'
+Assert-Equal $dcsMultiVariantPolicy.policy.nativeSchemaFileQname '{}SchemaFile' 'DCS schema-template envelope native SchemaFile QName'
+Assert-Equal $dcsMultiVariantPolicy.policy.nativeSchemaQname '{http://v8.1c.ru/8.1/data-composition-system/schema}dataCompositionSchema' 'DCS schema-template envelope native schema QName'
+Assert-Equal $dcsMultiVariantPolicy.policy.nativeSettingsQname '{http://v8.1c.ru/8.1/data-composition-system/settings}Settings' 'DCS schema-template envelope native Settings QName'
+Assert-Equal $dcsMultiVariantPolicy.policy.headerMarker $dcsMultiVariantManifest.proven_shape.header_marker 'DCS schema-template envelope header marker binding'
+Assert-Equal $dcsMultiVariantPolicy.policy.settingsCountOffsetBytes 4 'DCS schema-template envelope settings-count offset'
+Assert-Equal $dcsMultiVariantPolicy.policy.settingsCountEncoding 'little-endian-u32' 'DCS schema-template envelope settings-count encoding'
+Assert-Equal $dcsMultiVariantPolicy.policy.storedLengthsOffsetBytes 8 'DCS schema-template envelope stored-length offset'
+Assert-Equal $dcsMultiVariantPolicy.policy.storedLengthWidthBytes 8 'DCS schema-template envelope stored-length width'
+Assert-Equal $dcsMultiVariantPolicy.policy.storedLengthEncoding 'little-endian-u64' 'DCS schema-template envelope stored-length encoding'
+Assert-Equal $dcsMultiVariantPolicy.policy.minimumAttestedSettingsVariants 1 'DCS schema-template envelope minimum attested variant count'
+Assert-Equal $dcsMultiVariantPolicy.policy.maximumAttestedSettingsVariants 2 'DCS schema-template envelope maximum attested variant count'
+Assert-Equal (@($dcsMultiVariantPolicy.policy.storedLengthRoles) -join ',') 'PrimarySchemaFile,Settings[*]' 'DCS schema-template envelope stored-length roles'
+Assert-Equal (@($dcsMultiVariantPolicy.policy.documentRoles) -join ',') 'PrimarySchemaFile,Settings[*],TerminalSchemaFile' 'DCS schema-template envelope document roles'
+Assert-Equal $dcsMultiVariantPolicy.policy.storedLengthsCover 'primary-schema-file-and-each-settings-document' 'DCS schema-template envelope stored-length coverage'
+Assert-Equal $dcsMultiVariantPolicy.policy.terminalDocumentFraming 'remaining-bytes' 'DCS schema-template envelope terminal framing'
+Assert-Equal $dcsMultiVariantPolicy.policy.documentEncoding 'utf-8-with-bom' 'DCS schema-template envelope document encoding'
+Assert-Equal $dcsMultiVariantPolicy.policy.settingsBinding 'direct-settings-variant-order' 'DCS schema-template envelope settings binding'
+Assert-Equal $dcsMultiVariantPolicy.policy.sourceVariantPlacement 'direct-root-child' 'DCS schema-template envelope source placement'
+Assert-Equal $dcsMultiVariantPolicy.policy.terminalSchemaFileShape 'empty-data-composition-schema' 'DCS schema-template envelope terminal shape'
+Assert-Equal $dcsMultiVariantPolicy.twoVariantShape.settingsDocumentCount $dcsMultiVariantManifest.proven_shape.settings_document_count 'DCS schema-template envelope two-variant settings count'
+Assert-Equal $dcsMultiVariantPolicy.twoVariantShape.headerBytes $dcsMultiVariantManifest.proven_shape.header_bytes 'DCS schema-template envelope two-variant header size'
+Assert-Equal (@($dcsMultiVariantPolicy.twoVariantShape.storedDocumentLengths) -join ',') (@($dcsMultiVariantManifest.proven_shape.stored_document_lengths) -join ',') 'DCS schema-template envelope two-variant stored lengths'
+Assert-Equal $dcsMultiVariantPolicy.twoVariantShape.trailingDocumentLength $dcsMultiVariantManifest.proven_shape.trailing_document_length 'DCS schema-template envelope two-variant trailing length'
+Assert-Equal (@($dcsMultiVariantPolicy.twoVariantShape.documentRoles) -join ',') (@($dcsMultiVariantManifest.proven_shape.document_roles) -join ',') 'DCS schema-template envelope two-variant roles'
+Assert-Equal (@($dcsMultiVariantPolicy.twoVariantShape.documentSha256) -join ',') (@($dcsMultiVariantManifest.proven_shape.document_sha256) -join ',') 'DCS schema-template envelope two-variant document hashes'
+Assert-Equal (@($dcsMultiVariantPolicy.twoVariantShape.variantNames) -join ',') (@($dcsMultiVariantManifest.proven_shape.variant_names) -join ',') 'DCS schema-template envelope two-variant names'
+Assert-Equal $dcsMultiVariantPolicy.twoVariantShape.sourceVariantOrderMatchesExternalSettingsOrder $dcsMultiVariantManifest.proven_shape.source_variant_order_matches_external_settings_order 'DCS schema-template envelope positional-binding claim'
+Assert-Equal $dcsMultiVariantPolicy.twoVariantShape.terminalSchemaFileIsEmpty $dcsMultiVariantManifest.proven_shape.terminal_schema_file_is_empty 'DCS schema-template envelope terminal-shape claim'
+Assert-Equal (@($dcsMultiVariantPolicy.provenClaims) -join "`n") (@($dcsMultiVariantManifest.proven_claims) -join "`n") 'DCS schema-template envelope proven-claims binding'
+Assert-Equal (@($dcsMultiVariantPolicy.nonClaims) -join "`n") (@($dcsMultiVariantManifest.non_claims) -join "`n") 'DCS schema-template envelope non-claims binding'
+
 $dcsOrderRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-order'
 $dcsOrderManifestPath = Join-Path $dcsOrderRoot 'manifest.json'
 if (-not (Test-Path -LiteralPath $dcsOrderManifestPath -PathType Leaf)) {
@@ -859,6 +1101,8 @@ $dcsCfPath = Join-Path $temporaryRoot 'dcs-configuration.cf'
 $dcsOutputRoot = Join-Path $temporaryRoot 'dcs-export'
 $dcsDataParametersCfPath = Join-Path $temporaryRoot 'dcs-data-parameters-configuration.cf'
 $dcsDataParametersOutputRoot = Join-Path $temporaryRoot 'dcs-data-parameters-export'
+$dcsMultiVariantCfPath = Join-Path $temporaryRoot 'dcs-multi-variant-configuration.cf'
+$dcsMultiVariantOutputRoot = Join-Path $temporaryRoot 'dcs-multi-variant-export'
 $dcsFilterComparisonCfPath = Join-Path $temporaryRoot 'dcs-filter-comparison.cf'
 $dcsFilterComparisonOutputRoot = Join-Path $temporaryRoot 'dcs-filter-comparison-export'
 $dcsFilterMetadataCfPath = Join-Path $temporaryRoot 'dcs-filter-metadata-only.cf'
@@ -948,6 +1192,29 @@ try {
         throw "DCS dataParameters raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
     }
     Assert-Equal ((($verifyDcsDataParameters -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS dataParameters raw row'
+
+    [IO.File]::WriteAllBytes($dcsMultiVariantCfPath, $dcsMultiVariantCfBytes)
+    $dcsMultiVariantStdout = & $BinaryPath cf export --source-version 2.20 $dcsMultiVariantCfPath $dcsMultiVariantOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+        throw "DCS multi-variant CF export failed with exit code $LASTEXITCODE. $stderr"
+    }
+    $dcsMultiVariantReport = ($dcsMultiVariantStdout -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $dcsMultiVariantReport.ok $true 'DCS multi-variant CF export status'
+    Assert-Equal $dcsMultiVariantReport.export.storage.failed 0 'DCS multi-variant failed storage entries'
+    $dcsMultiVariantCandidatePath = Join-Path $dcsMultiVariantOutputRoot ($dcsMultiVariantManifest.template.native_xml.export_path.Replace('/', [IO.Path]::DirectorySeparatorChar))
+    if (-not (Test-Path -LiteralPath $dcsMultiVariantCandidatePath -PathType Leaf)) {
+        throw "Exported DCS multi-variant Template is missing: $($dcsMultiVariantManifest.template.native_xml.export_path)"
+    }
+    Assert-Equal (Get-Item -LiteralPath $dcsMultiVariantCandidatePath).Length ([long]$dcsMultiVariantManifest.template.native_xml.decoded_size) 'DCS multi-variant exported Template size'
+    Assert-Equal (Get-FileSha256Hex $dcsMultiVariantCandidatePath) $dcsMultiVariantManifest.template.native_xml.decoded_sha256 'DCS multi-variant exported Template SHA-256'
+    $verifyDcsMultiVariant = & $BinaryPath cf verify $dcsMultiVariantCfPath --compression raw-deflate `
+        --element $dcsMultiVariantManifest.template.body_key `
+        --expect-sha256 "$($dcsMultiVariantManifest.template.body_key)=$($dcsMultiVariantManifest.template.raw_entry.unpacked.decoded_sha256)" 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS multi-variant raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($verifyDcsMultiVariant -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS multi-variant raw row'
 
     [IO.File]::WriteAllBytes($dcsFilterComparisonCfPath, $dcsFilterComparisonCfBytes)
     $dcsFilterComparisonStdout = & $BinaryPath cf export --source-version 2.20 $dcsFilterComparisonCfPath $dcsFilterComparisonOutputRoot 2> $stderrPath
@@ -1099,4 +1366,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter/conditionalAppearance/dataParameters source-owned/Form Attributes wrapper + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter/conditionalAppearance/dataParameters source-owned/multi-variant envelope/Form Attributes wrapper + ChartOfCharacteristicTypes + register and plan generated types.'

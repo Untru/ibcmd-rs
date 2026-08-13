@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::ops::Range;
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::EffectiveProfile;
@@ -74,6 +75,7 @@ pub struct DcsBody {
     layout: DcsBodyLayout,
     plain: Vec<u8>,
     document_count: usize,
+    document_ranges: Vec<Range<usize>>,
 }
 
 impl DcsBody {
@@ -91,6 +93,17 @@ impl DcsBody {
 
     pub const fn document_count(&self) -> usize {
         self.document_count
+    }
+
+    /// Exact XML document slices resolved by the binary framing decoder.
+    ///
+    /// Consumers must use these ranges instead of scanning the plaintext for
+    /// XML declarations: declarations may legally occur in comments or text.
+    pub fn documents(&self) -> Vec<&[u8]> {
+        self.document_ranges
+            .iter()
+            .map(|range| &self.plain[range.clone()])
+            .collect()
     }
 }
 
@@ -146,6 +159,7 @@ pub(crate) fn decode_compatible_dcs(
                 Ok(DcsBody {
                     kind,
                     layout: DcsBodyLayout::DirectXml,
+                    document_ranges: vec![0..plain.len()],
                     plain,
                     document_count: 1,
                 })
@@ -164,11 +178,13 @@ fn decode_strict(kind: DcsTemplateKind, blob: &[u8]) -> Result<DcsBody, DcsCodec
 
 fn decode_appearance_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
     validate_xml_document(&plain, "AppearanceTemplate", Some(APPEARANCE_NS))?;
+    let document_len = plain.len();
     Ok(DcsBody {
         kind: DcsTemplateKind::Appearance,
         layout: DcsBodyLayout::DirectXml,
         plain,
         document_count: 1,
+        document_ranges: vec![0..document_len],
     })
 }
 
@@ -287,6 +303,7 @@ fn decode_schema_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
         .checked_add(2)
         .ok_or(DcsCodecError::LimitExceeded("DCS document count"))?;
     let mut document_start = header_len;
+    let mut document_ranges = Vec::with_capacity(document_count);
     for index in 0..stored_length_count {
         let length_offset = index
             .checked_mul(std::mem::size_of::<u64>())
@@ -318,6 +335,7 @@ fn decode_schema_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
         } else {
             validate_xml_document(document, "Settings", Some(SETTINGS_NS))?;
         }
+        document_ranges.push(document_start..document_end);
         document_start = document_end;
     }
     if document_start >= plain.len() {
@@ -338,11 +356,13 @@ fn decode_schema_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
             "DCS SchemaFile document has no dataCompositionSchema root".to_string(),
         ));
     }
+    document_ranges.push(document_start..plain.len());
     Ok(DcsBody {
         kind: DcsTemplateKind::Schema,
         layout: DcsBodyLayout::NativeThreeDocument,
         plain,
         document_count,
+        document_ranges,
     })
 }
 
@@ -760,6 +780,49 @@ mod tests {
         assert_eq!(decoded.layout(), DcsBodyLayout::NativeThreeDocument);
         assert_eq!(decoded.document_count(), 4);
         assert_eq!(decoded.plaintext(), plain);
+    }
+
+    #[test]
+    fn platform_multi_variant_body_exposes_framed_document_roles_without_rescanning() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-multi-variant-envelope/raw/",
+            "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate.b64"
+        )));
+
+        let decoded = decode_compatible_dcs(DcsTemplateKind::Schema, &packed)
+            .expect("platform-attested multi-variant body must decode");
+        let documents = decoded.documents();
+
+        assert_eq!(decoded.document_count(), 4);
+        assert_eq!(documents.len(), 4);
+        assert_eq!(
+            documents
+                .iter()
+                .map(|document| document.len())
+                .collect::<Vec<_>>(),
+            vec![3467, 1142, 826, 263]
+        );
+        assert!(
+            documents[0]
+                .windows(b"<SchemaFile".len())
+                .any(|window| window == b"<SchemaFile")
+        );
+        assert!(
+            documents[1]
+                .windows(b"<Settings".len())
+                .any(|window| window == b"<Settings")
+        );
+        assert!(
+            documents[2]
+                .windows(b"<Settings".len())
+                .any(|window| window == b"<Settings")
+        );
+        assert!(
+            documents[3]
+                .windows(b"<SchemaFile".len())
+                .any(|window| window == b"<SchemaFile")
+        );
     }
 
     #[test]

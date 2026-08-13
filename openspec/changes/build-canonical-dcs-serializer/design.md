@@ -15,6 +15,13 @@ Form ListSettings.
 Внедрение начинается с ListSettings и минимального settings document, затем
 расширяется на schema/template только при наличии verified evidence.
 
+Физический schema/template envelope отдельно подтверждён на одном и двух
+прямых root `settingsVariant`: поле `u32` по смещению 4 является числом внешних
+`Settings`, за ним следуют `settings_count + 1` длин `u64`, а settings documents
+делегируются вариантам позиционно. Это evidence для framing и source-owned
+placement, но не готовая поддержка нескольких вариантов reverse compiler и не
+полная typed schema model.
+
 Source-owned delegation не является вторым сериализатором: неизменённое
 поддерево остаётся у одного доказанного physical owner. Его мутация, перенос в
 другой wrapper или cross-profile emission запрещены до отдельного writer rule.

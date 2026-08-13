@@ -2830,6 +2830,28 @@ mod tests {
     }
 
     #[test]
+    fn platform_multi_variant_envelope_materializes_settings_positionally_byte_exact() {
+        let raw = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-multi-variant-envelope/raw/",
+            "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-multi-variant-envelope/native-template.xml.b64"
+        )));
+
+        let actual = normalize_data_composition_schema_template_xml(
+            &raw,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("platform-attested multi-variant DCS body must be exportable");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn unknown_settings_children_never_reach_the_generic_normalizer() {
         for unknown in [
             "<outputParameters/>",

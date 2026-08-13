@@ -2645,6 +2645,10 @@ pub const BUNDLED_DCS_FORM_ATTRIBUTES_CONDITIONAL_APPEARANCE_EVIDENCE_JSON: &str
 /// subtrees that remain source-owned by the XML codec.
 pub const BUNDLED_DCS_SETTINGS_SOURCE_OWNED_EVIDENCE_JSON: &str =
     include_str!("../data/platform-8.3.27-xml-2.20-dcs-settings-source-owned-evidence.json");
+/// Embedded platform-authenticated policy for the bounded
+/// `SchemaFile + Settings[*] + SchemaFile` DCS template envelope.
+pub const BUNDLED_DCS_SCHEMA_TEMPLATE_ENVELOPE_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-schema-template-envelope-evidence.json");
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3321,6 +3325,172 @@ pub struct DcsSettingsSourceOwnedPolicy {
     selected_item_auto_type_qname: String,
     max_data_parameter_items: usize,
     max_structure_items: usize,
+}
+
+/// Semantic document roles in the bounded native DCS schema-template body.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DcsSchemaTemplateEnvelopeDocumentRole {
+    PrimarySchemaFile,
+    Settings,
+    TerminalSchemaFile,
+}
+
+/// Exact, platform-authenticated framing and positional-binding policy for a
+/// DCS schema-template body. The schema shell remains source-owned; this type
+/// owns only the evidenced envelope and delegation to standalone Settings.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsSchemaTemplateEnvelopePolicy {
+    schema_namespace_uri: String,
+    settings_namespace_uri: String,
+    source_root_qname: String,
+    source_settings_variant_qname: String,
+    source_inline_settings_qname: String,
+    native_schema_file_qname: String,
+    native_schema_qname: String,
+    native_settings_qname: String,
+    header_marker: u32,
+    settings_count_offset_bytes: usize,
+    stored_lengths_offset_bytes: usize,
+    stored_length_width_bytes: usize,
+    minimum_attested_settings_variants: usize,
+    maximum_attested_settings_variants: usize,
+}
+
+impl DcsSchemaTemplateEnvelopePolicy {
+    pub fn schema_namespace_uri(&self) -> &str {
+        &self.schema_namespace_uri
+    }
+
+    pub fn settings_namespace_uri(&self) -> &str {
+        &self.settings_namespace_uri
+    }
+
+    pub fn source_root_qname(&self) -> &str {
+        &self.source_root_qname
+    }
+
+    pub fn source_settings_variant_qname(&self) -> &str {
+        &self.source_settings_variant_qname
+    }
+
+    pub fn source_inline_settings_qname(&self) -> &str {
+        &self.source_inline_settings_qname
+    }
+
+    pub fn native_schema_file_qname(&self) -> &str {
+        &self.native_schema_file_qname
+    }
+
+    pub fn native_schema_qname(&self) -> &str {
+        &self.native_schema_qname
+    }
+
+    pub fn native_settings_qname(&self) -> &str {
+        &self.native_settings_qname
+    }
+
+    pub const fn header_marker(&self) -> u32 {
+        self.header_marker
+    }
+
+    pub const fn settings_count_offset_bytes(&self) -> usize {
+        self.settings_count_offset_bytes
+    }
+
+    pub const fn stored_lengths_offset_bytes(&self) -> usize {
+        self.stored_lengths_offset_bytes
+    }
+
+    pub const fn stored_length_width_bytes(&self) -> usize {
+        self.stored_length_width_bytes
+    }
+
+    pub const fn min_attested_settings_variants(&self) -> usize {
+        self.minimum_attested_settings_variants
+    }
+
+    pub const fn max_attested_settings_variants(&self) -> usize {
+        self.maximum_attested_settings_variants
+    }
+
+    pub const fn settings_count_is_little_endian_u32(&self) -> bool {
+        true
+    }
+
+    pub const fn stored_lengths_are_little_endian_u64(&self) -> bool {
+        true
+    }
+
+    pub const fn stored_lengths_cover_primary_and_each_settings(&self) -> bool {
+        true
+    }
+
+    pub const fn terminal_schema_file_consumes_remaining_bytes(&self) -> bool {
+        true
+    }
+
+    pub const fn documents_require_utf8_bom(&self) -> bool {
+        true
+    }
+
+    pub const fn settings_bind_positionally(&self) -> bool {
+        true
+    }
+
+    pub const fn source_variants_must_be_direct_root_children(&self) -> bool {
+        true
+    }
+
+    pub const fn terminal_schema_file_is_empty(&self) -> bool {
+        true
+    }
+
+    pub const fn supports_attested_settings_variant_count(&self, count: usize) -> bool {
+        count >= self.minimum_attested_settings_variants
+            && count <= self.maximum_attested_settings_variants
+    }
+
+    /// Returns the role for a physical document index, where every Settings
+    /// document repeats between the primary and terminal SchemaFile.
+    pub const fn document_role(
+        &self,
+        settings_count: usize,
+        document_index: usize,
+    ) -> Option<DcsSchemaTemplateEnvelopeDocumentRole> {
+        if !self.supports_attested_settings_variant_count(settings_count) {
+            return None;
+        }
+        if document_index == 0 {
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::PrimarySchemaFile)
+        } else if document_index <= settings_count {
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::Settings)
+        } else if document_index == settings_count + 1 {
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile)
+        } else {
+            None
+        }
+    }
+
+    /// The header stores one length for the primary SchemaFile and one for
+    /// every Settings document; it deliberately omits the terminal length.
+    pub const fn stored_length_count(&self, settings_count: usize) -> Option<usize> {
+        if self.supports_attested_settings_variant_count(settings_count) {
+            settings_count.checked_add(1)
+        } else {
+            None
+        }
+    }
+
+    pub const fn header_size_bytes(&self, settings_count: usize) -> Option<usize> {
+        let length_count = match self.stored_length_count(settings_count) {
+            Some(count) => count,
+            None => return None,
+        };
+        match length_count.checked_mul(self.stored_length_width_bytes) {
+            Some(length_bytes) => self.stored_lengths_offset_bytes.checked_add(length_bytes),
+            None => None,
+        }
+    }
 }
 
 impl DcsSettingsSourceOwnedPolicy {
@@ -4002,6 +4172,101 @@ struct DcsSettingsSourceOwnedEvidencePolicy {
     max_structure_items: usize,
     unknown_children: String,
     generic_opaque_emission: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSchemaTemplateEnvelopeEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    source: DcsSchemaTemplateEnvelopeEvidenceSource,
+    fixture: DcsSchemaTemplateEnvelopeEvidenceFixture,
+    policy: DcsSchemaTemplateEnvelopeEvidencePolicy,
+    two_variant_shape: DcsSchemaTemplateEnvelopeTwoVariantShape,
+    proven_claims: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSchemaTemplateEnvelopeEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSchemaTemplateEnvelopeEvidenceFixture {
+    fixture_id: String,
+    platform_line: String,
+    platform_version: String,
+    source_version: String,
+    ibcmd_sha256: String,
+    extractor_identity: String,
+    extractor_path: String,
+    extractor_sha256: String,
+    seed_sha256: String,
+    round1_cf_sha256: String,
+    round2_cf_sha256: String,
+    round1_template_sha256: String,
+    round2_template_sha256: String,
+    round1_packed_sha256: String,
+    round2_packed_sha256: String,
+    round1_unpacked_sha256: String,
+    round2_unpacked_sha256: String,
+    configuration_encoded_sha256: String,
+    configuration_decoded_sha256: String,
+    raw_packed_encoded_sha256: String,
+    raw_packed_decoded_sha256: String,
+    raw_unpacked_encoded_sha256: String,
+    raw_unpacked_decoded_sha256: String,
+    native_xml_encoded_sha256: String,
+    native_xml_decoded_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSchemaTemplateEnvelopeEvidencePolicy {
+    schema_namespace: String,
+    settings_namespace: String,
+    source_root_qname: String,
+    source_settings_variant_qname: String,
+    source_inline_settings_qname: String,
+    native_schema_file_qname: String,
+    native_schema_qname: String,
+    native_settings_qname: String,
+    header_marker: u32,
+    settings_count_offset_bytes: usize,
+    settings_count_encoding: String,
+    stored_lengths_offset_bytes: usize,
+    stored_length_width_bytes: usize,
+    stored_length_encoding: String,
+    stored_length_roles: Vec<String>,
+    document_roles: Vec<String>,
+    minimum_attested_settings_variants: usize,
+    maximum_attested_settings_variants: usize,
+    stored_lengths_cover: String,
+    terminal_document_framing: String,
+    document_encoding: String,
+    settings_binding: String,
+    source_variant_placement: String,
+    terminal_schema_file_shape: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSchemaTemplateEnvelopeTwoVariantShape {
+    settings_document_count: usize,
+    header_bytes: usize,
+    stored_document_lengths: Vec<u64>,
+    trailing_document_length: u64,
+    document_roles: Vec<String>,
+    document_sha256: Vec<String>,
+    variant_names: Vec<String>,
+    source_variant_order_matches_external_settings_order: bool,
+    terminal_schema_file_is_empty: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -4786,6 +5051,213 @@ impl DcsSettingsSourceOwnedEvidenceCorpus {
             selected_item_auto_type_qname: self.policy.selected_item_auto_type_qname,
             max_data_parameter_items: self.policy.max_data_parameter_items,
             max_structure_items: self.policy.max_structure_items,
+        }
+    }
+}
+
+impl DcsSchemaTemplateEnvelopeEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 16 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "DCS schema-template envelope evidence exceeds 16384 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        let expected_source = DcsSchemaTemplateEnvelopeEvidenceSource {
+            product: "1C:Enterprise Platform".to_owned(),
+            release: "8.3.27 / XML 2.20".to_owned(),
+            derivation: "bounded schema-template envelope policy synthesized from the immutable one-variant dcs-core baseline and exact two-variant platform evidence on 8.3.27.2214; no other patch build is inferred".to_owned(),
+        };
+        let expected_fixture = DcsSchemaTemplateEnvelopeEvidenceFixture {
+            fixture_id: "8.3.27.2214-xml-2.20-dcs-multi-variant-envelope".to_owned(),
+            platform_line: "8.3.27".to_owned(),
+            platform_version: "8.3.27.2214".to_owned(),
+            source_version: "2.20".to_owned(),
+            ibcmd_sha256: "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+                .to_owned(),
+            extractor_identity: "ibcmd-rs cf extract retained lab build".to_owned(),
+            extractor_path: "C:/work/ibcmd-rs-selected-extract-2/target/debug/ibcmd-rs.exe"
+                .to_owned(),
+            extractor_sha256: "5ec1be63f1a850c2673ee8ce7b896fb98934f363d86fff4e9d581b57cfcab722"
+                .to_owned(),
+            seed_sha256: "d32bf50308d0af77243ac4a5b2b9d090ef9c32ddf5575e9583b679dbb785e881"
+                .to_owned(),
+            round1_cf_sha256: "de78c33dc31f49112f26bc9e880a079f3a8a122275ddea7e00f64a348c0807e6"
+                .to_owned(),
+            round2_cf_sha256: "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4"
+                .to_owned(),
+            round1_template_sha256:
+                "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680".to_owned(),
+            round2_template_sha256:
+                "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680".to_owned(),
+            round1_packed_sha256:
+                "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c".to_owned(),
+            round2_packed_sha256:
+                "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c".to_owned(),
+            round1_unpacked_sha256:
+                "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87".to_owned(),
+            round2_unpacked_sha256:
+                "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87".to_owned(),
+            configuration_encoded_sha256:
+                "bc5a9f7823b061fdf285de591dec24696016c751afa0f88751967fb4604040e0".to_owned(),
+            configuration_decoded_sha256:
+                "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4".to_owned(),
+            raw_packed_encoded_sha256:
+                "e618568d9979a1b8bd380488dd378029a6f157b691f023971d87208befa0eaff".to_owned(),
+            raw_packed_decoded_sha256:
+                "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c".to_owned(),
+            raw_unpacked_encoded_sha256:
+                "3ca3e131a41d7cac6cf3e4d0d60acc8acc4e5e1922cd394e44eef0a4687f0914".to_owned(),
+            raw_unpacked_decoded_sha256:
+                "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87".to_owned(),
+            native_xml_encoded_sha256:
+                "94a3fe8358475179213c176c49f3615a16d195166174927961b21334cdb62020".to_owned(),
+            native_xml_decoded_sha256:
+                "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680".to_owned(),
+            round_trips: 2,
+        };
+        const SCHEMA_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/schema";
+        const SETTINGS_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+        let expected_policy = DcsSchemaTemplateEnvelopeEvidencePolicy {
+            schema_namespace: SCHEMA_NS.to_owned(),
+            settings_namespace: SETTINGS_NS.to_owned(),
+            source_root_qname: format!("{{{SCHEMA_NS}}}DataCompositionSchema"),
+            source_settings_variant_qname: format!("{{{SCHEMA_NS}}}settingsVariant"),
+            source_inline_settings_qname: format!("{{{SETTINGS_NS}}}settings"),
+            native_schema_file_qname: "{}SchemaFile".to_owned(),
+            native_schema_qname: format!("{{{SCHEMA_NS}}}dataCompositionSchema"),
+            native_settings_qname: format!("{{{SETTINGS_NS}}}Settings"),
+            header_marker: 0,
+            settings_count_offset_bytes: 4,
+            settings_count_encoding: "little-endian-u32".to_owned(),
+            stored_lengths_offset_bytes: 8,
+            stored_length_width_bytes: 8,
+            stored_length_encoding: "little-endian-u64".to_owned(),
+            stored_length_roles: vec!["PrimarySchemaFile".to_owned(), "Settings[*]".to_owned()],
+            document_roles: vec![
+                "PrimarySchemaFile".to_owned(),
+                "Settings[*]".to_owned(),
+                "TerminalSchemaFile".to_owned(),
+            ],
+            minimum_attested_settings_variants: 1,
+            maximum_attested_settings_variants: 2,
+            stored_lengths_cover: "primary-schema-file-and-each-settings-document".to_owned(),
+            terminal_document_framing: "remaining-bytes".to_owned(),
+            document_encoding: "utf-8-with-bom".to_owned(),
+            settings_binding: "direct-settings-variant-order".to_owned(),
+            source_variant_placement: "direct-root-child".to_owned(),
+            terminal_schema_file_shape: "empty-data-composition-schema".to_owned(),
+        };
+        let expected_two_variant_shape = DcsSchemaTemplateEnvelopeTwoVariantShape {
+            settings_document_count: 2,
+            header_bytes: 32,
+            stored_document_lengths: vec![3467, 1142, 826],
+            trailing_document_length: 263,
+            document_roles: vec![
+                "PrimarySchemaFile".to_owned(),
+                "Settings[0]".to_owned(),
+                "Settings[1]".to_owned(),
+                "TerminalSchemaFile".to_owned(),
+            ],
+            document_sha256: vec![
+                "d66470fbd49885773af38530faf2bc584136ca5ccfd4830c4520464fc40e06fa".to_owned(),
+                "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4".to_owned(),
+                "5447b605113dad84ded4b1ad6159428e5d769daea542db87d181041c5c04cae1".to_owned(),
+                "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81".to_owned(),
+            ],
+            variant_names: vec!["Main".to_owned(), "Secondary Secondary".to_owned()],
+            source_variant_order_matches_external_settings_order: true,
+            terminal_schema_file_is_empty: true,
+        };
+        let expected_proven_claims = [
+            "The second little-endian u32 header field is the external Settings document count: it changed from one to two when a second direct settingsVariant was added.",
+            "For the attested one- and two-variant shapes, the header stores settings_count + 1 little-endian u64 lengths for PrimarySchemaFile and every external Settings document; TerminalSchemaFile consumes the remaining bytes.",
+            "Two external standalone Settings documents bind positionally to two direct root settingsVariant nodes and materialize as direct inline settings children in source order.",
+            "The native selected tree and packed and unpacked template body are byte-identical across two fresh ru_RU platform rounds.",
+            "The terminal empty SchemaFile is unchanged from dcs-core while the primary SchemaFile expands only for the second metadata shell.",
+        ];
+        let expected_non_claims = [
+            "No absent Settings document, duplicate variant name, empty name or presentation, more than two variants, defaultSettings, nested variant, or alternate positional binding is inferred.",
+            "No AreaTemplate, additional nonterminal SchemaFile, appearance side-table, appIndex, current-configuration reference, or reverse AreaTemplate writer is inferred.",
+            "No full typed DataCompositionSchema semantic model is inferred; the schema shell remains source-owned and only the evidenced envelope and Settings delegation are owned.",
+            "No arbitrary unknown schema child, cross-profile replay, EDT source roundtrip, or whole-profile 8.3.27 alias is inferred.",
+            "Unica generated only the hypothesis seed; pinned 8.3.27.2214 output is the authority.",
+        ];
+
+        let checks = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-schema-template-envelope-v1",
+            ),
+            ("contract source", self.source == expected_source),
+            (
+                "fixture provenance or artifact hashes",
+                self.fixture == expected_fixture,
+            ),
+            (
+                "framing and positional policy",
+                self.policy == expected_policy,
+            ),
+            (
+                "two-variant physical shape",
+                self.two_variant_shape == expected_two_variant_shape,
+            ),
+            (
+                "proven claims",
+                self.proven_claims == expected_proven_claims,
+            ),
+            ("non-claims", self.non_claims == expected_non_claims),
+        ];
+        if let Some((field, _)) = checks.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS schema-template envelope {field} drifted"
+            )));
+        }
+
+        let stored_length_count = self
+            .two_variant_shape
+            .settings_document_count
+            .checked_add(1);
+        let computed_header_bytes = stored_length_count
+            .and_then(|count| count.checked_mul(self.policy.stored_length_width_bytes))
+            .and_then(|bytes| self.policy.stored_lengths_offset_bytes.checked_add(bytes));
+        if stored_length_count != Some(self.two_variant_shape.stored_document_lengths.len())
+            || computed_header_bytes != Some(self.two_variant_shape.header_bytes)
+            || self.two_variant_shape.document_roles.len()
+                != self.two_variant_shape.settings_document_count + 2
+            || self.two_variant_shape.document_sha256.len()
+                != self.two_variant_shape.document_roles.len()
+        {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "DCS schema-template envelope internal count/role relation drifted".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsSchemaTemplateEnvelopePolicy {
+        DcsSchemaTemplateEnvelopePolicy {
+            schema_namespace_uri: self.policy.schema_namespace,
+            settings_namespace_uri: self.policy.settings_namespace,
+            source_root_qname: self.policy.source_root_qname,
+            source_settings_variant_qname: self.policy.source_settings_variant_qname,
+            source_inline_settings_qname: self.policy.source_inline_settings_qname,
+            native_schema_file_qname: self.policy.native_schema_file_qname,
+            native_schema_qname: self.policy.native_schema_qname,
+            native_settings_qname: self.policy.native_settings_qname,
+            header_marker: self.policy.header_marker,
+            settings_count_offset_bytes: self.policy.settings_count_offset_bytes,
+            stored_lengths_offset_bytes: self.policy.stored_lengths_offset_bytes,
+            stored_length_width_bytes: self.policy.stored_length_width_bytes,
+            minimum_attested_settings_variants: self.policy.minimum_attested_settings_variants,
+            maximum_attested_settings_variants: self.policy.maximum_attested_settings_variants,
         }
     }
 }
@@ -8844,6 +9316,21 @@ pub fn bundled_dcs_settings_source_owned_policy()
         .clone()
 }
 
+/// Returns the immutable platform-authenticated DCS schema-template envelope
+/// policy, bounded to the one- and two-variant cohorts actually attested.
+pub fn bundled_dcs_schema_template_envelope_policy()
+-> Result<DcsSchemaTemplateEnvelopePolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsSchemaTemplateEnvelopePolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsSchemaTemplateEnvelopeEvidenceCorpus::parse(
+                BUNDLED_DCS_SCHEMA_TEMPLATE_ENVELOPE_EVIDENCE_JSON,
+            )
+            .map(DcsSchemaTemplateEnvelopeEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 /// Returns the immutable platform-authenticated standalone/Form order policy.
 pub fn bundled_dcs_order_policy() -> Result<DcsOrderPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsOrderPolicy, SchemaError>> = OnceLock::new();
@@ -10829,6 +11316,116 @@ mod tests {
         extra_field["policy"]["opaqueFallback"] = serde_json::json!(true);
         assert!(matches!(
             DcsSettingsSourceOwnedEvidenceCorpus::parse(
+                &serde_json::to_string(&extra_field).unwrap()
+            ),
+            Err(SchemaError::InvalidJson(message)) if message.contains("unknown field")
+        ));
+    }
+
+    #[test]
+    fn bundled_platform_dcs_schema_template_envelope_policy_binds_positional_documents() {
+        let policy = bundled_dcs_schema_template_envelope_policy().unwrap();
+        assert_eq!(
+            policy.source_root_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/schema}DataCompositionSchema"
+        );
+        assert_eq!(
+            policy.source_settings_variant_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/schema}settingsVariant"
+        );
+        assert_eq!(
+            policy.source_inline_settings_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}settings"
+        );
+        assert_eq!(policy.native_schema_file_qname(), "{}SchemaFile");
+        assert_eq!(
+            policy.native_schema_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/schema}dataCompositionSchema"
+        );
+        assert_eq!(
+            policy.native_settings_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}Settings"
+        );
+        assert_eq!(policy.header_marker(), 0);
+        assert_eq!(policy.settings_count_offset_bytes(), 4);
+        assert_eq!(policy.stored_lengths_offset_bytes(), 8);
+        assert_eq!(policy.stored_length_width_bytes(), 8);
+        assert_eq!(policy.min_attested_settings_variants(), 1);
+        assert_eq!(policy.max_attested_settings_variants(), 2);
+        assert_eq!(policy.stored_length_count(1), Some(2));
+        assert_eq!(policy.stored_length_count(2), Some(3));
+        assert_eq!(policy.header_size_bytes(1), Some(24));
+        assert_eq!(policy.header_size_bytes(2), Some(32));
+        assert_eq!(
+            policy.document_role(2, 0),
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::PrimarySchemaFile)
+        );
+        assert_eq!(
+            policy.document_role(2, 1),
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::Settings)
+        );
+        assert_eq!(
+            policy.document_role(2, 2),
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::Settings)
+        );
+        assert_eq!(
+            policy.document_role(2, 3),
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile)
+        );
+        assert_eq!(policy.document_role(0, 0), None);
+        assert_eq!(policy.document_role(3, 0), None);
+        assert_eq!(policy.document_role(2, 4), None);
+        assert!(policy.settings_count_is_little_endian_u32());
+        assert!(policy.stored_lengths_are_little_endian_u64());
+        assert!(policy.stored_lengths_cover_primary_and_each_settings());
+        assert!(policy.terminal_schema_file_consumes_remaining_bytes());
+        assert!(policy.documents_require_utf8_bom());
+        assert!(policy.settings_bind_positionally());
+        assert!(policy.source_variants_must_be_direct_root_children());
+        assert!(policy.terminal_schema_file_is_empty());
+    }
+
+    #[test]
+    fn dcs_schema_template_envelope_evidence_fails_closed_on_hash_policy_and_nonclaim_drift() {
+        let raw = serde_json::from_str::<serde_json::Value>(
+            BUNDLED_DCS_SCHEMA_TEMPLATE_ENVELOPE_EVIDENCE_JSON,
+        )
+        .unwrap();
+
+        let mut hash_drift = raw.clone();
+        hash_drift["fixture"]["round2UnpackedSha256"] = serde_json::json!("0".repeat(64));
+        assert!(matches!(
+            DcsSchemaTemplateEnvelopeEvidenceCorpus::parse(
+                &serde_json::to_string(&hash_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("fixture provenance or artifact hashes drifted")
+        ));
+
+        let mut policy_drift = raw.clone();
+        policy_drift["policy"]["maximumAttestedSettingsVariants"] = serde_json::json!(3);
+        assert!(matches!(
+            DcsSchemaTemplateEnvelopeEvidenceCorpus::parse(
+                &serde_json::to_string(&policy_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("framing and positional policy drifted")
+        ));
+
+        let mut nonclaim_drift = raw.clone();
+        nonclaim_drift["nonClaims"][0] = serde_json::json!("More than two variants are supported.");
+        assert!(matches!(
+            DcsSchemaTemplateEnvelopeEvidenceCorpus::parse(
+                &serde_json::to_string(&nonclaim_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("non-claims drifted")
+        ));
+
+        let mut extra_field = raw;
+        extra_field["policy"]["guessMissingSettings"] = serde_json::json!(true);
+        assert!(matches!(
+            DcsSchemaTemplateEnvelopeEvidenceCorpus::parse(
                 &serde_json::to_string(&extra_field).unwrap()
             ),
             Err(SchemaError::InvalidJson(message)) if message.contains("unknown field")
