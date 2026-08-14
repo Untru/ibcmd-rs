@@ -2641,6 +2641,11 @@ pub const BUNDLED_DCS_CONDITIONAL_APPEARANCE_EVIDENCE_JSON: &str =
 pub const BUNDLED_DCS_FORM_ATTRIBUTES_CONDITIONAL_APPEARANCE_EVIDENCE_JSON: &str = include_str!(
     "../data/platform-8.3.27-xml-2.20-dcs-form-attributes-conditional-appearance-evidence.json"
 );
+/// Embedded platform-authenticated physical envelope policy for the Form
+/// DynamicList `ServerState` property-bag value
+/// (`UniversalListServerOnlyState`).
+pub const BUNDLED_DCS_FORM_SERVER_STATE_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-form-server-state-evidence.json");
 /// Embedded platform-authenticated policy for the exact standalone settings
 /// subtrees that remain source-owned by the XML codec.
 pub const BUNDLED_DCS_SETTINGS_SOURCE_OWNED_EVIDENCE_JSON: &str =
@@ -4824,6 +4829,81 @@ impl DcsFormAttributesConditionalAppearancePolicy {
     }
 }
 
+/// Physical envelope of the Form DynamicList `ServerState` property-bag
+/// value (`UniversalListServerOnlyState`). Only the one platform-proven
+/// shape -- an empty, self-closing wrapper -- is authenticated; no semantics
+/// are modeled for populated content (PRD WS5 DCS-FORM-SERVERSTATE-02).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsFormServerStatePolicy {
+    property_bag_key: String,
+    sibling_keys: Vec<String>,
+    chunk_magic: Vec<u8>,
+    chunk_short_length_tag: u8,
+    chunk_long_length_tag: u8,
+    chunk_terminator: Vec<u8>,
+    wrapper_local_name: String,
+    wrapper_default_namespace: String,
+    wrapper_xs_namespace: String,
+    wrapper_xsi_namespace: String,
+    wrapper_self_closing: bool,
+    empty_envelope_has_utf8_bom: bool,
+    empty_envelope_decoded_byte_len: usize,
+    empty_envelope_decoded_sha256: String,
+    native_form_xml_never_emits_server_state: bool,
+    explicit_list_settings_does_not_populate_envelope: bool,
+}
+
+impl DcsFormServerStatePolicy {
+    pub fn property_bag_key(&self) -> &str {
+        &self.property_bag_key
+    }
+    pub fn sibling_keys(&self) -> &[String] {
+        &self.sibling_keys
+    }
+    pub fn chunk_magic(&self) -> &[u8] {
+        &self.chunk_magic
+    }
+    pub const fn chunk_short_length_tag(&self) -> u8 {
+        self.chunk_short_length_tag
+    }
+    pub const fn chunk_long_length_tag(&self) -> u8 {
+        self.chunk_long_length_tag
+    }
+    pub fn chunk_terminator(&self) -> &[u8] {
+        &self.chunk_terminator
+    }
+    pub fn wrapper_local_name(&self) -> &str {
+        &self.wrapper_local_name
+    }
+    pub fn wrapper_default_namespace(&self) -> &str {
+        &self.wrapper_default_namespace
+    }
+    pub fn wrapper_xs_namespace(&self) -> &str {
+        &self.wrapper_xs_namespace
+    }
+    pub fn wrapper_xsi_namespace(&self) -> &str {
+        &self.wrapper_xsi_namespace
+    }
+    pub const fn wrapper_self_closing(&self) -> bool {
+        self.wrapper_self_closing
+    }
+    pub const fn empty_envelope_has_utf8_bom(&self) -> bool {
+        self.empty_envelope_has_utf8_bom
+    }
+    pub const fn empty_envelope_decoded_byte_len(&self) -> usize {
+        self.empty_envelope_decoded_byte_len
+    }
+    pub fn empty_envelope_decoded_sha256(&self) -> &str {
+        &self.empty_envelope_decoded_sha256
+    }
+    pub const fn native_form_xml_never_emits_server_state(&self) -> bool {
+        self.native_form_xml_never_emits_server_state
+    }
+    pub const fn explicit_list_settings_does_not_populate_envelope(&self) -> bool {
+        self.explicit_list_settings_does_not_populate_envelope
+    }
+}
+
 impl DcsOrderPolicy {
     pub fn namespace_uri(&self) -> &str {
         &self.namespace_uri
@@ -5859,6 +5939,62 @@ struct DcsFormAttributesConditionalAppearanceEvidencePolicy {
     container_metadata: String,
     absence_representation: String,
     max_emitted_items: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFormServerStateEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    body_contract: String,
+    source: DcsConditionalAppearanceContractSource,
+    sources: DcsFormServerStateEvidenceSources,
+    policy: DcsFormServerStateEvidencePolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFormServerStateEvidenceSources {
+    dynamic_list: DcsFormServerStateFixtureSource,
+    list_settings: DcsFormServerStateFixtureSource,
+    source_version: String,
+    platform_line: String,
+    ibcmd_sha256: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFormServerStateFixtureSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    form_body_unpacked_sha256: String,
+    form_native_xml_sha256: String,
+    server_state_decoded_sha256: String,
+    database_locale: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFormServerStateEvidencePolicy {
+    property_bag_key: String,
+    sibling_keys: Vec<String>,
+    chunk_magic: Vec<u8>,
+    chunk_short_length_tag: u8,
+    chunk_long_length_tag: u8,
+    chunk_terminator: Vec<u8>,
+    wrapper_local_name: String,
+    wrapper_default_namespace: String,
+    wrapper_xs_namespace: String,
+    wrapper_xsi_namespace: String,
+    wrapper_self_closing: bool,
+    empty_envelope_has_utf8_bom: bool,
+    empty_envelope_decoded_byte_len: usize,
+    empty_envelope_decoded_sha256: String,
+    native_form_xml_never_emits_server_state: bool,
+    explicit_list_settings_does_not_populate_envelope: bool,
 }
 
 impl DcsSelectionEvidenceCorpus {
@@ -7836,6 +7972,223 @@ impl DcsFormAttributesConditionalAppearanceEvidenceCorpus {
             storage_selection_type_indexes: self.policy.storage_selection_type_indexes,
             storage_filter_type_indexes: self.policy.storage_filter_type_indexes,
             max_emitted_items: self.policy.max_emitted_items,
+        }
+    }
+}
+
+impl DcsFormServerStateEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 16 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "Form ServerState evidence exceeds 16384 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        let dynamic_list = &self.sources.dynamic_list;
+        let list_settings = &self.sources.list_settings;
+        let policy = &self.policy;
+        let expected = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-form-server-state-v1",
+            ),
+            (
+                "body contract",
+                self.body_contract == "8.3.27-xml-2.20-dcs-settings-server-state-v1",
+            ),
+            (
+                "contract product",
+                self.source.product == "1C:Enterprise Platform",
+            ),
+            (
+                "contract release",
+                self.source.release == "8.3.27 / XML 2.20",
+            ),
+            (
+                "contract derivation",
+                !self.source.derivation.trim().is_empty(),
+            ),
+            ("platform line", self.sources.platform_line == "8.3.27"),
+            ("source version", self.sources.source_version == "2.20"),
+            (
+                "dynamicList product",
+                dynamic_list.product == "1C:Enterprise Platform",
+            ),
+            ("dynamicList release", dynamic_list.release == "8.3.27.2214"),
+            (
+                "dynamicList fixture",
+                dynamic_list.fixture_id
+                    == "8.3.27.2214-xml-2.20-dcs-form-dynamic-list-server-state",
+            ),
+            (
+                "dynamicList derivation",
+                !dynamic_list.derivation.trim().is_empty(),
+            ),
+            (
+                "dynamicList locale",
+                dynamic_list.database_locale == "ru_RU",
+            ),
+            ("dynamicList rounds", dynamic_list.round_trips >= 2),
+            (
+                "listSettings product",
+                list_settings.product == dynamic_list.product,
+            ),
+            (
+                "listSettings release",
+                list_settings.release == dynamic_list.release,
+            ),
+            (
+                "listSettings fixture",
+                list_settings.fixture_id
+                    == "8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state",
+            ),
+            (
+                "listSettings derivation",
+                !list_settings.derivation.trim().is_empty(),
+            ),
+            (
+                "listSettings locale",
+                list_settings.database_locale == "ru_RU",
+            ),
+            ("listSettings rounds", list_settings.round_trips >= 2),
+            (
+                "envelope determinism across corpora",
+                dynamic_list.server_state_decoded_sha256
+                    == list_settings.server_state_decoded_sha256,
+            ),
+            ("property bag key", policy.property_bag_key == "ServerState"),
+            (
+                "sibling keys",
+                policy.sibling_keys
+                    == ["Filter", "Order", "AutoSaveUserSettings"]
+                        .map(str::to_owned)
+                        .to_vec(),
+            ),
+            ("chunk magic", policy.chunk_magic == [0x41, 0xC1]),
+            (
+                "chunk short length tag",
+                policy.chunk_short_length_tag == 0x9A,
+            ),
+            (
+                "chunk long length tag",
+                policy.chunk_long_length_tag == 0x9B,
+            ),
+            ("chunk terminator", policy.chunk_terminator == [0x20, 0x20]),
+            (
+                "wrapper local name",
+                policy.wrapper_local_name == "UniversalListServerOnlyState",
+            ),
+            (
+                "wrapper default namespace",
+                policy.wrapper_default_namespace.is_empty(),
+            ),
+            (
+                "wrapper xs namespace",
+                policy.wrapper_xs_namespace == "http://www.w3.org/2001/XMLSchema",
+            ),
+            (
+                "wrapper xsi namespace",
+                policy.wrapper_xsi_namespace == "http://www.w3.org/2001/XMLSchema-instance",
+            ),
+            ("wrapper self-closing", policy.wrapper_self_closing),
+            ("empty envelope BOM", policy.empty_envelope_has_utf8_bom),
+            (
+                "empty envelope byte length",
+                policy.empty_envelope_decoded_byte_len == 181,
+            ),
+            (
+                "native Form.xml never emits ServerState",
+                policy.native_form_xml_never_emits_server_state,
+            ),
+            (
+                "explicit ListSettings does not populate the envelope",
+                policy.explicit_list_settings_does_not_populate_envelope,
+            ),
+        ];
+        if let Some((field, _)) = expected.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS Form ServerState {field} drifted"
+            )));
+        }
+        for (field, digest) in [
+            ("ibcmd", self.sources.ibcmd_sha256.as_str()),
+            (
+                "dynamicList form body unpacked",
+                dynamic_list.form_body_unpacked_sha256.as_str(),
+            ),
+            (
+                "dynamicList Form native XML",
+                dynamic_list.form_native_xml_sha256.as_str(),
+            ),
+            (
+                "dynamicList ServerState decoded",
+                dynamic_list.server_state_decoded_sha256.as_str(),
+            ),
+            (
+                "listSettings form body unpacked",
+                list_settings.form_body_unpacked_sha256.as_str(),
+            ),
+            (
+                "listSettings Form native XML",
+                list_settings.form_native_xml_sha256.as_str(),
+            ),
+            (
+                "listSettings ServerState decoded",
+                list_settings.server_state_decoded_sha256.as_str(),
+            ),
+            (
+                "policy empty envelope decoded",
+                policy.empty_envelope_decoded_sha256.as_str(),
+            ),
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                    "DCS Form ServerState {field} SHA-256 is invalid"
+                )));
+            }
+        }
+        if policy.empty_envelope_decoded_sha256 != dynamic_list.server_state_decoded_sha256 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "DCS Form ServerState policy empty-envelope SHA-256 drifted from the retained corpora"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsFormServerStatePolicy {
+        DcsFormServerStatePolicy {
+            property_bag_key: self.policy.property_bag_key,
+            sibling_keys: self.policy.sibling_keys,
+            chunk_magic: self.policy.chunk_magic,
+            chunk_short_length_tag: self.policy.chunk_short_length_tag,
+            chunk_long_length_tag: self.policy.chunk_long_length_tag,
+            chunk_terminator: self.policy.chunk_terminator,
+            wrapper_local_name: self.policy.wrapper_local_name,
+            wrapper_default_namespace: self.policy.wrapper_default_namespace,
+            wrapper_xs_namespace: self.policy.wrapper_xs_namespace,
+            wrapper_xsi_namespace: self.policy.wrapper_xsi_namespace,
+            wrapper_self_closing: self.policy.wrapper_self_closing,
+            empty_envelope_has_utf8_bom: self.policy.empty_envelope_has_utf8_bom,
+            empty_envelope_decoded_byte_len: self.policy.empty_envelope_decoded_byte_len,
+            empty_envelope_decoded_sha256: self.policy.empty_envelope_decoded_sha256,
+            native_form_xml_never_emits_server_state: self
+                .policy
+                .native_form_xml_never_emits_server_state,
+            explicit_list_settings_does_not_populate_envelope: self
+                .policy
+                .explicit_list_settings_does_not_populate_envelope,
         }
     }
 }
@@ -12152,6 +12505,20 @@ pub fn bundled_dcs_form_attributes_conditional_appearance_policy()
         .clone()
 }
 
+/// Returns the platform-authenticated physical envelope policy for the Form
+/// DynamicList `ServerState` property-bag value
+/// (`UniversalListServerOnlyState`). Only the empty, self-closing envelope
+/// shape is authenticated; see PRD WS5 DCS-FORM-SERVERSTATE-02.
+pub fn bundled_dcs_form_server_state_policy() -> Result<DcsFormServerStatePolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsFormServerStatePolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsFormServerStateEvidenceCorpus::parse(BUNDLED_DCS_FORM_SERVER_STATE_EVIDENCE_JSON)
+                .map(DcsFormServerStateEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsListSettingsTailPolicy, SchemaError>> = OnceLock::new();
     POLICY
@@ -14707,6 +15074,65 @@ mod tests {
             ),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("selection type indexes drifted")
+        ));
+    }
+
+    #[test]
+    fn bundled_dcs_form_server_state_policy_binds_empty_envelope() {
+        let policy = bundled_dcs_form_server_state_policy().unwrap();
+        assert_eq!(policy.property_bag_key(), "ServerState");
+        assert_eq!(
+            policy.sibling_keys(),
+            &[
+                "Filter".to_string(),
+                "Order".to_string(),
+                "AutoSaveUserSettings".to_string()
+            ]
+        );
+        assert_eq!(policy.chunk_magic(), &[0x41, 0xC1]);
+        assert_eq!(policy.chunk_short_length_tag(), 0x9A);
+        assert_eq!(policy.chunk_long_length_tag(), 0x9B);
+        assert_eq!(policy.chunk_terminator(), &[0x20, 0x20]);
+        assert_eq!(policy.wrapper_local_name(), "UniversalListServerOnlyState");
+        assert_eq!(policy.wrapper_default_namespace(), "");
+        assert_eq!(
+            policy.wrapper_xs_namespace(),
+            "http://www.w3.org/2001/XMLSchema"
+        );
+        assert_eq!(
+            policy.wrapper_xsi_namespace(),
+            "http://www.w3.org/2001/XMLSchema-instance"
+        );
+        assert!(policy.wrapper_self_closing());
+        assert!(policy.empty_envelope_has_utf8_bom());
+        assert_eq!(policy.empty_envelope_decoded_byte_len(), 181);
+        assert_eq!(
+            policy.empty_envelope_decoded_sha256(),
+            "08e0e00120f703b681522b0c1ea315055f4de28e6af806983707ba9a0ec96487"
+        );
+        assert!(policy.native_form_xml_never_emits_server_state());
+        assert!(policy.explicit_list_settings_does_not_populate_envelope());
+
+        let mut drift =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_FORM_SERVER_STATE_EVIDENCE_JSON)
+                .unwrap();
+        drift["policy"]["chunkMagic"] = serde_json::json!([0x41, 0xC2]);
+        assert!(matches!(
+            DcsFormServerStateEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("chunk magic drifted")
+        ));
+
+        let mut drift =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_FORM_SERVER_STATE_EVIDENCE_JSON)
+                .unwrap();
+        drift["sources"]["listSettings"]["serverStateDecodedSha256"] =
+            serde_json::json!("0000000000000000000000000000000000000000000000000000000000000000");
+        assert!(matches!(
+            DcsFormServerStateEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("envelope determinism across corpora drifted")
+                    || message.contains("SHA-256 is invalid")
         ));
     }
 

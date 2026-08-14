@@ -59,9 +59,9 @@ use ibcmd_schema::{
     FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
     GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
     MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
-    bundled_dcs_conditional_appearance_policy, bundled_writer_rules,
-    form_choice_parameter_cluster_order, form_text_document_context_menu_owner_fields,
-    parse_form_choice_list,
+    bundled_dcs_conditional_appearance_policy, bundled_dcs_form_server_state_policy,
+    bundled_writer_rules, form_choice_parameter_cluster_order,
+    form_text_document_context_menu_owner_fields, parse_form_choice_list,
     parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
@@ -779,7 +779,35 @@ pub(super) struct FormDynamicListSettings {
     pub(super) explicit_fields: Vec<FormDynamicListField>,
     pub(super) fields: Vec<FormDynamicListField>,
     pub(super) server_state_xml: Option<String>,
+    /// Evidence-policy-bound classification of the raw `ServerState`
+    /// property-bag value (PRD WS5 DCS-FORM-SERVERSTATE-02). This is purely
+    /// diagnostic: it never feeds Form.xml emission, which continues to be
+    /// governed exclusively by `server_state_xml` above.
+    pub(super) server_state_envelope: Option<FormServerStateEnvelope>,
     pub(super) list_settings: FormListSettings,
+}
+
+/// Physical classification of a raw Form DynamicList `ServerState`
+/// property-bag value against the platform-authenticated envelope policy
+/// (see `ibcmd_schema::bundled_dcs_form_server_state_policy`).
+///
+/// Only one content shape is platform-proven: an empty, self-closing
+/// `UniversalListServerOnlyState` wrapper. No semantics are modeled for any
+/// other content -- non-empty or structurally unrecognized payloads are
+/// retained as exact bytes instead (non-claim, PRD WS5
+/// DCS-FORM-SERVERSTATE-02).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormServerStateEnvelope {
+    /// Chunk-decoded content matched the evidenced empty envelope exactly
+    /// (byte length and SHA-256).
+    Empty,
+    /// Chunk stream failed structural validation, or its decoded content did
+    /// not match the evidenced empty envelope. The raw (post-base64,
+    /// pre-chunk-decode) property bytes are retained losslessly.
+    SourceOwned {
+        bytes: Vec<u8>,
+        reason: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3543,6 +3571,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
     let mut explicit_fields = Vec::new();
     let mut fields = Vec::new();
     let mut server_state_xml = None;
+    let mut server_state_envelope = None;
     let mut list_settings = FormListSettings::default();
     let conditional_appearance_property = bundled_dcs_conditional_appearance_policy()
         .ok()?
@@ -3586,8 +3615,12 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
                 list_settings.items_user_setting_id = parse_form_setting_string(window[1])
             }
             "ServerState" => {
-                server_state_xml =
-                    parse_form_server_state_xml_with_indexes(window[1], dcs_type_index, object_refs)
+                server_state_xml = parse_form_server_state_xml_with_indexes(
+                    window[1],
+                    dcs_type_index,
+                    object_refs,
+                );
+                server_state_envelope = parse_form_server_state_envelope(window[1]);
             }
             _ => {}
         }
@@ -3620,6 +3653,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
         explicit_fields,
         fields,
         server_state_xml,
+        server_state_envelope,
         list_settings,
     })
 }
@@ -4129,6 +4163,22 @@ pub(super) fn decode_form_server_state_chunks_with_limit(
     encoded: &[u8],
     max_output_bytes: usize,
 ) -> Option<Vec<u8>> {
+    decode_form_server_state_chunks_with_boundaries(encoded, max_output_bytes)
+        .map(|(output, _chunk_lengths)| output)
+}
+
+/// Decodes a `ServerState` chunk stream exactly like
+/// [`decode_form_server_state_chunks_with_limit`], additionally returning the
+/// exact chunk-length sequence consumed. This lets the encode direction of
+/// the codec, [`encode_form_server_state_chunks`], reproduce the platform's
+/// physical chunk framing byte-for-byte instead of choosing its own -- see
+/// the `dcs-form-*-server-state` sha256-pinned round-trip tests, which decode
+/// the retained raw fragment, then re-encode using these exact boundaries and
+/// assert equality with the original bytes.
+pub(super) fn decode_form_server_state_chunks_with_boundaries(
+    encoded: &[u8],
+    max_output_bytes: usize,
+) -> Option<(Vec<u8>, Vec<usize>)> {
     const MAGIC: &[u8] = &[0x41, 0xC1];
     const TERMINATOR: &[u8] = b"  ";
 
@@ -4138,10 +4188,11 @@ pub(super) fn decode_form_server_state_chunks_with_limit(
 
     let mut cursor = MAGIC.len();
     let mut output = Vec::new();
+    let mut chunk_lengths = Vec::new();
     loop {
         let remaining = encoded.get(cursor..)?;
         if remaining == TERMINATOR {
-            return Some(output);
+            return Some((output, chunk_lengths));
         }
 
         let tag = *remaining.first()?;
@@ -4170,8 +4221,88 @@ pub(super) fn decode_form_server_state_chunks_with_limit(
             return None;
         }
         output.extend_from_slice(chunk);
+        chunk_lengths.push(chunk_len);
         cursor = chunk_end;
     }
+}
+
+/// Encode direction of the `ServerState` chunk codec: the exact inverse of
+/// [`decode_form_server_state_chunks_with_boundaries`]. Given a decoded
+/// payload and the chunk-length sequence the platform used to frame it,
+/// reassembles the magic-prefixed, terminator-suffixed raw property-bag
+/// fragment. Returns `None` (fail-closed, never panics) if `chunk_lengths`
+/// does not exactly cover `payload` or a chunk does not fit the `u8`/`u16`
+/// length encoding.
+///
+/// There is no production writer for this raw MSSQL property-bag format
+/// (`mssql_dump` only ever reads it); this function exists to prove, with an
+/// evidence-pinned round-trip test, that the decode direction's
+/// understanding of the chunk format is complete and correct.
+#[cfg(test)]
+pub(super) fn encode_form_server_state_chunks(
+    payload: &[u8],
+    chunk_lengths: &[usize],
+) -> Option<Vec<u8>> {
+    let mut encoded = vec![0x41u8, 0xC1];
+    let mut cursor = 0usize;
+    for &chunk_len in chunk_lengths {
+        let chunk_end = cursor.checked_add(chunk_len)?;
+        let chunk = payload.get(cursor..chunk_end)?;
+        match u8::try_from(chunk_len) {
+            Ok(short_len) => {
+                encoded.push(0x9A);
+                encoded.push(short_len);
+            }
+            Err(_) => {
+                let long_len = u16::try_from(chunk_len).ok()?;
+                encoded.push(0x9B);
+                encoded.extend_from_slice(&long_len.to_le_bytes());
+            }
+        }
+        encoded.extend_from_slice(chunk);
+        cursor = chunk_end;
+    }
+    if cursor != payload.len() {
+        return None;
+    }
+    encoded.extend_from_slice(b"  ");
+    Some(encoded)
+}
+
+/// Evidence-policy-bound classification of a raw `ServerState` property-bag
+/// field (the `"ServerState",{"S","<base64>"}` pair). See
+/// [`FormServerStateEnvelope`] and PRD WS5 DCS-FORM-SERVERSTATE-02.
+pub(super) fn parse_form_server_state_envelope(field: &str) -> Option<FormServerStateEnvelope> {
+    let payload = parse_form_setting_string(field)?;
+    let raw = decode_base64_mime(&payload)?;
+    let policy = bundled_dcs_form_server_state_policy().ok()?;
+    if !raw.starts_with(policy.chunk_magic()) {
+        return Some(FormServerStateEnvelope::SourceOwned {
+            bytes: raw,
+            reason: "ServerState chunk stream has an unrecognized magic prefix",
+        });
+    }
+    match decode_form_server_state_chunks(&raw) {
+        Some(decoded) if is_evidenced_empty_server_state_envelope(&decoded, &policy) => {
+            Some(FormServerStateEnvelope::Empty)
+        }
+        Some(_) => Some(FormServerStateEnvelope::SourceOwned {
+            bytes: raw,
+            reason: "ServerState content is non-empty or does not match the evidenced empty envelope",
+        }),
+        None => Some(FormServerStateEnvelope::SourceOwned {
+            bytes: raw,
+            reason: "ServerState chunk stream failed structural (terminator/chunk framing) validation",
+        }),
+    }
+}
+
+fn is_evidenced_empty_server_state_envelope(
+    decoded: &[u8],
+    policy: &ibcmd_schema::DcsFormServerStatePolicy,
+) -> bool {
+    decoded.len() == policy.empty_envelope_decoded_byte_len()
+        && format!("{:x}", Sha256::digest(decoded)) == policy.empty_envelope_decoded_sha256()
 }
 
 #[cfg(test)]

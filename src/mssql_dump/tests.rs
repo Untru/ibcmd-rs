@@ -8315,6 +8315,180 @@ fn rejects_invalid_utf8_form_server_state_chunk_stream() {
     assert!(parse_form_server_state_xml(&form_server_state_field_for_test(&encoded)).is_none());
 }
 
+// PRD WS5 DCS-FORM-SERVERSTATE-02: evidence-policy-bound round-trip coverage
+// for the two retained `dcs-form-*-server-state` corpora
+// (tests/fixtures/native-evidence/8.3.27.2214/), plus fail-closed coverage of
+// `parse_form_server_state_envelope` for magic/chunk-structure corruption and
+// for non-empty content.
+
+/// Locates the raw `"ServerState",{"S","<base64>"}` property-bag value
+/// within a retained (already UTF-8 decoded) `form-body-unpacked.bin`
+/// fixture, returning the `{"S","<base64>"}` slice on its own -- the same
+/// shape `parse_form_dynamic_list_settings_with_dcs_type_index` passes as
+/// `window[1]` when it encounters the `"ServerState"` key in the property
+/// bag.
+fn locate_form_server_state_raw_field(form_body_unpacked: &str) -> &str {
+    let key_start = form_body_unpacked
+        .find("\"ServerState\"")
+        .expect("retained fixture has a ServerState property key");
+    let brace_offset = form_body_unpacked[key_start..]
+        .find('{')
+        .expect("ServerState value opens with a brace");
+    &form_body_unpacked[key_start + brace_offset..]
+}
+
+/// Extracts the exact raw (post-base64-decode, pre-chunk-decode) storage
+/// fragment bytes for `ServerState` from a retained fixture -- the bytes
+/// [`decode_form_server_state_chunks`] itself consumes.
+fn form_server_state_raw_storage_fragment(form_body_unpacked: &str) -> Vec<u8> {
+    let field = locate_form_server_state_raw_field(form_body_unpacked);
+    let payload =
+        parse_form_setting_string(field).expect("ServerState value parses as a 1C string");
+    decode_base64_mime(&payload).expect("ServerState payload is valid base64")
+}
+
+fn assert_dcs_form_server_state_corpus_round_trips(
+    form_body_unpacked_b64: &str,
+    server_state_decoded_b64: &str,
+) {
+    let form_body_unpacked = decode_base64_mime(form_body_unpacked_b64)
+        .expect("retained form-body-unpacked fixture is valid base64");
+    let form_body_unpacked =
+        String::from_utf8(form_body_unpacked).expect("retained form body is UTF-8 text");
+    let expected_decoded = decode_base64_mime(server_state_decoded_b64)
+        .expect("retained server-state-decoded fixture is valid base64");
+
+    let raw_fragment = form_server_state_raw_storage_fragment(&form_body_unpacked);
+
+    // Decode direction: the existing chunk decoder, applied to the exact raw
+    // storage fragment extracted from the retained fixture, reproduces the
+    // retained decoded envelope byte-for-byte.
+    let (decoded, chunk_lengths) =
+        decode_form_server_state_chunks_with_boundaries(&raw_fragment, 1_048_576)
+            .expect("evidenced ServerState fragment decodes");
+    assert_eq!(decoded, expected_decoded);
+
+    // The policy-bound classifier recognizes this exact content as the one
+    // platform-proven empty envelope.
+    let field = locate_form_server_state_raw_field(&form_body_unpacked);
+    assert_eq!(
+        parse_form_server_state_envelope(field),
+        Some(FormServerStateEnvelope::Empty)
+    );
+
+    // Encode direction: re-encoding the decoded payload using the platform's
+    // own chunk-length sequence (discovered, not guessed) reproduces the
+    // retained raw storage fragment byte-for-byte.
+    let re_encoded = encode_form_server_state_chunks(&decoded, &chunk_lengths)
+        .expect("re-encoding the evidenced payload with its own boundaries succeeds");
+    assert_eq!(re_encoded, raw_fragment);
+}
+
+#[test]
+fn dcs_form_dynamic_list_server_state_corpus_round_trips_against_retained_evidence() {
+    const FORM_BODY_UNPACKED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-dynamic-list-server-state/form-body-unpacked.bin.b64"
+    );
+    const SERVER_STATE_DECODED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-dynamic-list-server-state/server-state-decoded.xml.b64"
+    );
+    assert_dcs_form_server_state_corpus_round_trips(
+        FORM_BODY_UNPACKED_B64,
+        SERVER_STATE_DECODED_B64,
+    );
+}
+
+#[test]
+fn dcs_form_list_settings_server_state_corpus_round_trips_against_retained_evidence() {
+    const FORM_BODY_UNPACKED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/form-body-unpacked.bin.b64"
+    );
+    const SERVER_STATE_DECODED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/server-state-decoded.xml.b64"
+    );
+    assert_dcs_form_server_state_corpus_round_trips(
+        FORM_BODY_UNPACKED_B64,
+        SERVER_STATE_DECODED_B64,
+    );
+}
+
+#[test]
+fn dcs_form_server_state_corpora_agree_the_envelope_is_byte_identical() {
+    const F1_SERVER_STATE_DECODED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-dynamic-list-server-state/server-state-decoded.xml.b64"
+    );
+    const F2_SERVER_STATE_DECODED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/server-state-decoded.xml.b64"
+    );
+    let f1 = decode_base64_mime(F1_SERVER_STATE_DECODED_B64).unwrap();
+    let f2 = decode_base64_mime(F2_SERVER_STATE_DECODED_B64).unwrap();
+    assert_eq!(
+        f1, f2,
+        "explicit ListSettings must not populate the envelope"
+    );
+    assert_eq!(f1.len(), 181);
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&f1)),
+        "08e0e00120f703b681522b0c1ea315055f4de28e6af806983707ba9a0ec96487"
+    );
+}
+
+#[test]
+fn parse_form_server_state_envelope_is_fail_closed_on_bad_magic() {
+    let encoded = {
+        let mut bytes = encode_form_server_state_chunks_for_test(&[b"whatever"]);
+        bytes[0] = 0x00;
+        bytes
+    };
+    match parse_form_server_state_envelope(&form_server_state_field_for_test(&encoded)) {
+        Some(FormServerStateEnvelope::SourceOwned { bytes, .. }) => {
+            assert_eq!(bytes, encoded);
+        }
+        other => panic!("expected SourceOwned for bad magic bytes, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_form_server_state_envelope_is_fail_closed_on_truncated_chunk() {
+    let encoded = vec![0x41, 0xC1, 0x9A, 5, b'a', b'b'];
+    match parse_form_server_state_envelope(&form_server_state_field_for_test(&encoded)) {
+        Some(FormServerStateEnvelope::SourceOwned { bytes, .. }) => {
+            assert_eq!(bytes, encoded);
+        }
+        other => panic!("expected SourceOwned for a truncated chunk, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_form_server_state_envelope_is_source_owned_for_non_empty_content() {
+    let payload = concat!(
+        "\u{feff}<UniversalListServerOnlyState>",
+        "<Field><dcssch:dataPath>Дата</dcssch:dataPath></Field>",
+        "</UniversalListServerOnlyState>"
+    )
+    .as_bytes();
+    let encoded = encode_form_server_state_chunks_for_test(&[payload]);
+    match parse_form_server_state_envelope(&form_server_state_field_for_test(&encoded)) {
+        Some(FormServerStateEnvelope::SourceOwned { bytes, .. }) => {
+            assert_eq!(bytes, encoded);
+        }
+        other => panic!("expected SourceOwned for non-empty content, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_form_server_state_envelope_recognizes_the_evidenced_empty_wrapper() {
+    const F1_SERVER_STATE_DECODED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-dynamic-list-server-state/server-state-decoded.xml.b64"
+    );
+    let decoded = decode_base64_mime(F1_SERVER_STATE_DECODED_B64).unwrap();
+    let encoded = encode_form_server_state_chunks_for_test(&[&decoded[..2], &decoded[2..]]);
+    assert_eq!(
+        parse_form_server_state_envelope(&form_server_state_field_for_test(&encoded)),
+        Some(FormServerStateEnvelope::Empty)
+    );
+}
+
 #[test]
 fn resolves_form_server_state_type_ids_through_dcs_metadata_index() {
     const TYPE_ID: &str = "0f3bc348-6fa3-4be5-aaf7-e9c9b60c370f";
@@ -8566,6 +8740,7 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
                     "<Field xsi:type=\"dcssch:DataSetFieldField\">\n\t<dcssch:dataPath>Дата</dcssch:dataPath>\n\t<dcssch:field>Дата</dcssch:field>\n</Field>\n<Parameter xsi:type=\"dcssch:Parameter\">\n\t<dcssch:name>ДатаАктуальности</dcssch:name>\n</Parameter>"
                         .to_string(),
                 ),
+                server_state_envelope: None,
                 list_settings: FormListSettings::default(),
             }),
             spreadsheet_document_settings: None,
@@ -8593,6 +8768,7 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
         explicit_fields: Vec::new(),
         fields: Vec::new(),
         server_state_xml: None,
+        server_state_envelope: None,
         list_settings: FormListSettings::default(),
     };
 
@@ -8882,6 +9058,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
         explicit_fields: Vec::new(),
         fields: Vec::new(),
         server_state_xml: None,
+        server_state_envelope: None,
         list_settings: FormListSettings {
             filter: None,
             order: Some(FormListSettingsOrder::Typed(
@@ -9161,6 +9338,7 @@ fn formats_explicit_false_dynamic_data_read() {
             explicit_fields: Vec::new(),
             fields: Vec::new(),
             server_state_xml: None,
+            server_state_envelope: None,
             list_settings: FormListSettings::default(),
         }),
         spreadsheet_document_settings: None,
@@ -9842,6 +10020,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
                 explicit_fields: Vec::new(),
                 fields: Vec::new(),
                 server_state_xml: None,
+                server_state_envelope: None,
                 list_settings: FormListSettings::default(),
             }),
             spreadsheet_document_settings: None,
