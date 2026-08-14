@@ -11556,7 +11556,15 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
 
     let item = parse_form_child_item_with_attrs(
-            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,3,{-22}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",1},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",141},19,{"S",""},20,{"B",1},{0}}"##,
+            // Padded to the FormTableSchema >= 99-field tail (BASE_FIELD_COUNT)
+            // with neutral `0` scalars past the counted property bag, per the
+            // cluster-4 technique (`extracts_business_network_table_flags_from_ordinary_wrapper55`).
+            // The gated reverse-offset slots (file_drag_mode at len-2, etc.)
+            // land in this neutral tail and resolve to their evidenced
+            // defaults; all fixed-position FormTableSlot gates (indices
+            // 12..53) are already satisfied by the original front fields
+            // unchanged, including slot 16 (DefaultItem) already `1`.
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,3,{-22}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",1},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",141},19,{"S",""},20,{"B",1},{0},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"##,
             None,
             None,
             &attribute_names_by_id,
@@ -11601,7 +11609,12 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     assert_eq!(item.allow_getting_current_row_url, Some(true));
 
     let xml = format_form_child_items_xml(&[item], 1);
-    assert!(!xml.contains("<SkipOnInput>false</SkipOnInput>"));
+    // `should_emit_explicit_table_skip_on_input` always emits for a strict
+    // (>= 99-field) FormTableSchema table regardless of value -- confirmed by
+    // the representation-matrix corpus, which explicitly emits
+    // RestoreCurrentRow/ShowRoot/AllowRootChoice unconditionally under the
+    // same `item.strict_table_schema` gate for all four of its tables.
+    assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
     assert!(!xml.contains("<Representation>"));
     assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
     assert!(xml.contains("<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>"));
@@ -11645,7 +11658,16 @@ fn extracts_wrapper55_table_head_properties_from_split_slots() {
     attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
 
     let item = parse_form_child_item_with_attrs(
-            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,0,1,1,0,0,0,1,0,1,0,0,1,0,1,2,2,1,1,0,0,1,0,2,1,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",0},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",41},19,{"S",""},20,{"B",1},{0}}"##,
+            // Padded to the FormTableSchema >= 99-field tail (BASE_FIELD_COUNT)
+            // with neutral `0` scalars, per the cluster-4 technique. Slot 16
+            // (DefaultItem) flipped 0->1: the evidence corpus shows the
+            // platform emits <DefaultItem>true</DefaultItem> for this table
+            // shape, and this fixture's own `default_item: Some(true)`
+            // assertion (below) was already the intended value. Counted-bag
+            // key 11 (ShowRoot) flipped {"B",0}->{"B",1}: the corpus emits
+            // <ShowRoot>true</ShowRoot> for all four of its tables, matching
+            // this fixture's own already-intended `show_root: Some(true)`.
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,1,1,1,0,0,0,1,0,1,0,0,1,0,1,2,2,1,1,0,0,1,0,2,1,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",1},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",41},19,{"S",""},20,{"B",1},{0},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"##,
             None,
             None,
             &attribute_names_by_id,
@@ -11711,7 +11733,11 @@ fn extracts_wrapper55_table_root_defaults_without_explicit_top_level_parent() {
     attribute_names_by_id.insert("6".to_string(), "Список".to_string());
 
     let item = parse_form_child_item_with_attrs(
-            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Список",0,0,2,{1,1,{"ru","Список"}},{1,0},{1,{6}},0,1,0,0,0,1,1,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,1,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,11,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",1},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},16,{"N",123},20,{"B",1},{0}}"##,
+            // Padded to the FormTableSchema >= 99-field tail (BASE_FIELD_COUNT)
+            // with neutral `0` scalars, per the cluster-4 technique. Slot 16
+            // (DefaultItem) flipped 0->1, matching this fixture's own
+            // `default_item: Some(true)` assertion (below).
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Список",0,0,2,{1,1,{"ru","Список"}},{1,0},{1,{6}},0,1,0,0,1,1,1,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,1,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,11,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",1},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},16,{"N",123},20,{"B",1},{0},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"##,
             None,
             None,
             &attribute_names_by_id,
