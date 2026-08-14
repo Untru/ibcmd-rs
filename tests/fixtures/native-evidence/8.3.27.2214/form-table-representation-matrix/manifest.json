@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-table-representation-matrix",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": null,
+  "contract": "8.3.27-xml-2.20-form-table-representation-matrix-v1",
+  "body_contract": "8.3.27-xml-2.20-form-table-representation-matrix-body-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-14",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_fresh_file_infobases",
+    "database_locale": "ru_RU",
+    "creation_args": "infobase create --locale=ru_RU --load <input.cf> --apply --force",
+    "patch_build_policy": "the exact build is retained as experiment provenance; this wrapper contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "kind": "clean_room_form_representation_matrix_table_raw_codes_on_platform_authenticated_base_cf",
+    "base_fixture_id": "8.3.27.2214-xml-2.20-dcs-form-dynamic-list-server-state",
+    "base_cf_size": 88686,
+    "base_cf_sha256": "a0ba6431996a4349b3c3336ab974e867390e3f309e6805acb82e5f0c9721a9f6",
+    "authority": "hypothesis_only",
+    "basis": "FORM-EVIDENCE-PROBES-SPEC.md FE1, built on form-evidence-recon.md Q1. Base: retained CF of dcs-form-dynamic-list-server-state (F1). Delta: Catalog.CorpusList Hierarchical false->true (single-line diff, needed for HierarchicalList/Tree to be semantically legal per recon); Form.xml rebuilt with 4 DynamicList Table items (default/List/HierarchicalList/Tree Representation) each on its own new Attribute pointed at Catalog.CorpusList.",
+    "delta": "4-table form matrix with Representation codes: default (omitted), List (explicit), HierarchicalList (explicit), Tree (explicit)"
+  },
+  "rounds": {
+    "round_1": {
+      "cf_size": 95822,
+      "cf_sha256": "494659303481d79b916482a3005fe59adff98ef030777b2f408d7fa319d15f7e"
+    },
+    "round_2": {
+      "cf_size": 94899,
+      "cf_sha256": "548faec18d12feafa04d020cd85e1f7f3413cbe96faf34bc5115a082cf11573f"
+    },
+    "selected_native_equal_between_rounds": true,
+    "packed_rows_equal_between_rounds": true,
+    "unpacked_rows_equal_between_rounds": true
+  },
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "encoded_size": 126533,
+    "encoded_sha256": "2efe5fdfc163ab7bec8b205111e8032cbcbb205df0cb28d092fad1c8d008d537",
+    "decoded_size": 94899,
+    "decoded_sha256": "548faec18d12feafa04d020cd85e1f7f3413cbe96faf34bc5115a082cf11573f"
+  },
+  "form": {
+    "owner": "Catalog.CorpusList",
+    "name": "ListForm",
+    "native_xml": {
+      "path": "native-form.xml.b64",
+      "encoded_size": 25161,
+      "encoded_sha256": "7b904ffb311c8d4e56e57c9280399ae5c758b5dbea321b4a81327c59075ab9d4",
+      "decoded_size": 18868,
+      "sha256": "65f0d0acf08e92f6712fb436fbe070c13e1166b2cec0304876f96742851c7c4f"
+    },
+    "body_row": {
+      "packed_size": 3878,
+      "packed_sha256": "fb5cf7fef31e5ef89043c56e3350f2b5e5568fd9b807d3111eade57de9a80b5f",
+      "packed_file": {
+        "path": "form-body-packed.bin.b64",
+        "encoded_size": 5173,
+        "encoded_sha256": "7722ed6d8bfca96957c85a256bca021fb7c1326c2c67b5bbb41eb6be7a6b9641"
+      },
+      "unpacked_size": 52637,
+      "unpacked_sha256": "cad53c71628c3d09e49d0f14761e292c6cfd9495eb0e12033247cbae6f0c0cca",
+      "unpacked_file": {
+        "path": "form-body-unpacked.bin.b64",
+        "encoded_size": 70185,
+        "encoded_sha256": "5a7fd02e676a3dce2a5d2044de8f0c9525fdde799bc94ac10e5809901f3b001a"
+      }
+    }
+  },
+  "proven_shape": {
+    "catalog_name": "CorpusList",
+    "form_name": "ListForm",
+    "table_representation_matrix": "Representation: default→raw \"1\" (omitted in native), explicit List→\"0\", Tree→\"2\", HierarchicalList→silently dropped (indistinguishable from default)"
+  },
+  "proven_claims": [
+    "raw fields[3]='1' is the platform's own default/unset sentinel for Table Representation, semantically List but a distinct wire value from explicit List ('0')",
+    "raw fields[3]='2' confirms the existing code's Tree mapping is correct",
+    "explicit <Representation>List</Representation> emits raw '0', matching the existing code's List mapping for the EXPLICIT case only"
+  ],
+  "non_claims": [
+    "HierarchicalList: <Representation>HierarchicalList</Representation> in the seed does not survive the platform round-trip; native re-export omits the element entirely and the raw code is identical to the unset-default ('1'). No rejection/error occurred; this is a silent no-op, cause not established (spelling vs. unmet structural precondition beyond Catalog.Hierarchical=true).",
+    "No claim about what precondition (if any) would make HierarchicalList take effect; not investigated further within this probe's scope.",
+    "No claim that the raw-code table generalizes beyond wrapper-55 Table items on a DynamicList attribute targeting a flat/hierarchical Catalog MainTable.",
+    "compiler_acceptance is intentionally omitted; not part of this probe session.",
+    "Provenance: produced in a probe session (scratchpad/design/FORM-EVIDENCE-PROBES-SPEC.md), not yet reviewed or integrated."
+  ]
+}
