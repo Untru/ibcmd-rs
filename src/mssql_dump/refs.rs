@@ -2453,29 +2453,48 @@ fn parse_configuration_root_layout(text: &str, uuid: &str) -> Option<Configurati
     })
 }
 
+/// Matches the evidenced native root-control tail: a `{1,"",""}` marker
+/// followed by a signed 32-bit body checksum, e.g.
+/// `{{1,"",""},{-1648891888}}` (see
+/// `tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid`,
+/// confirmed identically across all 19 retained CF corpora). The checksum
+/// value itself is opaque and is not interpreted or re-derived here.
 fn is_configuration_root_footer(field: &str) -> bool {
     let Some(fields) = split_1c_braced_fields(field, 0) else {
         return false;
     };
-    if fields.len() != 1 {
+    if fields.len() != 2 {
         return false;
     }
-    let Some(footer) = fields
+    let Some(marker) = fields
         .first()
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))
     else {
         return false;
     };
-    footer.len() == 3
-        && footer.first().map(|field| field.trim()) == Some("0")
-        && footer
+    let marker_valid = marker.len() == 3
+        && marker.first().map(|field| field.trim()) == Some("1")
+        && marker
             .get(1)
             .and_then(|field| parse_1c_quoted_string(field.trim()))
             .is_some_and(|value| value.is_empty())
-        && footer
+        && marker
             .get(2)
             .and_then(|field| parse_1c_quoted_string(field.trim()))
-            .is_some_and(|value| value.is_empty())
+            .is_some_and(|value| value.is_empty());
+    if !marker_valid {
+        return false;
+    }
+    let Some(checksum) = fields
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return false;
+    };
+    checksum.len() == 1
+        && checksum
+            .first()
+            .is_some_and(|value| value.trim().parse::<i32>().is_ok())
 }
 
 fn configuration_contained_object_ids(text: &str) -> Vec<String> {

@@ -37973,7 +37973,9 @@ fn flat_configuration_code67_text(
         .collect::<Vec<_>>();
     let mut root_fields = vec!["2".to_string(), format!("{{{uuid}}}"), "7".to_string()];
     root_fields.extend(contained);
-    root_fields.push(r#"{{0,"",""}}"#.to_string());
+    // Evidenced native root-control tail: `{1,"",""}` marker plus an opaque
+    // signed body checksum (see `is_configuration_root_footer`).
+    root_fields.push(r#"{{1,"",""},{-1648891888}}"#.to_string());
     format!("{{{}}}", root_fields.join(","))
 }
 
@@ -38228,6 +38230,40 @@ fn extracts_flat_configuration_internal_info_and_reference_children() {
     assert!(!xml.contains("ConfigurationExtensionCompatibilityMode"));
     assert!(!xml.contains("30000000-0000-4000-8000-000000000001"));
     assert!(!xml.contains("40000000-0000-4000-8000-000000000001"));
+}
+
+#[test]
+fn flat_configuration_root_footer_requires_the_evidenced_marker_and_checksum() {
+    // The native root-control tail is `{1,"",""}` plus an opaque signed body
+    // checksum (see `is_configuration_root_footer`), confirmed identically
+    // across all 19 retained 8.3.27.2214 CF corpora under
+    // tests/fixtures/native-evidence. An earlier, never-evidenced hypothesis
+    // (`{0,"",""}` with no checksum) must keep being rejected so it cannot
+    // silently regress back in.
+    let (uuid, text, object_refs) = flat_configuration_fixture();
+    const GOOD_FOOTER: &str = r#"{{1,"",""},{-1648891888}}"#;
+    assert!(text.ends_with(&format!("{GOOD_FOOTER}}}")));
+
+    let malformed_footers = [
+        ("disproven zero marker, no checksum", r#"{{0,"",""}}"#),
+        ("zero marker with checksum", r#"{{0,"",""},{-1648891888}}"#),
+        ("non-numeric checksum", r#"{{1,"",""},{"x"}}"#),
+        ("missing checksum", r#"{{1,"",""}}"#),
+        ("extra trailing field", r#"{{1,"",""},{-1648891888},{0}}"#),
+    ];
+    for (case, footer) in malformed_footers {
+        let malformed = text.replacen(GOOD_FOOTER, footer, 1);
+        assert_ne!(malformed, text, "{case}: footer literal not found");
+        let xml = extract_configuration_source_xml(
+            &malformed,
+            &uuid,
+            &object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert!(!xml.contains("<InternalInfo>"), "{case}: {xml}");
+        assert!(!xml.contains("<ChildObjects"), "{case}: {xml}");
+    }
 }
 
 #[test]
