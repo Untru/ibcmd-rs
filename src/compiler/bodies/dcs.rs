@@ -1,5 +1,6 @@
 //! Profile-gated codecs for data-composition template bodies.
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Range;
@@ -8,8 +9,9 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::EffectiveProfile;
 use ibcmd_xml::{
     DcsChildParseOutcome, DcsSchemaTemplateError, DcsSettingsDocumentAnalysisError,
-    analyze_dcs_schema_template_documents, analyze_dcs_settings_document,
+    analyze_dcs_schema_template_documents_with_references, analyze_dcs_settings_document,
     compile_dcs_schema_template_source_documents,
+    compile_dcs_schema_template_source_documents_with_references,
 };
 use quick_xml::NsReader;
 use quick_xml::events::Event;
@@ -118,23 +120,58 @@ pub fn compile_dcs(
     kind: DcsTemplateKind,
     xml: &[u8],
 ) -> Result<Vec<u8>, DcsCodecError> {
+    compile_dcs_with_references(profile, kind, xml, &BTreeMap::new())
+}
+
+/// Compiles exactly like [`compile_dcs`], but also resolves a custom
+/// `StyleItem` area-appearance style reference's semantic name back to its
+/// configuration-local storage uuid via `style_reference_types` -- the same
+/// uuid-to-name map shape/convention as the TypeId-reference resolver (see
+/// [`ibcmd_xml::parse_dcs_inner_schema_storage_document_with_references`]),
+/// keyed the opposite direction here (searched by value) because this is
+/// the compile, not the decode, direction. Building this map from source
+/// tree data (`StyleItems/<Name>.xml`'s own `uuid` attribute) is the
+/// caller's job; this codec never resolves a uuid by string heuristics,
+/// only by exact lookup in the supplied map. Without a matching entry, a
+/// custom-StyleItem reference fails closed rather than fabricating or
+/// guessing a uuid; the standard `Named` form never needs a resolver and is
+/// unaffected either way. Entries in the map that this coordinate never
+/// looks up (any uuid/name pair unrelated to the one style reference this
+/// document contains) are silently ignored, matching the TypeId
+/// precedent's own lookup-only (never exhaustively validated) semantics.
+pub fn compile_dcs_with_references(
+    profile: &DcsCodecProfile,
+    kind: DcsTemplateKind,
+    xml: &[u8],
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<Vec<u8>, DcsCodecError> {
     let _ = profile;
-    compile_evidenced_dcs(kind, xml)
+    compile_evidenced_dcs_with_references(kind, xml, style_reference_types)
 }
 
 pub(crate) fn compile_evidenced_dcs(
     kind: DcsTemplateKind,
     xml: &[u8],
 ) -> Result<Vec<u8>, DcsCodecError> {
+    compile_evidenced_dcs_with_references(kind, xml, &BTreeMap::new())
+}
+
+pub(crate) fn compile_evidenced_dcs_with_references(
+    kind: DcsTemplateKind,
+    xml: &[u8],
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<Vec<u8>, DcsCodecError> {
     let plain = match kind {
         DcsTemplateKind::Appearance => {
             validate_xml_document(xml, "AppearanceTemplate", Some(APPEARANCE_NS))?;
             xml.to_vec()
         }
-        DcsTemplateKind::Schema => compile_schema_plain(xml)?,
+        DcsTemplateKind::Schema => {
+            compile_schema_plain_with_references(xml, style_reference_types)?
+        }
     };
     let blob = deflate_bytes(&plain)?;
-    decode_strict(kind, &blob)?;
+    decode_strict_with_references(kind, &blob, style_reference_types)?;
     Ok(blob)
 }
 
@@ -143,8 +180,24 @@ pub fn decode_dcs(
     kind: DcsTemplateKind,
     blob: &[u8],
 ) -> Result<DcsBody, DcsCodecError> {
+    decode_dcs_with_references(profile, kind, blob, &BTreeMap::new())
+}
+
+/// Decodes exactly like [`decode_dcs`], but also resolves a custom
+/// `StyleItem` area-appearance style reference's storage uuid back to its
+/// semantic name via `style_reference_types` (uuid-to-name, the same
+/// convention as [`compile_dcs_with_references`]'s resolver, searched
+/// forward here since this is the decode direction). Without a matching
+/// entry, that one coordinate fails closed exactly as [`decode_dcs`] does;
+/// every other coordinate is unaffected.
+pub fn decode_dcs_with_references(
+    profile: &DcsCodecProfile,
+    kind: DcsTemplateKind,
+    blob: &[u8],
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<DcsBody, DcsCodecError> {
     let _ = profile;
-    decode_strict(kind, blob)
+    decode_strict_with_references(kind, blob, style_reference_types)
 }
 
 /// Bounded compatibility reader. Historical staging emitted a direct source
@@ -174,10 +227,16 @@ pub(crate) fn decode_compatible_dcs(
     }
 }
 
-fn decode_strict(kind: DcsTemplateKind, blob: &[u8]) -> Result<DcsBody, DcsCodecError> {
+fn decode_strict_with_references(
+    kind: DcsTemplateKind,
+    blob: &[u8],
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<DcsBody, DcsCodecError> {
     let plain = inflate(blob)?;
     match kind {
-        DcsTemplateKind::Schema => decode_schema_plain(plain),
+        DcsTemplateKind::Schema => {
+            decode_schema_plain_with_references(plain, style_reference_types)
+        }
         DcsTemplateKind::Appearance => decode_appearance_plain(plain),
     }
 }
@@ -194,11 +253,15 @@ fn decode_appearance_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
     })
 }
 
-fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
+fn compile_schema_plain_with_references(
+    xml: &[u8],
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<Vec<u8>, DcsCodecError> {
     validate_xml_document(xml, "DataCompositionSchema", Some(SCHEMA_NS))?;
 
     let documents =
-        compile_dcs_schema_template_source_documents(xml).map_err(map_template_error)?;
+        compile_dcs_schema_template_source_documents_with_references(xml, style_reference_types)
+            .map_err(map_template_error)?;
     for settings_document in documents.settings() {
         let settings_document = std::str::from_utf8(settings_document).map_err(|_| {
             DcsCodecError::InvalidXml("native Settings document is not UTF-8".to_string())
@@ -286,9 +349,13 @@ fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
     Ok(plain)
 }
 
-fn decode_schema_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
+fn decode_schema_plain_with_references(
+    plain: Vec<u8>,
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<DcsBody, DcsCodecError> {
     let body = decode_schema_plain_framed(plain)?;
-    analyze_dcs_schema_template_documents(&body.documents()).map_err(map_template_error)?;
+    analyze_dcs_schema_template_documents_with_references(&body.documents(), style_reference_types)
+        .map_err(map_template_error)?;
     Ok(body)
 }
 
@@ -734,7 +801,7 @@ mod tests {
         let settings = xml_document(EMPTY_SETTINGS);
         let plain = synthetic_schema_plain(&[settings.clone(), settings.clone(), settings]);
         assert!(matches!(
-            decode_schema_plain(plain),
+            decode_schema_plain_with_references(plain, &BTreeMap::new()),
             Err(DcsCodecError::UnsupportedSource(reason))
                 if reason == "native DCS envelope settings count is outside the attested range"
         ));
@@ -1022,7 +1089,7 @@ mod tests {
         plain[4..8].copy_from_slice(&0u32.to_le_bytes());
 
         assert!(matches!(
-            decode_schema_plain(plain),
+            decode_schema_plain_with_references(plain, &BTreeMap::new()),
             Err(DcsCodecError::UnsupportedLayout(reason))
                 if reason == "DCS schema has no settings documents"
         ));
@@ -1034,7 +1101,7 @@ mod tests {
         plain[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
 
         assert!(matches!(
-            decode_schema_plain(plain),
+            decode_schema_plain_with_references(plain, &BTreeMap::new()),
             Err(DcsCodecError::UnsupportedLayout(reason))
                 if reason == "DCS schema header is truncated"
         ));
@@ -1046,7 +1113,7 @@ mod tests {
         plain[8..16].copy_from_slice(&0u64.to_le_bytes());
 
         assert!(matches!(
-            decode_schema_plain(plain),
+            decode_schema_plain_with_references(plain, &BTreeMap::new()),
             Err(DcsCodecError::UnsupportedLayout(reason))
                 if reason == "DCS schema document lengths are invalid"
         ));
@@ -1059,7 +1126,7 @@ mod tests {
         plain[8..16].copy_from_slice(&past_payload.to_le_bytes());
 
         assert!(matches!(
-            decode_schema_plain(plain),
+            decode_schema_plain_with_references(plain, &BTreeMap::new()),
             Err(DcsCodecError::UnsupportedLayout(reason))
                 if reason == "DCS schema document lengths are invalid"
         ));
@@ -1073,7 +1140,7 @@ mod tests {
         plain.truncate(DCS_HEADER_BYTES + first_len + settings_len);
 
         assert!(matches!(
-            decode_schema_plain(plain),
+            decode_schema_plain_with_references(plain, &BTreeMap::new()),
             Err(DcsCodecError::UnsupportedLayout(reason))
                 if reason == "DCS schema document lengths are invalid"
         ));
@@ -1088,7 +1155,7 @@ mod tests {
         let plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS), malformed]);
 
         assert!(matches!(
-            decode_schema_plain(plain),
+            decode_schema_plain_with_references(plain, &BTreeMap::new()),
             Err(DcsCodecError::InvalidXml(_))
         ));
     }
@@ -1453,41 +1520,90 @@ mod tests {
         assert_eq!(exported, native_template);
     }
 
-    /// KNOWN GAP (out of this work package's scope -- physical adapters get
-    /// test-only additions, never production logic changes): unlike the
-    /// standard/built-in style-reference form, the custom-StyleItem form's
-    /// raw `0:<uuid>` storage wire syntax needs a resolver (uuid <-> semantic
-    /// name) on *both* directions. `crates/ibcmd-xml` exposes that resolver
-    /// typed (`parse_dcs_area_template_storage_document_with_references`,
-    /// `emit_dcs_area_template_storage_document_with_references`,
-    /// `analyze_dcs_schema_template_documents_with_references`) -- proven
-    /// working end to end by
-    /// `mssql_dump::dcs::tests::platform_area_style_item_uuid_exports_byte_exact_through_common_codec`,
-    /// which already has an `object_refs` parameter available to thread a
-    /// real resolver through. But `compile_dcs`/`decode_dcs` here, this
-    /// physical adapter's own public entry points, have no such parameter at
-    /// all (a structural difference predating this package: the compile
-    /// direction has never carried configuration-object-reference context,
-    /// unlike the export/decode direction). Adding one would be a much more
-    /// invasive, cross-cutting production change to a widely used public
-    /// signature, out of scope here. Both directions therefore fail closed
-    /// for this exact coordinate through this specific entry point --
-    /// proven, not silently broken -- and the two tests below pin that.
+    /// The custom-StyleItem form's raw `0:<uuid>` storage wire syntax needs
+    /// a resolver (uuid <-> semantic name) on the compile direction, exactly
+    /// like the export/decode direction already had via `object_refs` (see
+    /// `mssql_dump::dcs::tests::platform_area_style_item_uuid_exports_byte_exact_through_common_codec`).
+    /// `compile_dcs_with_references` now carries that resolver; without one
+    /// supplied (the plain `compile_dcs`, or `compile_dcs_with_references`
+    /// given an empty/irrelevant map), this coordinate still fails closed --
+    /// the negative half of the original documented gap remains intact,
+    /// only the positive half (a supplied resolver actually working) is new.
     #[test]
-    fn area_style_item_uuid_compile_direction_does_not_yet_gate_resolver() {
+    fn area_style_item_uuid_compile_direction_gates_resolver() {
         let profile = DcsCodecProfile::fixture();
         let source = decode_base64_fixture(include_str!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-style-item-uuid/native-template.xml.b64"
         )));
+        // Without a resolver: still fails closed, exactly as before this
+        // work package.
         assert!(matches!(
             compile_dcs(&profile, DcsTemplateKind::Schema, &source),
             Err(DcsCodecError::UnsupportedSource(_))
         ));
+        assert!(matches!(
+            compile_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &source,
+                &BTreeMap::new()
+            ),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+        // A non-empty resolver that lacks the specific uuid this coordinate
+        // needs must fail closed exactly like an empty one -- having *some*
+        // entries is not the same as having the *right* one.
+        let mut irrelevant_only = BTreeMap::new();
+        irrelevant_only.insert(
+            "00000000-0000-0000-0000-000000000000".to_string(),
+            "SomeOtherStyleItem".to_string(),
+        );
+        assert!(matches!(
+            compile_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &source,
+                &irrelevant_only,
+            ),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+        // With the evidenced resolver entry: now compiles.
+        let mut style_reference_types = BTreeMap::new();
+        style_reference_types.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "CorpusAccent".to_string(),
+        );
+        assert!(
+            compile_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &source,
+                &style_reference_types,
+            )
+            .is_ok()
+        );
+        // An extra, unrelated entry alongside the needed one is silently
+        // ignored (never looked up), matching the TypeId precedent's
+        // lookup-only semantics documented on `compile_dcs_with_references`.
+        let mut with_extra_entry = style_reference_types.clone();
+        with_extra_entry.insert(
+            "11111111-1111-1111-1111-111111111111".to_string(),
+            "UnrelatedStyleItem".to_string(),
+        );
+        assert!(
+            compile_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &source,
+                &with_extra_entry,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
-    fn area_style_item_uuid_strict_decode_does_not_yet_gate_resolver() {
+    fn area_style_item_uuid_strict_decode_gates_resolver() {
         let profile = DcsCodecProfile::fixture();
         let packed = decode_base64_fixture(include_str!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
@@ -1497,10 +1613,275 @@ mod tests {
             format!("{:x}", Sha256::digest(&packed)),
             "680d04d34a12c54be75ac69a5c20ff82d2136736e11998b070c77d7abbbe3235"
         );
+        // Without a resolver: still fails closed, exactly as before this
+        // work package.
         assert!(matches!(
             decode_dcs(&profile, DcsTemplateKind::Schema, &packed),
             Err(DcsCodecError::UnsupportedSource(_))
         ));
+        assert!(matches!(
+            decode_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &packed,
+                &BTreeMap::new()
+            ),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+        // A non-empty resolver that lacks the specific uuid this coordinate
+        // needs must fail closed exactly like an empty one -- having *some*
+        // entries is not the same as having the *right* one.
+        let mut irrelevant_only = BTreeMap::new();
+        irrelevant_only.insert(
+            "00000000-0000-0000-0000-000000000000".to_string(),
+            "SomeOtherStyleItem".to_string(),
+        );
+        assert!(matches!(
+            decode_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &packed,
+                &irrelevant_only,
+            ),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+        // With the evidenced resolver entry: now decodes.
+        let mut style_reference_types = BTreeMap::new();
+        style_reference_types.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "CorpusAccent".to_string(),
+        );
+        assert!(
+            decode_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &packed,
+                &style_reference_types,
+            )
+            .is_ok()
+        );
+        // An extra, unrelated entry alongside the needed one is silently
+        // ignored (never looked up), matching the TypeId precedent's
+        // lookup-only semantics documented on `compile_dcs_with_references`.
+        let mut with_extra_entry = style_reference_types.clone();
+        with_extra_entry.insert(
+            "11111111-1111-1111-1111-111111111111".to_string(),
+            "UnrelatedStyleItem".to_string(),
+        );
+        assert!(
+            decode_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &packed,
+                &with_extra_entry,
+            )
+            .is_ok()
+        );
+    }
+
+    /// Gate test: the exact full cycle the fourth lab session's acceptance
+    /// attempt could not run (see `docs/evidence/dcs-style-link-probes-2214-20260814.md`,
+    /// A6 `NOT-COMPILABLE`) now works base-free with a resolver built from
+    /// the same fact the platform's own `StyleItems/<Name>.xml` source
+    /// object carries -- its `uuid` attribute -- exactly as the seed's
+    /// `StyleItems-CorpusAccent.xml` does. Native `Template.xml` compiles
+    /// to a terminal side-table document byte-identical to the one the
+    /// platform actually emitted inside `raw-unpacked.bin` (manifest-pinned
+    /// sha256, same `document_topology` slicing convention the sibling
+    /// `platform_area_style_color_reference_compiles_to_exact_side_table`
+    /// and `platform_area_appearance_web_color_compiles_to_exact_side_table`
+    /// tests use), and decoding that same body and re-emitting through the
+    /// shared codec reproduces the exact evidenced content again -- proving
+    /// compile and decode agree, not just that each independently produces
+    /// *something*.
+    ///
+    /// Whole-envelope byte equality against `raw-unpacked.bin` (primary
+    /// schema + settings document, not just the terminal side table) is
+    /// deliberately not asserted here: `native-template.xml`'s
+    /// `dataCompositionSchema`/`Settings` subtrees use a hoisted-namespace
+    /// (`v8:Type`, `dcsset:field`, ...) form, while the genuine platform
+    /// storage bytes for the *same two documents* use a minimized,
+    /// point-of-use namespace form (`Type xmlns="..."`, bare `field`, ...).
+    /// This is the identical pre-existing settings/primary reindentation
+    /// gap already documented as out of scope on the sibling
+    /// `platform_area_style_color_reference_compiles_to_exact_side_table`
+    /// and `platform_area_appearance_web_color_compiles_to_exact_side_table`
+    /// tests -- confirmed here to be unrelated to the style-resolver
+    /// feature itself (the resolver only touches the terminal AreaTemplate
+    /// document, which *does* match byte-for-byte below) and unrelated to
+    /// any StyleItem/color content (the divergent bytes are ordinary
+    /// `valueType`/`selection`/`order` elements the resolver never
+    /// touches). The genuine-bytes companion test below, which never goes
+    /// through our own compiler's primary/settings emission, proves
+    /// byte-exact whole-document equality instead -- exactly mirroring the
+    /// sibling cohorts' `*_native_packed_body_exports_exact_native_template`
+    /// pattern.
+    #[test]
+    fn platform_area_style_item_uuid_compiles_base_free_with_resolver_full_cycle() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-template.xml.b64"
+        )));
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/raw-unpacked.bin.b64"
+        )));
+        // manifest.json: retained.native_template.sha256 / retained.unpacked_body.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&source)),
+            "98f1857d3424198275cc35834a6635c28623568aae8d01a95cb5e220f91b818f"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&unpacked)),
+            "611abdfc11a72f536ecc90d134f0d0c17b833a87a228cecd1275231701825ef5"
+        );
+        // document_topology (manifest.json): header 24 bytes, one stored
+        // length for the primary schema (3029) and one for the sole
+        // settings document (1142); the terminal side-table SchemaFile is
+        // the remaining bytes.
+        let expected_area = unpacked[24 + 3029 + 1142..].to_vec();
+        assert_eq!(expected_area.len(), 1592);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected_area)),
+            "44e4c0a63f776b90901dc60a1b6cd7545413e8813e2cef63abf39a36c7c0f923"
+        );
+
+        // The resolver map: uuid (from seed/StyleItems-CorpusAccent.xml's
+        // own `uuid="..."` attribute, the same source tree fact a real
+        // compiler caller would scan) -> semantic name (from that same
+        // file's Properties/Name). Building this belongs to the caller, not
+        // this codec -- this map is the test's stand-in for that.
+        let mut style_reference_types = BTreeMap::new();
+        style_reference_types.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "CorpusAccent".to_string(),
+        );
+
+        // source XML -> body: must reproduce the exact platform-observed
+        // terminal side-table document, including the custom-StyleItem
+        // uuid coordinate.
+        let blob = compile_dcs_with_references(
+            &profile,
+            DcsTemplateKind::Schema,
+            &source,
+            &style_reference_types,
+        )
+        .expect("custom-StyleItem source must compile base-free with the resolver");
+        let decoded = decode_dcs_with_references(
+            &profile,
+            DcsTemplateKind::Schema,
+            &blob,
+            &style_reference_types,
+        )
+        .expect("compiled body must decode base-free with the same resolver");
+        assert_eq!(
+            decoded.documents().last().copied(),
+            Some(expected_area.as_slice())
+        );
+
+        // body -> XML: re-exporting the compiled body must reproduce the
+        // evidenced custom-StyleItem reference verbatim. (Byte-exact
+        // whole-document equality against native-template.xml is not
+        // asserted here for the reindentation reason documented on this
+        // test's doc comment; the genuine-bytes test below proves that
+        // instead.)
+        let object_refs = {
+            let mut object_refs = BTreeMap::new();
+            object_refs.insert(
+                "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+                "StyleItem.CorpusAccent".to_string(),
+            );
+            object_refs
+        };
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &object_refs,
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("decoded body must remain exportable");
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<dcscor:parameter>ЦветФона</dcscor:parameter>"));
+        assert!(exported_text.contains("d8p1:CorpusAccent"));
+        let color_at = exported_text.find("ЦветФона").unwrap();
+        let details_at = exported_text.find("Расшифровка").unwrap();
+        assert!(
+            color_at < details_at,
+            "style-reference item must precede Расшифровка"
+        );
+
+        // XML -> body: recompiling the exported source (with the same
+        // resolver, since the exported source still carries the
+        // name-lexical `d8p1:CorpusAccent` form that must resolve back to
+        // the uuid for storage) must reproduce the exact terminal
+        // side-table bytes the platform emitted.
+        let rebuilt = compile_dcs_schema_template_source_documents_with_references(
+            &exported,
+            &style_reference_types,
+        )
+        .expect("re-exported custom-StyleItem source must recompile base-free");
+        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+    }
+
+    /// Genuine-bytes companion to the gate test above: decodes the
+    /// platform's own deflate-compressed bytes directly -- not anything
+    /// ibcmd-rs compiled -- so the exact re-export match below is
+    /// independent of our own compiler direction's primary/settings
+    /// document emission. Mirrors
+    /// `platform_area_style_color_reference_native_packed_body_exports_exact_native_template`
+    /// and
+    /// `platform_area_appearance_web_color_native_packed_body_exports_exact_native_template`,
+    /// using the resolver-aware strict decode path this work package added
+    /// since this coordinate's storage form needs one.
+    #[test]
+    fn platform_area_style_item_uuid_native_packed_body_exports_exact_native_template() {
+        let profile = DcsCodecProfile::fixture();
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/raw-packed.bin.b64"
+        )));
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "680d04d34a12c54be75ac69a5c20ff82d2136736e11998b070c77d7abbbe3235"
+        );
+
+        let mut style_reference_types = BTreeMap::new();
+        style_reference_types.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "CorpusAccent".to_string(),
+        );
+        let decoded = decode_dcs_with_references(
+            &profile,
+            DcsTemplateKind::Schema,
+            &packed,
+            &style_reference_types,
+        )
+        .expect("genuine platform-packed body must decode base-free with the resolver");
+        let object_refs = {
+            let mut object_refs = BTreeMap::new();
+            object_refs.insert(
+                "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+                "StyleItem.CorpusAccent".to_string(),
+            );
+            object_refs
+        };
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &object_refs,
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("genuine platform side table must remain exportable");
+        assert_eq!(exported, native_template);
     }
 
     #[test]

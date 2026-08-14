@@ -364,7 +364,7 @@ pub fn compile_dcs_schema_template_source_documents_with_references(
         .chain(settings.iter().map(Vec::as_slice))
         .chain(std::iter::once(terminal.as_slice()))
         .collect::<Vec<_>>();
-    analyze_dcs_schema_template_documents(&borrowed)?;
+    analyze_dcs_schema_template_documents_with_references(&borrowed, reference_types)?;
     Ok(DcsSchemaTemplateOwnedDocuments {
         primary_schema_file: primary,
         settings,
