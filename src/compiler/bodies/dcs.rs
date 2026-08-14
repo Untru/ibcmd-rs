@@ -910,6 +910,113 @@ mod tests {
     }
 
     #[test]
+    fn platform_link_parameter_source_compiles_and_exports_through_common_codec() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-parameter/native-template.xml.b64"
+        )));
+        // manifest.json: retained.native_template.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&source)),
+            "381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698"
+        );
+        let compiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &source,
+        )
+        .expect("platform-attested link-parameter source must compile");
+        let decoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &compiled,
+        )
+        .unwrap();
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<parameter>LinkParam</parameter>"));
+        assert!(exported_text.contains("<parameterListAllowed>true</parameterListAllowed>"));
+        compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &exported,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn platform_link_expressions_source_compiles_and_exports_through_common_codec() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-expressions/native-template.xml.b64"
+        )));
+        // manifest.json: retained.native_template.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&source)),
+            "e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54"
+        );
+        let compiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &source,
+        )
+        .expect("platform-attested link-expressions source must compile");
+        let decoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &compiled,
+        )
+        .unwrap();
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<parameter>LinkParam</parameter>"));
+        assert!(exported_text.contains("<parameterListAllowed>true</parameterListAllowed>"));
+        assert!(
+            exported_text
+                .contains("<linkConditionExpression>SortKey &gt; 0</linkConditionExpression>")
+        );
+        assert!(exported_text.contains("<startExpression>SortKey</startExpression>"));
+        // Non-default (EDT defaultValue "true") retained verbatim.
+        assert!(exported_text.contains("<required>false</required>"));
+        let condition_at = exported_text.find("linkConditionExpression").unwrap();
+        let start_at = exported_text.find("startExpression").unwrap();
+        let required_at = exported_text.find("<required>").unwrap();
+        assert!(
+            condition_at < start_at && start_at < required_at,
+            "canonical order must be linkConditionExpression, startExpression, required"
+        );
+        let recompiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &exported,
+        )
+        .unwrap();
+        let redecoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &recompiled,
+        )
+        .unwrap();
+        assert_eq!(redecoded.document_count(), decoded.document_count());
+    }
+
+    #[test]
     fn schema_decoder_rejects_zero_settings_count() {
         let mut plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS)]);
         plain[4..8].copy_from_slice(&0u32.to_le_bytes());

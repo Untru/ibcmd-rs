@@ -998,6 +998,16 @@ fn parse_union(
         .map_err(DcsInnerSchemaError::Build)
 }
 
+/// Parses `dataSetLink`'s four mandatory children plus its evidenced
+/// optional extensions. Exactly three child counts are admitted: the base
+/// four alone; the base four plus `parameter`/`parameterListAllowed` (the
+/// `dcs-link-parameter` cohort); or all nine, with
+/// `linkConditionExpression`/`startExpression`/`required` layered on top
+/// (the `dcs-link-expressions` cohort). Any other count, any wrong order
+/// within a state, a duplicated field, or an unevidenced literal value all
+/// fail closed -- `exact_children` enforces exact name-and-position
+/// matching against whichever fixed list this coordinate selects, never a
+/// general reordering or subset search.
 fn parse_link(
     e: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
@@ -1005,14 +1015,82 @@ fn parse_link(
 ) -> Result<DcsSchemaDataSetLink, DcsInnerSchemaError> {
     require_name(e, Some(p.schema_namespace_uri()), "dataSetLink")?;
     require_no_attributes(e)?;
-    let c = exact_children(e, qp.link_children(), p.schema_namespace_uri())?;
-    DcsSchemaDataSetLink::new(
+    let base = qp.link_children();
+    let optional = qp.link_optional_children_canonical_order();
+    let child_count = element_children(e)?.len();
+    let names: Vec<String> = if child_count == base.len() {
+        base.to_vec()
+    } else if child_count == base.len() + 2 {
+        base.iter()
+            .cloned()
+            .chain(optional[..2].iter().cloned())
+            .collect()
+    } else if child_count == base.len() + 5 {
+        base.iter()
+            .cloned()
+            .chain(optional.iter().cloned())
+            .collect()
+    } else {
+        return unsupported("dataSetLink child cardinality is outside the cohort");
+    };
+    let c = exact_children(e, &names, p.schema_namespace_uri())?;
+    let link = DcsSchemaDataSetLink::new(
         canonical(text(c[0])?)?,
         canonical(text(c[1])?)?,
         canonical(text(c[2])?)?,
         canonical(text(c[3])?)?,
     )
-    .map_err(DcsInnerSchemaError::Build)
+    .map_err(DcsInnerSchemaError::Build)?;
+    let link = if c.len() >= 6 {
+        let parameter = canonical(text(c[4])?)?;
+        let parameter_list_allowed = parse_link_boolean(c[5])?;
+        if parameter.as_str() != qp.link_parameter_value()
+            || parameter_list_allowed != qp.link_parameter_list_allowed_value()
+        {
+            return unsupported(
+                "dataSetLink parameter/parameterListAllowed is outside the exact coordinate",
+            );
+        }
+        link.with_parameter(parameter, parameter_list_allowed)
+            .map_err(DcsInnerSchemaError::Build)?
+    } else {
+        link
+    };
+    if c.len() == 9 {
+        let link_condition_expression = canonical(text(c[6])?)?;
+        let start_expression = canonical(text(c[7])?)?;
+        let required = parse_link_boolean(c[8])?;
+        if link_condition_expression.as_str() != qp.link_condition_expression_value()
+            || start_expression.as_str() != qp.link_start_expression_value()
+            || required != qp.link_required_value()
+        {
+            return unsupported(
+                "dataSetLink linkConditionExpression/startExpression/required is outside the exact coordinate",
+            );
+        }
+        link.with_expressions(link_condition_expression, start_expression, required)
+            .map_err(DcsInnerSchemaError::Build)
+    } else {
+        Ok(link)
+    }
+}
+
+/// Reads a scalar boolean element's text strictly as the XML lexical
+/// tokens `true`/`false`; any other text (including `1`/`0`, mixed case,
+/// or attributes) fails closed rather than being coerced.
+fn parse_link_boolean(e: &ParsedElement) -> Result<bool, DcsInnerSchemaError> {
+    match text(e)?.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => unsupported("dataSetLink boolean field is outside the exact coordinate"),
+    }
+}
+
+/// The `dataSetLink` boolean-field lexical spelling (`true`/`false`,
+/// matching the evidenced XML tokens exactly). Callers only invoke this
+/// once the co-occurring group's presence is already established.
+fn link_boolean_text(value: Option<bool>) -> &'static str {
+    if value == Some(true) { "true" } else { "false" }
 }
 
 /// Emits the exact canonical XML 2.20 source spelling for the bounded cohort.
@@ -1227,6 +1305,33 @@ pub fn emit_dcs_query_union_link_source_document(
         ),
     ] {
         scalar(&mut out, 2, name, value.as_str());
+    }
+    if let Some(parameter) = schema.link().parameter() {
+        scalar(&mut out, 2, "parameter", parameter.as_str());
+        scalar(
+            &mut out,
+            2,
+            "parameterListAllowed",
+            link_boolean_text(schema.link().parameter_list_allowed()),
+        );
+    }
+    if let (Some(link_condition_expression), Some(start_expression)) = (
+        schema.link().link_condition_expression(),
+        schema.link().start_expression(),
+    ) {
+        scalar(
+            &mut out,
+            2,
+            "linkConditionExpression",
+            link_condition_expression.as_str(),
+        );
+        scalar(&mut out, 2, "startExpression", start_expression.as_str());
+        scalar(
+            &mut out,
+            2,
+            "required",
+            link_boolean_text(schema.link().required()),
+        );
     }
     line(&mut out, 1, "</dataSetLink>");
     emit_variant(
@@ -2118,10 +2223,38 @@ fn parse_document(bytes: &[u8]) -> Result<ParsedElement, DcsInnerSchemaError> {
             }
             Event::Decl(_) => {}
             Event::Eof => break,
-            Event::Comment(_) | Event::PI(_) | Event::DocType(_) | Event::GeneralRef(_) => {
-                return unsupported(
-                    "comments, PI, doctype and general references are outside the cohort",
-                );
+            // The five predefined XML entities (never a numeric character
+            // reference, and never a DTD-defined general entity, neither of
+            // which any evidenced cohort exercises) resolve to their plain
+            // character and are appended as text -- e.g. `SortKey &gt; 0`
+            // (the evidenced `dataSetLink` `linkConditionExpression`
+            // literal) is exactly this, not a hidden/rejected construct.
+            Event::GeneralRef(bytes_ref) => {
+                let name = bytes_ref
+                    .decode()
+                    .map_err(|x| DcsInnerSchemaError::Malformed(x.to_string()))?;
+                let resolved = match name.as_ref() {
+                    "lt" => '<',
+                    "gt" => '>',
+                    "amp" => '&',
+                    "apos" => '\'',
+                    "quot" => '"',
+                    _ => {
+                        return unsupported(
+                            "only the five predefined XML entity references are admitted",
+                        );
+                    }
+                };
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(ParsedNode::Text(resolved.to_string()));
+                } else {
+                    return Err(DcsInnerSchemaError::Malformed(
+                        "general reference outside root".into(),
+                    ));
+                }
+            }
+            Event::Comment(_) | Event::PI(_) | Event::DocType(_) => {
+                return unsupported("comments, PI and doctype are outside the cohort");
             }
         }
     }
@@ -2582,6 +2715,38 @@ mod tests {
         let body = decode_base64_fixture(include_str!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        vec![
+            body[24..24 + first].to_vec(),
+            body[24 + first..24 + first + second].to_vec(),
+            body[24 + first + second..].to_vec(),
+        ]
+    }
+
+    fn link_parameter_documents() -> Vec<Vec<u8>> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-parameter/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        vec![
+            body[24..24 + first].to_vec(),
+            body[24 + first..24 + first + second].to_vec(),
+            body[24 + first + second..].to_vec(),
+        ]
+    }
+
+    fn link_expressions_documents() -> Vec<Vec<u8>> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-expressions/raw-unpacked.bin.b64"
         )));
         let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
         assert_eq!(count, 1);
@@ -3637,6 +3802,78 @@ mod tests {
     }
 
     #[test]
+    fn platform_link_parameter_parses_and_emits_exact_source() {
+        let documents = link_parameter_documents();
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-parameter/native-template.xml.b64"
+        )));
+        let schema = parse_dcs_query_union_link_storage_document(
+            &documents[0],
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-link-parameter",
+        )
+        .unwrap();
+        assert_eq!(schema.link().parameter().unwrap().as_str(), "LinkParam");
+        assert_eq!(schema.link().parameter_list_allowed(), Some(true));
+        assert_eq!(schema.link().link_condition_expression(), None);
+        assert_eq!(schema.link().start_expression(), None);
+        assert_eq!(schema.link().required(), None);
+        let expected_text = std::str::from_utf8(&expected).unwrap();
+        let emitted = emit_dcs_query_union_link_source_document(
+            &schema,
+            &[inline_settings(
+                expected_text.trim_start_matches('\u{feff}'),
+            )],
+        )
+        .unwrap();
+        assert_eq!(emitted, expected);
+    }
+
+    #[test]
+    fn platform_link_expressions_parses_and_emits_exact_source() {
+        let documents = link_expressions_documents();
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-expressions/native-template.xml.b64"
+        )));
+        let schema = parse_dcs_query_union_link_storage_document(
+            &documents[0],
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-link-expressions",
+        )
+        .unwrap();
+        assert_eq!(schema.link().parameter().unwrap().as_str(), "LinkParam");
+        assert_eq!(schema.link().parameter_list_allowed(), Some(true));
+        assert_eq!(
+            schema.link().link_condition_expression().unwrap().as_str(),
+            "SortKey > 0"
+        );
+        assert_eq!(
+            schema.link().start_expression().unwrap().as_str(),
+            "SortKey"
+        );
+        // Non-default (EDT defaultValue "true") retained verbatim.
+        assert_eq!(schema.link().required(), Some(false));
+        let expected_text = std::str::from_utf8(&expected).unwrap();
+        // Confirmed directly against the retained storage bytes (not just
+        // the native re-export): the platform already canonicalizes to
+        // linkConditionExpression, startExpression, required at the
+        // *storage* layer itself, even though the seed submitted
+        // required, startExpression, linkConditionExpression -- the
+        // typed IR round-trips straight to the exact native byte sequence
+        // in this same canonical order both directions.
+        let emitted = emit_dcs_query_union_link_source_document(
+            &schema,
+            &[inline_settings(
+                expected_text.trim_start_matches('\u{feff}'),
+            )],
+        )
+        .unwrap();
+        assert_eq!(emitted, expected);
+    }
+
+    #[test]
     fn query_union_link_rejects_unattested_query_and_field_values() {
         let documents = query_union_link_documents();
         let primary = String::from_utf8(documents[0].clone()).unwrap();
@@ -3653,6 +3890,134 @@ mod tests {
                 Err(DcsInnerSchemaError::UnsupportedSource(_))
             ));
         }
+    }
+
+    #[test]
+    fn data_set_link_rejects_unknown_child() {
+        let documents = link_expressions_documents();
+        let primary = String::from_utf8(documents[0].clone()).unwrap();
+        // Renames one of the nine evidenced children to an unrecognized
+        // name, keeping cardinality at 9: `exact_children`'s positional
+        // name check must reject it, not silently accept an unknown tag
+        // in an otherwise-plausible position.
+        let mutated = primary.replacen(
+            "<required>false</required>",
+            "<requiredFlag>false</requiredFlag>",
+            1,
+        );
+        assert_ne!(
+            mutated, primary,
+            "mutation must actually change the fixture"
+        );
+        assert!(matches!(
+            parse_dcs_query_union_link_storage_document(
+                mutated.as_bytes(),
+                ProfileId::parse("provider:mssql-legacy").unwrap(),
+                "fixture:link-unknown-child",
+            ),
+            Err(DcsInnerSchemaError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
+    fn data_set_link_rejects_wrong_order() {
+        let documents = link_expressions_documents();
+        let primary = String::from_utf8(documents[0].clone()).unwrap();
+        // Swaps startExpression and required -- adjacent in the evidenced
+        // canonical order -- to the reverse; `exact_children`'s positional
+        // check must reject this, not accept any permutation of the same
+        // element set.
+        let mutated = primary.replacen(
+            "<startExpression>SortKey</startExpression>\r\n\t\t\t<required>false</required>",
+            "<required>false</required>\r\n\t\t\t<startExpression>SortKey</startExpression>",
+            1,
+        );
+        assert_ne!(
+            mutated, primary,
+            "mutation must actually change the fixture"
+        );
+        assert!(matches!(
+            parse_dcs_query_union_link_storage_document(
+                mutated.as_bytes(),
+                ProfileId::parse("provider:mssql-legacy").unwrap(),
+                "fixture:link-wrong-order",
+            ),
+            Err(DcsInnerSchemaError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
+    fn data_set_link_rejects_duplicate_field() {
+        let documents = link_expressions_documents();
+        let primary = String::from_utf8(documents[0].clone()).unwrap();
+        // Replaces linkConditionExpression with a second `required`,
+        // duplicating a field while keeping cardinality at 9: the
+        // positional name check must reject the duplicate in
+        // linkConditionExpression's evidenced slot, not silently accept it
+        // as if it were that field.
+        let mutated = primary.replacen(
+            "<linkConditionExpression>SortKey &gt; 0</linkConditionExpression>",
+            "<required>false</required>",
+            1,
+        );
+        assert_ne!(
+            mutated, primary,
+            "mutation must actually change the fixture"
+        );
+        assert!(matches!(
+            parse_dcs_query_union_link_storage_document(
+                mutated.as_bytes(),
+                ProfileId::parse("provider:mssql-legacy").unwrap(),
+                "fixture:link-duplicate-field",
+            ),
+            Err(DcsInnerSchemaError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
+    fn data_set_link_rejects_non_boolean_in_boolean_field() {
+        let documents = link_expressions_documents();
+        let primary = String::from_utf8(documents[0].clone()).unwrap();
+        for mutated in [
+            primary.replacen("<required>false</required>", "<required>0</required>", 1),
+            primary.replacen(
+                "<required>false</required>",
+                "<required>False</required>",
+                1,
+            ),
+            primary.replacen(
+                "<parameterListAllowed>true</parameterListAllowed>",
+                "<parameterListAllowed>1</parameterListAllowed>",
+                1,
+            ),
+        ] {
+            assert_ne!(
+                mutated, primary,
+                "mutation must actually change the fixture"
+            );
+            assert!(matches!(
+                parse_dcs_query_union_link_storage_document(
+                    mutated.as_bytes(),
+                    ProfileId::parse("provider:mssql-legacy").unwrap(),
+                    "fixture:link-non-boolean",
+                ),
+                Err(DcsInnerSchemaError::UnsupportedSource(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn data_set_link_storage_rejects_corrupted_bytes() {
+        let documents = link_expressions_documents();
+        let corrupted = &documents[0][..documents[0].len() / 2];
+        assert!(matches!(
+            parse_dcs_query_union_link_storage_document(
+                corrupted,
+                ProfileId::parse("provider:mssql-legacy").unwrap(),
+                "fixture:link-corrupted",
+            ),
+            Err(DcsInnerSchemaError::Malformed(_) | DcsInnerSchemaError::UnsupportedSource(_))
+        ));
     }
 
     #[test]

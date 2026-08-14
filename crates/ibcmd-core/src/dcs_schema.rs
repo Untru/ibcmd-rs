@@ -332,6 +332,10 @@ pub enum DcsSchemaBuildError {
     /// The three additional scalar-typed parameters require the existing
     /// string `Caption` parameter to already be present.
     ScalarParametersRequireStringParameter,
+    /// The evidenced `dataSetLink` `linkConditionExpression`/`startExpression`/
+    /// `required` triple only co-occurs with `parameter`/`parameterListAllowed`
+    /// already present; no cohort proves the triple alone.
+    LinkExpressionsRequireParameter,
 }
 
 impl Display for DcsSchemaBuildError {
@@ -435,6 +439,9 @@ impl Display for DcsSchemaBuildError {
             ),
             Self::ScalarParametersRequireStringParameter => formatter.write_str(
                 "DCS schema scalar-typed parameters require the existing string Caption parameter",
+            ),
+            Self::LinkExpressionsRequireParameter => formatter.write_str(
+                "DCS schema dataSetLink linkConditionExpression/startExpression/required require parameter/parameterListAllowed",
             ),
         }
     }
@@ -576,7 +583,18 @@ impl DcsSchemaUnionDataSet {
     }
 }
 
-/// One exact direct link from the Query to the Union.
+/// One exact direct link from the Query to the Union. Four fields
+/// (`source_data_set`/`destination_data_set`/`source_expression`/
+/// `destination_expression`) are always present, authenticated by the base
+/// `dcs-query-union-link` cohort. Two evidenced optional extensions layer
+/// on top, each only proven together as a whole group, never partially:
+///
+/// - `parameter`/`parameter_list_allowed` (the `dcs-link-parameter`
+///   cohort's `LinkParam`/`true` pair).
+/// - `link_condition_expression`/`start_expression`/`required` (the
+///   `dcs-link-expressions` cohort's triple), which itself only co-occurs
+///   with `parameter`/`parameter_list_allowed` already present -- no
+///   cohort proves the triple alone.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DcsSchemaDataSetLink {
@@ -584,6 +602,11 @@ pub struct DcsSchemaDataSetLink {
     destination_data_set: CanonicalText,
     source_expression: CanonicalText,
     destination_expression: CanonicalText,
+    parameter: Option<CanonicalText>,
+    parameter_list_allowed: Option<bool>,
+    link_condition_expression: Option<CanonicalText>,
+    start_expression: Option<CanonicalText>,
+    required: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -593,18 +616,52 @@ struct DcsSchemaDataSetLinkWire {
     destination_data_set: CanonicalText,
     source_expression: CanonicalText,
     destination_expression: CanonicalText,
+    #[serde(default)]
+    parameter: Option<CanonicalText>,
+    #[serde(default)]
+    parameter_list_allowed: Option<bool>,
+    #[serde(default)]
+    link_condition_expression: Option<CanonicalText>,
+    #[serde(default)]
+    start_expression: Option<CanonicalText>,
+    #[serde(default)]
+    required: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for DcsSchemaDataSetLink {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = DcsSchemaDataSetLinkWire::deserialize(deserializer)?;
-        Self::new(
+        let value = Self::new(
             wire.source_data_set,
             wire.destination_data_set,
             wire.source_expression,
             wire.destination_expression,
         )
-        .map_err(de::Error::custom)
+        .map_err(de::Error::custom)?;
+        let value = match (wire.parameter, wire.parameter_list_allowed) {
+            (Some(parameter), Some(parameter_list_allowed)) => value
+                .with_parameter(parameter, parameter_list_allowed)
+                .map_err(de::Error::custom)?,
+            (None, None) => value,
+            _ => {
+                return Err(de::Error::custom(
+                    "DCS dataSetLink parameter and parameterListAllowed must both be present or both absent",
+                ));
+            }
+        };
+        match (
+            wire.link_condition_expression,
+            wire.start_expression,
+            wire.required,
+        ) {
+            (Some(link_condition_expression), Some(start_expression), Some(required)) => value
+                .with_expressions(link_condition_expression, start_expression, required)
+                .map_err(de::Error::custom),
+            (None, None, None) => Ok(value),
+            _ => Err(de::Error::custom(
+                "DCS dataSetLink linkConditionExpression/startExpression/required must all be present or all absent",
+            )),
+        }
     }
 }
 
@@ -720,8 +777,51 @@ impl DcsSchemaDataSetLink {
             destination_data_set,
             source_expression,
             destination_expression,
+            parameter: None,
+            parameter_list_allowed: None,
+            link_condition_expression: None,
+            start_expression: None,
+            required: None,
         })
     }
+
+    /// Enables the exact `parameter`/`parameterListAllowed` pair
+    /// authenticated by the dedicated 2214 `dcs-link-parameter` cohort.
+    /// The two always co-occur; there is no evidenced state with only one
+    /// of them present.
+    pub fn with_parameter(
+        mut self,
+        parameter: CanonicalText,
+        parameter_list_allowed: bool,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("link parameter", &parameter)?;
+        self.parameter = Some(parameter);
+        self.parameter_list_allowed = Some(parameter_list_allowed);
+        Ok(self)
+    }
+
+    /// Enables the exact `linkConditionExpression`/`startExpression`/
+    /// `required` triple authenticated by the dedicated 2214
+    /// `dcs-link-expressions` cohort. Requires [`Self::with_parameter`] to
+    /// have already been applied: no cohort proves this triple without the
+    /// `parameter`/`parameterListAllowed` pair also present.
+    pub fn with_expressions(
+        mut self,
+        link_condition_expression: CanonicalText,
+        start_expression: CanonicalText,
+        required: bool,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        if self.parameter.is_none() {
+            return Err(DcsSchemaBuildError::LinkExpressionsRequireParameter);
+        }
+        require_text("link condition expression", &link_condition_expression)?;
+        require_text("link start expression", &start_expression)?;
+        self.link_condition_expression = Some(link_condition_expression);
+        self.start_expression = Some(start_expression);
+        self.required = Some(required);
+        Ok(self)
+    }
+
     pub const fn source_data_set(&self) -> &CanonicalText {
         &self.source_data_set
     }
@@ -733,6 +833,21 @@ impl DcsSchemaDataSetLink {
     }
     pub const fn destination_expression(&self) -> &CanonicalText {
         &self.destination_expression
+    }
+    pub const fn parameter(&self) -> Option<&CanonicalText> {
+        self.parameter.as_ref()
+    }
+    pub const fn parameter_list_allowed(&self) -> Option<bool> {
+        self.parameter_list_allowed
+    }
+    pub const fn link_condition_expression(&self) -> Option<&CanonicalText> {
+        self.link_condition_expression.as_ref()
+    }
+    pub const fn start_expression(&self) -> Option<&CanonicalText> {
+        self.start_expression.as_ref()
+    }
+    pub const fn required(&self) -> Option<bool> {
+        self.required
     }
 }
 
@@ -2126,6 +2241,71 @@ mod tests {
         let mut drift = serde_json::from_str::<serde_json::Value>(&json).unwrap();
         drift["link"]["destination_expression"] = serde_json::json!("Other");
         assert!(serde_json::from_value::<DcsSchemaQueryUnionLink>(drift).is_err());
+    }
+
+    #[test]
+    fn data_set_link_optional_fields_are_grouped_bounded_and_serde_stable() {
+        let base = DcsSchemaDataSetLink::new(
+            text("QueryRows"),
+            text("UnionRows"),
+            text("SortKey"),
+            text("SortKey"),
+        )
+        .unwrap();
+        assert_eq!(base.parameter(), None);
+        assert_eq!(base.parameter_list_allowed(), None);
+        assert_eq!(base.link_condition_expression(), None);
+        assert_eq!(base.start_expression(), None);
+        assert_eq!(base.required(), None);
+
+        // dcs-link-parameter cohort: parameter + parameterListAllowed only.
+        let with_parameter = base
+            .clone()
+            .with_parameter(text("LinkParam"), true)
+            .unwrap();
+        assert_eq!(with_parameter.parameter(), Some(&text("LinkParam")));
+        assert_eq!(with_parameter.parameter_list_allowed(), Some(true));
+        assert_eq!(with_parameter.link_condition_expression(), None);
+        let json = serde_json::to_string(&with_parameter).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaDataSetLink>(&json).unwrap(),
+            with_parameter
+        );
+
+        // dcs-link-expressions cohort: the full 6-field state.
+        let with_expressions = with_parameter
+            .clone()
+            .with_expressions(text("SortKey > 0"), text("SortKey"), false)
+            .unwrap();
+        assert_eq!(
+            with_expressions.link_condition_expression(),
+            Some(&text("SortKey > 0"))
+        );
+        assert_eq!(with_expressions.start_expression(), Some(&text("SortKey")));
+        assert_eq!(with_expressions.required(), Some(false));
+        let json = serde_json::to_string(&with_expressions).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaDataSetLink>(&json).unwrap(),
+            with_expressions
+        );
+        assert_ne!(with_expressions, with_parameter);
+
+        // The expressions triple has no evidenced state without the
+        // parameter pair already present.
+        assert!(matches!(
+            base.clone()
+                .with_expressions(text("SortKey > 0"), text("SortKey"), false),
+            Err(DcsSchemaBuildError::LinkExpressionsRequireParameter)
+        ));
+
+        // Wire-level partial presence (one of a co-occurring pair/triple
+        // present without the rest) must fail closed, not silently default.
+        let mut partial_pair: serde_json::Value = serde_json::from_str(&json).unwrap();
+        partial_pair["parameter_list_allowed"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<DcsSchemaDataSetLink>(partial_pair).is_err());
+        let mut partial_triple: serde_json::Value = serde_json::from_str(&json).unwrap();
+        partial_triple["required"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<DcsSchemaDataSetLink>(partial_triple).is_err());
     }
 
     #[test]

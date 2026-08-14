@@ -2659,6 +2659,19 @@ pub const BUNDLED_DCS_INNER_SCHEMA_EVIDENCE_JSON: &str =
 pub const BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-query-union-link/manifest.json"
 );
+/// Immutable platform-authenticated `dataSetLink` `parameter`/
+/// `parameterListAllowed` optional-pair coordinate. Third-lab-session
+/// draft; `compiler_acceptance` is intentionally absent -- not claimed.
+pub const BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-link-parameter/manifest.json"
+);
+/// Immutable platform-authenticated `dataSetLink`
+/// `linkConditionExpression`/`startExpression`/`required` optional-triple
+/// coordinate, layered on the `dcs-link-parameter` pair. Third-lab-session
+/// draft; `compiler_acceptance` is intentionally absent -- not claimed.
+pub const BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-link-expressions/manifest.json"
+);
 /// Immutable platform-authenticated style-free AreaTemplate coordinate.
 pub const BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-template/manifest.json"
@@ -3451,6 +3464,18 @@ pub struct DcsQueryUnionLinkPolicy {
     field_type_qname: String,
     query_text: String,
     field: String,
+    /// The five evidenced optional `dataSetLink` children, in their
+    /// canonical relative order (expanded QNames), positioned after the
+    /// four mandatory `link_children`. Any present subset must appear as
+    /// a subsequence of this order; see
+    /// [`Self::link_parameter_value`]/[`Self::link_parameter_list_allowed_value`]/
+    /// etc. for the paired exact evidenced literals.
+    link_optional_children_canonical_order: Vec<String>,
+    link_parameter_value: String,
+    link_parameter_list_allowed_value: bool,
+    link_condition_expression_value: String,
+    link_start_expression_value: String,
+    link_required_value: bool,
 }
 
 impl DcsQueryUnionLinkPolicy {
@@ -3477,6 +3502,34 @@ impl DcsQueryUnionLinkPolicy {
     }
     pub fn field(&self) -> &str {
         &self.field
+    }
+    pub fn link_optional_children_canonical_order(&self) -> &[String] {
+        &self.link_optional_children_canonical_order
+    }
+    /// The only evidenced `dataSetLink` `parameter` text, `LinkParam`.
+    pub fn link_parameter_value(&self) -> &str {
+        &self.link_parameter_value
+    }
+    /// The only evidenced `dataSetLink` `parameterListAllowed` value,
+    /// `true` -- retained verbatim by the platform despite EDT's
+    /// `qualifier:unsettable` annotation on this attribute.
+    pub fn link_parameter_list_allowed_value(&self) -> bool {
+        self.link_parameter_list_allowed_value
+    }
+    /// The only evidenced `dataSetLink` `linkConditionExpression` text,
+    /// `SortKey > 0`.
+    pub fn link_condition_expression_value(&self) -> &str {
+        &self.link_condition_expression_value
+    }
+    /// The only evidenced `dataSetLink` `startExpression` text, `SortKey`.
+    pub fn link_start_expression_value(&self) -> &str {
+        &self.link_start_expression_value
+    }
+    /// The only evidenced `dataSetLink` `required` value, `false` --
+    /// deliberately non-default (EDT declares `defaultValue "true"`) and
+    /// retained verbatim, not omitted or coerced to the default.
+    pub fn link_required_value(&self) -> bool {
+        self.link_required_value
     }
 }
 
@@ -5184,6 +5237,68 @@ struct DcsQueryUnionLinkCohort {
     link_children: Vec<String>,
     query: String,
     field: String,
+}
+
+/// Evidence: native-only round trips authenticate the exact `dataSetLink`
+/// `parameter`/`parameterListAllowed` optional pair, immediately after
+/// `destinationExpression`. No `compiler_acceptance` block yet --
+/// third-lab-session draft, per the coordinator's explicit instruction not
+/// to claim it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsLinkParameterEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsLinkParameterCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsLinkParameterCohort {
+    link_children_order_after_delta: Vec<String>,
+    parameter_value: String,
+    parameter_list_allowed_value: String,
+    parameter_list_allowed_omitted: bool,
+}
+
+/// Evidence: native-only round trips authenticate the exact `dataSetLink`
+/// `linkConditionExpression`/`startExpression`/`required` optional triple
+/// layered on top of [`DcsLinkParameterEvidence`]'s pair. The platform
+/// reorders the three newly-submitted children to
+/// `linkConditionExpression, startExpression, required` in the canonical
+/// re-export. No `compiler_acceptance` block yet -- same as
+/// [`DcsLinkParameterEvidence`].
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsLinkExpressionsEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsLinkExpressionsCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsLinkExpressionsCohort {
+    link_children_order_submitted: Vec<String>,
+    link_children_order_canonical: Vec<String>,
+    required_value: String,
+    required_omitted: bool,
+    start_expression_value: String,
+    link_condition_expression_value: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -10968,7 +11083,11 @@ pub fn bundled_dcs_inner_schema_policy() -> Result<DcsInnerSchemaPolicy, SchemaE
 }
 
 pub fn bundled_dcs_query_union_link_policy() -> Result<DcsQueryUnionLinkPolicy, SchemaError> {
-    parse_dcs_query_union_link_policy(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON)
+    parse_dcs_query_union_link_policy(
+        BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+        BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+        BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+    )
 }
 
 /// Returns the exact first style-free AreaTemplate policy.
@@ -11765,6 +11884,8 @@ mod dcs_parameter_scalar_types_policy_tests {
 
 fn parse_dcs_query_union_link_policy(
     evidence_json: &str,
+    link_parameter_json: &str,
+    link_expressions_json: &str,
 ) -> Result<DcsQueryUnionLinkPolicy, SchemaError> {
     let manifest: DcsQueryUnionLinkManifest = serde_json::from_str(evidence_json)
         .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
@@ -11848,6 +11969,78 @@ fn parse_dcs_query_union_link_policy(
             "DCS Query/Union/link evidence drifted from the exact cohort".into(),
         ));
     }
+    let link_parameter: DcsLinkParameterEvidence = serde_json::from_str(link_parameter_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if link_parameter.schema_version != 1
+        || link_parameter.fixture_id != "8.3.27.2214-xml-2.20-dcs-link-parameter"
+        || link_parameter.cohort.link_children_order_after_delta
+            != [
+                "sourceDataSet",
+                "destinationDataSet",
+                "sourceExpression",
+                "destinationExpression",
+                "parameter",
+                "parameterListAllowed",
+            ]
+        || link_parameter.cohort.parameter_value != "LinkParam"
+        || link_parameter.cohort.parameter_list_allowed_value != "true"
+        || link_parameter.cohort.parameter_list_allowed_omitted
+        || link_parameter.negative_observations.len() != 1
+        || link_parameter.non_claims.len() != 5
+        || link_parameter.platform.is_null()
+        || link_parameter.seed.is_null()
+        || link_parameter.rounds.is_null()
+        || link_parameter.retained.is_null()
+        || link_parameter.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidDcsWriterEvidence(
+            "DCS link-parameter evidence drifted from the exact coordinate".into(),
+        ));
+    }
+    let link_expressions: DcsLinkExpressionsEvidence = serde_json::from_str(link_expressions_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if link_expressions.schema_version != 1
+        || link_expressions.fixture_id != "8.3.27.2214-xml-2.20-dcs-link-expressions"
+        || link_expressions.cohort.link_children_order_submitted
+            != [
+                "sourceDataSet",
+                "destinationDataSet",
+                "sourceExpression",
+                "destinationExpression",
+                "parameter",
+                "parameterListAllowed",
+                "required",
+                "startExpression",
+                "linkConditionExpression",
+            ]
+        || link_expressions.cohort.link_children_order_canonical
+            != [
+                "sourceDataSet",
+                "destinationDataSet",
+                "sourceExpression",
+                "destinationExpression",
+                "parameter",
+                "parameterListAllowed",
+                "linkConditionExpression",
+                "startExpression",
+                "required",
+            ]
+        || link_expressions.cohort.required_value != "false"
+        || link_expressions.cohort.required_omitted
+        || link_expressions.cohort.start_expression_value != "SortKey"
+        || link_expressions.cohort.link_condition_expression_value != "SortKey > 0"
+        || link_expressions.negative_observations.len() != 3
+        || link_expressions.non_claims.len() != 4
+        || link_expressions.platform.is_null()
+        || link_expressions.seed.is_null()
+        || link_expressions.rounds.is_null()
+        || link_expressions.retained.is_null()
+        || link_expressions.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidDcsWriterEvidence(
+            "DCS link-expressions evidence drifted from the exact coordinate".into(),
+        ));
+    }
     const SCHEMA_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/schema";
     let q = |name: &str| format!("{{{SCHEMA_NS}}}{name}");
     Ok(DcsQueryUnionLinkPolicy {
@@ -11866,6 +12059,20 @@ fn parse_dcs_query_union_link_policy(
         field_type_qname: q("DataSetFieldField"),
         query_text: manifest.cohort.query,
         field: manifest.cohort.field,
+        link_optional_children_canonical_order: [
+            "parameter",
+            "parameterListAllowed",
+            "linkConditionExpression",
+            "startExpression",
+            "required",
+        ]
+        .map(q)
+        .into(),
+        link_parameter_value: link_parameter.cohort.parameter_value,
+        link_parameter_list_allowed_value: true,
+        link_condition_expression_value: link_expressions.cohort.link_condition_expression_value,
+        link_start_expression_value: link_expressions.cohort.start_expression_value,
+        link_required_value: false,
     })
 }
 
@@ -14057,11 +14264,30 @@ mod tests {
         assert_eq!(policy.field(), "SortKey");
         assert_eq!(policy.query_children().len(), 4);
         assert_eq!(policy.union_children().len(), 2);
+        assert_eq!(
+            policy.link_optional_children_canonical_order(),
+            [
+                "{http://v8.1c.ru/8.1/data-composition-system/schema}parameter",
+                "{http://v8.1c.ru/8.1/data-composition-system/schema}parameterListAllowed",
+                "{http://v8.1c.ru/8.1/data-composition-system/schema}linkConditionExpression",
+                "{http://v8.1c.ru/8.1/data-composition-system/schema}startExpression",
+                "{http://v8.1c.ru/8.1/data-composition-system/schema}required",
+            ]
+        );
+        assert_eq!(policy.link_parameter_value(), "LinkParam");
+        assert!(policy.link_parameter_list_allowed_value());
+        assert_eq!(policy.link_condition_expression_value(), "SortKey > 0");
+        assert_eq!(policy.link_start_expression_value(), "SortKey");
+        assert!(!policy.link_required_value());
         let mut value: serde_json::Value =
             serde_json::from_str(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON).unwrap();
         value["cohort"]["field"] = serde_json::json!("Other");
         assert!(matches!(
-            parse_dcs_query_union_link_policy(&serde_json::to_string(&value).unwrap()),
+            parse_dcs_query_union_link_policy(
+                &serde_json::to_string(&value).unwrap(),
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+            ),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("Query/Union/link evidence drifted")
         ));
@@ -14069,16 +14295,136 @@ mod tests {
             serde_json::from_str(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON).unwrap();
         hash_drift["retained"]["packed_body"]["sha256"] = serde_json::json!("0".repeat(64));
         assert!(
-            parse_dcs_query_union_link_policy(&serde_json::to_string(&hash_drift).unwrap())
-                .is_err()
+            parse_dcs_query_union_link_policy(
+                &serde_json::to_string(&hash_drift).unwrap(),
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+            )
+            .is_err()
         );
         let mut extra: serde_json::Value =
             serde_json::from_str(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON).unwrap();
         extra["platform"]["unexpected"] = serde_json::json!(true);
         assert!(matches!(
-            parse_dcs_query_union_link_policy(&serde_json::to_string(&extra).unwrap()),
+            parse_dcs_query_union_link_policy(
+                &serde_json::to_string(&extra).unwrap(),
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+            ),
             Err(SchemaError::InvalidJson(_))
         ));
+    }
+
+    #[test]
+    fn link_parameter_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsLinkParameterEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn link_parameter_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON).unwrap();
+
+        let mut order_drift = raw.clone();
+        order_drift["cohort"]["link_children_order_after_delta"] = serde_json::json!([
+            "sourceDataSet",
+            "destinationDataSet",
+            "parameter",
+            "sourceExpression",
+            "destinationExpression",
+            "parameterListAllowed"
+        ]);
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                &serde_json::to_string(&order_drift).unwrap(),
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+            )
+            .is_err()
+        );
+
+        let mut value_drift = raw;
+        value_drift["cohort"]["parameter_value"] = serde_json::json!("Other");
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                &serde_json::to_string(&value_drift).unwrap(),
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_query_union_link_policy().is_ok());
+    }
+
+    #[test]
+    fn link_expressions_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsLinkExpressionsEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn link_expressions_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON).unwrap();
+
+        let mut canonical_order_drift = raw.clone();
+        canonical_order_drift["cohort"]["link_children_order_canonical"] = serde_json::json!([
+            "sourceDataSet",
+            "destinationDataSet",
+            "sourceExpression",
+            "destinationExpression",
+            "parameter",
+            "parameterListAllowed",
+            "startExpression",
+            "linkConditionExpression",
+            "required"
+        ]);
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                &serde_json::to_string(&canonical_order_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut required_omitted_drift = raw.clone();
+        required_omitted_drift["cohort"]["required_omitted"] = serde_json::json!(true);
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                &serde_json::to_string(&required_omitted_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut condition_drift = raw;
+        condition_drift["cohort"]["link_condition_expression_value"] =
+            serde_json::json!("SortKey < 0");
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                &serde_json::to_string(&condition_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_query_union_link_policy().is_ok());
+        assert!(
+            bundled_dcs_query_union_link_policy()
+                .unwrap()
+                .link_parameter_list_allowed_value()
+        );
     }
 
     #[test]

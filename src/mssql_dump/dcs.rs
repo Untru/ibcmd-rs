@@ -3028,6 +3028,83 @@ mod tests {
     }
 
     #[test]
+    fn platform_link_parameter_exports_byte_exact_through_common_codec() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-parameter/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-parameter/native-template.xml.b64"
+        )));
+        // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "5211a2ac9fa02d3351686f48963445e0062e2d174327fcaf47026a6f11a6b9ae"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698"
+        );
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        // Proves the existing route already transparently threads the new
+        // optional `dataSetLink` fields through the shared codec: no
+        // per-field wiring was added here, this call is unchanged from the
+        // base `dcs-query-union-link` corpus's own equivalent test.
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_link_expressions_exports_byte_exact_through_common_codec() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-expressions/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-link-expressions/native-template.xml.b64"
+        )));
+        // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "c78d5cbf882eec93cec27480f200f1dad7b0d98c5938e8c2d115c4c1f4b46ce3"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54"
+        );
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        // Same transparency proof as the link-parameter cohort, for the
+        // fuller six-plus-three-field state (including the platform's own
+        // canonical reordering of the three newest fields).
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn platform_style_free_area_template_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
