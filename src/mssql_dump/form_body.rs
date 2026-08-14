@@ -3719,16 +3719,27 @@ pub(super) fn parse_form_dynamic_list_field_map_items(
 ) -> Vec<FormDynamicListField> {
     let mut field_name_by_suffix = BTreeMap::<String, String>::new();
     let mut item_id_by_suffix = BTreeMap::<String, String>::new();
-    for window in settings_fields.windows(2) {
+    // Non-overlapping pairs only: `windows(2)` used to slide by one, so each
+    // "FiledsMapItemId{N}"/"FiledsMapItemName{N}" key literal was tried
+    // against BOTH of its neighbors, not just its real pair partner. When a
+    // reversed-order layout put the key right after its own value (the
+    // correct pairing) *and* right before the next suffix's own value (a
+    // structurally-valid-looking but spurious pairing), the spurious call
+    // could silently overwrite the correct entry with the next suffix's
+    // data — observed as a one-suffix shift with the last value duplicated.
+    // `chunks_exact(2)` keeps each key literal paired with exactly its own
+    // neighbor, in whichever of the two supported orderings this layout
+    // uses, with no cross-pair contamination.
+    for pair in settings_fields.chunks_exact(2) {
         collect_form_dynamic_list_field_map_item(
-            window[0],
-            window[1],
+            pair[0],
+            pair[1],
             &mut field_name_by_suffix,
             &mut item_id_by_suffix,
         );
         collect_form_dynamic_list_field_map_item(
-            window[1],
-            window[0],
+            pair[1],
+            pair[0],
             &mut field_name_by_suffix,
             &mut item_id_by_suffix,
         );

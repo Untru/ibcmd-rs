@@ -16259,7 +16259,13 @@ fn parse_information_register_type_pattern_element(
         (r#""B""#, 1) => Some(ConstantValueType::Boolean),
         (r#""S""#, 1) => Some(ConstantValueType::String {
             length: None,
-            allowed_length_flag: 0,
+            // `format_metadata_types_xml` (mod.rs:~35717) already forces
+            // "Variable" whenever `length` is `None`
+            // (`length.map(|_| *allowed_length_flag).unwrap_or(1)`), so the
+            // actual emitted XML for a length-less String pattern has
+            // always been "Variable" — storing `0` here just desynced the
+            // parsed struct from that proven output. Store `1` to match.
+            allowed_length_flag: 1,
         }),
         (r#""S""#, 3) => {
             let allowed_length_flag = fields.get(2)?.trim().parse::<u8>().ok()?;
@@ -29027,7 +29033,11 @@ fn parse_metadata_type_pattern_element_with_builtin(
         r#""B""# => Some(ConstantValueType::Boolean),
         r#""S""# if element.len() == 1 => Some(ConstantValueType::String {
             length: None,
-            allowed_length_flag: 0,
+            // Same reasoning as `parse_information_register_type_pattern_element`
+            // (mod.rs:~16260): the serializer already forces "Variable" when
+            // `length` is `None`, so `1` is the value that matches actual
+            // emitted output.
+            allowed_length_flag: 1,
         }),
         r#""S""# if element.len() == 3 => Some(ConstantValueType::String {
             length: Some(element.get(1)?.trim().parse().ok()?),
