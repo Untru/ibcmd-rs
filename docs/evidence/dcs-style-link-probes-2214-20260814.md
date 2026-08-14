@@ -49,34 +49,42 @@ value-элементе первой попытки S2) вызвала XDTO-ош�
 | `dcs-area-style-color-reference` | ACCEPTED | `4269ac193b76bb88ecaaf65a5b4ef9ed12a31cdcf1d36d8ac429de68cf10f970` (= `rounds.native_template_sha256`) |
 | `dcs-link-parameter` | ACCEPTED | `381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698` (= `rounds.native_template_sha256`) |
 | `dcs-link-expressions` | ACCEPTED | `e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54` (= `rounds.native_template_sha256`) |
-| `dcs-area-style-item-uuid` | NOT-COMPILABLE | `DCS source cannot be compiled base-free: source AreaTemplate is outside the evidenced storage coordinate` |
+| `dcs-area-style-item-uuid` | ACCEPTED | `98f1857d3424198275cc35834a6635c28623568aae8d01a95cb5e220f91b818f` (= `rounds.native_template_sha256`) |
 
-Три координаты приняты платформой с первой попытки; re-export побайтово совпал с
-`rounds.native_template_sha256` соответствующего манифеста у всех трёх. Блок
+Все четыре координаты приняты платформой; re-export побайтово совпал с
+`rounds.native_template_sha256` соответствующего манифеста у всех четырёх. Блок
 `compiler_acceptance` (10 полей: `status`, `method`, `candidate_body_unpacked_size`,
 `candidate_body_unpacked_sha256`, `candidate_cf_sha256`, `platform_saved_cf_size`,
 `platform_saved_cf_sha256`, `reexported_template_size`, `reexported_template_sha256`,
-`reexport_matches_two_round_native_template`) записан в `manifest.json` каждой из этих
-трёх координат между `document_topology` и `cohort`.
+`reexport_matches_two_round_native_template`) записан в `manifest.json` каждой из
+четырёх координат между `document_topology` и `cohort`.
 
-`dcs-area-style-item-uuid` осталась `NOT-COMPILABLE`: `compile_dcs` отклонил retained
-round-2 native `Template.xml` до попытки построения кандидата CF, VM-загрузки,
-сохранения или re-export — потому что этот адаптерский путь не несёт resolver для
-custom-StyleItem/uuid-координаты, та же асимметрия, что уже задокументирована для
-decode-направления в `def4e7b`. Манифест `dcs-area-style-item-uuid` остаётся БЕЗ блока
-`compiler_acceptance`; уточнённая формулировка результата — в его собственном
-`non_claims`, ошибка сохранена дословно.
+`dcs-area-style-item-uuid` в четвёртой сессии вернулась `NOT-COMPILABLE`: `compile_dcs`
+отклонял retained round-2 native `Template.xml` до попытки построения кандидата CF,
+VM-загрузки, сохранения или re-export, потому что тогдашний адаптерский путь не нёс
+resolver для custom-StyleItem/uuid-координаты — та же асимметрия, что уже
+задокументирована для decode-направления в `def4e7b`. Одиннадцатая сессия закрыла этот
+разрыв: `2fc495a` (минимизация primary/settings документов в storage-форму) сделала
+компилированный кандидат побайтово равным genuine plaintext, а отдельно найденный и
+устранённый баг гарнесса — `cf overlay --raw-asset`, получавший уже упакованный
+(дважды-deflate) байт-поток вместо PLAINTEXT-входа, из-за чего `pack_raw_deflated_blob_from_bytes`
+сжимал его повторно — объяснял наблюдавшуюся в 7-й и 10-й сессиях `Stream format error`
+при `config export`. После подачи в `--raw-asset` именно PLAINTEXT (однослойная
+компрессия) полный цикл compile→overlay→import→save→export прошёл чисто с первой
+попытки: `Template.xml`, `Configuration.xml` и `StyleItems/CorpusAccent.xml` совпали с
+retained-хэшами манифеста побайтово. Манифест `dcs-area-style-item-uuid` теперь несёт
+блок `compiler_acceptance` наравне с тремя остальными координатами; устаревшая
+NOT-COMPILABLE-формулировка снята из его `non_claims`.
 
-Приёмка доказана только для этих трёх ровно указанных координат — не для прочих
-значений, позиций или для resolver-осведомлённого compile-направления, которое пока не
-реализовано.
+Приёмка доказана для всех четырёх координат этого корпуса — не для прочих
+значений, позиций или для более широкого style-reference-resolver'а, который пока не
+обобщён за пределы этой одной evidenced координаты.
 
 ## Границы
 
-`compiler_acceptance` есть у трёх из четырёх новых корпусов (см. «Приёмочная сессия
-компилятора» выше); четвёртый (`dcs-area-style-item-uuid`) намеренно остаётся без него.
-Прочие Kind StyleItem (Font/Border), несколько style-ссылок, списки значений
-link-параметров, `linkItem` containment — вне доказанного объёма.
+`compiler_acceptance` есть у всех четырёх новых корпусов (см. «Приёмочная сессия
+компилятора» выше). Прочие Kind StyleItem (Font/Border), несколько style-ссылок, списки
+значений link-параметров, `linkItem` containment — вне доказанного объёма.
 
 ## Cleanup
 

@@ -4233,18 +4233,19 @@ struct DcsAreaStyleColorReferenceCohort {
 /// difference (a raw `0:<uuid>` reference instead of a named lexical
 /// token).
 ///
-/// Unlike [`DcsAreaStyleColorReferenceEvidence`], this struct has no
-/// `compiler_acceptance` field and never will until a resolver-aware
-/// compile-direction slice exists: the fourth-lab-session acceptance
-/// session *attempted* base-free compilation for this coordinate and it
+/// The fourth-lab-session acceptance attempt for this coordinate initially
 /// came back `not_compilable` ("source AreaTemplate is outside the
-/// evidenced storage coordinate") -- `compile_dcs` carries no
-/// style-reference resolver, the same asymmetry already documented for the
-/// decode direction in commit `def4e7b`. This is a proven, not merely
-/// assumed, negative result (see the manifest's own `non_claims`), not an
-/// omission -- so it is deliberately not represented as an optional field
-/// here, to avoid inviting a future author to "fill it in" with a synthetic
-/// value.
+/// evidenced storage coordinate") because `compile_dcs` carried no
+/// style-reference resolver for the custom-StyleItem/uuid-resolution case --
+/// the same asymmetry already documented for the decode direction in commit
+/// `def4e7b`. An eleventh-session follow-up root-caused and closed that gap
+/// (commit `2fc495a`'s primary/settings storage minimization) and separately
+/// found and worked around a self-inflicted double-deflate bug in the
+/// acceptance harness's own `cf overlay --raw-asset` invocation (feeding it
+/// the compiler's already-packed bytes instead of its plaintext caused a
+/// second, unwanted compression pass); with both resolved, the coordinate now
+/// carries a `compiler_acceptance` block like its
+/// [`DcsAreaStyleColorReferenceEvidence`] sibling.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsAreaStyleItemUuidEvidence {
@@ -4255,6 +4256,7 @@ struct DcsAreaStyleItemUuidEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsAreaStyleItemUuidCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -11730,12 +11732,13 @@ fn parse_dcs_area_template_policy(
         || style_item_uuid.cohort.storage_value_form
             != "0:4a9d8536-ff59-4a90-a1cf-646d241dc53c (raw uuid reference, NOT a named lexical form)"
         || style_item_uuid.negative_observations.len() != 3
-        || style_item_uuid.non_claims.len() != 5
+        || style_item_uuid.non_claims.len() != 4
         || style_item_uuid.platform.is_null()
         || style_item_uuid.seed.is_null()
         || style_item_uuid.rounds.is_null()
         || style_item_uuid.retained.is_null()
         || style_item_uuid.document_topology.is_null()
+        || style_item_uuid.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidJson(
             "DCS AreaTemplate style-item-uuid evidence drifted from the exact coordinate"

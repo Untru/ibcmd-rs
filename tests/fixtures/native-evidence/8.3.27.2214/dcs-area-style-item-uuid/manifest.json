@@ -69,6 +69,18 @@
     "trailing_area_schema_file_sha256": "44e4c0a63f776b90901dc60a1b6cd7545413e8813e2cef63abf39a36c7c0f923",
     "trailing_area_schema_file_size": 1592
   },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "compile_dcs_with_references on the retained round-2 native Template.xml plus the style-resolver derived from seed StyleItems/CorpusAccent.xml (2fc495a's primary/settings-document storage minimization applied), overlaid via `cf overlay --raw-asset` fed the compiler's INFLATED PLAINTEXT rather than its packed output -- so the flag's own single raw-deflate compression pass (pack_raw_deflated_blob_from_bytes) is the only one applied; the double-deflate trap that produced sessions 7 and 10's 'Stream format error' (candidate PACKED bytes fed to --raw-asset get deflated a second time) is documented and avoided -- into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 5787,
+    "candidate_body_unpacked_sha256": "611abdfc11a72f536ecc90d134f0d0c17b833a87a228cecd1275231701825ef5",
+    "candidate_cf_sha256": "ff598f9287ff6d7441544f05f77ec55773c83b87601281e928e941b77fbf2bf7",
+    "platform_saved_cf_size": 81743,
+    "platform_saved_cf_sha256": "851b0295fa16494d6063060de90b763af77deb90b376bb298eda45ba2c8b8500",
+    "reexported_template_size": 5029,
+    "reexported_template_sha256": "98f1857d3424198275cc35834a6635c28623568aae8d01a95cb5e220f91b818f",
+    "reexport_matches_two_round_native_template": true
+  },
   "cohort": {
     "template_name": "AreaProbe",
     "style_item_name": "CorpusAccent",
@@ -104,7 +116,6 @@
     "No claim about StyleItem Kind values other than Color (Font, Border are explicitly out of scope per the design's non-claims).",
     "No claim about multiple StyleItem references, or StyleItem references outside a single AreaTemplate appearance context.",
     "No claim that the observed ChildObjects order generalizes beyond this exact 3-child cohort (Language + StyleItem + Report); the ordering rule itself is not derived, only this one observed instance.",
-    "compiler_acceptance was attempted in a later acceptance session and found not_compilable: base-free compilation failed with \"source AreaTemplate is outside the evidenced storage coordinate\" before any candidate CF, VM load, or platform re-export was attempted, because compile_dcs carries no style-reference resolver for this custom-StyleItem/uuid-resolution coordinate -- the same compile-direction asymmetry already documented for the decode direction in commit def4e7b, not a bug to route around; this manifest deliberately carries no compiler_acceptance block until a resolver-aware compile-direction slice exists.",
     "Provenance: produced in a probe/design session (scratchpad/design/E2-STYLE-REF-DESIGN.md), not yet reviewed or integrated."
   ]
 }
