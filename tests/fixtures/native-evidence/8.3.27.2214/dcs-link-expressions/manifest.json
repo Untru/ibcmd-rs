@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-link-expressions",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "E6-LINK-OPTIONAL-DESIGN.md Probe L2: append <required>false</required>, <startExpression>SortKey</startExpression>, <linkConditionExpression>SortKey &gt; 0</linkConditionExpression> to L1's already-accepted dataSetLink. required=false is deliberately non-default (EDT defaultValue \"true\") to test omission-semantics. Insertion order is explicitly a hypothesis per the design (\"Порядок вставки — гипотеза\").",
+    "path": "seed/Template.xml",
+    "size": 2727,
+    "sha256": "9143f9047073f2f5b00f9766922483292b6e480a997dd97b0e5b1201afdef104"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "55c154840f8cf30916dcb80244ae861c2f9b7ea505514ba67e084ae903026a0a",
+    "round_2_cf_sha256": "e1ace0f8cb0e1024b4318783f00d30a85c5329213d42195dcf355dafb74bb78e",
+    "native_template_sha256": "e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54",
+    "packed_body_sha256": "c78d5cbf882eec93cec27480f200f1dad7b0d98c5938e8c2d115c4c1f4b46ce3",
+    "unpacked_body_sha256": "b05c5eeb25ae20123ec2972e7ac6742b3c241477687c5dbfa1cea640f5dbdb68",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 87452,
+      "sha256": "e1ace0f8cb0e1024b4318783f00d30a85c5329213d42195dcf355dafb74bb78e"
+    },
+    "native_template": {
+      "path": "native-template.xml.b64",
+      "decoded_size": 2727,
+      "sha256": "e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54"
+    },
+    "packed_body": {
+      "path": "raw-packed.bin.b64",
+      "decoded_size": 840,
+      "sha256": "c78d5cbf882eec93cec27480f200f1dad7b0d98c5938e8c2d115c4c1f4b46ce3"
+    },
+    "unpacked_body": {
+      "path": "raw-unpacked.bin.b64",
+      "decoded_size": 3146,
+      "sha256": "b05c5eeb25ae20123ec2972e7ac6742b3c241477687c5dbfa1cea640f5dbdb68"
+    }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [
+      1995,
+      864
+    ],
+    "primary_schema_sha256": "6e8bf3b4150ee0c2ef0c1898f8481bf6ab9544beb9f81a5cbde1b3509a695c03",
+    "settings_sha256": "183a0cfa6326ca893c56663b07461497ec264ce45409844d656f32f1546c3734",
+    "trailing_area_schema_file_sha256": "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81",
+    "trailing_area_schema_file_size": 263
+  },
+  "cohort": {
+    "link_children_order_submitted": [
+      "sourceDataSet",
+      "destinationDataSet",
+      "sourceExpression",
+      "destinationExpression",
+      "parameter",
+      "parameterListAllowed",
+      "required",
+      "startExpression",
+      "linkConditionExpression"
+    ],
+    "link_children_order_canonical": [
+      "sourceDataSet",
+      "destinationDataSet",
+      "sourceExpression",
+      "destinationExpression",
+      "parameter",
+      "parameterListAllowed",
+      "linkConditionExpression",
+      "startExpression",
+      "required"
+    ],
+    "required_value": "false",
+    "required_omitted": false,
+    "start_expression_value": "SortKey",
+    "link_condition_expression_value": "SortKey > 0"
+  },
+  "negative_observations": [
+    "The platform reorders the three newly-added optional children (required, startExpression, linkConditionExpression) to linkConditionExpression, startExpression, required in the canonical re-export -- neither the submitted order nor alphabetical order.",
+    "required=false (non-default relative to EDT's declared defaultValue \"true\") is retained verbatim in the re-export, not omitted or coerced to the default -- directly answers the design's omission-semantics question for this field.",
+    "parameterListAllowed=true (from L1) remains present and unchanged alongside the three new L2 fields."
+  ],
+  "non_claims": [
+    "No claim about the canonical order of these three fields in any submission order other than the one tested (required, startExpression, linkConditionExpression) -- a different submitted order might or might not produce the same canonical order.",
+    "No claim about linkItem containment, multiple dataSetLink elements, or parameter value lists -- explicitly out of scope per the design.",
+    "compiler_acceptance is intentionally omitted from this draft; not part of this probe session.",
+    "Provenance: produced in a probe/design session (scratchpad/design/E6-LINK-OPTIONAL-DESIGN.md), not yet reviewed or integrated."
+  ]
+}

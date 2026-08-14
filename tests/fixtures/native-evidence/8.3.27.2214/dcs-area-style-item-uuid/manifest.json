@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-area-style-item-uuid",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "E2-STYLE-REF-DESIGN.md Probe S2: add a new StyleItem configuration object (CorpusAccent, Kind=Color, Value=web:Red) plus a dcsat:appearance item referencing it by name (style:CorpusAccent). StyleItem source XML shape derived strictly from src/mssql_dump/mod.rs format_style_item_source_xml/parse_style_item_properties_from_text (production writer for mssql-stage-style-item-object, not dead code) and the (\"StyleItem\",\"StyleItems\") family table entry (src/module_blob.rs:25377), cross-checked against src/compiler/root.rs CONFIGURATION_SECTION_1 membership.",
+    "path": "seed/Template.xml",
+    "size": 5031,
+    "sha256": "e9a73ec651b57d9c010215a8cb6afc26c2265171b6f949dd12d81d2fe4542598"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "e308d9b2d6d5c950bd91b00f032ed427de9555551a51e5e3693f57984dd3838e",
+    "round_2_cf_sha256": "bd64046b8e86ca9db7aa2bd6c74f2255d5c8efa2db580f249a1cf65bf1da1e49",
+    "native_template_sha256": "98f1857d3424198275cc35834a6635c28623568aae8d01a95cb5e220f91b818f",
+    "packed_body_sha256": "680d04d34a12c54be75ac69a5c20ff82d2136736e11998b070c77d7abbbe3235",
+    "unpacked_body_sha256": "611abdfc11a72f536ecc90d134f0d0c17b833a87a228cecd1275231701825ef5",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 81747,
+      "sha256": "bd64046b8e86ca9db7aa2bd6c74f2255d5c8efa2db580f249a1cf65bf1da1e49"
+    },
+    "native_template": {
+      "path": "native-template.xml.b64",
+      "decoded_size": 5029,
+      "sha256": "98f1857d3424198275cc35834a6635c28623568aae8d01a95cb5e220f91b818f"
+    },
+    "packed_body": {
+      "path": "raw-packed.bin.b64",
+      "decoded_size": 1283,
+      "sha256": "680d04d34a12c54be75ac69a5c20ff82d2136736e11998b070c77d7abbbe3235"
+    },
+    "unpacked_body": {
+      "path": "raw-unpacked.bin.b64",
+      "decoded_size": 5787,
+      "sha256": "611abdfc11a72f536ecc90d134f0d0c17b833a87a228cecd1275231701825ef5"
+    },
+    "native_configuration": {
+      "path": "native-configuration.xml.b64",
+      "decoded_size": 10497,
+      "sha256": "193e665b81eaa3fbb390644860ef0bfaf3d6f48bbe852d7a8fb33d33dd3be24f"
+    },
+    "native_style_item": {
+      "path": "native-style-item.xml.b64",
+      "decoded_size": 1168,
+      "sha256": "a62b959471790db01992201232f08238fb84ff70013897614af11944b6f39213"
+    }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [
+      3029,
+      1142
+    ],
+    "primary_schema_sha256": "5124cc181b46586289d2a1ff667f2e8e659c27beefcf806f1f54cc256d82be0c",
+    "settings_sha256": "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4",
+    "trailing_area_schema_file_sha256": "44e4c0a63f776b90901dc60a1b6cd7545413e8813e2cef63abf39a36c7c0f923",
+    "trailing_area_schema_file_size": 1592
+  },
+  "cohort": {
+    "template_name": "AreaProbe",
+    "style_item_name": "CorpusAccent",
+    "style_item_seed_uuid": "4a9d8536-ff59-4a90-a1cf-646d241dc53c",
+    "style_item_kind": "Color",
+    "style_item_declared_value": "web:Red",
+    "new_item_parameter": "ЦветФона",
+    "new_item_value_text_native": "d8p1:CorpusAccent",
+    "appearance_item_order_after_delta": [
+      "ЦветФона",
+      "Расшифровка"
+    ],
+    "child_objects_order_native": [
+      "Language",
+      "StyleItem",
+      "Report"
+    ],
+    "child_objects_order_predicted_before_vm": [
+      "StyleItem",
+      "Language",
+      "Report"
+    ],
+    "child_objects_prediction_correct": false,
+    "storage_parameter_lexeme": "BackColor",
+    "storage_value_form": "0:4a9d8536-ff59-4a90-a1cf-646d241dc53c (raw uuid reference, NOT a named lexical form)"
+  },
+  "negative_observations": [
+    "At the native XML layer a custom StyleItem reference is lexically indistinguishable from a standard built-in style reference (both style:<Name> -> auto-prefixed d8p1:<Name>).",
+    "Internally, however, a custom StyleItem reference resolves to a raw '0:<uuid>' value (the StyleItem's own uuid attribute), unlike a standard built-in style reference which stays a named lexical form internally (see sibling S1 draft manifest) -- this is a genuine, previously-only-hypothesized (via unit tests) platform behavior now confirmed by real bytes.",
+    "The pre-VM cross-evidence-derived prediction for ChildObjects order (ascending class_id within CONFIGURATION_SECTION_1, i.e. StyleItem before Language) was WRONG; the real platform emits Language before StyleItem. No new InternalInfo entry was needed either way (confirmed correct)."
+  ],
+  "non_claims": [
+    "No claim about StyleItem Kind values other than Color (Font, Border are explicitly out of scope per the design's non-claims).",
+    "No claim about multiple StyleItem references, or StyleItem references outside a single AreaTemplate appearance context.",
+    "No claim that the observed ChildObjects order generalizes beyond this exact 3-child cohort (Language + StyleItem + Report); the ordering rule itself is not derived, only this one observed instance.",
+    "compiler_acceptance is intentionally omitted from this draft; not part of this probe session.",
+    "Provenance: produced in a probe/design session (scratchpad/design/E2-STYLE-REF-DESIGN.md), not yet reviewed or integrated."
+  ]
+}
