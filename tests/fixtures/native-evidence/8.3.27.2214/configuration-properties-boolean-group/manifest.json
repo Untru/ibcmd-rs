@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-configuration-properties-boolean-group",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "CHIPS-BATCH-SPEC.md Block C, CP1: boolean group -- IncludeHelpInContents, UseManagedFormInOrdinaryApplication, UseOrdinaryFormInManagedApplication all changed false -> true in Configuration.xml of the dcs-area-style-item-uuid base tree (the retained all-default reference). These are the exact 3 named properties the spec proposed, confirmed by grep to be the ONLY 3 top-level boolean-valued Configuration properties outside the 38-entry mobile-capability <app:use> set; no additional booleans found or added.",
+    "path": "seed/Configuration.xml",
+    "note": "Delta is confined to 3 element text-node changes inside <Properties>; everything else in the wrapper tree is the real platform's own config export output of the retained base CF, unmodified.",
+    "size": 10494,
+    "sha256": "a0c0f53382f31871e766af73a772b25a2c6825340fe69f66321ad2e33af794de"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "3504a95f32fb55e8e85847297abbf868c15b7b1c918ced0f24af86939576b1bf",
+    "round_2_cf_sha256": "0c2a3010d6c72a45caaf75724f9c0c329391fd854031db228981cf6fd2fe3421",
+    "native_configuration_sha256": "a0c0f53382f31871e766af73a772b25a2c6825340fe69f66321ad2e33af794de",
+    "packed_body_round1_sha256": "ff2161c24779596d02a51584ba9f1488e9b02462cc894f4ddce0b207258daa4b",
+    "packed_body_round2_sha256": "6069216a09672223e294f3c52dd6950614e1e7b4ffe21be766883e9b0e35cc59",
+    "unpacked_body_round1_sha256": "f95b825a84982e79ccb7d43edeafe3dbca941ed0b8aa354360833440239dc488",
+    "unpacked_body_round2_sha256": "0892e9f58219e9e550f55978aeb55af32908ccb23fe2eee4f8b15d4efeb3e361",
+    "native_configuration_equal": true,
+    "content_equal_excl_footer_noise": true,
+    "packed_body_byte_equal": false,
+    "packed_body_note": "packed/unpacked round1 vs round2 differ ONLY in a trailing per-instance footer integer (variable ASCII digit count); the Properties-tuple content prefix is byte-identical between rounds (verified positionally, tail 20 bytes excluded).",
+    "round_trips": 2,
+    "import_attempts_used": 1,
+    "import_attempts_allowed": 3
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 81737,
+      "sha256": "0c2a3010d6c72a45caaf75724f9c0c329391fd854031db228981cf6fd2fe3421"
+    },
+    "native_configuration": {
+      "path": "native-configuration.xml.b64",
+      "decoded_size": 10494,
+      "sha256": "a0c0f53382f31871e766af73a772b25a2c6825340fe69f66321ad2e33af794de"
+    },
+    "packed_body": {
+      "path": "config-body-packed.bin.b64",
+      "decoded_size": 1806,
+      "sha256": "6069216a09672223e294f3c52dd6950614e1e7b4ffe21be766883e9b0e35cc59"
+    },
+    "unpacked_body": {
+      "path": "config-body-unpacked.bin.b64",
+      "decoded_size": 6513,
+      "sha256": "0892e9f58219e9e550f55978aeb55af32908ccb23fe2eee4f8b15d4efeb3e361"
+    }
+  },
+  "cohort": {
+    "changed_properties": [
+      "IncludeHelpInContents",
+      "UseManagedFormInOrdinaryApplication",
+      "UseOrdinaryFormInManagedApplication"
+    ],
+    "changed_property_values": "false -> true (all three)"
+  },
+  "negative_observations": [
+    "group-level, поля внутри группы не индивидуально разграничены"
+  ],
+  "proven_facts": [
+    "tuple-diff.md: offsets 428, 623, 625 (group-level, поля внутри группы не индивидуально разграничены)"
+  ],
+  "non_claims": [
+    "No claim about which of the 3 named properties maps to which of the 3 changed tuple offsets (428 vs. 623/625) -- this combined-delta probe changed all three simultaneously and cannot disambiguate individually; would require 3 separate single-boolean probes.",
+    "No claim about the semantics or field-order rationale of the config-body tuple beyond the raw offset observation.",
+    "compiler_acceptance is intentionally omitted from this probe; not part of this probe session.",
+    "Template and document_topology not applicable -- Configuration-level probe, not template-based.",
+    "Provenance: produced in a chip-fix probe session (scratchpad/evidence-batch/CHIPS-BATCH-SPEC.md), not yet reviewed or integrated."
+  ]
+}

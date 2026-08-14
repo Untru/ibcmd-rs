@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-configuration-properties-enum-group",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "CHIPS-BATCH-SPEC.md Block C, CP2: enum group -- ModalityUseMode=Use, SynchronousPlatformExtensionAndAddInCallUseMode=Use, InterfaceCompatibilityMode=Version8_2, all three literal values explicitly proposed by the spec text and submitted as an authorized hypothesis to the platform (no XSD/dictionary cross-evidence exists anywhere in the repo for these enum's legal value sets). DataLockControlMode, ObjectAutonumerationMode, MainClientApplicationWindowMode intentionally left unchanged: no cross-evidence for any alternative value and no spec-proposed candidate -- do-not-invent discipline applied.",
+    "path": "seed/Configuration.xml",
+    "note": "Delta is confined to 3 element text-node changes inside <Properties>; everything else in the wrapper tree is the real platform's own config export output of the retained base CF, unmodified.",
+    "size": 10479,
+    "sha256": "97a1c9a5b314587da1f1bf0babac6995af889c54067de704d4856d665a3de3e7"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "8a050855b13ef205ebdab87d1c2641665a4f64352ae45a602ea1605bf51d45c6",
+    "round_2_cf_sha256": "32e9cf8be130ce284d3ca2473bbc957b256e82d26b9eea37a7501c289b7b26ed",
+    "native_configuration_sha256": "97a1c9a5b314587da1f1bf0babac6995af889c54067de704d4856d665a3de3e7",
+    "packed_body_round1_sha256": "585905ac5138e1d4a25e66ab8c5aecb4f2a940c503482c4052cf9c8a54bdafea",
+    "packed_body_round2_sha256": "36a5f5ed3906c30a74c512488cbce36767315215163d3791afc035f07e99dbc1",
+    "unpacked_body_round1_sha256": "783059c45f1d11d8721bed3c879bb019997e7edbb3a1cb6da7d7c7694db8b831",
+    "unpacked_body_round2_sha256": "52e88c37bbab88fcf6fe20d010bcfd6470fc0151793de993641a3869b9a5653b",
+    "native_configuration_equal": true,
+    "content_equal_excl_footer_noise": true,
+    "packed_body_byte_equal": false,
+    "packed_body_note": "packed/unpacked round1 vs round2 differ ONLY in a trailing per-instance footer integer (variable ASCII digit count); the Properties-tuple content prefix is byte-identical between rounds (verified positionally, tail 20 bytes excluded).",
+    "round_trips": 2,
+    "import_attempts_used": 1,
+    "import_attempts_allowed": 3
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 82411,
+      "sha256": "32e9cf8be130ce284d3ca2473bbc957b256e82d26b9eea37a7501c289b7b26ed"
+    },
+    "native_configuration": {
+      "path": "native-configuration.xml.b64",
+      "decoded_size": 10479,
+      "sha256": "97a1c9a5b314587da1f1bf0babac6995af889c54067de704d4856d665a3de3e7"
+    },
+    "packed_body": {
+      "path": "config-body-packed.bin.b64",
+      "decoded_size": 1807,
+      "sha256": "36a5f5ed3906c30a74c512488cbce36767315215163d3791afc035f07e99dbc1"
+    },
+    "unpacked_body": {
+      "path": "config-body-unpacked.bin.b64",
+      "decoded_size": 6513,
+      "sha256": "52e88c37bbab88fcf6fe20d010bcfd6470fc0151793de993641a3869b9a5653b"
+    }
+  },
+  "cohort": {
+    "changed_properties": [
+      "ModalityUseMode",
+      "SynchronousPlatformExtensionAndAddInCallUseMode",
+      "InterfaceCompatibilityMode"
+    ],
+    "changed_property_values": "DontUse->Use, DontUse->Use, TaxiEnableVersion8_2->Version8_2",
+    "unchanged_properties_no_cross_evidence": [
+      "DataLockControlMode",
+      "ObjectAutonumerationMode",
+      "MainClientApplicationWindowMode"
+    ]
+  },
+  "negative_observations": [
+    "No XSD or enum-value dictionary was found anywhere in the repository (crates/ibcmd-schema/data/*.json, all .rs/.md sources) for DataLockControlMode, ObjectAutonumerationMode, or MainClientApplicationWindowMode's legal alternative values -- these three properties were left at their observed defaults rather than guessed.",
+    "group-level, поля внутри группы не индивидуально разграничены"
+  ],
+  "proven_facts": [
+    "tuple-diff.md: offsets 867, 906, 2669 (group-level, поля внутри группы не индивидуально разграничены)"
+  ],
+  "non_claims": [
+    "No claim about which of the 3 changed named properties maps to which of the 3 changed tuple offsets (867 vs. 906 vs. 2669) -- this combined-delta probe changed all three simultaneously and cannot disambiguate individually; would require 3 separate single-enum probes.",
+    "No claim about the semantics or field-order rationale of the config-body tuple beyond the raw offset observation.",
+    "No claim that DataLockControlMode/ObjectAutonumerationMode/MainClientApplicationWindowMode's tuple positions are unknown/unlocated -- they were simply not probed in this session (left at base defaults, so no diff signal was produced for them).",
+    "compiler_acceptance is intentionally omitted from this probe; not part of this probe session.",
+    "Template and document_topology not applicable -- Configuration-level probe, not template-based.",
+    "Provenance: produced in a chip-fix probe session (scratchpad/evidence-batch/CHIPS-BATCH-SPEC.md), not yet reviewed or integrated."
+  ]
+}
