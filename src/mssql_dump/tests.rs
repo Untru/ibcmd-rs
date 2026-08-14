@@ -45263,6 +45263,58 @@ fn report_raw_with_owner_fields_for_test(raw: &str, owner_fields: &[&str]) -> St
     )
 }
 
+/// Canonical Report owner-graph fixture builder, in the spirit of
+/// `exact_catalog_owner_fixture_for_test`/`exact_document_owner_fixture_for_test`
+/// (Clusters 1-3) and `exact_exchange_plan_root_with_collections_for_test`
+/// (Cluster 4): assembles the full `{1, {19,...18 owner fields...}, 5,
+/// collection0..collection4}` root that
+/// `parse_strict_report_root_fields`/`parse_report_properties_from_text`
+/// (`src/mssql_dump/mod.rs`) require. `collections` must be the 5 root
+/// collections in the fixed order the strict decoder validates them in:
+/// [template, attribute, form, tabular section, command] — use
+/// `report_other_collections_for_test()` for empty attribute/form/tabular
+/// section/command placeholders when a test doesn't exercise that
+/// collection's own members (form and command references are resolved via
+/// independent full-text scans, so they don't need to physically live
+/// inside these collections).
+#[allow(clippy::too_many_arguments)]
+fn exact_report_owner_fixture_for_test(
+    owner_uuid: &str,
+    owner_name: &str,
+    title: &str,
+    comment: &str,
+    object_type_id: &str,
+    object_value_id: &str,
+    manager_type_id: &str,
+    manager_value_id: &str,
+    main_form_uuid: &str,
+    main_dcs_uuid: &str,
+    settings_form_uuid: &str,
+    use_standard_commands: &str,
+    variants_storage_uuid: &str,
+    settings_storage_uuid: &str,
+    default_variant_form_uuid: &str,
+    include_help_in_contents: &str,
+    extended_presentation: &str,
+    explanation: &str,
+    collections: &[String; 5],
+) -> String {
+    let zero_uuid = ZERO_UUID_FOR_REPORT_TEMPLATE_TEST;
+    format!(
+        "{{1,\r\n\
+{{19,{object_type_id},{object_value_id},\r\n\
+{{0,\r\n\
+{{3,\r\n\
+{{1,0,{owner_uuid}}},\"{owner_name}\",{{1,\"en\",\"{title}\"}},\"{comment}\",0,0,{zero_uuid},0}}\r\n\
+}},{main_form_uuid},{main_dcs_uuid},{settings_form_uuid},{use_standard_commands},\
+{variants_storage_uuid},{settings_storage_uuid},{default_variant_form_uuid},{include_help_in_contents},\
+{manager_type_id},{manager_value_id},{zero_uuid},{extended_presentation},{explanation},{zero_uuid}}},5,\r\n\
+{},\r\n{},\r\n{},\r\n{},\r\n{}\r\n\
+}}",
+        collections[0], collections[1], collections[2], collections[3], collections[4],
+    )
+}
+
 #[test]
 fn extracts_all_report_child_templates_in_raw_order_across_observed_cardinalities() {
     let cases = [
@@ -45629,27 +45681,69 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
     let template_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     let storage_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     let command_uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let command_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
-    let fourth_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
-    let fifth_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
-    let report_raw = format!(
-        "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Refresh tip\"}},1,\r\n{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}},0,0,0}}\r\n}}"
+    // `parse_strict_report_root_fields` (`src/mssql_dump/mod.rs`) validates
+    // the 4 non-template root collections against fixed canonical UUIDs, in
+    // a fixed order (attribute, form, tabular section, command) — the old
+    // fixture used ad-hoc/random UUIDs there (and put the command
+    // definition and form list in the wrong slots), so the whole root parse
+    // failed. Rebuilt via `exact_report_owner_fixture_for_test`, using
+    // `report_other_collections_for_test()`'s empty attribute/tabular
+    // section placeholders (their members aren't consumed for this test).
+    // The form collection *is* populated (settings form, then main form) —
+    // `owned_metadata_form_names_in_text_order` needs a real "counted UUID
+    // block" (any UUID-shaped marker + count + UUID members) to order
+    // `<Form>` entries by text position, and the tagged, non-empty form
+    // collection itself satisfies that shape. The command definition is the
+    // sole member of the command collection (also just a full-text scan
+    // target for `nested_child_commands_from_text`, so its home collection
+    // doesn't matter beyond having the right tag).
+    let template_collection =
+        format!("{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},1,{template_uuid}}}");
+    let [
+        attribute_collection,
+        _unused_empty_form_collection,
+        tabular_section_collection,
+        _unused_command_collection,
+    ] = report_other_collections_for_test();
+    let form_collection =
+        format!("{{{REPORT_FORM_COLLECTION_UUID},2,{settings_form_uuid},{main_form_uuid}}}");
+    let command_collection = format!(
+        "{{{REPORT_COMMAND_COLLECTION_UUID},1,\r\n\
+{{9,\r\n\
+{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n\
+{{1,\"en\",\"Refresh tip\"}},1,\r\n\
+{{0,0,0}},0,\r\n\
+{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n\
+{{\"Pattern\"}},\r\n\
+{{3,\r\n\
+{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}},0,0,0}}}}"
     );
-    let report_raw = report_raw.replacen(
-        &format!("}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}}"),
-        &format!("}},5,\r\n{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},1,{template_uuid}}}"),
-        1,
-    );
-    let report_raw = report_raw.replacen(
-        ",\r\n{9,\r\n",
-        &format!(",\r\n{{{command_collection_uuid},1,\r\n{{9,\r\n"),
-        1,
-    );
-    let root_without_close = report_raw.strip_suffix('}').unwrap();
-    let report_raw = format!(
-        "{root_without_close}}},\r\n{{{fourth_collection_uuid},0}},\r\n{{{fifth_collection_uuid},0}}}}"
+    let report_raw = exact_report_owner_fixture_for_test(
+        report_uuid,
+        "SalesReport",
+        "Sales report",
+        "",
+        object_type_id,
+        object_value_id,
+        manager_type_id,
+        manager_value_id,
+        main_form_uuid,
+        template_uuid,
+        settings_form_uuid,
+        "1",
+        storage_uuid,
+        ZERO_UUID_FOR_REPORT_TEMPLATE_TEST,
+        ZERO_UUID_FOR_REPORT_TEMPLATE_TEST,
+        "1",
+        "{1,\"en\",\"Sales report extended\"}",
+        "{1,\"en\",\"Builds sales summary\"}",
+        &[
+            template_collection,
+            attribute_collection,
+            form_collection,
+            tabular_section_collection,
+            command_collection,
+        ],
     );
     let report_blob = deflate_for_test(report_raw.as_bytes());
     let form_refs = BTreeMap::from([
