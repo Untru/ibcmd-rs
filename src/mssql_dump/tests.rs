@@ -31271,9 +31271,18 @@ fn writes_exchange_plan_content_to_source_layout() {
     assert!(xml.contains("<AutoRecord>Allow</AutoRecord>"));
     assert!(xml.contains("<Metadata>Document.Invoice</Metadata>"));
     assert!(xml.contains("<AutoRecord>Auto</AutoRecord>"));
+    // `parse_exchange_plan_content_blob` (`src/mssql_dump/mod.rs`) sorts
+    // items by `metadata_id` (the raw UUID), not by their position in the
+    // content blob (the `_metadata_order` parameter is deliberately unused)
+    // — so with catalog_uuid="bbbbbbbb-...", register_uuid="cccccccc-...",
+    // document_uuid="dddddddd-...", the canonical output order is
+    // Catalog, then InformationRegister, then Document. The old assertion
+    // here expected Document before Catalog, contradicting both that sort
+    // order and the content blob's own declared order (catalog, register,
+    // document) — a stale assertion, not a production issue.
     assert!(
-        xml.find("<Metadata>Document.Invoice</Metadata>").unwrap()
-            < xml.find("<Metadata>Catalog.Customers</Metadata>").unwrap()
+        xml.find("<Metadata>Catalog.Customers</Metadata>").unwrap()
+            < xml.find("<Metadata>Document.Invoice</Metadata>").unwrap()
     );
     assert!(
         xml.find("<Metadata>Catalog.Customers</Metadata>").unwrap()
@@ -45889,20 +45898,74 @@ fn extracts_report_child_attribute_data_history_tail() {
     let object_value_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
     let manager_type_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
     let manager_value_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let report_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
-{zero_uuid},{zero_uuid},{zero_uuid},1,{zero_uuid},{zero_uuid},{zero_uuid},0,{manager_type_id},{manager_value_id},{zero_uuid},\
-{{0}},{{0}},{zero_uuid}}},\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
-{{3,\r\n{{1,0,{attribute_uuid}}},\"TrackChanges\",{{1,\"en\",\"Track changes\"}},\"\"}},\
-0,{{0}},{{0}},{{0}},0,\"\",0,0,{{0}},{{0}},0,{{0}},0,0,{{0}},{{0}},0,0,0,{{0}},0,0,0,0,1,0,0}}\r\n\
-}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let zero_uuid = ZERO_UUID_FOR_REPORT_TEMPLATE_TEST;
+    // `parse_report_attribute` (`src/mssql_dump/mod.rs`) requires the same
+    // canonical code27 attribute wrapper — `{0, <23-field code27 payload>,
+    // <DataHistory tail field>}` — that `parse_strict_common_metadata_attribute`
+    // shares with Document/Catalog/ExchangePlan attributes (compare
+    // `document_attribute_wrapper_for_test`). The old fixture used the
+    // pre-refactor flat long-list wrapper shape (`{5,{2,0,{"Pattern",...}},
+    // {3,...},0,{0},...}`), which the current decoder rejects outright, so
+    // the whole attribute (and thus the whole report) failed to parse.
+    // Paired with a production fix in `parse_report_attribute`: it now reads
+    // that trailing DataHistory field and overrides `properties.data_history`
+    // after calling `parse_strict_common_metadata_attribute`, mirroring
+    // `parse_exchange_plan_attribute` (mod.rs:~10427) — the shared function
+    // always leaves `data_history: None`, and nothing in the Report
+    // attribute pipeline previously set it.
+    let attribute_payload = format!(
+        "{{27,\r\n\
+{{2,\r\n\
+{{3,{{1,0,{attribute_uuid}}},\"TrackChanges\",{{1,\"en\",\"Track changes\"}},\"\",0,0,{zero_uuid},0}},\
+{{\"Pattern\",{{\"B\"}}}}\r\n\
+}},\
+0,{{0}},{{0}},0,\"\",0,\
+{{\"U\"}},{{\"U\"}},0,{zero_uuid},2,0,\
+{{5006,0}},\
+{{3,0,0}},\
+{{0,0}},\
+0,{{0}},{{\"U\"}},0,0,0\r\n\
+}}"
+    );
+    let attribute_wrapper = format!("{{0,{attribute_payload},1}}");
+    let attribute_collection =
+        format!("{{{REPORT_ATTRIBUTE_COLLECTION_UUID},1,\r\n{{{attribute_wrapper},0}}\r\n}}");
+    let [
+        _unused_empty_attribute_collection,
+        form_collection,
+        tabular_section_collection,
+        command_collection,
+    ] = report_other_collections_for_test();
+    let template_collection = format!("{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},0}}");
+
+    let report_raw = exact_report_owner_fixture_for_test(
+        report_uuid,
+        "SalesReport",
+        "Sales report",
+        "",
+        object_type_id,
+        object_value_id,
+        manager_type_id,
+        manager_value_id,
+        zero_uuid,
+        zero_uuid,
+        zero_uuid,
+        "1",
+        zero_uuid,
+        zero_uuid,
+        zero_uuid,
+        "1",
+        "{0}",
+        "{0}",
+        &[
+            template_collection,
+            attribute_collection,
+            form_collection,
+            tabular_section_collection,
+            command_collection,
+        ],
+    );
+    let report_blob = deflate_for_test(report_raw.as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &report_blob,

@@ -22116,11 +22116,11 @@ fn parse_report_attribute(
         return None;
     }
     let wrapper = split_information_register_braced_fields(item.first()?)?;
-    if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
+    if wrapper.len() != 3 || wrapper.first()?.trim() != "0" {
         return None;
     }
     let common = split_information_register_braced_fields(wrapper.get(1)?)?;
-    parse_strict_common_metadata_attribute(
+    let mut child = parse_strict_common_metadata_attribute(
         common,
         "Report",
         owner_name,
@@ -22128,7 +22128,18 @@ fn parse_report_attribute(
         object_refs,
         form_refs,
         nested,
-    )
+    )?;
+    // Same pattern as `parse_exchange_plan_attribute` (mod.rs:~10427) and the
+    // ChartOfAccounts non-Attribute branch (mod.rs:~19578):
+    // `parse_strict_common_metadata_attribute` always leaves `data_history`
+    // unset (`parse_information_register_common_child_properties` hardcodes
+    // `None`), so each owner family that carries a DataHistory tail field in
+    // its own wrapper (outside the shared code27 `common` payload) overrides
+    // it here from that field. Report's wrapper carries exactly one such
+    // trailing field.
+    let properties = child.properties.as_mut()?;
+    properties.data_history = Some(metadata_data_history_xml(wrapper.get(2)?.trim())?);
+    Some(child)
 }
 
 fn parse_document_properties_from_text(
