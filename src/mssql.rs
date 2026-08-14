@@ -7771,10 +7771,16 @@ mod tests {
     }
 
     fn sample_data_composition_template_xml() -> &'static [u8] {
+        // Local/DataSetObject with one xs:string field: the same minimal
+        // shape the evidenced `dcs-filter` corpus proves is admitted by the
+        // live `normalize_data_composition_schema_template_documents_with_profiles`
+        // codec's typed inner-schema parser (a dataSource-only, dataSet-free
+        // schema is outside its admitted cohort shapes).
         br#"<?xml version="1.0" encoding="UTF-8"?>
-<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>
-	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings/></settingsVariant>
+	<dataSet xsi:type="DataSetObject"><name>Rows</name><field xsi:type="DataSetFieldField"><dataPath>Name</dataPath><field>Name</field><valueType><v8:Type>xs:string</v8:Type><v8:StringQualifiers><v8:Length>20</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength></v8:StringQualifiers></valueType></field><dataSource>Source1</dataSource><objectName>Rows</objectName></dataSet>
+	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="v8:LocalStringType"><v8:item><v8:lang>ru</v8:lang><v8:content>Main</v8:content></v8:item></dcsset:presentation><dcsset:settings><dcsset:item xsi:type="dcsset:StructureItemGroup"><dcsset:order><dcsset:item xsi:type="dcsset:OrderItemAuto"/></dcsset:order><dcsset:selection><dcsset:item xsi:type="dcsset:SelectedItemAuto"/></dcsset:selection></dcsset:item></dcsset:settings></settingsVariant>
 </DataCompositionSchema>
 "#
     }
@@ -11390,12 +11396,15 @@ mod tests {
             decoded.data_composition().unwrap().layout(),
             crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument
         );
-        let exported = crate::mssql_dump::normalize_data_composition_schema_template_xml(
-            decoded.data_composition().unwrap().plaintext(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
-        .unwrap();
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.data_composition().unwrap().documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ibcmd_core::artifact::ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ibcmd_core::artifact::ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
         assert!(
             String::from_utf8(exported)
                 .unwrap()
