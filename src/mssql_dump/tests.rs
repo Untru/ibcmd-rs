@@ -11340,8 +11340,18 @@ fn extracts_text_document_field_child_item() {
 
 #[test]
 fn extracts_text_document_field_read_only() {
+    // The legacy wrapper-48 layout is only still explicitly supported at
+    // its original (>20-field) minimum length for `LabelField`,
+    // `InputField`, and `CheckBoxField` (see the "Preserve the three
+    // wrapper-48 field owners decoded by the legacy path" comment in
+    // `src/form_schema.rs`, `FormChildItemVisibleSchema::from_raw_layout`).
+    // `TextDocumentField` isn't in that allow-list, so the whole item
+    // failed to parse below 42 total fields; verified empirically (via
+    // bisection against the actual decoder) that 42 is the exact minimum —
+    // padded with neutral trailing `0` scalars, which don't change
+    // `read_only`'s own slot 14 that the fixture already set.
     let item = parse_form_child_item(
-            r#"{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{0},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,2,0}"#,
+            r#"{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{0},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -14602,8 +14612,15 @@ fn extracts_label_decoration_and_standard_close_command_from_layout_code() {
         Some("Form.StandardCommand.Close")
     );
 
+    // `FormDecorationHeaderSchema::from_raw_layout` (`src/form_schema.rs`)
+    // requires wrapper `"12"` items to have *exactly* 36 top-level fields
+    // for `form_child_item_tag` to even resolve `"LabelDecoration"` at all;
+    // the legacy 27-field fixture predates that gate. Padded with trailing
+    // neutral `0` scalars (verified none of the schema's own slots — 8 and
+    // 24 — fall in the padded range, so the pre-existing tooltip/content
+    // fields are untouched).
     let decoration = parse_form_child_item(
-            r#"{12,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСек",{1,1,{"ru","(сек)"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ДекорацияСекКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,0,{1,{1,1,{"ru","(сек)"}},0},0,1,{12,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСекРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0}}"#,
+            r#"{12,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСек",{1,1,{"ru","(сек)"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ДекорацияСекКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,0,{1,{1,1,{"ru","(сек)"}},0},0,1,{12,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСекРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -14625,8 +14642,13 @@ fn extracts_label_decoration_and_standard_close_command_from_layout_code() {
     assert_eq!(decoration.child_items.len(), 1);
     assert_eq!(decoration.child_items[0].tag, "ContextMenu");
 
+    // Same `FormDecorationHeaderSchema` exact-36-field gate as `decoration`
+    // above. Slot 27 (`FormLabelDecorationSchema::auto_max_width_slot`) is
+    // set to `2` (not `0`) so `auto_max_width` stays `None` as this test
+    // already expects, instead of the padding default flipping it to
+    // `Some(false)`.
     let info_decoration = parse_form_child_item(
-            r#"{12,{32,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстом",{1,1,{"ru","Количество файлов с неизвлеченным текстом: 1234"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{33,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстомКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Количество файлов с неизвлеченным текстом: 1234"}},0},0,1,{12,{34,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстомРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0}}"#,
+            r#"{12,{32,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстом",{1,1,{"ru","Количество файлов с неизвлеченным текстом: 1234"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{33,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстомКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Количество файлов с неизвлеченным текстом: 1234"}},0},0,1,{12,{34,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстомРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},2,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::new(),
