@@ -2677,6 +2677,17 @@ pub const BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON: &str = include_str!(
 pub const BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-link-expressions/manifest.json"
 );
+/// Immutable platform-authenticated second evidenced `DataSetQuery` shape:
+/// the base `dcs-query-union-link` cohort's `QueryRows` node with a second,
+/// typed field (`Owner`) transplanting the exact evidenced current-config
+/// TypeId construction the `dcs-typeid-reference` DataSetObject cohort
+/// already proved. Chip-fix probe session; `compiler_acceptance` is
+/// intentionally absent -- not claimed (the manifest's own
+/// `cf_export_still_fails_on_this_corpus` records the unrelated
+/// `DataSetUnion`-adjacent cf-export gap this coordinate does not resolve).
+pub const BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-query-union-link-typeid/manifest.json"
+);
 /// Immutable platform-authenticated style-free AreaTemplate coordinate.
 pub const BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-template/manifest.json"
@@ -3462,6 +3473,23 @@ pub enum DcsInnerSchemaRootChildKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DcsQueryUnionLinkPolicy {
     query_children: Vec<String>,
+    /// The second evidenced `DataSetQuery` child list (`dcs-query-union-link-typeid`):
+    /// the same [`Self::query_children`] with one extra `field` element
+    /// inserted between the existing (untyped) `field` and `dataSource` --
+    /// exactly the base cohort's own list plus the typed `Owner` field, by
+    /// child count (the same "select the evidenced list by child count"
+    /// convention [`Self::link_optional_children_canonical_order`] uses).
+    /// Only the non-nested top-level query may select this list; the
+    /// `DataSetUnion` item position has no evidence for it.
+    query_children_with_typed_field: Vec<String>,
+    /// The only evidenced typed second-field `dataPath`/`field` literal,
+    /// `Owner`. Its value type is resolved through the same
+    /// `reference_types`-driven mechanism `dcs-typeid-reference`'s
+    /// DataSetObject field already uses (see
+    /// [`DcsInnerSchemaPolicy::reference_storage_type_id`]/
+    /// [`DcsInnerSchemaPolicy::reference_source_qualified_name`]), not a
+    /// separate policy fact here.
+    query_typed_field_name: String,
     union_children: Vec<String>,
     link_children: Vec<String>,
     query_type_qname: String,
@@ -3486,6 +3514,12 @@ pub struct DcsQueryUnionLinkPolicy {
 impl DcsQueryUnionLinkPolicy {
     pub fn query_children(&self) -> &[String] {
         &self.query_children
+    }
+    pub fn query_children_with_typed_field(&self) -> &[String] {
+        &self.query_children_with_typed_field
+    }
+    pub fn query_typed_field_name(&self) -> &str {
+        &self.query_typed_field_name
     }
     pub fn union_children(&self) -> &[String] {
         &self.union_children
@@ -5399,6 +5433,38 @@ struct DcsLinkExpressionsCohort {
     required_omitted: bool,
     start_expression_value: String,
     link_condition_expression_value: String,
+}
+
+/// Evidence: the base `dcs-query-union-link` cohort's `QueryRows` node
+/// accepts a second, typed field carrying the exact evidenced current-config
+/// TypeId construction the `dcs-typeid-reference` DataSetObject cohort
+/// already proved, transplanted byte-for-byte into a new dataSet-type
+/// context (`DataSetQuery` instead of `DataSetObject`). No claim is made
+/// about the `DataSetUnion` item or the top-level `dataSetLink` admitting a
+/// second field -- neither was modified by this probe.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkTypeIdEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    cohort: DcsQueryUnionLinkTypeIdCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkTypeIdCohort {
+    new_field_name: String,
+    container_data_set: String,
+    value_type_reference: String,
+    native_prefix: String,
+    cf_export_still_fails_on_this_corpus: bool,
+    cf_export_error: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -11460,6 +11526,7 @@ pub fn bundled_dcs_query_union_link_policy() -> Result<DcsQueryUnionLinkPolicy, 
         BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
         BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
         BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+        BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
     )
 }
 
@@ -12260,6 +12327,7 @@ fn parse_dcs_query_union_link_policy(
     evidence_json: &str,
     link_parameter_json: &str,
     link_expressions_json: &str,
+    query_typeid_json: &str,
 ) -> Result<DcsQueryUnionLinkPolicy, SchemaError> {
     let manifest: DcsQueryUnionLinkManifest = serde_json::from_str(evidence_json)
         .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
@@ -12417,10 +12485,36 @@ fn parse_dcs_query_union_link_policy(
             "DCS link-expressions evidence drifted from the exact coordinate".into(),
         ));
     }
+    let query_typeid: DcsQueryUnionLinkTypeIdEvidence = serde_json::from_str(query_typeid_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if query_typeid.schema_version != 1
+        || query_typeid.fixture_id != "8.3.27.2214-xml-2.20-dcs-query-union-link-typeid"
+        || query_typeid.cohort.new_field_name != "Owner"
+        || query_typeid.cohort.container_data_set != "QueryRows (DataSetQuery)"
+        || query_typeid.cohort.value_type_reference != "CatalogRef.FilterProbe"
+        || query_typeid.cohort.native_prefix != "d5p1"
+        || !query_typeid.cohort.cf_export_still_fails_on_this_corpus
+        || query_typeid.cohort.cf_export_error
+            != "entry_export_failed: 1 CF storage entries could not be exported"
+        || query_typeid.negative_observations.len() != 1
+        || query_typeid.non_claims.len() != 4
+        || query_typeid.platform.is_null()
+        || query_typeid.seed.is_null()
+        || query_typeid.rounds.is_null()
+        || query_typeid.retained.is_null()
+    {
+        return Err(SchemaError::InvalidDcsWriterEvidence(
+            "DCS query-union-link-typeid evidence drifted from the exact coordinate".into(),
+        ));
+    }
     const SCHEMA_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/schema";
     let q = |name: &str| format!("{{{SCHEMA_NS}}}{name}");
     Ok(DcsQueryUnionLinkPolicy {
         query_children: ["name", "field", "dataSource", "query"].map(q).into(),
+        query_children_with_typed_field: ["name", "field", "field", "dataSource", "query"]
+            .map(q)
+            .into(),
+        query_typed_field_name: query_typeid.cohort.new_field_name,
         union_children: ["name", "item"].map(q).into(),
         link_children: [
             "sourceDataSet",
@@ -14653,6 +14747,8 @@ mod tests {
         assert_eq!(policy.query_text(), "ВЫБРАТЬ \"A\" КАК SortKey");
         assert_eq!(policy.field(), "SortKey");
         assert_eq!(policy.query_children().len(), 4);
+        assert_eq!(policy.query_children_with_typed_field().len(), 5);
+        assert_eq!(policy.query_typed_field_name(), "Owner");
         assert_eq!(policy.union_children().len(), 2);
         assert_eq!(
             policy.link_optional_children_canonical_order(),
@@ -14677,6 +14773,7 @@ mod tests {
                 &serde_json::to_string(&value).unwrap(),
                 BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
                 BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             ),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("Query/Union/link evidence drifted")
@@ -14689,6 +14786,7 @@ mod tests {
                 &serde_json::to_string(&hash_drift).unwrap(),
                 BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
                 BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -14700,6 +14798,7 @@ mod tests {
                 &serde_json::to_string(&extra).unwrap(),
                 BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
                 BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             ),
             Err(SchemaError::InvalidJson(_))
         ));
@@ -14732,6 +14831,7 @@ mod tests {
                 BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
                 &serde_json::to_string(&order_drift).unwrap(),
                 BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -14743,6 +14843,7 @@ mod tests {
                 BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
                 &serde_json::to_string(&value_drift).unwrap(),
                 BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -14781,6 +14882,7 @@ mod tests {
                 BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
                 BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
                 &serde_json::to_string(&canonical_order_drift).unwrap(),
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -14792,6 +14894,7 @@ mod tests {
                 BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
                 BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
                 &serde_json::to_string(&required_omitted_drift).unwrap(),
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -14804,6 +14907,7 @@ mod tests {
                 BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
                 BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
                 &serde_json::to_string(&condition_drift).unwrap(),
+                BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -14815,6 +14919,68 @@ mod tests {
                 .unwrap()
                 .link_parameter_list_allowed_value()
         );
+    }
+
+    #[test]
+    fn query_union_link_typeid_evidence_rejects_unknown_fields_and_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_QUERY_UNION_LINK_TYPEID_EVIDENCE_JSON).unwrap();
+
+        let mut extra = raw.clone();
+        extra["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsQueryUnionLinkTypeIdEvidence>(extra).is_err());
+
+        let mut field_name_drift = raw.clone();
+        field_name_drift["cohort"]["new_field_name"] = serde_json::json!("Other");
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                &serde_json::to_string(&field_name_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut container_drift = raw.clone();
+        container_drift["cohort"]["container_data_set"] = serde_json::json!("Other");
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                &serde_json::to_string(&container_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut reference_drift = raw.clone();
+        reference_drift["cohort"]["value_type_reference"] = serde_json::json!("CatalogRef.Other");
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                &serde_json::to_string(&reference_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut still_fails_drift = raw;
+        still_fails_drift["cohort"]["cf_export_still_fails_on_this_corpus"] =
+            serde_json::json!(false);
+        assert!(
+            parse_dcs_query_union_link_policy(
+                BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_PARAMETER_EVIDENCE_JSON,
+                BUNDLED_DCS_LINK_EXPRESSIONS_EVIDENCE_JSON,
+                &serde_json::to_string(&still_fails_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_query_union_link_policy().is_ok());
     }
 
     #[test]

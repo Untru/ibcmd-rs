@@ -488,12 +488,22 @@ impl DcsSchemaQueryField {
     }
 }
 
-/// One exact `DataSetQuery` node.
+/// One exact `DataSetQuery` node. `typed_field` is the second, evidence-bound
+/// evidenced extension: exactly one additional field carrying a
+/// `DcsSchemaFieldType::Reference` value type (the `dcs-query-union-link-typeid`
+/// cohort's `Owner`/`CatalogRef.FilterProbe` construction, reusing the same
+/// `DcsSchemaDataSetField` shape and the same evidenced reference resolution
+/// the `dcs-typeid-reference` DataSetObject cohort already proved). `None`
+/// keeps the original single-field `dcs-query-union-link` cohort; the
+/// `DataSetUnion` item position has no evidence for a second field and is
+/// never constructed with one.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DcsSchemaQueryDataSet {
     name: CanonicalText,
     field: DcsSchemaQueryField,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    typed_field: Option<DcsSchemaDataSetField>,
     data_source: CanonicalText,
     query: CanonicalText,
 }
@@ -503,6 +513,8 @@ pub struct DcsSchemaQueryDataSet {
 struct DcsSchemaQueryDataSetWire {
     name: CanonicalText,
     field: DcsSchemaQueryField,
+    #[serde(default)]
+    typed_field: Option<DcsSchemaDataSetField>,
     data_source: CanonicalText,
     query: CanonicalText,
 }
@@ -510,7 +522,14 @@ struct DcsSchemaQueryDataSetWire {
 impl<'de> Deserialize<'de> for DcsSchemaQueryDataSet {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = DcsSchemaQueryDataSetWire::deserialize(deserializer)?;
-        Self::new(wire.name, wire.field, wire.data_source, wire.query).map_err(de::Error::custom)
+        Self::new(
+            wire.name,
+            wire.field,
+            wire.typed_field,
+            wire.data_source,
+            wire.query,
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -518,6 +537,7 @@ impl DcsSchemaQueryDataSet {
     pub fn new(
         name: CanonicalText,
         field: DcsSchemaQueryField,
+        typed_field: Option<DcsSchemaDataSetField>,
         data_source: CanonicalText,
         query: CanonicalText,
     ) -> Result<Self, DcsSchemaBuildError> {
@@ -527,6 +547,7 @@ impl DcsSchemaQueryDataSet {
         Ok(Self {
             name,
             field,
+            typed_field,
             data_source,
             query,
         })
@@ -536,6 +557,9 @@ impl DcsSchemaQueryDataSet {
     }
     pub const fn field(&self) -> &DcsSchemaQueryField {
         &self.field
+    }
+    pub const fn typed_field(&self) -> Option<&DcsSchemaDataSetField> {
+        self.typed_field.as_ref()
     }
     pub const fn data_source(&self) -> &CanonicalText {
         &self.data_source
@@ -2205,6 +2229,7 @@ mod tests {
         let query = DcsSchemaQueryDataSet::new(
             text("QueryRows"),
             field.clone(),
+            None,
             text("ИсточникДанных1"),
             text("ВЫБРАТЬ \"A\" КАК SortKey"),
         )
@@ -2212,6 +2237,7 @@ mod tests {
         let item = DcsSchemaQueryDataSet::new(
             text("UnionPart"),
             field,
+            None,
             text("ИсточникДанных1"),
             text("ВЫБРАТЬ \"A\" КАК SortKey"),
         )
@@ -2240,6 +2266,68 @@ mod tests {
         );
         let mut drift = serde_json::from_str::<serde_json::Value>(&json).unwrap();
         drift["link"]["destination_expression"] = serde_json::json!("Other");
+        assert!(serde_json::from_value::<DcsSchemaQueryUnionLink>(drift).is_err());
+    }
+
+    /// `dcs-query-union-link-typeid` cohort: the query data set's second,
+    /// evidenced `typed_field` (reusing the same `DcsSchemaDataSetField`
+    /// shape and reference resolution the `dcs-typeid-reference`
+    /// DataSetObject cohort already proved). `None` (the base
+    /// `dcs-query-union-link` cohort) and `Some` (this cohort) must both
+    /// stay serde-stable and distinguishable; the `DataSetUnion` item
+    /// position has no evidence for a typed field and keeps `None`.
+    #[test]
+    fn query_data_set_typed_field_is_bounded_and_serde_stable() {
+        let field = DcsSchemaQueryField::new(text("SortKey"), text("SortKey")).unwrap();
+        let query = DcsSchemaQueryDataSet::new(
+            text("QueryRows"),
+            field.clone(),
+            Some(reference_field()),
+            text("ИсточникДанных1"),
+            text("ВЫБРАТЬ \"A\" КАК SortKey"),
+        )
+        .unwrap();
+        assert_eq!(
+            query.typed_field().map(DcsSchemaDataSetField::field),
+            Some(&text("Owner"))
+        );
+        let item = DcsSchemaQueryDataSet::new(
+            text("UnionPart"),
+            field,
+            None,
+            text("ИсточникДанных1"),
+            text("ВЫБРАТЬ \"A\" КАК SortKey"),
+        )
+        .unwrap();
+        assert!(item.typed_field().is_none());
+        let union = DcsSchemaUnionDataSet::new(text("UnionRows"), item).unwrap();
+        let link = DcsSchemaDataSetLink::new(
+            text("QueryRows"),
+            text("UnionRows"),
+            text("SortKey"),
+            text("SortKey"),
+        )
+        .unwrap();
+        let model = DcsSchemaQueryUnionLink::new(
+            DcsSchemaLocalDataSource::new(text("ИсточникДанных1")).unwrap(),
+            query,
+            union,
+            link,
+            vec![variant("Main")],
+            provenance(),
+        )
+        .unwrap();
+        let json = serde_json::to_string(&model).unwrap();
+        assert!(json.contains("\"typed_field\":{"));
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaQueryUnionLink>(&json).unwrap(),
+            model
+        );
+        let mut drift = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        drift["query"]["typed_field"]
+            .as_object_mut()
+            .unwrap()
+            .remove("value_type");
         assert!(serde_json::from_value::<DcsSchemaQueryUnionLink>(drift).is_err());
     }
 

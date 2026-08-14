@@ -262,6 +262,33 @@ pub fn parse_dcs_query_union_link_storage_document(
     source_profile: ProfileId,
     locator: &str,
 ) -> Result<DcsSchemaQueryUnionLink, DcsInnerSchemaError> {
+    parse_dcs_query_union_link_storage_document_with_references(
+        bytes,
+        source_profile,
+        locator,
+        &BTreeMap::new(),
+    )
+}
+
+/// Parses the Query/Union/link storage cohort exactly like
+/// [`parse_dcs_query_union_link_storage_document`], but also resolves the
+/// second evidenced `DataSetQuery` field's current-config TypeId reference
+/// (the `dcs-query-union-link-typeid` cohort's `Owner`/`CatalogRef.FilterProbe`
+/// construction, transplanted byte-for-byte from `dcs-typeid-reference`'s own
+/// DataSetObject field) via `reference_types` -- the same uuid-to-semantic-name
+/// map shape/convention
+/// [`parse_dcs_inner_schema_storage_document_with_references`]'s own field
+/// resolution already uses. Without a matching entry, that one coordinate
+/// fails closed exactly as the plain function does; every other coordinate
+/// is unaffected. Only the top-level query may resolve a second field; the
+/// `DataSetUnion` item position has no evidence for one and always parses
+/// as the original single-field shape.
+pub fn parse_dcs_query_union_link_storage_document_with_references(
+    bytes: &[u8],
+    source_profile: ProfileId,
+    locator: &str,
+    reference_types: &BTreeMap<String, String>,
+) -> Result<DcsSchemaQueryUnionLink, DcsInnerSchemaError> {
     let p = policy()?;
     let qp = bundled_dcs_query_union_link_policy()
         .map_err(|e| DcsInnerSchemaError::InvalidEvidence(e.to_string()))?;
@@ -284,8 +311,8 @@ pub fn parse_dcs_query_union_link_storage_document(
         return unsupported("Query/Union/link root must contain exactly five children");
     }
     let data_source = parse_data_source(children[0], &p)?;
-    let query = parse_query(children[1], &p, &qp, false)?;
-    let union = parse_union(children[2], &p, &qp)?;
+    let query = parse_query(children[1], &p, &qp, false, reference_types)?;
+    let union = parse_union(children[2], &p, &qp, reference_types)?;
     let link = parse_link(children[3], &p, &qp)?;
     let variant = parse_variant(children[4], &p)?;
     let anchor = CanonicalAnchor::new(
@@ -940,6 +967,7 @@ fn parse_query(
     p: &DcsInnerSchemaPolicy,
     qp: &ibcmd_schema::DcsQueryUnionLinkPolicy,
     nested: bool,
+    reference_types: &BTreeMap<String, String>,
 ) -> Result<DcsSchemaQueryDataSet, DcsInnerSchemaError> {
     require_name(
         e,
@@ -947,7 +975,25 @@ fn parse_query(
         if nested { "item" } else { "dataSet" },
     )?;
     require_type(e, p, qp.query_type_qname())?;
-    let c = exact_children(e, qp.query_children(), p.schema_namespace_uri())?;
+    // Exactly two evidenced shapes, selected by child count (the same
+    // "select the evidenced list by count" convention `parse_link` uses):
+    // the original single-field cohort, or the `dcs-query-union-link-typeid`
+    // cohort's second, typed field. The `DataSetUnion` item position (`nested`)
+    // has no evidence for the second form.
+    let child_count = element_children(e)?.len();
+    let with_typed_field = if child_count == qp.query_children().len() {
+        false
+    } else if !nested && child_count == qp.query_children_with_typed_field().len() {
+        true
+    } else {
+        return unsupported("dataSet child cardinality is outside the cohort");
+    };
+    let names = if with_typed_field {
+        qp.query_children_with_typed_field()
+    } else {
+        qp.query_children()
+    };
+    let c = exact_children(e, names, p.schema_namespace_uri())?;
     let field_children = exact_children(
         c[1],
         &[
@@ -962,11 +1008,38 @@ fn parse_query(
         canonical(text(field_children[1])?)?,
     )
     .map_err(DcsInnerSchemaError::Build)?;
+    let (typed_field, tail_start) = if with_typed_field {
+        require_type(c[2], p, qp.field_type_qname())?;
+        let typed_field_children = exact_children(
+            c[2],
+            &[
+                format!("{{{}}}dataPath", p.schema_namespace_uri()),
+                format!("{{{}}}field", p.schema_namespace_uri()),
+                format!("{{{}}}valueType", p.schema_namespace_uri()),
+            ],
+            p.schema_namespace_uri(),
+        )?;
+        let data_path = canonical(text(typed_field_children[0])?)?;
+        let typed_field_name = canonical(text(typed_field_children[1])?)?;
+        if data_path.as_str() != qp.query_typed_field_name()
+            || typed_field_name.as_str() != qp.query_typed_field_name()
+        {
+            return unsupported("query typed field is outside the evidenced cohort");
+        }
+        let value_type =
+            parse_value_type_with_references(typed_field_children[2], p, reference_types)?;
+        let typed = DcsSchemaDataSetField::new(data_path, typed_field_name, value_type)
+            .map_err(DcsInnerSchemaError::Build)?;
+        (Some(typed), 3)
+    } else {
+        (None, 2)
+    };
     let query = DcsSchemaQueryDataSet::new(
         canonical(text(c[0])?)?,
         field,
-        canonical(text(c[2])?)?,
-        canonical(text(c[3])?)?,
+        typed_field,
+        canonical(text(c[tail_start])?)?,
+        canonical(text(c[tail_start + 1])?)?,
     )
     .map_err(DcsInnerSchemaError::Build)?;
     require_query_union_link_values(&query, qp)?;
@@ -990,12 +1063,16 @@ fn parse_union(
     e: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     qp: &ibcmd_schema::DcsQueryUnionLinkPolicy,
+    reference_types: &BTreeMap<String, String>,
 ) -> Result<DcsSchemaUnionDataSet, DcsInnerSchemaError> {
     require_name(e, Some(p.schema_namespace_uri()), "dataSet")?;
     require_type(e, p, qp.union_type_qname())?;
     let c = exact_children(e, qp.union_children(), p.schema_namespace_uri())?;
-    DcsSchemaUnionDataSet::new(canonical(text(c[0])?)?, parse_query(c[1], p, qp, true)?)
-        .map_err(DcsInnerSchemaError::Build)
+    DcsSchemaUnionDataSet::new(
+        canonical(text(c[0])?)?,
+        parse_query(c[1], p, qp, true, reference_types)?,
+    )
+    .map_err(DcsInnerSchemaError::Build)
 }
 
 /// Parses `dataSetLink`'s four mandatory children plus its evidenced
@@ -1289,10 +1366,10 @@ pub fn emit_dcs_query_union_link_source_document(
     scalar(&mut out, 2, "name", schema.data_source().name().as_str());
     scalar(&mut out, 2, "dataSourceType", "Local");
     line(&mut out, 1, "</dataSource>");
-    emit_query(&mut out, 1, "dataSet", schema.query());
+    emit_query(&mut out, 1, "dataSet", schema.query(), &p);
     line(&mut out, 1, "<dataSet xsi:type=\"DataSetUnion\">");
     scalar(&mut out, 2, "name", schema.union().name().as_str());
-    emit_query(&mut out, 2, "item", schema.union().item());
+    emit_query(&mut out, 2, "item", schema.union().item(), &p);
     line(&mut out, 1, "</dataSet>");
     line(&mut out, 1, "<dataSetLink>");
     for (name, value) in [
@@ -1721,7 +1798,13 @@ fn emit_variant(
     line(out, 1, "</settingsVariant>");
 }
 
-fn emit_query(out: &mut String, depth: usize, element: &str, query: &DcsSchemaQueryDataSet) {
+fn emit_query(
+    out: &mut String,
+    depth: usize,
+    element: &str,
+    query: &DcsSchemaQueryDataSet,
+    policy: &DcsInnerSchemaPolicy,
+) {
     line(
         out,
         depth,
@@ -1737,6 +1820,13 @@ fn emit_query(out: &mut String, depth: usize, element: &str, query: &DcsSchemaQu
     );
     scalar(out, depth + 2, "field", query.field().field().as_str());
     line(out, depth + 1, "</field>");
+    if let Some(typed_field) = query.typed_field() {
+        line(out, depth + 1, "<field xsi:type=\"DataSetFieldField\">");
+        scalar(out, depth + 2, "dataPath", typed_field.data_path().as_str());
+        scalar(out, depth + 2, "field", typed_field.field().as_str());
+        emit_value_type(out, depth + 2, typed_field.value_type(), policy);
+        line(out, depth + 1, "</field>");
+    }
     scalar(out, depth + 1, "dataSource", query.data_source().as_str());
     line(
         out,
@@ -2747,6 +2837,22 @@ mod tests {
         let body = decode_base64_fixture(include_str!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-link-expressions/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        vec![
+            body[24..24 + first].to_vec(),
+            body[24 + first..24 + first + second].to_vec(),
+            body[24 + first + second..].to_vec(),
+        ]
+    }
+
+    fn query_union_link_typeid_documents() -> Vec<Vec<u8>> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link-typeid/raw-unpacked.bin.b64"
         )));
         let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
         assert_eq!(count, 1);
@@ -3790,6 +3896,63 @@ mod tests {
         .unwrap();
         assert_eq!(schema.query().name().as_str(), "QueryRows");
         assert_eq!(schema.union().name().as_str(), "UnionRows");
+        let expected_text = std::str::from_utf8(&expected).unwrap();
+        let emitted = emit_dcs_query_union_link_source_document(
+            &schema,
+            &[inline_settings(
+                expected_text.trim_start_matches('\u{feff}'),
+            )],
+        )
+        .unwrap();
+        assert_eq!(emitted, expected);
+    }
+
+    /// The second evidenced `DataSetQuery` shape (`dcs-query-union-link-typeid`):
+    /// `QueryRows` carries a second, typed field (`Owner`) transplanting the
+    /// exact evidenced current-config TypeId construction
+    /// `dcs-typeid-reference`'s DataSetObject field already proved, resolved
+    /// through the same `reference_types` mechanism. The `DataSetUnion`
+    /// item stays single-field (no evidence for a second field there).
+    #[test]
+    fn platform_query_union_link_typeid_resolves_second_field_and_emits_exact_source() {
+        let documents = query_union_link_typeid_documents();
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link-typeid/native-template.xml.b64"
+        )));
+        let mut references = BTreeMap::new();
+        references.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            "CatalogRef.FilterProbe".to_owned(),
+        );
+        let schema = parse_dcs_query_union_link_storage_document_with_references(
+            &documents[0],
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-query-union-link-typeid",
+            &references,
+        )
+        .unwrap();
+        assert_eq!(schema.query().name().as_str(), "QueryRows");
+        assert_eq!(schema.union().name().as_str(), "UnionRows");
+        assert!(matches!(
+            schema.query().typed_field().unwrap().value_type(),
+            DcsSchemaFieldType::Reference(reference)
+                if reference.qualified_name().as_str() == "CatalogRef.FilterProbe"
+        ));
+        assert!(schema.union().item().typed_field().is_none());
+
+        // Without the reference: fails closed, exactly as
+        // `parse_dcs_query_union_link_storage_document` (the plain,
+        // empty-map wrapper) does.
+        assert!(matches!(
+            parse_dcs_query_union_link_storage_document(
+                &documents[0],
+                ProfileId::parse("provider:mssql-legacy").unwrap(),
+                "fixture:dcs-query-union-link-typeid",
+            ),
+            Err(DcsInnerSchemaError::UnsupportedSource(_))
+        ));
+
         let expected_text = std::str::from_utf8(&expected).unwrap();
         let emitted = emit_dcs_query_union_link_source_document(
             &schema,

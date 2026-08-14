@@ -967,6 +967,120 @@ mod tests {
         .unwrap();
     }
 
+    /// DCS-QUERY-SECOND-FIELD-01: both directions for the second evidenced
+    /// `DataSetQuery` shape.
+    ///
+    /// Whole-envelope byte equality between `compile_dcs(seed)` and
+    /// `raw-unpacked.bin` is deliberately not asserted here: like every
+    /// other query-union-link/link-* corpus, the compile direction's
+    /// primary/settings documents stay blind passthrough (byte-range text
+    /// splicing of the source, never routed through the typed
+    /// inner-schema/query-union-link parsers), and `native-template.xml`'s
+    /// `dataCompositionSchema`/`Settings` subtrees use a hoisted-namespace
+    /// form while the genuine platform storage bytes for those same two
+    /// documents use a minimized, point-of-use namespace form. This is the
+    /// identical pre-existing primary/settings reindentation gap already
+    /// documented as out of scope on
+    /// `platform_area_style_item_uuid_compiles_base_free_with_resolver_full_cycle`
+    /// -- confirmed here to be unrelated to the query-cohort widening
+    /// itself: the terminal document (the only part of this envelope that
+    /// is genuinely re-emitted rather than copied, not blind-passthrough
+    /// copied) matches byte-for-byte below.
+    ///
+    /// Decode direction resolves the typed `Owner` field through
+    /// `normalize_data_composition_schema_template_documents_with_profiles`'s
+    /// `reference_types`. Re-exporting the compiled-then-decoded body is
+    /// verified by content (the typed field's evidenced
+    /// `d5p1:CatalogRef.FilterProbe` reference and its position after the
+    /// untyped `SortKey` field) and by successful recompilation, not by
+    /// byte-for-byte equality against `native-template.xml`: a direct diff
+    /// showed the settings document's element structure is identical but
+    /// its indentation differs by nesting depth -- the same pre-existing
+    /// settings-document formatting gap (the shared settings serializer
+    /// does not reproduce a source's own indentation), unrelated to the
+    /// query-cohort widening under test. The genuine-bytes companion test
+    /// `mssql_dump::dcs::tests::platform_query_union_link_typeid_body_exports_byte_exact_through_common_codec`
+    /// independently proves byte-exact re-emission against
+    /// `native-template.xml`, starting from the platform's own packed
+    /// bytes rather than this compiler's blind-passthrough primary/settings
+    /// documents.
+    #[test]
+    fn platform_query_union_link_typeid_compiles_and_decodes_byte_exact_both_directions() {
+        let seed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link-typeid/native-template.xml.b64"
+        )));
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link-typeid/raw-unpacked.bin.b64"
+        )));
+        // manifest.json: retained.native_template.sha256 / retained.unpacked_body.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&seed)),
+            "5ce6f74897ce0428f2898fcf54ed542dcd23af6aafdbd0f331a0fde1e18bb3be"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&unpacked)),
+            "82a05801479c413d58377a6b2436b66c0e679ec94b211bbf3c8746cfd9469e44"
+        );
+        // document_topology (raw-unpacked.bin header): 24-byte header, primary
+        // schema stored length 2001, sole settings document stored length 864;
+        // the terminal document is the remaining bytes.
+        let expected_terminal = unpacked[24 + 2001 + 864..].to_vec();
+        assert_eq!(expected_terminal.len(), 263);
+
+        let compiled = compile_dcs(&DcsCodecProfile::fixture(), DcsTemplateKind::Schema, &seed)
+            .expect("dcs-query-union-link-typeid seed must compile base-free");
+        let decoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &compiled,
+        )
+        .expect("compiled body must decode");
+        assert_eq!(
+            decoded.documents().last().copied(),
+            Some(expected_terminal.as_slice())
+        );
+
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            crate::mssql_dump::DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.FilterProbe".to_owned(),
+            },
+        );
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &type_index,
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("decoded typed-field body must re-emit through the common codec");
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(
+            exported_text.contains("d5p1:CatalogRef.FilterProbe"),
+            "typed Owner field must resolve through the evidenced reference mechanism"
+        );
+        let sort_key_field_at = exported_text.find("<field>SortKey</field>").unwrap();
+        let owner_field_at = exported_text.find("<field>Owner</field>").unwrap();
+        assert!(
+            sort_key_field_at < owner_field_at,
+            "untyped SortKey field must precede the typed Owner field"
+        );
+
+        // Round trip: the re-exported source must itself compile base-free
+        // (mirrors platform_query_union_link_source_compiles_and_exports_through_common_codec's
+        // own closing assertion for the base, single-field corpus).
+        compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &exported,
+        )
+        .expect("re-exported typed-field source must recompile base-free");
+    }
+
     #[test]
     fn platform_link_parameter_source_compiles_and_exports_through_common_codec() {
         let source = decode_base64_fixture(include_str!(concat!(

@@ -14,7 +14,7 @@ use ibcmd_xml::{
     emit_dcs_inner_schema_source_document, emit_dcs_query_union_link_source_document,
     emit_dcs_settings_children_parts, parse_dcs_area_template_storage_document_with_references,
     parse_dcs_inner_schema_storage_document_with_references,
-    parse_dcs_query_union_link_storage_document, rewrite_dcs_settings_children,
+    parse_dcs_query_union_link_storage_document_with_references, rewrite_dcs_settings_children,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -230,10 +230,11 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
     let mut source = match schema {
         Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings).ok()?,
         Err(_) => {
-            let schema = parse_dcs_query_union_link_storage_document(
+            let schema = parse_dcs_query_union_link_storage_document_with_references(
                 envelope.primary_schema_file(),
                 source_profile.clone(),
                 "mssql:dcs-schema-template/query-union-link",
+                &reference_types,
             )
             .ok()?;
             emit_dcs_query_union_link_source_document(&schema, &settings).ok()?
@@ -1829,25 +1830,18 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// `dcs-query-union-link-typeid` (evidenced fixture, immutable manifest)
-    /// transplants the same `CatalogRef.FilterProbe` TypeId construction
-    /// into the `QueryRows` DataSetQuery as a *second* field, alongside the
-    /// existing `SortKey` field. This proves the gate-condition fix in
-    /// isolation (see above) but cannot reach a byte-exact positive result
-    /// through the *whole* codec: `ibcmd_xml::parse_dcs_query_union_link_storage_document`'s
-    /// `parse_query` enforces an evidenced, fixed child cardinality
-    /// (`DcsQueryUnionLinkPolicy::query_children()`, four children) that a
-    /// two-field DataSetQuery violates, independent of `reference_types` or
-    /// this package's fix -- confirmed directly:
-    /// `UnsupportedSource("dataSet child cardinality is outside the cohort")`.
-    /// The fixture's own manifest already discloses this
-    /// (`cohort.cf_export_still_fails_on_this_corpus: true`); admitting a
-    /// two-field DataSetQuery shape is `ibcmd-schema`/`ibcmd-xml` evidence
-    /// work, out of this gate-fix package's one-line scope. This test pins
-    /// that exact, unrelated failure mode as a known negative so a future
-    /// evidence package has a fixed target.
+    /// `dcs-query-union-link-typeid` (evidenced fixture, immutable manifest,
+    /// DCS-QUERY-SECOND-FIELD-01): `QueryRows` carries a second, typed field
+    /// (`Owner`) transplanting the exact evidenced current-config TypeId
+    /// construction `dcs-typeid-reference`'s DataSetObject field already
+    /// proved. `DcsQueryUnionLinkPolicy::query_children()`/`parse_query`
+    /// (ibcmd-schema/ibcmd-xml) now admit exactly two evidenced
+    /// `DataSetQuery` shapes, selected by child count: the original
+    /// single-field cohort, or this cohort's five-child shape. With a
+    /// real, non-empty `type_index` (built the same way the live route
+    /// would), the full common codec now exports this corpus byte-exact.
     #[test]
-    fn platform_query_union_link_typeid_second_field_needs_wider_query_cohort_evidence() {
+    fn platform_query_union_link_typeid_body_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link-typeid/raw-packed.bin.b64"
@@ -1870,17 +1864,72 @@ mod tests {
             &packed,
         )
         .unwrap();
-        let documents = body.documents();
-        assert_eq!(
-            ibcmd_xml::parse_dcs_query_union_link_storage_document(
-                documents[0],
-                ProfileId::parse("provider:mssql-legacy").unwrap(),
-                "dcs-query-union-link-typeid:probe",
-            ),
-            Err(ibcmd_xml::DcsInnerSchemaError::UnsupportedSource(
-                "dataSet child cardinality is outside the cohort".to_string()
-            ))
+        // The same evidenced TypeId -> qname construction
+        // `platform_type_id_reference_body_exports_byte_exact_through_common_codec`
+        // already proves, built the same way the real route's
+        // `build_metadata_type_indexes_from_texts` would produce it.
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.FilterProbe".to_owned(),
+            },
         );
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("two-field DataSetQuery must now export through the common codec");
+        assert_eq!(actual, expected);
+    }
+
+    /// Regression negative: a third field (or any other cardinality outside
+    /// the two evidenced `DataSetQuery` shapes) still fails closed with a
+    /// typed bail, not a silent skip or a guessed admission -- admitting
+    /// exactly two evidenced child-lists by count does not loosen the
+    /// parser into accepting an arbitrary N fields.
+    #[test]
+    fn query_union_link_third_field_fails_closed() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link-typeid/raw-packed.bin.b64"
+        )));
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        let documents = body.documents();
+        let primary = std::str::from_utf8(documents[0]).unwrap();
+        // Duplicate the evidenced typed `Owner` field so `QueryRows` carries
+        // three fields (name, field, field, field, dataSource, query --
+        // six children), a cardinality neither evidenced list admits.
+        // Insert the duplicate right after the existing typed field's own
+        // closing `</field>` (located via its unique TypeId uuid).
+        let type_id_marker = "488c0ffa-ef24-480c-a420-3bd2736317f9</TypeId>";
+        let type_id_at = primary.find(type_id_marker).expect("Owner TypeId marker");
+        let insertion = type_id_at
+            + primary[type_id_at..]
+                .find("</field>")
+                .expect("Owner field closing tag")
+            + "</field>".len();
+        let extra_field = "\r\n\t\t\t<field xsi:type=\"DataSetFieldField\"><dataPath>Owner</dataPath><field>Owner</field><valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">488c0ffa-ef24-480c-a420-3bd2736317f9</TypeId></valueType></field>";
+        let three_field_primary = format!(
+            "{}{}{}",
+            &primary[..insertion],
+            extra_field,
+            &primary[insertion..]
+        );
+        let terminal = std::str::from_utf8(documents[2]).unwrap();
+        let settings = std::str::from_utf8(documents[1]).unwrap();
+        let three_field_documents: [&[u8]; 3] = [
+            three_field_primary.as_bytes(),
+            settings.as_bytes(),
+            terminal.as_bytes(),
+        ];
 
         let mut type_index = BTreeMap::new();
         type_index.insert(
@@ -1891,14 +1940,14 @@ mod tests {
         );
         assert_eq!(
             normalize_data_composition_schema_template_documents_with_profiles(
-                &body.documents(),
+                &three_field_documents,
                 &type_index,
                 &BTreeMap::new(),
                 &ProfileId::parse("provider:mssql-legacy").unwrap(),
                 &ProfileId::parse("xml-2.20").unwrap(),
             ),
             None,
-            "two-field DataSetQuery is outside the query-union-link parser's evidenced cohort"
+            "a three-field DataSetQuery must fail closed, not be silently admitted"
         );
     }
 
