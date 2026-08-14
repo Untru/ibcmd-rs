@@ -60,6 +60,18 @@
     "trailing_area_schema_file_size": 263,
     "trailing_area_schema_file_sha256": "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81"
   },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body (compile_dcs on the retained round-2 native Template.xml; the evidenced cohort parser requires platform storage order) overlaid via the common overlay APIs into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 6070,
+    "candidate_body_unpacked_sha256": "602b10174c978ea0427304a02245ec6b66e9bc1a012a3333e72a17267fe7a5ce",
+    "candidate_cf_sha256": "17a211abffb78f12c887a34b4a1733d7d51c5d0caf240e9109391f2b1e29f7d5",
+    "platform_saved_cf_size": 81554,
+    "platform_saved_cf_sha256": "e8bd895065a65aa6bbd8aa6616a00136fe503290ec45dae68f30d0d203bb05da",
+    "reexported_template_size": 5245,
+    "reexported_template_sha256": "7f4f83f5e8adcb21b0e9e848726c3da19d9cbb94996a08e69a84784fc4c9f1e0",
+    "reexport_matches_two_round_native_template": true
+  },
   "cohort": {
     "new_parameter_order": [
       "Флаг",
@@ -95,6 +107,6 @@
   "non_claims": [
     "No other StandardPeriodVariant enum member besides LastMonth is exercised or claimed.",
     "No claim about behavior for boolean/decimal/StandardPeriod parameters used as area-template or query filter values, only as top-level DCS schema parameters.",
-    "compiler_acceptance is intentionally omitted from this draft manifest; it is the next review stage, not part of this lab session."
+    "Compiler acceptance is proven only for the exact Флаг/Лимит/Период scalar-parameter coordinate recorded in compiler_acceptance above; it does not extend to other parameter types, insertion points, or StandardPeriodVariant members."
   ]
 }

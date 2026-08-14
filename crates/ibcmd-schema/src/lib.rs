@@ -3960,11 +3960,11 @@ struct DcsAreaTemplateAppearanceCohort {
     referenced_indexes_cover_table: bool,
 }
 
-/// Draft-stage evidence: native-only round trips authenticate the exact
+/// Evidence: native-only round trips authenticate the exact
 /// `ЦветТекста = web:Red` appearance item added ahead of `Расшифровка`.
-/// Unlike [`DcsAreaTemplateAppearanceEvidence`], this manifest carries no
-/// `compiler_acceptance` block -- the policy built from it must not claim
-/// live-platform verification of the compile direction.
+/// A `compiler_acceptance` block records a single accepted live-platform
+/// pass (VM acceptance session, 8.3.27.2214) for this exact coordinate --
+/// see [`DcsAreaTemplateAppearanceEvidence`]'s block for the same shape.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsAreaTemplateColorEvidence {
@@ -3975,6 +3975,7 @@ struct DcsAreaTemplateColorEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsAreaTemplateColorCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -3995,11 +3996,12 @@ struct DcsAreaTemplateColorCohort {
     appearance_item_order_in_seed: Vec<String>,
 }
 
-/// Draft-stage evidence: native-only round trips authenticate the exact
-/// two-row shared-appearance area body (row 1's two cells reuse one side-
-/// table entry via the same `appIndex`; row 2 has no appearance). Like
-/// [`DcsAreaTemplateColorEvidence`], this manifest carries no
-/// `compiler_acceptance` block.
+/// Evidence: native-only round trips authenticate the exact two-row
+/// shared-appearance area body (row 1's two cells reuse one side-table
+/// entry via the same `appIndex`; row 2 has no appearance). Like
+/// [`DcsAreaTemplateColorEvidence`], this manifest carries a
+/// `compiler_acceptance` block recording a single accepted live-platform
+/// pass for this exact coordinate.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsAreaTemplateMultiCellAppearanceEvidence {
@@ -4010,6 +4012,7 @@ struct DcsAreaTemplateMultiCellAppearanceEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsAreaTemplateMultiCellAppearanceCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -10666,6 +10669,7 @@ struct DcsOutputParametersEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsOutputParametersCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -10703,6 +10707,7 @@ fn parse_dcs_output_parameters_policy(
         || evidence.rounds.is_null()
         || evidence.retained.is_null()
         || evidence.document_topology.is_null()
+        || evidence.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidJson(
             "DCS output-parameters evidence drifted from the exact coordinate".to_string(),
@@ -10935,6 +10940,7 @@ fn parse_dcs_area_template_policy(
         || color.rounds.is_null()
         || color.retained.is_null()
         || color.document_topology.is_null()
+        || color.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidJson(
             "DCS AreaTemplate appearance web-color evidence drifted from the exact coordinate"
@@ -10966,6 +10972,7 @@ fn parse_dcs_area_template_policy(
         || multi_cell.rounds.is_null()
         || multi_cell.retained.is_null()
         || multi_cell.document_topology.is_null()
+        || multi_cell.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidJson(
             "DCS AreaTemplate multi-cell appearance evidence drifted from the exact coordinate"
@@ -11216,6 +11223,7 @@ struct DcsParameterScalarTypesEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsParameterScalarTypesCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -11301,6 +11309,7 @@ fn parse_dcs_parameter_scalar_types_policy(
         || evidence.rounds.is_null()
         || evidence.retained.is_null()
         || evidence.document_topology.is_null()
+        || evidence.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidJson(
             "DCS parameter scalar-types evidence drifted from the exact coordinate".to_string(),

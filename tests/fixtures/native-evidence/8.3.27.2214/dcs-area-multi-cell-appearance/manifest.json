@@ -59,6 +59,18 @@
     "trailing_area_schema_file_size": 1953,
     "trailing_area_schema_file_sha256": "2aed0a189339c894d16ab61c7a5fd89c08c30aec1a43e353085c8e6c20a10d90"
   },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body (compile_dcs on the retained round-2 native Template.xml; the evidenced cohort parser requires platform storage order) overlaid via the common overlay APIs into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 6424,
+    "candidate_body_unpacked_sha256": "534d6023196158ffc5fb0d3ecaf49052ea22152c884d759835a32aa9bdc019de",
+    "candidate_cf_sha256": "e12cdcd3159e77602f4329cbb460ceb50bd67ef6b34ebd393766f84e5c303002",
+    "platform_saved_cf_size": 81639,
+    "platform_saved_cf_sha256": "4d7e2398b8f94734073c5f3d1a27ff06dd37cc4b495668c52e1e6ea0534889fd",
+    "reexported_template_size": 5448,
+    "reexported_template_sha256": "a72d97cfe65a43326433ce1bcfe80f7adf6b6ecfa50074d5d092461db52080d0",
+    "reexport_matches_two_round_native_template": true
+  },
   "cohort": {
     "template_name": "AreaProbe",
     "row_count": 2,
@@ -89,6 +101,6 @@
   "non_claims": [
     "No claim about the raw storage body's internal appIndex side-table layout (shared vs. duplicated index) for the two structurally-identical row-1 appearance blocks; packed.bin/unpacked.bin are retained for that follow-up, not analyzed in this session.",
     "No claim about behavior with more than two rows, more than two cells per row, or appearance content that differs between cells.",
-    "compiler_acceptance is intentionally omitted from this draft manifest; it is the next review stage, not part of this lab session."
+    "Compiler acceptance is proven only for the exact two-row, shared-appIndex coordinate recorded in compiler_acceptance above; it does not extend to other row/cell counts or appearance placements, and does not resolve the shared-vs-duplicated raw storage side-table question noted above."
   ]
 }
