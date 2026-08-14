@@ -11008,8 +11008,17 @@ fn extracts_form_usual_group_group_from_layout_code() {
 
 #[test]
 fn extracts_form_pages_and_page_from_layout_codes() {
+    // The nested "Page" child's `group` needs `FormPageSchema` (`src/form_schema.rs`),
+    // which requires an *exact* multiple-of-2-past-30 field count and a
+    // 20-field `{18,...}` options block (`FormPageSchema::OPTIONS_SLOT = 20`).
+    // The legacy 12-field Page blob predates that options block entirely.
+    // Padded fields 12..19 (leaving the already-correct `scroll_on_compress`
+    // slots 8/11 untouched) and appended a minimal `{18,...}` options block
+    // with `options[2]=1, options[16]=2, options[17]=2` — the tuple
+    // `FormPageSchema::properties` maps to `Group=HorizontalIfPossible` —
+    // plus trailing padding to satisfy the length gate.
     let item = parse_form_child_item(
-            r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,1,{"ru","Pages tip"}},0,1,0,0,14,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,11111111-1111-4111-8111-111111111111,{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,1,{"ru","Main"}},{1,1,{"ru","Page tip"}},3,1,0}}"#,
+            r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,1,{"ru","Pages tip"}},0,1,0,0,14,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,11111111-1111-4111-8111-111111111111,{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,1,{"ru","Main"}},{1,1,{"ru","Page tip"}},3,1,0,0,0,0,0,0,0,0,0,{18,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0},0,0,0,0,0,0,0,0,0}}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -14819,10 +14828,18 @@ fn extracts_form_input_field_read_only_from_layout_code() {
 
 #[test]
 fn extracts_form_input_field_skip_on_input_from_layout_code() {
+    // The legacy wrapper-48, 25-field layout code predates `FormFieldSchema`,
+    // which now requires wrapper `"37"` and an *exact* 59-field item with a
+    // full 66-field `{36,...}` options block (`FormFieldSchema::from_raw_layout`
+    // in `src/form_schema.rs`) before `skip_on_input` is even queried.
+    // Rebuilt from the real, currently-valid `InputField` fixture used by
+    // `extracts_live_input_field_auto_choice_incomplete`, mutating only slot
+    // 15 (`FormFieldSchema::skip_on_input`'s own slot) — the same absolute
+    // position the original fixture already used for this scalar.
     for (code, expected) in [("0", false), ("1", true)] {
         let item = parse_form_child_item(
                 &format!(
-                    r#"{{48,{{78,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,2,"Author",1,0,{{1,0}},{{1,0}},{{0}},{{0}},1,0,{code},0,2,{{1,0}},{{1,0}},1,1,0,3,0}}"#
+                    r#"{{37,{{27,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,2,"СписокЭлектроннаяПочта",1,0,{{1,0}},{{1,0}},{{2,{{1}},{{4}}}},{{0}},1,0,{code},0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0,{{4,0,{{0}},"",-1,-1,1,0,""}},{{4,0,{{0}},"",-1,-1,1,0,""}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{36,{{3,0}},0,0,2,2,0,2,2,2,2,2,2,2,2,2,{{"U"}},{{"U"}},"",0,{{4,0,{{0}},"",-1,-1,1,0,""}},0,0,2,3,00000000-0000-0000-0000-000000000000,{{5006,0}},{{0,0}},1,{{1,0}},{{1,0}},1,0,0,{{"Pattern"}},1,{{0,1,0}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},1,{{3,0,0}},0,{{1,0}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{{0}},0,{{5007,0}},0}},{{0,1,0}},1,{{22,{{28,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,8,"СписокЭлектроннаяПочтаКонтекстноеМеню",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{1,1}},0,1,0,0,0,3,3,0}},1,{{"Pattern"}},{{"Pattern"}},"","",{{0}},0,0,1,{{12,{{29,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,0,"СписокЭлектроннаяПочтаРасширеннаяПодсказка",{{1,0}},{{1,0}},1,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{5,0,0,3,0,{{0,1,0}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}}},0,1,2,{{1,{{1,0}},0}},0,0,1,0,0,1,0,3,3,0,0}},3,3,0,0,0,0}}"#
                 ),
                 None,
                 None,
@@ -16746,19 +16763,19 @@ fn formats_form_input_field_button_options_in_schema_order() {
 
 #[test]
 fn extracts_form_input_field_choice_folders_and_items_from_layout_code() {
-    let mut input_fields = vec!["0".to_string(); 45];
-    input_fields[0] = "48".to_string();
-    input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
-    input_fields[5] = "2".to_string();
-    input_fields[6] = r#""Field""#.to_string();
-    let mut options = vec!["2".to_string(); 66];
-    options[0] = "38".to_string();
-    options[24] = "0".to_string();
-    input_fields[39] = format!("{{{}}}", options.join(","));
-    let field = format!("{{{}}}", input_fields.join(","));
+    // `FormFieldSchema::from_raw_layout` (`src/form_schema.rs`) requires
+    // wrapper `"37"` (not `"48"`), an *exact* 59-field item, and an options
+    // block tagged `"36"` (not `"38"`) for `InputField`. The legacy
+    // all-zero/all-`"2"` 45-field, wrapper-48 construction predates that
+    // schema and also made production's `ChoiceList` typed-preflight check
+    // panic (slot 1 needs a real choice-list shape, not a bare scalar), so
+    // this is rebuilt from the real, currently-valid `InputField` fixture
+    // used by `extracts_live_input_field_auto_choice_incomplete`, mutating
+    // only options slot 24 (`FormInputFieldExtendedOptionSlot::ChoiceFoldersAndItems`).
+    let field = r#"{37,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"СписокЭлектроннаяПочта",1,0,{1,0},{1,0},{2,{1},{4}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,0,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,0,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},1,{1,0},{1,0},1,0,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{0,1,0},1,{22,{28,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЭлектроннаяПочтаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{29,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЭлектроннаяПочтаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
 
     let item = parse_form_child_item(
-        &field,
+        field,
         None,
         None,
         &BTreeMap::new(),
@@ -16782,6 +16799,17 @@ fn extracts_form_input_field_choice_folders_and_items_from_layout_code() {
 
 #[test]
 fn extracts_field_context_menu_as_direct_child() {
+    // `append_form_child_items_by_tag` scans every top-level field of the
+    // parent independently, so the outer InputField's own (legacy, short)
+    // shape isn't the blocker here. `format_form_context_menu_xml`
+    // (`src/mssql_dump/form_body.rs`) instead renders a `ContextMenu` open
+    // (not self-closing) only when `autofill == Some(false)` or it has its
+    // own children; `parse_form_context_menu_autofill` reads that from slot
+    // 20 of the *nested* ContextMenu item, which the original 11-field
+    // ContextMenu blob didn't even reach. Rebuilt the nested ContextMenu
+    // from the real 29-field shape used by wrapper-55 table service items
+    // (e.g. `extracts_ordinary_wrapper55_table_properties_and_autocommandbar_autofill`'s
+    // "RowsContext"), with slot 20 set to `{1,0}` for `Autofill=false`.
     let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
     let mut fields = vec!["0".to_string(); 43];
     fields[0] = "48".to_string();
@@ -16795,8 +16823,9 @@ fn extracts_field_context_menu_as_direct_child() {
     fields[18] = "{1,0}".to_string();
     fields[19] = "{1,0}".to_string();
     fields[41] = "1".to_string();
-    fields[42] =
-        format!(r#"{{22,{{23,{form_uuid}}},0,0,0,8,"FieldContextMenu",{{1,0}},{{1,0}},0,1,0}}"#);
+    fields[42] = format!(
+        r#"{{22,{{23,{form_uuid}}},0,0,0,8,"FieldContextMenu",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{1,0}},0,1,0,0,0,3,3,0}}"#
+    );
     let field = format!("{{{}}}", fields.join(","));
 
     let item = parse_form_child_item(
@@ -17566,9 +17595,24 @@ fn extracts_table_service_child_items_from_layout_fields() {
         current_row_use: None,
     }];
     let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
+    // `parse_form_child_item_extended_tooltip` (`src/mssql_dump/form_body.rs`)
+    // requires the nested `{12,...}` tooltip's own name to satisfy
+    // `is_form_extended_tooltip_name` — it must literally contain
+    // "ExtendedTooltip"/"РасширеннаяПодсказка" (optionally followed only by
+    // digits), matching the naming convention used by every other extended
+    // tooltip fixture in this suite. The stale "RowsSearchTip" name never
+    // matched that convention, so `extended_tooltip` was always `None`.
+    //
+    // The nested `RowsSearchContext` `ContextMenu` also predates
+    // `format_form_context_menu_xml`'s open-vs-self-closing rule (open only
+    // when `autofill == Some(false)` or it has its own children); its
+    // 8-field blob was too short for `parse_form_context_menu_autofill` to
+    // read slot 20 at all. Extended it to the real 29-field ContextMenu
+    // shape (see `extracts_field_context_menu_as_direct_child`) with slot 20
+    // set to `{1,0}` for `Autofill=false`.
     let item = parse_form_child_item(
             &format!(
-                r#"{{73,{{25,{form_uuid}}},0,1,0,"Rows",0,0,0,{{1,0}},0,1,{{22,{{26,{form_uuid}}},0,0,0,8,"RowsContext",{{1,0}},{{1,0}},0,1,0}},1,{{22,{{27,{form_uuid}}},0,0,0,9,"RowsBar",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{4,4,{{0}},4}},{{8,3,0,1,100}},{{0,0,0}},1,{{1,0,1,0}},1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{28,{form_uuid}}},0,0,0,"RowsButton",{{1,0}},1,{{15,{command_uuid}}},{{0}},0,1,0,0,2,2,0,0,0,{{12,{{31,{form_uuid}}},0,0,0,0,"RowsButtonTip",{{1,0}},{{1,0}},1,0,0,2,2}}}}}},1,{{6,{{29,{form_uuid}}},0,0,0,0,"RowsSearch",{{1,0}},{{1,0}},1,1,0,1,{{1,0}},0,1,{{22,{{30,{form_uuid}}},0,0,0,8,"RowsSearchContext",{{1,0}},{{1,0}}}},0,0,{{25,0}},{{12,{{32,{form_uuid}}},0,0,0,0,"RowsSearchTip",{{1,0}},{{1,0}},1,0,0,2,2}}}}}}"#
+                r#"{{73,{{25,{form_uuid}}},0,1,0,"Rows",0,0,0,{{1,0}},0,1,{{22,{{26,{form_uuid}}},0,0,0,8,"RowsContext",{{1,0}},{{1,0}},0,1,0}},1,{{22,{{27,{form_uuid}}},0,0,0,9,"RowsBar",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{4,4,{{0}},4}},{{8,3,0,1,100}},{{0,0,0}},1,{{1,0,1,0}},1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{28,{form_uuid}}},0,0,0,"RowsButton",{{1,0}},1,{{15,{command_uuid}}},{{0}},0,1,0,0,2,2,0,0,0,{{12,{{31,{form_uuid}}},0,0,0,0,"RowsButtonTip",{{1,0}},{{1,0}},1,0,0,2,2}}}}}},1,{{6,{{29,{form_uuid}}},0,0,0,0,"RowsSearch",{{1,0}},{{1,0}},1,1,0,1,{{1,0}},0,1,{{22,{{30,{form_uuid}}},0,0,0,8,"RowsSearchContext",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{1,0}},0,1,0,0,0,3,3,0}},0,0,{{25,0}},{{12,{{32,{form_uuid}}},0,0,0,0,"RowsSearchExtendedTooltip",{{1,0}},{{1,0}},1,0,0,2,2}}}}}}"#
             ),
             Some("RowsData"),
             None,
@@ -17599,7 +17643,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
             .extended_tooltip
             .as_ref()
             .map(|tooltip| (tooltip.name.as_str(), tooltip.id.as_str())),
-        Some(("RowsSearchTip", "32"))
+        Some(("RowsSearchExtendedTooltip", "32"))
     );
 
     let xml = format_form_child_items_xml(&[item], 1);
