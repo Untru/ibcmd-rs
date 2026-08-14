@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": null,
+  "contract": "8.3.27-xml-2.20-dcs-form-list-settings-server-state-v1",
+  "body_contract": "8.3.27-xml-2.20-dcs-settings-list-settings-server-state-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-14",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_fresh_file_infobases",
+    "database_locale": "ru_RU",
+    "creation_args": "infobase create --locale=ru_RU --load <input.cf> --apply --force",
+    "patch_build_policy": "the exact build is retained as experiment provenance; this wrapper contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "kind": "clean_room_form_list_settings_delta_on_platform_authenticated_base_cf",
+    "base_fixture_id": "8.3.27.2214-xml-2.20-dcs-form-attributes-conditional-appearance",
+    "base_cf_size": 88686,
+    "base_cf_sha256": "a0ba6431996a4349b3c3336ab974e867390e3f309e6805acb82e5f0c9721a9f6",
+    "authority": "hypothesis_only",
+    "basis": "F-SERVERSTATE-DESIGN.md Probe F2: F1's DynamicList form (minimal, no ListSettings) plus an explicit ListSettings block (one string-field filter, one order) inside the Settings/DynamicList element. Filter shape is an exact byte-for-byte reuse of this same base fixture's own already-proven FilterItemComparison block. Order shape (dcsset:item xsi:type=dcsset:OrderItemField) is a cross-file analogy from the dcs-core/dcs-area-template-appearance settingsVariant/order fixtures, justified because parse_form_list_settings_order returns the same shared DcsOrder type used there.",
+    "delta": "DynamicList form on Catalog.CorpusList with explicit ListSettings (filter: SortKey=A, order: SortKey Asc) added to F1 form body"
+  },
+  "rounds": {
+    "round_1": {
+      "cf_size": 95780,
+      "cf_sha256": "95e70b71ada74d6a94539decc4c7296af8cbac2066e4a0061c74a2c9060e4d86"
+    },
+    "round_2": {
+      "cf_size": 94906,
+      "cf_sha256": "968594192a6610a02a199710547f169c96a8ec821f597b1cf92bd801a0d013ba"
+    },
+    "selected_native_equal_between_rounds": true,
+    "packed_rows_equal_between_rounds": true,
+    "unpacked_rows_equal_between_rounds": true
+  },
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "encoded_size": 128522,
+    "encoded_sha256": "8073f65de0a686bb10743b1930cf2314c68f22c746f0ed91775bfd4d9853796f",
+    "decoded_size": 94906,
+    "decoded_sha256": "968594192a6610a02a199710547f169c96a8ec821f597b1cf92bd801a0d013ba"
+  },
+  "form": {
+    "owner": "Catalog.CorpusList",
+    "name": "ListForm",
+    "native_xml": {
+      "path": "native-form.xml.b64",
+      "encoded_size": 8422,
+      "encoded_sha256": "2ec9179daeaad14067b03cb710c8381f9803d58539bc579700dea772203e3395",
+      "decoded_size": 6218,
+      "sha256": "b00707828886c454e17736f79573333fd89b4fec9f04618bdd740ecb9a4293ae"
+    },
+    "body_row": {
+      "packed_size": 3262,
+      "packed_sha256": "1a174f2c90f25aa01fbdbb957686f511ed751010cc00e1390568b4e8b4804b30",
+      "packed_file": {
+        "path": "form-body-packed.bin.b64",
+        "encoded_size": 4420,
+        "encoded_sha256": "6d594e22f751ee8da998ae4db886fb66489beaacbcb0ad0dcff06b9fe900f897"
+      },
+      "unpacked_size": 14994,
+      "unpacked_sha256": "6d455e9dbbe346408b9e04262142592e5d8786740c734f193a9e8f4b6cca651c",
+      "unpacked_file": {
+        "path": "form-body-unpacked.bin.b64",
+        "encoded_size": 20305,
+        "encoded_sha256": "8220d7994df31292d19176f78552f0637513d83a1cdcf9217659ed05547bbfac"
+      }
+    },
+    "server_state": {
+      "path": "server-state-decoded.xml.b64",
+      "encoded_size": 248,
+      "encoded_sha256": "6c846e2fbb9787c726ab1e3d81e415a2b1b60122827d76590f18129e292c27a5",
+      "decoded_size": 181,
+      "sha256": "08e0e00120f703b681522b0c1ea315055f4de28e6af806983707ba9a0ec96487",
+      "deterministic_between_rounds": true,
+      "identical_to_f1": true,
+      "description": "self-closing empty UniversalListServerOnlyState wrapper, IDENTICAL byte-for-byte to F1's ServerState despite explicit non-default ListSettings being present"
+    }
+  },
+  "selected_native_files": [
+    {
+      "path": "Catalogs/CorpusList.xml",
+      "size": 15299,
+      "sha256": "f27dbf9a75305d0ba5486fd52093ab641b8e26fd13651d08687b11443777822f"
+    },
+    {
+      "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+      "size": 3,
+      "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+      "size": 1494,
+      "sha256": "f8e11a1cf75666c4b989ca9222cc7a816bffd2659f86d7f833518d236cde0cf8"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+      "size": 6218,
+      "sha256": "b00707828886c454e17736f79573333fd89b4fec9f04618bdd740ecb9a4293ae"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+      "size": 492,
+      "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+    },
+    {
+      "path": "Catalogs/FilterProbe.xml",
+      "size": 15309,
+      "sha256": "b1863a5d4f6379912b1784733e09553bf4095fac7794ea65426d9de670d094bf"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+      "size": 3,
+      "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+      "size": 1494,
+      "sha256": "f8e11a1cf75666c4b989ca9222cc7a816bffd2659f86d7f833518d236cde0cf8"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+      "size": 8040,
+      "sha256": "4260e513e185a8cc09854327958a6ec39309d1a607ca2166dbc0be3e672ef23a"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+      "size": 492,
+      "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+    }
+  ],
+  "proven_shape": {
+    "catalog_name": "CorpusList",
+    "form_name": "ListForm",
+    "dynamic_list_attribute": "Список",
+    "main_table": "Catalog.CorpusList",
+    "manual_query": false,
+    "dynamic_data_read": true,
+    "list_settings_present_in_source": true,
+    "filter_field": "SortKey",
+    "filter_comparison_type": "Equal",
+    "filter_value": "A",
+    "order_field": "SortKey",
+    "order_type": "Asc",
+    "list_settings_child_order_native": [
+      "dcsset:filter",
+      "dcsset:order"
+    ],
+    "list_settings_reordered_by_platform": false
+  },
+  "proven_claims": [
+    "Explicit, non-default ListSettings (filter + order) does not populate any ServerState content -- the decoded ServerState XML is byte-identical to F1's (empty self-closing wrapper).",
+    "The platform did not reorder or reformat the submitted ListSettings/filter/order content at all -- unusual among this session family, where most DCS coordinates showed at least a reorder or a namespace-prefix rewrite.",
+    "The freshly-generated userSettingID GUIDs for filter and order were preserved verbatim in the native re-export."
+  ],
+  "non_claims": [
+    "No claim about itemsViewMode/itemsUserSettingID trailing pair; not attempted since attempt 1 (filter+order only, per the design's literal spec) was accepted immediately.",
+    "No claim about what triggers non-empty ServerState content; see F1's non_claims.",
+    "Provenance: produced in a probe/design session (scratchpad/design/F-SERVERSTATE-DESIGN.md), not yet reviewed or integrated."
+  ]
+}
