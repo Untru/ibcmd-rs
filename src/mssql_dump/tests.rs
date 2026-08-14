@@ -9392,9 +9392,18 @@ fn parses_form_attribute_value_table_columns() {
         attribute.columns[0].title,
         vec![("ru".to_string(), "Организация".to_string())]
     );
+    // `parse_form_attribute_column_type_pattern` tries the generic
+    // `parse_form_type_pattern` first, which resolves a single `"#"`+UUID
+    // pattern against `type_index` as `ReferenceTypeSet` (the
+    // `ConstantValueType::Reference` variant is only reached via the
+    // builtin-type fallback, for UUIDs *not* present in `type_index` — see
+    // `parse_form_attribute_column_builtin_type_pattern`, form_body.rs).
+    // `33c3e710-...` *is* in this test's `type_index`, so the old expected
+    // `Reference` variant is stale; `ReferenceTypeSet` is the current,
+    // correct classification.
     assert_eq!(
         attribute.columns[0].value_types,
-        vec![ConstantValueType::Reference {
+        vec![ConstantValueType::ReferenceTypeSet {
             reference: "cfg:DefinedType.Organization".to_string(),
         }]
     );
@@ -10488,9 +10497,14 @@ fn omits_form_command_current_row_use_for_command_tail_kind_2() {
 #[test]
 fn extracts_regular_form_attribute_types_from_body_tail() {
     let reference_type_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    // `string_allowed_length_xml` (mod.rs:36064) maps flag `0` to "Fixed"
+    // and anything else to "Variable" — the old fixture's explicit
+    // `{"S",25,0}` therefore renders `<v8:AllowedLength>Fixed</v8:AllowedLength>`,
+    // not the "Variable" this test asserts. Flipped the flag to `1` to
+    // match the test's own stated intent.
     let form_body = deflate_for_test(
             format!(
-                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}},"",{{4,3,{{9,{{1}},0,"Комментарий",{{1,1,{{"ru","Комментарий"}}}},{{"Pattern",{{"S",25,0}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}},{{9,{{2}},0,"Количество",{{1,0}},{{"Pattern",{{"N",10,3,1}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}},{{9,{{3}},0,"Номенклатура",{{1,0}},{{"Pattern",{{"#",{reference_type_uuid}}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}}}}}}"##
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}},"",{{4,3,{{9,{{1}},0,"Комментарий",{{1,1,{{"ru","Комментарий"}}}},{{"Pattern",{{"S",25,1}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}},{{9,{{2}},0,"Количество",{{1,0}},{{"Pattern",{{"N",10,3,1}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}},{{9,{{3}},0,"Номенклатура",{{1,0}},{{"Pattern",{{"#",{reference_type_uuid}}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}}}}}}"##
             )
             .as_bytes(),
         );
@@ -11044,6 +11058,11 @@ fn tooltip_representation_follows_f50_when_tooltip_is_empty() {
 
 #[test]
 fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
+    // `FormTooltipRepresentation::from_raw_scalar` (`src/form_schema.rs`)
+    // defines 9 deliberate, evidence-backed codes, "0".."8" (Omit..ShowRight)
+    // — "6" is a genuinely valid code (ShowLeft), not a malformed value, so
+    // it doesn't belong in this "should be rejected" fuzz list; "9" (past
+    // the valid range) and "-1" (negative) remain correctly rejected.
     for (wrapper, kind, field_count, raw) in [
         ("48", "2", 59, "3"),
         ("37", "6", 59, "3"),
@@ -11054,7 +11073,6 @@ fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
         ("37", "2", 59, "{3}"),
         ("37", "2", 59, "03"),
         ("37", "2", 59, "3suffix"),
-        ("37", "2", 59, "6"),
         ("37", "2", 59, "9"),
         ("37", "2", 59, "-1"),
     ] {
@@ -13020,12 +13038,22 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
             "{uuid} resolved for Table"
         );
 
+        // `form_formatted_document_standard_command_suffix` (form_body.rs)
+        // shares 11 uuids with `form_spreadsheet_document_standard_command_suffix`
+        // in total (both evidence-backed tables); of those, only these 6 are
+        // actually exercised by `cases` above (the rest — BackColor, Redo,
+        // TextColor, Undo — aren't in `cases` at all). The old whitelist
+        // only had the 4 alignment commands; Italic and Underline were
+        // always resolved for FormattedDocument too but never asserted.
         let formatted_expected = matches!(
             uuid,
             "56ae90b6-588f-406e-919c-cc5cc7f86297"
                 | "87ecfbdd-8e2b-4ba2-a315-0897020f382f"
                 | "ab0ebc39-68ee-4034-b2f4-43eee55bd651"
                 | "e428af27-c4f7-4577-b80e-95a79f94322d"
+                | "a8631f01-318a-4da2-80a9-9075c7524463"
+                | "f20eefc2-f819-4ab1-be67-87b3ca2e26e6"
+                | "85bd789b-0047-46f9-9b2e-845907fc1b1d"
         )
         .then(|| format!("Form.Item.TextRenamed.StandardCommand.{suffix}"));
         assert_eq!(
@@ -17317,12 +17345,20 @@ fn extracts_regular_table_selection_search_command_set_from_layout_field() {
         r#"{12,0ae4bea5-23be-42a7-b69e-97b11b29c453,37740564-9e86-44a0-bea9-3f485a5a3f91,51c99108-107c-43e1-8918-e48835bf2495,7b683784-b474-441a-ba63-3d757bd0ffd4,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,e7216412-03ac-4a81-99c2-1d7c28e88e31,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
     ];
 
+    // `88078230-1f6b-415f-99e4-ad2ff73810cf` (in the fixture) maps to
+    // "CopyToClipboard" via `form_table_standard_command_suffix`
+    // (form_body.rs:13399) — the SortListDesc uuid is
+    // `58b2a785-23f6-4b0e-a324-9a1323285595`, which isn't in this fixture
+    // at all. The old expected list named the wrong command for the
+    // fixture's actual uuid; the fixture's own uuid list is otherwise fully
+    // self-consistent with every other entry.
     assert_eq!(
         parse_form_table_command_set_excluded_commands(&fields),
         vec![
             "Add",
             "Change",
             "Copy",
+            "CopyToClipboard",
             "Delete",
             "EndEdit",
             "MoveDown",
@@ -17331,7 +17367,6 @@ fn extracts_regular_table_selection_search_command_set_from_layout_field() {
             "SelectAll",
             "ShowMultipleSelection",
             "ShowRowRearrangement",
-            "SortListDesc",
         ]
     );
 }
@@ -23307,12 +23342,27 @@ fn non_streamed_information_register_resolves_predefined_design_time_refs() {
     let register_uuid = "77777777-7777-4777-8777-777777777777";
     let resource_uuid = "88888888-8888-4888-8888-888888888888";
 
-    let catalog_metadata = deflate_for_test(
-        format!(
-            "{{1,{{57,{catalog_object_type_id},{catalog_object_value_id},{catalog_ref_type_id},{catalog_ref_value_id},{catalog_selection_type_id},{catalog_selection_value_id},{catalog_list_type_id},{catalog_list_value_id},{{0,{{3,{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{catalog_manager_type_id},{catalog_manager_value_id}}}}}}}"
-        )
-        .as_bytes(),
-    );
+    // Catalog goes through the strict `OwnerGraphFamily` decoder — the old
+    // flat/positional shape here predates that refactor (same root cause
+    // fixed repeatedly in Cluster 11 via `exact_catalog_owner_fixture_for_test`).
+    let (_header, mut catalog_fields, catalog_collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    for (field_index, value) in [
+        (1, catalog_object_type_id),
+        (2, catalog_object_value_id),
+        (3, catalog_ref_type_id),
+        (4, catalog_ref_value_id),
+        (5, catalog_selection_type_id),
+        (6, catalog_selection_value_id),
+        (7, catalog_list_type_id),
+        (8, catalog_list_value_id),
+        (34, catalog_manager_type_id),
+        (35, catalog_manager_value_id),
+    ] {
+        catalog_fields[field_index] = value.to_owned();
+    }
+    let catalog_raw = render_owner_graph_fixture_for_test(&catalog_fields, &catalog_collections);
+    let catalog_metadata = deflate_for_test(catalog_raw.as_bytes());
     let predefined = deflate_for_test(
         format!(
             "{{0,{{1,{{7}},{{2,{{1,1,{{2,0,5,{{\"#\",{predefined_type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"B\",1}},{{\"#\",{predefined_type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Items\"}},{{\"S\",\"\"}},1,{{1,1,{{2,1,7,{{\"#\",{predefined_type_uuid},{{1,{item_uuid}}}}},{{\"B\",0}},{{\"#\",{predefined_type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Item\"}},{{\"S\",\"I\"}},{{\"S\",\"Item\"}},{{\"N\",0}},0}}}}}}}}}}}}}},-1,3}}}}"
@@ -36915,14 +36965,30 @@ fn parses_detailed_information_register_command_picture_and_parameter_types() {
         Some("StdPicture.Print")
     );
     assert!(print_properties.picture_load_transparent);
-    for (uuid, expected) in [
+    // `common_uuid` is the picture uuid's presence in
+    // `common_command_standard_picture_name`'s own evidence-backed table
+    // (mod.rs:27969): still absent for SpreadsheetShowHeaders, but
+    // "caf2e58b-..." (StdPicture.Setting) has since been added there too
+    // (mod.rs:28069) — it's resolved by both the narrower
+    // `information_register_command_standard_picture_name` (mod.rs:6173)
+    // and the common table now, so the old blanket "not in the common
+    // table" precondition is stale for this entry.
+    for (uuid, expected, common_uuid) in [
         (
             "46598f81-5f95-4485-9b33-bfe4fd1276d0",
             "StdPicture.SpreadsheetShowHeaders",
+            false,
         ),
-        ("caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb", "StdPicture.Setting"),
+        (
+            "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb",
+            "StdPicture.Setting",
+            true,
+        ),
     ] {
-        assert_eq!(common_command_standard_picture_name(uuid), None);
+        assert_eq!(
+            common_command_standard_picture_name(uuid),
+            common_uuid.then_some(expected)
+        );
         let descriptor = format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,1,0,\"\"}}");
         let properties = parse_command(&descriptor, &BTreeMap::new()).unwrap();
         assert_eq!(properties.picture_ref.as_deref(), Some(expected));
@@ -37019,9 +37085,15 @@ fn extracts_enum_xml_with_values_and_native_envelope() {
     let value_open_uuid = "55555555-5555-4555-8555-555555555551";
     let value_closed_uuid = "66666666-6666-4666-8666-666666666661";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    // `parse_enum_properties_from_text` reads `has_standard_attributes` from
+    // `fields[18]` via `braced_field_has_entries`, which is `true` only when
+    // that field's own marker is non-"0" (mod.rs:26122). The old fixture
+    // used `{0,{0}}` there (marker "0" = absent), so `<StandardAttributes>`
+    // (Order/Ref) was never emitted even though the test expects it —
+    // flipped the marker to `{1,{0}}` to match the test's intent.
     let enum_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{20,{ref_type_id},{ref_value_id},{manager_type_id},{manager_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"enum comment\",0,0,{zero_uuid},0}}\r\n}},0,{list_type_id},{list_value_id},{zero_uuid},{zero_uuid},2,1,{zero_uuid},{zero_uuid},{{1,\"en\",\"Statuses\"}},{{0}},{{0}},{{0,{{0}}}},0}},2,\r\n{{aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0}},{{bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0}},{{cccccccc-cccc-4ccc-cccc-cccccccccccc,0}},\r\n{{dddddddd-dddd-4ddd-dddd-ddddddddddddd,2,\r\n{{{{0,{{3,{{1,0,{value_open_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}},0}},\r\n{{{{0,{{3,{{1,0,{value_closed_uuid}}},\"Closed\",{{1,\"en\",\"Closed\"}},\"\"}}}},0}}}}\r\n}}"
+                "{{1,\r\n{{20,{ref_type_id},{ref_value_id},{manager_type_id},{manager_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"enum comment\",0,0,{zero_uuid},0}}\r\n}},0,{list_type_id},{list_value_id},{zero_uuid},{zero_uuid},2,1,{zero_uuid},{zero_uuid},{{1,\"en\",\"Statuses\"}},{{0}},{{0}},{{1,{{0}}}},0}},2,\r\n{{aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0}},{{bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0}},{{cccccccc-cccc-4ccc-cccc-cccccccccccc,0}},\r\n{{dddddddd-dddd-4ddd-dddd-ddddddddddddd,2,\r\n{{{{0,{{3,{{1,0,{value_open_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}},0}},\r\n{{{{0,{{3,{{1,0,{value_closed_uuid}}},\"Closed\",{{1,\"en\",\"Closed\"}},\"\"}}}},0}}}}\r\n}}"
             )
             .as_bytes(),
         );
