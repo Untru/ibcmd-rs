@@ -756,6 +756,26 @@ mod tests {
             "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/native/",
             "Reports/DcsCorpus/Templates/MainSchema/Ext/Template.xml"
         ));
+        // manifest.json template.raw_entry.unpacked: the platform's own
+        // genuine storage bytes for this exact template UUID -- a strictly
+        // stronger ground truth than the pre-DCS-COMPILE-NAMESPACE-MIN-01
+        // pin below, which only asserted "the compiler's own candidate was
+        // VM-accepted" (manifest's own words: "semantically canonical even
+        // though its internal namespace spelling is not byte-identical to
+        // the platform storage body"). The compile direction now routes
+        // the primary/settings documents through the evidenced
+        // point-of-use namespace minimization, so the candidate is now
+        // byte-identical to genuine platform storage too, not just
+        // VM-accepted.
+        let genuine_unpacked = include_bytes!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/raw/",
+            "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin"
+        ));
+        assert_eq!(genuine_unpacked.len(), 4_458);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(genuine_unpacked)),
+            "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510"
+        );
         let packed =
             compile_dcs(&DcsCodecProfile::fixture(), DcsTemplateKind::Schema, source).unwrap();
         let decoded = decode_dcs(
@@ -764,16 +784,7 @@ mod tests {
             &packed,
         )
         .unwrap();
-        assert_eq!(decoded.plaintext().len(), 4_734);
-        assert_eq!(
-            format!("{:x}", Sha256::digest(decoded.plaintext())),
-            "928de9e6a9fbcfe89530e5d02fe8f08c0efe491c392b671fa61c4c36d48ec81a"
-        );
-        assert_eq!(packed.len(), 1_026);
-        assert_eq!(
-            format!("{:x}", Sha256::digest(&packed)),
-            "5b8f758dc3d64e56b744b7554148245b0bf1f3023ce5aa81df63bcd730058ca8"
-        );
+        assert_eq!(decoded.plaintext(), genuine_unpacked);
     }
 
     #[test]
@@ -1338,7 +1349,21 @@ mod tests {
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-template/area-schema-file.xml.b64"
         )));
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/raw-unpacked.bin.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&unpacked)),
+            "7047c6cfe75f1eb4241572bf350c273a6a1b8996c7350b75b557def2a6d8b7a6"
+        );
+        // Since DCS-COMPILE-NAMESPACE-MIN-01 routes the primary/settings
+        // documents through the evidenced point-of-use namespace
+        // minimization (the trivial dcs-core base schema this cohort's
+        // primary shares with every other dcs-area-* corpus), the whole
+        // compiled envelope now matches raw-unpacked.bin byte for byte.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        assert_eq!(inflate(&blob).unwrap(), unpacked);
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         assert_eq!(
             decoded.documents().last().copied(),
@@ -1371,7 +1396,20 @@ mod tests {
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-template-appearance/area-schema-file.xml.b64"
         )));
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template-appearance/raw-unpacked.bin.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&unpacked)),
+            "0b1b8c051c0dffdb8546068733347900f310e7c921ca6ecc275bbeb87845af22"
+        );
+        // Since DCS-COMPILE-NAMESPACE-MIN-01 routes the primary/settings
+        // documents through the evidenced point-of-use namespace
+        // minimization, the whole compiled envelope now matches
+        // raw-unpacked.bin byte for byte.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        assert_eq!(inflate(&blob).unwrap(), unpacked);
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         if let Ok(path) = std::env::var("IBCMD_DCS_CANDIDATE_OUT") {
             std::fs::write(path, decoded.plaintext()).unwrap();
@@ -1429,10 +1467,13 @@ mod tests {
         // seed(source) XML -> body: compiling the evidenced native
         // document must reproduce the exact platform-observed terminal
         // side-table document, including the new color side-table bytes
-        // (matching the scope b4bba2d's own equivalent test proves; the
-        // primary schema and settings documents are covered by the
-        // pre-existing, unrelated inner-schema/settings cohorts).
+        // (matching the scope b4bba2d's own equivalent test proves). Since
+        // DCS-COMPILE-NAMESPACE-MIN-01 routes the primary/settings
+        // documents through the evidenced point-of-use namespace
+        // minimization, the whole compiled envelope now matches
+        // raw-unpacked.bin byte for byte too.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        assert_eq!(inflate(&blob).unwrap(), unpacked);
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         assert_eq!(
             decoded.documents().last().copied(),
@@ -1440,15 +1481,7 @@ mod tests {
         );
 
         // body -> XML: re-exporting the compiled body must reproduce the
-        // evidenced color appearance verbatim. (Byte-exact whole-document
-        // equality against native-template.xml is not asserted here: the
-        // pre-existing settings-document reindentation gap in
-        // `normalize_data_composition_schema_template_documents_with_profiles`
-        // -- present identically for the unrelated base
-        // `dcs-area-template-appearance` corpus -- is out of this work
-        // package's scope. The genuine-bytes test below, which never goes
-        // through our own compiler's settings emission, proves byte-exact
-        // whole-document equality instead.)
+        // evidenced color appearance verbatim.
         let exported =
             crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
                 &decoded.documents(),
@@ -1560,8 +1593,14 @@ mod tests {
         // seed(source) XML -> body: the standard/built-in style reference
         // needs no resolver on either direction, so the plain compiler
         // entry points must already reproduce the exact platform-observed
-        // terminal side-table document byte for byte.
+        // terminal side-table document byte for byte. Since
+        // DCS-COMPILE-NAMESPACE-MIN-01 routes the primary/settings
+        // documents through the evidenced point-of-use namespace
+        // minimization (the trivial dcs-core base schema this cohort's
+        // primary shares with every other dcs-area-* corpus), the whole
+        // compiled envelope now matches raw-unpacked.bin byte for byte too.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        assert_eq!(inflate(&blob).unwrap(), unpacked);
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         assert_eq!(
             decoded.documents().last().copied(),
@@ -1569,11 +1608,7 @@ mod tests {
         );
 
         // body -> XML: re-exporting the compiled body must reproduce the
-        // evidenced style reference verbatim. (Byte-exact whole-document
-        // equality against native-template.xml is not asserted here for
-        // the same pre-existing, unrelated settings-document reindentation
-        // reason documented on the web-color cohort's equivalent test; the
-        // genuine-bytes test below proves that instead.)
+        // evidenced style reference verbatim.
         let exported =
             crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
                 &decoded.documents(),
@@ -1812,26 +1847,21 @@ mod tests {
     /// *something*.
     ///
     /// Whole-envelope byte equality against `raw-unpacked.bin` (primary
-    /// schema + settings document, not just the terminal side table) is
-    /// deliberately not asserted here: `native-template.xml`'s
-    /// `dataCompositionSchema`/`Settings` subtrees use a hoisted-namespace
-    /// (`v8:Type`, `dcsset:field`, ...) form, while the genuine platform
-    /// storage bytes for the *same two documents* use a minimized,
-    /// point-of-use namespace form (`Type xmlns="..."`, bare `field`, ...).
-    /// This is the identical pre-existing settings/primary reindentation
-    /// gap already documented as out of scope on the sibling
-    /// `platform_area_style_color_reference_compiles_to_exact_side_table`
-    /// and `platform_area_appearance_web_color_compiles_to_exact_side_table`
-    /// tests -- confirmed here to be unrelated to the style-resolver
-    /// feature itself (the resolver only touches the terminal AreaTemplate
-    /// document, which *does* match byte-for-byte below) and unrelated to
-    /// any StyleItem/color content (the divergent bytes are ordinary
-    /// `valueType`/`selection`/`order` elements the resolver never
-    /// touches). The genuine-bytes companion test below, which never goes
-    /// through our own compiler's primary/settings emission, proves
-    /// byte-exact whole-document equality instead -- exactly mirroring the
-    /// sibling cohorts' `*_native_packed_body_exports_exact_native_template`
-    /// pattern.
+    /// schema + settings document, not just the terminal side table) IS
+    /// asserted here as of DCS-COMPILE-NAMESPACE-MIN-01. The pre-existing
+    /// settings/primary reindentation gap (A6-BODY-DIFF-01: candidate used
+    /// a hoisted-namespace form -- `v8:Type`, `dcsset:field`, ... -- while
+    /// genuine platform storage uses a minimized, point-of-use namespace
+    /// form -- `Type xmlns="..."`, bare `field`, ...) is exactly what this
+    /// corpus's real platform `config export` choked on ("Stream format
+    /// error", zero-length re-exported Template.xml, while import/apply
+    /// accepted the mismatched candidate without complaint). The compile
+    /// direction now routes the primary document through the evidenced
+    /// point-of-use minimization for this cohort's trivial dcs-core base
+    /// schema (shared byte-for-byte with every other dcs-area-* corpus),
+    /// and the settings document through the general evidenced
+    /// `dcsset:`-prefix-stripping minimizer -- closing the gap this
+    /// specific corpus's failed platform re-export flagged.
     #[test]
     fn platform_area_style_item_uuid_compiles_base_free_with_resolver_full_cycle() {
         let profile = DcsCodecProfile::fixture();
@@ -1875,8 +1905,9 @@ mod tests {
         );
 
         // source XML -> body: must reproduce the exact platform-observed
-        // terminal side-table document, including the custom-StyleItem
-        // uuid coordinate.
+        // whole envelope (primary + settings + terminal side table),
+        // including the custom-StyleItem uuid coordinate -- this is the
+        // exact "Stream format error" fix.
         let blob = compile_dcs_with_references(
             &profile,
             DcsTemplateKind::Schema,
@@ -1884,6 +1915,7 @@ mod tests {
             &style_reference_types,
         )
         .expect("custom-StyleItem source must compile base-free with the resolver");
+        assert_eq!(inflate(&blob).unwrap(), unpacked);
         let decoded = decode_dcs_with_references(
             &profile,
             DcsTemplateKind::Schema,
@@ -1899,9 +1931,12 @@ mod tests {
         // body -> XML: re-exporting the compiled body must reproduce the
         // evidenced custom-StyleItem reference verbatim. (Byte-exact
         // whole-document equality against native-template.xml is not
-        // asserted here for the reindentation reason documented on this
-        // test's doc comment; the genuine-bytes test below proves that
-        // instead.)
+        // asserted here: this is the separate decode/export direction's
+        // own settings-document reindentation gap in
+        // `normalize_data_composition_schema_template_documents_with_profiles`,
+        // untouched by DCS-COMPILE-NAMESPACE-MIN-01's compile-direction-only
+        // scope; the genuine-bytes test below proves byte-exact
+        // whole-document equality on that direction instead.)
         let object_refs = {
             let mut object_refs = BTreeMap::new();
             object_refs.insert(
@@ -2053,7 +2088,12 @@ mod tests {
         // must reproduce the exact platform-observed terminal side-table
         // document, including the shared appIndex=0 referenced by both
         // row-1 cells and the single `Details`-spelled side-table record.
+        // Since DCS-COMPILE-NAMESPACE-MIN-01 routes the primary/settings
+        // documents through the evidenced point-of-use namespace
+        // minimization, the whole compiled envelope now matches
+        // raw-unpacked.bin byte for byte too.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        assert_eq!(inflate(&blob).unwrap(), unpacked);
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         assert_eq!(
             decoded.documents().last().copied(),
@@ -2061,11 +2101,7 @@ mod tests {
         );
 
         // body -> XML: re-exporting the compiled body must reproduce the
-        // evidenced shared-row appearance verbatim. (Whole-document byte
-        // equality against native-template.xml is not asserted here for
-        // the same pre-existing, unrelated settings-reindentation reason
-        // documented on the color cohort's equivalent test above; the
-        // genuine-bytes test below proves that instead.)
+        // evidenced shared-row appearance verbatim.
         let exported =
             crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
                 &decoded.documents(),
