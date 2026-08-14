@@ -10437,9 +10437,22 @@ pub(super) fn parse_form_search_addition_source_item(
     table_name_by_id.get(table_id).cloned()
 }
 
+/// FORM-TABLE-REPRESENTATION-01 (probe FE1, ninth lab session, two
+/// deterministic rounds, wrapper-55 `Table` items): raw `"1"` is the
+/// platform's own "Representation not set" sentinel -- native XML omits
+/// the `<Representation>` element entirely for it (the field then carries
+/// implicit `List` semantics by the platform's own default, not an
+/// explicit value ibcmd should emit). Raw `"0"` is the evidenced explicit
+/// `List` and raw `"2"` the pre-existing evidenced explicit `Tree`. `"1"`
+/// is listed alongside the other non-emitting codes deliberately (not
+/// folded into the wildcard) so this sentinel status stays visible at the
+/// call site; every other/unknown code stays fail-closed to `None`
+/// (`HierarchicalList` is dropped by the platform on import in the same
+/// probe -- non-claim, no raw code is evidenced for it here).
 pub(super) fn parse_form_table_representation(field: &str) -> Option<&'static str> {
     match field.trim() {
         "0" => Some("List"),
+        "1" => None,
         "2" => Some("Tree"),
         _ => None,
     }
