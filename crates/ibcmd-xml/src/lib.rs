@@ -40,16 +40,21 @@ pub use dcs::{
 };
 pub use dcs_schema::{
     DcsInlineSettingsFragment, DcsInnerSchemaError, emit_dcs_area_template_source_fragment,
-    emit_dcs_area_template_storage_document, emit_dcs_inner_schema_source_document,
+    emit_dcs_area_template_storage_document,
+    emit_dcs_area_template_storage_document_with_references, emit_dcs_inner_schema_source_document,
     emit_dcs_query_union_link_source_document, parse_dcs_area_template_source_document,
-    parse_dcs_area_template_storage_document, parse_dcs_inner_schema_storage_document,
+    parse_dcs_area_template_storage_document,
+    parse_dcs_area_template_storage_document_with_references,
+    parse_dcs_inner_schema_storage_document,
     parse_dcs_inner_schema_storage_document_with_references,
     parse_dcs_query_union_link_storage_document,
 };
 pub use dcs_template::{
     DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DcsSchemaTemplateOwnedDocuments,
     DetachedDcsSchemaTemplateSource, analyze_dcs_schema_template_documents,
-    bind_dcs_settings_to_source_variants, compile_dcs_schema_template_source_documents,
+    analyze_dcs_schema_template_documents_with_references, bind_dcs_settings_to_source_variants,
+    compile_dcs_schema_template_source_documents,
+    compile_dcs_schema_template_source_documents_with_references,
     detach_dcs_settings_from_source_variants,
 };
 pub use dialect::{

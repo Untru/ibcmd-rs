@@ -9,10 +9,10 @@ use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
     DcsChildParseOutcome, DcsInlineSettingsFragment, DcsSettingsChildrenError,
-    DcsSettingsChildrenParts, analyze_dcs_schema_template_documents, analyze_dcs_settings_document,
-    emit_dcs_area_template_source_fragment, emit_dcs_inner_schema_source_document,
-    emit_dcs_query_union_link_source_document, emit_dcs_settings_children_parts,
-    parse_dcs_area_template_storage_document,
+    DcsSettingsChildrenParts, analyze_dcs_schema_template_documents_with_references,
+    analyze_dcs_settings_document, emit_dcs_area_template_source_fragment,
+    emit_dcs_inner_schema_source_document, emit_dcs_query_union_link_source_document,
+    emit_dcs_settings_children_parts, parse_dcs_area_template_storage_document_with_references,
     parse_dcs_inner_schema_storage_document_with_references,
     parse_dcs_query_union_link_storage_document, rewrite_dcs_settings_children,
 };
@@ -237,7 +237,24 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Option<Vec<u8>> {
-    let envelope = analyze_dcs_schema_template_documents(documents).ok()?;
+    // Same shape/convention as `reference_types` below, but sourced from
+    // `object_refs` (already keyed by lowercase canonical uuid, the same
+    // convention `data_composition_style_item_name` uses for conditional
+    // appearance) rather than `type_index`, and filtered to StyleItem
+    // objects specifically. Built up front: the envelope's own structural
+    // validation independently re-parses the terminal AreaTemplate and
+    // needs the same resolver to accept the custom-StyleItem coordinate.
+    let style_reference_types = object_refs
+        .iter()
+        .filter_map(|(uuid, reference)| {
+            reference
+                .strip_prefix("StyleItem.")
+                .map(|name| (uuid.clone(), name.to_owned()))
+        })
+        .collect();
+    let envelope =
+        analyze_dcs_schema_template_documents_with_references(documents, &style_reference_types)
+            .ok()?;
     let reference_types = type_index
         .iter()
         .filter_map(|(type_id, resolution)| match resolution {
@@ -280,10 +297,11 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         Err(_) => return None,
     };
     let terminal = envelope.terminal_schema_file();
-    if let Ok(area) = parse_dcs_area_template_storage_document(
+    if let Ok(area) = parse_dcs_area_template_storage_document_with_references(
         terminal,
         source_profile.clone(),
         "mssql:dcs-schema-template/area-template",
+        &style_reference_types,
     ) {
         let fragment = emit_dcs_area_template_source_fragment(&area).ok()?;
         let variant = b"\r\n\t<settingsVariant>";
@@ -3085,6 +3103,102 @@ mod tests {
         )
         .unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_area_style_color_reference_exports_byte_exact_through_common_codec() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/native-template.xml.b64"
+        )));
+        // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "1e6c10a050235b9ecd42b1b7bdcdb3df5b148bde0c42cb442ba7bd16722cdf9b"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "4269ac193b76bb88ecaaf65a5b4ef9ed12a31cdcf1d36d8ac429de68cf10f970"
+        );
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        // The standard/built-in style-reference form needs no resolver
+        // (`object_refs` empty, exactly like every other pre-existing
+        // corpus): the named lexical spelling is authenticated on both
+        // directions without any configuration-object lookup.
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_area_style_item_uuid_exports_byte_exact_through_common_codec() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-template.xml.b64"
+        )));
+        // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "680d04d34a12c54be75ac69a5c20ff82d2136736e11998b070c77d7abbbe3235"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "98f1857d3424198275cc35834a6635c28623568aae8d01a95cb5e220f91b818f"
+        );
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        // The custom StyleItem form's raw uuid storage wire form requires a
+        // resolver: `object_refs` here stands in for what a real dump
+        // session's own object-reference scan would already have found
+        // (see `data_composition_style_item_name`'s own established
+        // "StyleItem.<Name>" convention, reused verbatim, not invented).
+        let mut object_refs = BTreeMap::new();
+        object_refs.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "StyleItem.CorpusAccent".to_string(),
+        );
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &object_refs,
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+
+        // Without the resolver entry, decode must fail closed instead of
+        // silently dropping the AreaTemplate appearance or emitting a
+        // fabricated value.
+        let without_resolver = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        );
+        assert_ne!(without_resolver, Some(expected));
     }
 
     #[test]

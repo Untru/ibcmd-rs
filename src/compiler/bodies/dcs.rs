@@ -1238,6 +1238,184 @@ mod tests {
     }
 
     #[test]
+    fn platform_area_style_color_reference_compiles_to_exact_side_table() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/native-template.xml.b64"
+        )));
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/raw-unpacked.bin.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&source)),
+            "4269ac193b76bb88ecaaf65a5b4ef9ed12a31cdcf1d36d8ac429de68cf10f970"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&unpacked)),
+            "1c18c7ed371e1fad4c56b8d9e48000455e752578e804bab19ffb9153293fbf72"
+        );
+        // document_topology (manifest.json): header 24 bytes, one stored
+        // length for the primary schema (3029) and one for the sole
+        // settings document (1142); the terminal side-table SchemaFile is
+        // the remaining bytes.
+        let expected_area = unpacked[24 + 3029 + 1142..].to_vec();
+        assert_eq!(expected_area.len(), 1623);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected_area)),
+            "c5879edc2a5776e5be6ae52f3843c2780dc141f74ffc221e7626bc442440cb08"
+        );
+
+        // seed(source) XML -> body: the standard/built-in style reference
+        // needs no resolver on either direction, so the plain compiler
+        // entry points must already reproduce the exact platform-observed
+        // terminal side-table document byte for byte.
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+        assert_eq!(
+            decoded.documents().last().copied(),
+            Some(expected_area.as_slice())
+        );
+
+        // body -> XML: re-exporting the compiled body must reproduce the
+        // evidenced style reference verbatim. (Byte-exact whole-document
+        // equality against native-template.xml is not asserted here for
+        // the same pre-existing, unrelated settings-document reindentation
+        // reason documented on the web-color cohort's equivalent test; the
+        // genuine-bytes test below proves that instead.)
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<dcscor:parameter>ЦветФона</dcscor:parameter>"));
+        assert!(exported_text.contains("d8p1:NegativeTextColor"));
+        assert!(!exported_text.contains("appIndex"));
+        let color_at = exported_text.find("ЦветФона").unwrap();
+        let details_at = exported_text.find("Расшифровка").unwrap();
+        assert!(
+            color_at < details_at,
+            "style-reference item must precede Расшифровка"
+        );
+
+        // XML -> body: recompiling the exported source must reproduce the
+        // exact terminal side-table bytes the platform emitted (the same
+        // property `body -> XML -> body == raw-unpacked` pins for the
+        // terminal document).
+        let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
+        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+    }
+
+    #[test]
+    fn platform_area_style_color_reference_native_packed_body_exports_exact_native_template() {
+        let profile = DcsCodecProfile::fixture();
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/raw-packed.bin.b64"
+        )));
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "1e6c10a050235b9ecd42b1b7bdcdb3df5b148bde0c42cb442ba7bd16722cdf9b"
+        );
+
+        // Decodes the platform's own deflate-compressed bytes directly --
+        // not anything ibcmd-rs compiled -- so the exact re-export match
+        // below is independent of our own compiler direction being
+        // correct.
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &packed)
+            .expect("genuine platform-packed body must decode");
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("genuine platform side table must remain exportable");
+        assert_eq!(exported, native_template);
+    }
+
+    /// KNOWN GAP (out of this work package's scope -- physical adapters get
+    /// test-only additions, never production logic changes): unlike the
+    /// standard/built-in style-reference form, the custom-StyleItem form's
+    /// raw `0:<uuid>` storage wire syntax needs a resolver (uuid <-> semantic
+    /// name) on *both* directions. `crates/ibcmd-xml` exposes that resolver
+    /// typed (`parse_dcs_area_template_storage_document_with_references`,
+    /// `emit_dcs_area_template_storage_document_with_references`,
+    /// `analyze_dcs_schema_template_documents_with_references`) -- proven
+    /// working end to end by
+    /// `mssql_dump::dcs::tests::platform_area_style_item_uuid_exports_byte_exact_through_common_codec`,
+    /// which already has an `object_refs` parameter available to thread a
+    /// real resolver through. But `compile_dcs`/`decode_dcs` here, this
+    /// physical adapter's own public entry points, have no such parameter at
+    /// all (a structural difference predating this package: the compile
+    /// direction has never carried configuration-object-reference context,
+    /// unlike the export/decode direction). Adding one would be a much more
+    /// invasive, cross-cutting production change to a widely used public
+    /// signature, out of scope here. Both directions therefore fail closed
+    /// for this exact coordinate through this specific entry point --
+    /// proven, not silently broken -- and the two tests below pin that.
+    #[test]
+    fn area_style_item_uuid_compile_direction_does_not_yet_gate_resolver() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-template.xml.b64"
+        )));
+        assert!(matches!(
+            compile_dcs(&profile, DcsTemplateKind::Schema, &source),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
+    fn area_style_item_uuid_strict_decode_does_not_yet_gate_resolver() {
+        let profile = DcsCodecProfile::fixture();
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/raw-packed.bin.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "680d04d34a12c54be75ac69a5c20ff82d2136736e11998b070c77d7abbbe3235"
+        );
+        assert!(matches!(
+            decode_dcs(&profile, DcsTemplateKind::Schema, &packed),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
+    fn area_style_color_reference_seed_order_is_rejected_fail_closed() {
+        let profile = DcsCodecProfile::fixture();
+        let seed = include_bytes!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/seed/Template.xml"
+        ));
+        // The seed is explicitly non-authoritative (manifest:
+        // "hypothesis_only") and orders the appearance items
+        // Расшифровка-then-ЦветФона -- the reverse of what
+        // native-template.xml (the platform-proven order) actually uses.
+        // The compiler must reject this order, not silently accept or
+        // reorder it.
+        assert!(matches!(
+            compile_dcs(&profile, DcsTemplateKind::Schema, seed),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
     fn platform_multi_cell_appearance_compiles_to_exact_side_table() {
         let profile = DcsCodecProfile::fixture();
         let source = decode_base64_fixture(include_str!(concat!(

@@ -31,6 +31,69 @@ pub const MAX_DCS_SCHEMA_RETAINED_BYTES: usize = 16_777_216;
 /// Exact Query/Union/link cardinality authenticated by the dedicated cohort.
 pub const DCS_SCHEMA_QUERY_UNION_LINK_COUNT: usize = 1;
 
+/// One evidenced DCS area-template appearance style-color reference, in one
+/// of the two forms proven by the dedicated 2214 style-reference cohort:
+///
+/// - A standard, built-in platform style, referenced by its bare lexical
+///   name (e.g. `NegativeTextColor`). No configuration object backs this
+///   reference, and the storage side retains the same named lexical form.
+/// - A custom `StyleItem` configuration object, referenced by its semantic
+///   name (e.g. `CorpusAccent`). At the *source* XML layer this is
+///   lexically indistinguishable from the standard-named form above; only
+///   the storage side reveals the difference, spelling it as a raw
+///   `0:<uuid>` reference to the StyleItem's own configuration-local uuid.
+///
+/// This IR never carries that uuid: resolving it to (or from) this
+/// semantic name is reference resolution, an adapter-supplied concern (see
+/// the evidenced TypeId-reference precedent), not something this XML-layer
+/// value type performs itself.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum DcsStyleColorReference {
+    Named(CanonicalText),
+    CustomStyleItem(CanonicalText),
+}
+
+impl DcsStyleColorReference {
+    pub fn named(name: CanonicalText) -> Result<Self, DcsSchemaBuildError> {
+        require_text("style-color reference name", &name)?;
+        Ok(Self::Named(name))
+    }
+
+    pub fn custom_style_item(name: CanonicalText) -> Result<Self, DcsSchemaBuildError> {
+        require_text("style-color reference custom StyleItem name", &name)?;
+        Ok(Self::CustomStyleItem(name))
+    }
+
+    /// The referenced style's semantic name, common to both forms.
+    pub const fn name(&self) -> &CanonicalText {
+        match self {
+            Self::Named(name) | Self::CustomStyleItem(name) => name,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum DcsStyleColorReferenceWire {
+    Named(CanonicalText),
+    CustomStyleItem(CanonicalText),
+}
+
+impl<'de> Deserialize<'de> for DcsStyleColorReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsStyleColorReferenceWire::deserialize(deserializer)?;
+        match wire {
+            DcsStyleColorReferenceWire::Named(name) => Self::named(name),
+            DcsStyleColorReferenceWire::CustomStyleItem(name) => Self::custom_style_item(name),
+        }
+        .map_err(de::Error::custom)
+    }
+}
+
 /// Exact style-free AreaTemplate authenticated by the dedicated 2214 cohort.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +106,12 @@ pub struct DcsSchemaAreaTemplate {
     /// appearance-color side-table cohort. Always co-occurs with
     /// `parameter_appearance`; the platform never emits color alone.
     text_color_appearance: Option<DcsAppearanceColor>,
+    /// `ЦветФона` (`BackColor` in storage) style-color reference
+    /// authenticated by the dedicated 2214 style-reference cohort. Always
+    /// co-occurs with `parameter_appearance`, exactly like
+    /// `text_color_appearance`; mutually exclusive with it by evidence (no
+    /// cohort proves combining the two color parameters).
+    back_color_style_reference: Option<DcsStyleColorReference>,
     /// Replaces the whole area body with the exact two-row shape
     /// authenticated by the dedicated 2214 multi-cell-appearance cohort:
     /// row 1 has two `tableCell`s sharing one identical `Расшифровка =
@@ -77,6 +146,7 @@ impl DcsSchemaAreaTemplate {
             expression,
             parameter_appearance: false,
             text_color_appearance: None,
+            back_color_style_reference: None,
             shared_row_appearance: false,
             provenance,
         })
@@ -97,6 +167,22 @@ impl DcsSchemaAreaTemplate {
     pub fn with_color_and_parameter_appearance(mut self, color: DcsAppearanceColor) -> Self {
         self.parameter_appearance = true;
         self.text_color_appearance = Some(color);
+        self
+    }
+
+    /// Enables the exact `ЦветФона = <style reference>` then `Расшифровка =
+    /// Parameter(Probe)` table-cell appearance pair authenticated by the
+    /// dedicated 2214 style-reference cohort. The style-color item is
+    /// always ordered before the parameter item, exactly like
+    /// `with_color_and_parameter_appearance`; callers must not also call
+    /// `with_color_and_parameter_appearance` on the same value (no cohort
+    /// proves combining the two color parameters).
+    pub fn with_style_reference_and_parameter_appearance(
+        mut self,
+        reference: DcsStyleColorReference,
+    ) -> Self {
+        self.parameter_appearance = true;
+        self.back_color_style_reference = Some(reference);
         self
     }
 
@@ -125,6 +211,9 @@ impl DcsSchemaAreaTemplate {
     pub const fn text_color_appearance(&self) -> Option<DcsAppearanceColor> {
         self.text_color_appearance
     }
+    pub const fn back_color_style_reference(&self) -> Option<&DcsStyleColorReference> {
+        self.back_color_style_reference.as_ref()
+    }
     pub const fn has_shared_row_appearance(&self) -> bool {
         self.shared_row_appearance
     }
@@ -144,6 +233,8 @@ struct DcsSchemaAreaTemplateWire {
     #[serde(default)]
     text_color_appearance: Option<DcsAppearanceColor>,
     #[serde(default)]
+    back_color_style_reference: Option<DcsStyleColorReference>,
+    #[serde(default)]
     shared_row_appearance: bool,
     provenance: SourceProvenance,
 }
@@ -158,10 +249,22 @@ impl<'de> Deserialize<'de> for DcsSchemaAreaTemplate {
             wire.provenance,
         )
         .map_err(de::Error::custom)?;
-        let value = match (wire.parameter_appearance, wire.text_color_appearance) {
-            (_, Some(color)) => value.with_color_and_parameter_appearance(color),
-            (true, None) => value.with_parameter_appearance(),
-            (false, None) => value,
+        let value = match (
+            wire.parameter_appearance,
+            wire.text_color_appearance,
+            wire.back_color_style_reference,
+        ) {
+            (_, Some(color), None) => value.with_color_and_parameter_appearance(color),
+            (_, None, Some(reference)) => {
+                value.with_style_reference_and_parameter_appearance(reference)
+            }
+            (_, Some(_), Some(_)) => {
+                return Err(de::Error::custom(
+                    "DCS AreaTemplate cannot combine text_color_appearance and back_color_style_reference",
+                ));
+            }
+            (true, None, None) => value.with_parameter_appearance(),
+            (false, None, None) => value,
         };
         Ok(if wire.shared_row_appearance {
             value.with_shared_row_appearance()
@@ -2078,6 +2181,62 @@ mod tests {
         let parameter_only = value.with_parameter_appearance();
         assert_eq!(parameter_only.text_color_appearance(), None);
         assert_ne!(parameter_only, colored);
+    }
+
+    #[test]
+    fn style_free_area_template_style_reference_appearance_is_bounded_and_serde_stable() {
+        let value = DcsSchemaAreaTemplate::new(
+            text("AreaProbe"),
+            text("Probe"),
+            text("\"Probe\""),
+            provenance(),
+        )
+        .unwrap();
+        let named = value.clone().with_style_reference_and_parameter_appearance(
+            DcsStyleColorReference::named(text("NegativeTextColor")).unwrap(),
+        );
+        assert!(named.has_parameter_appearance());
+        assert_eq!(
+            named.back_color_style_reference(),
+            Some(&DcsStyleColorReference::Named(text("NegativeTextColor")))
+        );
+        assert_eq!(named.text_color_appearance(), None);
+        let json = serde_json::to_string(&named).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaAreaTemplate>(&json).unwrap(),
+            named
+        );
+
+        let custom = value.clone().with_style_reference_and_parameter_appearance(
+            DcsStyleColorReference::custom_style_item(text("CorpusAccent")).unwrap(),
+        );
+        assert_eq!(
+            custom.back_color_style_reference(),
+            Some(&DcsStyleColorReference::CustomStyleItem(text(
+                "CorpusAccent"
+            )))
+        );
+        assert_ne!(custom, named);
+        let json = serde_json::to_string(&custom).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaAreaTemplate>(&json).unwrap(),
+            custom
+        );
+
+        // Combining text_color_appearance and back_color_style_reference on
+        // the wire is rejected: no cohort proves the two color parameters
+        // co-occurring.
+        let mut combined: serde_json::Value = serde_json::to_value(&named).unwrap();
+        combined["text_color_appearance"] = serde_json::json!("web_red");
+        assert!(serde_json::from_value::<DcsSchemaAreaTemplate>(combined).is_err());
+
+        // Empty style-reference names are rejected.
+        assert!(DcsStyleColorReference::named(text("")).is_err());
+        assert!(DcsStyleColorReference::custom_style_item(text("")).is_err());
+
+        let parameter_only = value.with_parameter_appearance();
+        assert_eq!(parameter_only.back_color_style_reference(), None);
+        assert_ne!(parameter_only, named);
     }
 
     #[test]

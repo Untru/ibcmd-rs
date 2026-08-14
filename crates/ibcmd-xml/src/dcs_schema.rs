@@ -14,6 +14,7 @@ use ibcmd_core::dcs_schema::{
     DcsSchemaSettingsVariantShell, DcsSchemaStandardPeriodParameter,
     DcsSchemaStandardPeriodVariant, DcsSchemaStringParameter, DcsSchemaStringType,
     DcsSchemaTotalFunction, DcsSchemaUngroupedTotalField, DcsSchemaUnionDataSet,
+    DcsStyleColorReference,
 };
 use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
@@ -303,6 +304,27 @@ pub fn parse_dcs_area_template_storage_document(
     source_profile: ProfileId,
     locator: &str,
 ) -> Result<DcsSchemaAreaTemplate, DcsInnerSchemaError> {
+    parse_dcs_area_template_storage_document_with_references(
+        bytes,
+        source_profile,
+        locator,
+        &BTreeMap::new(),
+    )
+}
+
+/// Parses the bounded AreaTemplate storage cohort while resolving
+/// configuration-local storage uuids (the evidenced `0:<uuid>` custom
+/// `StyleItem` wire form) to semantic style names. `reference_types` maps
+/// lowercased uuid text to semantic name -- the same shape/convention as
+/// the TypeId-reference resolver. Building this map from configuration
+/// metadata is an adapter-supplied concern; this codec never resolves a
+/// uuid by string heuristics, only by exact lookup in the supplied map.
+pub fn parse_dcs_area_template_storage_document_with_references(
+    bytes: &[u8],
+    source_profile: ProfileId,
+    locator: &str,
+    reference_types: &BTreeMap<String, String>,
+) -> Result<DcsSchemaAreaTemplate, DcsInnerSchemaError> {
     let p = policy()?;
     let ap = area_policy()?;
     let document = parse_document(bytes)?;
@@ -326,11 +348,16 @@ pub fn parse_dcs_area_template_storage_document(
     let area = parse_area_template_element(top[0], source_profile, locator, &ap)?;
     let area = if wrapper.len() == 2 {
         if area.has_shared_row_appearance() {
-            require_storage_shared_row_appearance(wrapper[1], &p, &ap)?;
+            require_storage_shared_row_appearance(wrapper[1], &p, &ap, reference_types)?;
             area
         } else if area.has_parameter_appearance() {
-            match require_storage_area_appearance(wrapper[1], &p, &ap)? {
-                Some(color) => area.with_color_and_parameter_appearance(color),
+            match require_storage_area_appearance(wrapper[1], &p, &ap, reference_types)? {
+                Some(ExtraAppearanceItem::Color(color)) => {
+                    area.with_color_and_parameter_appearance(color)
+                }
+                Some(ExtraAppearanceItem::StyleReference(reference)) => {
+                    area.with_style_reference_and_parameter_appearance(reference)
+                }
                 None => area,
             }
         } else {
@@ -427,11 +454,15 @@ fn parse_area_template_element(
         } => area,
         ParsedAreaBody::SingleCell {
             has_appearance: true,
-            color: Some(color),
+            extra: Some(ExtraAppearanceItem::Color(color)),
         } => area.with_color_and_parameter_appearance(color),
         ParsedAreaBody::SingleCell {
             has_appearance: true,
-            color: None,
+            extra: Some(ExtraAppearanceItem::StyleReference(reference)),
+        } => area.with_style_reference_and_parameter_appearance(reference),
+        ParsedAreaBody::SingleCell {
+            has_appearance: true,
+            extra: None,
         } => area.with_parameter_appearance(),
         ParsedAreaBody::SharedRowAppearance => area.with_shared_row_appearance(),
     })
@@ -451,23 +482,33 @@ enum AreaAppearanceDirection {
 
 /// The outcome of parsing an AreaTemplate's row/cell body: either the
 /// original single-row, single-cell shape (with its own optional
-/// appearance/color), or the evidenced two-row shared-appearance shape.
+/// appearance/extra item), or the evidenced two-row shared-appearance
+/// shape.
 enum ParsedAreaBody {
     SingleCell {
         has_appearance: bool,
-        color: Option<DcsAppearanceColor>,
+        extra: Option<ExtraAppearanceItem>,
     },
     SharedRowAppearance,
 }
 
+/// One authenticated "extra" appearance item preceding `Расшифровка`/
+/// `Details`: either the web-color cohort's `ЦветТекста`/`TextColor`, or
+/// the style-reference cohort's `ЦветФона`/`BackColor`. Evidence-bound to
+/// be mutually exclusive; no cohort proves the two co-occurring.
+enum ExtraAppearanceItem {
+    Color(DcsAppearanceColor),
+    StyleReference(DcsStyleColorReference),
+}
+
 /// One `tableCell`'s parsed appearance signal: no second child, an embedded
-/// source `dcsat:appearance` (with any color found inside it), or a storage
-/// `appIndex` (whose raw text the caller must validate -- the side-table
-/// wrapper elsewhere is the sole authority for what that index's content
-/// actually is).
+/// source `dcsat:appearance` (with any extra item found inside it), or a
+/// storage `appIndex` (whose raw text the caller must validate -- the
+/// side-table wrapper elsewhere is the sole authority for what that
+/// index's content actually is).
 enum TableCellAppearanceSignal {
     Absent,
-    Source(Option<DcsAppearanceColor>),
+    Source(Option<ExtraAppearanceItem>),
     Storage(String),
 }
 
@@ -486,9 +527,9 @@ fn parse_exact_area_body(
             if cells.len() != 1 {
                 return unsupported("AreaTemplate row must contain exactly one tableCell");
             }
-            let (has_appearance, color) = match parse_table_cell(cells[0], p, ap)? {
+            let (has_appearance, extra) = match parse_table_cell(cells[0], p, ap)? {
                 TableCellAppearanceSignal::Absent => (false, None),
-                TableCellAppearanceSignal::Source(color) => (true, color),
+                TableCellAppearanceSignal::Source(extra) => (true, extra),
                 TableCellAppearanceSignal::Storage(index) => {
                     if index != "0" {
                         return unsupported(
@@ -500,7 +541,7 @@ fn parse_exact_area_body(
             };
             Ok(ParsedAreaBody::SingleCell {
                 has_appearance,
-                color,
+                extra,
             })
         }
         2 => {
@@ -618,7 +659,7 @@ fn require_source_area_appearance(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
+) -> Result<Option<ExtraAppearanceItem>, DcsInnerSchemaError> {
     require_no_attributes(appearance)?;
     require_parameter_appearance_body(
         appearance,
@@ -626,6 +667,7 @@ fn require_source_area_appearance(
         ap,
         AreaAppearanceDirection::Source,
         ap.appearance_parameter(),
+        &BTreeMap::new(),
     )
 }
 
@@ -633,7 +675,8 @@ fn require_storage_area_appearance(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
+    reference_types: &BTreeMap<String, String>,
+) -> Result<Option<ExtraAppearanceItem>, DcsInnerSchemaError> {
     require_name(appearance, Some(ap.area_namespace_uri()), "appearance")?;
     require_type(appearance, p, &ap.table_cell_appearance_type_qname())?;
     require_parameter_appearance_body(
@@ -642,6 +685,7 @@ fn require_storage_area_appearance(
         ap,
         AreaAppearanceDirection::Storage,
         ap.appearance_parameter(),
+        reference_types,
     )
 }
 
@@ -649,14 +693,15 @@ fn require_storage_area_appearance(
 /// the two-row shared-appearance cohort. Unlike the single-cell storage
 /// entry, this one is spelled `Details` (see
 /// `DcsAreaTemplatePolicy::storage_shared_row_appearance_parameter`) even
-/// though it holds only one item and no color -- the evidenced
+/// though it holds only one item and no extra item -- the evidenced
 /// discriminator is the record being referenced by more than one cell, not
-/// its own item count. A color item here would be unevidenced, so it is
+/// its own item count. An extra item here would be unevidenced, so it is
 /// rejected rather than silently accepted.
 fn require_storage_shared_row_appearance(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
+    reference_types: &BTreeMap<String, String>,
 ) -> Result<(), DcsInnerSchemaError> {
     require_name(appearance, Some(ap.area_namespace_uri()), "appearance")?;
     require_type(appearance, p, &ap.table_cell_appearance_type_qname())?;
@@ -666,29 +711,33 @@ fn require_storage_shared_row_appearance(
         ap,
         AreaAppearanceDirection::Storage,
         ap.storage_shared_row_appearance_parameter(),
+        reference_types,
     )? {
         None => Ok(()),
         Some(_) => unsupported(
-            "AreaTemplate shared-row appearance side table must not contain a color item",
+            "AreaTemplate shared-row appearance side table must not contain a color or style-reference item",
         ),
     }
 }
 
 /// Validates the shared `dcscor:item`/`item` appearance body shape and
-/// returns the color, if the evidenced two-item `ЦветТекста` + `Расшифровка`
-/// state was found. Exactly one or two items are admitted; the color item,
-/// when present, must be first. `expected_single_item_parameter` is the
-/// literal expected for the lone item in the one-item state, which differs
-/// between the plain single-cell storage entry (`Расшифровка`) and the
-/// shared-row storage entry (`Details`); both directions' single-cell and
-/// two-item-with-color cases always expect `Расшифровка`/`storage_appearance_parameter_with_color`.
+/// returns the extra item, if the evidenced two-item state was found (the
+/// web-color cohort's `ЦветТекста`/`ЦветФона` + `Расшифровка`, or the
+/// style-reference cohort's `ЦветФона` + `Расшифровка`). Exactly one or two
+/// items are admitted; the extra item, when present, must be first.
+/// `expected_single_item_parameter` is the literal expected for the lone
+/// item in the one-item state, which differs between the plain single-cell
+/// storage entry (`Расшифровка`) and the shared-row storage entry
+/// (`Details`); both directions' single-cell and two-item cases always
+/// expect `Расшифровка`/`storage_appearance_parameter_with_color`.
 fn require_parameter_appearance_body(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
     direction: AreaAppearanceDirection,
     expected_single_item_parameter: &str,
-) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
+    reference_types: &BTreeMap<String, String>,
+) -> Result<Option<ExtraAppearanceItem>, DcsInnerSchemaError> {
     let items = elements(appearance)?;
     match items.len() {
         1 => {
@@ -696,13 +745,14 @@ fn require_parameter_appearance_body(
             Ok(None)
         }
         2 => {
-            let color = require_color_item(items[0], p, ap, direction)?;
+            let extra =
+                require_color_or_style_reference_item(items[0], p, ap, direction, reference_types)?;
             let expected_parameter = match direction {
                 AreaAppearanceDirection::Source => ap.appearance_parameter(),
                 AreaAppearanceDirection::Storage => ap.storage_appearance_parameter_with_color(),
             };
             require_parameter_item(items[1], p, ap, expected_parameter)?;
-            Ok(Some(color))
+            Ok(Some(extra))
         }
         _ => unsupported("AreaTemplate appearance item cardinality is outside the cohort"),
     }
@@ -734,40 +784,155 @@ fn require_parameter_item(
     Ok(())
 }
 
-fn require_color_item(
+/// Dispatches the shared `dcscor:item`/`item` shape to either the
+/// web-color cohort (`ЦветТекста`/`TextColor`) or the style-reference
+/// cohort (`ЦветФона`/`BackColor`), by the item's own `parameter` text --
+/// the two are mutually exclusive by evidence and never ambiguous, since
+/// they use disjoint parameter names in both directions.
+fn require_color_or_style_reference_item(
     item: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
     direction: AreaAppearanceDirection,
-) -> Result<DcsAppearanceColor, DcsInnerSchemaError> {
+    reference_types: &BTreeMap<String, String>,
+) -> Result<ExtraAppearanceItem, DcsInnerSchemaError> {
     require_name(item, Some(ap.core_namespace_uri()), "item")?;
     require_no_attributes(item)?;
     let children = elements(item)?;
     if children.len() != 2 {
-        return unsupported("AreaTemplate appearance color item must contain parameter and value");
+        return unsupported(
+            "AreaTemplate appearance color/style-reference item must contain parameter and value",
+        );
     }
     require_name(children[0], Some(ap.core_namespace_uri()), "parameter")?;
     require_no_attributes(children[0])?;
     require_name(children[1], Some(ap.core_namespace_uri()), "value")?;
-    require_type(children[1], p, &ap.color_type_qname())?;
     let parameter = text(children[0])?;
-    let expected_parameter = match direction {
+    let parameter = parameter.trim();
+    let color_parameter = match direction {
         AreaAppearanceDirection::Source => ap.text_color_parameter(),
         AreaAppearanceDirection::Storage => ap.storage_text_color_parameter(),
     };
-    if parameter.trim() != expected_parameter {
-        return unsupported(
-            "AreaTemplate appearance color parameter is outside the exact coordinate",
-        );
+    let style_reference_parameter = match direction {
+        AreaAppearanceDirection::Source => ap.back_color_parameter(),
+        AreaAppearanceDirection::Storage => ap.storage_back_color_parameter(),
+    };
+    if parameter == color_parameter {
+        require_color_value(children[1], p, ap).map(ExtraAppearanceItem::Color)
+    } else if parameter == style_reference_parameter {
+        require_style_reference_value(children[1], p, ap, direction, reference_types)
+            .map(ExtraAppearanceItem::StyleReference)
+    } else {
+        unsupported(
+            "AreaTemplate appearance color/style-reference parameter is outside the exact coordinate",
+        )
     }
+}
+
+fn require_color_value(
+    value: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<DcsAppearanceColor, DcsInnerSchemaError> {
+    require_type(value, p, &ap.color_type_qname())?;
     // Compare only the expanded QName: the platform does not preserve the
     // source prefix spelling, and the evidenced cohort admits any prefix
     // bound to the web-colors namespace (native uses an auto-generated
     // `d8p1`/`d4p2`, the seed uses a locally-declared `web`).
-    if resolve_qname_text_allowing_attributes(children[1])? != ap.web_red_qname() {
+    if resolve_qname_text_allowing_attributes(value)? != ap.web_red_qname() {
         return unsupported("AreaTemplate appearance color value is outside the exact coordinate");
     }
     Ok(DcsAppearanceColor::WebRed)
+}
+
+/// Recognizes the evidenced `0:<uuid>` storage wire syntax for a raw
+/// custom-`StyleItem` reference: a fixed discriminator prefix (not an XML
+/// namespace prefix), followed by the referenced StyleItem's own
+/// configuration-local uuid in canonical 8-4-4-4-12 hyphenated hex form.
+/// This recognizes the *syntax* only; resolving the uuid to a semantic
+/// name is the caller's job via an evidence-backed resolver map, never a
+/// string heuristic on the uuid's own digits.
+fn parse_style_item_storage_uuid_reference(value: &str) -> Option<&str> {
+    let uuid = value.strip_prefix("0:")?;
+    let bytes = uuid.as_bytes();
+    if bytes.len() != 36 {
+        return None;
+    }
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            if *byte != b'-' {
+                return None;
+            }
+        } else if !byte.is_ascii_hexdigit() {
+            return None;
+        }
+    }
+    Some(uuid)
+}
+
+fn require_style_reference_value(
+    value: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+    direction: AreaAppearanceDirection,
+    reference_types: &BTreeMap<String, String>,
+) -> Result<DcsStyleColorReference, DcsInnerSchemaError> {
+    require_type(value, p, &ap.color_type_qname())?;
+    let value_text = text_allowing_attributes(value)?;
+    let value_text = value_text.trim();
+    if let Some(uuid) = parse_style_item_storage_uuid_reference(value_text) {
+        if !matches!(direction, AreaAppearanceDirection::Storage) {
+            return unsupported(
+                "AreaTemplate appearance style-reference raw uuid form is only evidenced on the storage direction",
+            );
+        }
+        let lowercase_uuid = uuid.to_ascii_lowercase();
+        let name = reference_types.get(&lowercase_uuid).ok_or_else(|| {
+            DcsInnerSchemaError::UnsupportedSource(
+                "style-reference uuid has no evidence-backed semantic resolution".to_string(),
+            )
+        })?;
+        if name != ap.custom_style_item_name() {
+            return unsupported(
+                "resolved StyleItem name is outside the evidenced style-reference cohort",
+            );
+        }
+        return DcsStyleColorReference::custom_style_item(canonical(name.clone())?)
+            .map_err(DcsInnerSchemaError::Build);
+    }
+    // Not the raw-uuid wire form: must be a QName-resolvable lexical token.
+    // The platform does not preserve the source prefix spelling; compare
+    // only the expanded QName. Both evidenced forms are lexically
+    // *identical* shapes at the source layer -- `style:NegativeTextColor`
+    // and `style:CorpusAccent` are indistinguishable except by which name
+    // resolves -- so this branch alone can never disambiguate them from
+    // syntax; only the literal name (checked against each cohort's exact
+    // evidenced value) does. The named custom-StyleItem spelling is only
+    // evidenced on the source direction: storage always spells it as the
+    // raw uuid form checked above instead.
+    let qname = resolve_qname(value, value_text)?;
+    if qname == ap.negative_text_color_qname() {
+        return DcsStyleColorReference::named(canonical("NegativeTextColor".to_string())?)
+            .map_err(DcsInnerSchemaError::Build);
+    }
+    if qname
+        == format!(
+            "{{{}}}{}",
+            ap.style_namespace_uri(),
+            ap.custom_style_item_name()
+        )
+    {
+        if !matches!(direction, AreaAppearanceDirection::Source) {
+            return unsupported(
+                "AreaTemplate appearance custom-StyleItem named spelling is only evidenced on the source direction",
+            );
+        }
+        return DcsStyleColorReference::custom_style_item(canonical(
+            ap.custom_style_item_name().to_string(),
+        )?)
+        .map_err(DcsInnerSchemaError::Build);
+    }
+    unsupported("AreaTemplate appearance style-reference value is outside the exact coordinate")
 }
 
 fn parse_query(
@@ -1140,6 +1305,12 @@ pub fn emit_dcs_area_template_source_fragment(
                 scalar(&mut out, 7, "dcscor:parameter", "ЦветТекста");
                 line(&mut out, 7, source_color_value_fragment(color));
                 line(&mut out, 6, "</dcscor:item>");
+            } else if let Some(reference) = area.back_color_style_reference() {
+                line(&mut out, 6, "<dcscor:item>");
+                scalar(&mut out, 7, "dcscor:parameter", "ЦветФона");
+                let value = source_style_reference_value_fragment(reference)?;
+                line(&mut out, 7, &value);
+                line(&mut out, 6, "</dcscor:item>");
             }
             line(&mut out, 6, "<dcscor:item>");
             scalar(&mut out, 7, "dcscor:parameter", "Расшифровка");
@@ -1178,6 +1349,21 @@ pub fn emit_dcs_area_template_source_fragment(
 /// style-free AreaTemplate coordinate.
 pub fn emit_dcs_area_template_storage_document(
     area: &DcsSchemaAreaTemplate,
+) -> Result<Vec<u8>, DcsInnerSchemaError> {
+    emit_dcs_area_template_storage_document_with_references(area, &BTreeMap::new())
+}
+
+/// Emits the exact platform-authenticated terminal SchemaFile, resolving a
+/// custom-`StyleItem` style-color reference's semantic name back to its
+/// configuration-local storage uuid via `reference_types` (the same
+/// uuid-to-name map shape used by the decode-direction resolver -- this
+/// direction searches it by value). Without an entry for the wanted name,
+/// a `back_color_style_reference` in the evidenced `CustomStyleItem` form
+/// fails closed rather than fabricating or guessing a uuid; the standard
+/// `Named` form never needs a resolver and always succeeds.
+pub fn emit_dcs_area_template_storage_document_with_references(
+    area: &DcsSchemaAreaTemplate,
+    reference_types: &BTreeMap<String, String>,
 ) -> Result<Vec<u8>, DcsInnerSchemaError> {
     if area.name().as_str() != "AreaProbe"
         || area.parameter_name().as_str() != "Probe"
@@ -1279,6 +1465,7 @@ pub fn emit_dcs_area_template_storage_document(
             "<appearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"TableCellAppearance\">",
         );
         let color = area.text_color_appearance();
+        let style_reference = area.back_color_style_reference();
         if let Some(color) = color {
             line(
                 &mut out,
@@ -1288,13 +1475,23 @@ pub fn emit_dcs_area_template_storage_document(
             scalar(&mut out, 3, "parameter", "TextColor");
             line(&mut out, 3, storage_color_value_fragment(color));
             line(&mut out, 2, "</item>");
+        } else if let Some(reference) = style_reference {
+            line(
+                &mut out,
+                2,
+                "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">",
+            );
+            scalar(&mut out, 3, "parameter", "BackColor");
+            let value = storage_style_reference_value_fragment(reference, reference_types)?;
+            line(&mut out, 3, &value);
+            line(&mut out, 2, "</item>");
         }
         line(
             &mut out,
             2,
             "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">",
         );
-        let parameter_label = if color.is_some() {
+        let parameter_label = if color.is_some() || style_reference.is_some() {
             "Details"
         } else {
             "Расшифровка"
@@ -1329,6 +1526,70 @@ fn storage_color_value_fragment(color: DcsAppearanceColor) -> &'static str {
         DcsAppearanceColor::WebRed => {
             "<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\" xmlns:d4p2=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xsi:type=\"d4p1:Color\">d4p2:Red</value>"
         }
+    }
+}
+
+/// Exact `dcscor:value` fragment for the source-direction (embedded
+/// `dcsat:appearance`) spelling of an evidenced style-color reference.
+/// Both proven forms (standard-named and custom StyleItem) are lexically
+/// identical here -- only the referenced name differs -- and neither needs
+/// a resolver: the semantic name is already the source spelling. The
+/// `d8p1` prefix is the platform's own auto-generated spelling, reproduced
+/// verbatim to match `native-template.xml` byte for byte, but it is only
+/// ever compared by expanded QName on parse.
+fn source_style_reference_value_fragment(
+    reference: &DcsStyleColorReference,
+) -> Result<String, DcsInnerSchemaError> {
+    let name = match reference {
+        DcsStyleColorReference::Named(name) if name.as_str() == "NegativeTextColor" => {
+            name.as_str()
+        }
+        DcsStyleColorReference::CustomStyleItem(name) if name.as_str() == "CorpusAccent" => {
+            name.as_str()
+        }
+        _ => {
+            return unsupported(
+                "AreaTemplate style-reference value is outside the exact coordinate",
+            );
+        }
+    };
+    Ok(format!(
+        "<dcscor:value xmlns:d8p1=\"http://v8.1c.ru/8.1/data/ui/style\" xsi:type=\"v8ui:Color\">d8p1:{name}</dcscor:value>"
+    ))
+}
+
+/// Exact `value` fragment for the storage-direction (side-table) spelling
+/// of an evidenced style-color reference, matching the platform's own
+/// prefixes byte for byte. The standard-named form retains the same named
+/// lexical token (`d4p2:NegativeTextColor`) and needs no resolver; the
+/// custom-StyleItem form spells a raw `0:<uuid>` reference instead, so its
+/// uuid must be found in `reference_types` by reverse lookup on the
+/// semantic name -- an adapter-supplied concern, never guessed here.
+fn storage_style_reference_value_fragment(
+    reference: &DcsStyleColorReference,
+    reference_types: &BTreeMap<String, String>,
+) -> Result<String, DcsInnerSchemaError> {
+    match reference {
+        DcsStyleColorReference::Named(name) if name.as_str() == "NegativeTextColor" => Ok(format!(
+            "<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\" xmlns:d4p2=\"http://v8.1c.ru/8.1/data/ui/style\" xsi:type=\"d4p1:Color\">d4p2:{}</value>",
+            name.as_str()
+        )),
+        DcsStyleColorReference::CustomStyleItem(name) if name.as_str() == "CorpusAccent" => {
+            let uuid = reference_types
+                .iter()
+                .find(|(_, resolved_name)| resolved_name.as_str() == name.as_str())
+                .map(|(uuid, _)| uuid.as_str())
+                .ok_or_else(|| {
+                    DcsInnerSchemaError::UnsupportedSource(
+                        "style-reference custom StyleItem name has no evidence-backed uuid resolution"
+                            .to_string(),
+                    )
+                })?;
+            Ok(format!(
+                "<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"d4p1:Color\">0:{uuid}</value>"
+            ))
+        }
+        _ => unsupported("AreaTemplate style-reference value is outside the exact coordinate"),
     }
 }
 
@@ -2370,6 +2631,66 @@ mod tests {
         )))
     }
 
+    /// The style-color-reference cohort's manifest, like the web-color
+    /// cohort's, retains only the combined `raw-unpacked` envelope; slice
+    /// the terminal side-table document the same way.
+    fn area_template_style_color_reference_document() -> Vec<u8> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        body[24 + first + second..].to_vec()
+    }
+
+    fn area_template_style_color_reference_native_source() -> Vec<u8> {
+        decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-color-reference/native-template.xml.b64"
+        )))
+    }
+
+    /// The custom-StyleItem cohort's manifest, like its siblings, retains
+    /// only the combined `raw-unpacked` envelope; slice the terminal
+    /// side-table document the same way.
+    fn area_template_style_item_uuid_document() -> Vec<u8> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        body[24 + first + second..].to_vec()
+    }
+
+    fn area_template_style_item_uuid_native_source() -> Vec<u8> {
+        decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-template.xml.b64"
+        )))
+    }
+
+    /// The evidenced custom-StyleItem cohort's resolver map: the retained
+    /// `native-style-item.xml`'s own `uuid="..."` attribute (see
+    /// `manifest.json` `cohort.style_item_seed_uuid`), mapped to its
+    /// semantic name `CorpusAccent`. A stand-in for what an adapter would
+    /// build from live configuration metadata; this test never resolves
+    /// the uuid by any means other than this explicit, evidence-derived
+    /// map.
+    fn style_item_reference_types() -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
+        map.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "CorpusAccent".to_string(),
+        );
+        map
+    }
+
     /// Wraps a synthetic `dcsat:appearance` body (source direction, inside
     /// the inline `<template>`) in the minimal document shape
     /// `parse_dcs_area_template_source_document` accepts.
@@ -2670,6 +2991,134 @@ mod tests {
     }
 
     #[test]
+    fn platform_area_style_color_reference_side_table_parses_and_emits_exact_documents() {
+        let source = area_template_style_color_reference_native_source();
+        let storage = area_template_style_color_reference_document();
+
+        // Standard/built-in style reference: no resolver needed on either
+        // direction, so the plain (non-`_with_references`) entry points
+        // must already round-trip byte-exact.
+        let area = parse_dcs_area_template_storage_document(
+            &storage,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-area-style-color-reference",
+        )
+        .unwrap();
+        assert!(area.has_parameter_appearance());
+        assert_eq!(area.text_color_appearance(), None);
+        assert_eq!(
+            area.back_color_style_reference(),
+            Some(&DcsStyleColorReference::Named(
+                CanonicalText::new("NegativeTextColor").unwrap()
+            ))
+        );
+        // Storage direction: raw side-table bytes -> IR -> byte-exact re-emit.
+        assert_eq!(
+            emit_dcs_area_template_storage_document(&area).unwrap(),
+            storage
+        );
+
+        let parsed_source = parse_dcs_area_template_source_document(
+            &source,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:dcs-area-style-color-reference/source",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed_source.name(), area.name());
+        assert_eq!(
+            parsed_source.back_color_style_reference(),
+            area.back_color_style_reference()
+        );
+        // Source direction: native XML -> IR -> byte-exact re-emit of the
+        // inline `<template>` fragment (the same IR the storage side
+        // produced), proving one shared IR drives both directions.
+        let fragment = emit_dcs_area_template_source_fragment(&parsed_source).unwrap();
+        let fragment = std::str::from_utf8(&fragment).unwrap();
+        assert!(fragment.contains("<dcscor:parameter>ЦветФона</dcscor:parameter>"));
+        assert!(fragment.contains("d8p1:NegativeTextColor"));
+        let color_at = fragment.find("ЦветФона").unwrap();
+        let details_at = fragment.find("Расшифровка").unwrap();
+        assert!(
+            color_at < details_at,
+            "style-reference item must precede Расшифровка"
+        );
+    }
+
+    #[test]
+    fn platform_area_style_item_uuid_side_table_parses_and_emits_exact_documents() {
+        let source = area_template_style_item_uuid_native_source();
+        let storage = area_template_style_item_uuid_document();
+        let reference_types = style_item_reference_types();
+
+        // Custom StyleItem reference: the raw uuid storage form requires a
+        // resolver on decode (uuid -> semantic name) and on re-encode
+        // (semantic name -> uuid, reverse lookup on the same map).
+        let area = parse_dcs_area_template_storage_document_with_references(
+            &storage,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-area-style-item-uuid",
+            &reference_types,
+        )
+        .unwrap();
+        assert!(area.has_parameter_appearance());
+        assert_eq!(area.text_color_appearance(), None);
+        assert_eq!(
+            area.back_color_style_reference(),
+            Some(&DcsStyleColorReference::CustomStyleItem(
+                CanonicalText::new("CorpusAccent").unwrap()
+            ))
+        );
+        // Without a resolver, decode must fail closed rather than silently
+        // dropping the uuid form or guessing a name.
+        assert!(
+            parse_dcs_area_template_storage_document(
+                &storage,
+                ProfileId::parse("provider:mssql-legacy").unwrap(),
+                "fixture:dcs-area-style-item-uuid/no-resolver",
+            )
+            .is_err()
+        );
+        // Storage direction: raw side-table bytes -> IR -> byte-exact
+        // re-emit, resolving the semantic name back to the same uuid.
+        assert_eq!(
+            emit_dcs_area_template_storage_document_with_references(&area, &reference_types)
+                .unwrap(),
+            storage
+        );
+        // Without a resolver, re-emitting the custom-StyleItem form must
+        // also fail closed rather than fabricating a uuid.
+        assert!(emit_dcs_area_template_storage_document(&area).is_err());
+
+        let parsed_source = parse_dcs_area_template_source_document(
+            &source,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:dcs-area-style-item-uuid/source",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed_source.name(), area.name());
+        assert_eq!(
+            parsed_source.back_color_style_reference(),
+            area.back_color_style_reference()
+        );
+        // Source direction: native XML -> IR -> byte-exact re-emit of the
+        // inline `<template>` fragment. No resolver is needed here: both
+        // style-reference forms are lexically identical at the source
+        // layer, so the plain emitter suffices even for the custom form.
+        let fragment = emit_dcs_area_template_source_fragment(&parsed_source).unwrap();
+        let fragment = std::str::from_utf8(&fragment).unwrap();
+        assert!(fragment.contains("<dcscor:parameter>ЦветФона</dcscor:parameter>"));
+        assert!(fragment.contains("d8p1:CorpusAccent"));
+        let color_at = fragment.find("ЦветФона").unwrap();
+        let details_at = fragment.find("Расшифровка").unwrap();
+        assert!(
+            color_at < details_at,
+            "style-reference item must precede Расшифровка"
+        );
+    }
+
+    #[test]
     fn area_appearance_source_accepts_any_prefix_bound_to_web_namespace() {
         // The seed used a locally-declared `web` prefix rather than the
         // platform's auto-generated `d8p1`; both must parse identically
@@ -2760,6 +3209,150 @@ mod tests {
             corrupted,
             ProfileId::parse("provider:mssql-legacy").unwrap(),
             "fixture:area-appearance-web-color/corrupted",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DcsInnerSchemaError::Malformed(_) | DcsInnerSchemaError::UnsupportedSource(_)
+        ));
+    }
+
+    #[test]
+    fn area_style_reference_source_rejects_unknown_style_name() {
+        // Neither evidenced literal ("NegativeTextColor"/"CorpusAccent");
+        // an unrelated style name in the same namespace is outside the
+        // cohort and must not be silently accepted as either form.
+        let appearance = format!(
+            "<dcscor:item><dcscor:parameter>ЦветФона</dcscor:parameter><dcscor:value xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xsi:type=\"v8ui:Color\">style:PositiveTextColor</dcscor:value></dcscor:item>{PARAMETER_ITEM_PROBE}"
+        );
+        let document = area_template_document_with_appearance(&appearance);
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-style-reference/unknown-style-name",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_style_reference_storage_rejects_unknown_uuid() {
+        // A uuid absent from the supplied resolver map must fail closed
+        // rather than being silently dropped, treated as absent, or
+        // guessed at by any means other than the map.
+        let storage = area_template_style_item_uuid_document();
+        let storage_text = std::str::from_utf8(&storage).unwrap();
+        let mutated = storage_text.replacen(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c",
+            "00000000-0000-0000-0000-000000000000",
+            1,
+        );
+        assert_ne!(
+            mutated, storage_text,
+            "mutation must actually change the fixture"
+        );
+        let error = parse_dcs_area_template_storage_document_with_references(
+            mutated.as_bytes(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-style-reference/unknown-uuid",
+            &style_item_reference_types(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_style_reference_source_rejects_raw_uuid_form() {
+        // The raw `0:<uuid>` wire form is only evidenced on the storage
+        // direction; the source direction always spells a style reference
+        // by name, even for a custom StyleItem.
+        let appearance = format!(
+            "<dcscor:item><dcscor:parameter>ЦветФона</dcscor:parameter><dcscor:value xsi:type=\"v8ui:Color\">0:4a9d8536-ff59-4a90-a1cf-646d241dc53c</dcscor:value></dcscor:item>{PARAMETER_ITEM_PROBE}"
+        );
+        let document = area_template_document_with_appearance(&appearance);
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-style-reference/raw-uuid-on-source",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_style_reference_storage_rejects_named_form_for_custom_style_item() {
+        // The named `d4p2:CorpusAccent` spelling is the source-direction
+        // form; storage always spells a custom StyleItem reference as the
+        // raw uuid form instead. Mixing the two forms across directions
+        // must fail closed, not be silently accepted as the standard form.
+        let storage = area_template_style_item_uuid_document();
+        let storage_text = std::str::from_utf8(&storage).unwrap();
+        let mutated = storage_text.replacen(
+            "<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"d4p1:Color\">0:4a9d8536-ff59-4a90-a1cf-646d241dc53c</value>",
+            "<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\" xmlns:d4p2=\"http://v8.1c.ru/8.1/data/ui/style\" xsi:type=\"d4p1:Color\">d4p2:CorpusAccent</value>",
+            1,
+        );
+        assert_ne!(
+            mutated, storage_text,
+            "mutation must actually change the fixture"
+        );
+        let error = parse_dcs_area_template_storage_document_with_references(
+            mutated.as_bytes(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-style-reference/named-form-on-storage",
+            &style_item_reference_types(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_style_reference_rejects_uuid_resolving_to_unevidenced_name() {
+        // The resolver map's own semantics can still drift: a uuid that
+        // resolves to some other name (mixing an unrelated configuration
+        // object's identity into this cohort) must fail closed rather than
+        // being accepted as if it resolved to the evidenced CorpusAccent.
+        let storage = area_template_style_item_uuid_document();
+        let mut drifted_references = BTreeMap::new();
+        drifted_references.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "SomeOtherStyleItem".to_string(),
+        );
+        let error = parse_dcs_area_template_storage_document_with_references(
+            &storage,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-style-reference/drifted-resolution",
+            &drifted_references,
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_style_color_reference_storage_rejects_corrupted_side_table_bytes() {
+        let storage = area_template_style_color_reference_document();
+        let corrupted = &storage[..storage.len() / 2];
+        let error = parse_dcs_area_template_storage_document(
+            corrupted,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-style-color-reference/corrupted",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DcsInnerSchemaError::Malformed(_) | DcsInnerSchemaError::UnsupportedSource(_)
+        ));
+    }
+
+    #[test]
+    fn area_style_item_uuid_storage_rejects_corrupted_side_table_bytes() {
+        let storage = area_template_style_item_uuid_document();
+        let corrupted = &storage[..storage.len() / 2];
+        let error = parse_dcs_area_template_storage_document_with_references(
+            corrupted,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-style-item-uuid/corrupted",
+            &style_item_reference_types(),
         )
         .unwrap_err();
         assert!(matches!(

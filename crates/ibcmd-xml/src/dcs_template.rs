@@ -11,12 +11,14 @@ use ibcmd_schema::{
 use quick_xml::NsReader;
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 
 use crate::{
     DcsSettingsDocumentAnalysisError, analyze_dcs_settings_document,
-    emit_dcs_area_template_storage_document, parse_dcs_area_template_source_document,
-    parse_dcs_area_template_storage_document,
+    emit_dcs_area_template_storage_document_with_references,
+    parse_dcs_area_template_source_document,
+    parse_dcs_area_template_storage_document_with_references,
 };
 
 const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
@@ -124,6 +126,20 @@ impl std::error::Error for DcsSchemaTemplateError {}
 pub fn analyze_dcs_schema_template_documents<'a>(
     documents: &[&'a [u8]],
 ) -> Result<DcsSchemaTemplateDocuments<'a>, DcsSchemaTemplateError> {
+    analyze_dcs_schema_template_documents_with_references(documents, &BTreeMap::new())
+}
+
+/// Validates decoder-resolved native documents and assigns their evidenced
+/// roles exactly like [`analyze_dcs_schema_template_documents`], but also
+/// resolves a custom-`StyleItem` style-color reference's storage uuid via
+/// `reference_types` when validating the terminal AreaTemplate (see
+/// [`crate::parse_dcs_area_template_storage_document_with_references`]).
+/// Without a matching entry, that one coordinate fails closed exactly as
+/// the plain function does; every other coordinate is unaffected.
+pub fn analyze_dcs_schema_template_documents_with_references<'a>(
+    documents: &[&'a [u8]],
+    reference_types: &BTreeMap<String, String>,
+) -> Result<DcsSchemaTemplateDocuments<'a>, DcsSchemaTemplateError> {
     let policy = bundled_dcs_schema_template_envelope_policy()
         .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
     let settings_count =
@@ -159,12 +175,13 @@ pub fn analyze_dcs_schema_template_documents<'a>(
             }
             Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile) => {
                 if inspect_schema_file(document, true, &policy).is_err() {
-                    parse_dcs_area_template_storage_document(
+                    parse_dcs_area_template_storage_document_with_references(
                         document,
                         ProfileId::parse("provider:mssql-legacy").map_err(|error| {
                             DcsSchemaTemplateError::InvalidEvidence(error.to_string())
                         })?,
                         "dcs-envelope:terminal-area-template",
+                        reference_types,
                     )
                     .map_err(|_| {
                         DcsSchemaTemplateError::UnsupportedSource(
@@ -273,6 +290,21 @@ pub fn detach_dcs_settings_from_source_variants(
 pub fn compile_dcs_schema_template_source_documents(
     source: &[u8],
 ) -> Result<DcsSchemaTemplateOwnedDocuments, DcsSchemaTemplateError> {
+    compile_dcs_schema_template_source_documents_with_references(source, &BTreeMap::new())
+}
+
+/// Compiles the attested source wrapper into native XML document roles
+/// exactly like [`compile_dcs_schema_template_source_documents`], but also
+/// resolves a custom-`StyleItem` style-color reference's semantic name back
+/// to its configuration-local storage uuid via `reference_types` when the
+/// terminal AreaTemplate's `back_color_style_reference` is in that form
+/// (see [`crate::emit_dcs_area_template_storage_document_with_references`]).
+/// The standard `Named` style-reference form and every other coordinate are
+/// unaffected: an empty map behaves identically to the plain function.
+pub fn compile_dcs_schema_template_source_documents_with_references(
+    source: &[u8],
+    reference_types: &BTreeMap<String, String>,
+) -> Result<DcsSchemaTemplateOwnedDocuments, DcsSchemaTemplateError> {
     let policy = bundled_dcs_schema_template_envelope_policy()
         .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
     let text = std::str::from_utf8(source)
@@ -314,11 +346,14 @@ pub fn compile_dcs_schema_template_source_documents(
         .map(|document| xml_document(document))
         .collect::<Vec<_>>();
     let terminal = match area {
-        Some(area) => emit_dcs_area_template_storage_document(&area).map_err(|_| {
-            DcsSchemaTemplateError::UnsupportedSource(
-                "source AreaTemplate is outside the evidenced storage coordinate",
-            )
-        })?,
+        Some(area) => {
+            emit_dcs_area_template_storage_document_with_references(&area, reference_types)
+                .map_err(|_| {
+                    DcsSchemaTemplateError::UnsupportedSource(
+                        "source AreaTemplate is outside the evidenced storage coordinate",
+                    )
+                })?
+        }
         None => xml_document(&format!(
             "{SCHEMA_FILE_OPEN}\r\n\t<dataCompositionSchema xmlns=\"{}\"/>\r\n</SchemaFile>",
             policy.schema_namespace_uri()

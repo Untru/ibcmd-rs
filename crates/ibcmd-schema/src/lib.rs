@@ -2682,6 +2682,24 @@ pub const BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON: &str = include_st
 pub const BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-multi-cell-appearance/manifest.json"
 );
+/// Immutable platform-authenticated AreaTemplate style-color-reference
+/// coordinate: the `ЦветФона` item, valued by a standard/built-in platform
+/// style referenced by name (`style:NegativeTextColor`), that precedes
+/// `Расшифровка` in the same table-cell appearance. Third-lab-session
+/// draft; `compiler_acceptance` is intentionally absent -- not claimed.
+pub const BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-color-reference/manifest.json"
+);
+/// Immutable platform-authenticated AreaTemplate custom-StyleItem
+/// coordinate: the `ЦветФона` item, valued by a custom `StyleItem`
+/// configuration object referenced by name (`style:CorpusAccent`),
+/// lexically indistinguishable from the standard form at the native/source
+/// XML layer but resolving to a raw `0:<uuid>` on the storage side.
+/// Third-lab-session draft; `compiler_acceptance` is intentionally absent
+/// -- not claimed.
+pub const BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/manifest.json"
+);
 /// Immutable platform-authenticated three-additional-scalar-parameter
 /// coordinate: `Флаг` (xs:boolean), `Лимит` (xs:decimal, 10/2/Any) and
 /// `Период` (v8:StandardPeriod, LastMonth), immediately after the existing
@@ -3776,6 +3794,7 @@ pub struct DcsAreaTemplatePolicy {
     supports_parameter_appearance: bool,
     supports_text_color_appearance: bool,
     supports_shared_row_appearance: bool,
+    supports_style_reference_appearance: bool,
 }
 
 impl DcsAreaTemplatePolicy {
@@ -3823,6 +3842,40 @@ impl DcsAreaTemplatePolicy {
     }
     pub const fn supports_shared_row_appearance(&self) -> bool {
         self.supports_shared_row_appearance
+    }
+    pub const fn supports_style_reference_appearance(&self) -> bool {
+        self.supports_style_reference_appearance
+    }
+    /// Source-direction spelling of the back-color style-reference
+    /// appearance parameter.
+    pub fn back_color_parameter(&self) -> &str {
+        "ЦветФона"
+    }
+    /// Storage-side spelling of the back-color style-reference appearance
+    /// parameter.
+    pub fn storage_back_color_parameter(&self) -> &str {
+        "BackColor"
+    }
+    /// `http://v8.1c.ru/8.1/data/ui/style`, the namespace hosting both
+    /// evidenced style-reference forms (standard-named and custom
+    /// StyleItem alike -- they are lexically indistinguishable at the
+    /// native/source XML layer).
+    pub fn style_namespace_uri(&self) -> &str {
+        "http://v8.1c.ru/8.1/data/ui/style"
+    }
+    /// Expanded QName of the only evidenced standard/built-in style
+    /// lexical token, `NegativeTextColor`. Comparison against parsed
+    /// values must use this expanded form only; the platform does not
+    /// preserve the source prefix spelling.
+    pub fn negative_text_color_qname(&self) -> String {
+        format!("{{{}}}NegativeTextColor", self.style_namespace_uri())
+    }
+    /// The only evidenced custom `StyleItem` semantic name. Its
+    /// storage-local uuid is never exposed here -- resolving between the
+    /// two is an adapter-supplied concern (see the TypeId-reference
+    /// precedent), not this policy's.
+    pub fn custom_style_item_name(&self) -> &str {
+        "CorpusAccent"
     }
     pub fn appearance_parameter(&self) -> &str {
         "Расшифровка"
@@ -4039,6 +4092,82 @@ struct DcsAreaTemplateMultiCellAppearanceItem {
     parameter: String,
     value_type: String,
     value: String,
+}
+
+/// Evidence: native-only round trips authenticate the exact `ЦветФона`
+/// appearance item added ahead of `Расшифровка`, valued by a *standard,
+/// built-in* platform style referenced by name (`style:NegativeTextColor`).
+/// No `compiler_acceptance` block yet -- third-lab-session draft, per the
+/// coordinator's explicit instruction not to claim it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaStyleColorReferenceEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsAreaStyleColorReferenceCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaStyleColorReferenceCohort {
+    template_name: String,
+    new_item_parameter: String,
+    new_item_value_type: String,
+    new_item_value_text: String,
+    new_item_namespace_prefix_source: String,
+    new_item_namespace_uri: String,
+    appearance_item_order_after_delta: Vec<String>,
+    appearance_item_order_in_seed: Vec<String>,
+    storage_parameter_lexeme: String,
+    storage_value_form: String,
+}
+
+/// Evidence: native-only round trips authenticate the exact `ЦветФона`
+/// appearance item added ahead of `Расшифровка`, valued by a *custom*
+/// `StyleItem` configuration object referenced by name
+/// (`style:CorpusAccent`). Lexically indistinguishable from the standard
+/// form at the native/source XML layer; the storage side reveals the
+/// difference (a raw `0:<uuid>` reference instead of a named lexical
+/// token). No `compiler_acceptance` block yet -- same as
+/// [`DcsAreaStyleColorReferenceEvidence`].
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaStyleItemUuidEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsAreaStyleItemUuidCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaStyleItemUuidCohort {
+    template_name: String,
+    style_item_name: String,
+    style_item_seed_uuid: String,
+    style_item_kind: String,
+    style_item_declared_value: String,
+    new_item_parameter: String,
+    new_item_value_text_native: String,
+    appearance_item_order_after_delta: Vec<String>,
+    child_objects_order_native: Vec<String>,
+    child_objects_order_predicted_before_vm: Vec<String>,
+    child_objects_prediction_correct: bool,
+    storage_parameter_lexeme: String,
+    storage_value_form: String,
 }
 
 impl DcsSchemaTemplateEnvelopePolicy {
@@ -10849,6 +10978,8 @@ pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, Schem
         BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
         BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
         BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+        BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+        BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
     )
 }
 
@@ -10857,6 +10988,8 @@ fn parse_dcs_area_template_policy(
     appearance_json: &str,
     color_json: &str,
     multi_cell_json: &str,
+    style_color_reference_json: &str,
+    style_item_uuid_json: &str,
 ) -> Result<DcsAreaTemplatePolicy, SchemaError> {
     let evidence: DcsAreaTemplateEvidence = serde_json::from_str(evidence_json)
         .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
@@ -10979,6 +11112,76 @@ fn parse_dcs_area_template_policy(
                 .to_string(),
         ));
     }
+    let style_color_reference: DcsAreaStyleColorReferenceEvidence =
+        serde_json::from_str(style_color_reference_json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if style_color_reference.schema_version != 1
+        || style_color_reference.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-style-color-reference"
+        || style_color_reference.cohort.template_name != evidence.cohort.template_name
+        || style_color_reference.cohort.new_item_parameter != "ЦветФона"
+        || style_color_reference.cohort.new_item_value_type != "v8ui:Color"
+        || style_color_reference.cohort.new_item_value_text != "d8p1:NegativeTextColor"
+        || style_color_reference
+            .cohort
+            .new_item_namespace_prefix_source
+            != "auto-generated by platform (d8p1), not the seed's locally-declared \"style\" prefix"
+        || style_color_reference.cohort.new_item_namespace_uri
+            != "http://v8.1c.ru/8.1/data/ui/style"
+        || style_color_reference
+            .cohort
+            .appearance_item_order_after_delta
+            != ["ЦветФона", "Расшифровка"]
+        || style_color_reference.cohort.appearance_item_order_in_seed != ["Расшифровка", "ЦветФона"]
+        || style_color_reference.cohort.storage_parameter_lexeme != "BackColor"
+        || style_color_reference.cohort.storage_value_form
+            != "d4p2:NegativeTextColor (auto-generated prefixes d4p1=data/ui, d4p2=data/ui/style; named lexical form retained, not resolved to a UUID)"
+        || style_color_reference.negative_observations.len() != 3
+        || style_color_reference.non_claims.len() != 4
+        || style_color_reference.platform.is_null()
+        || style_color_reference.seed.is_null()
+        || style_color_reference.rounds.is_null()
+        || style_color_reference.retained.is_null()
+        || style_color_reference.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS AreaTemplate style-color-reference evidence drifted from the exact coordinate"
+                .to_string(),
+        ));
+    }
+    let style_item_uuid: DcsAreaStyleItemUuidEvidence = serde_json::from_str(style_item_uuid_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if style_item_uuid.schema_version != 1
+        || style_item_uuid.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-style-item-uuid"
+        || style_item_uuid.cohort.template_name != evidence.cohort.template_name
+        || style_item_uuid.cohort.style_item_name != "CorpusAccent"
+        || style_item_uuid.cohort.style_item_seed_uuid != "4a9d8536-ff59-4a90-a1cf-646d241dc53c"
+        || style_item_uuid.cohort.style_item_kind != "Color"
+        || style_item_uuid.cohort.style_item_declared_value != "web:Red"
+        || style_item_uuid.cohort.new_item_parameter != "ЦветФона"
+        || style_item_uuid.cohort.new_item_value_text_native != "d8p1:CorpusAccent"
+        || style_item_uuid.cohort.appearance_item_order_after_delta != ["ЦветФона", "Расшифровка"]
+        || style_item_uuid.cohort.child_objects_order_native != ["Language", "StyleItem", "Report"]
+        || style_item_uuid
+            .cohort
+            .child_objects_order_predicted_before_vm
+            != ["StyleItem", "Language", "Report"]
+        || style_item_uuid.cohort.child_objects_prediction_correct
+        || style_item_uuid.cohort.storage_parameter_lexeme != "BackColor"
+        || style_item_uuid.cohort.storage_value_form
+            != "0:4a9d8536-ff59-4a90-a1cf-646d241dc53c (raw uuid reference, NOT a named lexical form)"
+        || style_item_uuid.negative_observations.len() != 3
+        || style_item_uuid.non_claims.len() != 5
+        || style_item_uuid.platform.is_null()
+        || style_item_uuid.seed.is_null()
+        || style_item_uuid.rounds.is_null()
+        || style_item_uuid.retained.is_null()
+        || style_item_uuid.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS AreaTemplate style-item-uuid evidence drifted from the exact coordinate"
+                .to_string(),
+        ));
+    }
     Ok(DcsAreaTemplatePolicy {
         template_name: evidence.cohort.template_name,
         parameter_name: evidence.cohort.parameter_name,
@@ -10992,6 +11195,7 @@ fn parse_dcs_area_template_policy(
         supports_parameter_appearance: true,
         supports_text_color_appearance: true,
         supports_shared_row_appearance: true,
+        supports_style_reference_appearance: true,
     })
 }
 
@@ -11026,6 +11230,18 @@ mod dcs_area_template_policy_tests {
         );
         assert!(policy.supports_shared_row_appearance());
         assert_eq!(policy.storage_shared_row_appearance_parameter(), "Details");
+        assert!(policy.supports_style_reference_appearance());
+        assert_eq!(policy.back_color_parameter(), "ЦветФона");
+        assert_eq!(policy.storage_back_color_parameter(), "BackColor");
+        assert_eq!(
+            policy.style_namespace_uri(),
+            "http://v8.1c.ru/8.1/data/ui/style"
+        );
+        assert_eq!(
+            policy.negative_text_color_qname(),
+            "{http://v8.1c.ru/8.1/data/ui/style}NegativeTextColor"
+        );
+        assert_eq!(policy.custom_style_item_name(), "CorpusAccent");
     }
 
     #[test]
@@ -11058,6 +11274,8 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 &serde_json::to_string(&namespace_drift).unwrap(),
                 BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -11071,6 +11289,8 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 &serde_json::to_string(&order_drift).unwrap(),
                 BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -11085,6 +11305,8 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 &serde_json::to_string(&truncated_observations).unwrap(),
                 BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -11096,6 +11318,8 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
             )
             .is_ok()
         );
@@ -11124,6 +11348,8 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
                 &serde_json::to_string(&row_count_drift).unwrap(),
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -11137,6 +11363,8 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
                 &serde_json::to_string(&order_drift).unwrap(),
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -11149,6 +11377,8 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
                 &serde_json::to_string(&appearance_flag_drift).unwrap(),
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -11159,6 +11389,132 @@ mod dcs_area_template_policy_tests {
             bundled_dcs_area_template_policy()
                 .unwrap()
                 .supports_shared_row_appearance()
+        );
+    }
+
+    #[test]
+    fn area_style_color_reference_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsAreaStyleColorReferenceEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn area_style_color_reference_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON).unwrap();
+
+        let mut parameter_drift = raw.clone();
+        parameter_drift["cohort"]["storage_parameter_lexeme"] = serde_json::json!("Background");
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                &serde_json::to_string(&parameter_drift).unwrap(),
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
+            )
+            .is_err()
+        );
+
+        let mut value_drift = raw.clone();
+        value_drift["cohort"]["new_item_value_text"] = serde_json::json!("d8p1:PositiveTextColor");
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                &serde_json::to_string(&value_drift).unwrap(),
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
+            )
+            .is_err()
+        );
+
+        let mut order_drift = raw;
+        order_drift["cohort"]["appearance_item_order_after_delta"] =
+            serde_json::json!(["Расшифровка", "ЦветФона"]);
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                &serde_json::to_string(&order_drift).unwrap(),
+                BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON,
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_area_template_policy().is_ok());
+    }
+
+    #[test]
+    fn area_style_item_uuid_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsAreaStyleItemUuidEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn area_style_item_uuid_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON).unwrap();
+
+        let mut name_drift = raw.clone();
+        name_drift["cohort"]["style_item_name"] = serde_json::json!("OtherAccent");
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                &serde_json::to_string(&name_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut uuid_drift = raw.clone();
+        uuid_drift["cohort"]["style_item_seed_uuid"] =
+            serde_json::json!("00000000-0000-0000-0000-000000000000");
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                &serde_json::to_string(&uuid_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut storage_form_drift = raw;
+        storage_form_drift["cohort"]["storage_value_form"] =
+            serde_json::json!("named lexical form, not a uuid reference");
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON,
+                &serde_json::to_string(&storage_form_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_area_template_policy().is_ok());
+        assert!(
+            bundled_dcs_area_template_policy()
+                .unwrap()
+                .supports_style_reference_appearance()
         );
     }
 }
