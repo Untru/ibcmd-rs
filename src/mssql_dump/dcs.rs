@@ -229,7 +229,7 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
     }
     let mut source = match schema {
         Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings).ok()?,
-        Err(_) if reference_types.is_empty() => {
+        Err(_) => {
             let schema = parse_dcs_query_union_link_storage_document(
                 envelope.primary_schema_file(),
                 source_profile.clone(),
@@ -238,7 +238,6 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
             .ok()?;
             emit_dcs_query_union_link_source_document(&schema, &settings).ok()?
         }
-        Err(_) => return None,
     };
     let terminal = envelope.terminal_schema_file();
     if let Ok(area) = parse_dcs_area_template_storage_document_with_references(
@@ -1770,6 +1769,187 @@ mod tests {
         )
         .unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// Gate test for the query-union-link fallback's `reference_types.is_empty()`
+    /// bug (DCS-LEGACY-REMOVAL-01 phase-1 finding, candidate a): the inner-schema
+    /// typed parser rejects any DataSetQuery/DataSetUnion/dataSetLink shape (it
+    /// only admits DataSetObject), and this fixture's own type_index -- the
+    /// same evidenced `CatalogRef.FilterProbe` construction
+    /// `platform_type_id_reference_body_exports_byte_exact_through_common_codec`
+    /// already proves, built the same way the real route's
+    /// `build_metadata_type_indexes_from_texts` would produce it -- is
+    /// non-empty. Before the fix this combination (inner-schema parse
+    /// fails + `reference_types` non-empty) skipped the query-union-link
+    /// fallback entirely and hard failed; the fix removes the accidental
+    /// gate so the fallback is always attempted on inner-schema-parse
+    /// failure, independent of `reference_types`. This reuses the base
+    /// `dcs-query-union-link` corpus's own genuine bytes (its shape is
+    /// admitted by the query-union-link parser) with an injected type_index
+    /// entry the corpus itself does not need, isolating the gate-condition
+    /// fix from the query-union-link parser's own unrelated fixed-shape
+    /// strictness -- see the module doc comment on this test for why the
+    /// evidenced `dcs-query-union-link-typeid` corpus cannot be used here.
+    #[test]
+    fn platform_query_union_link_exports_byte_exact_with_non_empty_type_index() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/native-template.xml.b64"
+        )));
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        // A type_index entry this corpus's own content never references:
+        // before the fix, its mere non-emptiness alone was enough to skip
+        // the query-union-link fallback and hard fail; after the fix,
+        // export must still succeed byte-exactly because the fallback is
+        // attempted regardless of what (or whether) `reference_types`
+        // resolves.
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.FilterProbe".to_owned(),
+            },
+        );
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("query-union-link fallback must still be attempted with a non-empty type_index");
+        assert_eq!(actual, expected);
+    }
+
+    /// `dcs-query-union-link-typeid` (evidenced fixture, immutable manifest)
+    /// transplants the same `CatalogRef.FilterProbe` TypeId construction
+    /// into the `QueryRows` DataSetQuery as a *second* field, alongside the
+    /// existing `SortKey` field. This proves the gate-condition fix in
+    /// isolation (see above) but cannot reach a byte-exact positive result
+    /// through the *whole* codec: `ibcmd_xml::parse_dcs_query_union_link_storage_document`'s
+    /// `parse_query` enforces an evidenced, fixed child cardinality
+    /// (`DcsQueryUnionLinkPolicy::query_children()`, four children) that a
+    /// two-field DataSetQuery violates, independent of `reference_types` or
+    /// this package's fix -- confirmed directly:
+    /// `UnsupportedSource("dataSet child cardinality is outside the cohort")`.
+    /// The fixture's own manifest already discloses this
+    /// (`cohort.cf_export_still_fails_on_this_corpus: true`); admitting a
+    /// two-field DataSetQuery shape is `ibcmd-schema`/`ibcmd-xml` evidence
+    /// work, out of this gate-fix package's one-line scope. This test pins
+    /// that exact, unrelated failure mode as a known negative so a future
+    /// evidence package has a fixed target.
+    #[test]
+    fn platform_query_union_link_typeid_second_field_needs_wider_query_cohort_evidence() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link-typeid/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link-typeid/native-template.xml.b64"
+        )));
+        // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "f51f756a382994936bcf748a62d665cf9a53cfc05153e75401d3df6e8b4ee3ca"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "5ce6f74897ce0428f2898fcf54ed542dcd23af6aafdbd0f331a0fde1e18bb3be"
+        );
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        let documents = body.documents();
+        assert_eq!(
+            ibcmd_xml::parse_dcs_query_union_link_storage_document(
+                documents[0],
+                ProfileId::parse("provider:mssql-legacy").unwrap(),
+                "dcs-query-union-link-typeid:probe",
+            ),
+            Err(ibcmd_xml::DcsInnerSchemaError::UnsupportedSource(
+                "dataSet child cardinality is outside the cohort".to_string()
+            ))
+        );
+
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.FilterProbe".to_owned(),
+            },
+        );
+        assert_eq!(
+            normalize_data_composition_schema_template_documents_with_profiles(
+                &body.documents(),
+                &type_index,
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            ),
+            None,
+            "two-field DataSetQuery is outside the query-union-link parser's evidenced cohort"
+        );
+    }
+
+    /// Regression negative: a primary schema outside BOTH the inner-schema
+    /// parser's admitted shape (not DataSetObject) AND the query-union-link
+    /// parser's admitted shape (not exactly dataSource+query+union+link+variant)
+    /// must still fail closed with a typed bail, not a silent skip -- the
+    /// fix only removes the accidental `reference_types.is_empty()` gate on
+    /// the fallback *attempt*, it does not loosen either parser's own
+    /// admitted-shape strictness.
+    #[test]
+    fn schema_outside_both_inner_schema_and_query_union_link_parsers_fails_closed() {
+        let primary = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+            "\t\t<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>\r\n",
+            "\t\t<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Default</name></settingsVariant>\r\n",
+            "\t</dataCompositionSchema>\r\n",
+            "</SchemaFile>"
+        );
+        let settings = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>"
+        );
+        let terminal = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n",
+            "</SchemaFile>"
+        );
+        let documents: [&[u8]; 3] = [primary.as_bytes(), settings.as_bytes(), terminal.as_bytes()];
+
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.FilterProbe".to_owned(),
+            },
+        );
+        assert_eq!(
+            normalize_data_composition_schema_template_documents_with_profiles(
+                &documents,
+                &type_index,
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            ),
+            None,
+            "a schema admitted by neither parser must still fail closed with a non-empty type_index"
+        );
     }
 
     #[test]
