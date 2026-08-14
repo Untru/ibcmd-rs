@@ -6189,12 +6189,19 @@ fn writes_object_family_module_text_to_source_layout_when_metadata_is_present() 
 #[test]
 fn extracts_simple_metadata_xml_from_recognized_blob() {
     let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let blob = deflate_for_test(
-            format!(
-                "\u{feff}{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"SalesCatalog\",{{2,\"ru\",\"Продажи\",\"en\",\"Sales\"}},\"Comment\"}}\r\n}}\r\n}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    // Catalog goes through the strict `OwnerGraphFamily` decoder — the old
+    // flat `{57,{0,{3,header}}}` shape predates that refactor (same root
+    // cause as the Catalog sub-case fixed in
+    // `disambiguates_colliding_metadata_object_codes`, Cluster 11). Rebuilt
+    // on `exact_catalog_owner_fixture_for_test`, overriding the header's
+    // synonym field to keep this test's original two-locale intent.
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(uuid, "SalesCatalog", "Comment");
+    fields[9] = format!(
+        "{{0,{{3,{{1,0,{uuid}}},\"SalesCatalog\",{{2,\"ru\",\"Продажи\",\"en\",\"Sales\"}},\"Comment\",0,0,00000000-0000-0000-0000-000000000000,0}}}}"
+    );
+    let raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let blob = deflate_for_test(raw.as_bytes());
 
     let extracted = extract_metadata_source_xml(
         &blob,
@@ -31744,12 +31751,18 @@ fn disambiguates_colliding_metadata_object_codes() {
         .as_bytes(),
     );
     let subsystem_uuid = "33333333-3333-4333-8333-333333333333";
+    // The old fixture was a 3-field flat shape (`{22, header, "1"}`), well
+    // short of what `parse_subsystem_properties_from_text` requires (it
+    // reads `fields[2]`, `fields[4]`, `fields[5]` via
+    // `parse_command_group_picture_value`, `fields[6]`, `fields[7]`,
+    // `fields[8]`) — the whole subsystem failed to parse. Rebuilt on the
+    // already-proven `subsystem_source_for_test` builder (used by
+    // `extracts_subsystem_include_in_command_interface_to_metadata_xml` and
+    // friends).
     let subsystem_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},1}}\r\n}}"
-            )
+        subsystem_source_for_test(subsystem_uuid, "Sales", "Sales", true, false, false, &[])
             .as_bytes(),
-        );
+    );
     let accounting_uuid = "44444444-4444-4444-8444-444444444444";
     let accounting_blob = deflate_for_test(
             format!(
@@ -31757,13 +31770,21 @@ fn disambiguates_colliding_metadata_object_codes() {
             )
             .as_bytes(),
         );
-    let task_uuid = "55555555-5555-4555-8555-555555555555";
-    let task_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"Task\",{{1,\"en\",\"Task\"}},\"\"}},0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    // `parse_task_properties_from_text` (`src/mssql_dump/mod.rs`) is the
+    // strict owner-graph-style decoder used for Task metadata: it requires
+    // an exact 9-field root and a 52-field `fields` owner block (5 marked
+    // root collections, generated types, addressing attributes, etc). The
+    // old fixture was a 3-field flat shape, nowhere close — no amount of
+    // "field count correction" makes a hand-rolled fixture practical here,
+    // so this uses the real evidence-backed corpus fixture already proven
+    // by `extracts_task_child_form_ref_from_current_index` /
+    // `extracts_task_generated_types_to_platform_proven_metadata_xml`
+    // instead of hand-crafting one.
+    let task_uuid = "32838304-a94f-4eb0-b1a6-4e5e855f022c";
+    let task_text = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
+    );
+    let task_blob = deflate_for_test(task_text.as_bytes());
 
     assert_eq!(
         extract_metadata_source_xml(
@@ -31823,17 +31844,20 @@ fn disambiguates_colliding_metadata_object_codes() {
         )
         .unwrap()
         .relative_path,
-        PathBuf::from("Tasks").join("Task.xml")
+        PathBuf::from("Tasks").join("CorpusTask.xml")
     );
 
+    // Catalog goes through the strict `OwnerGraphFamily` decoder
+    // (`metadata_owner_graph.rs`), which needs the full 5-collection,
+    // ~61-field owner root — the old flat/positional fixture here predates
+    // that refactor. Rebuilt on the already-proven
+    // `exact_catalog_owner_fixture_for_test` +
+    // `render_owner_graph_fixture_for_test` pair (Clusters 1-3).
     let catalog_uuid = "66666666-6666-4666-8666-666666666666";
-    let catalog_form_uuid = "77777777-7777-4777-8777-777777777777";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{catalog_form_uuid},{catalog_form_uuid},1,{{1,{{1,9,{{-13}},510405d3-2a0c-4fea-960a-7fee59b32f,{{14,25,1183c14f-f814-49c6-9233-a3c26b3f64cf}}}}}}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
     assert_eq!(
         extract_metadata_source_xml(
             &catalog_blob,
@@ -32953,15 +32977,39 @@ fn extracts_exchange_plan_this_node_to_internal_info() {
 fn extracts_exchange_plan_child_attributes_to_metadata_xml() {
     let exchange_plan_uuid = "11111111-1111-4111-8111-111111111111";
     let attribute_uuid = "99999999-9999-4999-8999-999999999999";
-    let attribute_header = format!(
-        "{{3,{{1,0,{attribute_uuid}}},\"UseRouting\",{{1,\"en\",\"Use routing\"}},\"attribute comment\"}}"
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    // `parse_strict_common_metadata_attribute` unwraps the code27 payload
+    // via `parse_metadata_code27_payload_fields`, which requires exactly 23
+    // fields (see `parse_information_register_common_child_properties`,
+    // mod.rs:16357, for the field-by-field map: [4]=tooltip, [13]=fill
+    // checking, etc). The old fixture's payload had only 19 fields with
+    // tooltip one slot off — stale relative to the current decoder. Also,
+    // `parse_exchange_plan_attribute`'s modern-layout wrapper (code "37"
+    // exchange plans use `modern_layout=true`) requires a 7-field wrapper
+    // `{4, payload, indexing, full_text_search, data_history, 0,
+    // {1,ZERO}}` wrapped again as `{wrapper, 0}` — the old fixture used a
+    // bare 2-field `{4, payload}` with no outer `{.., 0}` wrapper and no
+    // indexing/full_text_search/data_history/reserved tail at all. Rebuilt
+    // on the same 23-field code27 payload shape proven by
+    // `document_attribute_wrapper_for_test`, keeping the original test's
+    // intent (boolean attribute, "Routing flag" tooltip, ShowError fill
+    // checking).
+    let payload = format!(
+        "{{27,\r\n\
+{{2,\r\n\
+{{3,{{1,0,{attribute_uuid}}},\"UseRouting\",{{1,\"en\",\"Use routing\"}},\"attribute comment\",0,0,{zero_uuid},0}},\
+{{\"Pattern\",{{\"B\"}}}}\r\n\
+}},\
+0,{{0}},{{1,\"en\",\"Routing flag\"}},0,\"\",0,\
+{{\"U\"}},{{\"U\"}},0,{zero_uuid},2,1,\
+{{5006,0}},\
+{{3,0,0}},\
+{{0,0}},\
+0,{{0}},{{\"U\"}},0,0,0\r\n\
+}}"
     );
-    let attribute_type = r#"{"Pattern",{"B"}}"#;
-    let typed_header = format!("{{2,{attribute_header},{attribute_type}}}");
-    let attribute_properties = format!(
-        "{{27,{typed_header},0,{{0}},{{0}},{{1,\"en\",\"Routing flag\"}},0,\"\",0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,00000000-0000-0000-0000-000000000000,1,0,{{0}},{{0}},0}}"
-    );
-    let attribute = format!("{{4,{attribute_properties}}}");
+    let wrapper = format!("{{4,{payload},2,1,1,0,{{1,{zero_uuid}}}}}");
+    let attribute = format!("{{{wrapper},0}}");
     assert!(split_information_register_braced_fields(&attribute).is_some());
     let attribute_collection = format!("{{1a1b4fea-e093-470d-94ff-1d2f16cda2ab,1,{attribute}}}");
     let tail = exchange_plan_default_owner_tail_for_test();
