@@ -7994,9 +7994,14 @@ fn extracts_form_attributes_and_commands_from_body_tail() {
 #[test]
 fn extracts_form_commands_from_wrapper9_body_tail() {
     let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    // `FormCommandSchema::from_raw_layout` (`src/form_schema.rs`) requires
+    // the command's own field list to be *exactly* 19 elements; the fixture
+    // had two stray trailing `0` scalars past `current_row_use` (slot 18,
+    // the schema's last field), pushing it to 21 and making the whole
+    // command (and thus the `<Command>` XML) disappear.
     let form_body = deflate_for_test(
             format!(
-                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{0}},{{0}},{{0,1,{{9,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}}}}"##
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{0}},{{0}},{{0,1,{{9,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1}}}},{{0}}}}"##
             )
             .as_bytes(),
         );
@@ -10456,8 +10461,14 @@ fn formatter_emits_form_command_children_in_native_order() {
 
 #[test]
 fn omits_form_command_current_row_use_for_command_tail_kind_2() {
+    // `FormCommandSchema::from_raw_layout` (`src/form_schema.rs`) reads the
+    // command's picture value (slot 7) via `split_1c_braced_fields`, which
+    // requires a braced structure; the fixture's bare `0` placeholder is no
+    // longer accepted (the "no picture" marker now has to be the fully
+    // braced `{4,0,{0},"",-1,-1,1,0,""}`, as used throughout this suite),
+    // so the whole command previously failed to parse.
     let form_body = deflate_for_test(
-            r#"{4,{59,0,0,0,0,1},"",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"Выполнить",{1,0},{1,0},0,0,0,"Выполнить",3,0,0,{0,0},1,0,1,0,0,2}},{0}}"#
+            r#"{4,{59,0,0,0,0,1},"",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"Выполнить",{1,0},{1,0},0,0,{4,0,{0},"",-1,-1,1,0,""},"Выполнить",3,0,0,{0,0},1,0,1,0,0,2}},{0}}"#
                 .as_bytes(),
         );
 
@@ -18835,9 +18846,18 @@ fn extracts_form_command_interface_navigation_panel() {
 fn extracts_form_command_interface_command_bar() {
     let first_command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let second_command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    // `extract_form_command_interface_with_context` classifies each
+    // container purely by its position in `body.trailing`
+    // (`FormCommandInterfaceContainerSchema::from_raw_layout`'s
+    // `trailing_slot`: 3 => NavigationPanel, 4 => CommandBar). The fixture
+    // was an exact copy of `extracts_form_command_interface_navigation_panel`
+    // with the declared-items container still at slot 3, so it always
+    // rendered as a `<NavigationPanel>` regardless of the test's own name.
+    // Swapped the (now-empty) slot-4 placeholder with the populated
+    // container so it lands at slot 4 instead.
     let form_body = deflate_for_test(
             format!(
-                r#"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}}, "",{{0}},{{0,0}},{{0,0}},{{0,2,{{3,0,{{0,{first_command_uuid}}},{{0}},1,{{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b}},1,0,{{0,{{0,{{"B",0}},0}}}}}},{{3,1,{{0,{second_command_uuid}}},{{0}},1,{{0,dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0}},0,0,{{0,{{0,{{"B",0}},0}}}}}}}},{{0}},0,0}}"#
+                r#"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}}, "",{{0}},{{0,0}},{{0,0}},{{0}},{{0,2,{{3,0,{{0,{first_command_uuid}}},{{0}},1,{{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b}},1,0,{{0,{{0,{{"B",0}},0}}}}}},{{3,1,{{0,{second_command_uuid}}},{{0}},1,{{0,dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0}},0,0,{{0,{{0,{{"B",0}},0}}}}}}}},0,0}}"#
             )
             .as_bytes(),
         );
@@ -18908,10 +18928,15 @@ fn extracts_real_world_form_command_interface_command_bar_variants() {
             "CommonCommand.СоздатьЗаметкуПоПредмету".to_string(),
         ),
     ]);
+    // As in `extracts_form_command_interface_command_bar`, the declared-items
+    // container must land at `body.trailing` slot 4 (CommandBar), not slot 3
+    // (NavigationPanel); inserted a bare `0` placeholder ahead of it to shift
+    // it over by one slot.
     let form_body = deflate_for_test(
             concat!(
                 "{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1},\"\",{0},{0,0},",
                 "{0,0},",
+                "0,",
                 "{0,14,",
                 "{3,0,{0,becf53b6-3fbc-4c70-822f-4a70b0434353},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},1,0,{0,{0,{\"B\",1},0}}},",
                 "{3,1,{0},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},3,0,{0,{0,{\"B\",1},0}}},",
