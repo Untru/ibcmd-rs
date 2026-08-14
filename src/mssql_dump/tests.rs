@@ -11573,7 +11573,7 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     assert_eq!(item.name, "Rows");
     assert_eq!(item.data_path.as_deref(), Some("Rows"));
     assert_eq!(item.table_representation, None);
-    assert_eq!(item.table_command_bar_location, None);
+    assert_eq!(item.table_command_bar_location, Some("None"));
     assert_eq!(item.skip_on_input, Some(false));
     assert_eq!(item.file_drag_mode, Some("AsFile"));
     assert_eq!(item.auto_refresh, Some(false));
@@ -11659,7 +11659,7 @@ fn extracts_wrapper55_table_head_properties_from_split_slots() {
         .unwrap();
 
     assert_eq!(item.table_representation, None);
-    assert_eq!(item.table_command_bar_location, Some("Top"));
+    assert_eq!(item.table_command_bar_location, Some("None"));
     assert_eq!(item.default_item, Some(true));
     assert_eq!(item.use_alternation_row_color, Some(true));
     assert_eq!(item.initial_tree_view, Some("ExpandTopLevel"));
@@ -11674,7 +11674,7 @@ fn extracts_wrapper55_table_head_properties_from_split_slots() {
 
     let xml = format_form_child_items_xml(&[item], 1);
     assert!(!xml.contains("<Representation>"));
-    assert!(xml.contains("<CommandBarLocation>Top</CommandBarLocation>"));
+    assert!(xml.contains("<CommandBarLocation>None</CommandBarLocation>"));
     assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
     assert!(xml.contains("<UseAlternationRowColor>true</UseAlternationRowColor>"));
     assert!(xml.contains("<InitialTreeView>ExpandTopLevel</InitialTreeView>"));
@@ -11682,7 +11682,7 @@ fn extracts_wrapper55_table_head_properties_from_split_slots() {
     assert!(xml.contains("<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>"));
     assert!(xml.contains(r#"<TopLevelParent xsi:nil="true"/>"#));
     assert!(
-        xml.find("<CommandBarLocation>Top</CommandBarLocation>")
+        xml.find("<CommandBarLocation>None</CommandBarLocation>")
             .unwrap()
             < xml.find("<DefaultItem>true</DefaultItem>").unwrap()
     );
