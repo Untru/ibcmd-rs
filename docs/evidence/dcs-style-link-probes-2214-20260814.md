@@ -37,10 +37,45 @@ value-элементе первой попытки S2) вызвала XDTO-ош�
 (`Mapping lexical value 'style:CorpusAccent' to value type 'Color'`); попытка
 отменена и не входит в evidence, ошибка сохранена дословно в артефактах сессии.
 
+## Приёмочная сессия компилятора
+
+Четвёртая лабораторная сессия (Parallels «Windows 11», 1С `8.3.27.2214`, locale `ru_RU`)
+прогнала `compile_dcs`-кандидатов всех четырёх координат на retained round-2 native
+`Template.xml` через общие overlay API в свежую файловую ИБ `ru_RU`, один платформенный
+проход на координату, re-export тем же пиненным `ibcmd`, что и в основной сессии.
+
+| Корпус | Статус | `reexported_template_sha256` / ошибка |
+|---|---|---|
+| `dcs-area-style-color-reference` | ACCEPTED | `4269ac193b76bb88ecaaf65a5b4ef9ed12a31cdcf1d36d8ac429de68cf10f970` (= `rounds.native_template_sha256`) |
+| `dcs-link-parameter` | ACCEPTED | `381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698` (= `rounds.native_template_sha256`) |
+| `dcs-link-expressions` | ACCEPTED | `e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54` (= `rounds.native_template_sha256`) |
+| `dcs-area-style-item-uuid` | NOT-COMPILABLE | `DCS source cannot be compiled base-free: source AreaTemplate is outside the evidenced storage coordinate` |
+
+Три координаты приняты платформой с первой попытки; re-export побайтово совпал с
+`rounds.native_template_sha256` соответствующего манифеста у всех трёх. Блок
+`compiler_acceptance` (10 полей: `status`, `method`, `candidate_body_unpacked_size`,
+`candidate_body_unpacked_sha256`, `candidate_cf_sha256`, `platform_saved_cf_size`,
+`platform_saved_cf_sha256`, `reexported_template_size`, `reexported_template_sha256`,
+`reexport_matches_two_round_native_template`) записан в `manifest.json` каждой из этих
+трёх координат между `document_topology` и `cohort`.
+
+`dcs-area-style-item-uuid` осталась `NOT-COMPILABLE`: `compile_dcs` отклонил retained
+round-2 native `Template.xml` до попытки построения кандидата CF, VM-загрузки,
+сохранения или re-export — потому что этот адаптерский путь не несёт resolver для
+custom-StyleItem/uuid-координаты, та же асимметрия, что уже задокументирована для
+decode-направления в `def4e7b`. Манифест `dcs-area-style-item-uuid` остаётся БЕЗ блока
+`compiler_acceptance`; уточнённая формулировка результата — в его собственном
+`non_claims`, ошибка сохранена дословно.
+
+Приёмка доказана только для этих трёх ровно указанных координат — не для прочих
+значений, позиций или для resolver-осведомлённого compile-направления, которое пока не
+реализовано.
+
 ## Границы
 
-`compiler_acceptance` у четырёх новых корпусов отсутствует до отдельной приёмочной
-сессии. Прочие Kind StyleItem (Font/Border), несколько style-ссылок, списки значений
+`compiler_acceptance` есть у трёх из четырёх новых корпусов (см. «Приёмочная сессия
+компилятора» выше); четвёртый (`dcs-area-style-item-uuid`) намеренно остаётся без него.
+Прочие Kind StyleItem (Font/Border), несколько style-ссылок, списки значений
 link-параметров, `linkItem` containment — вне доказанного объёма.
 
 ## Cleanup

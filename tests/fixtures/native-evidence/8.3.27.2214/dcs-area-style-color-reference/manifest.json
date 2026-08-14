@@ -59,6 +59,18 @@
     "trailing_area_schema_file_sha256": "c5879edc2a5776e5be6ae52f3843c2780dc141f74ffc221e7626bc442440cb08",
     "trailing_area_schema_file_size": 1623
   },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body (compile_dcs on the retained round-2 native Template.xml; the evidenced cohort parser requires platform storage order) overlaid via the common overlay APIs into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 6094,
+    "candidate_body_unpacked_sha256": "7764b4985022b2739c9e661f856a386d113787199bc8c1b061937c285c6177d0",
+    "candidate_cf_sha256": "514bcc50bf9a0293bb91c42902b0f4e02b8a1cb5b4db527e71b02c6bee9dedbf",
+    "platform_saved_cf_size": 81009,
+    "platform_saved_cf_sha256": "d4e148ab0c4bc0ea587e5771f309f33c59918791e29f44f2b3bd34416e9a0cd1",
+    "reexported_template_size": 5034,
+    "reexported_template_sha256": "4269ac193b76bb88ecaaf65a5b4ef9ed12a31cdcf1d36d8ac429de68cf10f970",
+    "reexport_matches_two_round_native_template": true
+  },
   "cohort": {
     "template_name": "AreaProbe",
     "new_item_parameter": "ЦветФона",

@@ -59,6 +59,18 @@
     "trailing_area_schema_file_sha256": "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81",
     "trailing_area_schema_file_size": 263
   },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body (compile_dcs on the retained round-2 native Template.xml; the evidenced cohort parser requires platform storage order) overlaid via the common overlay APIs into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 3552,
+    "candidate_body_unpacked_sha256": "7c43903f7245501acef5380a0592770bb111e8a8c1d36d38136c50cf9a57ba80",
+    "candidate_cf_sha256": "4d82a03527ba346491c39418c7b71ec2b9a7425be22b4ca52d107b99183dcaef",
+    "platform_saved_cf_size": 87478,
+    "platform_saved_cf_sha256": "3aa0713c8f474228f2584036ad35c88ee84415e9afc39d463514182900620075",
+    "reexported_template_size": 2727,
+    "reexported_template_sha256": "e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54",
+    "reexport_matches_two_round_native_template": true
+  },
   "cohort": {
     "link_children_order_submitted": [
       "sourceDataSet",

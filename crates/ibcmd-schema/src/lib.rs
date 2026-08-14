@@ -4150,8 +4150,11 @@ struct DcsAreaTemplateMultiCellAppearanceItem {
 /// Evidence: native-only round trips authenticate the exact `ЦветФона`
 /// appearance item added ahead of `Расшифровка`, valued by a *standard,
 /// built-in* platform style referenced by name (`style:NegativeTextColor`).
-/// No `compiler_acceptance` block yet -- third-lab-session draft, per the
-/// coordinator's explicit instruction not to claim it.
+/// A `compiler_acceptance` block records a single accepted live-platform
+/// pass (fourth-lab-session acceptance session, 8.3.27.2214) for this exact
+/// coordinate -- the named/built-in style-reference form needs no uuid
+/// resolver on either direction, so it compiled cleanly, unlike the sibling
+/// custom-StyleItem coordinate (see [`DcsAreaStyleItemUuidEvidence`]).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsAreaStyleColorReferenceEvidence {
@@ -4162,6 +4165,7 @@ struct DcsAreaStyleColorReferenceEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsAreaStyleColorReferenceCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -4188,8 +4192,20 @@ struct DcsAreaStyleColorReferenceCohort {
 /// (`style:CorpusAccent`). Lexically indistinguishable from the standard
 /// form at the native/source XML layer; the storage side reveals the
 /// difference (a raw `0:<uuid>` reference instead of a named lexical
-/// token). No `compiler_acceptance` block yet -- same as
-/// [`DcsAreaStyleColorReferenceEvidence`].
+/// token).
+///
+/// Unlike [`DcsAreaStyleColorReferenceEvidence`], this struct has no
+/// `compiler_acceptance` field and never will until a resolver-aware
+/// compile-direction slice exists: the fourth-lab-session acceptance
+/// session *attempted* base-free compilation for this coordinate and it
+/// came back `not_compilable` ("source AreaTemplate is outside the
+/// evidenced storage coordinate") -- `compile_dcs` carries no
+/// style-reference resolver, the same asymmetry already documented for the
+/// decode direction in commit `def4e7b`. This is a proven, not merely
+/// assumed, negative result (see the manifest's own `non_claims`), not an
+/// omission -- so it is deliberately not represented as an optional field
+/// here, to avoid inviting a future author to "fill it in" with a synthetic
+/// value.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsAreaStyleItemUuidEvidence {
@@ -5241,9 +5257,9 @@ struct DcsQueryUnionLinkCohort {
 
 /// Evidence: native-only round trips authenticate the exact `dataSetLink`
 /// `parameter`/`parameterListAllowed` optional pair, immediately after
-/// `destinationExpression`. No `compiler_acceptance` block yet --
-/// third-lab-session draft, per the coordinator's explicit instruction not
-/// to claim it.
+/// `destinationExpression`. A `compiler_acceptance` block records a single
+/// accepted live-platform pass (fourth-lab-session acceptance session,
+/// 8.3.27.2214) for this exact coordinate.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsLinkParameterEvidence {
@@ -5254,6 +5270,7 @@ struct DcsLinkParameterEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsLinkParameterCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -5273,7 +5290,9 @@ struct DcsLinkParameterCohort {
 /// layered on top of [`DcsLinkParameterEvidence`]'s pair. The platform
 /// reorders the three newly-submitted children to
 /// `linkConditionExpression, startExpression, required` in the canonical
-/// re-export. No `compiler_acceptance` block yet -- same as
+/// re-export. A `compiler_acceptance` block records a single accepted
+/// live-platform pass (fourth-lab-session acceptance session, 8.3.27.2214)
+/// for this exact coordinate -- same session as
 /// [`DcsLinkParameterEvidence`].
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -5285,6 +5304,7 @@ struct DcsLinkExpressionsEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsLinkExpressionsCohort,
     negative_observations: Vec<String>,
     non_claims: Vec<String>,
@@ -11261,6 +11281,7 @@ fn parse_dcs_area_template_policy(
         || style_color_reference.rounds.is_null()
         || style_color_reference.retained.is_null()
         || style_color_reference.document_topology.is_null()
+        || style_color_reference.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidJson(
             "DCS AreaTemplate style-color-reference evidence drifted from the exact coordinate"
@@ -11992,6 +12013,7 @@ fn parse_dcs_query_union_link_policy(
         || link_parameter.rounds.is_null()
         || link_parameter.retained.is_null()
         || link_parameter.document_topology.is_null()
+        || link_parameter.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidDcsWriterEvidence(
             "DCS link-parameter evidence drifted from the exact coordinate".into(),
@@ -12036,6 +12058,7 @@ fn parse_dcs_query_union_link_policy(
         || link_expressions.rounds.is_null()
         || link_expressions.retained.is_null()
         || link_expressions.document_topology.is_null()
+        || link_expressions.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidDcsWriterEvidence(
             "DCS link-expressions evidence drifted from the exact coordinate".into(),

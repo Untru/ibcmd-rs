@@ -104,7 +104,7 @@
     "No claim about StyleItem Kind values other than Color (Font, Border are explicitly out of scope per the design's non-claims).",
     "No claim about multiple StyleItem references, or StyleItem references outside a single AreaTemplate appearance context.",
     "No claim that the observed ChildObjects order generalizes beyond this exact 3-child cohort (Language + StyleItem + Report); the ordering rule itself is not derived, only this one observed instance.",
-    "compiler_acceptance is intentionally omitted from this draft; not part of this probe session.",
+    "compiler_acceptance was attempted in a later acceptance session and found not_compilable: base-free compilation failed with \"source AreaTemplate is outside the evidenced storage coordinate\" before any candidate CF, VM load, or platform re-export was attempted, because compile_dcs carries no style-reference resolver for this custom-StyleItem/uuid-resolution coordinate -- the same compile-direction asymmetry already documented for the decode direction in commit def4e7b, not a bug to route around; this manifest deliberately carries no compiler_acceptance block until a resolver-aware compile-direction slice exists.",
     "Provenance: produced in a probe/design session (scratchpad/design/E2-STYLE-REF-DESIGN.md), not yet reviewed or integrated."
   ]
 }
