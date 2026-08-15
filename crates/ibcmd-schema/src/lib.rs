@@ -4323,6 +4323,22 @@ pub const CONFIGURATION_PROPERTIES_EVIDENCED_DEFAULT_BLOCK_SOURCE_SHA256: &str =
 pub struct ConfigurationPropertiesEvidencedDefaultBlockPolicy;
 
 impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
+    /// `ScriptVariant`, verbatim from the sha-bound evidence.
+    ///
+    /// This property has no proven config-body coordinate: the decoder's
+    /// long-standing tuple-field-13 mapping is disproven by the
+    /// `configuration-property-include-help-in-contents` corpus, where that
+    /// byte tracks `IncludeHelpInContents` while the platform keeps emitting
+    /// `Russian`. On the evidenced path a coordinate is not needed - the
+    /// caller has already proven every byte outside the six known offsets
+    /// equals this reference, and ScriptVariant's byte lies inside that
+    /// range - so the evidenced default is proven rather than assumed, and a
+    /// genuinely different value fails the range check instead of reaching
+    /// this segment.
+    pub fn script_variant_segment(&self) -> &'static str {
+        "\t\t\t<ScriptVariant>Russian</ScriptVariant>\r\n"
+    }
+
     /// Inserted immediately after `<ScriptVariant>`, before the writer's own
     /// (already-correct) `Vendor`/`Version`/`UpdateCatalogAddress`.
     pub fn default_roles_segment(&self) -> &'static str {

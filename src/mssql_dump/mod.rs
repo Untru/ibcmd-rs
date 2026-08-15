@@ -29752,7 +29752,29 @@ fn format_configuration_source_xml(
             properties.default_language.as_deref(),
         );
     }
-    push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
+    if evidenced.is_some() {
+        // `parse_configuration_properties_from_text` reads ScriptVariant from
+        // tuple field 13, which the `configuration-property-include-help-in-contents`
+        // single-field probe disproves: that byte flips 0->1 with
+        // IncludeHelpInContents while the platform keeps emitting
+        // `ScriptVariant`Russian`. Exporting that corpus through the field-13
+        // mapping produces `English` against the platform's `Russian`.
+        //
+        // ScriptVariant has no proven config-body coordinate, but on the
+        // evidenced path it does not need one: reaching here means
+        // `verify_unmapped_range` already proved every byte outside the six
+        // known offsets equals the evidenced all-default reference, and
+        // ScriptVariant's byte - wherever it sits - is inside that range.
+        // So the evidenced default is proven for this tuple, and a
+        // configuration that actually differs fails the range check and never
+        // reaches this branch.
+        insert.push_str(
+            ibcmd_schema::configuration_properties_evidenced_default_block_policy()
+                .script_variant_segment(),
+        );
+    } else {
+        push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
+    }
     if evidenced.is_some() {
         insert.push_str(
             ibcmd_schema::configuration_properties_evidenced_default_block_policy()
