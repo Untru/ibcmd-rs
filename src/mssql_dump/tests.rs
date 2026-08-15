@@ -9131,9 +9131,18 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
     assert!(xml.contains(
         "<dcsset:userSettingID>f5abd21c-a9fb-4b17-8ed5-0505541ef807</dcsset:userSettingID>"
     ));
-    assert!(xml.contains(
-        "<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>"
-    ));
+    // Unlike the synthesized metadata-only Filter default (proven present in
+    // native Form.xml by `8.3.27.2214-xml-2.20-dcs-filter`'s own
+    // `metadata_only_cohort`), the synthesized metadata-only
+    // conditionalAppearance default never appears in native Form.xml:
+    // `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`'s CorpusList
+    // form has explicit, non-default Filter/Order but its native Form.xml
+    // omits `<dcsset:conditionalAppearance>` entirely.
+    assert!(!xml.contains("<dcsset:conditionalAppearance>"), "{xml}");
+    assert!(
+        !xml.contains("b75fecce-942b-4aed-abc9-e6a02e460fb3"),
+        "{xml}"
+    );
     assert!(xml.contains(
             "<dcsset:itemsUserSettingID>971fd96e-2ae3-41d5-9d7a-bad772efb890</dcsset:itemsUserSettingID>"
         ));

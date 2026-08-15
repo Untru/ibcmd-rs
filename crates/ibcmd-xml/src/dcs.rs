@@ -17,6 +17,7 @@ use ibcmd_core::dcs::{
     MAX_DCS_RETAINED_BYTES,
 };
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
+use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_schema::{
     DcsListSettingsTailField, DcsOutputParametersPolicy, FormListSettingsNullValue, SchemaError,
@@ -932,7 +933,7 @@ fn validate_dcs_filter_for_emission(
         return Err(DcsListSettingsTailError::InvalidValue("filter viewMode").into());
     }
     if let Some(user_setting_id) = filter.user_setting_id()
-        && user_setting_id.as_str() != policy.metadata_only_user_setting_id()
+        && !is_dcs_user_setting_id_syntax(user_setting_id.as_str())
     {
         return Err(DcsListSettingsTailError::InvalidValue("filter userSettingID").into());
     }
@@ -1363,7 +1364,7 @@ fn validate_dcs_conditional_appearance_for_emission(
         );
     }
     if let Some(user_setting_id) = value.user_setting_id()
-        && user_setting_id.as_str() != policy.metadata_only_user_setting_id()
+        && !is_dcs_user_setting_id_syntax(user_setting_id.as_str())
     {
         return Err(
             DcsListSettingsTailError::InvalidValue("conditionalAppearance userSettingID").into(),
@@ -2458,10 +2459,10 @@ fn parse_dcs_filter(
         ));
     }
     if let Some(value) = user_setting_id.as_deref()
-        && value != policy.metadata_only_user_setting_id()
+        && !is_dcs_user_setting_id_syntax(value)
     {
         return Ok(DcsChildParseOutcome::Unsupported(
-            "filter userSettingID is outside the platform-evidenced value",
+            "filter userSettingID is not canonical UUID syntax",
         ));
     }
     let view_mode = view_mode
@@ -2840,10 +2841,10 @@ fn parse_dcs_conditional_appearance_body(
         ));
     }
     if let Some(value) = user_setting_id.as_deref()
-        && value != policy.metadata_only_user_setting_id()
+        && !is_dcs_user_setting_id_syntax(value)
     {
         return Ok(DcsChildParseOutcome::Unsupported(
-            "conditionalAppearance userSettingID is outside the authenticated value",
+            "conditionalAppearance userSettingID is not canonical UUID syntax",
         ));
     }
     let view_mode = view_mode
@@ -3049,7 +3050,19 @@ fn parse_dcs_appearance_value(
             reason: "appearance item children are duplicated or out of sequence",
         });
     }
-    if parse_simple_filter_child(parameter)? != "ЦветТекста"
+    // The localized display name ("ЦветТекста") is what every decompiled
+    // Form.xml shows, proven across the dcs-conditional-appearance corpus.
+    // The raw packed Form body's own embedded `Appearance` storage document
+    // instead spells the same well-known parameter using its internal,
+    // locale-independent token ("TextColor"): proven byte-for-byte by
+    // `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`, whose
+    // FilterProbe form's raw storage bytes carry `<parameter>TextColor</parameter>`
+    // for the identical selection/filter/color shape that the native
+    // re-export renders as `ЦветТекста`. Both spellings resolve to the same
+    // canonical `DcsAppearanceParameter::TextColor` value; the writer always
+    // emits the localized spelling, matching every native Form.xml.
+    let parameter_text = parse_simple_filter_child(parameter)?;
+    if !matches!(parameter_text.as_str(), "ЦветТекста" | "TextColor")
         || resolved_xsi_type(value, root).as_deref() != Some(policy.color_type_qname())
         || resolved_qname_text(value, root).as_deref()
             != Some(format!("{{{}}}Red", policy.web_color_namespace_uri()).as_str())
@@ -3101,6 +3114,22 @@ fn resolved_qname_text(element: &XmlElement, root: &XmlElement) -> Option<String
     Some(format!("{{{namespace}}}{local}"))
 }
 
+/// Returns whether `element` carries no ordinary attributes and no element
+/// or non-blank text/CData children -- i.e. is physically the exact
+/// self-closing `<Tag/>` shape once XML-namespace declarations are set
+/// aside.
+fn xml_element_is_empty(element: &XmlElement) -> bool {
+    !element
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+        && !element.children().iter().any(|node| match node {
+            XmlNode::Text(text) => !text.value().trim().is_empty(),
+            XmlNode::CData(text) => !text.value().trim().is_empty(),
+            _ => true,
+        })
+}
+
 /// Parses the physical BOM ConditionalAppearance storage document.
 pub fn parse_dcs_conditional_appearance_storage_document(
     bytes: &[u8],
@@ -3124,6 +3153,20 @@ pub fn parse_dcs_conditional_appearance_storage_document(
         return Err(DcsSettingsParseError {
             reason: "storage root is not ConditionalAppearance in the settings namespace",
         });
+    }
+    // A Form whose ListSettings customizes Filter/Order but leaves
+    // conditionalAppearance at its default no longer omits the `Appearance`
+    // storage property outright: proven by
+    // `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`, whose
+    // CorpusList form stores a physically present but genuinely empty
+    // self-closing `<ConditionalAppearance/>` (no items, no viewMode, no
+    // userSettingID) rather than omitting the property. `DcsConditionalAppearance`
+    // cannot represent that shape (its constructor rejects empty items paired
+    // with absent metadata), so the caller must reconstruct the same
+    // platform-authenticated default it already uses for the
+    // property-absent case; report this exact physical shape as `Absent`.
+    if xml_element_is_empty(root) {
+        return Ok(DcsChildParseOutcome::Absent);
     }
     let outcome = parse_dcs_conditional_appearance(root, root)?;
     if matches!(&outcome, DcsChildParseOutcome::Typed(value) if value.items().is_empty()) {
@@ -4211,6 +4254,20 @@ fn is_xml_1_0_char(character: char) -> bool {
         character,
         '\u{9}' | '\u{a}' | '\u{d}' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
     )
+}
+
+/// Returns whether `value` has the exact strict lowercase, hyphenated
+/// canonical UUID syntax (`8-4-4-4-12`) that the platform uses for every
+/// `dcsset:userSettingID` instance. Filter/order/conditionalAppearance
+/// `userSettingID` values are freshly generated, per-form instance data, not
+/// a fixed platform-wide constant: proven by
+/// `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`, where the
+/// platform preserved two distinct, freshly-generated GUIDs (neither equal to
+/// any bundled evidence literal) verbatim across a native re-export. The
+/// bundled evidence literals remain valid syntax examples exercised by tests,
+/// not an exhaustive value whitelist.
+fn is_dcs_user_setting_id_syntax(value: &str) -> bool {
+    ObjectUuid::parse(value).is_ok()
 }
 
 /// Runs the single schema/evidence boundary shared by standalone settings and

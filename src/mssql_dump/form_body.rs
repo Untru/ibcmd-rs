@@ -4128,12 +4128,16 @@ pub(super) fn parse_form_list_settings_conditional_appearance(
         Ok(DcsChildParseOutcome::Unsupported(reason)) => {
             Some(FormListSettingsConditionalAppearance::OpaqueStorage { bytes, reason })
         }
-        Ok(DcsChildParseOutcome::Absent) => {
-            Some(FormListSettingsConditionalAppearance::OpaqueStorage {
-                bytes,
-                reason: "present storage conditional-appearance payload parsed as absent",
-            })
-        }
+        // The physically present but genuinely empty self-closing
+        // `<ConditionalAppearance/>` shape (no items, no viewMode, no
+        // userSettingID) is the platform's on-storage representation for "no
+        // customization" when sibling Filter/Order settings ARE explicit;
+        // see `parse_dcs_conditional_appearance_storage_document`. Treat it
+        // exactly like a physically absent property so
+        // `apply_implicit_form_dynamic_list_settings` reconstructs the same
+        // platform-authenticated metadata-only default it already applies
+        // for the fully-absent case.
+        Ok(DcsChildParseOutcome::Absent) => None,
         Err(error) => Some(FormListSettingsConditionalAppearance::OpaqueStorage {
             bytes,
             reason: error.reason(),
@@ -17780,7 +17784,20 @@ pub(super) fn form_list_settings_filter_has_output(
 pub(super) fn form_list_settings_conditional_appearance_has_output(
     value: Option<&FormListSettingsConditionalAppearance>,
 ) -> bool {
-    value.is_some()
+    // The platform-authenticated metadata-only default (empty items, plus a
+    // synthesized viewMode/userSettingID pair) never appears in the
+    // decompiled, human-readable Form.xml: proven by
+    // `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`, whose
+    // CorpusList form has explicit, non-default Filter/Order but native
+    // output omits the `<dcsset:conditionalAppearance>` element entirely.
+    // Only genuinely non-default (non-empty item) values, and any opaque
+    // storage that must still surface its own emission error, produce
+    // output.
+    match value {
+        Some(FormListSettingsConditionalAppearance::Typed(value)) => !value.items().is_empty(),
+        Some(FormListSettingsConditionalAppearance::OpaqueStorage { .. }) => true,
+        None => false,
+    }
 }
 
 pub(super) fn form_list_settings_order_has_output(order: Option<&FormListSettingsOrder>) -> bool {
