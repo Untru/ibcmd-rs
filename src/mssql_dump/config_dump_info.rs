@@ -4,6 +4,50 @@ use uuid::Uuid;
 const CONFIG_DUMP_INFO_FILE_NAME: &str = "ConfigDumpInfo.xml";
 const VERSIONS_SERVICE_NAMES: [&str; 3] = ["root", "version", "versions"];
 
+/// The Configuration object's own metadata text always embeds a `{1,0,...}`
+/// header reference to its (thick-client) `CommandInterface` sub-object at
+/// this fixed, well-known uuid — confirmed identical across three
+/// independent native-evidence corpora (T1/T2/T3,
+/// `scratchpad/evidence-batch/session12`), each reusing the owning
+/// Configuration's own display name as the embedded header's name. Unlike
+/// `ClientApplicationInterface` (embedded at `{uuid}.b`, which *does* get
+/// its own row and canonical reference when customized), an uncustomized
+/// `CommandInterface` never gets a row of its own, so it is unresolvable via
+/// `object_refs` — and it never appears as a `<Metadata>` entry in any of
+/// the three corpora's native ConfigDumpInfo.xml. Skipping it here mirrors
+/// that observed, evidence-backed native behavior exactly, the same way
+/// `configuration_module_groups` already skips other well-known aggregate
+/// references that don't correspond to their own exportable child object.
+const CONFIGURATION_COMMAND_INTERFACE_UUID: &str = "00000000-0000-0000-0000-000000000002";
+
+/// Where the raw `versions` row/record came from, since its *content* shape
+/// differs by source even though `validate_versions_inventory`'s separate
+/// manifest-membership check (are `root`/`version`/`versions` present as
+/// their own rows/records alongside the per-object ids?) holds for both.
+///
+/// The streamed MSSQL `Config` table's `versions` row embeds `root`,
+/// `version`, and `versions` as extra name/uuid pairs *inside* its own
+/// blob content, in addition to those three existing as separate rows.
+/// A CF archive's `versions` storage element does not: confirmed by
+/// decoding the `versions` element's content against three independent
+/// native-evidence corpora (T1/T2/T3, `scratchpad/evidence-batch/session12`)
+/// — each has `root`/`version`/`versions` as their own top-level storage
+/// records (verified via `cf inspect`), but the `versions` element's own
+/// parsed pairs are exclusively per-object uuid keys, never those three
+/// names. Requiring them unconditionally would fail-closed a completely
+/// well-formed CF export.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum VersionsBlobOrigin {
+    MssqlConfigTable,
+    CfStorageImage,
+}
+
+impl VersionsBlobOrigin {
+    const fn embeds_service_entries(self) -> bool {
+        matches!(self, Self::MssqlConfigTable)
+    }
+}
+
 struct ConfigVersionEntry {
     id: String,
     version: Uuid,
@@ -38,9 +82,10 @@ pub(super) fn write_config_dump_info(
     output_dir: &Path,
     source_version: InfobaseConfigSourceVersion,
     versions_blob: &[u8],
+    versions_blob_origin: VersionsBlobOrigin,
     inventory: ConfigDumpInfoInventory<'_>,
 ) -> Result<()> {
-    let versions = parse_versions_blob(versions_blob)?;
+    let versions = parse_versions_blob(versions_blob, versions_blob_origin)?;
     validate_versions_inventory(&versions, inventory.file_names)?;
 
     let mut canonical_refs = inventory.object_refs.clone();
@@ -75,6 +120,15 @@ pub(super) fn write_config_dump_info(
         inventory.metadata_texts,
         inventory.configuration_module_groups,
     )?;
+    if !canonical_refs.contains_key(CONFIGURATION_COMMAND_INTERFACE_UUID)
+        && let Some(configuration_reference) =
+            configuration_top_level_reference(inventory.object_refs)
+    {
+        canonical_refs.insert(
+            CONFIGURATION_COMMAND_INTERFACE_UUID.to_owned(),
+            configuration_reference.to_owned(),
+        );
+    }
 
     let version_ids = versions
         .iter()
@@ -154,7 +208,7 @@ pub(super) fn write_config_dump_info(
     fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))
 }
 
-fn parse_versions_blob(blob: &[u8]) -> Result<Vec<ConfigVersionEntry>> {
+fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<ConfigVersionEntry>> {
     let plain = inflate_raw_deflate(blob).context("failed to inflate Config versions row")?;
     let text = std::str::from_utf8(&plain).context("Config versions row is not valid UTF-8")?;
     let text = text.trim_start_matches('\u{feff}');
@@ -204,9 +258,11 @@ fn parse_versions_blob(blob: &[u8]) -> Result<Vec<ConfigVersionEntry>> {
         bail!("Config versions row has no generation entry");
     }
 
-    for service_name in VERSIONS_SERVICE_NAMES {
-        if !named.contains_key(service_name) {
-            bail!("Config versions row has no service entry {service_name}");
+    if origin.embeds_service_entries() {
+        for service_name in VERSIONS_SERVICE_NAMES {
+            if !named.contains_key(service_name) {
+                bail!("Config versions row has no service entry {service_name}");
+            }
         }
     }
     Ok(named
@@ -276,6 +332,23 @@ fn add_configuration_group_references(
     Ok(())
 }
 
+/// Finds the Configuration root's own canonical reference (`"Configuration.<Name>"`,
+/// with no further `.` suffix) among `object_refs`.
+///
+/// The index is already built from the canonical root-envelope decoder by the
+/// time this runs, so scanning it directly avoids re-decoding raw blob text
+/// (which this function has no access to anyway).
+fn configuration_top_level_reference(object_refs: &BTreeMap<String, String>) -> Option<&str> {
+    object_refs
+        .values()
+        .find(|reference| {
+            reference
+                .strip_prefix("Configuration.")
+                .is_some_and(|suffix| !suffix.is_empty() && !suffix.contains('.'))
+        })
+        .map(String::as_str)
+}
+
 fn config_dump_top_name(
     id: &str,
     canonical_refs: &BTreeMap<String, String>,
@@ -335,6 +408,11 @@ fn build_config_dump_children(
                 continue;
             }
             if configuration_module_groups.contains(&header.uuid) {
+                continue;
+            }
+            if header.uuid == CONFIGURATION_COMMAND_INTERFACE_UUID
+                && !object_refs.contains_key(&header.uuid)
+            {
                 continue;
             }
             let child_name = if let Some(child_name) = object_refs.get(&header.uuid) {
