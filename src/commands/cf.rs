@@ -17,10 +17,11 @@ use ibcmd_cf::{
     archive::decode_archive_uniform,
     bootstrap::{BootstrapCfProfile, publish_bootstrap_patch_new},
     overlay::{OverlayCodec, OverlayReport, publish_overlay_new},
-    payload::{PayloadDecoder, PayloadEncoding},
+    payload::{PayloadDecoder, PayloadEncoding, decode_payload},
 };
 use ibcmd_core::{
     artifact::{ProfileId, StorageProfileId},
+    family::FamilyId,
     limits::ResourceLimits,
     storage::{
         MultipartIdentity, Sha256Digest, StorageEntry, StorageKey, StoragePatchTarget,
@@ -40,8 +41,8 @@ use crate::{
         CfInspectArgs, CfOverlayArgs, CfRevision, CfVerifyArgs,
     },
     compiler::{
-        CompileAxes, CompileRequest, SourcePayload, bootstrap::compile_bootstrap_source_tree,
-        compile_overlay,
+        CompileAxes, CompileRequest, PrepackedSource, SourcePayload,
+        bootstrap::compile_bootstrap_source_tree, compile_overlay,
     },
     module_blob::{
         pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
@@ -53,6 +54,13 @@ use crate::{
 };
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// Family recorded for `--compiled-asset` payloads crossing the prepacked seam.
+const COMPILED_ASSET_FAMILY: &str = "cf-cli-compiled-asset";
+
+/// Diagnostic code for `--compiled-asset` bytes that are not one complete
+/// raw-deflate stream.
+const INVALID_COMPILED_ASSET: &str = "invalid_compiled_asset";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CfReport {
@@ -735,6 +743,7 @@ fn export_failure(
 enum OverlaySourceFamily {
     Module,
     RawAsset,
+    CompiledAsset,
     MetadataXml,
     CommonModuleXml,
     CommandInterface,
@@ -746,6 +755,7 @@ impl OverlaySourceFamily {
         match self {
             Self::Module => "module",
             Self::RawAsset => "raw-asset",
+            Self::CompiledAsset => "compiled-asset",
             Self::MetadataXml => "metadata-xml",
             Self::CommonModuleXml => "common-module-xml",
             Self::CommandInterface => "command-interface",
@@ -796,7 +806,9 @@ impl OverlayCodec for CliOverlayCodec<'_> {
                 pack_form_body_blob_from_form_xml(base.packed_payload(), &source.bytes, None)
                     .map(|packed| packed.blob)
             }
-            OverlaySourceFamily::Module | OverlaySourceFamily::RawAsset => Err(anyhow::anyhow!(
+            OverlaySourceFamily::Module
+            | OverlaySourceFamily::RawAsset
+            | OverlaySourceFamily::CompiledAsset => Err(anyhow::anyhow!(
                 "{} source unexpectedly requested a base entry",
                 source.family.label()
             )),
@@ -832,8 +844,16 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
             &args,
             profile,
             "invalid_sources",
-            "at least one --module, --raw-asset or XML source is required".to_owned(),
+            "at least one --module, --raw-asset, --compiled-asset or XML source is required"
+                .to_owned(),
         ));
+    }
+    for source in &sources {
+        if source.family == OverlaySourceFamily::CompiledAsset {
+            validate_compiled_asset_stream(source).map_err(|message| {
+                overlay_failure(&args, profile.clone(), INVALID_COMPILED_ASSET, message)
+            })?;
+        }
     }
 
     let axes = CompileAxes::new(
@@ -865,6 +885,14 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
             OverlaySourceFamily::RawAsset => SourcePayload::RawDeflated {
                 bytes: &source.bytes,
             },
+            OverlaySourceFamily::CompiledAsset => {
+                SourcePayload::Prepacked(PrepackedSource::base_free(
+                    FamilyId::new(COMPILED_ASSET_FAMILY)
+                        .expect("static compiled-asset family id is valid"),
+                    target.provenance().clone(),
+                    &source.bytes,
+                ))
+            }
             OverlaySourceFamily::MetadataXml => SourcePayload::MetadataXml { xml: &source.bytes },
             OverlaySourceFamily::CommonModuleXml => {
                 SourcePayload::CommonModuleMetadataXml { xml: &source.bytes }
@@ -961,10 +989,36 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
     }))
 }
 
+/// Fail-closed check that `--compiled-asset` bytes are one complete raw-deflate
+/// stream, using the same strict payload decoder the CF reader applies:
+/// `StreamEnd` must be reached and the whole input must be consumed, so plain
+/// source bytes (or double-compressed bodies) can never be stored verbatim.
+fn validate_compiled_asset_stream(source: &OverlaySource) -> Result<(), String> {
+    decode_payload(
+        PayloadEncoding::RawDeflate,
+        &source.bytes,
+        ResourceLimits::default(),
+    )
+    .map(|_| ())
+    .map_err(|error| {
+        format!(
+            "--compiled-asset source `{}` for `{}` is not one complete raw-deflate stream: {error}; \
+             --compiled-asset stores the file verbatim as the final physical payload, so plain \
+             source bytes must be passed via --raw-asset instead, which deflates them exactly once",
+            source.path.display(),
+            source.key.as_str()
+        )
+    })
+}
+
 fn load_overlay_sources(args: &CfOverlayArgs) -> Result<Vec<OverlaySource>, String> {
     let groups = [
         (OverlaySourceFamily::Module, args.modules.as_slice()),
         (OverlaySourceFamily::RawAsset, args.raw_assets.as_slice()),
+        (
+            OverlaySourceFamily::CompiledAsset,
+            args.compiled_assets.as_slice(),
+        ),
         (
             OverlaySourceFamily::MetadataXml,
             args.metadata_xml.as_slice(),

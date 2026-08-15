@@ -406,8 +406,22 @@ pub struct CfOverlayArgs {
     #[arg(long = "module", value_name = "KEY=FILE")]
     pub modules: Vec<String>,
     /// Replace a raw-deflated asset from exact source bytes (`STORAGE_KEY=FILE`); repeatable.
+    ///
+    /// The plain source bytes are deflated exactly once. For a body that a
+    /// compiler already produced as a raw-deflate stream, use
+    /// `--compiled-asset` instead: deflating such bytes again would store a
+    /// double-compressed payload the platform cannot export.
     #[arg(long = "raw-asset", value_name = "KEY=FILE")]
     pub raw_assets: Vec<String>,
+    /// Write an already-compiled body verbatim as the final physical payload (`STORAGE_KEY=FILE`); repeatable.
+    ///
+    /// Unlike `--raw-asset`, the file bytes are never re-compressed. The file
+    /// must already be one complete raw RFC 1951 DEFLATE stream (for example a
+    /// DCS Template body produced by the offline compiler); this is validated
+    /// fail-closed, and plain source bytes are rejected with a pointer back to
+    /// `--raw-asset`.
+    #[arg(long = "compiled-asset", value_name = "KEY=FILE")]
+    pub compiled_assets: Vec<String>,
     /// Patch a metadata row using its base row and source XML (`STORAGE_KEY=FILE`); repeatable.
     #[arg(long = "metadata-xml", value_name = "KEY=FILE")]
     pub metadata_xml: Vec<String>,

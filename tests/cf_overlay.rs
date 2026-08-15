@@ -10,7 +10,7 @@ use std::{
 use ibcmd_cf::{
     archive::decode_archive_uniform,
     overlay::{OverlayCodec, PublishOverlayError, publish_overlay_new},
-    payload::{PayloadEncoding, encode_payload},
+    payload::{PayloadEncoding, decode_payload, encode_payload},
 };
 use ibcmd_core::{
     artifact::StorageProfileId,
@@ -28,6 +28,57 @@ const PROFILE: &str = "storage:mssql-config-configsave";
 const MODULE_KEY: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0";
 const ASSET_KEY: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.0";
 const INTERFACE_KEY: &str = "cccccccc-cccc-4ccc-8ccc-cccccccccccc.0";
+
+// Retained clean-room evidence for a compiled DCS Template body: the packed
+// body is the platform's own single raw-deflate stream and the manifest
+// records the SHA-256 of both the packed bytes and the one-inflate plaintext.
+const DCS_CORPUS_MANIFEST: &str =
+    include_str!("fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/manifest.json");
+const DCS_CORPUS_PACKED_BODY_B64: &str = include_str!(
+    "fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/raw-packed.bin.b64"
+);
+const DCS_CORPUS_UNPACKED_BODY_B64: &str = include_str!(
+    "fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/raw-unpacked.bin.b64"
+);
+
+fn decode_base64(source: &str) -> Vec<u8> {
+    let mut output = Vec::new();
+    let mut buffer = 0_u32;
+    let mut bits = 0_u8;
+    let mut saw_padding = false;
+    for byte in source.bytes() {
+        if byte.is_ascii_whitespace() {
+            continue;
+        }
+        if byte == b'=' {
+            saw_padding = true;
+            continue;
+        }
+        assert!(!saw_padding, "non-padding data after Base64 padding");
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => panic!("invalid Base64 byte 0x{byte:02x}"),
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            output.push(((buffer >> bits) & 0xff) as u8);
+            buffer &= if bits == 0 { 0 } else { (1_u32 << bits) - 1 };
+        }
+    }
+    assert!(bits == 0 || buffer == 0, "non-zero trailing Base64 bits");
+    output
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
 
 struct TempDirectory(PathBuf);
 
@@ -205,6 +256,130 @@ fn cli_overlays_module_raw_asset_and_needs_base_without_platform() {
         base.entry("versions").unwrap().packed_payload(),
         overlaid.entry("versions").unwrap().packed_payload()
     );
+}
+
+/// A compiled DCS Template body (the corpus's platform-produced raw-deflate
+/// stream) overlaid via `--compiled-asset` must land in the CF verbatim: the
+/// stored physical payload is byte-identical to the input file, and a single
+/// inflate yields the XML plaintext whose SHA-256 the corpus manifest records
+/// as `unpacked_body`. The `--raw-asset` path would instead deflate the body a
+/// second time, producing the double-compressed payload the platform accepts
+/// but cannot export ("Stream format error").
+#[test]
+fn cli_overlay_compiled_asset_stores_corpus_dcs_body_verbatim() {
+    let manifest: Value = serde_json::from_str(DCS_CORPUS_MANIFEST).unwrap();
+    let compiled = decode_base64(DCS_CORPUS_PACKED_BODY_B64);
+    assert_eq!(
+        sha256_hex(&compiled),
+        manifest["retained"]["packed_body"]["sha256"]
+            .as_str()
+            .unwrap(),
+        "retained raw-packed.bin.b64 fixture no longer matches its manifest sha256"
+    );
+
+    let temp = TempDirectory::new();
+    let base_path = temp.path().join("base.cf");
+    let output_path = temp.path().join("overlay.cf");
+    let body_path = temp.path().join("compiled-dcs-body.bin");
+    fs::write(&base_path, base_archive()).unwrap();
+    fs::write(&body_path, &compiled).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "overlay"])
+        .arg(&base_path)
+        .arg(&output_path)
+        .arg("--compiled-asset")
+        .arg(format!("{ASSET_KEY}={}", body_path.display()))
+        .args(["--source-version", "2.20"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["command"], "overlay");
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["overlay"]["requested_entries"], 1);
+
+    let overlaid = decode(&fs::read(&output_path).unwrap(), "compiled-asset-output");
+    let entry = overlaid.entry(ASSET_KEY).unwrap();
+    assert_eq!(
+        entry.packed_payload(),
+        compiled.as_slice(),
+        "compiled body must be stored verbatim, without a second deflate layer"
+    );
+    let inflated_once = decode_payload(
+        PayloadEncoding::RawDeflate,
+        entry.packed_payload(),
+        ResourceLimits::default(),
+    )
+    .unwrap()
+    .into_bytes();
+    assert_eq!(
+        sha256_hex(&inflated_once),
+        manifest["retained"]["unpacked_body"]["sha256"]
+            .as_str()
+            .unwrap(),
+        "one inflate of the stored payload must yield the manifest unpacked body"
+    );
+    assert!(
+        String::from_utf8_lossy(&inflated_once)
+            .contains("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
+        "one inflate must already expose the XML plaintext"
+    );
+    assert_eq!(entry.unpacked_payload(), inflated_once.as_slice());
+}
+
+/// Plain (not raw-deflated) bytes handed to `--compiled-asset` must be
+/// rejected fail-closed with the dedicated diagnostic code before any output
+/// is written, and the message must point at `--raw-asset` as the family for
+/// plain source bytes. The corpus's unpacked body doubles as the realistic
+/// wrong input: it is exactly what an extraction produces.
+#[test]
+fn cli_overlay_compiled_asset_rejects_plain_bytes_with_raw_asset_hint() {
+    let temp = TempDirectory::new();
+    let base_path = temp.path().join("base.cf");
+    let output_path = temp.path().join("overlay.cf");
+    let plain_path = temp.path().join("plain-dcs-body.bin");
+    fs::write(&base_path, base_archive()).unwrap();
+    fs::write(&plain_path, decode_base64(DCS_CORPUS_UNPACKED_BODY_B64)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "overlay"])
+        .arg(&base_path)
+        .arg(&output_path)
+        .arg("--compiled-asset")
+        .arg(format!("{ASSET_KEY}={}", plain_path.display()))
+        .args(["--source-version", "2.20"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "plain bytes must not be accepted: stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(report["command"], "overlay");
+    assert_eq!(report["ok"], false);
+    let error = &report["errors"][0];
+    assert_eq!(error["code"], "invalid_compiled_asset");
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("--raw-asset"),
+        "error must point at --raw-asset for plain bytes: {message}"
+    );
+    assert!(
+        message.contains(ASSET_KEY),
+        "error must name the rejected storage key: {message}"
+    );
+    assert!(!output_path.exists());
 }
 
 struct CountingCodec<'a>(&'a AtomicUsize);
