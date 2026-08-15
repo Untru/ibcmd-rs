@@ -4429,6 +4429,251 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
             _ => None,
         }
     }
+
+    // ---------------------------------------------------------------------
+    // Reverse (XML lexeme -> config-body tuple byte) reading of the SAME
+    // evidence. REVERSE-GATE-R2-CONFIG-PROJECTION-01: the compiler needs the
+    // six proven coordinates in the load direction, so each map below is the
+    // exact inverse of its `*_xml` sibling above and is drift-tested against
+    // it. No lexeme outside the proven maps ever produces a digit.
+    // ---------------------------------------------------------------------
+
+    /// Zero-based index, into the 61-field Configuration `<Properties>` tuple
+    /// of the config body, of each evidenced single-byte coordinate. Derived
+    /// from the same bundled all-default reference the `*_xml` maps were
+    /// proven against: byte offsets 428/623/625/867/906/2669 fall inside
+    /// tuple fields 13/28/29/36/38/41 respectively, and each of those fields
+    /// is exactly one byte wide there. The derivation itself is re-checked
+    /// against the bundled reference bytes by
+    /// `evidenced_byte_offsets_land_in_the_declared_tuple_fields`.
+    pub fn include_help_in_contents_tuple_field(&self) -> usize {
+        13
+    }
+
+    /// See [`Self::include_help_in_contents_tuple_field`] (offset 623).
+    pub fn use_managed_form_in_ordinary_application_tuple_field(&self) -> usize {
+        28
+    }
+
+    /// See [`Self::include_help_in_contents_tuple_field`] (offset 625).
+    pub fn use_ordinary_form_in_managed_application_tuple_field(&self) -> usize {
+        29
+    }
+
+    /// See [`Self::include_help_in_contents_tuple_field`] (offset 867).
+    pub fn modality_use_mode_tuple_field(&self) -> usize {
+        36
+    }
+
+    /// See [`Self::include_help_in_contents_tuple_field`] (offset 906).
+    pub fn interface_compatibility_mode_tuple_field(&self) -> usize {
+        38
+    }
+
+    /// See [`Self::include_help_in_contents_tuple_field`] (offset 2669).
+    pub fn synchronous_platform_extension_and_add_in_call_use_mode_tuple_field(&self) -> usize {
+        41
+    }
+
+    /// Inverse of [`Self::include_help_in_contents_xml`].
+    pub fn include_help_in_contents_digit(&self, xml: &str) -> Option<u8> {
+        invert(xml, |digit| self.include_help_in_contents_xml(digit))
+    }
+
+    /// Inverse of [`Self::use_managed_form_in_ordinary_application_xml`].
+    pub fn use_managed_form_in_ordinary_application_digit(&self, xml: &str) -> Option<u8> {
+        invert(xml, |digit| {
+            self.use_managed_form_in_ordinary_application_xml(digit)
+        })
+    }
+
+    /// Inverse of [`Self::use_ordinary_form_in_managed_application_xml`].
+    pub fn use_ordinary_form_in_managed_application_digit(&self, xml: &str) -> Option<u8> {
+        invert(xml, |digit| {
+            self.use_ordinary_form_in_managed_application_xml(digit)
+        })
+    }
+
+    /// Inverse of [`Self::modality_use_mode_xml`].
+    pub fn modality_use_mode_digit(&self, xml: &str) -> Option<u8> {
+        invert(xml, |digit| self.modality_use_mode_xml(digit))
+    }
+
+    /// Inverse of [`Self::interface_compatibility_mode_xml`].
+    pub fn interface_compatibility_mode_digit(&self, xml: &str) -> Option<u8> {
+        invert(xml, |digit| self.interface_compatibility_mode_xml(digit))
+    }
+
+    /// Inverse of
+    /// [`Self::synchronous_platform_extension_and_add_in_call_use_mode_xml`].
+    pub fn synchronous_platform_extension_and_add_in_call_use_mode_digit(
+        &self,
+        xml: &str,
+    ) -> Option<u8> {
+        invert(xml, |digit| {
+            self.synchronous_platform_extension_and_add_in_call_use_mode_xml(digit)
+        })
+    }
+
+    /// Every Configuration `<Properties>` element covered by the verbatim
+    /// segments above, in native document order, with the exact platform
+    /// default the sha-bound native XML gives it.
+    ///
+    /// The table is *parsed out of those very segments* at first use, so it
+    /// cannot drift away from them: there is still exactly one source of
+    /// truth for this span. A load-direction caller uses it to decide whether
+    /// a source tree's value for one of these properties is the proven
+    /// platform default (which the compiler can emit, because the evidenced
+    /// reference tuple proves the bytes) or something else entirely (which it
+    /// must refuse, because no corpus proves where or how that value is
+    /// stored).
+    pub fn evidenced_default_properties(
+        &self,
+    ) -> &'static [(&'static str, ConfigurationPropertyEvidencedDefault)] {
+        &EVIDENCED_DEFAULT_PROPERTIES
+    }
+
+    /// Looks one property up in [`Self::evidenced_default_properties`].
+    pub fn evidenced_default_property(
+        &self,
+        name: &str,
+    ) -> Option<ConfigurationPropertyEvidencedDefault> {
+        EVIDENCED_DEFAULT_PROPERTIES
+            .iter()
+            .find(|(candidate, _)| *candidate == name)
+            .map(|(_, value)| *value)
+    }
+
+    /// The `<UsedMobileApplicationFunctionalities>` default, parsed out of the
+    /// same segment into ordered `(functionality, use)` pairs.
+    pub fn used_mobile_application_functionality_defaults(
+        &self,
+    ) -> &'static [(&'static str, bool)] {
+        &USED_MOBILE_APPLICATION_FUNCTIONALITY_DEFAULTS
+    }
+
+    /// The numeric functionality IDs the evidenced all-default config-body
+    /// tuple marks as used in its `<UsedMobileApplicationFunctionalities>`
+    /// field (tuple field 53, which reads
+    /// `{2,38,{0,1},{1,0},...,{25,1},...,{41,0},0}`). Read straight off the
+    /// bundled reference bytes and re-checked there by
+    /// `evidenced_reference_marks_exactly_the_declared_mobile_ids`.
+    pub fn used_mobile_application_functionalities_default_tuple_ids(&self) -> &'static [u32] {
+        &[0, 25]
+    }
+}
+
+fn invert(xml: &str, forward: impl Fn(u8) -> Option<&'static str>) -> Option<u8> {
+    (b'0'..=b'9').find(|digit| forward(*digit) == Some(xml))
+}
+
+/// The platform-default form of one Configuration `<Properties>` element, as
+/// proven by the sha-bound native XML behind
+/// [`ConfigurationPropertiesEvidencedDefaultBlockPolicy`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConfigurationPropertyEvidencedDefault {
+    /// `<Name/>` — the element carries no content at all.
+    Empty,
+    /// `<Name>text</Name>` on a single line; the payload is that text.
+    Text(&'static str),
+    /// A multi-line element; the payload is its exact inner markup.
+    Block(&'static str),
+}
+
+static EVIDENCED_DEFAULT_PROPERTIES: std::sync::LazyLock<
+    Vec<(&'static str, ConfigurationPropertyEvidencedDefault)>,
+> = std::sync::LazyLock::new(|| {
+    let policy = ConfigurationPropertiesEvidencedDefaultBlockPolicy;
+    let mut properties = Vec::new();
+    for segment in [
+        policy.default_roles_segment(),
+        policy.additional_full_text_search_dictionaries_segment(),
+        policy.storage_and_mobile_functionality_segment(),
+        policy.data_lock_and_object_autonumeration_segment(),
+        policy.database_tablespaces_use_mode_segment(),
+        policy.default_constants_form_segment(),
+    ] {
+        parse_evidenced_default_segment(segment, &mut properties);
+    }
+    properties
+});
+
+static USED_MOBILE_APPLICATION_FUNCTIONALITY_DEFAULTS: std::sync::LazyLock<
+    Vec<(&'static str, bool)>,
+> = std::sync::LazyLock::new(|| {
+    let policy = ConfigurationPropertiesEvidencedDefaultBlockPolicy;
+    let Some(ConfigurationPropertyEvidencedDefault::Block(block)) =
+        policy.evidenced_default_property("UsedMobileApplicationFunctionalities")
+    else {
+        panic!("the evidenced default block always carries UsedMobileApplicationFunctionalities");
+    };
+    let mut defaults = Vec::new();
+    for entry in block.split("\r\n\t\t\t\t</app:functionality>") {
+        let Some(use_open) = entry.find("<app:use>") else {
+            continue;
+        };
+        let use_start = use_open + "<app:use>".len();
+        let use_end = entry[use_start..]
+            .find("</app:use>")
+            .expect("an evidenced <app:use> is always closed")
+            + use_start;
+        let used = match &entry[use_start..use_end] {
+            "true" => true,
+            "false" => false,
+            other => panic!("evidenced <app:use> carries only true/false, got `{other}`"),
+        };
+        let marker = "<app:functionality>";
+        let name_start = entry[..use_open]
+            .rfind(marker)
+            .expect("an evidenced functionality entry always names itself")
+            + marker.len();
+        let name_end = entry[name_start..]
+            .find('<')
+            .expect("an evidenced functionality name is always closed")
+            + name_start;
+        defaults.push((&entry[name_start..name_end], used));
+    }
+    defaults
+});
+
+/// Splits one verbatim segment into its top-level `<Properties>` children.
+/// The segments are exact slices of a real platform export, so their shape is
+/// fixed: every child starts at a three-tab indent and is either self-closing,
+/// a single-line text element, or a multi-line block.
+fn parse_evidenced_default_segment(
+    segment: &'static str,
+    properties: &mut Vec<(&'static str, ConfigurationPropertyEvidencedDefault)>,
+) {
+    const INDENT: &str = "\t\t\t<";
+    let mut rest = segment;
+    while let Some(start) = rest.find(INDENT) {
+        rest = &rest[start + INDENT.len()..];
+        let name_end = rest
+            .find(['>', '/'])
+            .expect("an evidenced element always closes its start tag");
+        let name = &rest[..name_end];
+        if rest[name_end..].starts_with("/>") {
+            properties.push((name, ConfigurationPropertyEvidencedDefault::Empty));
+            rest = &rest[name_end + 2..];
+            continue;
+        }
+        let body_start = name_end + 1;
+        let closing = format!("</{name}>");
+        let body_end = rest[body_start..]
+            .find(&closing)
+            .expect("an evidenced non-empty element always closes")
+            + body_start;
+        let body = &rest[body_start..body_end];
+        properties.push((
+            name,
+            if body.starts_with("\r\n") {
+                ConfigurationPropertyEvidencedDefault::Block(body)
+            } else {
+                ConfigurationPropertyEvidencedDefault::Text(body)
+            },
+        ));
+        rest = &rest[body_end + closing.len()..];
+    }
 }
 
 /// Loads [`ConfigurationPropertiesEvidencedDefaultBlockPolicy`].
@@ -12615,6 +12860,156 @@ mod configuration_properties_evidenced_default_block_policy_tests {
             Some("Version8_2")
         );
         assert_eq!(policy.interface_compatibility_mode_xml(b'1'), None);
+    }
+
+    /// REVERSE-GATE-R2-CONFIG-PROJECTION-01: the load-direction maps are the
+    /// exact inverse of the already-proven export-direction maps, and nothing
+    /// outside those maps produces a digit.
+    #[test]
+    fn reverse_value_maps_invert_the_proven_forward_maps_and_refuse_everything_else() {
+        let policy = configuration_properties_evidenced_default_block_policy();
+        for digit in b'0'..=b'9' {
+            if let Some(xml) = policy.include_help_in_contents_xml(digit) {
+                assert_eq!(policy.include_help_in_contents_digit(xml), Some(digit));
+            }
+            if let Some(xml) = policy.use_managed_form_in_ordinary_application_xml(digit) {
+                assert_eq!(
+                    policy.use_managed_form_in_ordinary_application_digit(xml),
+                    Some(digit)
+                );
+            }
+            if let Some(xml) = policy.use_ordinary_form_in_managed_application_xml(digit) {
+                assert_eq!(
+                    policy.use_ordinary_form_in_managed_application_digit(xml),
+                    Some(digit)
+                );
+            }
+            if let Some(xml) = policy.modality_use_mode_xml(digit) {
+                assert_eq!(policy.modality_use_mode_digit(xml), Some(digit));
+            }
+            if let Some(xml) = policy.interface_compatibility_mode_xml(digit) {
+                assert_eq!(policy.interface_compatibility_mode_digit(xml), Some(digit));
+            }
+            if let Some(xml) =
+                policy.synchronous_platform_extension_and_add_in_call_use_mode_xml(digit)
+            {
+                assert_eq!(
+                    policy.synchronous_platform_extension_and_add_in_call_use_mode_digit(xml),
+                    Some(digit)
+                );
+            }
+        }
+
+        // Lexemes that exist in the platform's own enumerations but were
+        // never observed in any evidenced corpus must NOT be guessed at.
+        assert_eq!(policy.modality_use_mode_digit("UseWithWarnings"), None);
+        assert_eq!(
+            policy.interface_compatibility_mode_digit("Version8_2Enable8_3"),
+            None
+        );
+        assert_eq!(
+            policy.synchronous_platform_extension_and_add_in_call_use_mode_digit("UseWithWarnings"),
+            None
+        );
+        assert_eq!(policy.include_help_in_contents_digit("True"), None);
+        assert_eq!(policy.include_help_in_contents_digit(""), None);
+    }
+
+    /// The default table is parsed out of the verbatim segments, so this test
+    /// pins both the inventory it exposes and the exact values it yields.
+    #[test]
+    fn evidenced_default_property_table_covers_the_whole_verbatim_span() {
+        let policy = configuration_properties_evidenced_default_block_policy();
+        let names = policy
+            .evidenced_default_properties()
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "DefaultRoles",
+                "AdditionalFullTextSearchDictionaries",
+                "DynamicListsUserSettingsStorage",
+                "URLExternalDataStorage",
+                "Content",
+                "DefaultReportForm",
+                "DefaultReportVariantForm",
+                "DefaultReportSettingsForm",
+                "DefaultReportAppearanceTemplate",
+                "DefaultDynamicListSettingsForm",
+                "DefaultSearchForm",
+                "DefaultDataHistoryChangeHistoryForm",
+                "DefaultDataHistoryVersionDataForm",
+                "DefaultDataHistoryVersionDifferencesForm",
+                "DefaultCollaborationSystemUsersChoiceForm",
+                "RequiredMobileApplicationPermissions",
+                "UsedMobileApplicationFunctionalities",
+                "StandaloneConfigurationRestrictionRoles",
+                "MobileApplicationURLs",
+                "AllowedIncomingShareRequestTypes",
+                "MainClientApplicationWindowMode",
+                "DefaultInterface",
+                "DefaultStyle",
+                "DataLockControlMode",
+                "ObjectAutonumerationMode",
+                "DatabaseTablespacesUseMode",
+                "DefaultConstantsForm",
+            ]
+        );
+        assert_eq!(
+            policy.evidenced_default_property("DefaultRoles"),
+            Some(ConfigurationPropertyEvidencedDefault::Empty)
+        );
+        assert_eq!(
+            policy.evidenced_default_property("MainClientApplicationWindowMode"),
+            Some(ConfigurationPropertyEvidencedDefault::Text("Normal"))
+        );
+        assert_eq!(
+            policy.evidenced_default_property("DataLockControlMode"),
+            Some(ConfigurationPropertyEvidencedDefault::Text("Managed"))
+        );
+        assert_eq!(
+            policy.evidenced_default_property("ObjectAutonumerationMode"),
+            Some(ConfigurationPropertyEvidencedDefault::Text("NotAutoFree"))
+        );
+        assert_eq!(
+            policy.evidenced_default_property("DatabaseTablespacesUseMode"),
+            Some(ConfigurationPropertyEvidencedDefault::Text("DontUse"))
+        );
+        assert!(matches!(
+            policy.evidenced_default_property("UsedMobileApplicationFunctionalities"),
+            Some(ConfigurationPropertyEvidencedDefault::Block(_))
+        ));
+        // Names the compiler still has to source elsewhere are deliberately
+        // absent from this table.
+        assert_eq!(policy.evidenced_default_property("DefaultLanguage"), None);
+        assert_eq!(policy.evidenced_default_property("CompatibilityMode"), None);
+    }
+
+    #[test]
+    fn used_mobile_application_functionality_defaults_match_the_verbatim_block() {
+        let policy = configuration_properties_evidenced_default_block_policy();
+        let defaults = policy.used_mobile_application_functionality_defaults();
+        assert_eq!(defaults.len(), 38);
+        assert_eq!(defaults[0], ("Biometrics", true));
+        assert_eq!(defaults[1], ("Location", false));
+        assert_eq!(defaults[25], ("OSBackup", true));
+        assert_eq!(defaults[37], ("TextToSpeech", false));
+        assert_eq!(
+            defaults
+                .iter()
+                .filter(|(_, used)| *used)
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            ["Biometrics", "OSBackup"]
+        );
+        // The positional agreement between the XML block and the config-body
+        // tuple IDs is what the compiler relies on.
+        assert_eq!(
+            policy.used_mobile_application_functionalities_default_tuple_ids(),
+            [0, 25]
+        );
     }
 }
 

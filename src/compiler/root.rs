@@ -254,6 +254,36 @@ pub struct ConfigurationBodyProperties {
     pub default_roles: Vec<ObjectUuid>,
     /// Enabled mobile functionality IDs (`0..=27` and `32..=41`).
     pub enabled_mobile_functionalities: Vec<u32>,
+    /// Config-body tuple bytes for the six Configuration properties whose
+    /// coordinate inside that tuple is corpus-proven.
+    pub evidenced_property_digits: ConfigurationEvidencedPropertyDigits,
+}
+
+/// The exact config-body tuple byte for each Configuration `<Properties>`
+/// element whose position in that tuple is proven by
+/// MINI-GATE-A-CONFIG-PROPS-01's single-field isolation corpora (tuple fields
+/// 13/28/29/36/38/41, i.e. all-default byte offsets 428/623/625/867/906/2669).
+///
+/// `None` means the source tree never named that property, and the compiler
+/// keeps the pre-evidence constant it has always written into that field --
+/// existing callers stay byte-for-byte unchanged. `Some(digit)` is only ever
+/// produced by
+/// `ibcmd_schema::ConfigurationPropertiesEvidencedDefaultBlockPolicy`'s proven
+/// lexeme maps, never by this compiler guessing at an encoding.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ConfigurationEvidencedPropertyDigits {
+    /// `IncludeHelpInContents` (tuple field 13).
+    pub include_help_in_contents: Option<u8>,
+    /// `UseManagedFormInOrdinaryApplication` (tuple field 28).
+    pub use_managed_form_in_ordinary_application: Option<u8>,
+    /// `UseOrdinaryFormInManagedApplication` (tuple field 29).
+    pub use_ordinary_form_in_managed_application: Option<u8>,
+    /// `ModalityUseMode` (tuple field 36).
+    pub modality_use_mode: Option<u8>,
+    /// `InterfaceCompatibilityMode` (tuple field 38).
+    pub interface_compatibility_mode: Option<u8>,
+    /// `SynchronousPlatformExtensionAndAddInCallUseMode` (tuple field 41).
+    pub synchronous_platform_extension_and_add_in_call_use_mode: Option<u8>,
 }
 
 impl ConfigurationBodyProperties {
@@ -283,6 +313,7 @@ impl ConfigurationBodyProperties {
             use_platform_application: true,
             default_roles: Vec::new(),
             enabled_mobile_functionalities: Vec::new(),
+            evidenced_property_digits: ConfigurationEvidencedPropertyDigits::default(),
         }
     }
 }
@@ -695,6 +726,8 @@ fn validate_configuration_properties(
         )?;
     }
 
+    validate_evidenced_property_digits(properties)?;
+
     let allowed_mobile_ids = mobile_functionality_ids().collect::<BTreeSet<_>>();
     let mut mobile_ids = BTreeSet::new();
     for id in &properties.enabled_mobile_functionalities {
@@ -708,6 +741,83 @@ fn validate_configuration_properties(
                 "Properties/UsedMobileApplicationFunctionalities duplicates ID {id}"
             ));
         }
+    }
+    Ok(())
+}
+
+/// Re-checks every evidenced digit against the proven value map that produced
+/// it, and refuses the one input shape this compiler cannot encode: tuple
+/// field 13 is corpus-proven to carry `IncludeHelpInContents`, yet this
+/// compiler's legacy projection puts `ScriptVariant` in the very same field.
+/// When both are named and disagree on that byte there is no honest output,
+/// so the compilation fails closed instead of silently dropping one of them.
+fn validate_evidenced_property_digits(
+    properties: &ConfigurationBodyProperties,
+) -> Result<(), SpecialEntryBuildError> {
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    let digits = &properties.evidenced_property_digits;
+    for (path, digit, accepted) in [
+        (
+            "Properties/IncludeHelpInContents",
+            digits.include_help_in_contents,
+            policy.include_help_in_contents_xml(digits.include_help_in_contents.unwrap_or(b'0')),
+        ),
+        (
+            "Properties/UseManagedFormInOrdinaryApplication",
+            digits.use_managed_form_in_ordinary_application,
+            policy.use_managed_form_in_ordinary_application_xml(
+                digits
+                    .use_managed_form_in_ordinary_application
+                    .unwrap_or(b'0'),
+            ),
+        ),
+        (
+            "Properties/UseOrdinaryFormInManagedApplication",
+            digits.use_ordinary_form_in_managed_application,
+            policy.use_ordinary_form_in_managed_application_xml(
+                digits
+                    .use_ordinary_form_in_managed_application
+                    .unwrap_or(b'0'),
+            ),
+        ),
+        (
+            "Properties/ModalityUseMode",
+            digits.modality_use_mode,
+            policy.modality_use_mode_xml(digits.modality_use_mode.unwrap_or(b'2')),
+        ),
+        (
+            "Properties/InterfaceCompatibilityMode",
+            digits.interface_compatibility_mode,
+            policy.interface_compatibility_mode_xml(
+                digits.interface_compatibility_mode.unwrap_or(b'2'),
+            ),
+        ),
+        (
+            "Properties/SynchronousPlatformExtensionAndAddInCallUseMode",
+            digits.synchronous_platform_extension_and_add_in_call_use_mode,
+            policy.synchronous_platform_extension_and_add_in_call_use_mode_xml(
+                digits
+                    .synchronous_platform_extension_and_add_in_call_use_mode
+                    .unwrap_or(b'2'),
+            ),
+        ),
+    ] {
+        if digit.is_some() && accepted.is_none() {
+            return invalid_configuration(&format!(
+                "{path} carries a config-body byte outside its corpus-proven value map"
+            ));
+        }
+    }
+
+    if let Some(digit) = digits.include_help_in_contents
+        && digit != properties.script_variant.native_code().as_bytes()[0]
+    {
+        return invalid_configuration(
+            "Properties/IncludeHelpInContents and Properties/ScriptVariant both project onto \
+             config-body tuple field 13 (the corpus-proven IncludeHelpInContents coordinate) \
+             and disagree on its byte; ScriptVariant has no separately proven coordinate, so \
+             this pair cannot be compiled",
+        );
     }
     Ok(())
 }
@@ -859,7 +969,17 @@ fn push_configuration_properties(
     fields.push(uuid_or_nil(properties.default_language));
     fields.push(NIL_UUID.to_owned());
     fields.push(NIL_UUID.to_owned());
-    fields.push(properties.script_variant.native_code().to_owned());
+    // Tuple field 13. Corpus-proven to carry `IncludeHelpInContents`; this
+    // compiler has always written `ScriptVariant`'s legacy code here, so the
+    // legacy byte only survives when no evidenced value was supplied (and
+    // `validate_configuration_properties` has already refused any input where
+    // the two projections would disagree on this byte).
+    fields.push(digit_or(
+        properties
+            .evidenced_property_digits
+            .include_help_in_contents,
+        properties.script_variant.native_code(),
+    ));
     fields.push(quoted_1c(&properties.vendor));
     fields.push(quoted_1c(&properties.version));
     fields.push(quoted_1c(&properties.update_catalog_address));
@@ -876,8 +996,21 @@ fn push_configuration_properties(
     );
     fields.push(properties.extension_compatibility_mode.to_string());
     fields.push("{0,0}".to_owned());
-    fields.push("0".to_owned());
-    fields.push("0".to_owned());
+    // Tuple fields 28/29: `UseManagedFormInOrdinaryApplication` and
+    // `UseOrdinaryFormInManagedApplication`. The legacy constant already
+    // equals the proven platform default here.
+    fields.push(digit_or(
+        properties
+            .evidenced_property_digits
+            .use_managed_form_in_ordinary_application,
+        "0",
+    ));
+    fields.push(digit_or(
+        properties
+            .evidenced_property_digits
+            .use_ordinary_form_in_managed_application,
+        "0",
+    ));
     fields.push(NIL_UUID.to_owned());
     fields.push(NIL_UUID.to_owned());
     fields.push(NIL_UUID.to_owned());
@@ -886,12 +1019,32 @@ fn push_configuration_properties(
     ));
     fields.push(NIL_UUID.to_owned());
     fields.push(NIL_UUID.to_owned());
-    fields.push("1".to_owned());
+    // Tuple field 36: `ModalityUseMode`. The legacy constant `1` is NOT the
+    // platform default (the evidenced all-default tuple carries `2`), so an
+    // evidenced value materially corrects this byte.
+    fields.push(digit_or(
+        properties.evidenced_property_digits.modality_use_mode,
+        "1",
+    ));
     fields.push(NIL_UUID.to_owned());
-    fields.push("2".to_owned());
+    // Tuple field 38: `InterfaceCompatibilityMode`. The legacy constant
+    // already equals the proven platform default.
+    fields.push(digit_or(
+        properties
+            .evidenced_property_digits
+            .interface_compatibility_mode,
+        "2",
+    ));
     fields.push(configuration_default_roles(&properties.default_roles));
     fields.push(configuration_compatibility_options());
-    fields.push("0".to_owned());
+    // Tuple field 41: `SynchronousPlatformExtensionAndAddInCallUseMode`. The
+    // legacy constant `0` is NOT the platform default (`2`).
+    fields.push(digit_or(
+        properties
+            .evidenced_property_digits
+            .synchronous_platform_extension_and_add_in_call_use_mode,
+        "0",
+    ));
     fields.push(quoted_1c(""));
     fields.push(properties.compatibility_mode.to_string());
     fields.push("1".to_owned());
@@ -927,6 +1080,15 @@ fn configuration_header(object_id: &str, properties: &ConfigurationBodyPropertie
         localized_1c(&properties.synonyms),
         quoted_1c(&properties.comment),
     )
+}
+
+/// Emits an evidenced single-byte tuple field, or the pre-evidence constant
+/// this compiler has always written there.
+fn digit_or(digit: Option<u8>, legacy: &str) -> String {
+    match digit {
+        Some(digit) => (digit as char).to_string(),
+        None => legacy.to_owned(),
+    }
 }
 
 fn configuration_use_purpose(enabled: bool) -> String {
@@ -1373,6 +1535,219 @@ mod tests {
             Err(SpecialEntryBuildError::InvalidConfigurationModel { reason })
                 if reason.contains("DefaultStyle") && reason.contains("expected top-level Style")
         ));
+    }
+
+    /// REVERSE-GATE-R2-CONFIG-PROJECTION-01, emit half: driven with exactly
+    /// the values the load direction projects out of the all-default
+    /// `dcs-area-style-item-uuid` native `Configuration.xml`, this compiler
+    /// must reproduce that corpus's own retained config-body Properties tuple
+    /// field for field.
+    ///
+    /// Four fields are excluded, each for a stated reason -- and the test
+    /// asserts they really are the only exclusions by checking every other
+    /// index:
+    ///
+    /// * 1 -- the Configuration header carries this fixture's derived
+    ///   contained-object UUID, not the corpus's;
+    /// * 10 -- `DefaultLanguage` points at this fixture's Language object;
+    /// * 40 -- `configuration_compatibility_options()` is a pre-existing
+    ///   constant that differs from the platform's own shape
+    ///   (`{29,...,{"#",0}}` versus `{28,...,{"B",n}}`);
+    /// * 51 -- `configuration_client_capabilities()` likewise
+    ///   (`{2,35,...}` versus `{2,34,...}`).
+    ///
+    /// Both 40 and 51 are outside the Configuration `<Properties>` element
+    /// inventory this gate covers and remain unproven coordinates.
+    #[test]
+    fn evidenced_all_default_properties_compile_to_the_retained_native_tuple() {
+        const REFERENCE_B64: &str = include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/config-body-unpacked.bin.b64"
+        );
+        let (identities, graph) = fixture(&ALL_ROOT_FAMILIES);
+        let language = identities
+            .objects()
+            .iter()
+            .find(|object| object.kind().as_str() == "Language")
+            .unwrap()
+            .uuid();
+
+        let mut properties = ConfigurationBodyProperties::minimal("DcsEvidence", 80_327);
+        properties.synonyms = vec![ConfigurationLocalizedString::new("ru", "DCS evidence")];
+        properties.default_language = Some(language);
+        properties.enabled_mobile_functionalities = vec![0, 25];
+        properties.evidenced_property_digits = ConfigurationEvidencedPropertyDigits {
+            include_help_in_contents: Some(b'0'),
+            use_managed_form_in_ordinary_application: Some(b'0'),
+            use_ordinary_form_in_managed_application: Some(b'0'),
+            modality_use_mode: Some(b'2'),
+            interface_compatibility_mode: Some(b'2'),
+            synchronous_platform_extension_and_add_in_call_use_mode: Some(b'2'),
+        };
+
+        let compiled =
+            compile_configuration_body(&identities, &graph, &profile(), &properties).unwrap();
+        let plain = inflate_for_test(compiled.outcome().compiled_payload().unwrap().bytes());
+        let actual = properties_tuple_fields(std::str::from_utf8(&plain).unwrap());
+        let reference = crate::module_blob::decode_base64_mime(REFERENCE_B64.trim()).unwrap();
+        let expected = properties_tuple_fields(std::str::from_utf8(&reference).unwrap());
+
+        assert_eq!(actual.len(), 61);
+        assert_eq!(expected.len(), 61);
+        let excluded = [1usize, 10, 40, 51];
+        for index in 0..61 {
+            if excluded.contains(&index) {
+                assert_ne!(
+                    actual[index], expected[index],
+                    "field {index} is excluded but no longer differs; tighten this test"
+                );
+                continue;
+            }
+            assert_eq!(
+                actual[index], expected[index],
+                "config-body Properties tuple field {index} diverges from the retained native corpus"
+            );
+        }
+    }
+
+    /// The three non-default evidenced enum values of the
+    /// `configuration-properties-enum-group` corpus must land as exactly
+    /// three changed bytes, in the proven tuple fields and nowhere else.
+    #[test]
+    fn non_default_evidenced_digits_change_only_their_own_tuple_fields() {
+        let (identities, graph) = fixture(&ALL_ROOT_FAMILIES);
+        let mut properties = ConfigurationBodyProperties::minimal("DcsEvidence", 80_327);
+        properties.evidenced_property_digits = ConfigurationEvidencedPropertyDigits {
+            include_help_in_contents: Some(b'0'),
+            use_managed_form_in_ordinary_application: Some(b'0'),
+            use_ordinary_form_in_managed_application: Some(b'0'),
+            modality_use_mode: Some(b'2'),
+            interface_compatibility_mode: Some(b'2'),
+            synchronous_platform_extension_and_add_in_call_use_mode: Some(b'2'),
+        };
+        let baseline = compile_configuration_body(&identities, &graph, &profile(), &properties)
+            .map(|entry| {
+                properties_tuple_fields(
+                    std::str::from_utf8(&inflate_for_test(
+                        entry.outcome().compiled_payload().unwrap().bytes(),
+                    ))
+                    .unwrap(),
+                )
+            })
+            .unwrap();
+
+        properties.evidenced_property_digits.modality_use_mode = Some(b'0');
+        properties
+            .evidenced_property_digits
+            .interface_compatibility_mode = Some(b'0');
+        properties
+            .evidenced_property_digits
+            .synchronous_platform_extension_and_add_in_call_use_mode = Some(b'0');
+        let changed = compile_configuration_body(&identities, &graph, &profile(), &properties)
+            .map(|entry| {
+                properties_tuple_fields(
+                    std::str::from_utf8(&inflate_for_test(
+                        entry.outcome().compiled_payload().unwrap().bytes(),
+                    ))
+                    .unwrap(),
+                )
+            })
+            .unwrap();
+
+        let differing = (0..61)
+            .filter(|index| baseline[*index] != changed[*index])
+            .collect::<Vec<_>>();
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        assert_eq!(
+            differing,
+            [
+                policy.modality_use_mode_tuple_field(),
+                policy.interface_compatibility_mode_tuple_field(),
+                policy.synchronous_platform_extension_and_add_in_call_use_mode_tuple_field(),
+            ]
+        );
+        assert_eq!(changed[policy.modality_use_mode_tuple_field()], "0");
+    }
+
+    /// Tuple field 13 is corpus-proven to be `IncludeHelpInContents`, but this
+    /// compiler's legacy projection writes `ScriptVariant` into the same
+    /// field. A source tree that needs both bytes at once has no honest
+    /// encoding and must fail closed rather than silently lose one.
+    #[test]
+    fn the_unresolved_tuple_field_13_collision_fails_closed() {
+        let (identities, graph) = fixture(&ALL_ROOT_FAMILIES);
+        let mut properties = ConfigurationBodyProperties::minimal("DcsEvidence", 80_327);
+        properties.script_variant = ConfigurationScriptVariant::English;
+        properties
+            .evidenced_property_digits
+            .include_help_in_contents = Some(b'0');
+        assert!(matches!(
+            compile_configuration_body(&identities, &graph, &profile(), &properties),
+            Err(SpecialEntryBuildError::InvalidConfigurationModel { reason })
+                if reason.contains("tuple field 13")
+        ));
+
+        // The agreeing pair every evidenced corpus actually carries compiles.
+        properties.script_variant = ConfigurationScriptVariant::Russian;
+        assert!(compile_configuration_body(&identities, &graph, &profile(), &properties).is_ok());
+    }
+
+    /// A byte no evidenced value map produces can never reach the tuple.
+    #[test]
+    fn an_unproven_evidenced_digit_is_refused_by_the_compiler() {
+        let (identities, graph) = fixture(&ALL_ROOT_FAMILIES);
+        let mut properties = ConfigurationBodyProperties::minimal("DcsEvidence", 80_327);
+        properties.evidenced_property_digits.modality_use_mode = Some(b'7');
+        assert!(matches!(
+            compile_configuration_body(&identities, &graph, &profile(), &properties),
+            Err(SpecialEntryBuildError::InvalidConfigurationModel { reason })
+                if reason.contains("Properties/ModalityUseMode")
+                    && reason.contains("outside its corpus-proven value map")
+        ));
+    }
+
+    /// Whitespace-normalized top-level fields of the config-body's
+    /// Configuration `<Properties>` tuple. The `\r\n` padding the platform
+    /// puts before nested containers is a separate, still-unclosed gap; this
+    /// helper deliberately looks past it so that field *content* can be
+    /// compared on its own.
+    fn properties_tuple_fields(text: &str) -> Vec<String> {
+        let start = text
+            .find("{68,")
+            .expect("a compiled config body always opens its Properties tuple with `{68,`");
+        braced_fields(&balanced_slice(&text[start..]))
+            .into_iter()
+            .map(|field| field.replace("\r\n", ""))
+            .collect()
+    }
+
+    fn balanced_slice(text: &str) -> String {
+        let bytes = text.as_bytes();
+        let mut depth = 0usize;
+        let mut quoted = false;
+        let mut index = 0usize;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'"' if quoted && bytes.get(index + 1) == Some(&b'"') => index += 2,
+                b'"' => {
+                    quoted = !quoted;
+                    index += 1;
+                }
+                _ if quoted => index += 1,
+                b'{' => {
+                    depth += 1;
+                    index += 1;
+                }
+                b'}' => {
+                    depth -= 1;
+                    index += 1;
+                    if depth == 0 {
+                        return text[..index].to_owned();
+                    }
+                }
+                _ => index += 1,
+            }
+        }
+        panic!("an unbalanced container never leaves a compiled config body");
     }
 
     #[test]

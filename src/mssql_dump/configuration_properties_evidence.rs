@@ -328,6 +328,115 @@ mod tests {
         decode_base64_mime(b64.trim()).unwrap()
     }
 
+    /// Byte ranges of the 61 top-level fields of the config-body tuple's
+    /// Configuration `<Properties>` container, in `text`'s own coordinates.
+    fn properties_tuple_field_ranges(text: &[u8]) -> Vec<(usize, usize)> {
+        let start = text
+            .windows(4)
+            .position(|window| window == b"{68,")
+            .expect("every evidenced config body opens its Properties tuple with `{68,`");
+        let mut ranges = Vec::new();
+        let mut depth = 1usize;
+        let mut quoted = false;
+        let mut field_start = start + 1;
+        let mut index = start + 1;
+        while index < text.len() {
+            match text[index] {
+                b'"' if quoted && text.get(index + 1) == Some(&b'"') => index += 2,
+                b'"' => {
+                    quoted = !quoted;
+                    index += 1;
+                }
+                _ if quoted => index += 1,
+                b'{' => {
+                    depth += 1;
+                    index += 1;
+                }
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        ranges.push((field_start, index));
+                        return ranges;
+                    }
+                    index += 1;
+                }
+                b',' if depth == 1 => {
+                    ranges.push((field_start, index));
+                    field_start = index + 1;
+                    index += 1;
+                }
+                _ => index += 1,
+            }
+        }
+        panic!("the Properties tuple is never left unterminated in an evidenced corpus");
+    }
+
+    /// REVERSE-GATE-R2-CONFIG-PROJECTION-01: the load direction addresses the
+    /// six proven coordinates by *tuple field index*, not by absolute byte
+    /// offset. This pins that translation against the very bytes the offsets
+    /// were proven on: each declared field must be exactly the single byte at
+    /// the declared offset.
+    #[test]
+    fn evidenced_byte_offsets_land_in_the_declared_tuple_fields() {
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        let text = load(T1_BASE_B64);
+        let ranges = properties_tuple_field_ranges(&text);
+        assert_eq!(ranges.len(), 61);
+        for (offset, field) in [
+            (428, policy.include_help_in_contents_tuple_field()),
+            (
+                623,
+                policy.use_managed_form_in_ordinary_application_tuple_field(),
+            ),
+            (
+                625,
+                policy.use_ordinary_form_in_managed_application_tuple_field(),
+            ),
+            (867, policy.modality_use_mode_tuple_field()),
+            (906, policy.interface_compatibility_mode_tuple_field()),
+            (
+                2669,
+                policy.synchronous_platform_extension_and_add_in_call_use_mode_tuple_field(),
+            ),
+        ] {
+            let (start, end) = ranges[field];
+            assert_eq!(
+                (start, end),
+                (offset, offset + 1),
+                "tuple field {field} is not the single byte at offset {offset}"
+            );
+        }
+    }
+
+    /// The compiler emits the all-default
+    /// `<UsedMobileApplicationFunctionalities>` block by turning it into the
+    /// numeric IDs the platform's own tuple marks as used. Those IDs come
+    /// from the bundled reference, so pin them there.
+    #[test]
+    fn evidenced_reference_marks_exactly_the_declared_mobile_ids() {
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        let text = load(T1_BASE_B64);
+        let ranges = properties_tuple_field_ranges(&text);
+        let (start, end) = ranges[53];
+        let field = std::str::from_utf8(&text[start..end])
+            .unwrap()
+            .replace("\r\n", "");
+        let mut used = Vec::new();
+        for entry in field.trim_start_matches("{2,38,").split("},") {
+            let entry = entry.trim_start_matches('{').trim_end_matches('}');
+            let Some((id, flag)) = entry.split_once(',') else {
+                continue;
+            };
+            if flag.trim() == "1" {
+                used.push(id.trim().parse::<u32>().unwrap());
+            }
+        }
+        assert_eq!(
+            used,
+            policy.used_mobile_application_functionalities_default_tuple_ids()
+        );
+    }
+
     #[test]
     fn all_default_base_corpus_decodes_to_the_platform_default_values() {
         let text = load(T1_BASE_B64);

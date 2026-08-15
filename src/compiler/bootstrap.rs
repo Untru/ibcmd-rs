@@ -24,6 +24,7 @@ use ibcmd_core::{
     value::CanonicalValueKind,
     version::XmlDialect,
 };
+use ibcmd_schema::ConfigurationPropertyEvidencedDefault;
 use ibcmd_xml::{
     AttributeKind, DialectDetection, DialectRegistry, XmlDocument, XmlElement, XmlNode, XmlReader,
     bundled_dialect_registry, bundled_metadata_registry,
@@ -157,9 +158,13 @@ struct ConfigurationChildReference {
     name: String,
 }
 
+#[derive(Debug)]
 struct ConfigurationProjection {
     properties: ConfigurationBodyProperties,
     children: Vec<ConfigurationChildReference>,
+    /// Raw `<DefaultLanguage>` reference text (`Language.<name>`), resolved to
+    /// an object UUID only once the canonical inventory exists.
+    default_language: Option<String>,
 }
 
 /// Compiles one complete, bounded source tree for an explicitly selected XML
@@ -307,10 +312,15 @@ pub fn compile_bootstrap_source_tree(
             actual: configuration_count,
         });
     }
-    let configuration = configuration.expect("configuration count proved a decoded projection");
+    let mut configuration = configuration.expect("configuration count proved a decoded projection");
     let canonical = CanonicalConfiguration::new(objects)
         .map_err(|source| BootstrapCompileError::Canonical(source.to_string()))?;
     validate_configuration_children(&canonical, &configuration.children)?;
+    if let Some(reference) = configuration.default_language.as_deref() {
+        configuration.properties.default_language = Some(resolve_configuration_default_language(
+            &canonical, reference,
+        )?);
+    }
     let validated = validate_configuration(&canonical)
         .map_err(|source| BootstrapCompileError::Canonical(format!("{source:?}")))?;
     let identities = collect_bootstrap_identities(&validated)
@@ -856,7 +866,9 @@ fn project_configuration(
     let properties_element = named_child(configuration, "Properties")?.ok_or_else(|| {
         BootstrapCompileError::InvalidConfiguration("Configuration has no Properties".to_owned())
     })?;
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
     let mut properties = ConfigurationBodyProperties::minimal("", target_compatibility);
+    let mut default_language = None::<String>;
     let mut seen = BTreeSet::new();
     for element in child_elements(properties_element)? {
         let name = element.name().local();
@@ -911,6 +923,107 @@ fn project_configuration(
             "Vendor" => properties.vendor = simple_text(element)?,
             "Version" => properties.version = simple_text(element)?,
             "UpdateCatalogAddress" => properties.update_catalog_address = simple_text(element)?,
+
+            // -- the six coordinates MINI-GATE-A-CONFIG-PROPS-01 proved by
+            // single-field isolation, read here in the load direction --
+            "IncludeHelpInContents" => {
+                let value = simple_text(element)?;
+                properties
+                    .evidenced_property_digits
+                    .include_help_in_contents = Some(evidenced_digit(
+                    name,
+                    &value,
+                    policy.include_help_in_contents_digit(&value),
+                )?);
+            }
+            "UseManagedFormInOrdinaryApplication" => {
+                let value = simple_text(element)?;
+                properties
+                    .evidenced_property_digits
+                    .use_managed_form_in_ordinary_application = Some(evidenced_digit(
+                    name,
+                    &value,
+                    policy.use_managed_form_in_ordinary_application_digit(&value),
+                )?);
+            }
+            "UseOrdinaryFormInManagedApplication" => {
+                let value = simple_text(element)?;
+                properties
+                    .evidenced_property_digits
+                    .use_ordinary_form_in_managed_application = Some(evidenced_digit(
+                    name,
+                    &value,
+                    policy.use_ordinary_form_in_managed_application_digit(&value),
+                )?);
+            }
+            "ModalityUseMode" => {
+                let value = simple_text(element)?;
+                properties.evidenced_property_digits.modality_use_mode = Some(evidenced_digit(
+                    name,
+                    &value,
+                    policy.modality_use_mode_digit(&value),
+                )?);
+            }
+            "InterfaceCompatibilityMode" => {
+                let value = simple_text(element)?;
+                properties
+                    .evidenced_property_digits
+                    .interface_compatibility_mode = Some(evidenced_digit(
+                    name,
+                    &value,
+                    policy.interface_compatibility_mode_digit(&value),
+                )?);
+            }
+            "SynchronousPlatformExtensionAndAddInCallUseMode" => {
+                let value = simple_text(element)?;
+                properties
+                    .evidenced_property_digits
+                    .synchronous_platform_extension_and_add_in_call_use_mode =
+                    Some(evidenced_digit(
+                        name,
+                        &value,
+                        policy
+                            .synchronous_platform_extension_and_add_in_call_use_mode_digit(&value),
+                    )?);
+            }
+
+            // -- properties whose config-body slot this compiler already
+            // fills, corroborated by the evidenced reference tuple --
+            "UsePurposes" => properties.use_platform_application = use_purposes(element)?,
+            "DefaultLanguage" => {
+                let reference = simple_text(element)?;
+                default_language = (!reference.is_empty()).then_some(reference);
+            }
+            "CommonSettingsStorage"
+            | "ReportsUserSettingsStorage"
+            | "ReportsVariantsStorage"
+            | "FormDataSettingsStorage" => {
+                // Tuple fields 22..=25 are all-nil in every evidenced corpus,
+                // so only the empty reference has a proven encoding.
+                reject_unless_empty(name, element)?;
+            }
+            "UsedMobileApplicationFunctionalities" => {
+                reject_unless_evidenced_mobile_default(element)?;
+                properties.enabled_mobile_functionalities = policy
+                    .used_mobile_application_functionalities_default_tuple_ids()
+                    .to_vec();
+            }
+            "DefaultStyle" => {
+                reject_unless_evidenced_default(name, element)?;
+                properties.default_style = None;
+            }
+            "DefaultRoles" => {
+                reject_unless_evidenced_default(name, element)?;
+                properties.default_roles.clear();
+            }
+
+            // -- everything else the evidenced reference covers: the exact
+            // platform default is compilable (its bytes are proven), any
+            // other value is refused because nothing proves where it lives --
+            evidenced if policy.evidenced_default_property(evidenced).is_some() => {
+                reject_unless_evidenced_default(name, element)?;
+            }
+
             unsupported => {
                 return Err(BootstrapCompileError::InvalidConfiguration(format!(
                     "Configuration property `{unsupported}` has no base-free projection"
@@ -949,7 +1062,204 @@ fn project_configuration(
     Ok(ConfigurationProjection {
         properties,
         children,
+        default_language,
     })
+}
+
+/// Turns one proven lexeme into the config-body byte the evidenced value map
+/// assigns it. A lexeme no evidenced corpus ever produced is refused: the
+/// platform's own enumerations are wider than the corpus, and guessing at an
+/// unobserved index would write a byte nothing proves.
+fn evidenced_digit(
+    property: &str,
+    value: &str,
+    digit: Option<u8>,
+) -> Result<u8, BootstrapCompileError> {
+    digit.ok_or_else(
+        || BootstrapCompileError::ConfigurationPropertyValueOutsideEvidencedMap {
+            property: property.to_owned(),
+            value: value.to_owned(),
+        },
+    )
+}
+
+fn property_not_projectable(property: &str, value: String) -> BootstrapCompileError {
+    BootstrapCompileError::ConfigurationPropertyValueNotProjectable {
+        property: property.to_owned(),
+        value,
+    }
+}
+
+/// What one Configuration `<Properties>` element actually carries, without
+/// assuming which of the three shapes it is.
+enum PropertyContent {
+    /// No element children and no non-whitespace text.
+    Empty,
+    /// No element children; the exact concatenated character data.
+    Text(String),
+    /// At least one element child.
+    Markup,
+}
+
+fn property_content(element: &XmlElement) -> PropertyContent {
+    let mut text = String::new();
+    for node in element.children() {
+        match node {
+            XmlNode::Element(_) => return PropertyContent::Markup,
+            XmlNode::Text(value) => text.push_str(value.value()),
+            XmlNode::CData(value) => text.push_str(value.value()),
+            _ => {}
+        }
+    }
+    if text.trim().is_empty() {
+        PropertyContent::Empty
+    } else {
+        PropertyContent::Text(text)
+    }
+}
+
+/// Accepts only a content-free element.
+fn reject_unless_empty(property: &str, element: &XmlElement) -> Result<(), BootstrapCompileError> {
+    match property_content(element) {
+        PropertyContent::Empty => Ok(()),
+        PropertyContent::Text(text) => Err(property_not_projectable(property, text)),
+        PropertyContent::Markup => Err(property_not_projectable(
+            property,
+            "<non-empty reference>".to_owned(),
+        )),
+    }
+}
+
+/// Accepts only the exact platform default the evidenced all-default
+/// reference proves for this property; every other value is a coordinate this
+/// compiler has no evidence for and must refuse rather than approximate.
+fn reject_unless_evidenced_default(
+    property: &str,
+    element: &XmlElement,
+) -> Result<(), BootstrapCompileError> {
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    match policy.evidenced_default_property(property) {
+        Some(ConfigurationPropertyEvidencedDefault::Empty) => {
+            reject_unless_empty(property, element)
+        }
+        Some(ConfigurationPropertyEvidencedDefault::Text(expected)) => {
+            match property_content(element) {
+                PropertyContent::Text(text) if text == expected => Ok(()),
+                PropertyContent::Text(text) => Err(property_not_projectable(property, text)),
+                PropertyContent::Empty => Err(property_not_projectable(property, String::new())),
+                PropertyContent::Markup => Err(property_not_projectable(
+                    property,
+                    "<nested markup>".to_owned(),
+                )),
+            }
+        }
+        Some(ConfigurationPropertyEvidencedDefault::Block(_)) | None => Err(
+            property_not_projectable(property, "<unclassified default>".to_owned()),
+        ),
+    }
+}
+
+/// `<UsedMobileApplicationFunctionalities>` is compilable only as the exact
+/// all-default block: the evidenced reference tuple proves which numeric IDs
+/// that block corresponds to, and nothing proves any other combination.
+fn reject_unless_evidenced_mobile_default(
+    element: &XmlElement,
+) -> Result<(), BootstrapCompileError> {
+    const PROPERTY: &str = "UsedMobileApplicationFunctionalities";
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    let mut actual = Vec::new();
+    for entry in child_elements(element)? {
+        if entry.name().local() != "functionality" {
+            return Err(property_not_projectable(
+                PROPERTY,
+                format!("<unexpected `{}` entry>", entry.name().local()),
+            ));
+        }
+        let name = named_child(entry, "functionality")?
+            .ok_or_else(|| property_not_projectable(PROPERTY, "<entry without a name>".to_owned()))
+            .and_then(simple_text)?;
+        let used = named_child(entry, "use")?
+            .ok_or_else(|| property_not_projectable(PROPERTY, "<entry without a use>".to_owned()))
+            .and_then(simple_text)?;
+        let used = match used.as_str() {
+            "true" => true,
+            "false" => false,
+            other => {
+                return Err(property_not_projectable(
+                    PROPERTY,
+                    format!("<{name} uses `{other}`>"),
+                ));
+            }
+        };
+        actual.push((name, used));
+    }
+    let expected = policy.used_mobile_application_functionality_defaults();
+    if actual.len() != expected.len()
+        || actual
+            .iter()
+            .zip(expected)
+            .any(|((name, used), (expected_name, expected_used))| {
+                name != expected_name || used != expected_used
+            })
+    {
+        return Err(property_not_projectable(
+            PROPERTY,
+            "<block differs from the evidenced platform default>".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// `<UsePurposes>` is compilable only as the single `PlatformApplication`
+/// value every evidenced corpus carries (config-body tuple field 33).
+fn use_purposes(element: &XmlElement) -> Result<bool, BootstrapCompileError> {
+    const PROPERTY: &str = "UsePurposes";
+    let values = child_elements(element)?;
+    let purposes = values
+        .iter()
+        .map(|value| {
+            if value.name().local() != "Value" {
+                return Err(property_not_projectable(
+                    PROPERTY,
+                    format!("<unexpected `{}` entry>", value.name().local()),
+                ));
+            }
+            simple_text(value)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if purposes.len() == 1 && purposes[0] == "PlatformApplication" {
+        Ok(true)
+    } else {
+        Err(property_not_projectable(PROPERTY, purposes.join(", ")))
+    }
+}
+
+/// Resolves a `<DefaultLanguage>` reference against the tree's own inventory.
+/// The evidenced reference tuple carries the referenced Language object's
+/// UUID in config-body tuple field 10 (`dcs-area-style-item-uuid` names
+/// `Language.Русский`, whose object UUID is exactly the value that field
+/// holds), which is what this compiler already emits there.
+fn resolve_configuration_default_language(
+    canonical: &CanonicalConfiguration,
+    reference: &str,
+) -> Result<ObjectUuid, BootstrapCompileError> {
+    let name = reference
+        .strip_prefix("Language.")
+        .ok_or_else(|| property_not_projectable("DefaultLanguage", reference.to_owned()))?;
+    canonical
+        .objects()
+        .iter()
+        .find(|object| {
+            object.owner().is_none()
+                && object.kind().as_str() == "Language"
+                && object_name(object) == Some(name)
+        })
+        .map(|object| object.identity().uuid())
+        .ok_or_else(|| {
+            BootstrapCompileError::InvalidConfiguration(format!(
+                "Configuration DefaultLanguage names `{reference}`, which the source tree does not contain"
+            ))
+        })
 }
 
 fn compatibility_token(value: &str) -> Result<u32, BootstrapCompileError> {
@@ -1132,6 +1442,20 @@ pub enum BootstrapCompileError {
         actual: usize,
     },
     InvalidConfiguration(String),
+    /// A Configuration property whose value differs from the platform default
+    /// the evidenced all-default config-body reference proves, and whose
+    /// non-default form has no corpus-proven config-body coordinate.
+    ConfigurationPropertyValueNotProjectable {
+        property: String,
+        value: String,
+    },
+    /// A Configuration property that *does* have a corpus-proven config-body
+    /// coordinate, carrying a lexeme no evidenced corpus ever mapped to a
+    /// byte at that coordinate.
+    ConfigurationPropertyValueOutsideEvidencedMap {
+        property: String,
+        value: String,
+    },
     DuplicateConfigurationChild {
         family: String,
         name: String,
@@ -1195,6 +1519,12 @@ impl BootstrapCompileError {
             Self::ConfigurationPath { .. } => "configuration_path",
             Self::ConfigurationCount { .. } => "configuration_count",
             Self::InvalidConfiguration(_) => "invalid_configuration",
+            Self::ConfigurationPropertyValueNotProjectable { .. } => {
+                "configuration_property_value_not_projectable"
+            }
+            Self::ConfigurationPropertyValueOutsideEvidencedMap { .. } => {
+                "configuration_property_value_outside_evidenced_map"
+            }
             Self::DuplicateConfigurationChild { .. } => "duplicate_configuration_child",
             Self::ConfigurationInventoryMismatch { .. } => "configuration_inventory_mismatch",
             Self::UnsupportedMetadataFamily { .. } => "unsupported_metadata_family",
@@ -1239,6 +1569,12 @@ impl BootstrapCompileError {
             Self::ConfigurationInventoryMismatch { missing, .. } if !missing.is_empty() => {
                 Some(format!("missing: {}", missing.join(", ")))
             }
+            Self::ConfigurationPropertyValueNotProjectable { property, .. } => {
+                Some(format!("the evidenced platform default for `{property}`"))
+            }
+            Self::ConfigurationPropertyValueOutsideEvidencedMap { property, .. } => {
+                Some(format!("a corpus-evidenced lexeme for `{property}`"))
+            }
             _ => None,
         }
     }
@@ -1253,6 +1589,10 @@ impl BootstrapCompileError {
             }
             Self::AmbiguousSourceRoute { candidates, .. } => Some(candidates.join(", ")),
             Self::UnsupportedMetadataFamily { family, .. } => Some(family.clone()),
+            Self::ConfigurationPropertyValueNotProjectable { value, .. }
+            | Self::ConfigurationPropertyValueOutsideEvidencedMap { value, .. } => {
+                Some(value.clone())
+            }
             _ => None,
         }
     }
@@ -1292,6 +1632,17 @@ impl Display for BootstrapCompileError {
                     "Configuration.xml cannot be bootstrapped: {message}"
                 )
             }
+            Self::ConfigurationPropertyValueNotProjectable { property, value } => write!(
+                formatter,
+                "Configuration property `{property}` carries `{value}`, which is not the platform \
+                 default proven by the evidenced config-body reference and has no proven \
+                 base-free projection"
+            ),
+            Self::ConfigurationPropertyValueOutsideEvidencedMap { property, value } => write!(
+                formatter,
+                "Configuration property `{property}` carries `{value}`, which no evidenced corpus \
+                 maps to a config-body byte at its proven coordinate"
+            ),
             Self::DuplicateConfigurationChild { family, name } => write!(
                 formatter,
                 "Configuration contains duplicate top-level `{family}.{name}`"
@@ -1400,6 +1751,33 @@ mod tests {
     </Properties>
   </CommonModule>
 </MetaDataObject>"#;
+
+    /// The three mini-parity corpora whose retained `Configuration.xml` the
+    /// export direction already reproduces byte-for-byte (commit 8defc4c):
+    /// two all-default trees whose Configuration headers differ in length,
+    /// and one that carries three non-default evidenced enum values.
+    const T1_ALL_DEFAULT_NATIVE_XML_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/native-configuration.xml.b64"
+    );
+    const T2_LONGER_HEADER_NATIVE_XML_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/native-configuration.xml.b64"
+    );
+    const T3_ENUM_GROUP_NATIVE_XML_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/configuration-properties-enum-group/native-configuration.xml.b64"
+    );
+
+    fn native_configuration_xml(encoded: &str) -> String {
+        String::from_utf8(crate::module_blob::decode_base64_mime(encoded.trim()).unwrap()).unwrap()
+    }
+
+    fn project_native(encoded: &str) -> Result<ConfigurationProjection, BootstrapCompileError> {
+        project_native_text(&native_configuration_xml(encoded))
+    }
+
+    fn project_native_text(xml: &str) -> Result<ConfigurationProjection, BootstrapCompileError> {
+        let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        project_configuration(&document, 80_327)
+    }
 
     fn entry(path: &str, bytes: &[u8]) -> SourceEntry {
         SourceEntry::from_bytes(SourcePath::new(path).unwrap(), bytes.to_vec()).unwrap()
@@ -1640,6 +2018,250 @@ mod tests {
             ),
             Err(BootstrapCompileError::InvalidMetadataEnvelope { message, .. })
                 if message.contains("incompatible with selected source profile")
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // REVERSE-GATE-R2-CONFIG-PROJECTION-01
+    // ------------------------------------------------------------------
+
+    /// The load direction must accept, name for name, every Configuration
+    /// `<Properties>` element the platform's own export writes. This is the
+    /// coverage assertion: nothing in a real native document falls through to
+    /// "has no base-free projection" any more.
+    #[test]
+    fn every_native_configuration_property_name_has_a_projection() {
+        for encoded in [
+            T1_ALL_DEFAULT_NATIVE_XML_B64,
+            T2_LONGER_HEADER_NATIVE_XML_B64,
+            T3_ENUM_GROUP_NATIVE_XML_B64,
+        ] {
+            let xml = native_configuration_xml(encoded);
+            let projection = project_native_text(&xml).unwrap();
+            assert_eq!(projection.properties.compatibility_mode, 80_327);
+            assert_eq!(projection.properties.extension_compatibility_mode, 80_327);
+            assert_eq!(
+                projection.default_language.as_deref(),
+                Some("Language.Русский")
+            );
+            assert!(projection.properties.use_platform_application);
+            assert_eq!(
+                projection.properties.enabled_mobile_functionalities,
+                [0, 25]
+            );
+            assert!(projection.properties.default_roles.is_empty());
+            assert_eq!(projection.properties.default_style, None);
+            assert_eq!(projection.properties.settings_storages, [None; 4]);
+        }
+    }
+
+    /// T1 and T2 are all-default; T2 additionally exercises a Configuration
+    /// header of a different length, which is what shifts every proven byte
+    /// offset in the export direction.
+    #[test]
+    fn all_default_corpora_project_to_the_evidenced_default_digits() {
+        for (encoded, name, synonym) in [
+            (T1_ALL_DEFAULT_NATIVE_XML_B64, "DcsEvidence", "DCS evidence"),
+            (
+                T2_LONGER_HEADER_NATIVE_XML_B64,
+                "DcsFilterEvidence",
+                "DCS Filter Evidence",
+            ),
+        ] {
+            let projection = project_native(encoded).unwrap();
+            assert_eq!(projection.properties.name, name);
+            assert_eq!(projection.properties.synonyms.len(), 1);
+            assert_eq!(projection.properties.synonyms[0].content, synonym);
+            let digits = projection.properties.evidenced_property_digits;
+            assert_eq!(digits.include_help_in_contents, Some(b'0'));
+            assert_eq!(digits.use_managed_form_in_ordinary_application, Some(b'0'));
+            assert_eq!(digits.use_ordinary_form_in_managed_application, Some(b'0'));
+            assert_eq!(digits.modality_use_mode, Some(b'2'));
+            assert_eq!(digits.interface_compatibility_mode, Some(b'2'));
+            assert_eq!(
+                digits.synchronous_platform_extension_and_add_in_call_use_mode,
+                Some(b'2')
+            );
+        }
+    }
+
+    /// T3 differs from T1 in exactly three evidenced enum values, so exactly
+    /// three projected digits must differ and nothing else.
+    #[test]
+    fn enum_group_corpus_projects_its_three_non_default_digits() {
+        let base = project_native(T1_ALL_DEFAULT_NATIVE_XML_B64)
+            .unwrap()
+            .properties
+            .evidenced_property_digits;
+        let digits = project_native(T3_ENUM_GROUP_NATIVE_XML_B64)
+            .unwrap()
+            .properties
+            .evidenced_property_digits;
+        assert_eq!(digits.modality_use_mode, Some(b'0'));
+        assert_eq!(digits.interface_compatibility_mode, Some(b'0'));
+        assert_eq!(
+            digits.synchronous_platform_extension_and_add_in_call_use_mode,
+            Some(b'0')
+        );
+        assert_eq!(
+            digits.include_help_in_contents,
+            base.include_help_in_contents
+        );
+        assert_eq!(
+            digits.use_managed_form_in_ordinary_application,
+            base.use_managed_form_in_ordinary_application
+        );
+        assert_eq!(
+            digits.use_ordinary_form_in_managed_application,
+            base.use_ordinary_form_in_managed_application
+        );
+    }
+
+    /// NEGATIVE 1: a property whose value is not the proven platform default
+    /// has no proven config-body coordinate, so it must be refused with a
+    /// typed error rather than compiled approximately or dropped in silence.
+    #[test]
+    fn a_non_default_value_of_an_unproven_property_fails_closed() {
+        for (from, to, property, value) in [
+            (
+                "<DataLockControlMode>Managed</DataLockControlMode>",
+                "<DataLockControlMode>Automatic</DataLockControlMode>",
+                "DataLockControlMode",
+                "Automatic",
+            ),
+            (
+                "<MainClientApplicationWindowMode>Normal</MainClientApplicationWindowMode>",
+                "<MainClientApplicationWindowMode>FullscreenWorkplace</MainClientApplicationWindowMode>",
+                "MainClientApplicationWindowMode",
+                "FullscreenWorkplace",
+            ),
+            (
+                "<ObjectAutonumerationMode>NotAutoFree</ObjectAutonumerationMode>",
+                "<ObjectAutonumerationMode>AutoFree</ObjectAutonumerationMode>",
+                "ObjectAutonumerationMode",
+                "AutoFree",
+            ),
+            (
+                "<DefaultConstantsForm/>",
+                "<DefaultConstantsForm>CommonForm.Constants</DefaultConstantsForm>",
+                "DefaultConstantsForm",
+                "CommonForm.Constants",
+            ),
+            (
+                "<CommonSettingsStorage/>",
+                "<CommonSettingsStorage>SettingsStorage.Common</CommonSettingsStorage>",
+                "CommonSettingsStorage",
+                "SettingsStorage.Common",
+            ),
+            (
+                "<DefaultRoles/>",
+                "<DefaultRoles><xr:Item xsi:type=\"xr:MDObjectRef\">Role.Full</xr:Item></DefaultRoles>",
+                "DefaultRoles",
+                "<non-empty reference>",
+            ),
+        ] {
+            let xml = native_configuration_xml(T1_ALL_DEFAULT_NATIVE_XML_B64).replace(from, to);
+            assert!(
+                xml.contains(to),
+                "the `{property}` negative case must actually patch the native document"
+            );
+            let error = project_native_text(&xml).unwrap_err();
+            match error {
+                BootstrapCompileError::ConfigurationPropertyValueNotProjectable {
+                    property: actual_property,
+                    value: actual_value,
+                } => {
+                    assert_eq!(actual_property, property);
+                    assert_eq!(actual_value, value);
+                }
+                other => panic!("`{property}` produced {other:?} instead of a typed refusal"),
+            }
+        }
+    }
+
+    /// NEGATIVE 2: an evidenced coordinate carrying an enum lexeme that no
+    /// corpus ever mapped to a byte must be refused, not guessed at. The
+    /// platform's enumerations are wider than the evidence.
+    #[test]
+    fn an_evidenced_property_value_outside_the_proven_map_fails_closed() {
+        for (from, to, property, value) in [
+            (
+                "<ModalityUseMode>DontUse</ModalityUseMode>",
+                "<ModalityUseMode>UseWithWarnings</ModalityUseMode>",
+                "ModalityUseMode",
+                "UseWithWarnings",
+            ),
+            (
+                "<InterfaceCompatibilityMode>TaxiEnableVersion8_2</InterfaceCompatibilityMode>",
+                "<InterfaceCompatibilityMode>Taxi</InterfaceCompatibilityMode>",
+                "InterfaceCompatibilityMode",
+                "Taxi",
+            ),
+            (
+                "<SynchronousPlatformExtensionAndAddInCallUseMode>DontUse</SynchronousPlatformExtensionAndAddInCallUseMode>",
+                "<SynchronousPlatformExtensionAndAddInCallUseMode>UseWithWarnings</SynchronousPlatformExtensionAndAddInCallUseMode>",
+                "SynchronousPlatformExtensionAndAddInCallUseMode",
+                "UseWithWarnings",
+            ),
+            (
+                "<IncludeHelpInContents>false</IncludeHelpInContents>",
+                "<IncludeHelpInContents>FALSE</IncludeHelpInContents>",
+                "IncludeHelpInContents",
+                "FALSE",
+            ),
+        ] {
+            let xml = native_configuration_xml(T1_ALL_DEFAULT_NATIVE_XML_B64).replace(from, to);
+            assert!(xml.contains(to));
+            let error = project_native_text(&xml).unwrap_err();
+            match error {
+                BootstrapCompileError::ConfigurationPropertyValueOutsideEvidencedMap {
+                    property: actual_property,
+                    value: actual_value,
+                } => {
+                    assert_eq!(actual_property, property);
+                    assert_eq!(actual_value, value);
+                }
+                other => panic!("`{property}` produced {other:?} instead of a typed refusal"),
+            }
+        }
+    }
+
+    /// NEGATIVE 3: the mobile-functionality block is compilable only as the
+    /// exact evidenced default; flipping one entry must fail closed.
+    #[test]
+    fn a_modified_mobile_functionality_block_fails_closed() {
+        let xml = native_configuration_xml(T1_ALL_DEFAULT_NATIVE_XML_B64).replace(
+            "<app:functionality>Location</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>",
+            "<app:functionality>Location</app:functionality>\r\n\t\t\t\t\t<app:use>true</app:use>",
+        );
+        assert!(matches!(
+            project_native_text(&xml).unwrap_err(),
+            BootstrapCompileError::ConfigurationPropertyValueNotProjectable { property, .. }
+                if property == "UsedMobileApplicationFunctionalities"
+        ));
+
+        let xml = native_configuration_xml(T1_ALL_DEFAULT_NATIVE_XML_B64).replace(
+            "<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>",
+            "<v8:Value xsi:type=\"app:ApplicationUsePurpose\">MobileDevice</v8:Value>",
+        );
+        assert!(matches!(
+            project_native_text(&xml).unwrap_err(),
+            BootstrapCompileError::ConfigurationPropertyValueNotProjectable { property, value }
+                if property == "UsePurposes" && value == "MobileDevice"
+        ));
+    }
+
+    /// An element name the platform never writes is still refused by the
+    /// original catch-all, so widening the projection did not widen what the
+    /// compiler silently tolerates.
+    #[test]
+    fn an_unknown_property_name_is_still_refused() {
+        let xml = native_configuration_xml(T1_ALL_DEFAULT_NATIVE_XML_B64)
+            .replace("<DefaultConstantsForm/>", "<FutureProperty/>");
+        assert!(matches!(
+            project_native_text(&xml).unwrap_err(),
+            BootstrapCompileError::InvalidConfiguration(message)
+                if message.contains("`FutureProperty` has no base-free projection")
         ));
     }
 }
