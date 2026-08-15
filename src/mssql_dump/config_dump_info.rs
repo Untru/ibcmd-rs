@@ -78,13 +78,35 @@ pub(super) struct ConfigDumpInfoInventory<'a> {
     pub(super) configuration_module_groups: &'a BTreeSet<String>,
 }
 
+/// How [`write_config_dump_info`] responds when the decoded inventory cannot
+/// canonically route every versioned entry.
+///
+/// A full MSSQL `Config`-table dump decodes every metadata text, so a route
+/// that fails to resolve there is an internal inconsistency and must fail
+/// the export ([`Self::Fail`]). A CF storage image, by contrast, is allowed
+/// to be only partially *recognized* by this exporter -- unrecognized
+/// records are already disclosed as `opaque` in the export report, and every
+/// unroutable entry stems from exactly such a record -- so a
+/// ConfigDumpInfo.xml that cannot be complete is skipped rather than
+/// half-written or turned into a whole-export failure ([`Self::Skip`]).
+/// Structural corruption (an undecodable/mismatched `versions` blob,
+/// duplicate metadata names) stays a hard error under both policies.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ConfigDumpInfoPartialInventoryPolicy {
+    Fail,
+    Skip,
+}
+
+/// Returns whether `ConfigDumpInfo.xml` was written (`false` = skipped under
+/// [`ConfigDumpInfoPartialInventoryPolicy::Skip`]).
 pub(super) fn write_config_dump_info(
     output_dir: &Path,
     source_version: InfobaseConfigSourceVersion,
     versions_blob: &[u8],
     versions_blob_origin: VersionsBlobOrigin,
+    partial_inventory_policy: ConfigDumpInfoPartialInventoryPolicy,
     inventory: ConfigDumpInfoInventory<'_>,
-) -> Result<()> {
+) -> Result<bool> {
     let versions = parse_versions_blob(versions_blob, versions_blob_origin)?;
     validate_versions_inventory(&versions, inventory.file_names)?;
 
@@ -179,6 +201,9 @@ pub(super) fn write_config_dump_info(
         });
     }
     if !unresolved_top_routes.is_empty() {
+        if partial_inventory_policy == ConfigDumpInfoPartialInventoryPolicy::Skip {
+            return Ok(false);
+        }
         let unresolved = unresolved_top_routes
             .iter()
             .take(64)
@@ -205,7 +230,8 @@ pub(super) fn write_config_dump_info(
     metadata.sort_by(|left, right| left.name.cmp(&right.name));
     let xml = format_config_dump_info_xml(source_version, &metadata);
     let path = output_dir.join(CONFIG_DUMP_INFO_FILE_NAME);
-    fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))
+    fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(true)
 }
 
 fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<ConfigVersionEntry>> {

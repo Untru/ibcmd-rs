@@ -2856,16 +2856,15 @@ fn dump_table_rows_with_options_mode(
     );
 
     if generate_config_dump_info {
-        // Fail-closed: a caller that requests ConfigDumpInfo.xml but whose
-        // rows have no (or a malformed) `versions` service entry gets a
-        // typed error, not a silently-skipped file — mirrors the streamed
-        // MSSQL path's `ok_or_else` (mod.rs, `dump_table_rows_streamed`), and
-        // matches this codebase's fail-closed-decoder convention throughout
-        // `mssql_dump`. A CF archive whose image represents a full, current
-        // configuration snapshot always carries this record when produced by
-        // the real 1C compiler; its absence means the archive is
-        // incomplete/corrupted, which should abort the whole export rather
-        // than emit a source tree that's silently missing ConfigDumpInfo.xml.
+        // Every real compiler-produced full-snapshot CF carries a `versions`
+        // service record (confirmed across the T1/T2/T3 native-evidence
+        // corpora); a storage image without one is not presenting a
+        // versioned snapshot inventory at all, so ConfigDumpInfo.xml is
+        // simply not applicable rather than an error -- clean-room and
+        // partial images are first-class inputs for this offline exporter.
+        // A `versions` record that IS present but structurally corrupt
+        // (multipart, duplicated, undecodable) still fails the export:
+        // fail-closed applies to content we claim to decode.
         let mut versions_blob: Option<Vec<u8>> = None;
         for row in &rows {
             if row.file_name != "versions" {
@@ -2882,8 +2881,6 @@ fn dump_table_rows_with_options_mode(
                     .with_context(|| "Config versions row is not valid hex".to_string())?,
             );
         }
-        let versions_blob =
-            versions_blob.ok_or_else(|| anyhow!("full Config export has no versions row"))?;
 
         let mut emitted_source_asset_paths = BTreeMap::<String, PathBuf>::new();
         for manifest in &manifests {
@@ -2906,25 +2903,29 @@ fn dump_table_rows_with_options_mode(
         // callers are the CF export path (`export_storage_image_to_source`)
         // and test helpers built the same way — never the streamed MSSQL SQL
         // path (that one calls `write_config_dump_info` directly from
-        // `dump_table_rows_streamed` with `VersionsBlobOrigin::MssqlConfigTable`).
-        write_config_dump_info(
-            output_dir,
-            source_version,
-            &versions_blob,
-            VersionsBlobOrigin::CfStorageImage,
-            ConfigDumpInfoInventory {
-                file_names: &file_names_owned,
-                metadata_texts: &metadata_audit.rows,
-                object_refs: &object_refs,
-                form_refs: &form_refs,
-                template_refs: &template_refs,
-                subsystem_refs: &subsystem_refs,
-                module_text_paths: &module_text_paths,
-                source_assets: &source_assets,
-                emitted_source_asset_paths: &emitted_source_asset_paths,
-                configuration_module_groups: &configuration_module_groups,
-            },
-        )?;
+        // `dump_table_rows_streamed` with `VersionsBlobOrigin::MssqlConfigTable`
+        // and the `Fail` partial-inventory policy).
+        if let Some(versions_blob) = versions_blob {
+            write_config_dump_info(
+                output_dir,
+                source_version,
+                &versions_blob,
+                VersionsBlobOrigin::CfStorageImage,
+                ConfigDumpInfoPartialInventoryPolicy::Skip,
+                ConfigDumpInfoInventory {
+                    file_names: &file_names_owned,
+                    metadata_texts: &metadata_audit.rows,
+                    object_refs: &object_refs,
+                    form_refs: &form_refs,
+                    template_refs: &template_refs,
+                    subsystem_refs: &subsystem_refs,
+                    module_text_paths: &module_text_paths,
+                    source_assets: &source_assets,
+                    emitted_source_asset_paths: &emitted_source_asset_paths,
+                    configuration_module_groups: &configuration_module_groups,
+                },
+            )?;
+        }
     }
 
     let metadata_root_inventory = if extract_metadata_xml {
@@ -3981,6 +3982,7 @@ fn dump_table_rows_streamed(
                 .as_deref()
                 .ok_or_else(|| anyhow!("full Config export has no versions row"))?,
             VersionsBlobOrigin::MssqlConfigTable,
+            ConfigDumpInfoPartialInventoryPolicy::Fail,
             ConfigDumpInfoInventory {
                 file_names: &file_names,
                 metadata_texts: &index_metadata_texts,
