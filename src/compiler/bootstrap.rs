@@ -19,7 +19,10 @@ use ibcmd_core::{
     identity::ObjectUuid,
     model::{CanonicalConfiguration, CanonicalObject},
     profile::EffectiveProfile,
-    storage::{StoragePatch, StoragePatchEntry},
+    storage::{
+        MultipartIdentity, StoragePatch, StoragePatchEntry, StoragePatchOutcome,
+        StoragePatchTarget, StorageProvenance,
+    },
     validate::{ValidatedConfiguration, validate_configuration},
     value::CanonicalValueKind,
     version::XmlDialect,
@@ -34,6 +37,7 @@ use ibcmd_xml::{
 
 use super::{
     CompileAxes,
+    bodies::form::{ManagedFormCodecProfile, compile_managed_form},
     families::{
         assets::{
             AssetCodecProfile, SourceAssetCodec, SourceAssetPayload, SourceAssetRegistry,
@@ -47,6 +51,9 @@ use super::{
         document::{DocumentMetadataProfile, compile_document_metadata},
         r#enum::{EnumMetadataProfile, compile_enum_metadata},
         exchange_plan::{ExchangePlanMetadataProfile, compile_exchange_plan_metadata},
+        form::{
+            FORM_FAMILY, FormMetadataProfile, compile_form_metadata, decode_form_metadata_source,
+        },
         modules::{CommonModuleProfile, compile_common_module_metadata},
         recalculation::{RecalculationMetadataProfile, compile_recalculation_metadata},
         registers::{RegisterFamily, RegisterMetadataProfile, compile_register_metadata},
@@ -80,6 +87,18 @@ const EXPORT_MANIFEST_ROOT: &str = "ConfigDumpInfo";
 /// (`ibcmd-xml/src/dialect.rs`,
 /// `repository_xcf_roots_are_recognized_but_dumpinfo_is_not_conflated`).
 const EXPORT_MANIFEST_NAMESPACE: &str = "http://v8.1c.ru/8.3/xcf/dumpinfo";
+
+/// Owner-relative directory prefix holding one managed form's two documents.
+const FORM_SOURCE_DIRECTORY: &str = "Forms/";
+/// Owner-relative path of the form-body structure document.
+const FORM_BODY_XML: &str = "Ext/Form.xml";
+/// Owner-relative path of the form-body module, which the platform omits when
+/// the form has no module at all.
+const FORM_BODY_MODULE: &str = "Ext/Form/Module.bsl";
+/// Storage suffix of the managed-form body row, read off our own `cf export`
+/// report: key `<uuid>.0` produces exactly `Ext/Form/Module.bsl` and
+/// `Ext/Form.xml`, while key `<uuid>` produces `Forms/<Name>.xml`.
+const FORM_BODY_SUFFIX: &str = ".0";
 
 /// Complete compiler result.  The patch owns every payload and can cross the
 /// root-crate/CF-crate boundary without retaining XML documents.
@@ -152,6 +171,31 @@ struct AssetSource {
     route: &'static SourceAssetRoute,
 }
 
+/// One `Forms/<Name>.xml` document held back until every possible owner
+/// document has been decoded.
+#[derive(Clone, Debug)]
+struct PendingFormSource {
+    source_index: usize,
+    path: String,
+    object_path: ObjectPath,
+}
+
+/// The two source files a managed-form body row is compiled from.
+#[derive(Clone, Debug)]
+struct FormBodySource {
+    form_uuid: ObjectUuid,
+    /// Tree path of `Ext/Form.xml`, used as the address of any body refusal.
+    form_xml_path: String,
+    form_xml_index: usize,
+    module_index: Option<usize>,
+}
+
+impl FormBodySource {
+    const fn consumed_files(&self) -> usize {
+        1 + if self.module_index.is_some() { 1 } else { 0 }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct ConfigurationChildReference {
     family: String,
@@ -208,6 +252,10 @@ pub fn compile_bootstrap_source_tree(
     let mut metadata_indexes = BTreeSet::<usize>::new();
     let mut non_source_indexes = BTreeSet::<usize>::new();
     let mut configuration = None::<ConfigurationProjection>;
+    // Managed forms are decoded after this loop: a `Forms/<Name>.xml` document
+    // never names its owning metadata object, so the ownership edge can only be
+    // read off the tree layout once every owner document has been seen.
+    let mut form_sources = Vec::<PendingFormSource>::new();
 
     for (source_index, source) in tree.entries().iter().enumerate() {
         if !source
@@ -253,6 +301,15 @@ pub fn compile_bootstrap_source_tree(
             })?),
         ])
         .expect("bounded source-tree index makes a bounded canonical path");
+
+        if family == FORM_FAMILY {
+            form_sources.push(PendingFormSource {
+                source_index,
+                path: source.path().as_str().to_owned(),
+                object_path,
+            });
+            continue;
+        }
 
         let envelope = if family == "Configuration" {
             if source.kind() != SourceKind::ConfigurationRoot {
@@ -303,6 +360,48 @@ pub fn compile_bootstrap_source_tree(
         objects.extend(envelope.descendants().iter().cloned());
     }
 
+    // Managed-form metadata, resolved against the owners collected above.
+    for pending in &form_sources {
+        let source = &tree.entries()[pending.source_index];
+        let document = XmlReader::from_slice(source.bytes()).map_err(|error| {
+            BootstrapCompileError::InvalidXml {
+                path: pending.path.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        let (owner_uuid, declared_name) = resolve_form_owner(&pending.path, &metadata_sources)?;
+        let object = decode_form_metadata_source(
+            &document,
+            &source_profile,
+            pending.object_path.clone(),
+            owner_uuid,
+        )
+        .map_err(|error| BootstrapCompileError::InvalidMetadataEnvelope {
+            path: pending.path.clone(),
+            message: error.to_string(),
+        })?;
+        let name =
+            object_name(&object).ok_or_else(|| BootstrapCompileError::InvalidMetadataEnvelope {
+                path: pending.path.clone(),
+                message: "Form has no textual Name".to_owned(),
+            })?;
+        if name != declared_name {
+            return Err(BootstrapCompileError::FormNameMismatch {
+                path: pending.path.clone(),
+                expected: declared_name,
+                actual: name.to_owned(),
+            });
+        }
+        metadata_sources.push(MetadataSource {
+            owner_directory: owner_directory(&pending.path, FORM_FAMILY),
+            path: pending.path.clone(),
+            family: FORM_FAMILY.to_owned(),
+            uuid: object.identity().uuid(),
+        });
+        metadata_indexes.insert(pending.source_index);
+        objects.push(object);
+    }
+
     let configuration_count = metadata_sources
         .iter()
         .filter(|source| source.family == "Configuration")
@@ -330,6 +429,11 @@ pub fn compile_bootstrap_source_tree(
     // accounted for; only the remainder may claim a source-asset route.
     let mut consumed_indexes = metadata_indexes;
     consumed_indexes.extend(non_source_indexes.iter().copied());
+    // A managed-form body is one storage row fed by two source files, so it
+    // cannot be expressed as a one-file source-asset route.  Claim those files
+    // before the router runs, so the router keeps refusing everything it does
+    // not recognise instead of silently absorbing a form file.
+    let form_bodies = resolve_form_bodies(tree, &metadata_sources, &mut consumed_indexes)?;
     let assets = resolve_assets(tree, &metadata_sources, &consumed_indexes)?;
     let mut suffixes = BTreeMap::<ObjectUuid, Vec<StorageSuffix>>::new();
     for asset in &assets {
@@ -338,14 +442,22 @@ pub fn compile_bootstrap_source_tree(
                 .map_err(|source| BootstrapCompileError::Graph(source.to_string()))?,
         );
     }
+    for body in &form_bodies {
+        suffixes.entry(body.form_uuid).or_default().push(
+            StorageSuffix::new(FORM_BODY_SUFFIX)
+                .map_err(|source| BootstrapCompileError::Graph(source.to_string()))?,
+        );
+    }
     for values in suffixes.values_mut() {
         values.sort();
         values.dedup();
     }
+    // Forms are the one owned family that still occupies its own storage rows,
+    // so ownership alone no longer decides who gets a route.
     let routes = identities
         .objects()
         .iter()
-        .filter(|identity| identity.owner().is_none())
+        .filter(|identity| identity.owner().is_none() || identity.kind().as_str() == FORM_FAMILY)
         .map(|identity| {
             ObjectStorageRoute::new(
                 identity.uuid(),
@@ -433,6 +545,16 @@ pub fn compile_bootstrap_source_tree(
         })?;
         insert_compiled(&mut compiled, entry)?;
     }
+    if !form_bodies.is_empty() {
+        let selected = ManagedFormCodecProfile::from_effective(target_profile)
+            .map_err(|error| profile_error("managed form body", error))?;
+        let suffix = StorageSuffix::new(FORM_BODY_SUFFIX)
+            .map_err(|source| BootstrapCompileError::Graph(source.to_string()))?;
+        for body in &form_bodies {
+            let entry = compile_form_body(tree, &graph, body, &suffix, &selected)?;
+            insert_compiled(&mut compiled, entry)?;
+        }
+    }
 
     let without_versions = StoragePatch::new(compiled.into_values().collect())
         .map_err(|source| BootstrapCompileError::Patch(source.to_string()))?;
@@ -463,7 +585,14 @@ pub fn compile_bootstrap_source_tree(
         storage_profile,
         source_files: tree.entries().len(),
         metadata_files: metadata_sources.len(),
-        asset_files: assets.len(),
+        // Form-body files are payload sources consumed into a storage row just
+        // like routed assets are, so they stay inside `asset_files` and keep
+        // `source_files == metadata + asset + non_source` true.
+        asset_files: assets.len()
+            + form_bodies
+                .iter()
+                .map(FormBodySource::consumed_files)
+                .sum::<usize>(),
         non_source_files: non_source_indexes.len(),
         patch,
     })
@@ -630,6 +759,7 @@ fn compile_metadata(
         "CommonModule" => {
             select_compile!(CommonModuleProfile, compile_common_module_metadata)
         }
+        FORM_FAMILY => select_compile!(FormMetadataProfile, compile_form_metadata),
         simple => {
             if let Some(simple) = simple_family(simple) {
                 let selected = SimpleMetadataProfile::from_effective_for_family(effective, simple)
@@ -777,6 +907,154 @@ fn resolve_assets(
         left_key.cmp(&right_key)
     });
     Ok(assets)
+}
+
+/// Resolves the metadata object that owns one `Forms/<Name>.xml` document.
+///
+/// The document itself carries no owner reference — in a native `config export`
+/// tree the edge exists only as the file's position under the owner's directory
+/// — so it is read from the tree layout and must resolve to exactly one owner.
+/// Returning the name segment as well lets the caller prove the document's own
+/// `Name` and the file name it is filed under agree instead of trusting either
+/// one alone.
+fn resolve_form_owner(
+    path: &str,
+    metadata: &[MetadataSource],
+) -> Result<(ObjectUuid, String), BootstrapCompileError> {
+    let mut matches = Vec::<(ObjectUuid, String)>::new();
+    for owner in metadata {
+        // A form never owns a form; skipping them keeps a nested `Forms/`
+        // directory from resolving to two owners at once.
+        if owner.family == FORM_FAMILY {
+            continue;
+        }
+        let Some(relative) = relative_to_owner(path, &owner.owner_directory) else {
+            continue;
+        };
+        let Some(name) = relative
+            .strip_prefix(FORM_SOURCE_DIRECTORY)
+            .and_then(|rest| rest.strip_suffix(".xml"))
+        else {
+            continue;
+        };
+        if name.is_empty() || name.contains('/') {
+            continue;
+        }
+        matches.push((owner.uuid, name.to_owned()));
+    }
+    matches.sort();
+    matches.dedup();
+    match matches.as_slice() {
+        [] => Err(BootstrapCompileError::UnownedForm {
+            path: path.to_owned(),
+        }),
+        [single] => Ok(single.clone()),
+        _ => Err(BootstrapCompileError::AmbiguousSourceRoute {
+            path: path.to_owned(),
+            candidates: matches
+                .iter()
+                .map(|(uuid, name)| format!("{uuid}:{name}"))
+                .collect(),
+        }),
+    }
+}
+
+/// Claims the two source files behind each managed-form body row.
+///
+/// `Ext/Form.xml` is mandatory: a form metadata record without a body row would
+/// leave `<uuid>.0` missing from the storage inventory, and inventing an empty
+/// body is exactly the silent guess this compiler refuses to make.
+/// `Ext/Form/Module.bsl` is optional because the platform omits it for a form
+/// that has no module.
+fn resolve_form_bodies(
+    tree: &SourceTree,
+    metadata: &[MetadataSource],
+    consumed_indexes: &mut BTreeSet<usize>,
+) -> Result<Vec<FormBodySource>, BootstrapCompileError> {
+    let index_by_path = tree
+        .entries()
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.path().as_str(), index))
+        .collect::<BTreeMap<_, _>>();
+    let mut bodies = Vec::new();
+    for owner in metadata
+        .iter()
+        .filter(|source| source.family == FORM_FAMILY)
+    {
+        let form_xml_path = format!("{}/{FORM_BODY_XML}", owner.owner_directory);
+        let module_path = format!("{}/{FORM_BODY_MODULE}", owner.owner_directory);
+        let form_xml_index = index_by_path.get(form_xml_path.as_str()).copied().ok_or(
+            BootstrapCompileError::MissingFormBody {
+                path: owner.path.clone(),
+                expected: form_xml_path.clone(),
+            },
+        )?;
+        let module_index = index_by_path.get(module_path.as_str()).copied();
+        consumed_indexes.insert(form_xml_index);
+        if let Some(index) = module_index {
+            consumed_indexes.insert(index);
+        }
+        bodies.push(FormBodySource {
+            form_uuid: owner.uuid,
+            form_xml_path,
+            form_xml_index,
+            module_index,
+        });
+    }
+    Ok(bodies)
+}
+
+/// Compiles one managed-form body row through the existing base-free packer.
+///
+/// `crate::compiler::bodies::form` holds the only managed-form compiler in this
+/// build; this function supplies it with the two source files and turns its
+/// refusals into an addressed bootstrap blocker rather than a second packer.
+fn compile_form_body(
+    tree: &SourceTree,
+    graph: &BootstrapGraph,
+    body: &FormBodySource,
+    suffix: &StorageSuffix,
+    profile: &ManagedFormCodecProfile,
+) -> Result<StoragePatchEntry, BootstrapCompileError> {
+    let form_xml = tree.entries()[body.form_xml_index].bytes();
+    let module = body.module_index.map(|index| tree.entries()[index].bytes());
+    let bytes = compile_managed_form(profile, form_xml, module, None).map_err(|error| {
+        BootstrapCompileError::FormBody {
+            path: body.form_xml_path.clone(),
+            message: error.to_string(),
+        }
+    })?;
+    let target = graph.object_entry(body.form_uuid, suffix).ok_or_else(|| {
+        BootstrapCompileError::FormBody {
+            path: body.form_xml_path.clone(),
+            message: format!(
+                "bootstrap graph has no `{}{FORM_BODY_SUFFIX}` row",
+                body.form_uuid
+            ),
+        }
+    })?;
+    let provenance = StorageProvenance::new(&format!(
+        "bootstrap:{}:body:Form:{FORM_BODY_XML}",
+        profile.profile_id()
+    ))
+    .map_err(|error| BootstrapCompileError::FormBody {
+        path: body.form_xml_path.clone(),
+        message: error.to_string(),
+    })?;
+    let outcome =
+        StoragePatchOutcome::compiled(bytes).map_err(|error| BootstrapCompileError::FormBody {
+            path: body.form_xml_path.clone(),
+            message: error.to_string(),
+        })?;
+    Ok(StoragePatchEntry::new(
+        StoragePatchTarget::new(
+            target.key().clone(),
+            MultipartIdentity::single(),
+            provenance,
+        ),
+        outcome,
+    ))
 }
 
 fn owner_directory(path: &str, family: &str) -> String {
@@ -1468,6 +1746,26 @@ pub enum BootstrapCompileError {
         path: String,
         family: String,
     },
+    /// A `Forms/<Name>.xml` document sits where no metadata object owns it.
+    UnownedForm {
+        path: String,
+    },
+    /// A form's own `Name` disagrees with the file name the tree filed it under.
+    FormNameMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
+    /// A form metadata document has no body document beside it.
+    MissingFormBody {
+        path: String,
+        expected: String,
+    },
+    /// The base-free managed-form packer refused this form's body.
+    FormBody {
+        path: String,
+        message: String,
+    },
     UnconsumedSource {
         path: String,
         kind: SourceKind,
@@ -1528,6 +1826,10 @@ impl BootstrapCompileError {
             Self::DuplicateConfigurationChild { .. } => "duplicate_configuration_child",
             Self::ConfigurationInventoryMismatch { .. } => "configuration_inventory_mismatch",
             Self::UnsupportedMetadataFamily { .. } => "unsupported_metadata_family",
+            Self::UnownedForm { .. } => "form_owner_unresolved",
+            Self::FormNameMismatch { .. } => "form_name_mismatch",
+            Self::MissingFormBody { .. } => "form_body_missing",
+            Self::FormBody { .. } => "form_body_compile_failed",
             Self::UnconsumedSource { .. } => "unconsumed_source",
             Self::AmbiguousSourceRoute { .. } => "ambiguous_source_route",
             Self::UnsupportedAssetCodec { .. } => "unsupported_asset_codec",
@@ -1552,6 +1854,10 @@ impl BootstrapCompileError {
             | Self::NonSourceDocumentMismatch { path, .. }
             | Self::ConfigurationPath { path }
             | Self::UnsupportedMetadataFamily { path, .. }
+            | Self::UnownedForm { path }
+            | Self::FormNameMismatch { path, .. }
+            | Self::MissingFormBody { path, .. }
+            | Self::FormBody { path, .. }
             | Self::UnconsumedSource { path, .. }
             | Self::AmbiguousSourceRoute { path, .. }
             | Self::UnsupportedAssetCodec { path, .. }
@@ -1575,6 +1881,9 @@ impl BootstrapCompileError {
             Self::ConfigurationPropertyValueOutsideEvidencedMap { property, .. } => {
                 Some(format!("a corpus-evidenced lexeme for `{property}`"))
             }
+            Self::FormNameMismatch { expected, .. } | Self::MissingFormBody { expected, .. } => {
+                Some(expected.clone())
+            }
             _ => None,
         }
     }
@@ -1593,6 +1902,8 @@ impl BootstrapCompileError {
             | Self::ConfigurationPropertyValueOutsideEvidencedMap { value, .. } => {
                 Some(value.clone())
             }
+            Self::FormNameMismatch { actual, .. } => Some(actual.clone()),
+            Self::FormBody { message, .. } => Some(message.clone()),
             _ => None,
         }
     }
@@ -1656,6 +1967,26 @@ impl Display for BootstrapCompileError {
             Self::UnsupportedMetadataFamily { path, family } => write!(
                 formatter,
                 "metadata source `{path}` uses unsupported family `{family}`"
+            ),
+            Self::UnownedForm { path } => write!(
+                formatter,
+                "Form source `{path}` is not filed under any metadata object's `Forms/` directory"
+            ),
+            Self::FormNameMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "Form source `{path}` is filed as `{expected}` but declares Name `{actual}`"
+            ),
+            Self::MissingFormBody { path, expected } => write!(
+                formatter,
+                "Form source `{path}` has no body document `{expected}`"
+            ),
+            Self::FormBody { path, message } => write!(
+                formatter,
+                "Form body `{path}` cannot be compiled base-free: {message}"
             ),
             Self::UnconsumedSource { path, kind } => write!(
                 formatter,
@@ -2006,6 +2337,229 @@ mod tests {
             ),
             Err(BootstrapCompileError::InvalidConfiguration(_))
         ));
+    }
+
+    // ---------------------------------------------------------------------
+    // Managed forms
+    // ---------------------------------------------------------------------
+
+    const FORM_CONFIGURATION: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+  <Configuration uuid="10000000-0000-4000-8000-000000000001">
+    <Properties>
+      <Name>BootstrapFixture</Name>
+      <Synonym><v8:item><v8:lang>en</v8:lang><v8:content>Bootstrap fixture</v8:content></v8:item></Synonym>
+      <Comment>Clean-room full source tree</Comment>
+      <DefaultRunMode>ManagedApplication</DefaultRunMode>
+      <ScriptVariant>English</ScriptVariant>
+      <CompatibilityMode>Version8_3_24</CompatibilityMode>
+    </Properties>
+    <ChildObjects><SettingsStorage>Holder</SettingsStorage></ChildObjects>
+  </Configuration>
+</MetaDataObject>"#;
+
+    const FORM_OWNER: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+  <SettingsStorage uuid="20000000-0000-4000-8000-000000000001">
+    <InternalInfo>
+      <xr:GeneratedType name="SettingsStorageManager.Holder" category="Manager">
+        <xr:TypeId>21000000-0000-4000-8000-000000000001</xr:TypeId>
+        <xr:ValueId>22000000-0000-4000-8000-000000000001</xr:ValueId>
+      </xr:GeneratedType>
+    </InternalInfo>
+    <Properties>
+      <Name>Holder</Name><Synonym/><Comment/>
+      <DefaultSaveForm/><DefaultLoadForm/><AuxiliarySaveForm/><AuxiliaryLoadForm/>
+    </Properties>
+    <ChildObjects><Form>SaveForm</Form></ChildObjects>
+  </SettingsStorage>
+</MetaDataObject>"#;
+
+    /// Same property inventory as every retained `Forms/<Name>.xml`.
+    const FORM_METADATA: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+  <Form uuid="30000000-0000-4000-8000-000000000001">
+    <Properties>
+      <Name>SaveForm</Name>
+      <Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>SaveForm</v8:content></v8:item></Synonym>
+      <Comment/>
+      <FormType>Managed</FormType>
+      <IncludeHelpInContents>false</IncludeHelpInContents>
+      <UsePurposes>
+        <v8:Value xsi:type="app:ApplicationUsePurpose">PlatformApplication</v8:Value>
+        <v8:Value xsi:type="app:ApplicationUsePurpose">MobilePlatformApplication</v8:Value>
+      </UsePurposes>
+    </Properties>
+  </Form>
+</MetaDataObject>"#;
+
+    /// Deliberately inside the base-free packer's evidenced marker-50 cohort,
+    /// so this test measures the routing rather than the packer's coverage.
+    const FORM_BODY: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<ChildItems>
+		<UsualGroup name="Main" id="10">
+			<ChildItems>
+				<InputField name="Description" id="12"><DataPath>Description</DataPath></InputField>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>"#;
+
+    const FORM_MODULE: &[u8] = b"&AtClient\r\nProcedure Refresh(Command)\r\nEndProcedure";
+
+    fn form_tree_entries() -> Vec<SourceEntry> {
+        vec![
+            entry("Configuration.xml", FORM_CONFIGURATION.as_bytes()),
+            entry("SettingsStorages/Holder.xml", FORM_OWNER.as_bytes()),
+            entry(
+                "SettingsStorages/Holder/Forms/SaveForm.xml",
+                FORM_METADATA.as_bytes(),
+            ),
+            entry(
+                "SettingsStorages/Holder/Forms/SaveForm/Ext/Form.xml",
+                FORM_BODY.as_bytes(),
+            ),
+            entry(
+                "SettingsStorages/Holder/Forms/SaveForm/Ext/Form/Module.bsl",
+                FORM_MODULE,
+            ),
+        ]
+    }
+
+    fn compile_form_tree(
+        entries: Vec<SourceEntry>,
+    ) -> Result<BootstrapCompilation, BootstrapCompileError> {
+        compile_bootstrap_source_tree(
+            &SourceTree::new(entries).unwrap(),
+            XmlDialect::parse("2.20").unwrap(),
+            &target_profile(),
+        )
+    }
+
+    #[test]
+    fn managed_form_occupies_its_own_metadata_and_body_rows() {
+        let compilation = compile_form_tree(form_tree_entries()).unwrap();
+        assert_eq!(compilation.source_files(), 5);
+        assert_eq!(compilation.metadata_files(), 3);
+        // `Ext/Form.xml` plus `Ext/Form/Module.bsl` feed the single body row.
+        assert_eq!(compilation.asset_files(), 2);
+        assert_eq!(
+            compilation
+                .patch()
+                .entries()
+                .iter()
+                .map(|entry| entry.target().key().as_str())
+                .collect::<Vec<_>>(),
+            [
+                "10000000-0000-4000-8000-000000000001",
+                "20000000-0000-4000-8000-000000000001",
+                "30000000-0000-4000-8000-000000000001",
+                "30000000-0000-4000-8000-000000000001.0",
+                "root",
+                "version",
+                "versions",
+            ]
+        );
+        compilation.patch().preflight().unwrap();
+
+        // The body row really is the base-free managed-form packer's output.
+        let body = compilation
+            .patch()
+            .entries()
+            .iter()
+            .find(|entry| entry.target().key().as_str() == "30000000-0000-4000-8000-000000000001.0")
+            .unwrap();
+        let bytes = body.outcome().compiled_payload().unwrap().bytes();
+        let profile = ManagedFormCodecProfile::from_effective(&target_profile()).unwrap();
+        let decoded = crate::compiler::bodies::form::decode_managed_form(&profile, bytes).unwrap();
+        assert_eq!(
+            decoded.module_text(),
+            std::str::from_utf8(FORM_MODULE).unwrap()
+        );
+    }
+
+    #[test]
+    fn form_without_a_body_document_is_a_named_refusal() {
+        let entries = form_tree_entries()
+            .into_iter()
+            .filter(|entry| {
+                entry.path().as_str() != "SettingsStorages/Holder/Forms/SaveForm/Ext/Form.xml"
+            })
+            .collect::<Vec<_>>();
+        let error = compile_form_tree(entries).unwrap_err();
+        assert_eq!(error.code(), "form_body_missing");
+        assert_eq!(
+            error.source_path(),
+            Some("SettingsStorages/Holder/Forms/SaveForm.xml")
+        );
+        assert_eq!(
+            error.expected().as_deref(),
+            Some("SettingsStorages/Holder/Forms/SaveForm/Ext/Form.xml")
+        );
+    }
+
+    #[test]
+    fn form_body_outside_the_base_free_cohort_is_addressed_not_swallowed() {
+        let entries = form_tree_entries()
+            .into_iter()
+            .map(|source| {
+                if source.path().as_str() == "SettingsStorages/Holder/Forms/SaveForm/Ext/Form.xml" {
+                    entry(
+                        source.path().as_str(),
+                        br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><LabelDecoration name="Future" id="1"/></ChildItems></Form>"#,
+                    )
+                } else {
+                    source
+                }
+            })
+            .collect::<Vec<_>>();
+        let error = compile_form_tree(entries).unwrap_err();
+        assert_eq!(error.code(), "form_body_compile_failed");
+        assert_eq!(
+            error.source_path(),
+            Some("SettingsStorages/Holder/Forms/SaveForm/Ext/Form.xml")
+        );
+        assert!(
+            error
+                .actual()
+                .unwrap()
+                .contains("unsupported base-free element"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn form_filed_under_no_owner_is_a_named_refusal() {
+        let mut entries = form_tree_entries();
+        entries.push(entry("Forms/Orphan.xml", FORM_METADATA.as_bytes()));
+        let error = compile_form_tree(entries).unwrap_err();
+        assert_eq!(error.code(), "form_owner_unresolved");
+        assert_eq!(error.source_path(), Some("Forms/Orphan.xml"));
+    }
+
+    #[test]
+    fn form_name_must_agree_with_the_directory_it_is_filed_under() {
+        let entries = form_tree_entries()
+            .into_iter()
+            .map(|source| {
+                if source.path().as_str() == "SettingsStorages/Holder/Forms/SaveForm.xml" {
+                    entry(
+                        source.path().as_str(),
+                        FORM_METADATA
+                            .replace("<Name>SaveForm</Name>", "<Name>LoadForm</Name>")
+                            .as_bytes(),
+                    )
+                } else {
+                    source
+                }
+            })
+            .collect::<Vec<_>>();
+        let error = compile_form_tree(entries).unwrap_err();
+        assert_eq!(error.code(), "form_name_mismatch");
+        assert_eq!(error.expected().as_deref(), Some("SaveForm"));
+        assert_eq!(error.actual().as_deref(), Some("LoadForm"));
     }
 
     #[test]

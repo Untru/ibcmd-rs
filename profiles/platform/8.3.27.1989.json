@@ -23,6 +23,7 @@
     "bootstrap.metadata.document.layout": "document-v1-crlf-utf8-bom",
     "bootstrap.metadata.enum.layout": "enum-v1-crlf-utf8-bom",
     "bootstrap.metadata.exchange_plan.layout": "exchange-plan-v1-crlf-utf8-bom",
+    "bootstrap.metadata.form.layout": "form-v13-managed-platform-mobile-v1-crlf-utf8-bom",
     "bootstrap.metadata.event_subscription.layout": "event-subscription-v1-crlf-utf8-bom",
     "bootstrap.metadata.functional_option.layout": "functional-option-v1-crlf-utf8-bom",
     "bootstrap.metadata.functional_options_parameter.layout": "functional-options-parameter-v1-crlf-utf8-bom",
