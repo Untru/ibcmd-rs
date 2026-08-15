@@ -3,16 +3,17 @@ use ibcmd_core::dcs::{
     DcsBuildError, DcsConditionalAppearance, DcsFilter, DcsOrder, DcsOutputParameters,
     DcsSelection, DcsSettingsBuilder, DcsSettingsEnvelope,
 };
-use ibcmd_core::diagnostic::{PathSegment, PropertyPath};
+use ibcmd_core::diagnostic::{DiagnosticCode, PathSegment, PropertyPath, Severity};
 use ibcmd_core::opaque::OpaqueFacets;
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
-    DcsChildParseOutcome, DcsInlineSettingsFragment, DcsSettingsChildrenError,
-    DcsSettingsChildrenParts, analyze_dcs_schema_template_documents_with_references,
-    analyze_dcs_settings_document, emit_dcs_area_template_source_fragment,
-    emit_dcs_inner_schema_source_document, emit_dcs_query_union_link_source_document,
-    emit_dcs_settings_children_parts, parse_dcs_area_template_storage_document_with_references,
+    DcsChildParseOutcome, DcsInlineSettingsFragment, DcsInnerSchemaError, DcsSchemaTemplateError,
+    DcsSettingsChildrenError, DcsSettingsChildrenParts, DcsSettingsDocumentAnalysisError,
+    analyze_dcs_schema_template_documents_with_references, analyze_dcs_settings_document,
+    emit_dcs_area_template_source_fragment, emit_dcs_inner_schema_source_document,
+    emit_dcs_query_union_link_source_document, emit_dcs_settings_children_parts,
+    parse_dcs_area_template_storage_document_with_references,
     parse_dcs_inner_schema_storage_document_with_references,
     parse_dcs_query_union_link_storage_document_with_references, rewrite_dcs_settings_children,
 };
@@ -46,7 +47,7 @@ pub(super) enum CanonicalDcsSettingsContext {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) enum CanonicalDcsSettingsAdapterError {
+pub(crate) enum CanonicalDcsSettingsAdapterError {
     Value {
         field: &'static str,
         message: String,
@@ -174,13 +175,304 @@ pub(crate) enum DcsTypeResolution {
 
 pub(crate) type DcsTypeIndex = BTreeMap<String, DcsTypeResolution>;
 
+/// Stage-typed reason one native three-document DCS schema template could not
+/// be normalized into its native source XML.
+///
+/// The normalizer chains several independently fallible steps (envelope
+/// analysis, primary-schema parse, per-variant settings canonicalization,
+/// terminal AreaTemplate splice). Collapsing them into a bare `None` made the
+/// dominant `cf export` failure class diagnostically invisible, so every step
+/// now names itself. This carries observability only: each variant is produced
+/// exactly where the previous code produced `None`, so what counts as success
+/// is unchanged.
+///
+/// Diagnostics reuse the crate-wide vocabulary rather than a parallel one:
+/// [`Self::diagnostic_code`] returns a validated [`DiagnosticCode`] under the
+/// same `dcs.*` kebab namespace `ibcmd-xml` already publishes, and
+/// [`Self::class`] maps each step onto [`MetadataSourceFailureClass`], the
+/// failure taxonomy the metadata-source ledger already reports.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum DcsTemplateNormalizeError {
+    /// The three-document envelope itself was not admitted.
+    EnvelopeAnalysis(DcsSchemaTemplateError),
+    /// A settings variant document was not valid UTF-8.
+    SettingsDocumentNotUtf8 { index: usize },
+    /// A settings variant did not canonicalize.
+    SettingsCanonicalize {
+        index: usize,
+        cause: DcsSettingsCanonicalizeError,
+    },
+    /// A canonicalized settings variant was rejected by the inline-fragment
+    /// analyzer that re-verifies it before it is spliced into the schema.
+    SettingsFragmentParse {
+        index: usize,
+        cause: DcsInnerSchemaError,
+    },
+    /// The primary schema file matched neither admitted parser shape.
+    PrimarySchemaParse {
+        inner_schema: DcsInnerSchemaError,
+        query_union_link: DcsInnerSchemaError,
+    },
+    /// The `DataSetObject` schema emitter rejected the parsed schema.
+    InnerSchemaEmit(DcsInnerSchemaError),
+    /// The query/union/link emitter rejected the parsed schema.
+    QueryUnionLinkEmit(DcsInnerSchemaError),
+    /// The terminal AreaTemplate parsed but its source fragment was rejected.
+    AreaTemplateEmit(DcsInnerSchemaError),
+    /// The emitted schema had no `settingsVariant` anchor to splice against.
+    AreaTemplateAnchorMissing,
+    /// The spliced document length overflowed the platform size boundary.
+    AreaTemplateSizeOverflow,
+}
+
+impl DcsTemplateNormalizeError {
+    /// Returns the stable diagnostic code for the failing step.
+    pub(crate) const fn code(&self) -> &'static str {
+        match self {
+            Self::EnvelopeAnalysis(_) => "dcs.template-normalize.envelope-analysis",
+            Self::SettingsDocumentNotUtf8 { .. } => "dcs.template-normalize.settings-not-utf8",
+            Self::SettingsCanonicalize { cause, .. } => cause.code(),
+            Self::SettingsFragmentParse { .. } => "dcs.template-normalize.settings-fragment-parse",
+            Self::PrimarySchemaParse { .. } => "dcs.template-normalize.primary-schema-parse",
+            Self::InnerSchemaEmit(_) => "dcs.template-normalize.inner-schema-emit",
+            Self::QueryUnionLinkEmit(_) => "dcs.template-normalize.query-union-link-emit",
+            Self::AreaTemplateEmit(_) => "dcs.template-normalize.area-template-emit",
+            Self::AreaTemplateAnchorMissing => {
+                "dcs.template-normalize.area-template-anchor-missing"
+            }
+            Self::AreaTemplateSizeOverflow => "dcs.template-normalize.area-template-size-overflow",
+        }
+    }
+
+    /// Returns the validated diagnostic code for the failing step.
+    pub(crate) fn diagnostic_code(&self) -> DiagnosticCode {
+        DiagnosticCode::new(self.code()).expect("static DCS normalize codes are valid")
+    }
+
+    /// Classifies the failing step in the shared metadata-source taxonomy.
+    pub(crate) const fn class(&self) -> MetadataSourceFailureClass {
+        match self {
+            Self::EnvelopeAnalysis(error) => match error {
+                DcsSchemaTemplateError::InvalidEvidence(_) => MetadataSourceFailureClass::Invariant,
+                DcsSchemaTemplateError::Malformed(_) => MetadataSourceFailureClass::Malformed,
+                DcsSchemaTemplateError::UnsupportedSource(_) => {
+                    MetadataSourceFailureClass::Unsupported
+                }
+            },
+            Self::SettingsDocumentNotUtf8 { .. } => MetadataSourceFailureClass::Malformed,
+            Self::SettingsCanonicalize { cause, .. } => cause.class(),
+            Self::SettingsFragmentParse { cause, .. }
+            | Self::InnerSchemaEmit(cause)
+            | Self::QueryUnionLinkEmit(cause)
+            | Self::AreaTemplateEmit(cause) => inner_schema_failure_class(cause),
+            // Neither admitted parser recognized the shape: the source is
+            // outside the evidenced cohort, not malformed.
+            Self::PrimarySchemaParse { .. } => MetadataSourceFailureClass::Unsupported,
+            Self::AreaTemplateAnchorMissing => MetadataSourceFailureClass::Invariant,
+            Self::AreaTemplateSizeOverflow => MetadataSourceFailureClass::Invariant,
+        }
+    }
+
+    /// Every normalize failure is fail-closed.
+    pub(crate) const fn severity(&self) -> Severity {
+        Severity::Error
+    }
+}
+
+/// Renders a severity with the same snake_case tokens the persisted
+/// diagnostic ledger serializes.
+const fn severity_token(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Info => "info",
+        Severity::Warning => "warning",
+        Severity::Error => "error",
+    }
+}
+
+const fn inner_schema_failure_class(error: &DcsInnerSchemaError) -> MetadataSourceFailureClass {
+    match error {
+        DcsInnerSchemaError::InvalidEvidence(_) => MetadataSourceFailureClass::Invariant,
+        DcsInnerSchemaError::Malformed(_) => MetadataSourceFailureClass::Malformed,
+        DcsInnerSchemaError::UnsupportedSource(_) => MetadataSourceFailureClass::Unsupported,
+        DcsInnerSchemaError::Build(_) => MetadataSourceFailureClass::Invariant,
+    }
+}
+
+impl std::fmt::Display for DcsTemplateNormalizeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Header shape mirrors the persisted ledger entries: severity, stable
+        // code, failure classification.
+        write!(
+            formatter,
+            "[{} {} {}] ",
+            severity_token(self.severity()),
+            self.diagnostic_code(),
+            self.class().as_str()
+        )?;
+        match self {
+            Self::EnvelopeAnalysis(error) => {
+                write!(formatter, "DCS template envelope was not admitted: {error}")
+            }
+            Self::SettingsDocumentNotUtf8 { index } => {
+                write!(formatter, "settings variant {index} is not valid UTF-8 XML")
+            }
+            Self::SettingsCanonicalize { index, cause } => {
+                write!(formatter, "settings variant {index}: {cause}")
+            }
+            Self::SettingsFragmentParse { index, cause } => write!(
+                formatter,
+                "canonicalized settings variant {index} was rejected by the inline fragment analyzer: {cause}"
+            ),
+            Self::PrimarySchemaParse {
+                inner_schema,
+                query_union_link,
+            } => write!(
+                formatter,
+                "primary schema file matched no admitted parser (inner schema: {inner_schema}; query/union/link: {query_union_link})"
+            ),
+            Self::InnerSchemaEmit(error) => {
+                write!(formatter, "inner schema source emit failed: {error}")
+            }
+            Self::QueryUnionLinkEmit(error) => {
+                write!(formatter, "query/union/link source emit failed: {error}")
+            }
+            Self::AreaTemplateEmit(error) => write!(
+                formatter,
+                "terminal AreaTemplate source fragment emit failed: {error}"
+            ),
+            Self::AreaTemplateAnchorMissing => formatter.write_str(
+                "emitted schema has no settingsVariant anchor to splice the AreaTemplate against",
+            ),
+            Self::AreaTemplateSizeOverflow => formatter
+                .write_str("spliced AreaTemplate document exceeds the platform size boundary"),
+        }
+    }
+}
+
+impl std::error::Error for DcsTemplateNormalizeError {}
+
+/// One typed direct child of a DCS `Settings` root.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum DcsSettingsChild {
+    Selection,
+    Filter,
+    Order,
+    ConditionalAppearance,
+    OutputParameters,
+}
+
+impl DcsSettingsChild {
+    /// Returns the source element name.
+    const fn element(self) -> &'static str {
+        match self {
+            Self::Selection => "selection",
+            Self::Filter => "filter",
+            Self::Order => "order",
+            Self::ConditionalAppearance => "conditionalAppearance",
+            Self::OutputParameters => "outputParameters",
+        }
+    }
+
+    /// Returns the stable diagnostic code for an unsupported shape here.
+    const fn unsupported_code(self) -> &'static str {
+        match self {
+            Self::Selection => "dcs.settings-canonicalize.unsupported-child.selection",
+            Self::Filter => "dcs.settings-canonicalize.unsupported-child.filter",
+            Self::Order => "dcs.settings-canonicalize.unsupported-child.order",
+            Self::ConditionalAppearance => {
+                "dcs.settings-canonicalize.unsupported-child.conditional-appearance"
+            }
+            Self::OutputParameters => {
+                "dcs.settings-canonicalize.unsupported-child.output-parameters"
+            }
+        }
+    }
+}
+
+/// Stage-typed reason one DCS `Settings` document did not canonicalize.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum DcsSettingsCanonicalizeError {
+    /// The shared settings analyzer rejected the document.
+    Analysis(DcsSettingsDocumentAnalysisError),
+    /// One direct `Settings` child parsed into an unsupported shape.
+    UnsupportedChild {
+        child: DcsSettingsChild,
+        reason: &'static str,
+    },
+    /// The lexical settings rewriter could not reproduce the document.
+    Writer,
+    /// The canonical DCS IR could not be re-serialized into children.
+    CanonicalChildren(CanonicalDcsSettingsAdapterError),
+    /// The canonical children could not be spliced back into the document.
+    ChildrenRewrite,
+}
+
+impl DcsSettingsCanonicalizeError {
+    /// Returns the stable diagnostic code for the failing step.
+    pub(crate) const fn code(&self) -> &'static str {
+        match self {
+            Self::Analysis(_) => "dcs.settings-canonicalize.analysis",
+            Self::UnsupportedChild { child, .. } => child.unsupported_code(),
+            Self::Writer => "dcs.settings-canonicalize.writer",
+            Self::CanonicalChildren(_) => "dcs.settings-canonicalize.canonical-children",
+            Self::ChildrenRewrite => "dcs.settings-canonicalize.children-rewrite",
+        }
+    }
+
+    /// Classifies the failing step in the shared metadata-source taxonomy.
+    pub(crate) const fn class(&self) -> MetadataSourceFailureClass {
+        match self {
+            Self::Analysis(error) => match error {
+                DcsSettingsDocumentAnalysisError::Malformed(_) => {
+                    MetadataSourceFailureClass::Malformed
+                }
+                DcsSettingsDocumentAnalysisError::UnsupportedSource { .. } => {
+                    MetadataSourceFailureClass::Unsupported
+                }
+            },
+            Self::UnsupportedChild { .. } | Self::Writer => MetadataSourceFailureClass::Unsupported,
+            Self::CanonicalChildren(_) | Self::ChildrenRewrite => {
+                MetadataSourceFailureClass::Invariant
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for DcsSettingsCanonicalizeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Analysis(error) => {
+                write!(
+                    formatter,
+                    "settings analyzer rejected the document: {error}"
+                )
+            }
+            Self::UnsupportedChild { child, reason } => write!(
+                formatter,
+                "direct settings child `{}` is unsupported: {reason}",
+                child.element()
+            ),
+            Self::Writer => formatter
+                .write_str("lexical settings writer could not reproduce the source document"),
+            Self::CanonicalChildren(error) => write!(
+                formatter,
+                "canonical settings children could not be serialized: {error}"
+            ),
+            Self::ChildrenRewrite => formatter
+                .write_str("canonical settings children could not be spliced into the document"),
+        }
+    }
+}
+
+impl std::error::Error for DcsSettingsCanonicalizeError {}
+
 pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles(
     documents: &[&[u8]],
     type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
     source_profile: &ProfileId,
     target_profile: &ProfileId,
-) -> Option<Vec<u8>> {
+) -> std::result::Result<Vec<u8>, DcsTemplateNormalizeError> {
     // Same shape/convention as `reference_types` below, but sourced from
     // `object_refs` (already keyed by lowercase canonical uuid, the same
     // convention `data_composition_style_item_name` uses for conditional
@@ -198,7 +490,7 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         .collect();
     let envelope =
         analyze_dcs_schema_template_documents_with_references(documents, &style_reference_types)
-            .ok()?;
+            .map_err(DcsTemplateNormalizeError::EnvelopeAnalysis)?;
     let reference_types = type_index
         .iter()
         .filter_map(|(type_id, resolution)| match resolution {
@@ -215,29 +507,40 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         &reference_types,
     );
     let mut settings = Vec::with_capacity(envelope.settings().len());
-    for document in envelope.settings() {
-        let document = std::str::from_utf8(document).ok()?;
+    for (index, document) in envelope.settings().iter().enumerate() {
+        let document = std::str::from_utf8(document)
+            .map_err(|_| DcsTemplateNormalizeError::SettingsDocumentNotUtf8 { index })?;
+        let canonical = canonicalize_data_composition_settings_document(
+            document,
+            object_refs,
+            source_profile,
+            target_profile,
+        )
+        .map_err(|cause| DcsTemplateNormalizeError::SettingsCanonicalize { index, cause })?;
         settings.push(
-            DcsInlineSettingsFragment::parse(canonicalize_data_composition_settings_document(
-                document,
-                object_refs,
-                source_profile,
-                target_profile,
-            )?)
-            .ok()?,
+            DcsInlineSettingsFragment::parse(canonical).map_err(|cause| {
+                DcsTemplateNormalizeError::SettingsFragmentParse { index, cause }
+            })?,
         );
     }
     let mut source = match schema {
-        Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings).ok()?,
-        Err(_) => {
+        Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings)
+            .map_err(DcsTemplateNormalizeError::InnerSchemaEmit)?,
+        Err(inner_schema) => {
             let schema = parse_dcs_query_union_link_storage_document_with_references(
                 envelope.primary_schema_file(),
                 source_profile.clone(),
                 "mssql:dcs-schema-template/query-union-link",
                 &reference_types,
             )
-            .ok()?;
-            emit_dcs_query_union_link_source_document(&schema, &settings).ok()?
+            .map_err(|query_union_link| {
+                DcsTemplateNormalizeError::PrimarySchemaParse {
+                    inner_schema,
+                    query_union_link,
+                }
+            })?;
+            emit_dcs_query_union_link_source_document(&schema, &settings)
+                .map_err(DcsTemplateNormalizeError::QueryUnionLinkEmit)?
         }
     };
     let terminal = envelope.terminal_schema_file();
@@ -247,20 +550,26 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         "mssql:dcs-schema-template/area-template",
         &style_reference_types,
     ) {
-        let fragment = emit_dcs_area_template_source_fragment(&area).ok()?;
+        let fragment = emit_dcs_area_template_source_fragment(&area)
+            .map_err(DcsTemplateNormalizeError::AreaTemplateEmit)?;
         let variant = b"\r\n\t<settingsVariant>";
         let offset = source
             .windows(variant.len())
-            .position(|window| window == variant)?;
-        let mut with_area =
-            Vec::with_capacity(source.len().checked_add(fragment.len())?.checked_add(2)?);
+            .position(|window| window == variant)
+            .ok_or(DcsTemplateNormalizeError::AreaTemplateAnchorMissing)?;
+        let capacity = source
+            .len()
+            .checked_add(fragment.len())
+            .and_then(|length| length.checked_add(2))
+            .ok_or(DcsTemplateNormalizeError::AreaTemplateSizeOverflow)?;
+        let mut with_area = Vec::with_capacity(capacity);
         with_area.extend_from_slice(&source[..offset]);
         with_area.extend_from_slice(b"\r\n");
         with_area.extend_from_slice(&fragment);
         with_area.extend_from_slice(&source[offset..]);
         source = with_area;
     }
-    Some(source)
+    Ok(source)
 }
 
 pub(crate) fn data_composition_type_id_xml(
@@ -363,27 +672,46 @@ fn canonicalize_data_composition_settings_document(
     object_refs: &BTreeMap<String, String>,
     source_profile: &ProfileId,
     target_profile: &ProfileId,
-) -> Option<String> {
-    let analysis = analyze_dcs_settings_document(document).ok()?;
+) -> std::result::Result<String, DcsSettingsCanonicalizeError> {
+    let analysis =
+        analyze_dcs_settings_document(document).map_err(DcsSettingsCanonicalizeError::Analysis)?;
     let children = analysis.typed();
-    if matches!(
-        children.selection_outcome(),
-        DcsChildParseOutcome::Unsupported(_)
-    ) || matches!(children.filter(), DcsChildParseOutcome::Unsupported(_))
-        || matches!(children.order(), DcsChildParseOutcome::Unsupported(_))
-        || matches!(
-            children.conditional_appearance(),
-            DcsChildParseOutcome::Unsupported(_)
-        )
-        || matches!(
-            children.output_parameters(),
-            DcsChildParseOutcome::Unsupported(_)
-        )
-    {
-        return None;
+    // Same five children in the same order the previous single boolean chain
+    // tested; only the rejection is now named.
+    if let DcsChildParseOutcome::Unsupported(reason) = children.selection_outcome() {
+        return Err(DcsSettingsCanonicalizeError::UnsupportedChild {
+            child: DcsSettingsChild::Selection,
+            reason,
+        });
+    }
+    if let DcsChildParseOutcome::Unsupported(reason) = children.filter() {
+        return Err(DcsSettingsCanonicalizeError::UnsupportedChild {
+            child: DcsSettingsChild::Filter,
+            reason,
+        });
+    }
+    if let DcsChildParseOutcome::Unsupported(reason) = children.order() {
+        return Err(DcsSettingsCanonicalizeError::UnsupportedChild {
+            child: DcsSettingsChild::Order,
+            reason,
+        });
+    }
+    if let DcsChildParseOutcome::Unsupported(reason) = children.conditional_appearance() {
+        return Err(DcsSettingsCanonicalizeError::UnsupportedChild {
+            child: DcsSettingsChild::ConditionalAppearance,
+            reason,
+        });
+    }
+    if let DcsChildParseOutcome::Unsupported(reason) = children.output_parameters() {
+        return Err(DcsSettingsCanonicalizeError::UnsupportedChild {
+            child: DcsSettingsChild::OutputParameters,
+            reason,
+        });
     }
     let mut writer = DataCompositionXmlWriter::new(object_refs);
-    writer.write_document(document, DataCompositionDocumentMode::Settings)?;
+    writer
+        .write_document(document, DataCompositionDocumentMode::Settings)
+        .ok_or(DcsSettingsCanonicalizeError::Writer)?;
     let parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::Standalone,
         CanonicalDcsSettingsInput {
@@ -417,13 +745,14 @@ fn canonicalize_data_composition_settings_document(
         "\t",
         "mssql:dcs/Settings",
     )
-    .ok()?;
-    rewrite_dcs_settings_children(&mut writer.output, &children, &parts)?;
+    .map_err(DcsSettingsCanonicalizeError::CanonicalChildren)?;
+    rewrite_dcs_settings_children(&mut writer.output, &children, &parts)
+        .ok_or(DcsSettingsCanonicalizeError::ChildrenRewrite)?;
     let settings = writer
         .output
         .trim_start_matches(['\r', '\n', '\t'])
         .to_string();
-    Some(indent_data_composition_settings(&settings))
+    Ok(indent_data_composition_settings(&settings))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1579,6 +1908,123 @@ mod tests {
         output
     }
 
+    /// Every normalize step must name itself with a code that is valid in the
+    /// shared `ibcmd-core` diagnostic vocabulary, and no two steps may share a
+    /// code -- the whole point of the typed reason is that a `cf export`
+    /// failure ledger can be grouped by step.
+    #[test]
+    fn every_normalize_step_carries_a_distinct_valid_diagnostic_code() {
+        let inner = |reason: &str| DcsInnerSchemaError::Malformed(reason.to_owned());
+        let errors = vec![
+            DcsTemplateNormalizeError::EnvelopeAnalysis(DcsSchemaTemplateError::Malformed(
+                "probe".to_owned(),
+            )),
+            DcsTemplateNormalizeError::SettingsDocumentNotUtf8 { index: 0 },
+            DcsTemplateNormalizeError::SettingsFragmentParse {
+                index: 0,
+                cause: inner("probe"),
+            },
+            DcsTemplateNormalizeError::PrimarySchemaParse {
+                inner_schema: inner("probe"),
+                query_union_link: inner("probe"),
+            },
+            DcsTemplateNormalizeError::InnerSchemaEmit(inner("probe")),
+            DcsTemplateNormalizeError::QueryUnionLinkEmit(inner("probe")),
+            DcsTemplateNormalizeError::AreaTemplateEmit(inner("probe")),
+            DcsTemplateNormalizeError::AreaTemplateAnchorMissing,
+            DcsTemplateNormalizeError::AreaTemplateSizeOverflow,
+            DcsTemplateNormalizeError::SettingsCanonicalize {
+                index: 0,
+                cause: DcsSettingsCanonicalizeError::Analysis(
+                    DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                        reason: "probe",
+                        direct_ordinal: None,
+                    },
+                ),
+            },
+            DcsTemplateNormalizeError::SettingsCanonicalize {
+                index: 0,
+                cause: DcsSettingsCanonicalizeError::Writer,
+            },
+            DcsTemplateNormalizeError::SettingsCanonicalize {
+                index: 0,
+                cause: DcsSettingsCanonicalizeError::CanonicalChildren(
+                    CanonicalDcsSettingsAdapterError::Provenance("probe".to_owned()),
+                ),
+            },
+            DcsTemplateNormalizeError::SettingsCanonicalize {
+                index: 0,
+                cause: DcsSettingsCanonicalizeError::ChildrenRewrite,
+            },
+        ];
+        let children = [
+            DcsSettingsChild::Selection,
+            DcsSettingsChild::Filter,
+            DcsSettingsChild::Order,
+            DcsSettingsChild::ConditionalAppearance,
+            DcsSettingsChild::OutputParameters,
+        ];
+        let errors = errors
+            .into_iter()
+            .chain(children.into_iter().map(|child| {
+                DcsTemplateNormalizeError::SettingsCanonicalize {
+                    index: 0,
+                    cause: DcsSettingsCanonicalizeError::UnsupportedChild {
+                        child,
+                        reason: "probe",
+                    },
+                }
+            }))
+            .collect::<Vec<_>>();
+
+        let mut codes = BTreeSet::new();
+        for error in &errors {
+            let code = error.code();
+            assert_eq!(
+                error.diagnostic_code().as_str(),
+                code,
+                "step code must round-trip through the shared vocabulary: {code}"
+            );
+            assert!(codes.insert(code), "duplicate normalize step code: {code}");
+            assert_eq!(error.severity(), Severity::Error, "{code} must fail closed");
+            let rendered = error.to_string();
+            assert!(
+                rendered.starts_with(&format!("[error {code} {}] ", error.class().as_str())),
+                "rendered reason must lead with severity, code and class: {rendered}"
+            );
+        }
+        assert_eq!(codes.len(), errors.len());
+    }
+
+    /// A settings child whose shape has no ownership rule must be reported
+    /// against the exact child, not as an anonymous normalization failure.
+    #[test]
+    fn unsupported_settings_child_names_the_child() {
+        let settings = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"",
+            " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<order><probe/></order>",
+            "</Settings>"
+        );
+        let error = canonicalize_data_composition_settings_document(
+            settings,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect_err("an unparsable order child must fail closed");
+        assert!(
+            matches!(
+                error,
+                DcsSettingsCanonicalizeError::UnsupportedChild {
+                    child: DcsSettingsChild::Order,
+                    ..
+                }
+            ),
+            "expected an unsupported `order` child, got: {error}"
+        );
+    }
+
     #[test]
     fn standalone_settings_tail_uses_the_shared_canonical_scalar_path() {
         let settings = concat!(
@@ -1938,15 +2384,15 @@ mod tests {
                 qname: "cfg:CatalogRef.FilterProbe".to_owned(),
             },
         );
-        assert_eq!(
+        assert!(
             normalize_data_composition_schema_template_documents_with_profiles(
                 &three_field_documents,
                 &type_index,
                 &BTreeMap::new(),
                 &ProfileId::parse("provider:mssql-legacy").unwrap(),
                 &ProfileId::parse("xml-2.20").unwrap(),
-            ),
-            None,
+            )
+            .is_err(),
             "a three-field DataSetQuery must fail closed, not be silently admitted"
         );
     }
@@ -1988,16 +2434,24 @@ mod tests {
                 qname: "cfg:CatalogRef.FilterProbe".to_owned(),
             },
         );
+        let rejection = normalize_data_composition_schema_template_documents_with_profiles(
+            &documents,
+            &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect_err(
+            "a schema admitted by neither parser must still fail closed with a non-empty type_index",
+        );
+        // The rejection must be named, not anonymous. This probe's settings
+        // variant is rejected by the inline fragment analyzer before the
+        // primary-schema branch is reached -- the same step order the previous
+        // `Option`-based chain used, now visible in the reason itself.
         assert_eq!(
-            normalize_data_composition_schema_template_documents_with_profiles(
-                &documents,
-                &type_index,
-                &BTreeMap::new(),
-                &ProfileId::parse("provider:mssql-legacy").unwrap(),
-                &ProfileId::parse("xml-2.20").unwrap(),
-            ),
-            None,
-            "a schema admitted by neither parser must still fail closed with a non-empty type_index"
+            rejection.code(),
+            "dcs.template-normalize.settings-fragment-parse",
+            "the rejection must name the step that refused the source: {rejection}"
         );
     }
 
@@ -2249,7 +2703,7 @@ mod tests {
             &ProfileId::parse("provider:mssql-legacy").unwrap(),
             &ProfileId::parse("xml-2.20").unwrap(),
         );
-        assert_ne!(without_resolver, Some(expected));
+        assert_ne!(without_resolver.ok(), Some(expected));
     }
 
     #[test]
@@ -2350,7 +2804,7 @@ mod tests {
                     &source_profile,
                     &target_profile,
                 )
-                .is_none(),
+                .is_err(),
                 "unknown child reached generic normalization: {unknown}"
             );
         }

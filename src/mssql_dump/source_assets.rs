@@ -1497,6 +1497,10 @@ pub(super) fn write_source_asset(
                         adapter.provider_id(),
                         &target_profile,
                     )
+                    // The typed step-level reason travels out as this error's
+                    // source, so `{error:#}` in the failed-row ledger names the
+                    // stage that rejected the template instead of reporting a
+                    // bare "failed to normalize".
                     .with_context(|| {
                         format!(
                             "failed to normalize native data-composition source asset {}",
