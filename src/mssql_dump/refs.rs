@@ -1866,28 +1866,10 @@ pub(super) fn parse_configuration_reference_text_for_row(
 }
 
 fn parse_configuration_reference_text_with_identity(text: &str) -> Option<(String, String)> {
-    let root = split_1c_braced_fields(text.trim_start(), 0)?;
-    if root.first()?.trim() != "2" {
-        return None;
-    }
-    let identity = split_1c_braced_fields(root.get(1)?.trim(), 0)?;
-    if identity.len() != 1 {
-        return None;
-    }
-    let identity = parse_non_zero_uuid(identity.first()?.trim())?;
-    let child_count = root.get(2)?.trim().parse::<usize>().ok()?;
-    if child_count.checked_add(4)? != root.len() {
-        return None;
-    }
-    let marker = "{1,0,";
-    let marker_start = text.find(marker)?;
-    let uuid_start = marker_start + marker.len();
-    let uuid_end = uuid_start + 36;
-    let uuid = text.get(uuid_start..uuid_end)?;
-    if !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
-        return None;
-    }
-    parse_metadata_header_from_text(text, uuid).map(|header| (identity, header.name))
+    let envelope = parse_configuration_root_envelope(text)?;
+    let header_uuid = parse_configuration_header_uuid(text)?;
+    let header = parse_metadata_header_from_text(text, &header_uuid)?;
+    Some((envelope.identity, header.name))
 }
 
 pub(super) fn extract_configuration_source_xml(
@@ -1907,15 +1889,8 @@ pub(super) fn extract_configuration_source_xml(
     if uuid_fields.first()?.trim() != uuid {
         return None;
     }
-    let marker = "{1,0,";
-    let marker_start = text.find(marker)?;
-    let header_uuid_start = marker_start + marker.len();
-    let header_uuid_end = header_uuid_start + 36;
-    let header_uuid = text.get(header_uuid_start..header_uuid_end)?;
-    if !is_uuid_text(header_uuid) || !is_metadata_header_marker(text, header_uuid_end) {
-        return None;
-    }
-    let mut header = parse_metadata_header_from_text(text, header_uuid)?;
+    let header_uuid = parse_configuration_header_uuid(text)?;
+    let mut header = parse_metadata_header_from_text(text, &header_uuid)?;
     header.uuid = uuid.to_string();
     let mut properties =
         parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
@@ -1942,7 +1917,7 @@ pub(super) fn extract_configuration_source_xml(
     let root_layout = parse_configuration_root_layout(text, uuid);
     let child_objects = root_layout
         .is_none()
-        .then(|| parse_configuration_child_objects(text, uuid, header_uuid))
+        .then(|| parse_configuration_child_objects(text, uuid, &header_uuid))
         .unwrap_or_default();
     let mut xml = format_configuration_source_xml(&header, &properties, source_version);
     if let Some(root_layout) = &root_layout {
@@ -2272,8 +2247,9 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
 
 fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
     parse_configuration_root_layout(text, uuid)?;
-    let root_fields = split_1c_braced_fields(text, 0)?;
-    let contained_fields = split_1c_braced_fields(root_fields.get(3)?.trim(), 0)?;
+    let envelope = parse_configuration_root_envelope(text)?;
+    let first_section = envelope.sections.first()?.trim();
+    let contained_fields = split_1c_braced_fields(first_section, 0)?;
     if contained_fields.len() != 2 {
         return None;
     }
@@ -2288,7 +2264,7 @@ fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<V
         ("76", 77) => {}
         _ => return None,
     }
-    let mut object_ids = configuration_contained_object_ids(root_fields.get(3)?.trim()).into_iter();
+    let mut object_ids = configuration_contained_object_ids(first_section).into_iter();
     let object_id = object_ids.next()?;
     if object_ids.next().is_some() {
         return None;
@@ -2409,26 +2385,54 @@ const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 45] = [
     "IntegrationService",
 ];
 
+/// The evidenced Configuration root envelope shared by every root consumer:
+/// `{2,{Identity},N,<section 1>...<section N>,{footer}}` — a flat field list
+/// whose declared section count must match the actual slots exactly (see
+/// `docs/evidence/configuration-body-8.3.27.md` and the retained CF corpora
+/// under `tests/fixtures/native-evidence/8.3.27.2214`). This parser is the
+/// single source of truth for the outer root shape; consumers layer their own
+/// stricter requirements (section count, footer variant) on top of it instead
+/// of re-deriving the slot arithmetic.
+struct ConfigurationRootEnvelope<'a> {
+    identity: String,
+    sections: Vec<&'a str>,
+    footer: ConfigurationRootFooter,
+}
+
+fn parse_configuration_root_envelope(text: &str) -> Option<ConfigurationRootEnvelope<'_>> {
+    let root = split_1c_braced_fields(text.trim_start(), 0)?;
+    if root.first()?.trim() != "2" {
+        return None;
+    }
+    let identity_fields = split_1c_braced_fields(root.get(1)?.trim(), 0)?;
+    if identity_fields.len() != 1 {
+        return None;
+    }
+    let identity = parse_non_zero_uuid(identity_fields.first()?.trim())?;
+    let section_count = root.get(2)?.trim().parse::<usize>().ok()?;
+    if section_count == 0 || section_count.checked_add(4)? != root.len() {
+        return None;
+    }
+    let footer = classify_configuration_root_footer(root.last()?.trim())?;
+    Some(ConfigurationRootEnvelope {
+        identity,
+        sections: root[3..3 + section_count].to_vec(),
+        footer,
+    })
+}
+
 fn parse_configuration_root_layout(text: &str, uuid: &str) -> Option<ConfigurationRootLayout> {
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "2" {
-        return None;
-    }
-    let uuid_fields = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
-    if uuid_fields.len() != 1 || uuid_fields.first()?.trim() != uuid {
-        return None;
-    }
-    let contained_count = fields.get(2)?.trim().parse::<usize>().ok()?;
-    if contained_count != CONFIGURATION_CONTAINED_OBJECT_COUNT
-        || fields.len() != contained_count + 4
-        || !is_configuration_root_footer(fields.last()?.trim())
+    let envelope = parse_configuration_root_envelope(text)?;
+    if envelope.identity != uuid
+        || envelope.sections.len() != CONFIGURATION_CONTAINED_OBJECT_COUNT
+        || envelope.footer != ConfigurationRootFooter::Checksummed
     {
         return None;
     }
 
-    let mut contained_objects = Vec::with_capacity(contained_count);
+    let mut contained_objects = Vec::with_capacity(envelope.sections.len());
     let mut child_families = Vec::new();
-    for field in fields.iter().skip(3).take(contained_count) {
+    for field in &envelope.sections {
         let contained_fields = split_1c_braced_fields(field.trim(), 0)?;
         if contained_fields.len() != 2 {
             return None;
@@ -2453,27 +2457,25 @@ fn parse_configuration_root_layout(text: &str, uuid: &str) -> Option<Configurati
     })
 }
 
-/// Matches the evidenced native root-control tail: a `{1,"",""}` marker
-/// followed by a signed 32-bit body checksum, e.g.
-/// `{{1,"",""},{-1648891888}}` (see
-/// `tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid`,
-/// confirmed identically across all 19 retained CF corpora). The checksum
-/// value itself is opaque and is not interpreted or re-derived here.
-fn is_configuration_root_footer(field: &str) -> bool {
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return false;
-    };
-    if fields.len() != 2 {
-        return false;
-    }
-    let Some(marker) = fields
-        .first()
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
-    else {
-        return false;
-    };
-    let marker_valid = marker.len() == 3
-        && marker.first().map(|field| field.trim()) == Some("1")
+/// The two evidenced Configuration root-control tails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfigurationRootFooter {
+    /// `{{0,"",""}}` — the db-resident tail recorded for the 8.3.27.1989
+    /// cohort (`docs/evidence/configuration-body-8.3.27.md`) and emitted by
+    /// the clean-room bootstrap writer (`compiler::root`).
+    Bare,
+    /// `{{1,"",""},{checksum}}` — a `{1,"",""}` marker followed by a signed
+    /// 32-bit body checksum, e.g. `{{1,"",""},{-1648891888}}` (see
+    /// `tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid`,
+    /// confirmed identically across all 19 retained CF corpora). The checksum
+    /// value itself is opaque and is not interpreted or re-derived here.
+    Checksummed,
+}
+
+fn classify_configuration_root_footer(field: &str) -> Option<ConfigurationRootFooter> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    let marker = split_1c_braced_fields(fields.first()?.trim(), 0)?;
+    let marker_tail_valid = marker.len() == 3
         && marker
             .get(1)
             .and_then(|field| parse_1c_quoted_string(field.trim()))
@@ -2482,19 +2484,21 @@ fn is_configuration_root_footer(field: &str) -> bool {
             .get(2)
             .and_then(|field| parse_1c_quoted_string(field.trim()))
             .is_some_and(|value| value.is_empty());
-    if !marker_valid {
-        return false;
+    if !marker_tail_valid {
+        return None;
     }
-    let Some(checksum) = fields
-        .get(1)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
-    else {
-        return false;
-    };
-    checksum.len() == 1
-        && checksum
-            .first()
-            .is_some_and(|value| value.trim().parse::<i32>().is_ok())
+    match (marker.first()?.trim(), fields.len()) {
+        ("0", 1) => Some(ConfigurationRootFooter::Bare),
+        ("1", 2) => {
+            let checksum = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+            (checksum.len() == 1
+                && checksum
+                    .first()
+                    .is_some_and(|value| value.trim().parse::<i32>().is_ok()))
+            .then_some(ConfigurationRootFooter::Checksummed)
+        }
+        _ => None,
+    }
 }
 
 fn configuration_contained_object_ids(text: &str) -> Vec<String> {

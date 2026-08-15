@@ -29869,9 +29869,12 @@ fn writes_role_rights_to_source_layout() {
             )
             .as_bytes(),
         );
+    // Canonical root envelope: the declared section count matches the actual
+    // section slots and the evidenced CF root-control tail is present (see
+    // `parse_configuration_root_envelope`).
     let configuration_metadata = deflate_for_test(
             format!(
-                "{{2,\r\n{{{configuration_uuid}}},7,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+                "{{2,\r\n{{{configuration_uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}},\r\n{{{{1,\"\",\"\"}},{{-1648891888}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -29953,20 +29956,21 @@ fn writes_role_rights_to_source_layout() {
     assert!(xml.starts_with('\u{feff}'));
     assert!(!xml.ends_with("\r\n"));
     assert!(xml.contains(r#"<Rights xmlns="http://v8.1c.ru/8.2/roles""#));
-    assert!(
-        xml.find("<name>Catalog.Products</name>").unwrap()
-            < xml.find("<name>Configuration.DemoApp</name>").unwrap()
-    );
-    assert!(
-        xml.find("<name>Configuration.DemoApp</name>").unwrap()
-            < xml
-                .find("<name>WebService.RemoteApi.Operation.Ping</name>")
-                .unwrap()
-    );
+    // Objects follow object-uuid order (see
+    // `role_rights_objects_follow_object_uuid_order`): operation 88… <
+    // catalog bb… < register cc… < configuration dd….
     assert!(
         xml.find("<name>WebService.RemoteApi.Operation.Ping</name>")
             .unwrap()
+            < xml.find("<name>Catalog.Products</name>").unwrap()
+    );
+    assert!(
+        xml.find("<name>Catalog.Products</name>").unwrap()
             < xml.find("<name>InformationRegister.Prices</name>").unwrap()
+    );
+    assert!(
+        xml.find("<name>InformationRegister.Prices</name>").unwrap()
+            < xml.find("<name>Configuration.DemoApp</name>").unwrap()
     );
     assert!(xml.contains("<name>Configuration.DemoApp</name>"));
     assert!(xml.contains("<name>MainWindowModeNormal</name>"));
@@ -29992,7 +29996,10 @@ fn writes_role_rights_to_source_layout() {
     assert!(xml.contains("<name>TotalsControl</name>"));
     assert!(xml.contains("<field>ВерсияОбъекта</field>"));
     assert!(xml.contains("ГДЕ ЛОЖЬ"));
-    assert!(xml.contains("<name>Delete</name>\r\n\t\t\t<value>false</value>"));
+    // The plain-false Delete right is omitted for restriction-only top-level
+    // objects (see
+    // `format_role_rights_omits_plain_false_rights_for_restriction_only_top_level_objects`).
+    assert!(!xml.contains("<name>Delete</name>"));
     assert!(xml.contains("<name>Insert</name>"));
     assert!(xml.contains("<name>View</name>"));
     assert!(xml.contains("<restrictionTemplate>"));
@@ -37597,7 +37604,7 @@ fn flat_configuration_code67_text(
     let mut root_fields = vec!["2".to_string(), format!("{{{uuid}}}"), "7".to_string()];
     root_fields.extend(contained);
     // Evidenced native root-control tail: `{1,"",""}` marker plus an opaque
-    // signed body checksum (see `is_configuration_root_footer`).
+    // signed body checksum (see `classify_configuration_root_footer`).
     root_fields.push(r#"{{1,"",""},{-1648891888}}"#.to_string());
     format!("{{{}}}", root_fields.join(","))
 }
@@ -37675,23 +37682,30 @@ fn configuration_reference_requires_identity_and_exact_root_slots() {
     let child = r#"{cccccccc-cccc-4ccc-8ccc-cccccccccccc,{0,{3,{1,0,$OBJECT},"DemoApp",{0},"",0,0,$ZERO,0}}}"#
         .replace("$OBJECT", object_uuid)
         .replace("$ZERO", zero_uuid);
-    let configuration = format!(r#"{{2,{{{identity}}},1,{child},{{{{0,"",""}}}}}}"#);
+    // Both evidenced root-control tails must be accepted: the bare
+    // db-resident tail and the checksummed CF tail (see
+    // `classify_configuration_root_footer`).
+    let bare_footer = format!(r#"{{2,{{{identity}}},1,{child},{{{{0,"",""}}}}}}"#);
+    let checksummed_footer =
+        format!(r#"{{2,{{{identity}}},1,{child},{{{{1,"",""}},{{-1648891888}}}}}}"#);
 
-    assert_eq!(
-        parse_configuration_reference_text(&configuration),
-        Some("DemoApp".to_string())
-    );
-    assert_eq!(
-        parse_configuration_reference_text_for_row(&configuration, identity),
-        Some("DemoApp".to_string())
-    );
-    assert!(
-        parse_configuration_reference_text_for_row(
-            &configuration,
-            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-        )
-        .is_none()
-    );
+    for configuration in [&bare_footer, &checksummed_footer] {
+        assert_eq!(
+            parse_configuration_reference_text(configuration),
+            Some("DemoApp".to_string())
+        );
+        assert_eq!(
+            parse_configuration_reference_text_for_row(configuration, identity),
+            Some("DemoApp".to_string())
+        );
+        assert!(
+            parse_configuration_reference_text_for_row(
+                configuration,
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            )
+            .is_none()
+        );
+    }
 
     let extended_catalog = r#"{2,{11,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,{0,{3,{1,0,$OBJECT},"Lines",{0},"",0,0,$ZERO,0}},0,0,0},5}"#
         .replace("$OBJECT", object_uuid)
@@ -37704,8 +37718,37 @@ fn configuration_reference_requires_identity_and_exact_root_slots() {
     let mixed_identity = format!(
         r#"{{2,{{{identity},dddddddd-dddd-4ddd-8ddd-dddddddddddd}},1,{child},{{{{0,"",""}}}}}}"#
     );
-    for malformed in [missing_tail, wrong_count, mixed_identity] {
-        assert!(parse_configuration_reference_text(&malformed).is_none());
+    // The simplified root shape formerly used by synthetic fixtures: a
+    // declared section count with neither the matching section slots nor any
+    // root-control tail. Never evidenced; must stay rejected.
+    let simplified_nested = format!("{{2,{{{identity}}},7,{child}}}");
+    let zero_sections = format!(r#"{{2,{{{identity}}},0,{{{{0,"",""}}}}}}"#);
+    // Footer shapes outside the two evidenced tails must fail closed.
+    let zero_marker_with_checksum =
+        format!(r#"{{2,{{{identity}}},1,{child},{{{{0,"",""}},{{-1648891888}}}}}}"#);
+    let checksummed_marker_without_checksum =
+        format!(r#"{{2,{{{identity}}},1,{child},{{{{1,"",""}}}}}}"#);
+    let non_numeric_checksum = format!(r#"{{2,{{{identity}}},1,{child},{{{{1,"",""}},{{"x"}}}}}}"#);
+    let garbage_footer = format!("{{2,{{{identity}}},1,{child},{{0}}}}");
+    for malformed in [
+        missing_tail,
+        wrong_count,
+        mixed_identity,
+        simplified_nested,
+        zero_sections,
+        zero_marker_with_checksum,
+        checksummed_marker_without_checksum,
+        non_numeric_checksum,
+        garbage_footer,
+    ] {
+        assert!(
+            parse_configuration_reference_text(&malformed).is_none(),
+            "accepted malformed root: {malformed}"
+        );
+        assert!(
+            parse_configuration_reference_text_for_row(&malformed, identity).is_none(),
+            "accepted malformed root for row: {malformed}"
+        );
     }
 }
 
@@ -37857,12 +37900,13 @@ fn extracts_flat_configuration_internal_info_and_reference_children() {
 
 #[test]
 fn flat_configuration_root_footer_requires_the_evidenced_marker_and_checksum() {
-    // The native root-control tail is `{1,"",""}` plus an opaque signed body
-    // checksum (see `is_configuration_root_footer`), confirmed identically
-    // across all 19 retained 8.3.27.2214 CF corpora under
-    // tests/fixtures/native-evidence. An earlier, never-evidenced hypothesis
-    // (`{0,"",""}` with no checksum) must keep being rejected so it cannot
-    // silently regress back in.
+    // The CF root-control tail is `{1,"",""}` plus an opaque signed body
+    // checksum (see `classify_configuration_root_footer`), confirmed
+    // identically across all 19 retained 8.3.27.2214 CF corpora under
+    // tests/fixtures/native-evidence. The bare `{0,"",""}` tail (db-resident
+    // cohort) stays a valid root envelope but must keep being insufficient
+    // for InternalInfo/ChildObjects emission, and every other tail shape must
+    // keep being rejected so none can silently regress back in.
     let (uuid, text, object_refs) = flat_configuration_fixture();
     const GOOD_FOOTER: &str = r#"{{1,"",""},{-1648891888}}"#;
     assert!(text.ends_with(&format!("{GOOD_FOOTER}}}")));
