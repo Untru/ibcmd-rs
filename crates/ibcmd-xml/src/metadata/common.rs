@@ -281,6 +281,30 @@ pub enum MetadataDecodeError {
     ProfileVersionMismatch {
         object_path: ObjectPath,
     },
+    /// A complex property carries content that the compile direction has no
+    /// evidenced model for. `owner` names the enclosing shape (family, child
+    /// object, or standard attribute) and `property` the exact XML property,
+    /// so the coordinate is identified without reading the decoder source.
+    UnevidencedProperty {
+        owner: String,
+        property: &'static str,
+    },
+    /// A property that every evidenced platform tree emits empty carries
+    /// stray text.  This is a lexical defect of the input, not a missing
+    /// compile model, and is reported apart from `UnevidencedProperty`.
+    UnexpectedContent {
+        owner: String,
+        property: &'static str,
+    },
+    /// A standard-attribute sub-property deviates from the platform default
+    /// profile, so the block carries object data the compile direction cannot
+    /// represent.  `expected` is the evidenced default, `actual` what was read.
+    UnevidencedStandardAttribute {
+        owner: String,
+        property: &'static str,
+        expected: &'static str,
+        actual: String,
+    },
 }
 impl Display for MetadataDecodeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
