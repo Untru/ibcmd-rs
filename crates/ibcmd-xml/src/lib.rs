@@ -49,6 +49,7 @@ pub use dcs_schema::{
     parse_dcs_inner_schema_storage_document_with_references,
     parse_dcs_query_union_link_storage_document,
     parse_dcs_query_union_link_storage_document_with_references,
+    rewrite_dcs_primary_schema_storage_document,
 };
 pub use dcs_template::{
     DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DcsSchemaTemplateOwnedDocuments,

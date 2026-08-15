@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-ut-empty-inline-settings",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "storage_element": "15f6a89d-53a1-47f7-967e-973c5966caf8.0",
+    "source_path": "Reports/РезультатыТестирования/Templates/Макет/Ext/Template.xml",
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 424,
+      "sha256": "a7e61a3156c7a2fa3302f7f77277d7f1a64abda10eb0519292bf4a1829a6f169"
+    },
+    "unpacked_body": {
+      "size": 1574,
+      "sha256": "9d3bd74f83e6c48c1d23bbfc6f27d59c812a76eda8573b9302ef650c79e161d4"
+    },
+    "native_template": {
+      "size": 1030,
+      "sha256": "c1b1771520a0c8153e3c2f8d8381fa90f02c78338dc9e936eaef68caf2dffe67"
+    }
+  }
+}

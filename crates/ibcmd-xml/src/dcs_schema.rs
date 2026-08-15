@@ -1,6 +1,6 @@
 //! Evidence-bounded codec for the first typed inner DCS schema cohort.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
@@ -77,21 +77,53 @@ impl DcsInlineSettingsFragment {
     }
 }
 
+/// Byte offset of the `>` that terminates the document's first opening tag.
+///
+/// `>` is a perfectly legal attribute-value character in XML, so the naive
+/// "first `>` in the document" answer can land inside a value and split the
+/// tag in the wrong place. This scanner tracks the attribute-value quoting
+/// state (both `"` and `'` delimiters, exactly as XML defines them) and only
+/// accepts a `>` seen outside a value.
+fn opening_tag_end(xml: &str) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    for (offset, byte) in xml.bytes().enumerate() {
+        match (quote, byte) {
+            (Some(open), byte) if byte == open => quote = None,
+            (Some(_), _) => {}
+            (None, b'"' | b'\'') => quote = Some(byte),
+            (None, b'>') => return Some(offset),
+            (None, _) => {}
+        }
+    }
+    None
+}
+
+/// Splices the missing `xmlns:` declarations into an inline `<dcsset:settings>`
+/// fragment so it can be analyzed as a standalone document.
+///
+/// The declarations must land *inside* the opening tag. For the empty
+/// self-closing spelling `<dcsset:settings .../>` the tag's final two bytes are
+/// `/` and `>`, so the insertion point is the `/`, not the `>`: splicing at the
+/// `>` would produce `<dcsset:settings .../ xmlns:dcsset="..."...>`, which is
+/// not well-formed and which our own analyzer then rejects.
 fn close_inline_settings_namespaces(
     xml: &str,
     policy: &DcsInnerSchemaPolicy,
 ) -> Result<String, DcsInnerSchemaError> {
-    let opening_end = xml.find('>').ok_or_else(|| {
+    let opening_end = opening_tag_end(xml).ok_or_else(|| {
         DcsInnerSchemaError::Malformed("inline Settings has no opening tag".into())
     })?;
-    if !xml[..opening_end]
-        .trim_start()
-        .starts_with("<dcsset:settings")
-    {
+    let opening = &xml[..opening_end];
+    if !opening.trim_start().starts_with("<dcsset:settings") {
         return unsupported("inline Settings root does not use the canonical dcsset spelling");
     }
+    let insertion = if opening.ends_with('/') {
+        opening_end - 1
+    } else {
+        opening_end
+    };
     let mut closed = String::with_capacity(xml.len() + 384);
-    closed.push_str(&xml[..opening_end]);
+    closed.push_str(&xml[..insertion]);
     for (prefix, namespace) in [
         ("dcsset", policy.settings_namespace_uri()),
         ("dcscor", "http://v8.1c.ru/8.1/data-composition-system/core"),
@@ -100,7 +132,7 @@ fn close_inline_settings_namespaces(
         ("xs", policy.xml_schema_namespace_uri()),
         ("xsi", policy.xsi_namespace_uri()),
     ] {
-        if !xml[..opening_end].contains(&format!("xmlns:{prefix}=")) {
+        if !opening.contains(&format!("xmlns:{prefix}=")) {
             closed.push_str(" xmlns:");
             closed.push_str(prefix);
             closed.push_str("=\"");
@@ -108,7 +140,7 @@ fn close_inline_settings_namespaces(
             closed.push('"');
         }
     }
-    closed.push_str(&xml[opening_end..]);
+    closed.push_str(&xml[insertion..]);
     Ok(closed)
 }
 
@@ -2682,6 +2714,630 @@ fn emit_local_string(
     line(out, depth + 1, "</v8:item>");
     line(out, depth, &format!("</{name}>"))
 }
+// ---------------------------------------------------------------------------
+// Primary `SchemaFile` -> source `DataCompositionSchema` transliteration
+// ---------------------------------------------------------------------------
+//
+// The platform stores and exports the *same* DCS document; the two directions
+// differ only in which namespace prefixes are in scope, in one level of
+// indentation (storage nests the schema inside a `SchemaFile` wrapper), in
+// where the `Settings` documents live, and in how a configuration-local
+// `TypeId` is spelled.  Every one of those differences is a mechanical
+// rewrite of platform-written bytes, so this codec transliterates them
+// instead of round-tripping through a typed IR: the closed typed cohorts
+// above can only describe the handful of shapes they enumerate, while real
+// configurations use the full schema vocabulary.
+//
+// Everything this rewriter cannot account for from the document's own bytes
+// fails closed: an element or attribute in a namespace the source root does
+// not declare, a `TypeId` the configuration type index cannot resolve,
+// comments/PIs/doctypes, or a `settingsVariant` count that disagrees with the
+// envelope's `Settings` document count.
+
+/// Source prefix for `uri` in a `DataCompositionSchema` source document, or
+/// `None` when the source root declares no prefix for it.
+///
+/// The table is exactly the root declaration
+/// [`emit_dcs_inner_schema_source_document`] writes, in the same order.
+fn source_namespace_prefix(policy: &DcsInnerSchemaPolicy, uri: &str) -> Option<&'static str> {
+    match uri {
+        "http://v8.1c.ru/8.1/data-composition-system/common" => Some("dcscom"),
+        "http://v8.1c.ru/8.1/data-composition-system/core" => Some("dcscor"),
+        "http://v8.1c.ru/8.1/data/ui" => Some("v8ui"),
+        _ if uri == policy.schema_namespace_uri() => Some(""),
+        _ if uri == policy.settings_namespace_uri() => Some("dcsset"),
+        _ if uri == policy.data_core_namespace_uri() => Some("v8"),
+        _ if uri == policy.xml_schema_namespace_uri() => Some("xs"),
+        _ if uri == policy.xsi_namespace_uri() => Some("xsi"),
+        _ => None,
+    }
+}
+
+/// A raw lexical token: either character data or one complete tag.
+///
+/// The document is never unescaped, so every entity reference, attribute
+/// quoting style and whitespace run reaches the output exactly as the
+/// platform wrote it.
+enum RawToken<'a> {
+    Text(&'a str),
+    Tag(&'a str),
+}
+
+/// Byte offset of the `>` closing the tag that starts at `start`, ignoring
+/// `>` inside single- or double-quoted attribute values.
+fn raw_tag_end(body: &str, start: usize) -> Result<usize, DcsInnerSchemaError> {
+    let bytes = body.as_bytes();
+    let mut quote: Option<u8> = None;
+    for (offset, byte) in bytes.iter().enumerate().skip(start) {
+        match (quote, *byte) {
+            (Some(open), byte) if byte == open => quote = None,
+            (Some(_), _) => {}
+            (None, b'"' | b'\'') => quote = Some(*byte),
+            (None, b'>') => return Ok(offset),
+            (None, _) => {}
+        }
+    }
+    Err(DcsInnerSchemaError::Malformed(
+        "unterminated XML tag".into(),
+    ))
+}
+
+fn scan_raw_tokens(body: &str) -> Result<Vec<RawToken<'_>>, DcsInnerSchemaError> {
+    let mut tokens = Vec::new();
+    let mut position = 0usize;
+    while position < body.len() {
+        match body[position..].find('<') {
+            None => {
+                tokens.push(RawToken::Text(&body[position..]));
+                break;
+            }
+            Some(relative) => {
+                if relative > 0 {
+                    tokens.push(RawToken::Text(&body[position..position + relative]));
+                }
+                let start = position + relative;
+                let end = raw_tag_end(body, start)?;
+                tokens.push(RawToken::Tag(&body[start..=end]));
+                position = end + 1;
+            }
+        }
+    }
+    if tokens.len() > MAX_EVENTS {
+        return Err(DcsInnerSchemaError::Malformed(
+            "XML event limit exceeded".into(),
+        ));
+    }
+    Ok(tokens)
+}
+
+/// One start (or self-closing) tag split into its name and its attributes,
+/// with every value still in its original escaped spelling.
+struct RawStartTag<'a> {
+    name: &'a str,
+    attributes: Vec<(&'a str, &'a str)>,
+    self_closing: bool,
+}
+
+fn scan_start_tag(tag: &str) -> Result<RawStartTag<'_>, DcsInnerSchemaError> {
+    let inner = tag
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        .ok_or_else(|| DcsInnerSchemaError::Malformed("malformed XML tag".into()))?;
+    let (inner, self_closing) = match inner.strip_suffix('/') {
+        Some(value) => (value, true),
+        None => (inner, false),
+    };
+    let name_end = inner
+        .find(|c: char| c.is_ascii_whitespace())
+        .unwrap_or(inner.len());
+    let name = &inner[..name_end];
+    if name.is_empty() {
+        return Err(DcsInnerSchemaError::Malformed("XML tag has no name".into()));
+    }
+    let mut attributes = Vec::new();
+    let mut rest = &inner[name_end..];
+    loop {
+        rest = rest.trim_start_matches(|c: char| c.is_ascii_whitespace());
+        if rest.is_empty() {
+            break;
+        }
+        let equals = rest
+            .find('=')
+            .ok_or_else(|| DcsInnerSchemaError::Malformed("attribute has no value".into()))?;
+        let key = rest[..equals].trim_end();
+        if key.is_empty() || key.contains(char::is_whitespace) {
+            return Err(DcsInnerSchemaError::Malformed(
+                "malformed attribute name".into(),
+            ));
+        }
+        let after = rest[equals + 1..].trim_start_matches(|c: char| c.is_ascii_whitespace());
+        let quote = after
+            .chars()
+            .next()
+            .filter(|c| *c == '"' || *c == '\'')
+            .ok_or_else(|| {
+                DcsInnerSchemaError::Malformed("attribute value is not quoted".into())
+            })?;
+        let value_end = after[1..].find(quote).ok_or_else(|| {
+            DcsInnerSchemaError::Malformed("attribute value is not terminated".into())
+        })?;
+        attributes.push((key, &after[1..1 + value_end]));
+        rest = &after[1 + value_end + 1..];
+    }
+    Ok(RawStartTag {
+        name,
+        attributes,
+        self_closing,
+    })
+}
+
+fn split_prefix(name: &str) -> (&str, &str) {
+    match name.split_once(':') {
+        Some((prefix, local)) => (prefix, local),
+        None => ("", name),
+    }
+}
+
+/// What the rewriter is currently inside, so a close tag knows what to write.
+enum RewriteFrame {
+    /// The dropped `SchemaFile` wrapper.
+    Wrapper,
+    /// The schema root, re-spelled as `DataCompositionSchema`.
+    Root,
+    /// A `v8:TypeId` element whose content is replaced wholesale.
+    TypeId,
+    /// Any other element, already re-prefixed for the source direction.
+    Element(String),
+}
+
+/// One open element, with everything a later token needs to decide how to
+/// write itself.
+struct RewriteState {
+    frame: RewriteFrame,
+    /// Whether an element child has already been written inside this element,
+    /// which is what distinguishes pretty-printing whitespace from character
+    /// data in a leaf.
+    saw_child: bool,
+    /// Whether this element's character data is a QName to re-prefix.
+    qname_text: bool,
+    /// Storage prefix -> source prefix for the namespaces this element
+    /// declared, so its own QName content resolves the same way its
+    /// attributes do.
+    renamed: Vec<(String, String)>,
+}
+
+impl RewriteState {
+    const fn new(frame: RewriteFrame) -> Self {
+        Self {
+            frame,
+            saw_child: false,
+            qname_text: false,
+            renamed: Vec::new(),
+        }
+    }
+}
+
+/// Namespace declarations in scope, innermost last.
+type NamespaceScopes = Vec<Vec<(String, String)>>;
+
+fn resolve_prefix<'a>(scopes: &'a NamespaceScopes, prefix: &str) -> Option<&'a str> {
+    scopes
+        .iter()
+        .rev()
+        .find_map(|scope| {
+            scope
+                .iter()
+                .rev()
+                .find(|(declared, _)| declared == prefix)
+                .map(|(_, uri)| uri.as_str())
+        })
+        .or(if prefix.is_empty() { Some("") } else { None })
+}
+
+/// Removes exactly one indentation tab after every line break.
+///
+/// Storage nests the schema one level deeper than the source document, so
+/// every pretty-printing whitespace run is one tab longer. Only whitespace
+/// runs that separate sibling elements are shifted; character data (a query
+/// text, an expression) is never touched.
+fn dedent_one_level(whitespace: &str) -> String {
+    let mut out = String::with_capacity(whitespace.len());
+    let mut rest = whitespace;
+    while let Some(index) = rest.find('\n') {
+        out.push_str(&rest[..=index]);
+        rest = &rest[index + 1..];
+        rest = rest.strip_prefix('\t').unwrap_or(rest);
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Rewrites the platform's primary `SchemaFile` storage document into the
+/// source `DataCompositionSchema` document, inlining `settings_blocks` into
+/// the `settingsVariant` elements in document order.
+///
+/// `reference_types` maps a lowercased storage `TypeId` uuid to its semantic
+/// current-configuration qualified name (`DocumentRef.X`), exactly as
+/// [`parse_dcs_inner_schema_storage_document_with_references`] uses it.
+/// `opaque_type_ids` holds the uuids the configuration type index resolves to
+/// no semantic name at all; the platform writes those back verbatim as
+/// `<v8:TypeId>`. A uuid in neither map fails closed rather than being
+/// guessed in either direction.
+pub fn rewrite_dcs_primary_schema_storage_document(
+    bytes: &[u8],
+    reference_types: &BTreeMap<String, String>,
+    opaque_type_ids: &BTreeSet<String>,
+    settings_blocks: &[DcsInlineSettingsFragment],
+) -> Result<Vec<u8>, DcsInnerSchemaError> {
+    let policy = policy()?;
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| DcsInnerSchemaError::Malformed("primary schema is not UTF-8".into()))?;
+    let text = text
+        .strip_prefix('\u{feff}')
+        .ok_or_else(|| DcsInnerSchemaError::Malformed("primary schema has no UTF-8 BOM".into()))?;
+    let body = text
+        .strip_prefix("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n")
+        .ok_or_else(|| {
+            DcsInnerSchemaError::Malformed("primary schema has no canonical declaration".into())
+        })?;
+    let tokens = scan_raw_tokens(body)?;
+
+    let mut out = String::with_capacity(bytes.len() + 1024);
+    out.push('\u{feff}');
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+    let mut scopes: NamespaceScopes = Vec::new();
+    let mut frames: Vec<RewriteState> = Vec::new();
+    let mut pending: Option<&str> = None;
+    let mut variant = 0usize;
+
+    for (index, token) in tokens.iter().enumerate() {
+        match token {
+            RawToken::Text(value) => {
+                if pending.is_some() {
+                    return Err(DcsInnerSchemaError::Malformed(
+                        "adjacent character data runs".into(),
+                    ));
+                }
+                pending = Some(value);
+            }
+            RawToken::Tag(tag) => {
+                if tag.starts_with("<?") || tag.starts_with("<!") {
+                    return unsupported("comments, PI and doctype are outside the cohort");
+                }
+                let closing = tag.starts_with("</");
+                if let Some(value) = pending.take() {
+                    let Some(state) = frames.last() else {
+                        if !value.trim().is_empty() {
+                            return Err(DcsInnerSchemaError::Malformed("text outside root".into()));
+                        }
+                        continue;
+                    };
+                    match state.frame {
+                        RewriteFrame::Wrapper => {
+                            if !value.trim().is_empty() {
+                                return unsupported("SchemaFile wrapper carries character data");
+                            }
+                        }
+                        RewriteFrame::TypeId => {}
+                        _ if state.qname_text => {
+                            out.push_str(&rewrite_qname_value(
+                                &policy,
+                                &scopes,
+                                &state.renamed,
+                                "xsi:type",
+                                value,
+                            )?);
+                        }
+                        _ => {
+                            if value.trim().is_empty() && (!closing || state.saw_child) {
+                                out.push_str(&dedent_one_level(value));
+                            } else {
+                                out.push_str(value);
+                            }
+                        }
+                    }
+                }
+                if closing {
+                    let name = tag[2..tag.len() - 1].trim();
+                    let state = frames.pop().ok_or_else(|| {
+                        DcsInnerSchemaError::Malformed("unexpected closing element".into())
+                    })?;
+                    scopes.pop();
+                    match state.frame {
+                        RewriteFrame::Wrapper => {}
+                        RewriteFrame::Root => out.push_str("</DataCompositionSchema>"),
+                        RewriteFrame::TypeId => {}
+                        RewriteFrame::Element(emitted) => {
+                            if name.split_once(':').map_or(name, |(_, local)| local)
+                                == "settingsVariant"
+                                && frames.len() == 2
+                            {
+                                let block = settings_blocks.get(variant).ok_or_else(|| {
+                                    DcsInnerSchemaError::UnsupportedSource(
+                                        "settingsVariant count exceeds the Settings document count"
+                                            .into(),
+                                    )
+                                })?;
+                                variant += 1;
+                                let tail =
+                                    out.len() - out.trim_end_matches(['\r', '\n', '\t']).len();
+                                let held = out.split_off(out.len() - tail);
+                                append_indented_fragment(&mut out, block.as_str(), 2);
+                                out.push_str(&held);
+                            }
+                            out.push('<');
+                            out.push('/');
+                            out.push_str(&emitted);
+                            out.push('>');
+                        }
+                    }
+                    continue;
+                }
+
+                let start = scan_start_tag(tag)?;
+                let mut declared: Vec<(String, String)> = Vec::new();
+                for (key, value) in &start.attributes {
+                    if *key == "xmlns" {
+                        declared.push((String::new(), (*value).to_owned()));
+                    } else if let Some(prefix) = key.strip_prefix("xmlns:") {
+                        declared.push((prefix.to_owned(), (*value).to_owned()));
+                    }
+                }
+                scopes.push(declared);
+                let (prefix, local) = split_prefix(start.name);
+                let uri = resolve_prefix(&scopes, prefix)
+                    .ok_or_else(|| {
+                        DcsInnerSchemaError::Malformed(format!("unbound namespace prefix {prefix}"))
+                    })?
+                    .to_owned();
+                let depth = frames.len();
+                if let Some(state) = frames.last_mut() {
+                    state.saw_child = true;
+                }
+                if depth == 0 {
+                    if local != "SchemaFile" || !uri.is_empty() || start.self_closing {
+                        return unsupported("primary schema root is not a SchemaFile wrapper");
+                    }
+                    frames.push(RewriteState::new(RewriteFrame::Wrapper));
+                    continue;
+                }
+                if depth == 1 {
+                    if local != "dataCompositionSchema"
+                        || uri != policy.schema_namespace_uri()
+                        || start.self_closing
+                    {
+                        return unsupported("SchemaFile does not wrap a dataCompositionSchema");
+                    }
+                    out.push_str("<DataCompositionSchema xmlns=\"");
+                    out.push_str(policy.schema_namespace_uri());
+                    out.push_str(
+                        "\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\"",
+                    );
+                    out.push_str(
+                        " xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\"",
+                    );
+                    out.push_str(" xmlns:dcsset=\"");
+                    out.push_str(policy.settings_namespace_uri());
+                    out.push_str("\" xmlns:v8=\"");
+                    out.push_str(policy.data_core_namespace_uri());
+                    out.push_str("\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"");
+                    out.push_str(policy.xml_schema_namespace_uri());
+                    out.push_str("\" xmlns:xsi=\"");
+                    out.push_str(policy.xsi_namespace_uri());
+                    out.push_str("\">");
+                    frames.push(RewriteState::new(RewriteFrame::Root));
+                    continue;
+                }
+
+                if uri == policy.data_core_namespace_uri() && local == "TypeId" {
+                    let content = match tokens.get(index + 1) {
+                        Some(RawToken::Text(value)) => (*value).trim(),
+                        _ if start.self_closing => "",
+                        _ => {
+                            return unsupported("TypeId has no storage uuid");
+                        }
+                    };
+                    let type_id = content.to_ascii_lowercase();
+                    match reference_types.get(&type_id) {
+                        Some(qualified) => {
+                            out.push_str("<v8:Type xmlns:d");
+                            out.push_str(&depth.to_string());
+                            out.push_str("p1=\"");
+                            out.push_str(policy.current_config_namespace_uri());
+                            out.push_str("\">d");
+                            out.push_str(&depth.to_string());
+                            out.push_str("p1:");
+                            out.push_str(&escape(qualified));
+                            out.push_str("</v8:Type>");
+                        }
+                        // Already in its stored lexical form; re-escaping it
+                        // would double-encode whatever the platform wrote.
+                        None if opaque_type_ids.contains(&type_id) => {
+                            out.push_str("<v8:TypeId>");
+                            out.push_str(content);
+                            out.push_str("</v8:TypeId>");
+                        }
+                        None => {
+                            return unsupported(format!(
+                                "TypeId {type_id} has no configuration type-index resolution"
+                            ));
+                        }
+                    }
+                    if start.self_closing {
+                        scopes.pop();
+                    } else {
+                        frames.push(RewriteState::new(RewriteFrame::TypeId));
+                    }
+                    continue;
+                }
+
+                let Some(element_prefix) = source_namespace_prefix(&policy, &uri) else {
+                    return unsupported(format!(
+                        "element namespace {uri} is outside the source root declaration"
+                    ));
+                };
+                let emitted_name = if element_prefix.is_empty() {
+                    local.to_owned()
+                } else {
+                    format!("{element_prefix}:{local}")
+                };
+                let mut declarations = String::new();
+                let mut renamed: Vec<(String, String)> = Vec::new();
+                let mut local_declarations = 0usize;
+                for (key, value) in &start.attributes {
+                    let declared_prefix = if *key == "xmlns" {
+                        Some("")
+                    } else {
+                        key.strip_prefix("xmlns:")
+                    };
+                    let Some(declared_prefix) = declared_prefix else {
+                        continue;
+                    };
+                    match source_namespace_prefix(&policy, value) {
+                        Some(source) => {
+                            renamed.push((declared_prefix.to_owned(), source.to_owned()));
+                        }
+                        None => {
+                            local_declarations += 1;
+                            let replacement = format!("d{depth}p{local_declarations}");
+                            declarations.push_str(" xmlns:");
+                            declarations.push_str(&replacement);
+                            declarations.push_str("=\"");
+                            declarations.push_str(value);
+                            declarations.push('"');
+                            renamed.push((declared_prefix.to_owned(), replacement));
+                        }
+                    }
+                }
+                let mut rendered = String::new();
+                for (key, value) in &start.attributes {
+                    if *key == "xmlns" || key.starts_with("xmlns:") {
+                        continue;
+                    }
+                    let (attribute_prefix, attribute_local) = split_prefix(key);
+                    let emitted_key = if attribute_prefix.is_empty() {
+                        attribute_local.to_owned()
+                    } else {
+                        let attribute_uri =
+                            resolve_prefix(&scopes, attribute_prefix).ok_or_else(|| {
+                                DcsInnerSchemaError::Malformed(format!(
+                                    "unbound namespace prefix {attribute_prefix}"
+                                ))
+                            })?;
+                        let Some(source) = source_namespace_prefix(&policy, attribute_uri) else {
+                            return unsupported(format!(
+                                "attribute namespace {attribute_uri} is outside the source root declaration"
+                            ));
+                        };
+                        if source.is_empty() {
+                            return unsupported(
+                                "an attribute cannot bind to the source default namespace",
+                            );
+                        }
+                        format!("{source}:{attribute_local}")
+                    };
+                    let emitted_value =
+                        rewrite_qname_value(&policy, &scopes, &renamed, &emitted_key, value)?;
+                    rendered.push(' ');
+                    rendered.push_str(&emitted_key);
+                    rendered.push_str("=\"");
+                    rendered.push_str(&emitted_value);
+                    rendered.push('"');
+                }
+                out.push('<');
+                out.push_str(&emitted_name);
+                out.push_str(&declarations);
+                out.push_str(&rendered);
+                if start.self_closing {
+                    out.push_str("/>");
+                    scopes.pop();
+                } else {
+                    out.push('>');
+                    let mut state = RewriteState::new(RewriteFrame::Element(emitted_name));
+                    // `v8:Type`/`v8:TypeSet` content is a QName, so it moves
+                    // to the source document's prefixes exactly like an
+                    // `xsi:type` attribute does: a storage `StandardPeriod`
+                    // resolved through the data-core default namespace is
+                    // spelled `v8:StandardPeriod` in the source direction.
+                    state.qname_text = uri == policy.data_core_namespace_uri()
+                        && (local == "Type" || local == "TypeSet");
+                    state.renamed = renamed;
+                    frames.push(state);
+                }
+            }
+        }
+    }
+    if !frames.is_empty() {
+        return Err(DcsInnerSchemaError::Malformed("unclosed element".into()));
+    }
+    if variant != settings_blocks.len() {
+        return unsupported("settingsVariant count does not match the Settings document count");
+    }
+    Ok(out.into_bytes())
+}
+
+/// Re-prefixes a QName-valued attribute for the source direction.
+///
+/// Only a value whose prefix is actually declared in scope is touched: an
+/// `xsi:type` naming a storage-local `dNpM` prefix moves to whichever prefix
+/// the source document uses for that namespace, and an unprefixed `xsi:type`
+/// picks up the prefix of the default namespace it resolved through (this is
+/// what turns the storage `xsi:type="StructureItemGroup"` under a default
+/// settings namespace into `xsi:type="dcsset:StructureItemGroup"`). Anything
+/// else -- a literal like `DataSetQuery`, a boolean, a number, free text --
+/// is copied through untouched.
+fn rewrite_qname_value(
+    policy: &DcsInnerSchemaPolicy,
+    scopes: &NamespaceScopes,
+    renamed: &[(String, String)],
+    key: &str,
+    value: &str,
+) -> Result<String, DcsInnerSchemaError> {
+    let (prefix, local) = split_prefix(value);
+    if !prefix.is_empty() {
+        if let Some(source) = renamed
+            .iter()
+            .find(|(declared, _)| declared == prefix)
+            .map(|(_, source)| source.clone())
+        {
+            return Ok(if source.is_empty() {
+                local.to_owned()
+            } else {
+                format!("{source}:{local}")
+            });
+        }
+        if let Some(uri) = resolve_prefix(scopes, prefix)
+            && let Some(source) = source_namespace_prefix(policy, uri)
+        {
+            return Ok(if source.is_empty() {
+                local.to_owned()
+            } else {
+                format!("{source}:{local}")
+            });
+        }
+        return Ok(value.to_owned());
+    }
+    if key != "xsi:type" {
+        return Ok(value.to_owned());
+    }
+    let Some(default_uri) = resolve_prefix(scopes, "") else {
+        return Ok(value.to_owned());
+    };
+    if default_uri.is_empty() {
+        return Ok(value.to_owned());
+    }
+    let Some(source) = source_namespace_prefix(policy, default_uri) else {
+        return unsupported(format!(
+            "xsi:type default namespace {default_uri} is outside the source root declaration"
+        ));
+    };
+    Ok(if source.is_empty() {
+        value.to_owned()
+    } else {
+        format!("{source}:{value}")
+    })
+}
+
 fn append_indented_fragment(out: &mut String, fragment: &str, depth: usize) {
     let fragment = fragment.trim();
     let base_indent = fragment
@@ -3038,6 +3694,42 @@ mod tests {
         let close = "</dcsset:settings>";
         let end = start + source[start..].find(close).unwrap() + close.len();
         DcsInlineSettingsFragment::parse(source[start..end].to_owned()).unwrap()
+    }
+
+    /// The empty settings variant exactly as 1C:Enterprise 8.3.27.2214 writes
+    /// it into a `DataCompositionSchema` source document (verified against
+    /// `CommonTemplates/ДанныеПечатиРегистрСимволов/Ext/Template.xml` of an
+    /// `ibcmd config export` capture of 1C:Trade Management 11.5.27.75).
+    const EMPTY_INLINE_SETTINGS: &str = "<dcsset:settings xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"/>";
+
+    #[test]
+    fn empty_self_closing_inline_settings_keeps_declarations_inside_the_tag() {
+        let policy = policy().unwrap();
+        let closed = close_inline_settings_namespaces(EMPTY_INLINE_SETTINGS, &policy).unwrap();
+        assert!(
+            closed.ends_with("/>"),
+            "self-closing marker must survive namespace closing: {closed}"
+        );
+        assert!(
+            !closed.contains("/ xmlns:"),
+            "declarations must not be spliced between `/` and `>`: {closed}"
+        );
+        DcsInlineSettingsFragment::parse(EMPTY_INLINE_SETTINGS.to_owned())
+            .expect("the empty native settings variant is a well-formed analyzable fragment");
+    }
+
+    #[test]
+    fn inline_settings_opening_tag_end_ignores_angle_brackets_inside_attribute_values() {
+        let xml = "<dcsset:settings xmlns:probe=\"urn:a>b\" xmlns:other='urn:c>d'/>";
+        assert_eq!(opening_tag_end(xml), Some(xml.len() - 1));
+        let policy = policy().unwrap();
+        let closed = close_inline_settings_namespaces(xml, &policy).unwrap();
+        assert!(closed.ends_with("/>"), "{closed}");
+        assert!(
+            closed.starts_with("<dcsset:settings xmlns:probe="),
+            "{closed}"
+        );
+        assert!(closed.contains("xmlns:dcsset="), "{closed}");
     }
 
     #[test]

@@ -15,7 +15,8 @@ use ibcmd_xml::{
     emit_dcs_query_union_link_source_document, emit_dcs_settings_children_parts,
     parse_dcs_area_template_storage_document_with_references,
     parse_dcs_inner_schema_storage_document_with_references,
-    parse_dcs_query_union_link_storage_document_with_references, rewrite_dcs_settings_children,
+    parse_dcs_query_union_link_storage_document_with_references,
+    rewrite_dcs_primary_schema_storage_document, rewrite_dcs_settings_children,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -208,10 +209,13 @@ pub(crate) enum DcsTemplateNormalizeError {
         index: usize,
         cause: DcsInnerSchemaError,
     },
-    /// The primary schema file matched neither admitted parser shape.
+    /// The primary schema file matched no admitted shape: neither closed
+    /// typed cohort recognized it, and the general storage-to-source
+    /// transliteration could not account for its bytes either.
     PrimarySchemaParse {
         inner_schema: DcsInnerSchemaError,
         query_union_link: DcsInnerSchemaError,
+        transliterate: DcsInnerSchemaError,
     },
     /// The `DataSetObject` schema emitter rejected the parsed schema.
     InnerSchemaEmit(DcsInnerSchemaError),
@@ -326,9 +330,10 @@ impl std::fmt::Display for DcsTemplateNormalizeError {
             Self::PrimarySchemaParse {
                 inner_schema,
                 query_union_link,
+                transliterate,
             } => write!(
                 formatter,
-                "primary schema file matched no admitted parser (inner schema: {inner_schema}; query/union/link: {query_union_link})"
+                "primary schema file matched no admitted parser (inner schema: {inner_schema}; query/union/link: {query_union_link}; transliterate: {transliterate})"
             ),
             Self::InnerSchemaEmit(error) => {
                 write!(formatter, "inner schema source emit failed: {error}")
@@ -500,6 +505,17 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
             DcsTypeResolution::KeepId | DcsTypeResolution::TypeSet { .. } => None,
         })
         .collect();
+    // The type ids the configuration index deliberately resolves to no
+    // semantic name. The platform writes those straight back as
+    // `<v8:TypeId>`; a type id in neither map is not resolvable at all and
+    // must fail closed rather than be spelled either way.
+    let opaque_type_ids = type_index
+        .iter()
+        .filter_map(|(type_id, resolution)| match resolution {
+            DcsTypeResolution::KeepId => Some(type_id.clone()),
+            DcsTypeResolution::Type { .. } | DcsTypeResolution::TypeSet { .. } => None,
+        })
+        .collect();
     let schema = parse_dcs_inner_schema_storage_document_with_references(
         envelope.primary_schema_file(),
         source_profile.clone(),
@@ -527,20 +543,33 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings)
             .map_err(DcsTemplateNormalizeError::InnerSchemaEmit)?,
         Err(inner_schema) => {
-            let schema = parse_dcs_query_union_link_storage_document_with_references(
+            match parse_dcs_query_union_link_storage_document_with_references(
                 envelope.primary_schema_file(),
                 source_profile.clone(),
                 "mssql:dcs-schema-template/query-union-link",
                 &reference_types,
-            )
-            .map_err(|query_union_link| {
-                DcsTemplateNormalizeError::PrimarySchemaParse {
-                    inner_schema,
-                    query_union_link,
-                }
-            })?;
-            emit_dcs_query_union_link_source_document(&schema, &settings)
-                .map_err(DcsTemplateNormalizeError::QueryUnionLinkEmit)?
+            ) {
+                Ok(schema) => emit_dcs_query_union_link_source_document(&schema, &settings)
+                    .map_err(DcsTemplateNormalizeError::QueryUnionLinkEmit)?,
+                // Neither closed typed cohort describes this schema. Fall
+                // through to the general storage-to-source transliteration,
+                // which reproduces the platform's own source spelling from
+                // the stored document's own bytes instead of from an
+                // enumerated shape.
+                Err(query_union_link) => rewrite_dcs_primary_schema_storage_document(
+                    envelope.primary_schema_file(),
+                    &reference_types,
+                    &opaque_type_ids,
+                    &settings,
+                )
+                .map_err(|transliterate| {
+                    DcsTemplateNormalizeError::PrimarySchemaParse {
+                        inner_schema,
+                        query_union_link,
+                        transliterate,
+                    }
+                })?,
+            }
         }
     };
     let terminal = envelope.terminal_schema_file();
@@ -1927,6 +1956,7 @@ mod tests {
             DcsTemplateNormalizeError::PrimarySchemaParse {
                 inner_schema: inner("probe"),
                 query_union_link: inner("probe"),
+                transliterate: inner("probe"),
             },
             DcsTemplateNormalizeError::InnerSchemaEmit(inner("probe")),
             DcsTemplateNormalizeError::QueryUnionLinkEmit(inner("probe")),
@@ -2091,6 +2121,102 @@ mod tests {
             &ProfileId::parse("xml-2.20").unwrap(),
         )
         .expect("platform-attested DCS body must be exportable through the live codec");
+
+        assert_eq!(actual, expected);
+    }
+
+    /// A real production `DataSetQuery` schema -- the shape no closed typed
+    /// cohort describes and that the general storage-to-source
+    /// transliteration exists for.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `20db535c-d9a7-4a81-98b5-06295e8f518d.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `5df7cb6cb94efb1c7ef3e0ea1405553bd2cdf2895cc35ceacc31e7bf9130319f`;
+    /// the expectation is the platform's own
+    /// `DataProcessors/УправлениеВыгрузкамиВБидзаар/Templates/УсловияОтбораНоменклатуры/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `1d04899ee7fe61cddaa3efb51892d91fcea94db481db34e3ecaf0a2bfa3fc6b7`.
+    #[test]
+    fn platform_query_data_set_body_exports_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-query-data-set/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-query-data-set/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "5df7cb6cb94efb1c7ef3e0ea1405553bd2cdf2895cc35ceacc31e7bf9130319f"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "1d04899ee7fe61cddaa3efb51892d91fcea94db481db34e3ecaf0a2bfa3fc6b7"
+        );
+
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a production DataSetQuery schema must export through the live codec");
+
+        assert_eq!(actual, expected);
+    }
+
+    /// The empty `<dcsset:settings .../>` variant: its inline fragment used to
+    /// be spliced as `.../ xmlns:dcsset="..."...>`, which is not well-formed,
+    /// so our own analyzer rejected our own output.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `15f6a89d-53a1-47f7-967e-973c5966caf8.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `a7e61a3156c7a2fa3302f7f77277d7f1a64abda10eb0519292bf4a1829a6f169`;
+    /// the expectation is the platform's own
+    /// `Reports/РезультатыТестирования/Templates/Макет/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `c1b1771520a0c8153e3c2f8d8381fa90f02c78338dc9e936eaef68caf2dffe67`.
+    #[test]
+    fn platform_empty_inline_settings_body_exports_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-empty-inline-settings/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-empty-inline-settings/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "a7e61a3156c7a2fa3302f7f77277d7f1a64abda10eb0519292bf4a1829a6f169"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "c1b1771520a0c8153e3c2f8d8381fa90f02c78338dc9e936eaef68caf2dffe67"
+        );
+
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("an empty settings variant must export through the live codec");
 
         assert_eq!(actual, expected);
     }
@@ -2332,13 +2458,15 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// Regression negative: a third field (or any other cardinality outside
-    /// the two evidenced `DataSetQuery` shapes) still fails closed with a
-    /// typed bail, not a silent skip or a guessed admission -- admitting
-    /// exactly two evidenced child-lists by count does not loosen the
-    /// parser into accepting an arbitrary N fields.
+    /// A third field is outside both closed typed cohorts (which admit exactly
+    /// two evidenced `DataSetQuery` child-lists, by count), so it reaches the
+    /// general storage-to-source transliteration instead -- and is exported,
+    /// not skipped. What the typed parsers refuse is still refused *by them*;
+    /// the document is then accounted for from its own bytes. The
+    /// transliterated result must reproduce the document itself: same
+    /// `DataSetQuery`, all three fields, in order.
     #[test]
-    fn query_union_link_third_field_fails_closed() {
+    fn query_union_link_third_field_transliterates_instead_of_failing_closed() {
         let packed = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link-typeid/raw-packed.bin.b64"
@@ -2384,28 +2512,82 @@ mod tests {
                 qname: "cfg:CatalogRef.FilterProbe".to_owned(),
             },
         );
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &three_field_documents,
+            &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a three-field DataSetQuery must transliterate, not be dropped");
+        let actual = String::from_utf8(actual).expect("source XML is UTF-8");
+        // The corpus carries the top-level `dataSet` query plus the one nested
+        // in the `DataSetUnion` item, and both survive the rewrite.
+        assert_eq!(actual.matches("xsi:type=\"DataSetQuery\"").count(), 2);
+        assert_eq!(actual.matches("<dataPath>Owner</dataPath>").count(), 2);
         assert!(
-            normalize_data_composition_schema_template_documents_with_profiles(
-                &three_field_documents,
-                &type_index,
-                &BTreeMap::new(),
-                &ProfileId::parse("provider:mssql-legacy").unwrap(),
-                &ProfileId::parse("xml-2.20").unwrap(),
-            )
-            .is_err(),
-            "a three-field DataSetQuery must fail closed, not be silently admitted"
+            actual.contains("<v8:Type xmlns:d5p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">d5p1:CatalogRef.FilterProbe</v8:Type>"),
+            "the resolved TypeId keeps its evidenced source spelling: {actual}"
         );
     }
 
-    /// Regression negative: a primary schema outside BOTH the inner-schema
-    /// parser's admitted shape (not DataSetObject) AND the query-union-link
-    /// parser's admitted shape (not exactly dataSource+query+union+link+variant)
-    /// must still fail closed with a typed bail, not a silent skip -- the
-    /// fix only removes the accidental `reference_types.is_empty()` gate on
-    /// the fallback *attempt*, it does not loosen either parser's own
-    /// admitted-shape strictness.
+    /// Fail-closed floor for the transliteration: a primary schema carrying an
+    /// element the source root declares no prefix for cannot be spelled in the
+    /// source direction at all, so it must still be refused by name rather
+    /// than exported with an invented prefix.
     #[test]
-    fn schema_outside_both_inner_schema_and_query_union_link_parsers_fails_closed() {
+    fn primary_schema_with_undeclarable_namespace_still_fails_closed() {
+        let primary = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+            "\t\t<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>\r\n",
+            "\t\t<probe xmlns=\"urn:example:not-a-dcs-namespace\">x</probe>\r\n",
+            "\t\t<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Default</name></settingsVariant>\r\n",
+            "\t</dataCompositionSchema>\r\n",
+            "</SchemaFile>"
+        );
+        let settings = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>"
+        );
+        let terminal = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n",
+            "</SchemaFile>"
+        );
+        let documents: [&[u8]; 3] = [primary.as_bytes(), settings.as_bytes(), terminal.as_bytes()];
+        let rejection = normalize_data_composition_schema_template_documents_with_profiles(
+            &documents,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect_err("an undeclarable namespace must fail closed");
+        assert_eq!(
+            rejection.code(),
+            "dcs.template-normalize.primary-schema-parse",
+            "the rejection must name the step that refused the source: {rejection}"
+        );
+    }
+
+    /// A primary schema outside BOTH the inner-schema parser's admitted shape
+    /// (not DataSetObject) AND the query-union-link parser's admitted shape
+    /// (not exactly dataSource+query+union+link+variant) is neither dropped
+    /// nor guessed at: it reaches the general storage-to-source
+    /// transliteration, which accounts for it from its own bytes. Neither
+    /// typed parser's admitted-shape strictness is loosened; what changes is
+    /// only what happens after both of them have refused.
+    ///
+    /// The empty `<dcsset:settings/>` variant this probe carries is also the
+    /// shape whose inline fragment used to be spliced as
+    /// `.../ xmlns:dcsset="..."...>` -- not well-formed, and therefore
+    /// rejected by our own analyzer before the primary schema was ever
+    /// reached.
+    #[test]
+    fn schema_outside_both_typed_parsers_transliterates_with_its_empty_settings() {
         let primary = concat!(
             "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
             "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
@@ -2434,24 +2616,36 @@ mod tests {
                 qname: "cfg:CatalogRef.FilterProbe".to_owned(),
             },
         );
-        let rejection = normalize_data_composition_schema_template_documents_with_profiles(
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
             &documents,
             &type_index,
             &BTreeMap::new(),
             &ProfileId::parse("provider:mssql-legacy").unwrap(),
             &ProfileId::parse("xml-2.20").unwrap(),
         )
-        .expect_err(
-            "a schema admitted by neither parser must still fail closed with a non-empty type_index",
+        .expect("a schema admitted by neither typed parser must still transliterate");
+        let actual = String::from_utf8(actual).expect("source XML is UTF-8");
+        assert!(
+            actual.starts_with(
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<DataCompositionSchema xmlns="
+            ),
+            "the source root replaces the SchemaFile wrapper: {actual}"
         );
-        // The rejection must be named, not anonymous. This probe's settings
-        // variant is rejected by the inline fragment analyzer before the
-        // primary-schema branch is reached -- the same step order the previous
-        // `Option`-based chain used, now visible in the reason itself.
-        assert_eq!(
-            rejection.code(),
-            "dcs.template-normalize.settings-fragment-parse",
-            "the rejection must name the step that refused the source: {rejection}"
+        assert!(
+            actual.contains("\r\n\t<dataSource><name>Source1</name>"),
+            "storage indentation loses exactly the wrapper level: {actual}"
+        );
+        assert!(
+            actual.contains("<dcsset:name>Default</dcsset:name>"),
+            "the settings-namespace child moves onto the source prefix: {actual}"
+        );
+        assert!(
+            actual.contains("<dcsset:settings"),
+            "the empty settings variant is inlined, not dropped: {actual}"
+        );
+        assert!(
+            actual.ends_with("</DataCompositionSchema>"),
+            "the wrapper close is replaced too: {actual}"
         );
     }
 
