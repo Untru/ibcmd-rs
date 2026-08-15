@@ -1564,6 +1564,7 @@ fn display_path(path: &Path) -> String {
 mod tests {
     use std::{
         fs,
+        sync::atomic::{AtomicUsize, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -1572,14 +1573,25 @@ mod tests {
 
     use super::*;
 
+    // The wall clock alone can collide when parallel tests hit the same
+    // timer tick; a per-process sequence keeps the names unique.
+    fn temp_nonce() -> String {
+        static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+        format!(
+            "{}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
     struct TempFile(PathBuf);
 
     impl TempFile {
         fn new(bytes: &[u8]) -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+            let nonce = temp_nonce();
             let path = std::env::temp_dir().join(format!(
                 "ibcmd-rs-cf-command-{}-{nonce}.cf",
                 std::process::id()
@@ -1599,10 +1611,7 @@ mod tests {
 
     impl TempDirectory {
         fn new(label: &str) -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+            let nonce = temp_nonce();
             let path = std::env::temp_dir().join(format!(
                 "ibcmd-rs-cf-command-{label}-{}-{nonce}",
                 std::process::id()
