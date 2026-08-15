@@ -119,6 +119,64 @@ pub enum OverlayBlocker {
     },
 }
 
+impl OverlayBlocker {
+    /// Stable machine-readable discriminator, identical to the serde `code`
+    /// tag, so a JSON report can name each individual blocker instead of
+    /// collapsing the set into a count.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Unsupported { .. } => "overlay_target_unsupported",
+            Self::MissingTarget { .. } => "overlay_target_missing",
+            Self::MultipartMismatch { .. } => "overlay_multipart_mismatch",
+            Self::MissingRequiredBase { .. } => "overlay_required_base_missing",
+            Self::AmbiguousRequiredBase { .. } => "overlay_required_base_ambiguous",
+            Self::MissingVersions => "overlay_versions_missing",
+            Self::MultipartVersions { .. } => "overlay_versions_multipart",
+        }
+    }
+
+    /// Overlay target this blocker is attributable to, when it is attributable
+    /// to one target.  The two `versions` blockers describe the base image as a
+    /// whole and have none.
+    #[must_use]
+    pub fn logical_key(&self) -> Option<&str> {
+        match self {
+            Self::Unsupported { logical_key, .. }
+            | Self::MissingTarget { logical_key, .. }
+            | Self::MultipartMismatch { logical_key, .. }
+            | Self::MissingRequiredBase { logical_key, .. }
+            | Self::AmbiguousRequiredBase { logical_key, .. } => Some(logical_key.as_str()),
+            Self::MissingVersions | Self::MultipartVersions { .. } => None,
+        }
+    }
+
+    /// Part count the base declares, for the one blocker that compares two
+    /// counts.
+    #[must_use]
+    pub const fn expected_part_count(&self) -> Option<u32> {
+        match self {
+            Self::MultipartMismatch {
+                expected_part_count,
+                ..
+            } => Some(*expected_part_count),
+            _ => None,
+        }
+    }
+
+    /// Part count the overlay declares, paired with
+    /// [`Self::expected_part_count`].
+    #[must_use]
+    pub const fn actual_part_count(&self) -> Option<u32> {
+        match self {
+            Self::MultipartMismatch {
+                actual_part_count, ..
+            } => Some(*actual_part_count),
+            _ => None,
+        }
+    }
+}
+
 impl Display for OverlayBlocker {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -220,6 +278,17 @@ pub enum OverlayError {
     Storage(StorageBuildError),
 }
 
+impl OverlayError {
+    /// Typed preflight blocker set, when the overlay was refused structurally.
+    #[must_use]
+    pub const fn preflight(&self) -> Option<&OverlayPreflightError> {
+        match self {
+            Self::Preflight(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
 impl Display for OverlayError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -288,6 +357,19 @@ pub struct PublishedOverlay {
 pub enum PublishOverlayError {
     Overlay(OverlayError),
     Publication(AtomicRepackError),
+}
+
+impl PublishOverlayError {
+    /// Typed preflight blocker set, when publication was refused before any
+    /// codec ran.  `Display` alone only reports the blocker count, so reports
+    /// that want to name each blocker must reach it through here.
+    #[must_use]
+    pub const fn preflight(&self) -> Option<&OverlayPreflightError> {
+        match self {
+            Self::Overlay(source) => source.preflight(),
+            Self::Publication(_) => None,
+        }
+    }
 }
 
 impl Display for PublishOverlayError {

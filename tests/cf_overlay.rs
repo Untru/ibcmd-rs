@@ -389,6 +389,66 @@ fn cli_overlay_compiled_asset_rejects_plain_bytes_with_raw_asset_hint() {
     assert!(!output_path.exists());
 }
 
+/// Every structural preflight blocker must reach the JSON report as its own
+/// typed record.  `OverlayPreflightError`'s `Display` renders only "found N
+/// blocker(s)", so a report carrying just that string tells a reader something
+/// is wrong without ever saying which target or why.
+#[test]
+fn cli_overlay_reports_every_preflight_blocker_individually() {
+    const ABSENT_ONE: &str = "aaaaaaaa-0000-4000-8000-000000000001.0";
+    const ABSENT_TWO: &str = "aaaaaaaa-0000-4000-8000-000000000002.0";
+
+    let temp = TempDirectory::new();
+    let base_path = temp.path().join("base.cf");
+    let output_path = temp.path().join("overlay.cf");
+    let module_path = temp.path().join("Module.bsl");
+    fs::write(&base_path, base_archive()).unwrap();
+    fs::write(&module_path, b"Procedure Offline()\nEndProcedure").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "overlay"])
+        .arg(&base_path)
+        .arg(&output_path)
+        .arg("--module")
+        .arg(format!("{ABSENT_ONE}={}", module_path.display()))
+        .arg("--module")
+        .arg(format!("{ABSENT_TWO}={}", module_path.display()))
+        .args(["--source-version", "2.20"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "overlay onto absent targets must fail: stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(report["ok"], false);
+    let errors = report["errors"].as_array().unwrap();
+    assert_eq!(errors[0]["code"], "overlay_failed");
+    let blockers = errors
+        .iter()
+        .skip(1)
+        .map(|error| {
+            (
+                error["code"].as_str().unwrap(),
+                error["element"].as_str().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        blockers,
+        [
+            ("overlay_target_missing", ABSENT_ONE),
+            ("overlay_target_missing", ABSENT_TWO),
+        ],
+        "each blocker must be named, not collapsed into a count: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!output_path.exists());
+}
+
 struct CountingCodec<'a>(&'a AtomicUsize);
 
 impl OverlayCodec for CountingCodec<'_> {

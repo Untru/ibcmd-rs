@@ -202,6 +202,91 @@ fn unsupported_source_prevents_publication() {
     assert!(!output.status.success());
     let report: Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(report["errors"][0]["code"], "bootstrap_compile_failed");
+    // The umbrella entry alone never says which rule fired or on which file;
+    // the typed entry that follows it must.
+    let detail = &report["errors"][1];
+    assert_eq!(detail["code"], "unconsumed_source");
+    assert_eq!(detail["element"], "unsupported.dat");
+    assert!(!cf.exists());
+}
+
+#[test]
+fn export_inventory_manifest_is_excluded_from_construction() {
+    let temp = TempDirectory::new();
+    let source = temp.path().join("source");
+    copy_tree(&fixture_root(), &source);
+    // A native `config export` tree always carries this file; it is an
+    // inventory manifest of the dump, has no CF storage record of its own, and
+    // must therefore be excluded from construction rather than parsed as
+    // metadata or routed as a source asset.
+    fs::write(
+        source.join("ConfigDumpInfo.xml"),
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" format="Hierarchical" version="2.20">
+  <ConfigVersions>
+    <Metadata name="Configuration.BootstrapFixture" id="10000000-0000-4000-8000-000000000001" configVersion="00"/>
+  </ConfigVersions>
+</ConfigDumpInfo>"#,
+    )
+    .unwrap();
+    let cf = temp.path().join("configuration.cf");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "bootstrap"])
+        .arg(&source)
+        .arg(&cf)
+        .args([
+            "--source-version",
+            "2.20",
+            "--target-profile",
+            "platform-8.3.27.1989",
+        ])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["source_files"], 4);
+    assert_eq!(report["metadata_files"], 2);
+    assert_eq!(report["asset_files"], 1);
+    assert_eq!(report["non_source_files"], 1);
+    // Same entry inventory as the manifest-free tree: the excluded file adds
+    // nothing to the container.
+    assert_eq!(report["storage_entries"], 6);
+}
+
+#[test]
+fn reserved_manifest_path_holding_metadata_is_rejected_not_skipped() {
+    let temp = TempDirectory::new();
+    let source = temp.path().join("source");
+    copy_tree(&fixture_root(), &source);
+    fs::write(
+        source.join("ConfigDumpInfo.xml"),
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20"/>"#,
+    )
+    .unwrap();
+    let cf = temp.path().join("blocked.cf");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "bootstrap"])
+        .arg(&source)
+        .arg(&cf)
+        .args(["--source-version", "2.20"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let report: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(report["errors"][1]["code"], "non_source_document_mismatch");
+    assert_eq!(report["errors"][1]["element"], "ConfigDumpInfo.xml");
     assert!(!cf.exists());
 }
 

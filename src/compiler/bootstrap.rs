@@ -25,7 +25,7 @@ use ibcmd_core::{
     version::XmlDialect,
 };
 use ibcmd_xml::{
-    DialectDetection, DialectRegistry, XmlDocument, XmlElement, XmlNode, XmlReader,
+    AttributeKind, DialectDetection, DialectRegistry, XmlDocument, XmlElement, XmlNode, XmlReader,
     bundled_dialect_registry, bundled_metadata_registry,
     metadata::decode_configuration_envelope,
     source_tree::{SourceKind, SourceTree},
@@ -68,6 +68,18 @@ use super::{
     versions::compile_versions,
 };
 
+/// Exact tree-root path of the one non-source document a native `config
+/// export` tree carries.
+const EXPORT_MANIFEST_PATH: &str = "ConfigDumpInfo.xml";
+/// Root element local name of that document.
+const EXPORT_MANIFEST_ROOT: &str = "ConfigDumpInfo";
+/// Root element namespace of that document.  Deliberately distinct from the
+/// `MDClasses`/`xcf` source namespaces, and the bundled dialect registry
+/// already refuses to conflate it with any source dialect
+/// (`ibcmd-xml/src/dialect.rs`,
+/// `repository_xcf_roots_are_recognized_but_dumpinfo_is_not_conflated`).
+const EXPORT_MANIFEST_NAMESPACE: &str = "http://v8.1c.ru/8.3/xcf/dumpinfo";
+
 /// Complete compiler result.  The patch owns every payload and can cross the
 /// root-crate/CF-crate boundary without retaining XML documents.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -77,6 +89,7 @@ pub struct BootstrapCompilation {
     source_files: usize,
     metadata_files: usize,
     asset_files: usize,
+    non_source_files: usize,
     patch: StoragePatch,
 }
 
@@ -104,6 +117,13 @@ impl BootstrapCompilation {
     #[must_use]
     pub const fn asset_files(&self) -> usize {
         self.asset_files
+    }
+
+    /// Source-tree files deliberately excluded from CF construction because
+    /// they are export-side manifests rather than source documents.
+    #[must_use]
+    pub const fn non_source_files(&self) -> usize {
+        self.non_source_files
     }
 
     #[must_use]
@@ -181,6 +201,7 @@ pub fn compile_bootstrap_source_tree(
     let mut objects = Vec::<CanonicalObject>::new();
     let mut metadata_sources = Vec::<MetadataSource>::new();
     let mut metadata_indexes = BTreeSet::<usize>::new();
+    let mut non_source_indexes = BTreeSet::<usize>::new();
     let mut configuration = None::<ConfigurationProjection>;
 
     for (source_index, source) in tree.entries().iter().enumerate() {
@@ -198,6 +219,10 @@ pub fn compile_bootstrap_source_tree(
                 message: error.to_string(),
             }
         })?;
+        if classify_export_manifest(&document, source.path().as_str())? {
+            non_source_indexes.insert(source_index);
+            continue;
+        }
         validate_source_dialect(
             &document,
             &dialects,
@@ -291,7 +316,11 @@ pub fn compile_bootstrap_source_tree(
     let identities = collect_bootstrap_identities(&validated)
         .map_err(|source| BootstrapCompileError::Identity(source.to_string()))?;
 
-    let assets = resolve_assets(tree, &metadata_sources, &metadata_indexes)?;
+    // Metadata documents and excluded non-source documents are both already
+    // accounted for; only the remainder may claim a source-asset route.
+    let mut consumed_indexes = metadata_indexes;
+    consumed_indexes.extend(non_source_indexes.iter().copied());
+    let assets = resolve_assets(tree, &metadata_sources, &consumed_indexes)?;
     let mut suffixes = BTreeMap::<ObjectUuid, Vec<StorageSuffix>>::new();
     for asset in &assets {
         suffixes.entry(asset.owner_uuid).or_default().push(
@@ -425,8 +454,84 @@ pub fn compile_bootstrap_source_tree(
         source_files: tree.entries().len(),
         metadata_files: metadata_sources.len(),
         asset_files: assets.len(),
+        non_source_files: non_source_indexes.len(),
         patch,
     })
+}
+
+/// Fail-closed classification of the single non-source document a native
+/// `config export` tree carries: `ConfigDumpInfo.xml`.
+///
+/// That file is an inventory manifest of the dump, not a `MetaDataObject`
+/// document, and it has no counterpart record inside a CF container — verified
+/// with `cf inspect` against all three retained native corpora, whose storage
+/// elements are exclusively per-object uuid keys plus `root`/`version`/
+/// `versions`.  Feeding it to the metadata route therefore cannot ever be
+/// right: it is not part of what a CF stores, so it must be excluded both from
+/// dialect detection and from the source-asset router.
+///
+/// Two independent pieces of evidence must agree before anything is excluded:
+/// the exact tree-root path, and the document's own root element identity
+/// (local name plus resolved namespace).  Either one alone matching is a hard
+/// error rather than a skip:
+///
+/// * the reserved path holding a foreign root element means real content is
+///   parked under that name, and dropping it silently is exactly the swallow
+///   this gate exists to prevent;
+/// * the manifest root element at any other path is a tree shape this compiler
+///   has no evidence for, so it refuses to guess which of the two signals to
+///   believe.
+///
+/// Rejecting instead by the weaker rule "any XML whose root is not
+/// `MetaDataObject`" was considered and deliberately not chosen: it would turn
+/// every future unrecognized root — including genuine metadata this build does
+/// not yet parse — into a silent skip, and the resulting CF would be quietly
+/// incomplete.  Under the rule implemented here, unrecognized XML keeps its
+/// existing route and still fails, either in dialect detection or as
+/// `UnconsumedSource`.
+fn classify_export_manifest(
+    document: &XmlDocument,
+    path: &str,
+) -> Result<bool, BootstrapCompileError> {
+    let reserved_path = path == EXPORT_MANIFEST_PATH;
+    let root = document.root();
+    let manifest_root = root.name().local() == EXPORT_MANIFEST_ROOT
+        && root_namespace(root) == Some(EXPORT_MANIFEST_NAMESPACE);
+    match (reserved_path, manifest_root) {
+        (true, true) => Ok(true),
+        (false, false) => Ok(false),
+        (true, false) => Err(BootstrapCompileError::NonSourceDocumentMismatch {
+            path: path.to_owned(),
+            message: format!(
+                "`{EXPORT_MANIFEST_PATH}` is reserved for the export inventory manifest, but this \
+                 document's root element is `{}`; it is neither excluded nor compiled",
+                root.name().raw()
+            ),
+        }),
+        (false, true) => Err(BootstrapCompileError::NonSourceDocumentMismatch {
+            path: path.to_owned(),
+            message: format!(
+                "export inventory manifest root `{{{EXPORT_MANIFEST_NAMESPACE}}}{EXPORT_MANIFEST_ROOT}` \
+                 is only evidenced at the tree root path `{EXPORT_MANIFEST_PATH}`"
+            ),
+        }),
+    }
+}
+
+/// Namespace URI bound to an element's own name, resolved from the element's
+/// own declarations.  A source-tree root element always carries its own
+/// bindings, so no ancestor scope can apply here.
+fn root_namespace(element: &XmlElement) -> Option<&str> {
+    let prefix = element.name().prefix();
+    element
+        .attributes()
+        .iter()
+        .find_map(|attribute| match attribute.kind() {
+            AttributeKind::Namespace(declared) if declared.as_deref() == prefix => {
+                Some(attribute.value())
+            }
+            _ => None,
+        })
 }
 
 fn validate_source_dialect(
@@ -613,12 +718,12 @@ fn command_family(family: &str) -> Option<CommandMetadataFamily> {
 fn resolve_assets(
     tree: &SourceTree,
     metadata: &[MetadataSource],
-    metadata_indexes: &BTreeSet<usize>,
+    consumed_indexes: &BTreeSet<usize>,
 ) -> Result<Vec<AssetSource>, BootstrapCompileError> {
     let registry = SourceAssetRegistry;
     let mut assets = Vec::new();
     for (source_index, source) in tree.entries().iter().enumerate() {
-        if metadata_indexes.contains(&source_index) {
+        if consumed_indexes.contains(&source_index) {
             continue;
         }
         let path = source.path().as_str();
@@ -1016,6 +1121,10 @@ pub enum BootstrapCompileError {
         path: String,
         message: String,
     },
+    NonSourceDocumentMismatch {
+        path: String,
+        message: String,
+    },
     ConfigurationPath {
         path: String,
     },
@@ -1070,6 +1179,85 @@ pub enum BootstrapCompileError {
     Patch(String),
 }
 
+impl BootstrapCompileError {
+    /// Stable machine-readable discriminator, one per variant, so a JSON report
+    /// can carry *which* structural rule rejected the tree rather than only a
+    /// rendered sentence.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::SourceTree(_) => "source_tree_invalid",
+            Self::SourceProfile(_) => "source_profile_invalid",
+            Self::MissingTargetCoordinate(_) => "missing_target_coordinate",
+            Self::InvalidXml { .. } => "invalid_xml",
+            Self::InvalidMetadataEnvelope { .. } => "invalid_metadata_envelope",
+            Self::NonSourceDocumentMismatch { .. } => "non_source_document_mismatch",
+            Self::ConfigurationPath { .. } => "configuration_path",
+            Self::ConfigurationCount { .. } => "configuration_count",
+            Self::InvalidConfiguration(_) => "invalid_configuration",
+            Self::DuplicateConfigurationChild { .. } => "duplicate_configuration_child",
+            Self::ConfigurationInventoryMismatch { .. } => "configuration_inventory_mismatch",
+            Self::UnsupportedMetadataFamily { .. } => "unsupported_metadata_family",
+            Self::UnconsumedSource { .. } => "unconsumed_source",
+            Self::AmbiguousSourceRoute { .. } => "ambiguous_source_route",
+            Self::UnsupportedAssetCodec { .. } => "unsupported_asset_codec",
+            Self::Asset { .. } => "asset_compile_failed",
+            Self::Profile { .. } => "profile_selection_failed",
+            Self::Canonical(_) => "canonical_graph_invalid",
+            Self::Identity(_) => "identity_graph_invalid",
+            Self::Graph(_) => "storage_graph_invalid",
+            Self::Compiler { .. } => "family_compiler_rejected",
+            Self::DuplicateCompiledEntry { .. } => "duplicate_compiled_entry",
+            Self::Patch(_) => "patch_invalid",
+        }
+    }
+
+    /// Source-tree path this failure is attributable to, when it is attributable
+    /// to one file.  Answers *where* without re-parsing the rendered message.
+    #[must_use]
+    pub fn source_path(&self) -> Option<&str> {
+        match self {
+            Self::InvalidXml { path, .. }
+            | Self::InvalidMetadataEnvelope { path, .. }
+            | Self::NonSourceDocumentMismatch { path, .. }
+            | Self::ConfigurationPath { path }
+            | Self::UnsupportedMetadataFamily { path, .. }
+            | Self::UnconsumedSource { path, .. }
+            | Self::AmbiguousSourceRoute { path, .. }
+            | Self::UnsupportedAssetCodec { path, .. }
+            | Self::Asset { path, .. } => Some(path.as_str()),
+            _ => None,
+        }
+    }
+
+    /// What the compiler required, for the variants that compare two inventories
+    /// or two counts.
+    #[must_use]
+    pub fn expected(&self) -> Option<String> {
+        match self {
+            Self::ConfigurationCount { .. } => Some("1".to_owned()),
+            Self::ConfigurationInventoryMismatch { missing, .. } if !missing.is_empty() => {
+                Some(format!("missing: {}", missing.join(", ")))
+            }
+            _ => None,
+        }
+    }
+
+    /// What the compiler actually observed, paired with [`Self::expected`].
+    #[must_use]
+    pub fn actual(&self) -> Option<String> {
+        match self {
+            Self::ConfigurationCount { actual } => Some(actual.to_string()),
+            Self::ConfigurationInventoryMismatch { extra, .. } if !extra.is_empty() => {
+                Some(format!("extra: {}", extra.join(", ")))
+            }
+            Self::AmbiguousSourceRoute { candidates, .. } => Some(candidates.join(", ")),
+            Self::UnsupportedMetadataFamily { family, .. } => Some(family.clone()),
+            _ => None,
+        }
+    }
+}
+
 impl Display for BootstrapCompileError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -1083,6 +1271,12 @@ impl Display for BootstrapCompileError {
             }
             Self::InvalidMetadataEnvelope { path, message } => {
                 write!(formatter, "metadata source `{path}` is invalid: {message}")
+            }
+            Self::NonSourceDocumentMismatch { path, message } => {
+                write!(
+                    formatter,
+                    "source `{path}` cannot be classified as source or non-source: {message}"
+                )
             }
             Self::ConfigurationPath { path } => write!(
                 formatter,
@@ -1287,6 +1481,90 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    const EXPORT_MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" format="Hierarchical" version="2.20">
+  <ConfigVersions>
+    <Metadata name="Configuration.BootstrapFixture" id="10000000-0000-4000-8000-000000000001" configVersion="00"/>
+  </ConfigVersions>
+</ConfigDumpInfo>"#;
+
+    #[test]
+    fn export_inventory_manifest_is_excluded_without_reaching_any_route() {
+        let mut sources = full_tree().entries().to_vec();
+        sources.push(entry("ConfigDumpInfo.xml", EXPORT_MANIFEST.as_bytes()));
+        let compilation = compile_bootstrap_source_tree(
+            &SourceTree::new(sources).unwrap(),
+            XmlDialect::parse("2.20").unwrap(),
+            &target_profile(),
+        )
+        .unwrap();
+        assert_eq!(compilation.source_files(), 4);
+        assert_eq!(compilation.metadata_files(), 2);
+        assert_eq!(compilation.asset_files(), 1);
+        assert_eq!(compilation.non_source_files(), 1);
+        // The excluded manifest contributes nothing to the container, matching
+        // `cf inspect` on the retained native corpora.
+        assert_eq!(compilation.patch(), full_compilation().patch());
+    }
+
+    fn full_compilation() -> BootstrapCompilation {
+        compile_bootstrap_source_tree(
+            &full_tree(),
+            XmlDialect::parse("2.20").unwrap(),
+            &target_profile(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn reserved_manifest_path_holding_other_content_is_rejected_not_skipped() {
+        let mut sources = full_tree().entries().to_vec();
+        sources.push(entry(
+            "ConfigDumpInfo.xml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20"/>"#,
+        ));
+        let error = compile_bootstrap_source_tree(
+            &SourceTree::new(sources).unwrap(),
+            XmlDialect::parse("2.20").unwrap(),
+            &target_profile(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                BootstrapCompileError::NonSourceDocumentMismatch { path, .. }
+                    if path == "ConfigDumpInfo.xml"
+            ),
+            "{error}"
+        );
+        assert_eq!(error.code(), "non_source_document_mismatch");
+        assert_eq!(error.source_path(), Some("ConfigDumpInfo.xml"));
+    }
+
+    #[test]
+    fn manifest_root_outside_the_tree_root_path_is_rejected_not_skipped() {
+        let mut sources = full_tree().entries().to_vec();
+        sources.push(entry(
+            "CommonModules/ConfigDumpInfo.xml",
+            EXPORT_MANIFEST.as_bytes(),
+        ));
+        let error = compile_bootstrap_source_tree(
+            &SourceTree::new(sources).unwrap(),
+            XmlDialect::parse("2.20").unwrap(),
+            &target_profile(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                BootstrapCompileError::NonSourceDocumentMismatch { path, .. }
+                    if path == "CommonModules/ConfigDumpInfo.xml"
+            ),
+            "{error}"
+        );
     }
 
     #[test]

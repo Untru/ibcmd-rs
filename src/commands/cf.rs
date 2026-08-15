@@ -16,7 +16,7 @@ use std::{
 use ibcmd_cf::{
     archive::decode_archive_uniform,
     bootstrap::{BootstrapCfProfile, publish_bootstrap_patch_new},
-    overlay::{OverlayCodec, OverlayReport, publish_overlay_new},
+    overlay::{OverlayCodec, OverlayReport, PublishOverlayError, publish_overlay_new},
     payload::{PayloadDecoder, PayloadEncoding, decode_payload},
 };
 use ibcmd_core::{
@@ -42,7 +42,8 @@ use crate::{
     },
     compiler::{
         CompileAxes, CompileRequest, PrepackedSource, SourcePayload,
-        bootstrap::compile_bootstrap_source_tree, compile_overlay,
+        bootstrap::{BootstrapCompileError, compile_bootstrap_source_tree},
+        compile_overlay,
     },
     module_blob::{
         pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
@@ -154,6 +155,10 @@ pub struct CfBootstrapReport {
     pub source_files: usize,
     pub metadata_files: usize,
     pub asset_files: usize,
+    /// Source-tree files excluded from CF construction because they are
+    /// export-side manifests, not source documents.  `source_files` equals
+    /// `metadata_files + asset_files + non_source_files` on success.
+    pub non_source_files: usize,
     pub storage_entries: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publication: Option<CfBootstrapPublicationReport>,
@@ -549,16 +554,11 @@ fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
     })?;
     let axes = args.source_version.version_axes();
     let compilation = compile_bootstrap_source_tree(&tree, axes.xml_dialect().clone(), target)
-        .map_err(|source| {
-            bootstrap_failure(
-                &args,
-                "bootstrap_compile_failed",
-                format!("source tree cannot be bootstrapped: {source}"),
-            )
-        })?;
+        .map_err(|source| bootstrap_compile_failure(&args, &source))?;
     let source_files = compilation.source_files();
     let metadata_files = compilation.metadata_files();
     let asset_files = compilation.asset_files();
+    let non_source_files = compilation.non_source_files();
     let storage_entries = compilation.patch().len();
     let revision = match args.revision {
         CfRevision::Format15 => Revision::Format15,
@@ -602,6 +602,7 @@ fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
         source_files,
         metadata_files,
         asset_files,
+        non_source_files,
         storage_entries,
         publication: Some(CfBootstrapPublicationReport {
             bytes_written: publication.write.bytes_written,
@@ -617,6 +618,38 @@ fn bootstrap_failure(
     code: &'static str,
     message: String,
 ) -> CfCommandError {
+    bootstrap_failure_many(args, vec![diagnostic(code, message)])
+}
+
+/// Renders a [`BootstrapCompileError`] as two report entries: the stable
+/// `bootstrap_compile_failed` umbrella every consumer already keys on, followed
+/// by the typed record naming the structural rule that rejected the tree, the
+/// exact source file, and — where the rule compares two sets — what was
+/// required against what was found.  Without the second entry the report only
+/// says that compilation failed, not what or where.
+fn bootstrap_compile_failure(
+    args: &CfBootstrapArgs,
+    error: &BootstrapCompileError,
+) -> CfCommandError {
+    bootstrap_failure_many(
+        args,
+        vec![
+            diagnostic(
+                "bootstrap_compile_failed",
+                format!("source tree cannot be bootstrapped: {error}"),
+            ),
+            CfDiagnostic {
+                code: error.code(),
+                message: error.to_string(),
+                element: error.source_path().map(str::to_owned),
+                expected: error.expected(),
+                actual: error.actual(),
+            },
+        ],
+    )
+}
+
+fn bootstrap_failure_many(args: &CfBootstrapArgs, errors: Vec<CfDiagnostic>) -> CfCommandError {
     let revision = match args.revision {
         CfRevision::Format15 => Revision::Format15,
         CfRevision::Format16 => Revision::Format16,
@@ -637,9 +670,10 @@ fn bootstrap_failure(
             source_files: 0,
             metadata_files: 0,
             asset_files: 0,
+            non_source_files: 0,
             storage_entries: 0,
             publication: None,
-            errors: vec![diagnostic(code, message)],
+            errors,
         })),
     }
 }
@@ -957,14 +991,7 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
         &args.output,
         ResourceLimits::default(),
     )
-    .map_err(|source| {
-        overlay_failure(
-            &args,
-            profile.clone(),
-            "overlay_failed",
-            format!("failed to publish CF overlay: {source}"),
-        )
-    })?;
+    .map_err(|source| overlay_publish_failure(&args, profile.clone(), &source))?;
 
     let publication = CfOverlayPublicationReport {
         revision: match published.publication.write.revision {
@@ -1083,6 +1110,42 @@ fn overlay_failure(
     code: &'static str,
     message: String,
 ) -> CfCommandError {
+    overlay_failure_many(args, profile, vec![diagnostic(code, message)])
+}
+
+/// Renders a publication failure as the stable `overlay_failed` umbrella
+/// followed by one typed record per structural preflight blocker.
+///
+/// `OverlayPreflightError`'s own `Display` renders only "found N blocker(s)",
+/// so without this expansion the report told a reader that something is wrong
+/// but never which target or why — the blockers were already typed and
+/// serializable, they simply never reached the report.
+fn overlay_publish_failure(
+    args: &CfOverlayArgs,
+    profile: CfProfileReport,
+    error: &PublishOverlayError,
+) -> CfCommandError {
+    let mut errors = vec![diagnostic(
+        "overlay_failed",
+        format!("failed to publish CF overlay: {error}"),
+    )];
+    if let Some(preflight) = error.preflight() {
+        errors.extend(preflight.blockers().iter().map(|blocker| CfDiagnostic {
+            code: blocker.code(),
+            message: blocker.to_string(),
+            element: blocker.logical_key().map(str::to_owned),
+            expected: blocker.expected_part_count().map(|parts| parts.to_string()),
+            actual: blocker.actual_part_count().map(|parts| parts.to_string()),
+        }));
+    }
+    overlay_failure_many(args, profile, errors)
+}
+
+fn overlay_failure_many(
+    args: &CfOverlayArgs,
+    profile: CfProfileReport,
+    errors: Vec<CfDiagnostic>,
+) -> CfCommandError {
     CfCommandError {
         report: Box::new(CfCommandReport::Overlay(CfOverlayReport {
             schema_version: REPORT_SCHEMA_VERSION,
@@ -1094,7 +1157,7 @@ fn overlay_failure(
             profile,
             overlay: None,
             publication: None,
-            errors: vec![diagnostic(code, message)],
+            errors,
         })),
     }
 }
