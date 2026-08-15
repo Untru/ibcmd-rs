@@ -905,6 +905,7 @@ mod characteristics {
 mod command_interface;
 mod config_dump_info;
 mod config_rows;
+mod configuration_properties_evidence;
 mod dcs;
 mod fetch;
 mod form_body;
@@ -7690,6 +7691,20 @@ struct ConfigurationProperties {
     form_data_settings_storage: Option<ConfigurationRootReference>,
     used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
     compatibility_mode: Option<String>,
+    /// Set only by the CF-container decode path
+    /// (`extract_configuration_source_xml`'s own raw config-body text),
+    /// after `parse_configuration_properties_evidenced_default_block`
+    /// fail-closed-proves the tuple's unmapped span matches the evidenced
+    /// all-default reference. When present, the writer emits the entire
+    /// `DefaultRoles`..`DefaultConstantsForm` span from this evidence
+    /// instead of from the (currently always-empty, for this decode path)
+    /// struct fields above that cover that same span
+    /// (`default_roles`/`default_style`/
+    /// `used_mobile_application_functionalities`/`compatibility_mode`'s
+    /// sibling fields near `DataLockControlMode`) -- existing callers that
+    /// never populate this field see no change in behavior.
+    configuration_properties_evidenced_default_block:
+        Option<configuration_properties_evidence::ConfigurationPropertiesEvidencedFields>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -29716,18 +29731,34 @@ fn format_configuration_source_xml(
         }
         insert.push_str("\t\t\t</UsePurposes>\r\n");
     }
-    push_optional_simple_property_xml(
-        &mut insert,
-        "DefaultStyle",
-        properties.default_style.as_deref(),
-    );
-    push_optional_simple_property_xml(
-        &mut insert,
-        "DefaultLanguage",
-        properties.default_language.as_deref(),
-    );
+    let evidenced = properties
+        .configuration_properties_evidenced_default_block
+        .as_ref();
+    if evidenced.is_none() {
+        // Native positions `DefaultStyle`/`DefaultLanguage` immediately
+        // before `DataLockControlMode`, near the end of `<Properties>` (see
+        // the evidenced branch below) -- this early position is legacy,
+        // pre-dating that discovery, and is kept only for callers that
+        // don't populate `configuration_properties_evidenced_default_block`
+        // so their existing output (and tests) don't change.
+        push_optional_simple_property_xml(
+            &mut insert,
+            "DefaultStyle",
+            properties.default_style.as_deref(),
+        );
+        push_optional_simple_property_xml(
+            &mut insert,
+            "DefaultLanguage",
+            properties.default_language.as_deref(),
+        );
+    }
     push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
-    if !properties.default_roles.is_empty() {
+    if evidenced.is_some() {
+        insert.push_str(
+            ibcmd_schema::configuration_properties_evidenced_default_block_policy()
+                .default_roles_segment(),
+        );
+    } else if !properties.default_roles.is_empty() {
         insert.push_str("\t\t\t<DefaultRoles>\r\n");
         for role in &properties.default_roles {
             insert.push_str(&format!(
@@ -29744,6 +29775,20 @@ fn format_configuration_source_xml(
         "UpdateCatalogAddress",
         properties.update_catalog_address.as_deref(),
     );
+    if let Some(evidenced) = evidenced {
+        insert.push_str(&format!(
+            "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
+\t\t\t<UseManagedFormInOrdinaryApplication>{}</UseManagedFormInOrdinaryApplication>\r\n\
+\t\t\t<UseOrdinaryFormInManagedApplication>{}</UseOrdinaryFormInManagedApplication>\r\n",
+            evidenced.include_help_in_contents_xml,
+            evidenced.use_managed_form_in_ordinary_application_xml,
+            evidenced.use_ordinary_form_in_managed_application_xml,
+        ));
+        insert.push_str(
+            ibcmd_schema::configuration_properties_evidenced_default_block_policy()
+                .additional_full_text_search_dictionaries_segment(),
+        );
+    }
     push_optional_root_reference_xml(
         &mut insert,
         "CommonSettingsStorage",
@@ -29764,24 +29809,36 @@ fn format_configuration_source_xml(
         "FormDataSettingsStorage",
         properties.form_data_settings_storage.as_ref(),
     );
-    if !properties
-        .used_mobile_application_functionalities
-        .is_empty()
-    {
-        insert.push_str("\t\t\t<UsedMobileApplicationFunctionalities>\r\n");
-        for functionality in &properties.used_mobile_application_functionalities {
-            insert.push_str("\t\t\t\t<app:functionality>\r\n");
-            insert.push_str(&format!(
-                "\t\t\t\t\t<app:functionality>{}</app:functionality>\r\n",
-                escape_xml_element_text(functionality.name)
-            ));
-            insert.push_str(&format!(
-                "\t\t\t\t\t<app:use>{}</app:use>\r\n",
-                xml_bool(functionality.use_functionality)
-            ));
-            insert.push_str("\t\t\t\t</app:functionality>\r\n");
+    if evidenced.is_some() {
+        insert.push_str(
+            ibcmd_schema::configuration_properties_evidenced_default_block_policy()
+                .storage_and_mobile_functionality_segment(),
+        );
+        push_optional_simple_property_xml(
+            &mut insert,
+            "DefaultLanguage",
+            properties.default_language.as_deref(),
+        );
+    } else {
+        if !properties
+            .used_mobile_application_functionalities
+            .is_empty()
+        {
+            insert.push_str("\t\t\t<UsedMobileApplicationFunctionalities>\r\n");
+            for functionality in &properties.used_mobile_application_functionalities {
+                insert.push_str("\t\t\t\t<app:functionality>\r\n");
+                insert.push_str(&format!(
+                    "\t\t\t\t\t<app:functionality>{}</app:functionality>\r\n",
+                    escape_xml_element_text(functionality.name)
+                ));
+                insert.push_str(&format!(
+                    "\t\t\t\t\t<app:use>{}</app:use>\r\n",
+                    xml_bool(functionality.use_functionality)
+                ));
+                insert.push_str("\t\t\t\t</app:functionality>\r\n");
+            }
+            insert.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
         }
-        insert.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
     }
     if let Some(localized) = &properties.localized_properties {
         push_localized_property(
@@ -29832,11 +29889,30 @@ fn format_configuration_source_xml(
             &properties.configuration_information_address,
         );
     }
+    if let Some(evidenced) = evidenced {
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        insert.push_str(policy.data_lock_and_object_autonumeration_segment());
+        insert.push_str(&format!(
+            "\t\t\t<ModalityUseMode>{}</ModalityUseMode>\r\n\
+\t\t\t<SynchronousPlatformExtensionAndAddInCallUseMode>{}</SynchronousPlatformExtensionAndAddInCallUseMode>\r\n\
+\t\t\t<InterfaceCompatibilityMode>{}</InterfaceCompatibilityMode>\r\n",
+            evidenced.modality_use_mode_xml,
+            evidenced.synchronous_platform_extension_and_add_in_call_use_mode_xml,
+            evidenced.interface_compatibility_mode_xml,
+        ));
+        insert.push_str(policy.database_tablespaces_use_mode_segment());
+    }
     push_optional_simple_property_xml(
         &mut insert,
         "CompatibilityMode",
         properties.compatibility_mode.as_deref(),
     );
+    if evidenced.is_some() {
+        insert.push_str(
+            ibcmd_schema::configuration_properties_evidenced_default_block_policy()
+                .default_constants_form_segment(),
+        );
+    }
     insert_metadata_properties_xml(&mut xml, &insert);
     xml
 }

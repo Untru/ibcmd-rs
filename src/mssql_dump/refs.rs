@@ -1895,6 +1895,37 @@ pub(super) fn extract_configuration_source_xml(
     let mut properties =
         parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
     properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
+    match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block(
+        text.as_bytes(),
+    ) {
+        Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
+        Err(
+            super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::HeaderAnchorNotFound
+            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::HeaderAnchorNotUnique { .. }
+            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::FieldAnchorNotFound { .. }
+            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::FieldAnchorNotUnique { .. },
+        ) => {
+            // This text doesn't match the shape the six evidenced offsets
+            // were proven against at all (e.g. a synthetic/SQL-sourced text
+            // shape a non-CF caller constructed) -- never proven to be the
+            // evidenced family, so fall back to today's existing per-field
+            // behavior rather than fail closed on a coordinate we have no
+            // evidence about either way.
+        }
+        Err(
+            super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnrecognizedDigit { .. }
+            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnmappedRangeMismatch { .. }
+            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnmappedRangeOutOfBounds,
+        ) => {
+            // The text DOES match the evidenced family's structural shape,
+            // but its content diverges from the proven all-default reference
+            // somewhere we cannot yet decode -- fail closed (no XML for this
+            // Configuration object at all) rather than silently repeat
+            // today's incomplete-but-quiet omission of ~30 Properties
+            // fields.
+            return None;
+        }
+    }
     if configuration_root_property_fields(text, uuid).is_some() {
         properties.default_roles =
             parse_configuration_default_roles_from_root(text, uuid, object_refs)
@@ -2009,6 +2040,7 @@ pub(super) fn parse_configuration_properties_from_text(
         compatibility_mode: fields
             .get(43)
             .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
+        configuration_properties_evidenced_default_block: None,
     })
 }
 

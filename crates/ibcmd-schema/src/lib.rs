@@ -2729,6 +2729,15 @@ pub const BUNDLED_DCS_AREA_STYLE_COLOR_REFERENCE_EVIDENCE_JSON: &str = include_s
 pub const BUNDLED_DCS_AREA_STYLE_ITEM_UUID_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/manifest.json"
 );
+/// Base64 of the retained, all-default `native-configuration.xml` for the
+/// `dcs-area-style-item-uuid` coordinate (sha256 in
+/// [`CONFIGURATION_PROPERTIES_EVIDENCED_DEFAULT_BLOCK_SOURCE_SHA256`]). Used
+/// only to drift-check
+/// [`configuration_properties_evidenced_default_block_policy`]'s hardcoded
+/// segments against the real bundled evidence.
+pub const BUNDLED_DCS_AREA_STYLE_ITEM_UUID_NATIVE_CONFIGURATION_XML_B64: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/native-configuration.xml.b64"
+);
 /// Immutable platform-authenticated three-additional-scalar-parameter
 /// coordinate: `Флаг` (xs:boolean), `Лимит` (xs:decimal, 10/2/Any) and
 /// `Период` (v8:StandardPeriod, LastMonth), immediately after the existing
@@ -4278,6 +4287,154 @@ struct DcsAreaStyleItemUuidCohort {
     child_objects_prediction_correct: bool,
     storage_parameter_lexeme: String,
     storage_value_form: String,
+}
+
+/// sha256 of the `dcs-area-style-item-uuid` corpus's retained
+/// `native-configuration.xml` (all Configuration Properties at platform
+/// default), the sole source of every lexical fragment in
+/// [`ConfigurationPropertiesEvidencedDefaultBlockPolicy`]. A bundled-evidence
+/// test reconstructs the full Properties body from these fragments plus the
+/// six typed default values and asserts the result is an exact substring of
+/// the file this hash names.
+pub const CONFIGURATION_PROPERTIES_EVIDENCED_DEFAULT_BLOCK_SOURCE_SHA256: &str =
+    "193e665b81eaa3fbb390644860ef0bfaf3d6f48bbe852d7a8fb33d33dd3be24f";
+
+/// Evidence-honest lexical policy for the Configuration `<Properties>`
+/// fields the compiler cannot yet decode individually from the raw
+/// config-body tuple text. Corpus: MINI-GATE-A-CONFIG-PROPS-01 --
+/// `configuration-property-{include-help-in-contents,use-managed-form-ordinary,
+/// use-ordinary-form-managed,modality-use-mode,interface-compatibility-mode}`
+/// and `configuration-properties-{boolean,enum}-group`, cross-checked
+/// against the all-default `dcs-area-style-item-uuid` base corpus.
+///
+/// Six fields (`IncludeHelpInContents`, `UseManagedFormInOrdinaryApplication`,
+/// `UseOrdinaryFormInManagedApplication`, `ModalityUseMode`,
+/// `SynchronousPlatformExtensionAndAddInCallUseMode`,
+/// `InterfaceCompatibilityMode`) have corpus-proven single-byte offsets
+/// (428/623/625/867/906/2669 respectively) into the config-body tuple and
+/// are decoded and emitted typed via the value maps below. Every other
+/// field in this span is emitted verbatim from the segments below, which are
+/// exact, ordered, contiguous slices of the sha-bound native XML -- never
+/// invented -- and are only used by a caller that has independently proven
+/// (by byte-range comparison against the same evidenced-default tuple) that
+/// this specific corpus's Properties tuple matches the all-default case
+/// everywhere outside the six known offsets. A caller that cannot prove
+/// that must fail closed instead of calling into this policy.
+pub struct ConfigurationPropertiesEvidencedDefaultBlockPolicy;
+
+impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
+    /// Inserted immediately after `<ScriptVariant>`, before the writer's own
+    /// (already-correct) `Vendor`/`Version`/`UpdateCatalogAddress`.
+    pub fn default_roles_segment(&self) -> &'static str {
+        "\t\t\t<DefaultRoles/>\r\n"
+    }
+
+    /// Inserted immediately after the three typed boolean fields.
+    pub fn additional_full_text_search_dictionaries_segment(&self) -> &'static str {
+        "\t\t\t<AdditionalFullTextSearchDictionaries/>\r\n"
+    }
+
+    /// `DynamicListsUserSettingsStorage` through `DefaultStyle` inclusive.
+    /// Inserted immediately after the writer's own (already-correct)
+    /// `CommonSettingsStorage`/`ReportsUserSettingsStorage`/
+    /// `ReportsVariantsStorage`/`FormDataSettingsStorage`.
+    pub fn storage_and_mobile_functionality_segment(&self) -> &'static str {
+        "\t\t\t<DynamicListsUserSettingsStorage/>\r\n\t\t\t<URLExternalDataStorage/>\r\n\t\t\t<Content/>\r\n\t\t\t<DefaultReportForm/>\r\n\t\t\t<DefaultReportVariantForm/>\r\n\t\t\t<DefaultReportSettingsForm/>\r\n\t\t\t<DefaultReportAppearanceTemplate/>\r\n\t\t\t<DefaultDynamicListSettingsForm/>\r\n\t\t\t<DefaultSearchForm/>\r\n\t\t\t<DefaultDataHistoryChangeHistoryForm/>\r\n\t\t\t<DefaultDataHistoryVersionDataForm/>\r\n\t\t\t<DefaultDataHistoryVersionDifferencesForm/>\r\n\t\t\t<DefaultCollaborationSystemUsersChoiceForm/>\r\n\t\t\t<RequiredMobileApplicationPermissions/>\r\n\t\t\t<UsedMobileApplicationFunctionalities>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Biometrics</app:functionality>\r\n\t\t\t\t\t<app:use>true</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Location</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BackgroundLocation</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BluetoothPrinters</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>WiFiPrinters</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Contacts</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Calendars</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>PushNotifications</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>LocalNotifications</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>InAppPurchases</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>PersonalComputerFileExchange</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Ads</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>NumberDialing</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>CallProcessing</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>CallLog</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AutoSendSMS</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>ReceiveSMS</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>SMSLog</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Camera</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Microphone</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>MusicLibrary</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>PictureAndVideoLibraries</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AudioPlaybackAndVibration</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BackgroundAudioPlaybackAndVibration</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>InstallPackages</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>OSBackup</app:functionality>\r\n\t\t\t\t\t<app:use>true</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>ApplicationUsageStatistics</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BarcodeScanning</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BackgroundAudioRecording</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AllFilesAccess</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Videoconferences</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>NFC</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>DocumentScanning</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>SpeechToText</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Geofences</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>IncomingShareRequests</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AllIncomingShareRequestsTypesProcessing</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>TextToSpeech</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t</UsedMobileApplicationFunctionalities>\r\n\t\t\t<StandaloneConfigurationRestrictionRoles/>\r\n\t\t\t<MobileApplicationURLs/>\r\n\t\t\t<AllowedIncomingShareRequestTypes/>\r\n\t\t\t<MainClientApplicationWindowMode>Normal</MainClientApplicationWindowMode>\r\n\t\t\t<DefaultInterface/>\r\n\t\t\t<DefaultStyle/>\r\n"
+    }
+
+    /// `DataLockControlMode` and `ObjectAutonumerationMode`. Inserted
+    /// immediately after the writer's own (already-correct)
+    /// `BriefInformation`/`DetailedInformation`/`Copyright`/
+    /// `VendorInformationAddress`/`ConfigurationInformationAddress`, before
+    /// the three typed enum fields.
+    pub fn data_lock_and_object_autonumeration_segment(&self) -> &'static str {
+        "\t\t\t<DataLockControlMode>Managed</DataLockControlMode>\r\n\t\t\t<ObjectAutonumerationMode>NotAutoFree</ObjectAutonumerationMode>\r\n"
+    }
+
+    /// `DatabaseTablespacesUseMode`. Inserted immediately after the typed
+    /// `InterfaceCompatibilityMode`, before the writer's own
+    /// (already-correct) `CompatibilityMode`.
+    pub fn database_tablespaces_use_mode_segment(&self) -> &'static str {
+        "\t\t\t<DatabaseTablespacesUseMode>DontUse</DatabaseTablespacesUseMode>\r\n"
+    }
+
+    /// Inserted at the very end of `<Properties>`, immediately after the
+    /// writer's own (already-correct) `CompatibilityMode`.
+    pub fn default_constants_form_segment(&self) -> &'static str {
+        "\t\t\t<DefaultConstantsForm/>\r\n"
+    }
+
+    /// `IncludeHelpInContents` (config-body tuple offset 428): single ASCII
+    /// digit, `'0'` = `false` (platform default), `'1'` = `true`. Any other
+    /// byte is unrecognized and must fail closed.
+    pub fn include_help_in_contents_xml(&self, digit: u8) -> Option<&'static str> {
+        match digit {
+            b'0' => Some("false"),
+            b'1' => Some("true"),
+            _ => None,
+        }
+    }
+
+    /// `UseManagedFormInOrdinaryApplication` (offset 623): same `'0'`/`'1'`
+    /// boolean convention as [`Self::include_help_in_contents_xml`].
+    pub fn use_managed_form_in_ordinary_application_xml(&self, digit: u8) -> Option<&'static str> {
+        self.include_help_in_contents_xml(digit)
+    }
+
+    /// `UseOrdinaryFormInManagedApplication` (offset 625): same `'0'`/`'1'`
+    /// boolean convention as [`Self::include_help_in_contents_xml`].
+    pub fn use_ordinary_form_in_managed_application_xml(&self, digit: u8) -> Option<&'static str> {
+        self.include_help_in_contents_xml(digit)
+    }
+
+    /// `ModalityUseMode` (offset 867): single ASCII digit, `'2'` = `DontUse`
+    /// (platform default), `'0'` = `Use`. No other index value has been
+    /// observed by any evidenced corpus; any other byte must fail closed
+    /// rather than guess at unobserved enum members.
+    pub fn modality_use_mode_xml(&self, digit: u8) -> Option<&'static str> {
+        match digit {
+            b'2' => Some("DontUse"),
+            b'0' => Some("Use"),
+            _ => None,
+        }
+    }
+
+    /// `SynchronousPlatformExtensionAndAddInCallUseMode` (offset 2669): same
+    /// `'2'` = `DontUse` / `'0'` = `Use` convention as
+    /// [`Self::modality_use_mode_xml`] -- proven by elimination
+    /// (`configuration-properties-enum-group` changes exactly three offsets
+    /// {867,906,2669} to exactly three named properties {ModalityUseMode,
+    /// SynchronousPlatformExtensionAndAddInCallUseMode,
+    /// InterfaceCompatibilityMode}; the other two offsets are independently,
+    /// single-field-proven, leaving this pairing as the only one left).
+    pub fn synchronous_platform_extension_and_add_in_call_use_mode_xml(
+        &self,
+        digit: u8,
+    ) -> Option<&'static str> {
+        match digit {
+            b'2' => Some("DontUse"),
+            b'0' => Some("Use"),
+            _ => None,
+        }
+    }
+
+    /// `InterfaceCompatibilityMode` (offset 906): single ASCII digit, `'2'`
+    /// = `TaxiEnableVersion8_2` (platform default), `'0'` =
+    /// `Version8_2`. No other index value has been observed; any other byte
+    /// must fail closed.
+    pub fn interface_compatibility_mode_xml(&self, digit: u8) -> Option<&'static str> {
+        match digit {
+            b'2' => Some("TaxiEnableVersion8_2"),
+            b'0' => Some("Version8_2"),
+            _ => None,
+        }
+    }
+}
+
+/// Loads [`ConfigurationPropertiesEvidencedDefaultBlockPolicy`].
+pub fn configuration_properties_evidenced_default_block_policy()
+-> ConfigurationPropertiesEvidencedDefaultBlockPolicy {
+    ConfigurationPropertiesEvidencedDefaultBlockPolicy
 }
 
 impl DcsSchemaTemplateEnvelopePolicy {
@@ -12323,6 +12480,141 @@ mod dcs_parameter_scalar_types_policy_tests {
 
         // The pinned bundled evidence itself must still pass every gate.
         assert!(bundled_dcs_parameter_scalar_types_policy().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod configuration_properties_evidenced_default_block_policy_tests {
+    use super::*;
+
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut length = 0usize;
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            quartet[length] = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => 64,
+                _ => panic!("invalid fixture base64 byte {byte}"),
+            };
+            length += 1;
+            if length == 4 {
+                output.push((quartet[0] << 2) | (quartet[1] >> 4));
+                if quartet[2] != 64 {
+                    output.push((quartet[1] << 4) | (quartet[2] >> 2));
+                }
+                if quartet[3] != 64 {
+                    output.push((quartet[2] << 6) | quartet[3]);
+                }
+                length = 0;
+            }
+        }
+        output
+    }
+
+    /// Every lexical segment in the policy, plus the six typed fields at
+    /// their platform-default values, must reconstruct an EXACT, ordered,
+    /// contiguous substring of the sha-bound bundled native
+    /// `Configuration.xml`. This is the drift guard: if the bundled fixture
+    /// ever changes, or a segment was mistyped, this test catches it instead
+    /// of silently emitting wrong XML from a stale hand-copy.
+    #[test]
+    fn default_block_segments_are_an_exact_substring_of_the_bundled_evidence() {
+        let bytes =
+            decode_base64_fixture(BUNDLED_DCS_AREA_STYLE_ITEM_UUID_NATIVE_CONFIGURATION_XML_B64);
+        let native = String::from_utf8(bytes).unwrap();
+        let sha256 = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(native.as_bytes());
+            hasher
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        assert_eq!(
+            sha256,
+            CONFIGURATION_PROPERTIES_EVIDENCED_DEFAULT_BLOCK_SOURCE_SHA256
+        );
+
+        let policy = configuration_properties_evidenced_default_block_policy();
+        let reconstructed = format!(
+            "\t\t\t<ScriptVariant>Russian</ScriptVariant>\r\n\
+{defaults}\
+\t\t\t<Vendor/>\r\n\
+\t\t\t<Version/>\r\n\
+\t\t\t<UpdateCatalogAddress/>\r\n\
+\t\t\t<IncludeHelpInContents>{include_help}</IncludeHelpInContents>\r\n\
+\t\t\t<UseManagedFormInOrdinaryApplication>{use_managed}</UseManagedFormInOrdinaryApplication>\r\n\
+\t\t\t<UseOrdinaryFormInManagedApplication>{use_ordinary}</UseOrdinaryFormInManagedApplication>\r\n\
+{full_text}\
+\t\t\t<CommonSettingsStorage/>\r\n\
+\t\t\t<ReportsUserSettingsStorage/>\r\n\
+\t\t\t<ReportsVariantsStorage/>\r\n\
+\t\t\t<FormDataSettingsStorage/>\r\n\
+{storage_and_mobile}\
+\t\t\t<DefaultLanguage>Language.Русский</DefaultLanguage>\r\n\
+\t\t\t<BriefInformation/>\r\n\
+\t\t\t<DetailedInformation/>\r\n\
+\t\t\t<Copyright/>\r\n\
+\t\t\t<VendorInformationAddress/>\r\n\
+\t\t\t<ConfigurationInformationAddress/>\r\n\
+{data_lock}\
+\t\t\t<ModalityUseMode>{modality}</ModalityUseMode>\r\n\
+\t\t\t<SynchronousPlatformExtensionAndAddInCallUseMode>{synchronous}</SynchronousPlatformExtensionAndAddInCallUseMode>\r\n\
+\t\t\t<InterfaceCompatibilityMode>{interface_compat}</InterfaceCompatibilityMode>\r\n\
+{database_tablespaces}\
+\t\t\t<CompatibilityMode>Version8_3_27</CompatibilityMode>\r\n\
+{default_constants_form}",
+            defaults = policy.default_roles_segment(),
+            include_help = policy.include_help_in_contents_xml(b'0').unwrap(),
+            use_managed = policy
+                .use_managed_form_in_ordinary_application_xml(b'0')
+                .unwrap(),
+            use_ordinary = policy
+                .use_ordinary_form_in_managed_application_xml(b'0')
+                .unwrap(),
+            full_text = policy.additional_full_text_search_dictionaries_segment(),
+            storage_and_mobile = policy.storage_and_mobile_functionality_segment(),
+            data_lock = policy.data_lock_and_object_autonumeration_segment(),
+            modality = policy.modality_use_mode_xml(b'2').unwrap(),
+            synchronous = policy
+                .synchronous_platform_extension_and_add_in_call_use_mode_xml(b'2')
+                .unwrap(),
+            interface_compat = policy.interface_compatibility_mode_xml(b'2').unwrap(),
+            database_tablespaces = policy.database_tablespaces_use_mode_segment(),
+            default_constants_form = policy.default_constants_form_segment(),
+        );
+        assert_eq!(
+            native.matches(&reconstructed).count(),
+            1,
+            "reconstructed default block is not an exact substring of the bundled native Configuration.xml"
+        );
+    }
+
+    #[test]
+    fn typed_field_maps_are_fail_closed() {
+        let policy = configuration_properties_evidenced_default_block_policy();
+        assert_eq!(policy.include_help_in_contents_xml(b'0'), Some("false"));
+        assert_eq!(policy.include_help_in_contents_xml(b'1'), Some("true"));
+        assert_eq!(policy.include_help_in_contents_xml(b'2'), None);
+        assert_eq!(policy.modality_use_mode_xml(b'2'), Some("DontUse"));
+        assert_eq!(policy.modality_use_mode_xml(b'0'), Some("Use"));
+        assert_eq!(policy.modality_use_mode_xml(b'1'), None);
+        assert_eq!(
+            policy.interface_compatibility_mode_xml(b'2'),
+            Some("TaxiEnableVersion8_2")
+        );
+        assert_eq!(
+            policy.interface_compatibility_mode_xml(b'0'),
+            Some("Version8_2")
+        );
+        assert_eq!(policy.interface_compatibility_mode_xml(b'1'), None);
     }
 }
 

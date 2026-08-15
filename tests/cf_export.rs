@@ -298,3 +298,74 @@ fn retained_configuration_reproduces_native_internal_info_and_child_objects() {
         "exported ChildObjects does not reproduce the native Language/StyleItem/Report order"
     );
 }
+
+/// MINI-GATE-A-CONFIG-PROPS-01: full-file `Configuration.xml` byte parity
+/// across three corpora sharing the base coordinate but differing in which
+/// Properties fields are at their platform default. T1/T3 share the exact
+/// `dcs-area-style-item-uuid` base recipe (T3 additionally has three
+/// non-default enum-typed properties at the corpus-proven offsets); T2 is a
+/// structurally different corpus (different Configuration Name/Synonym
+/// header length, additional Catalogs/Report ChildObjects) whose Properties
+/// span is nonetheless all-default -- exercising the evidenced-default
+/// fail-closed comparison's header-length-shift tolerance, not just the
+/// exact-offset case.
+#[test]
+fn retained_configuration_xml_matches_native_byte_for_byte_across_the_evidenced_cohort() {
+    const T1_CF: &str = include_str!(
+        "fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/configuration.cf.b64"
+    );
+    const T1_NATIVE: &str = include_str!(
+        "fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/native-configuration.xml.b64"
+    );
+    const T2_CF: &str = include_str!(
+        "fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/configuration.cf.b64"
+    );
+    const T2_NATIVE: &str = include_str!(
+        "fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/native-configuration.xml.b64"
+    );
+    const T3_CF: &str = include_str!(
+        "fixtures/native-evidence/8.3.27.2214/configuration-properties-enum-group/configuration.cf.b64"
+    );
+    const T3_NATIVE: &str = include_str!(
+        "fixtures/native-evidence/8.3.27.2214/configuration-properties-enum-group/native-configuration.xml.b64"
+    );
+
+    for (name, cf_b64, native_b64) in [
+        ("T1 dcs-area-style-item-uuid", T1_CF, T1_NATIVE),
+        ("T2 dcs-form-list-settings-server-state", T2_CF, T2_NATIVE),
+        ("T3 configuration-properties-enum-group", T3_CF, T3_NATIVE),
+    ] {
+        let cf_bytes = decode_base64(cf_b64);
+        let native_bytes = decode_base64(native_b64);
+        let native_xml = String::from_utf8(native_bytes).unwrap();
+
+        let temp = TempDirectory::new();
+        let input = temp.path().join("configuration.cf");
+        let output_dir = temp.path().join("source");
+        fs::write(&input, &cf_bytes).unwrap();
+
+        // Only Configuration.xml is asserted here; the exit status is
+        // deliberately not, so an unrelated per-row export gap in a corpus
+        // cannot mask (or be masked by) this test's own byte-parity claim.
+        let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(["cf", "export"])
+            .arg(&input)
+            .arg(&output_dir)
+            .env("PATH", "")
+            .output()
+            .unwrap();
+
+        let exported_xml =
+            fs::read_to_string(output_dir.join("Configuration.xml")).unwrap_or_else(|error| {
+                panic!(
+                    "{name}: Configuration.xml missing: {error}\nstdout: {}\nstderr: {}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                )
+            });
+        assert_eq!(
+            exported_xml, native_xml,
+            "{name}: exported Configuration.xml is not byte-exact against native"
+        );
+    }
+}
