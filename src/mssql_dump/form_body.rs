@@ -8687,16 +8687,19 @@ pub(super) fn parse_form_label_field_options(
                 .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
                 .map(str::to_string)
         },
-        auto_max_width: if hyperlink_style {
-            None
-        } else {
-            match options
-                .get(LabelFieldSlot::AutoMaxWidth.index())
-                .map(|field| field.trim())
-            {
-                Some("0") => Some(false),
-                _ => None,
-            }
+        // `AutoMaxWidth` is *not* part of what the hyperlink shape suppresses:
+        // a hyperlink LabelField carries its own `<AutoMaxWidth>false</AutoMaxWidth>`
+        // right next to `<Hiperlink>true</Hiperlink>` in the platform's own
+        // `config export` output, with no `<Width>` and no `<MaxWidth>`
+        // alongside it (352 of the 818 hyperlink LabelFields in the retained
+        // native tree of 1C:Trade Management 11.5.27.75 carry it). Only the
+        // width-bearing properties below are hidden by the hyperlink shape.
+        auto_max_width: match options
+            .get(LabelFieldSlot::AutoMaxWidth.index())
+            .map(|field| field.trim())
+        {
+            Some("0") => Some(false),
+            _ => None,
         },
         max_width: if hyperlink_style { None } else { max_width },
         auto_max_height: if hyperlink_style {
