@@ -156,13 +156,17 @@ pub(super) fn write_config_dump_info(
         .iter()
         .map(|entry| entry.id.as_str())
         .collect::<BTreeSet<_>>();
-    let mut children_by_owner = build_config_dump_children(
+    let Some(mut children_by_owner) = build_config_dump_children(
         inventory.metadata_texts,
         inventory.object_refs,
         &canonical_refs,
         &version_ids,
         inventory.configuration_module_groups,
-    )?;
+        partial_inventory_policy,
+    )?
+    else {
+        return Ok(false);
+    };
 
     let mut metadata = Vec::with_capacity(versions.len());
     let mut names = BTreeMap::<String, String>::new();
@@ -410,7 +414,8 @@ fn build_config_dump_children(
     canonical_refs: &BTreeMap<String, String>,
     version_ids: &BTreeSet<&str>,
     configuration_module_groups: &BTreeSet<String>,
-) -> Result<BTreeMap<String, BTreeMap<String, String>>> {
+    partial_inventory_policy: ConfigDumpInfoPartialInventoryPolicy,
+) -> Result<Option<BTreeMap<String, BTreeMap<String, String>>>> {
     let indexed_child_ids = object_refs
         .keys()
         .filter(|id| !version_ids.contains(id.as_str()))
@@ -479,6 +484,15 @@ fn build_config_dump_children(
     }
 
     if !unresolved_child_roles.is_empty() {
+        // Same partial-inventory rule as the top-level routes: on a CF storage
+        // image an unresolved child role always traces back to a record this
+        // exporter did not recognize (already disclosed as `opaque` in the
+        // report), so the incomplete ConfigDumpInfo.xml is skipped rather than
+        // half-written; a full MSSQL Config-table dump decodes every text, so
+        // there the same condition stays a hard error.
+        if partial_inventory_policy == ConfigDumpInfoPartialInventoryPolicy::Skip {
+            return Ok(None);
+        }
         let unresolved = unresolved_child_roles
             .iter()
             .take(64)
@@ -496,6 +510,9 @@ fn build_config_dump_children(
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
     if !indexed_child_ids.is_subset(&discovered) {
+        if partial_inventory_policy == ConfigDumpInfoPartialInventoryPolicy::Skip {
+            return Ok(None);
+        }
         let missing = indexed_child_ids
             .difference(&discovered)
             .take(8)
@@ -506,7 +523,7 @@ fn build_config_dump_children(
             missing.join(", ")
         );
     }
-    Ok(children_by_owner)
+    Ok(Some(children_by_owner))
 }
 
 fn config_version(version: Uuid) -> String {
