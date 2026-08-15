@@ -843,6 +843,18 @@ pub(super) struct FormListSettings {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum FormListSettingsConditionalAppearance {
     Typed(DcsConditionalAppearance),
+    /// The `Appearance` property is physically present in the packed form body
+    /// but holds a genuinely empty, self-closing `<ConditionalAppearance/>`
+    /// storage document (no items, no viewMode, no userSettingID).
+    ///
+    /// This is a *different* physical state from the property being absent
+    /// altogether, and the platform renders the two differently -- see
+    /// [`form_list_settings_conditional_appearance_has_output`] for the two
+    /// native captures that prove it. `DcsConditionalAppearance` cannot
+    /// represent the shape (its constructor rejects empty items paired with
+    /// absent metadata), so the physical state is carried here instead of
+    /// being collapsed into either `Typed` or `None`.
+    EmptyStorage,
     OpaqueStorage {
         bytes: Vec<u8>,
         reason: &'static str,
@@ -854,7 +866,7 @@ impl FormListSettingsConditionalAppearance {
     pub(super) const fn typed(&self) -> Option<&DcsConditionalAppearance> {
         match self {
             Self::Typed(value) => Some(value),
-            Self::OpaqueStorage { .. } => None,
+            Self::EmptyStorage | Self::OpaqueStorage { .. } => None,
         }
     }
 }
@@ -1550,7 +1562,7 @@ fn preflight_form_writer_paths_with_dcs_profiles(
                 Some(FormListSettingsConditionalAppearance::OpaqueStorage { reason, .. }) => {
                     return Err(FormSchemaWriteError::OpaqueDcsConditionalAppearance { reason });
                 }
-                None => None,
+                Some(FormListSettingsConditionalAppearance::EmptyStorage) | None => None,
             };
         // This is the only fallible DynamicList/ListSettings formatter path. It returns its
         // complete fragment atomically and has no output or filesystem side effects.
@@ -4128,16 +4140,19 @@ pub(super) fn parse_form_list_settings_conditional_appearance(
         Ok(DcsChildParseOutcome::Unsupported(reason)) => {
             Some(FormListSettingsConditionalAppearance::OpaqueStorage { bytes, reason })
         }
-        // The physically present but genuinely empty self-closing
-        // `<ConditionalAppearance/>` shape (no items, no viewMode, no
-        // userSettingID) is the platform's on-storage representation for "no
-        // customization" when sibling Filter/Order settings ARE explicit;
-        // see `parse_dcs_conditional_appearance_storage_document`. Treat it
-        // exactly like a physically absent property so
-        // `apply_implicit_form_dynamic_list_settings` reconstructs the same
-        // platform-authenticated metadata-only default it already applies
-        // for the fully-absent case.
-        Ok(DcsChildParseOutcome::Absent) => None,
+        // `parse_dcs_conditional_appearance_storage_document` reports the
+        // physically present but genuinely empty self-closing
+        // `<ConditionalAppearance/>` document (no items, no viewMode, no
+        // userSettingID) as `Absent`, because `DcsConditionalAppearance`
+        // cannot represent that shape. This function is only ever reached
+        // with the property's own bytes, so "the property was there and it
+        // was empty" is distinguishable here from "the property was never
+        // there" -- and the platform renders those two states differently.
+        // Keep the physical distinction instead of collapsing it; see
+        // `form_list_settings_conditional_appearance_has_output`.
+        Ok(DcsChildParseOutcome::Absent) => {
+            Some(FormListSettingsConditionalAppearance::EmptyStorage)
+        }
         Err(error) => Some(FormListSettingsConditionalAppearance::OpaqueStorage {
             bytes,
             reason: error.reason(),
@@ -17729,7 +17744,7 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         Some(FormListSettingsConditionalAppearance::OpaqueStorage { reason, .. }) => {
             return Err(FormSchemaWriteError::OpaqueDcsConditionalAppearance { reason });
         }
-        None => None,
+        Some(FormListSettingsConditionalAppearance::EmptyStorage) | None => None,
     };
     let canonical_parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::FormListSettings,
@@ -17784,19 +17799,34 @@ pub(super) fn form_list_settings_filter_has_output(
 pub(super) fn form_list_settings_conditional_appearance_has_output(
     value: Option<&FormListSettingsConditionalAppearance>,
 ) -> bool {
-    // The platform-authenticated metadata-only default (empty items, plus a
-    // synthesized viewMode/userSettingID pair) never appears in the
-    // decompiled, human-readable Form.xml: proven by
-    // `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`, whose
-    // CorpusList form has explicit, non-default Filter/Order but native
-    // output omits the `<dcsset:conditionalAppearance>` element entirely.
-    // Only genuinely non-default (non-empty item) values, and any opaque
-    // storage that must still surface its own emission error, produce
-    // output.
+    // Whether the metadata-only conditionalAppearance default reaches the
+    // decompiled Form.xml is decided by the *physical* state of the packed
+    // body's `Appearance` property, not by the value it reconstructs to. Two
+    // native captures of the same platform build pin both sides:
+    //
+    // * property physically ABSENT -> the platform synthesizes the default
+    //   and WRITES it. `8.3.27.2214-xml-2.20-dcs-filter`'s metadata-only
+    //   cohort (`native-form-metadata-only.xml.b64`) and its comparison
+    //   cohort (`native-form-comparison.xml.b64`) both carry
+    //   `<dcsset:conditionalAppearance>` holding nothing but
+    //   `viewMode=Normal` and userSettingID
+    //   `b75fecce-942b-4aed-abc9-e6a02e460fb3`.
+    // * property physically PRESENT but an empty, self-closing
+    //   `<ConditionalAppearance/>` -> the platform OMITS the element.
+    //   `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`'s
+    //   CorpusList form stores exactly that document and its native
+    //   Form.xml has explicit Filter/Order and no conditionalAppearance.
+    //
+    // So `Typed` (a real value, or the default reconstructed for an absent
+    // property) and `OpaqueStorage` (which must still surface its own
+    // emission error) produce output, while the empty-storage state does
+    // not.
     match value {
-        Some(FormListSettingsConditionalAppearance::Typed(value)) => !value.items().is_empty(),
-        Some(FormListSettingsConditionalAppearance::OpaqueStorage { .. }) => true,
-        None => false,
+        Some(
+            FormListSettingsConditionalAppearance::Typed(_)
+            | FormListSettingsConditionalAppearance::OpaqueStorage { .. },
+        ) => true,
+        Some(FormListSettingsConditionalAppearance::EmptyStorage) | None => false,
     }
 }
 

@@ -9131,22 +9131,161 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
     assert!(xml.contains(
         "<dcsset:userSettingID>f5abd21c-a9fb-4b17-8ed5-0505541ef807</dcsset:userSettingID>"
     ));
-    // Unlike the synthesized metadata-only Filter default (proven present in
-    // native Form.xml by `8.3.27.2214-xml-2.20-dcs-filter`'s own
-    // `metadata_only_cohort`), the synthesized metadata-only
-    // conditionalAppearance default never appears in native Form.xml:
+    // The synthesized metadata-only conditionalAppearance default stands in
+    // for an `Appearance` property that is *physically absent* from the
+    // packed body -- exactly what this fixture models -- and the platform
+    // writes it, just like the metadata-only Filter default:
+    // `8.3.27.2214-xml-2.20-dcs-filter`'s own `metadata_only_cohort`
+    // (`native-form-metadata-only.xml.b64`) and its comparison cohort
+    // (`native-form-comparison.xml.b64`) each carry a
+    // `<dcsset:conditionalAppearance>` holding nothing but `viewMode=Normal`
+    // and userSettingID `b75fecce-942b-4aed-abc9-e6a02e460fb3`.
+    //
+    // The omission proven by
     // `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`'s CorpusList
-    // form has explicit, non-default Filter/Order but its native Form.xml
-    // omits `<dcsset:conditionalAppearance>` entirely.
-    assert!(!xml.contains("<dcsset:conditionalAppearance>"), "{xml}");
+    // form is a different physical state -- the property is *present* and
+    // empty -- and is gated separately by
+    // `empty_appearance_storage_is_omitted_while_an_absent_property_emits_the_default`.
+    assert!(xml.contains("<dcsset:conditionalAppearance>"), "{xml}");
     assert!(
-        !xml.contains("b75fecce-942b-4aed-abc9-e6a02e460fb3"),
+        xml.contains(
+            "<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>"
+        ),
         "{xml}"
     );
     assert!(xml.contains(
             "<dcsset:itemsUserSettingID>971fd96e-2ae3-41d5-9d7a-bad772efb890</dcsset:itemsUserSettingID>"
         ));
     assert!(!xml.contains("<dcsset:itemsViewMode>"), "{xml}");
+}
+
+/// Removes the `"<name>",<value>` pair from a raw 1C braced property bag,
+/// returning the removed value text alongside the shortened body.
+///
+/// Only used to model "the platform never stored this property at all"
+/// against a retained body that does store it. The values in question are
+/// `{"#",<uuid>,{#base64:...}}` groups: base64 payloads and the quoted keys
+/// around them contain no braces, so plain depth counting is exact here.
+fn remove_form_body_property_for_test(body: &str, name: &str) -> (String, String) {
+    let key = format!(",\"{name}\",");
+    let key_start = body
+        .find(&key)
+        .unwrap_or_else(|| panic!("retained body has a {name} property key"));
+    let value_start = key_start
+        + key.len()
+        + body[key_start + key.len()..]
+            .find('{')
+            .expect("property value opens with a brace");
+    let mut depth = 0_usize;
+    let mut value_end = None;
+    for (offset, character) in body[value_start..].char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    value_end = Some(value_start + offset + character.len_utf8());
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let value_end = value_end.expect("property value is brace balanced");
+    let removed = body[value_start..value_end].to_string();
+    let mut shortened = body[..key_start].to_string();
+    shortened.push_str(&body[value_end..]);
+    (shortened, removed)
+}
+
+/// Which physical state the packed body's `Appearance` property is in --
+/// absent, or present but empty -- is what decides whether the platform
+/// writes the metadata-only `conditionalAppearance` default into the
+/// decompiled Form.xml. Both states are pinned by native captures of
+/// 8.3.27.2214, and the two disagree, so neither "always emit" nor "never
+/// emit" is the platform's rule:
+///
+/// * present-but-empty: `8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state`
+///   stores an empty self-closing `<ConditionalAppearance/>` in its
+///   CorpusList form and its `native-form.xml.b64` carries explicit
+///   Filter/Order with no `conditionalAppearance` at all.
+/// * absent: `8.3.27.2214-xml-2.20-dcs-filter`'s `native-form-metadata-only.xml.b64`
+///   (and its comparison cohort) carry the synthesized
+///   `<dcsset:conditionalAppearance>` holding only `viewMode=Normal` plus
+///   userSettingID `b75fecce-942b-4aed-abc9-e6a02e460fb3`.
+///
+/// The two directions are measured here on one and the same retained body, so
+/// the only variable between them is the physical presence of the property.
+#[test]
+fn empty_appearance_storage_is_omitted_while_an_absent_property_emits_the_default() {
+    // Catalog.CorpusList.ListForm's own unpacked body row, sha256 pinned
+    // against `form.body_row.unpacked_sha256` in that fixture's manifest.json.
+    const FORM_BODY_UNPACKED_B64: &str = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/form-body-unpacked.bin.b64"
+    );
+    let body = decode_base64_mime(FORM_BODY_UNPACKED_B64)
+        .expect("retained form-body-unpacked fixture is valid base64");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&body)),
+        "6d455e9dbbe346408b9e04262142592e5d8786740c734f193a9e8f4b6cca651c",
+        "retained CorpusList form body drifted from its manifest sha256"
+    );
+    let body = String::from_utf8(body).expect("retained form body is UTF-8 text");
+
+    let (without_property, removed) = remove_form_body_property_for_test(&body, "Appearance");
+    // What the retained body actually stores under `Appearance`: the
+    // conditional-appearance storage record type, carrying a genuinely empty,
+    // self-closing `<ConditionalAppearance .../>` document.
+    let policy = ibcmd_schema::bundled_dcs_conditional_appearance_policy().unwrap();
+    assert!(
+        removed.contains(policy.storage_record_type_uuid()),
+        "{removed}"
+    );
+    let storage = decode_base64_mime(
+        extract_base64_payload(&removed).expect("Appearance value carries a base64 payload"),
+    )
+    .expect("Appearance payload is valid base64");
+    let storage = String::from_utf8(storage).expect("Appearance storage document is UTF-8");
+    assert!(storage.contains("<ConditionalAppearance "), "{storage}");
+    assert!(storage.trim_end().ends_with("/>"), "{storage}");
+    assert!(!storage.contains("</ConditionalAppearance>"), "{storage}");
+
+    // (1) Present-but-empty: explicit Filter/Order survive, no
+    //     conditionalAppearance is written -- byte-for-byte what the
+    //     retained native Form.xml of this very form shows.
+    let present =
+        extract_form_body_xml(&deflate_for_test(body.as_bytes()), &BTreeMap::new()).unwrap();
+    assert!(present.contains("<dcsset:filter>"), "{present}");
+    assert!(present.contains("<dcsset:order>"), "{present}");
+    assert!(!present.contains("conditionalAppearance"), "{present}");
+    assert!(
+        !present.contains("b75fecce-942b-4aed-abc9-e6a02e460fb3"),
+        "{present}"
+    );
+
+    // (2) Same body, property physically removed: the platform's synthesized
+    //     metadata-only default is written.
+    let absent = extract_form_body_xml(
+        &deflate_for_test(without_property.as_bytes()),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(absent.contains("<dcsset:filter>"), "{absent}");
+    assert!(absent.contains("<dcsset:order>"), "{absent}");
+    assert!(
+        absent.contains("<dcsset:conditionalAppearance>"),
+        "{absent}"
+    );
+    assert!(
+        absent.contains(
+            "<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>"
+        ),
+        "{absent}"
+    );
+    assert!(
+        absent.contains("<dcsset:viewMode>Normal</dcsset:viewMode>"),
+        "{absent}"
+    );
 }
 
 #[test]
