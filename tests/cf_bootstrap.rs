@@ -2,6 +2,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicUsize, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -11,10 +12,17 @@ struct TempDirectory(PathBuf);
 
 impl TempDirectory {
     fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        // The wall clock alone can collide when parallel tests hit the same
+        // timer tick; a per-process sequence keeps the names unique.
+        static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+        let nonce = format!(
+            "{}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        );
         let path = std::env::temp_dir().join(format!(
             "ibcmd-rs-cf-bootstrap-{}-{nonce}",
             std::process::id()
