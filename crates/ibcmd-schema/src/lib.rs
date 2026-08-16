@@ -4787,9 +4787,38 @@ impl DcsSchemaTemplateEnvelopePolicy {
         true
     }
 
+    /// Whether the clean-room corpus physically exhibited this many external
+    /// Settings documents. This is a statement about the fixture, not about
+    /// the format: use [`Self::supports_framed_settings_variant_count`] to
+    /// decide whether an envelope may be admitted.
     pub const fn supports_attested_settings_variant_count(&self, count: usize) -> bool {
         count >= self.minimum_attested_settings_variants
             && count <= self.maximum_attested_settings_variants
+    }
+
+    /// Whether an envelope whose header declares this many external Settings
+    /// documents frames consistently.
+    ///
+    /// The count is not a cohort choice: the second header u32 *is* the
+    /// external Settings document count (proven claim 1), and the framing it
+    /// drives -- `count + 1` stored u64 lengths for the primary SchemaFile and
+    /// every Settings document, terminal SchemaFile taking the remaining bytes
+    /// (proven claim 2) -- is one formula, uniform in `count`. The clean-room
+    /// fixture could only exhibit the counts it was built with (one and two);
+    /// enumerating those as a ceiling would refuse counts the same formula
+    /// describes, and the real 11.5.27.75 configuration carries at least
+    /// three through ten.
+    ///
+    /// Nothing here is taken on trust. A declared count only survives if
+    /// every one of its `count + 1` stored lengths is non-zero and in bounds
+    /// with a non-empty remainder (the framing decoder), and then only if
+    /// every resulting document carries a UTF-8 BOM and matches the shape its
+    /// positional role demands (`analyze_dcs_schema_template_documents`). A
+    /// wrong count cannot satisfy both. The lower bound stays attested
+    /// because a zero-Settings envelope is a different physical shape, not a
+    /// longer one.
+    pub const fn supports_framed_settings_variant_count(&self, count: usize) -> bool {
+        count >= self.minimum_attested_settings_variants
     }
 
     /// Returns the role for a physical document index, where every Settings
@@ -4799,7 +4828,7 @@ impl DcsSchemaTemplateEnvelopePolicy {
         settings_count: usize,
         document_index: usize,
     ) -> Option<DcsSchemaTemplateEnvelopeDocumentRole> {
-        if !self.supports_attested_settings_variant_count(settings_count) {
+        if !self.supports_framed_settings_variant_count(settings_count) {
             return None;
         }
         if document_index == 0 {
@@ -4816,7 +4845,7 @@ impl DcsSchemaTemplateEnvelopePolicy {
     /// The header stores one length for the primary SchemaFile and one for
     /// every Settings document; it deliberately omits the terminal length.
     pub const fn stored_length_count(&self, settings_count: usize) -> Option<usize> {
-        if self.supports_attested_settings_variant_count(settings_count) {
+        if self.supports_framed_settings_variant_count(settings_count) {
             settings_count.checked_add(1)
         } else {
             None
@@ -7012,7 +7041,7 @@ impl DcsSchemaTemplateEnvelopeEvidenceCorpus {
             "The terminal empty SchemaFile is unchanged from dcs-core while the primary SchemaFile expands only for the second metadata shell.",
         ];
         let expected_non_claims = [
-            "No absent Settings document, duplicate variant name, empty name or presentation, more than two variants, defaultSettings, nested variant, or alternate positional binding is inferred.",
+            "No absent Settings document, duplicate variant name, empty name or presentation, defaultSettings, nested variant, or alternate positional binding is inferred; the variant count itself is read from the header rather than enumerated, and only the count-independent framing formula above is applied to it.",
             "No AreaTemplate, additional nonterminal SchemaFile, appearance side-table, appIndex, current-configuration reference, or reverse AreaTemplate writer is inferred.",
             "No full typed DataCompositionSchema semantic model is inferred; the schema shell remains source-owned and only the evidenced envelope and Settings delegation are owned.",
             "No arbitrary unknown schema child, cross-profile replay, EDT source roundtrip, or whole-profile 8.3.27 alias is inferred.",
@@ -15308,8 +15337,33 @@ mod tests {
             Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile)
         );
         assert_eq!(policy.document_role(0, 0), None);
-        assert_eq!(policy.document_role(3, 0), None);
         assert_eq!(policy.document_role(2, 4), None);
+        // The fixture attests one and two variants; the framing formula the
+        // header drives is uniform in the count, so roles are assigned for
+        // longer envelopes too rather than refused for not being enumerated.
+        // `supports_attested_settings_variant_count` keeps saying what the
+        // fixture physically showed.
+        assert!(policy.supports_attested_settings_variant_count(2));
+        assert!(!policy.supports_attested_settings_variant_count(3));
+        assert!(policy.supports_framed_settings_variant_count(3));
+        assert!(!policy.supports_framed_settings_variant_count(0));
+        assert_eq!(
+            policy.document_role(3, 0),
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::PrimarySchemaFile)
+        );
+        assert_eq!(
+            policy.document_role(3, 3),
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::Settings)
+        );
+        assert_eq!(
+            policy.document_role(3, 4),
+            Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile)
+        );
+        assert_eq!(policy.document_role(3, 5), None);
+        assert_eq!(policy.document_role(0, 1), None);
+        assert_eq!(policy.stored_length_count(4), Some(5));
+        assert_eq!(policy.header_size_bytes(4), Some(48));
+        assert_eq!(policy.stored_length_count(0), None);
         assert!(policy.settings_count_is_little_endian_u32());
         assert!(policy.stored_lengths_are_little_endian_u64());
         assert!(policy.stored_lengths_cover_primary_and_each_settings());

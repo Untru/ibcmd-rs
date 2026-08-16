@@ -798,14 +798,48 @@ mod tests {
         assert_eq!(decoded.plaintext(), plain);
     }
 
+    /// Contract change, named rather than hidden: this used to pin that a
+    /// third Settings document is refused for not being enumerated. The
+    /// header declares the count and the framing formula the evidence proves
+    /// is uniform in it, so a longer envelope now decodes -- while the two
+    /// floors that actually protect the bytes stay where they were.
     #[test]
-    fn schema_decoder_rejects_more_than_two_unattested_settings_documents() {
+    fn schema_decoder_admits_a_header_declared_count_beyond_the_attested_shapes() {
         let settings = xml_document(EMPTY_SETTINGS);
         let plain = synthetic_schema_plain(&[settings.clone(), settings.clone(), settings]);
+        let decoded = decode_schema_plain_with_references(plain, &BTreeMap::new())
+            .expect("a header-declared three-variant envelope frames consistently");
+        assert_eq!(decoded.document_count(), 5);
+    }
+
+    #[test]
+    fn schema_decoder_still_rejects_a_zero_settings_envelope() {
+        let schema = synthetic_schema_document();
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&0u32.to_le_bytes());
+        plain.extend_from_slice(&0u32.to_le_bytes());
+        plain.extend_from_slice(&(schema.len() as u64).to_le_bytes());
+        plain.extend_from_slice(&schema);
+        plain.extend_from_slice(&schema);
         assert!(matches!(
             decode_schema_plain_with_references(plain, &BTreeMap::new()),
-            Err(DcsCodecError::UnsupportedSource(reason))
-                if reason == "native DCS envelope settings count is outside the attested range"
+            Err(DcsCodecError::UnsupportedLayout(reason))
+                if reason == "DCS schema has no settings documents"
+        ));
+    }
+
+    /// The count is only ever believed as far as the bytes bear it out: a
+    /// header claiming one more document than the payload holds cannot frame,
+    /// so it is refused rather than read past the end.
+    #[test]
+    fn schema_decoder_rejects_a_count_the_payload_cannot_frame() {
+        let settings = xml_document(EMPTY_SETTINGS);
+        let plain = synthetic_schema_plain(&[settings.clone(), settings]);
+        let mut overstated = plain.clone();
+        overstated[4..8].copy_from_slice(&9u32.to_le_bytes());
+        assert!(matches!(
+            decode_schema_plain_with_references(overstated, &BTreeMap::new()),
+            Err(DcsCodecError::UnsupportedLayout(_))
         ));
     }
 

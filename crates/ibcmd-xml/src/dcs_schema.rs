@@ -3168,10 +3168,14 @@ fn dedent_one_level(whitespace: &str) -> String {
 /// `reference_types` maps a lowercased storage `TypeId` uuid to its semantic
 /// current-configuration qualified name (`DocumentRef.X`), exactly as
 /// [`parse_dcs_inner_schema_storage_document_with_references`] uses it.
+/// `type_set_types` is its `<v8:TypeSet>` twin, holding the uuids that denote
+/// a whole reference family (`DocumentRef`, `CatalogRef`, `AnyIBRef`) rather
+/// than one configuration type; the type index knows which of the two a uuid
+/// is, so the element name is looked up rather than inferred.
 /// `opaque_type_ids` holds the uuids the configuration type index resolves to
 /// no semantic name at all; the platform writes those back verbatim as
-/// `<v8:TypeId>`. A uuid in neither map fails closed rather than being
-/// guessed in either direction.
+/// `<v8:TypeId>`. A uuid in none of the three fails closed rather than being
+/// guessed in any direction.
 ///
 /// `style_item_names` maps a configuration object uuid to the `StyleItem`
 /// name it denotes, which is what a `0:<uuid>` colour reference is spelled as
@@ -3179,6 +3183,7 @@ fn dedent_one_level(whitespace: &str) -> String {
 pub fn rewrite_dcs_primary_schema_storage_document(
     bytes: &[u8],
     reference_types: &BTreeMap<String, String>,
+    type_set_types: &BTreeMap<String, String>,
     opaque_type_ids: &BTreeSet<String>,
     style_item_names: &BTreeMap<String, String>,
     settings_blocks: &[DcsInlineSettingsFragment],
@@ -3397,9 +3402,25 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                         }
                     };
                     let type_id = content.to_ascii_lowercase();
-                    match reference_types.get(&type_id) {
-                        Some(qualified) => {
-                            out.push_str("<v8:Type xmlns:d");
+                    // A uuid resolves either to one configuration type
+                    // (`<v8:Type>`) or to a whole reference family such as
+                    // `DocumentRef` or `AnyIBRef` (`<v8:TypeSet>`). Which of
+                    // the two it is comes from the same type index, never from
+                    // the shape of the uuid, so the two maps are disjoint and
+                    // the element name is read rather than guessed.
+                    let resolved = reference_types
+                        .get(&type_id)
+                        .map(|qualified| ("Type", qualified))
+                        .or_else(|| {
+                            type_set_types
+                                .get(&type_id)
+                                .map(|qualified| ("TypeSet", qualified))
+                        });
+                    match resolved {
+                        Some((element, qualified)) => {
+                            out.push_str("<v8:");
+                            out.push_str(element);
+                            out.push_str(" xmlns:d");
                             out.push_str(&depth.to_string());
                             out.push_str("p1=\"");
                             out.push_str(policy.current_config_namespace_uri());
@@ -3407,7 +3428,9 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                             out.push_str(&depth.to_string());
                             out.push_str("p1:");
                             out.push_str(&escape(qualified));
-                            out.push_str("</v8:Type>");
+                            out.push_str("</v8:");
+                            out.push_str(element);
+                            out.push('>');
                         }
                         // Already in its stored lexical form; re-escaping it
                         // would double-encode whatever the platform wrote.

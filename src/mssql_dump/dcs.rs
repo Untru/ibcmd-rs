@@ -535,10 +535,30 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
             DcsTypeResolution::KeepId | DcsTypeResolution::TypeSet { .. } => None,
         })
         .collect();
+    // The reference-family half of the same index. `data_composition_type_id_xml`
+    // already spells these as `<v8:TypeSet>` on the typed path; the
+    // transliteration had no map to put them in at all, so every
+    // `DocumentRef`/`CatalogRef`/`ExchangePlanRef` uuid fell through to
+    // "no configuration type-index resolution" and failed closed on a name
+    // the index in fact carried. `AnyIBRef` is a protocol identifier that
+    // sits outside the generated-type index, exactly as that function's own
+    // special case records.
+    let mut type_set_types: BTreeMap<String, String> = type_index
+        .iter()
+        .filter_map(|(type_id, resolution)| match resolution {
+            DcsTypeResolution::TypeSet { qname } => qname
+                .strip_prefix(CFG_PREFIX)
+                .map(|name| (type_id.clone(), name.to_owned())),
+            DcsTypeResolution::KeepId | DcsTypeResolution::Type { .. } => None,
+        })
+        .collect();
+    type_set_types
+        .entry(ANY_IB_REF_TYPE_ID.to_owned())
+        .or_insert_with(|| "AnyIBRef".to_owned());
     // The type ids the configuration index deliberately resolves to no
     // semantic name. The platform writes those straight back as
-    // `<v8:TypeId>`; a type id in neither map is not resolvable at all and
-    // must fail closed rather than be spelled either way.
+    // `<v8:TypeId>`; a type id in none of the three maps is not resolvable at
+    // all and must fail closed rather than be spelled any way.
     let opaque_type_ids = type_index
         .iter()
         .filter_map(|(type_id, resolution)| match resolution {
@@ -600,6 +620,7 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
                 Err(query_union_link) => rewrite_dcs_primary_schema_storage_document(
                     envelope.primary_schema_file(),
                     &reference_types,
+                    &type_set_types,
                     &opaque_type_ids,
                     &style_reference_types,
                     &settings,
@@ -2427,6 +2448,183 @@ mod tests {
         .expect("an empty settings variant must export through the live codec");
 
         assert_eq!(actual, expected);
+    }
+
+    /// Four external Settings documents in one envelope -- twice the count the
+    /// clean-room corpus could exhibit, and the shape the attested-range gate
+    /// refused outright. The header declares the count and the framing formula
+    /// is uniform in it; this pins that reading it beats enumerating it, on
+    /// the platform's own bytes.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `542a53f5-56c5-4ca9-90d1-d689532c69fd.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `90db75a46813f9f36e8abcc32499cf8bf5591af8b7c09770a11456569428e11f`;
+    /// the expectation is the platform's own
+    /// `Reports/ПродлениеСрокаДействияЭлектронныхПодписей/Templates/Макет/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `afaa6a8bc76bb34a3d5bf4650c60b0a7e740625fd690ec8da039675578eecbc5`.
+    #[test]
+    fn platform_multi_variant_settings_body_exports_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-multi-variant-settings/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-multi-variant-settings/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "90db75a46813f9f36e8abcc32499cf8bf5591af8b7c09770a11456569428e11f"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "afaa6a8bc76bb34a3d5bf4650c60b0a7e740625fd690ec8da039675578eecbc5"
+        );
+
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        assert_eq!(
+            body.documents().len(),
+            6,
+            "the header declares four Settings documents between the two SchemaFiles"
+        );
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a four-variant envelope must export through the live codec");
+
+        assert_eq!(actual, expected);
+    }
+
+    /// `AnyIBRef` is a protocol identifier outside the generated-type index,
+    /// so it reaches the transliteration through the same unconditional seed
+    /// `data_composition_type_id_xml` applies on the typed path -- and it is
+    /// spelled `<v8:TypeSet>`, not `<v8:Type>`.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `cd6770d5-cd3c-47af-bc46-c865993adf63.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `4b70aeb7032569c77a2508fc932e0d27c03704191193f4e946922001f3adc9e4`;
+    /// the expectation is the platform's own
+    /// `Reports/МестаИспользованияСсылок/Templates/ОсновнаяСхемаКомпоновкиДанных/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `98d644bc92ee7fb5b100277478f90d075ab22bea2b358e6e2e86bbb34c07d6f9`.
+    #[test]
+    fn platform_any_ib_ref_type_set_body_exports_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-any-ib-ref-type-set/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-any-ib-ref-type-set/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "4b70aeb7032569c77a2508fc932e0d27c03704191193f4e946922001f3adc9e4"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "98d644bc92ee7fb5b100277478f90d075ab22bea2b358e6e2e86bbb34c07d6f9"
+        );
+
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("an AnyIBRef valueType must export through the live codec");
+
+        assert_eq!(actual, expected);
+        assert!(
+            String::from_utf8_lossy(&actual).contains(":AnyIBRef</v8:TypeSet>"),
+            "a reference family is spelled as a TypeSet"
+        );
+    }
+
+    /// The index-driven half of the same gap: `DocumentRef` is a
+    /// `DcsTypeResolution::TypeSet` entry the type index does carry, which the
+    /// transliteration had no map to read it from and so refused by name.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `3c305f89-e453-46c7-987b-f01dc964efdb.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `d0e430b3ab056b79ca70bd3c810bf0a82c006fb2d637bc41d9217a6b15f9b5fe`;
+    /// the expectation is the platform's own
+    /// `Reports/ДвиженияДокумента/Templates/ПустаяСхемаКомпоновкиДанных/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `4dcc90d8002faeabc911551b2ce388148feaab71b1d3283cd0deb01b85b31944`.
+    #[test]
+    fn platform_document_ref_type_set_body_exports_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-document-ref-type-set/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-document-ref-type-set/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "d0e430b3ab056b79ca70bd3c810bf0a82c006fb2d637bc41d9217a6b15f9b5fe"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "4dcc90d8002faeabc911551b2ce388148feaab71b1d3283cd0deb01b85b31944"
+        );
+
+        let mut type_index = DcsTypeIndex::new();
+        type_index.insert(
+            "38bfd075-3e63-4aaa-a93e-94521380d579".to_owned(),
+            DcsTypeResolution::TypeSet {
+                qname: "cfg:DocumentRef".to_owned(),
+            },
+        );
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a DocumentRef valueType must export through the live codec");
+
+        assert_eq!(actual, expected);
+
+        // Without the index entry the uuid resolves to nothing at all, and
+        // that must still fail closed rather than be spelled either way.
+        let refused = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &DcsTypeIndex::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        );
+        assert!(
+            refused.is_err(),
+            "an unresolvable TypeId must not be guessed as either spelling"
+        );
     }
 
     #[test]

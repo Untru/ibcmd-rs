@@ -88,7 +88,7 @@
     "The terminal empty SchemaFile is unchanged from dcs-core while the primary SchemaFile expands only for the second metadata shell."
   ],
   "nonClaims": [
-    "No absent Settings document, duplicate variant name, empty name or presentation, more than two variants, defaultSettings, nested variant, or alternate positional binding is inferred.",
+    "No absent Settings document, duplicate variant name, empty name or presentation, defaultSettings, nested variant, or alternate positional binding is inferred; the variant count itself is read from the header rather than enumerated, and only the count-independent framing formula above is applied to it.",
     "No AreaTemplate, additional nonterminal SchemaFile, appearance side-table, appIndex, current-configuration reference, or reverse AreaTemplate writer is inferred.",
     "No full typed DataCompositionSchema semantic model is inferred; the schema shell remains source-owned and only the evidenced envelope and Settings delegation are owned.",
     "No arbitrary unknown schema child, cross-profile replay, EDT source roundtrip, or whole-profile 8.3.27 alias is inferred.",

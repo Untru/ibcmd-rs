@@ -174,9 +174,9 @@ pub fn analyze_dcs_schema_template_documents_with_references<'a>(
             .ok_or(DcsSchemaTemplateError::UnsupportedSource(
                 "native DCS envelope must contain primary and terminal SchemaFile documents",
             ))?;
-    if !policy.supports_attested_settings_variant_count(settings_count) {
+    if !policy.supports_framed_settings_variant_count(settings_count) {
         return Err(DcsSchemaTemplateError::UnsupportedSource(
-            "native DCS envelope settings count is outside the attested range",
+            "native DCS envelope settings count is below the framed minimum",
         ));
     }
 
@@ -251,9 +251,9 @@ pub fn bind_dcs_settings_to_source_variants(
 ) -> Result<String, DcsSchemaTemplateError> {
     let policy = bundled_dcs_schema_template_envelope_policy()
         .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
-    if !policy.supports_attested_settings_variant_count(settings_blocks.len()) {
+    if !policy.supports_framed_settings_variant_count(settings_blocks.len()) {
         return Err(DcsSchemaTemplateError::UnsupportedSource(
-            "source settingsVariant count is outside the attested range",
+            "source settingsVariant count is below the framed minimum",
         ));
     }
     let variants = direct_variant_closing_offsets(source_schema, false, &policy)?;
@@ -288,9 +288,9 @@ pub fn detach_dcs_settings_from_source_variants(
     let policy = bundled_dcs_schema_template_envelope_policy()
         .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
     let captures = direct_inline_settings_ranges(source_schema, &policy)?;
-    if !policy.supports_attested_settings_variant_count(captures.len()) {
+    if !policy.supports_framed_settings_variant_count(captures.len()) {
         return Err(DcsSchemaTemplateError::UnsupportedSource(
-            "source settingsVariant count is outside the attested range",
+            "source settingsVariant count is below the framed minimum",
         ));
     }
     let mut settings_documents = Vec::with_capacity(captures.len());
