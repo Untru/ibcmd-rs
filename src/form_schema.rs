@@ -3711,6 +3711,139 @@ impl FormChildItemShowTitleSchema {
     }
 }
 
+/// The form root's property bag: field 18 declares how many `key`/`value`
+/// pairs follow at field 19, and the bag is that many pairs wide - a declared
+/// count, not a fixed slot window.
+///
+/// UT 11.5.27.75 native tree, 5 075 attributable roots: the declared count is
+/// 0 (2 881 roots), 1 (1 400), 3 (47), 4 (373), 5 (2), 6 (320) or 21 (52), and
+/// in every single one of them the field is an integer, the layout carries the
+/// full `19 + 2 * count` fields, and every key in the walk is an integer -
+/// zero counter-examples. Reading the bag only when the count exceeds one
+/// hides the 1 400 single-entry bags, 13 of which carry the
+/// `UseForFoldersAndItems` entry under key 0.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootPropertyBagSchema {
+    entry_count: usize,
+}
+
+impl FormRootPropertyBagSchema {
+    pub(crate) const COUNT_SLOT: usize = 18;
+    pub(crate) const FIRST_ENTRY_SLOT: usize = 19;
+
+    pub(crate) fn from_raw_layout(count_field: Option<&str>, field_count: usize) -> Option<Self> {
+        let entry_count = count_field?.trim().parse::<usize>().ok()?;
+        let required = Self::FIRST_ENTRY_SLOT.checked_add(entry_count.checked_mul(2)?)?;
+        (field_count >= required).then_some(Self { entry_count })
+    }
+
+    pub(crate) const fn entry_count(self) -> usize {
+        self.entry_count
+    }
+
+    pub(crate) const fn key_slot(self, entry_index: usize) -> usize {
+        Self::FIRST_ENTRY_SLOT + entry_index * 2
+    }
+}
+
+/// `Customizable` sits alone in root field 14 of the `50` layout.
+///
+/// UT 11.5.27.75 native tree, 5 075 attributable roots: field 14 reads `0` for
+/// all 359 roots whose native document carries `<Customizable>false</...>` and
+/// `1` for all 4 716 that omit it - a total function with no counter-example.
+/// Field 11 is the root's `Group` marker (`1` for the 39 roots that carry a
+/// horizontal `Group`, `0` for the other 5 036), so pairing it into the
+/// `Customizable` test only suppressed the 12 roots that have both.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootCustomizableSchema {
+    slot: usize,
+}
+
+impl FormRootCustomizableSchema {
+    const SLOT: usize = 14;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        field_count: usize,
+    ) -> Option<Self> {
+        (root_discriminator == Some("50") && field_count > Self::SLOT)
+            .then_some(Self { slot: Self::SLOT })
+    }
+
+    pub(crate) fn customizable(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(self.slot)?.trim() {
+            "0" => Some(false),
+            _ => None,
+        }
+    }
+}
+
+/// `CustomSettingsFolder` is property-bag key 23: an `{"N", id}` reference to
+/// one of the form's own items, with `0` standing for "no folder".
+///
+/// UT 11.5.27.75 native tree: 56 of the 5 075 attributable roots carry key 23.
+/// It reads `{"N",0}` in the 42 whose native document omits the property, and a
+/// non-zero item id in the 14 that carry it - and in all 14 the id resolves
+/// through the form's own item table to exactly the native folder name. No
+/// counter-example either way.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootCustomSettingsFolderSchema;
+
+impl FormRootCustomSettingsFolderSchema {
+    pub(crate) const PROPERTY_BAG_KEY: &'static str = "23";
+
+    pub(crate) fn from_raw_layout(root_discriminator: Option<&str>) -> Option<Self> {
+        (root_discriminator == Some("50")).then_some(Self)
+    }
+
+    pub(crate) fn item_id(self, value_fields: &[&str]) -> Option<String> {
+        match (
+            value_fields.first().map(|field| field.trim()),
+            value_fields.get(1).map(|field| field.trim()),
+            value_fields.len(),
+        ) {
+            (Some(r##""N""##), Some("0"), 2) => None,
+            (Some(r##""N""##), Some(id), 2) if id.parse::<u64>().is_ok() => Some(id.to_owned()),
+            _ => None,
+        }
+    }
+}
+
+/// `ConversationsRepresentation` lives in trailer slot 19 of the `50` layout,
+/// not in the property bag.
+///
+/// UT 11.5.27.75 native tree, 5 075 attributable roots: trailer slot 19 reads
+/// `2` for all 16 roots whose native document says `DontShow`, `1` for all 3
+/// that say `Show`, and `0` for the remaining 5 056 that omit the property -
+/// a total function with no counter-example. Property-bag key 21 carries the
+/// report form's `AutoShowState` instead, which is why the previous bag-keyed
+/// reader never emitted the property on any of the 5 075 roots.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootConversationsRepresentationSchema {
+    trailer_slot: usize,
+}
+
+impl FormRootConversationsRepresentationSchema {
+    const TRAILER_SLOT: usize = 19;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        trailer_field_count: usize,
+    ) -> Option<Self> {
+        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
+            trailer_slot: Self::TRAILER_SLOT,
+        })
+    }
+
+    pub(crate) fn conversations_representation(self, trailer: &[&str]) -> Option<&'static str> {
+        match trailer.get(self.trailer_slot)?.trim() {
+            "1" => Some("Show"),
+            "2" => Some("DontShow"),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormRootVerticalScrollSchema {
     qualifier_slot: usize,

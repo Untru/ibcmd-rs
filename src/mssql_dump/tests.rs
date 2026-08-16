@@ -7921,10 +7921,18 @@ fn does_not_extract_form_use_for_folders_and_items_without_property_key() {
     assert!(!form_xml.contains("<UseForFoldersAndItems>"));
 }
 
+// `ConversationsRepresentation` is trailer slot 19 of the root `50` layout, not
+// property-bag key 21. Across the 5 075 attributable UT 11.5.27.75 roots the
+// slot reads `2` for all 16 natives that say `DontShow`, `1` for all 3 that say
+// `Show` and `0` for the other 5 056 that omit it; bag key 21 carries the report
+// form's `AutoShowState` instead. The two tests that used to stand here asserted
+// the property out of a hand-written `59` bag layout the platform never writes -
+// on the real tree the bag reader fired on zero of the 5 075 roots, so the whole
+// property was dead and all 19 native occurrences were lost.
 #[test]
-fn extracts_form_conversations_representation_show_from_property_bag_layout() {
+fn extracts_form_conversations_representation_show_from_root_trailer() {
     let form_body = deflate_for_test(
-            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1},24,{"B",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,1,0,0,{50,0},1},"",{0}}"##.as_bytes(),
         );
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
@@ -7933,9 +7941,9 @@ fn extracts_form_conversations_representation_show_from_property_bag_layout() {
 }
 
 #[test]
-fn extracts_form_conversations_representation_dont_show_from_property_bag_layout() {
+fn extracts_form_conversations_representation_dont_show_from_root_trailer() {
     let form_body = deflate_for_test(
-            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0},24,{"B",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,2,0,0,{50,0},1},"",{0}}"##.as_bytes(),
         );
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
@@ -7946,14 +7954,125 @@ fn extracts_form_conversations_representation_dont_show_from_property_bag_layout
 }
 
 #[test]
-fn does_not_extract_form_conversations_representation_without_property_key() {
+fn does_not_extract_form_conversations_representation_from_default_root_trailer() {
     let form_body = deflate_for_test(
-            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,24,{"B",0},25,{"U"},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
         );
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
     assert!(!form_xml.contains("<ConversationsRepresentation>"));
+}
+
+#[test]
+fn does_not_extract_form_conversations_representation_from_property_bag_key_21() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1},{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(!form_xml.contains("<ConversationsRepresentation>"));
+}
+
+// The property bag is `count` pairs wide, and a count of exactly one is a bag
+// like any other: 1 400 of the 5 075 attributable UT roots declare one entry,
+// and the 13 that put `UseForFoldersAndItems` there lost the property entirely
+// while the reader demanded a count above one.
+#[test]
+fn extracts_form_use_for_folders_and_items_from_single_entry_property_bag() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<UseForFoldersAndItems>Items</UseForFoldersAndItems>"));
+}
+
+#[test]
+fn extracts_form_use_for_folders_and_items_folders_from_single_entry_property_bag() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1},{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<UseForFoldersAndItems>Folders</UseForFoldersAndItems>"));
+}
+
+#[test]
+fn does_not_extract_form_use_for_folders_and_items_from_unrelated_single_entry_bag() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1,{"N",0},{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(!form_xml.contains("<UseForFoldersAndItems>"));
+}
+
+// Root field 14 carries `Customizable` on its own; field 11 is the root's
+// `Group` marker. Pairing the two suppressed the 12 UT roots that have both a
+// horizontal `Group` and `<Customizable>false</Customizable>`.
+#[test]
+fn extracts_form_customizable_false_from_root_slot_with_group_marker_set() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,1,0,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<Customizable>false</Customizable>"));
+}
+
+#[test]
+fn does_not_extract_form_customizable_from_default_root_slot() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(!form_xml.contains("<Customizable>"));
+}
+
+// `CustomSettingsFolder` is property-bag key 23, an `{"N", id}` reference into
+// the form's own item table with `0` standing for "no folder".
+#[test]
+fn extracts_form_custom_settings_folder_from_property_bag_item_reference() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,23,{"N",1},{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{48,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Поле"},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<CustomSettingsFolder>Поле</CustomSettingsFolder>"));
+}
+
+#[test]
+fn does_not_extract_form_custom_settings_folder_for_zero_item_reference() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,23,{"N",0},{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{48,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Поле"},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(!form_xml.contains("<CustomSettingsFolder>"));
+}
+
+// Root field 6 reads `SaveDataInSettings` whatever the property bag holds: it is
+// `1` for every one of the 89 attributable UT roots whose native document says
+// `UseList`, including the 2 that also carry a populated bag.
+#[test]
+fn extracts_form_save_data_in_settings_alongside_a_populated_property_bag() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,23,{"N",0},{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<SaveDataInSettings>UseList</SaveDataInSettings>"));
 }
 
 #[test]

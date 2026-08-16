@@ -28,10 +28,11 @@ use crate::form_schema::{
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
-    FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
-    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalAlign,
-    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
-    FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
+    FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
+    FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
+    FormRootCustomizableSchema, FormRootGroupSchema, FormRootMobileDeviceCommandBarContentSchema,
+    FormRootPropertyBagSchema, FormRootVerticalAlign, FormRootVerticalAlignSchema,
+    FormRootVerticalScrollSchema, FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRootPropertyBagKey as TableRootBagKey,
@@ -314,6 +315,8 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &form_fields,
         &child_item_indexes.item_name_by_id,
     );
+    properties.custom_settings_folder =
+        extract_form_custom_settings_folder(&form_fields, &child_item_indexes.item_name_by_id);
     let child_item_indexes_cpu_ms = elapsed_ms(started);
 
     let started = Instant::now();
@@ -664,6 +667,7 @@ pub(super) struct FormBodyProperties {
     pub(super) details_data: Option<String>,
     pub(super) report_form_type: Option<&'static str>,
     pub(super) auto_show_state: Option<&'static str>,
+    pub(super) custom_settings_folder: Option<String>,
     pub(super) report_result_view_mode: Option<&'static str>,
     pub(super) view_mode_application_on_set_report_result: Option<&'static str>,
 }
@@ -675,8 +679,7 @@ pub(super) const FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID: &str =
     "2ef6d6fa-847a-485e-8684-d37a3ab5efb8";
 pub(super) const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
 pub(super) const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
-pub(super) const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str =
-    "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
+pub(super) const FORM_AUTO_SHOW_STATE_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
 pub(super) const FORM_REPORT_FORM_TYPE_UUID: &str = "acbc2eeb-2efb-48e4-b78a-661fd09fcf80";
 pub(super) const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048fd2df";
 pub(super) const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
@@ -1750,6 +1753,7 @@ pub(super) fn extract_form_body_properties(
         details_data: None,
         report_form_type,
         auto_show_state: extract_form_auto_show_state(fields),
+        custom_settings_folder: None,
         report_result_view_mode: extract_form_report_result_view_mode(fields),
         view_mode_application_on_set_report_result:
             extract_form_view_mode_application_on_set_report_result(fields),
@@ -1814,7 +1818,14 @@ pub(super) fn extract_form_auto_url(fields: &[&str]) -> Option<bool> {
 }
 
 pub(super) fn extract_form_save_data_in_settings(fields: &[&str]) -> Option<&'static str> {
-    if form_root_uses_property_bag(fields) {
+    // Root field 6 reads `1` for every one of the 89 attributable UT roots whose
+    // native document carries `<SaveDataInSettings>UseList</...>` and `0` for
+    // the other 4 986, whatever the property bag holds - the bag is not a
+    // second reader of this property, so gating on it only suppressed the 2
+    // roots that carry both. The legacy `59` layout keeps the old gate, having
+    // no observation of its own.
+    if fields.first().map(|field| field.trim()) != Some("50") && form_root_uses_property_bag(fields)
+    {
         return None;
     }
     match fields.get(6).map(|field| field.trim())? {
@@ -2000,13 +2011,9 @@ pub(super) fn extract_form_auto_show_state(fields: &[&str]) -> Option<&'static s
         value_fields.get(1).map(|field| field.trim()),
         value_fields.get(2).map(|field| field.trim()),
     ) {
-        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("0")) => Some("Auto"),
-        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("1")) => {
-            Some("DontShow")
-        }
-        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("3")) => {
-            Some("ShowOnComposition")
-        }
+        (Some(r##""#""##), Some(FORM_AUTO_SHOW_STATE_UUID), Some("0")) => Some("Auto"),
+        (Some(r##""#""##), Some(FORM_AUTO_SHOW_STATE_UUID), Some("1")) => Some("DontShow"),
+        (Some(r##""#""##), Some(FORM_AUTO_SHOW_STATE_UUID), Some("3")) => Some("ShowOnComposition"),
         _ => None,
     }
 }
@@ -2093,6 +2100,14 @@ fn parse_form_choice_folders_and_items_value(value: &str) -> Option<&'static str
 }
 
 pub(super) fn extract_form_customizable(fields: &[&str]) -> Option<bool> {
+    let root_discriminator = fields.first().map(|field| field.trim());
+    if root_discriminator == Some("50") {
+        // A `50` root that does not reach slot 14 is unreadable, not legacy.
+        return FormRootCustomizableSchema::from_raw_layout(root_discriminator, fields.len())?
+            .customizable(fields);
+    }
+    // The legacy `59` layout keeps its own pairing; the UT tree carries no `59`
+    // root, so there is no observation that would justify changing it.
     match (
         fields.get(11).map(|field| field.trim())?,
         fields.get(14).map(|field| field.trim())?,
@@ -2151,22 +2166,26 @@ pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static 
 }
 
 pub(super) fn extract_form_conversations_representation(fields: &[&str]) -> Option<&'static str> {
-    if extract_form_report_form_type(fields).is_some() {
-        return None;
-    }
-    let value = form_root_property_bag_value(fields, "21")?;
-    let value_fields = split_1c_braced_fields(value, 0)?;
-    match (
-        value_fields.first().map(|field| field.trim()),
-        value_fields.get(1).map(|field| field.trim()),
-        value_fields.get(2).map(|field| field.trim()),
-    ) {
-        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("0")) => {
-            Some("DontShow")
-        }
-        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("1")) => Some("Show"),
-        _ => None,
-    }
+    let tail_start = form_root_child_items_tail_start(fields)?;
+    let trailer = fields.get(tail_start..)?;
+    FormRootConversationsRepresentationSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+    )?
+    .conversations_representation(trailer)
+}
+
+pub(super) fn extract_form_custom_settings_folder(
+    fields: &[&str],
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let schema =
+        FormRootCustomSettingsFolderSchema::from_raw_layout(fields.first().map(|f| f.trim()))?;
+    let value =
+        form_root_property_bag_value(fields, FormRootCustomSettingsFolderSchema::PROPERTY_BAG_KEY)?;
+    let value_fields = split_1c_braced_fields(value.trim(), 0)?;
+    let item_id = schema.item_id(&value_fields)?;
+    item_name_by_id.get(&item_id).cloned()
 }
 
 pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
@@ -2263,20 +2282,25 @@ pub(super) fn form_root_property_bag_value<'a>(
     fields: &'a [&str],
     property_key: &str,
 ) -> Option<&'a str> {
-    if !form_root_uses_property_bag(fields) {
-        return None;
-    }
-    let count = fields.get(18)?.trim().parse::<usize>().ok()?;
-    let mut index = 19usize;
-    for _ in 0..count {
-        let key = fields.get(index)?.trim();
-        let value = *fields.get(index + 1)?;
-        if key == property_key {
-            return Some(value);
+    let schema = FormRootPropertyBagSchema::from_raw_layout(
+        fields.get(FormRootPropertyBagSchema::COUNT_SLOT).copied(),
+        fields.len(),
+    )?;
+    let mut found = None;
+    for entry_index in 0..schema.entry_count() {
+        let key_slot = schema.key_slot(entry_index);
+        let key = fields.get(key_slot)?.trim();
+        // Every key in the walk is an integer in all 5 075 attributable UT
+        // roots; a non-integer means the field 18 count was not a count and the
+        // whole bag is unreadable rather than partially readable.
+        if key.parse::<usize>().is_err() {
+            return None;
         }
-        index += 2;
+        if key == property_key {
+            found = Some(*fields.get(key_slot + 1)?);
+        }
     }
-    None
+    found
 }
 
 pub(super) fn form_standard_excluded_command_name(
@@ -15372,6 +15396,20 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(value) = properties.auto_show_state {
         xml.push_str(&format!(
             "\t<AutoShowState>{}</AutoShowState>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // `CustomSettingsFolder` follows `AutoShowState` (12), `ReportFormType`
+    // (12), `CommandBarLocation` (13), `CommandSet` (8), `ReportResult` (7),
+    // `DetailsData` (7), `AutoTitle` (4), `VerticalScroll` (4) and `Title` (4),
+    // and precedes `ReportResultViewMode` (12),
+    // `ViewModeApplicationOnSetReportResult` (12), `Attributes` (14),
+    // `AutoCommandBar` (14), `ChildItems` (14), `Events` (12), `Commands` (9)
+    // and `Parameters` (4) across the 5 201 native `Form.xml` documents, with
+    // no counter-example in either direction.
+    if let Some(value) = &properties.custom_settings_folder {
+        xml.push_str(&format!(
+            "\t<CustomSettingsFolder>{}</CustomSettingsFolder>\r\n",
             escape_xml_text(value)
         ));
     }
