@@ -923,6 +923,117 @@ fn canonicalize_typed_data_composition_settings_document(
     Ok(indent_data_composition_settings(&settings))
 }
 
+/// The three storage documents a packed form body carries under its dynamic
+/// list `ListSettings`, paired with the inline element each becomes.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormListSettingsChildKind {
+    Filter,
+    Order,
+    ConditionalAppearance,
+}
+
+impl FormListSettingsChildKind {
+    /// The element name the platform gives this child inline in a decompiled
+    /// Form.xml.
+    ///
+    /// Its storage spelling differs only in the initial letter (`Filter`,
+    /// `Order`, `ConditionalAppearance`), so pinning the rendered name pins
+    /// the storage root the writer accepted as well.
+    const fn source_root_local(self) -> &'static str {
+        match self {
+            Self::Filter => "filter",
+            Self::Order => "order",
+            Self::ConditionalAppearance => "conditionalAppearance",
+        }
+    }
+}
+
+/// What one `ListSettings` child storage document re-spells to.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum FormListSettingsChildTransliteration {
+    /// The storage document is an empty element. It carries no content, and
+    /// the platform's own export writes nothing for it -- the same physical
+    /// state, and the same treatment, the `ConditionalAppearance` property
+    /// already has: property present, element omitted.
+    Empty,
+    /// The inline source fragment, indented for its position.
+    Fragment(String),
+}
+
+/// Re-spells one `ListSettings` child storage document as the inline source
+/// fragment the platform's own export writes for it, indented for its
+/// position under `<ListSettings>`.
+///
+/// This is the form-body twin of the standalone-`Settings` transliteration:
+/// the storage and source documents carry the same content and differ only in
+/// how they spell it -- the root's initial letter, prefixes for namespaces the
+/// `Form.xml` root already declares, and generated prefixes numbered by depth
+/// in the target document. So the fragment is produced from the platform's own
+/// bytes by a lexical writer rather than by teaching a typed representation
+/// one more shape.
+///
+/// Returns `None` -- leaving the caller's existing refusal in place -- for
+/// anything the bytes do not account for: a document that is not well-formed,
+/// a root that is not the expected settings-namespace element, a namespace
+/// outside the evidenced `ListSettings` vocabulary, more than one generated
+/// prefix on a single element, and an unresolvable QName in character data.
+pub(crate) fn transliterate_form_list_settings_child_document(
+    bytes: &[u8],
+    kind: FormListSettingsChildKind,
+    object_refs: &BTreeMap<String, String>,
+    indent: &str,
+) -> Option<FormListSettingsChildTransliteration> {
+    if bytes.len() > MAX_FORM_LIST_SETTINGS_CHILD_STORAGE_BYTES {
+        return None;
+    }
+    let document = std::str::from_utf8(bytes).ok()?;
+    let document = document.strip_prefix('\u{feff}').unwrap_or(document);
+    let mut writer = DataCompositionXmlWriter::new_for_mode(
+        object_refs,
+        DataCompositionDocumentMode::FormListSettingsChild,
+    );
+    writer.write_document(document, DataCompositionDocumentMode::FormListSettingsChild)?;
+    let fragment = writer.output.trim_start_matches(['\r', '\n', '\t', ' ']);
+    // The writer renames the root from the mode alone; this pins that the
+    // document it renamed was the one this caller asked for, so a `Filter`
+    // payload can never be spliced in as an `order` element.
+    let expected_open = format!("<dcsset:{}", kind.source_root_local());
+    if !fragment.starts_with(&expected_open)
+        || !fragment[expected_open.len()..].starts_with([' ', '>', '/', '\t', '\r', '\n'])
+    {
+        return None;
+    }
+    if fragment == format!("{expected_open}/>") {
+        return Some(FormListSettingsChildTransliteration::Empty);
+    }
+    Some(FormListSettingsChildTransliteration::Fragment(
+        indent_form_list_settings_child_fragment(fragment, indent),
+    ))
+}
+
+/// Bounds one `ListSettings` child storage document. The largest such
+/// document in the UT corpus is far below this; the ceiling exists so a
+/// malformed length cannot drive an unbounded rewrite.
+const MAX_FORM_LIST_SETTINGS_CHILD_STORAGE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Shifts a rendered `ListSettings` child to the depth its inline position
+/// sits at, on the same rule the standalone settings splice uses: only
+/// pretty-printing whitespace moves, never a line break inside character data.
+fn indent_form_list_settings_child_fragment(fragment: &str, indent: &str) -> String {
+    let literal = data_composition_character_data_runs(fragment);
+    let mut indented = String::with_capacity(fragment.len() + indent.len() * 8);
+    let mut offset = 0usize;
+    for line in fragment.split_inclusive('\n') {
+        if !data_composition_offset_continues_character_data(&literal, offset) {
+            indented.push_str(indent);
+        }
+        indented.push_str(line);
+        offset += line.len();
+    }
+    indented.push_str("\r\n");
+    indented
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct CanonicalFormServerStateFragment {
     pub(crate) start: usize,
@@ -937,7 +1048,7 @@ pub(crate) fn canonicalize_form_server_state_conditional_appearances(
     let mut reader = NsReader::from_str(document);
     reader.config_mut().trim_text(false);
     let mode = DataCompositionDocumentMode::FormServerStateFragment;
-    let mut writer = DataCompositionXmlWriter::new(object_refs);
+    let mut writer = DataCompositionXmlWriter::new_for_mode(object_refs, mode);
     let mut capture_depth = 0usize;
     let mut capture_start = None::<usize>;
     let mut captures = Vec::new();
@@ -1126,7 +1237,46 @@ fn data_composition_offset_continues_character_data(
 enum DataCompositionDocumentMode {
     Settings,
     FormServerStateFragment,
+    /// One packed-form `ListSettings` child storage document -- `Filter`,
+    /// `Order` or `ConditionalAppearance` -- re-spelled for its inline
+    /// position inside a decompiled `Form.xml`.
+    ///
+    /// The distinguishing fact is where the fragment lands. A standalone
+    /// `Settings` document carries its own root, so the writer declares the
+    /// four UI namespaces there and mints `dNpM` prefixes against the
+    /// settings document's own depth. A `ListSettings` child is spliced under
+    /// `Form/Attributes/Attribute/Settings/ListSettings`, whose root already
+    /// declares every namespace the platform's own export uses -- proven by
+    /// the `Form` element of all 1 672 native UT forms that carry a
+    /// `ListSettings` -- so the same content is spelled with the globally
+    /// declared prefixes and generated prefixes count depth from the Form
+    /// root, not from the fragment.
+    FormListSettingsChild,
 }
+
+impl DataCompositionDocumentMode {
+    /// Whether QNames resolve against the prefixes a decompiled `Form.xml`
+    /// declares on its own root element rather than against declarations the
+    /// writer emits itself.
+    const fn uses_form_root_prefixes(self) -> bool {
+        matches!(
+            self,
+            Self::FormServerStateFragment | Self::FormListSettingsChild
+        )
+    }
+}
+
+/// 1-based depth of a `ListSettings` child element inside `Form.xml`:
+/// `Form`(1) / `Attributes`(2) / `Attribute`(3) / `Settings`(4) /
+/// `ListSettings`(5), so the fragment's own root sits at 6.
+///
+/// The platform numbers a generated `dNp1` prefix by exactly this depth. Two
+/// native UT captures pin both ends of the range: `DocumentJournals/
+/// Взаимодействия/Forms/ФормаСписка` declares `xmlns:d8p1` on a
+/// `filter/item/right` (6 + 2) and `DocumentJournals/ЧекиККМ/Forms/
+/// ФормаСписка` declares `xmlns:d10p1` on a
+/// `conditionalAppearance/item/filter/item/right` (6 + 4).
+const FORM_LIST_SETTINGS_CHILD_ROOT_DEPTH: usize = 6;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct DcsDynamicNamespace {
@@ -1142,6 +1292,10 @@ struct DcsElementFrame {
     xsi_type_local: Option<String>,
     dynamic_namespaces: Vec<DcsDynamicNamespace>,
     is_data_ui_color_value: bool,
+    /// The element's `xsi:type` is `{data/core}Type` or `{data/core}TypeSet`,
+    /// which makes its character data a QName. A settings `right` value spells
+    /// a type this way, where the element's own name says nothing about it.
+    is_data_core_type_value: bool,
     output_namespace_offset: usize,
 }
 
@@ -1168,15 +1322,30 @@ struct DataCompositionXmlWriter<'a> {
     skip_depth: usize,
     element_stack: Vec<DcsElementFrame>,
     object_refs: &'a BTreeMap<String, String>,
+    /// The document mode this writer was built for.
+    ///
+    /// The mode is also threaded through the write calls, which is how the
+    /// existing paths read it; the field exists so the QName resolvers that
+    /// sit below those calls can see it without re-threading a parameter
+    /// through every caller.
+    mode: DataCompositionDocumentMode,
 }
 
 impl<'a> DataCompositionXmlWriter<'a> {
     fn new(object_refs: &'a BTreeMap<String, String>) -> Self {
+        Self::new_for_mode(object_refs, DataCompositionDocumentMode::Settings)
+    }
+
+    fn new_for_mode(
+        object_refs: &'a BTreeMap<String, String>,
+        mode: DataCompositionDocumentMode,
+    ) -> Self {
         Self {
             output: String::new(),
             skip_depth: 0,
             element_stack: Vec::new(),
             object_refs,
+            mode,
         }
     }
 
@@ -1290,8 +1459,44 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         && parent.namespace.as_deref() == Some(DCS_SCHEMA_NS)
                         && parent.local.as_slice() == b"nestedSchema")
             });
+        let is_form_list_settings_child_root = *mode
+            == DataCompositionDocumentMode::FormListSettingsChild
+            && self.element_stack.is_empty();
         let mut rendered_attributes = Vec::<(String, String)>::new();
         let mut dynamic_namespaces = Vec::<DcsDynamicNamespace>::new();
+        if *mode == DataCompositionDocumentMode::FormListSettingsChild {
+            // A generated prefix in a `ListSettings` child is declared at the
+            // point of use and numbered by the element's depth in `Form.xml`,
+            // not carried down from a document root. Mint it here, before any
+            // attribute or character-data QName is rendered against it, so
+            // both resolve through the frame's own declaration. More than one
+            // undeclarable namespace on a single element has no evidenced
+            // numbering, so it is refused rather than guessed.
+            let mut minted = None::<String>;
+            for attribute in event.attributes().with_checks(false) {
+                let attribute = attribute.ok()?;
+                if !is_xmlns_attribute(attribute.key.as_ref()) {
+                    continue;
+                }
+                let uri = attribute
+                    .decode_and_unescape_value(reader.decoder())
+                    .ok()?
+                    .into_owned();
+                if uri.is_empty()
+                    || form_root_declared_data_composition_prefix(uri.as_bytes()).is_some()
+                {
+                    continue;
+                }
+                if minted.replace(uri.clone()).is_some() {
+                    return None;
+                }
+                self.push_dynamic_namespace(
+                    &mut dynamic_namespaces,
+                    self.form_list_settings_child_scope_prefix(),
+                    uri,
+                )?;
+            }
+        }
         let is_data_ui_picture_value = namespace == Some(DCS_CORE_NS)
             && local == b"value"
             && data_composition_xsi_type_is(reader, event, DATA_UI_NS, b"Picture")?;
@@ -1329,6 +1534,22 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 .into_owned();
             let value = if attr_name == "ref" && is_data_ui_picture_value {
                 canonical_data_composition_picture_ref(reader, &value).unwrap_or(value)
+            } else if attr_name == "ref"
+                && *mode == DataCompositionDocumentMode::FormListSettingsChild
+                && value.trim_start().starts_with("0:")
+            {
+                // A style-item reference the platform stored by metadata
+                // UUID. Its inline spelling is the style item's own name
+                // under the globally declared `style` prefix -- proven by
+                // `CommonForms/МашиночитаемыеДоверенности`, whose
+                // `ref="0:4a6c2c50-..."` is exported as
+                // `ref="style:ЗачеркнутыйШрифтБЭД"`. A UUID that resolves to
+                // no style item is refused rather than passed through, since
+                // the raw form is not a spelling the platform ever writes.
+                format!(
+                    "style:{}",
+                    data_composition_style_item_name(&value, self.object_refs)?
+                )
             } else {
                 value
             };
@@ -1361,6 +1582,20 @@ impl<'a> DataCompositionXmlWriter<'a> {
         }
         let name = if is_settings_root {
             "dcsset:settings".to_string()
+        } else if is_form_list_settings_child_root {
+            // The storage document names its root in the platform's storage
+            // spelling (`Filter`, `Order`, `ConditionalAppearance`); the
+            // inline source position names the same element in the settings
+            // namespace with a lower-case initial (`dcsset:filter`,
+            // `dcsset:order`, `dcsset:conditionalAppearance`). Everything
+            // below the root is already spelled the source way in storage.
+            if namespace != Some(DCS_SETTINGS_NS) {
+                return None;
+            }
+            format!(
+                "dcsset:{}",
+                lower_camel_data_composition_local(std::str::from_utf8(local).ok()?)?
+            )
         } else {
             let rendered_name = self.render_data_composition_node_name(
                 event.name().as_ref(),
@@ -1415,8 +1650,13 @@ impl<'a> DataCompositionXmlWriter<'a> {
     ) -> Option<()> {
         let text = std::str::from_utf8(event.as_ref()).ok()?;
         let is_qname_text = self.element_stack.last().is_some_and(|frame| {
-            frame.namespace.as_deref() == Some(DATA_CORE_NS)
-                && matches!(frame.local.as_slice(), b"Type" | b"TypeSet")
+            (frame.namespace.as_deref() == Some(DATA_CORE_NS)
+                && matches!(frame.local.as_slice(), b"Type" | b"TypeSet"))
+                // A `ListSettings` child spells a type as a settings element
+                // carrying `xsi:type="v8:Type"`, so the element's own name is
+                // not what makes its body a QName.
+                || (*mode == DataCompositionDocumentMode::FormListSettingsChild
+                    && frame.is_data_core_type_value)
         });
         if is_qname_text {
             let value = text.trim();
@@ -1443,6 +1683,15 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 self.output.push_str(&escape_xml_text(&rendered.value));
                 self.output.push_str(&text[value_start + value.len()..]);
                 return Some(());
+            }
+            // A `v8:Type`/`v8:TypeSet` body is a QName. In a fragment spliced
+            // into a document this writer does not own the root of, letting an
+            // unresolved one through verbatim would emit a prefix nothing
+            // declares, so it is refused instead.
+            if *mode == DataCompositionDocumentMode::FormListSettingsChild
+                && text.trim().contains(':')
+            {
+                return None;
             }
         }
         if self
@@ -1476,8 +1725,8 @@ impl<'a> DataCompositionXmlWriter<'a> {
             let qualified_canonical_value = (in_area_template || qualified_schema_style)
                 .then_some(qualified_value.clone())
                 .flatten();
-            let qualified_form_value = (*mode
-                == DataCompositionDocumentMode::FormServerStateFragment)
+            let qualified_form_value = mode
+                .uses_form_root_prefixes()
                 .then_some(qualified_value)
                 .flatten()
                 .filter(|(namespace, _)| canonical_form_data_ui_value_prefix(namespace).is_some());
@@ -1490,13 +1739,13 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     Some(self.scope_prefix(8))
                 } else if qualified_schema_style {
                     Some(self.schema_style_prefix())
-                } else if *mode == DataCompositionDocumentMode::FormServerStateFragment {
+                } else if mode.uses_form_root_prefixes() {
                     canonical_form_data_ui_value_prefix(&namespace).map(str::to_string)
                 } else {
                     None
                 };
                 if let Some(prefix) = &prefix
-                    && *mode != DataCompositionDocumentMode::FormServerStateFragment
+                    && !mode.uses_form_root_prefixes()
                 {
                     let output_namespace_offset =
                         self.element_stack.last()?.output_namespace_offset;
@@ -1512,6 +1761,9 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 self.output.push_str(&escape_xml_text(&local));
                 self.output.push_str(&text[value_start + value.len()..]);
                 return Some(());
+            }
+            if *mode == DataCompositionDocumentMode::FormListSettingsChild && value.contains(':') {
+                return None;
             }
         }
         self.output.push_str(text);
@@ -1529,6 +1781,25 @@ impl<'a> DataCompositionXmlWriter<'a> {
     ) -> Option<DcsRenderedQName> {
         if namespace.is_none() && lexical_name.contains(&b':') {
             return None;
+        }
+        if mode == DataCompositionDocumentMode::FormListSettingsChild {
+            // An unprefixed attribute name carries no namespace and needs
+            // none; every other name in this mode resolves through the Form
+            // root's own declarations or through a prefix minted at the
+            // element that declared it.
+            if is_attribute && namespace.is_none() {
+                return Some(DcsRenderedQName {
+                    value: std::str::from_utf8(local).ok()?.to_string(),
+                    declaration: None,
+                });
+            }
+            return self.render_form_list_settings_child_qname(
+                DcsExpandedQName {
+                    namespace: Some(namespace?.to_vec()),
+                    local: std::str::from_utf8(local).ok()?.to_string(),
+                },
+                local_namespaces,
+            );
         }
         let canonical = if is_attribute {
             canonical_data_composition_attr_name(namespace, local)
@@ -1716,11 +1987,60 @@ impl<'a> DataCompositionXmlWriter<'a> {
         )
     }
 
+    /// Resolves one QName for a `ListSettings` child fragment.
+    ///
+    /// Exactly two sources are admitted: a prefix the decompiled `Form.xml`
+    /// declares on its own root, and a prefix this writer minted at the
+    /// element that declared the namespace. Anything else is refused rather
+    /// than spelled with a prefix nothing declares -- a fragment is spliced
+    /// into a document whose root the writer does not control, so an
+    /// unresolvable namespace has no place to be declared.
+    fn render_form_list_settings_child_qname(
+        &self,
+        expanded: DcsExpandedQName,
+        local_namespaces: &[DcsDynamicNamespace],
+    ) -> Option<DcsRenderedQName> {
+        let namespace = expanded.namespace.as_deref()?;
+        if let Some(prefix) = form_root_declared_data_composition_prefix(namespace) {
+            return Some(DcsRenderedQName {
+                value: format!("{prefix}:{}", expanded.local),
+                declaration: None,
+            });
+        }
+        let uri = std::str::from_utf8(namespace).ok()?;
+        let prefix = self.dynamic_namespace_prefix_for_uri(uri, local_namespaces)?;
+        Some(DcsRenderedQName {
+            value: format!("{prefix}:{}", expanded.local),
+            declaration: None,
+        })
+    }
+
+    fn dynamic_namespace_prefix_for_uri(
+        &self,
+        uri: &str,
+        local_namespaces: &[DcsDynamicNamespace],
+    ) -> Option<String> {
+        local_namespaces
+            .iter()
+            .rev()
+            .chain(
+                self.element_stack
+                    .iter()
+                    .rev()
+                    .flat_map(|frame| frame.dynamic_namespaces.iter().rev()),
+            )
+            .find(|namespace| namespace.uri == uri)
+            .map(|namespace| namespace.prefix.clone())
+    }
+
     fn render_expanded_qname(
         &self,
         expanded: DcsExpandedQName,
         element_local: &[u8],
     ) -> Option<DcsRenderedQName> {
+        if self.mode == DataCompositionDocumentMode::FormListSettingsChild {
+            return self.render_form_list_settings_child_qname(expanded, &[]);
+        }
         let namespace = expanded.namespace.as_deref();
         if namespace == Some(DCS_AREA_TEMPLATE_NS) {
             let prefix = "dcsat".to_string();
@@ -1837,6 +2157,15 @@ impl<'a> DataCompositionXmlWriter<'a> {
         })
     }
 
+    /// The generated prefix for a namespace declared at the element currently
+    /// being written, numbered by that element's depth in `Form.xml`.
+    fn form_list_settings_child_scope_prefix(&self) -> String {
+        format!(
+            "d{}p1",
+            FORM_LIST_SETTINGS_CHILD_ROOT_DEPTH + self.element_stack.len()
+        )
+    }
+
     fn scope_prefix(&self, base: usize) -> String {
         let nested_schema_depth = self
             .element_stack
@@ -1859,6 +2188,7 @@ fn data_composition_element_frame(
 ) -> Option<DcsElementFrame> {
     let mut xsi_type_local = None;
     let mut is_data_ui_color_value = false;
+    let mut is_data_core_type_value = false;
     for attribute in event.attributes().with_checks(false) {
         let attribute = attribute.ok()?;
         let (attr_namespace, attr_local) = reader.resolve_attribute(attribute.key);
@@ -1869,6 +2199,8 @@ fn data_composition_element_frame(
                 && local == b"value"
                 && expanded.namespace.as_deref() == Some(DATA_UI_NS)
                 && expanded.local == "Color";
+            is_data_core_type_value = expanded.namespace.as_deref() == Some(DATA_CORE_NS)
+                && matches!(expanded.local.as_str(), "Type" | "TypeSet");
             xsi_type_local = Some(
                 value
                     .rsplit_once(':')
@@ -1886,6 +2218,7 @@ fn data_composition_element_frame(
         xsi_type_local,
         dynamic_namespaces: written_start.dynamic_namespaces,
         is_data_ui_color_value,
+        is_data_core_type_value,
         output_namespace_offset: written_start.output_namespace_offset,
     })
 }
@@ -1945,6 +2278,49 @@ fn globally_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'stati
         XS_NS => Some("xs"),
         _ => None,
     }
+}
+
+/// The prefix a decompiled `Form.xml` declares on its own root element for
+/// `namespace`, for the namespaces a `ListSettings` child can carry.
+///
+/// The set is exactly the vocabulary the platform's own export uses inside
+/// `ListSettings`: surveying all 1 672 UT forms that carry one yields element
+/// prefixes `dcsset`/`dcscor`/`v8`, `xsi:type` prefixes adding `v8ui`/`xs`,
+/// and character-data QName prefixes `style`/`web` (plus generated ones,
+/// which are minted at their point of use). Namespaces outside it -- the
+/// schema, common, area-template, current-config and enterprise namespaces
+/// among them -- are deliberately absent: no `ListSettings` in the corpus
+/// carries one, so admitting them would be a guess about a spelling nothing
+/// proves, and the writer refuses instead.
+fn form_root_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'static str> {
+    match namespace {
+        DCS_CORE_NS => Some("dcscor"),
+        DCS_SETTINGS_NS => Some("dcsset"),
+        DATA_CORE_NS => Some("v8"),
+        DATA_UI_NS => Some("v8ui"),
+        STYLE_NS => Some("style"),
+        SYS_NS => Some("sys"),
+        WEB_NS => Some("web"),
+        WIN_NS => Some("win"),
+        XSI_NS => Some("xsi"),
+        XS_NS => Some("xs"),
+        _ => None,
+    }
+}
+
+/// Lowercases the first character of a storage-spelled element local name.
+///
+/// The three `ListSettings` child roots are the only names this is applied
+/// to, and each differs from its inline source spelling in exactly that
+/// character: `Filter`/`filter`, `Order`/`order`,
+/// `ConditionalAppearance`/`conditionalAppearance`.
+fn lower_camel_data_composition_local(local: &str) -> Option<String> {
+    let mut chars = local.chars();
+    let first = chars.next()?;
+    if !first.is_ascii_uppercase() {
+        return None;
+    }
+    Some(format!("{}{}", first.to_ascii_lowercase(), chars.as_str()))
 }
 
 fn canonical_form_data_ui_value_prefix(namespace: &[u8]) -> Option<&'static str> {

@@ -855,6 +855,9 @@ pub(super) enum FormListSettingsConditionalAppearance {
     /// absent metadata), so the physical state is carried here instead of
     /// being collapsed into either `Typed` or `None`.
     EmptyStorage,
+    /// Storage bytes no typed cohort described, re-spelled in the inline
+    /// source direction by the lexical writer and ready to splice.
+    Transliterated(String),
     OpaqueStorage {
         bytes: Vec<u8>,
         reason: &'static str,
@@ -866,7 +869,7 @@ impl FormListSettingsConditionalAppearance {
     pub(super) const fn typed(&self) -> Option<&DcsConditionalAppearance> {
         match self {
             Self::Typed(value) => Some(value),
-            Self::EmptyStorage | Self::OpaqueStorage { .. } => None,
+            Self::EmptyStorage | Self::Transliterated(_) | Self::OpaqueStorage { .. } => None,
         }
     }
 }
@@ -874,6 +877,10 @@ impl FormListSettingsConditionalAppearance {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum FormListSettingsOrder {
     Typed(DcsOrder),
+    /// See [`FormListSettingsConditionalAppearance::EmptyStorage`].
+    EmptyStorage,
+    /// See [`FormListSettingsConditionalAppearance::Transliterated`].
+    Transliterated(String),
     OpaqueStorage {
         bytes: Vec<u8>,
         reason: &'static str,
@@ -883,6 +890,10 @@ pub(super) enum FormListSettingsOrder {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum FormListSettingsFilter {
     Typed(DcsFilter),
+    /// See [`FormListSettingsConditionalAppearance::EmptyStorage`].
+    EmptyStorage,
+    /// See [`FormListSettingsConditionalAppearance::Transliterated`].
+    Transliterated(String),
     OpaqueStorage {
         bytes: Vec<u8>,
         reason: &'static str,
@@ -894,7 +905,7 @@ impl FormListSettingsFilter {
     pub(super) const fn typed(&self) -> Option<&DcsFilter> {
         match self {
             Self::Typed(filter) => Some(filter),
-            Self::OpaqueStorage { .. } => None,
+            Self::EmptyStorage | Self::Transliterated(_) | Self::OpaqueStorage { .. } => None,
         }
     }
 }
@@ -904,7 +915,7 @@ impl FormListSettingsOrder {
     pub(super) const fn typed(&self) -> Option<&DcsOrder> {
         match self {
             Self::Typed(order) => Some(order),
-            Self::OpaqueStorage { .. } => None,
+            Self::EmptyStorage | Self::Transliterated(_) | Self::OpaqueStorage { .. } => None,
         }
     }
 }
@@ -1547,14 +1558,20 @@ fn preflight_form_writer_paths_with_dcs_profiles(
             Some(FormListSettingsFilter::OpaqueStorage { reason, .. }) => {
                 return Err(FormSchemaWriteError::OpaqueDcsFilter { reason });
             }
-            None => None,
+            Some(
+                FormListSettingsFilter::EmptyStorage | FormListSettingsFilter::Transliterated(_),
+            )
+            | None => None,
         };
         let canonical_order = match settings.list_settings.order.as_ref() {
             Some(FormListSettingsOrder::Typed(order)) => Some(order),
             Some(FormListSettingsOrder::OpaqueStorage { reason, .. }) => {
                 return Err(FormSchemaWriteError::OpaqueDcsOrder { reason });
             }
-            None => None,
+            Some(
+                FormListSettingsOrder::EmptyStorage | FormListSettingsOrder::Transliterated(_),
+            )
+            | None => None,
         };
         let canonical_conditional_appearance =
             match settings.list_settings.conditional_appearance.as_ref() {
@@ -1562,7 +1579,11 @@ fn preflight_form_writer_paths_with_dcs_profiles(
                 Some(FormListSettingsConditionalAppearance::OpaqueStorage { reason, .. }) => {
                     return Err(FormSchemaWriteError::OpaqueDcsConditionalAppearance { reason });
                 }
-                Some(FormListSettingsConditionalAppearance::EmptyStorage) | None => None,
+                Some(
+                    FormListSettingsConditionalAppearance::EmptyStorage
+                    | FormListSettingsConditionalAppearance::Transliterated(_),
+                )
+                | None => None,
             };
         // This is the only fallible DynamicList/ListSettings formatter path. It returns its
         // complete fragment atomically and has no output or filesystem side effects.
@@ -3624,11 +3645,13 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
                 dynamic_data_read_explicit = true;
                 dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
             }
-            "Filter" => list_settings.filter = parse_form_list_settings_filter(window[1]),
+            "Filter" => {
+                list_settings.filter = parse_form_list_settings_filter(window[1], object_refs)
+            }
             "Order" => list_settings.order = parse_form_list_settings_order(window[1], object_refs),
             property if property == conditional_appearance_property => {
                 list_settings.conditional_appearance =
-                    parse_form_list_settings_conditional_appearance(window[1])
+                    parse_form_list_settings_conditional_appearance(window[1], object_refs)
             }
             "ItemsViewMode" => list_settings.items_view_mode = parse_form_setting_string(window[1]),
             "ItemsUserSettingID" => {
@@ -4096,61 +4119,117 @@ pub(super) fn prefix_default_xml_tags(fragment: &str, prefix: &str) -> String {
     output
 }
 
+/// Re-spells a `ListSettings` child the typed cohort refused, or gives up on
+/// it.
+///
+/// A cohort refusal says only that no enumerated shape describes the
+/// document, never that the document cannot be spelled. Since the storage and
+/// inline forms of these three children differ only lexically, the writer is
+/// asked next; when it too cannot account for the bytes, the caller's typed
+/// refusal stands and the record still fails closed.
+fn transliterated_form_list_settings_child(
+    bytes: &[u8],
+    kind: FormListSettingsChildKind,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormListSettingsChildTransliteration> {
+    transliterate_form_list_settings_child_document(
+        bytes,
+        kind,
+        object_refs,
+        FORM_LIST_SETTINGS_CHILD_INDENT,
+    )
+}
+
+/// Indent of a `ListSettings` child inside a decompiled `Form.xml`.
+pub(super) const FORM_LIST_SETTINGS_CHILD_INDENT: &str = "\t\t\t\t\t";
+
 pub(super) fn parse_form_list_settings_order(
     field: &str,
-    _object_refs: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<FormListSettingsOrder> {
     let payload = extract_base64_payload(field)?;
     let bytes = decode_base64_mime(payload)?;
+    let refused = |reason: &'static str| match transliterated_form_list_settings_child(
+        &bytes,
+        FormListSettingsChildKind::Order,
+        object_refs,
+    ) {
+        Some(FormListSettingsChildTransliteration::Empty) => FormListSettingsOrder::EmptyStorage,
+        Some(FormListSettingsChildTransliteration::Fragment(xml)) => {
+            FormListSettingsOrder::Transliterated(xml)
+        }
+        None => FormListSettingsOrder::OpaqueStorage {
+            bytes: bytes.clone(),
+            reason,
+        },
+    };
     match parse_dcs_order_storage_document(&bytes) {
         Ok(DcsChildParseOutcome::Typed(canonical)) => Some(FormListSettingsOrder::Typed(canonical)),
-        Ok(DcsChildParseOutcome::Unsupported(reason)) => {
-            Some(FormListSettingsOrder::OpaqueStorage { bytes, reason })
-        }
-        Ok(DcsChildParseOutcome::Absent) => Some(FormListSettingsOrder::OpaqueStorage {
-            bytes,
-            reason: "present storage Order parsed as absent",
-        }),
-        Err(error) => Some(FormListSettingsOrder::OpaqueStorage {
-            bytes,
-            reason: error.reason(),
-        }),
+        Ok(DcsChildParseOutcome::Unsupported(reason)) => Some(refused(reason)),
+        Ok(DcsChildParseOutcome::Absent) => Some(refused("present storage Order parsed as absent")),
+        Err(error) => Some(refused(error.reason())),
     }
 }
 
-pub(super) fn parse_form_list_settings_filter(field: &str) -> Option<FormListSettingsFilter> {
+pub(super) fn parse_form_list_settings_filter(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormListSettingsFilter> {
     let payload = extract_base64_payload(field)?;
     let bytes = decode_base64_mime(payload)?;
+    let refused = |reason: &'static str| match transliterated_form_list_settings_child(
+        &bytes,
+        FormListSettingsChildKind::Filter,
+        object_refs,
+    ) {
+        Some(FormListSettingsChildTransliteration::Empty) => FormListSettingsFilter::EmptyStorage,
+        Some(FormListSettingsChildTransliteration::Fragment(xml)) => {
+            FormListSettingsFilter::Transliterated(xml)
+        }
+        None => FormListSettingsFilter::OpaqueStorage {
+            bytes: bytes.clone(),
+            reason,
+        },
+    };
     match parse_dcs_filter_storage_document(&bytes) {
         Ok(DcsChildParseOutcome::Typed(canonical)) => {
             Some(FormListSettingsFilter::Typed(canonical))
         }
-        Ok(DcsChildParseOutcome::Unsupported(reason)) => {
-            Some(FormListSettingsFilter::OpaqueStorage { bytes, reason })
+        Ok(DcsChildParseOutcome::Unsupported(reason)) => Some(refused(reason)),
+        Ok(DcsChildParseOutcome::Absent) => {
+            Some(refused("present storage Filter parsed as absent"))
         }
-        Ok(DcsChildParseOutcome::Absent) => Some(FormListSettingsFilter::OpaqueStorage {
-            bytes,
-            reason: "present storage Filter parsed as absent",
-        }),
-        Err(error) => Some(FormListSettingsFilter::OpaqueStorage {
-            bytes,
-            reason: error.reason(),
-        }),
+        Err(error) => Some(refused(error.reason())),
     }
 }
 
 pub(super) fn parse_form_list_settings_conditional_appearance(
     field: &str,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<FormListSettingsConditionalAppearance> {
     let payload = extract_base64_payload(field)?;
     let bytes = decode_base64_mime(payload)?;
+    let refused = |reason: &'static str| match transliterated_form_list_settings_child(
+        &bytes,
+        FormListSettingsChildKind::ConditionalAppearance,
+        object_refs,
+    ) {
+        Some(FormListSettingsChildTransliteration::Empty) => {
+            FormListSettingsConditionalAppearance::EmptyStorage
+        }
+        Some(FormListSettingsChildTransliteration::Fragment(xml)) => {
+            FormListSettingsConditionalAppearance::Transliterated(xml)
+        }
+        None => FormListSettingsConditionalAppearance::OpaqueStorage {
+            bytes: bytes.clone(),
+            reason,
+        },
+    };
     match parse_dcs_conditional_appearance_storage_document(&bytes) {
         Ok(DcsChildParseOutcome::Typed(canonical)) => {
             Some(FormListSettingsConditionalAppearance::Typed(canonical))
         }
-        Ok(DcsChildParseOutcome::Unsupported(reason)) => {
-            Some(FormListSettingsConditionalAppearance::OpaqueStorage { bytes, reason })
-        }
+        Ok(DcsChildParseOutcome::Unsupported(reason)) => Some(refused(reason)),
         // `parse_dcs_conditional_appearance_storage_document` reports the
         // physically present but genuinely empty self-closing
         // `<ConditionalAppearance/>` document (no items, no viewMode, no
@@ -4164,10 +4243,7 @@ pub(super) fn parse_form_list_settings_conditional_appearance(
         Ok(DcsChildParseOutcome::Absent) => {
             Some(FormListSettingsConditionalAppearance::EmptyStorage)
         }
-        Err(error) => Some(FormListSettingsConditionalAppearance::OpaqueStorage {
-            bytes,
-            reason: error.reason(),
-        }),
+        Err(error) => Some(refused(error.reason())),
     }
 }
 
@@ -18619,21 +18695,27 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         Some(FormListSettingsFilter::OpaqueStorage { reason, .. }) => {
             return Err(FormSchemaWriteError::OpaqueDcsFilter { reason });
         }
-        None => None,
+        Some(FormListSettingsFilter::EmptyStorage | FormListSettingsFilter::Transliterated(_))
+        | None => None,
     };
     let canonical_order = match settings.order.as_ref() {
         Some(FormListSettingsOrder::Typed(order)) => Some(order),
         Some(FormListSettingsOrder::OpaqueStorage { reason, .. }) => {
             return Err(FormSchemaWriteError::OpaqueDcsOrder { reason });
         }
-        None => None,
+        Some(FormListSettingsOrder::EmptyStorage | FormListSettingsOrder::Transliterated(_))
+        | None => None,
     };
     let canonical_conditional_appearance = match settings.conditional_appearance.as_ref() {
         Some(FormListSettingsConditionalAppearance::Typed(value)) => Some(value),
         Some(FormListSettingsConditionalAppearance::OpaqueStorage { reason, .. }) => {
             return Err(FormSchemaWriteError::OpaqueDcsConditionalAppearance { reason });
         }
-        Some(FormListSettingsConditionalAppearance::EmptyStorage) | None => None,
+        Some(
+            FormListSettingsConditionalAppearance::EmptyStorage
+            | FormListSettingsConditionalAppearance::Transliterated(_),
+        )
+        | None => None,
     };
     let canonical_parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::FormListSettings,
@@ -18658,31 +18740,88 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         )
         && canonical_parts.tail().is_empty()
     {
-        return Ok(String::new());
+        // No child renders. Whether the container itself is written is
+        // decided by the physical state of the packed body's own properties,
+        // not by what they render to: a dynamic list that stores the
+        // properties and leaves them empty gets a self-closing
+        // `<ListSettings/>`, one that never stored them gets nothing. Pinned
+        // by 31 UT forms whose `Filter` and `Order` are both empty storage
+        // documents and whose native Form.xml carries exactly
+        // `<ListSettings/>`.
+        return Ok(if form_list_settings_are_physically_present(settings) {
+            "\t\t\t\t<ListSettings/>\r\n".to_string()
+        } else {
+            String::new()
+        });
     }
     let mut xml = "\t\t\t\t<ListSettings>\r\n".to_string();
-    if form_list_settings_filter_has_output(settings.filter.as_ref())
-        && let Some(filter) = canonical_parts.filter()
-    {
-        xml.push_str(filter);
+    // Each child is rendered from whichever representation carries it: the
+    // canonical serializer for the typed cohort, the child's own
+    // transliterated bytes otherwise. The three are independent, so a form
+    // that has one child in each state still emits all three in the
+    // platform's order.
+    match settings.filter.as_ref() {
+        Some(FormListSettingsFilter::Transliterated(fragment)) => xml.push_str(fragment),
+        _ => {
+            if form_list_settings_filter_has_output(settings.filter.as_ref())
+                && let Some(filter) = canonical_parts.filter()
+            {
+                xml.push_str(filter);
+            }
+        }
     }
-    if form_list_settings_order_has_output(settings.order.as_ref()) && settings.order.is_some() {
-        xml.push_str(canonical_parts.order().unwrap_or_default());
+    match settings.order.as_ref() {
+        Some(FormListSettingsOrder::Transliterated(fragment)) => xml.push_str(fragment),
+        _ => {
+            if form_list_settings_order_has_output(settings.order.as_ref())
+                && settings.order.is_some()
+            {
+                xml.push_str(canonical_parts.order().unwrap_or_default());
+            }
+        }
     }
-    if form_list_settings_conditional_appearance_has_output(
-        settings.conditional_appearance.as_ref(),
-    ) {
-        xml.push_str(canonical_parts.conditional_appearance().unwrap_or_default());
+    match settings.conditional_appearance.as_ref() {
+        Some(FormListSettingsConditionalAppearance::Transliterated(fragment)) => {
+            xml.push_str(fragment);
+        }
+        _ => {
+            if form_list_settings_conditional_appearance_has_output(
+                settings.conditional_appearance.as_ref(),
+            ) {
+                xml.push_str(canonical_parts.conditional_appearance().unwrap_or_default());
+            }
+        }
     }
     xml.push_str(canonical_parts.tail());
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
     Ok(xml)
 }
 
+/// Whether the packed form body physically carried a `Filter`, `Order` or
+/// `Appearance` storage document, regardless of what those documents
+/// reconstruct to.
+///
+/// Only these three decide the container: they are what the 31 native
+/// `<ListSettings/>` captures carry. The tail properties are deliberately not
+/// consulted -- no capture shows a `ListSettings` whose only physical content
+/// is a tail value the canonical serializer then drops.
+fn form_list_settings_are_physically_present(settings: &FormListSettings) -> bool {
+    settings.filter.is_some()
+        || settings.order.is_some()
+        || settings.conditional_appearance.is_some()
+}
+
 pub(super) fn form_list_settings_filter_has_output(
     filter: Option<&FormListSettingsFilter>,
 ) -> bool {
-    filter.is_some()
+    // A physically present but empty `<Filter/>` storage document is omitted
+    // from the decompiled Form.xml, exactly as an empty
+    // `<ConditionalAppearance/>` is -- see
+    // `form_list_settings_conditional_appearance_has_output` for the same
+    // rule and its captures. 42 UT forms store an empty Filter together with
+    // an empty Order and their native Form.xml carries no `<ListSettings>`
+    // element at all.
+    !matches!(filter, None | Some(FormListSettingsFilter::EmptyStorage))
 }
 
 pub(super) fn form_list_settings_conditional_appearance_has_output(
@@ -18713,6 +18852,7 @@ pub(super) fn form_list_settings_conditional_appearance_has_output(
     match value {
         Some(
             FormListSettingsConditionalAppearance::Typed(_)
+            | FormListSettingsConditionalAppearance::Transliterated(_)
             | FormListSettingsConditionalAppearance::OpaqueStorage { .. },
         ) => true,
         Some(FormListSettingsConditionalAppearance::EmptyStorage) | None => false,
@@ -18720,7 +18860,9 @@ pub(super) fn form_list_settings_conditional_appearance_has_output(
 }
 
 pub(super) fn form_list_settings_order_has_output(order: Option<&FormListSettingsOrder>) -> bool {
-    order.is_some()
+    // See `form_list_settings_filter_has_output`: the empty storage document
+    // is a physical state the platform omits rather than renders.
+    !matches!(order, None | Some(FormListSettingsOrder::EmptyStorage))
 }
 
 pub(super) fn indent_xml_fragment(fragment: &str, indent: &str) -> String {

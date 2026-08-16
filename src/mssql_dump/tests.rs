@@ -9122,36 +9122,325 @@ fn preserves_custom_order_without_auto_save_for_renamed_attribute() {
     assert!(settings.list_settings.items_user_setting_id.is_none());
 }
 
+/// Contract change: a well-formed storage `Order` the typed cohort refuses is
+/// no longer a terminal refusal. The typed step still names the reason, but
+/// the writer then re-spells the document from its own bytes, so the record
+/// is emitted instead of failing closed. What still fails closed -- a storage
+/// document that is not well-formed, or not the settings-namespace element it
+/// claims to be -- is pinned by
+/// `unparseable_present_storage_order_is_retained_and_fails_closed`.
 #[test]
-fn malformed_present_storage_order_is_retained_and_fails_closed() {
-    let malformed = concat!(
+fn present_storage_order_outside_the_cohort_is_transliterated() {
+    let document = concat!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
         "<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
         "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
         "<item xsi:type=\"OrderItemField\"><field>Дата</field></item></Order>"
     );
+    // The typed step still names why it cannot describe the document; only
+    // what happens afterwards changed.
+    assert!(matches!(
+        ibcmd_xml::parse_dcs_order_storage_document(document.as_bytes()),
+        Err(error) if error.reason() == "order field and explicit orderType are required"
+    ));
     let field = format!(
         "{{#base64:{}}}",
-        encode_base64_for_test(malformed.as_bytes())
+        encode_base64_for_test(document.as_bytes())
     );
     let order = parse_form_list_settings_order(&field, &BTreeMap::new())
         .expect("present Order must not collapse to absence");
-    assert!(matches!(
-        &order,
-        FormListSettingsOrder::OpaqueStorage { bytes, reason }
-            if bytes == malformed.as_bytes()
-                && *reason == "order field and explicit orderType are required"
-    ));
+    let FormListSettingsOrder::Transliterated(fragment) = &order else {
+        panic!("expected a transliterated order, got {order:?}");
+    };
+    assert_eq!(
+        fragment,
+        concat!(
+            "\t\t\t\t\t<dcsset:order>",
+            "<dcsset:item xsi:type=\"dcsset:OrderItemField\">",
+            "<dcsset:field>Дата</dcsset:field>",
+            "</dcsset:item>",
+            "</dcsset:order>\r\n"
+        )
+    );
     let settings = FormListSettings {
         order: Some(order),
         ..FormListSettings::default()
     };
-    assert!(matches!(
-        format_form_list_settings_xml(&settings),
-        Err(FormSchemaWriteError::OpaqueDcsOrder {
-            reason: "order field and explicit orderType are required"
-        })
-    ));
+    let xml = format_form_list_settings_xml(&settings).expect("transliterated order emits");
+    assert!(xml.contains("<dcsset:order>"), "{xml}");
+    assert!(xml.starts_with("\t\t\t\t<ListSettings>\r\n"), "{xml}");
+}
+
+#[test]
+fn unparseable_present_storage_order_is_retained_and_fails_closed() {
+    for (document, reason) in [
+        (
+            concat!(
+                "<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">",
+                "<item></Order>",
+            ),
+            "storage Order document is not well-formed XML",
+        ),
+        (
+            "<Order xmlns=\"urn:not-the-settings-namespace\"><item/></Order>",
+            "storage root is not the settings-namespace Order element",
+        ),
+    ] {
+        let field = format!(
+            "{{#base64:{}}}",
+            encode_base64_for_test(document.as_bytes())
+        );
+        let order = parse_form_list_settings_order(&field, &BTreeMap::new())
+            .expect("present Order must not collapse to absence");
+        assert!(
+            matches!(
+                &order,
+                FormListSettingsOrder::OpaqueStorage { bytes, reason: actual }
+                    if bytes == document.as_bytes() && *actual == reason
+            ),
+            "{order:?}"
+        );
+        let settings = FormListSettings {
+            order: Some(order),
+            ..FormListSettings::default()
+        };
+        assert!(matches!(
+            format_form_list_settings_xml(&settings),
+            Err(FormSchemaWriteError::OpaqueDcsOrder { .. })
+        ));
+    }
+}
+
+/// Builds the packed `{"#",<uuid>,{#base64:...}}` property value a form body
+/// carries for one `ListSettings` child storage document.
+fn packed_list_settings_child_for_test(document: &str) -> String {
+    format!(
+        "{{#base64:{}}}",
+        encode_base64_for_test(document.as_bytes())
+    )
+}
+
+/// A generated prefix in a transliterated `ListSettings` child is numbered by
+/// the element's depth in `Form.xml`, not by the depth it had in the storage
+/// document.
+///
+/// The storage bytes are those of `DocumentJournals/Взаимодействия/Forms/
+/// ФормаСписка`, whose `right` element declares `d3p2` for
+/// `http://v8.1c.ru/8.2/data/types`; the platform's own export of that form
+/// spells the same element `<dcsset:right xmlns:d8p1="..." xsi:type="v8:Type">
+/// d8p1:Undefined</dcsset:right>` -- 6 for the `ListSettings` child root plus
+/// the two levels down to `right`. The sibling `d3p1` declaration, for a
+/// namespace the `Form` root already declares, is dropped and its QNames move
+/// onto `v8`.
+#[test]
+fn transliterated_filter_mints_generated_prefixes_by_form_depth() {
+    let document = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+        "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+        "\t<item xsi:type=\"FilterItemComparison\">\r\n",
+        "\t\t<use>false</use>\r\n",
+        "\t\t<left xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+        "xsi:type=\"dcscor:Field\">ТипПредмета</left>\r\n",
+        "\t\t<comparisonType>Equal</comparisonType>\r\n",
+        "\t\t<right xmlns:d3p1=\"http://v8.1c.ru/8.1/data/core\" ",
+        "xmlns:d3p2=\"http://v8.1c.ru/8.2/data/types\" ",
+        "xsi:type=\"d3p1:Type\">d3p2:Undefined</right>\r\n",
+        "\t</item>\r\n",
+        "\t<viewMode>Normal</viewMode>\r\n",
+        "</Filter>",
+    );
+    let filter = parse_form_list_settings_filter(
+        &packed_list_settings_child_for_test(document),
+        &BTreeMap::new(),
+    )
+    .expect("present Filter must not collapse to absence");
+    let FormListSettingsFilter::Transliterated(fragment) = &filter else {
+        panic!("expected a transliterated filter, got {filter:?}");
+    };
+    assert_eq!(
+        fragment,
+        concat!(
+            "\t\t\t\t\t<dcsset:filter>\r\n",
+            "\t\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:FilterItemComparison\">\r\n",
+            "\t\t\t\t\t\t\t<dcsset:use>false</dcsset:use>\r\n",
+            "\t\t\t\t\t\t\t<dcsset:left xsi:type=\"dcscor:Field\">ТипПредмета</dcsset:left>\r\n",
+            "\t\t\t\t\t\t\t<dcsset:comparisonType>Equal</dcsset:comparisonType>\r\n",
+            "\t\t\t\t\t\t\t<dcsset:right xmlns:d8p1=\"http://v8.1c.ru/8.2/data/types\" ",
+            "xsi:type=\"v8:Type\">d8p1:Undefined</dcsset:right>\r\n",
+            "\t\t\t\t\t\t</dcsset:item>\r\n",
+            "\t\t\t\t\t\t<dcsset:viewMode>Normal</dcsset:viewMode>\r\n",
+            "\t\t\t\t\t</dcsset:filter>\r\n",
+        )
+    );
+}
+
+/// An empty storage document is a physical state, not a value: the child
+/// element is omitted and the container collapses to `<ListSettings/>`.
+///
+/// Both halves are pinned by native captures --
+/// `Catalogs/КлассификаторСтранСАТУРН/Forms/ФормаСписка` stores an empty
+/// `Filter` and an empty `Order` and its `Form.xml` carries exactly
+/// `<ListSettings/>`.
+#[test]
+fn empty_list_settings_child_storage_collapses_the_container() {
+    let empty = |root: &str| {
+        format!(
+            concat!(
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+                "<{0} xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+                "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+                "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>",
+            ),
+            root
+        )
+    };
+    let filter = parse_form_list_settings_filter(
+        &packed_list_settings_child_for_test(&empty("Filter")),
+        &BTreeMap::new(),
+    )
+    .expect("present Filter must not collapse to absence");
+    let order = parse_form_list_settings_order(
+        &packed_list_settings_child_for_test(&empty("Order")),
+        &BTreeMap::new(),
+    )
+    .expect("present Order must not collapse to absence");
+    assert_eq!(filter, FormListSettingsFilter::EmptyStorage);
+    assert_eq!(order, FormListSettingsOrder::EmptyStorage);
+
+    let settings = FormListSettings {
+        filter: Some(filter),
+        order: Some(order),
+        ..FormListSettings::default()
+    };
+    assert_eq!(
+        format_form_list_settings_xml(&settings).expect("empty children collapse"),
+        "\t\t\t\t<ListSettings/>\r\n"
+    );
+    assert_eq!(
+        format_form_list_settings_xml(&FormListSettings::default())
+            .expect("absent properties emit nothing"),
+        ""
+    );
+}
+
+/// The floors that keep transliteration from inventing bytes. Each document
+/// below is well-formed enough to reach the writer and is refused there, so
+/// the caller's typed refusal stands.
+#[test]
+fn list_settings_transliteration_fails_closed_outside_the_evidenced_vocabulary() {
+    let wrap = |body: &str| {
+        format!(
+            concat!(
+                "<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+                "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">{}</Filter>",
+            ),
+            body
+        )
+    };
+    // Stated rather than hidden, as on the settings side: a single
+    // unrecognized namespace declared at its point of use travels through on
+    // a minted prefix rather than being refused. It is well-formed and
+    // self-describing, and no UT record exercises it.
+    let passed_through = parse_form_list_settings_filter(
+        &packed_list_settings_child_for_test(&wrap(
+            "<item xmlns:f=\"urn:foreign\"><f:thing/></item>",
+        )),
+        &BTreeMap::new(),
+    )
+    .expect("present Filter must not collapse to absence");
+    assert!(
+        matches!(&passed_through, FormListSettingsFilter::Transliterated(fragment)
+            if fragment.contains("xmlns:d7p1=\"urn:foreign\"")),
+        "{passed_through:?}"
+    );
+
+    let documents = [
+        // Two undeclarable namespaces on one element have no evidenced
+        // numbering between them.
+        wrap(concat!(
+            "<item><right xmlns:a=\"urn:one\" xmlns:b=\"urn:two\" ",
+            "xsi:type=\"a:Thing\">b:Value</right></item>",
+        )),
+        // A `v8:Type` body naming a prefix nothing binds. Passing it through
+        // verbatim would splice an undeclared prefix into the Form.
+        concat!(
+            "<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<item><right xsi:type=\"v8:Type\">zz:Undefined</right></item></Filter>",
+        )
+        .to_string(),
+    ];
+    for document in documents {
+        let filter = parse_form_list_settings_filter(
+            &packed_list_settings_child_for_test(&document),
+            &BTreeMap::new(),
+        )
+        .expect("present Filter must not collapse to absence");
+        assert!(
+            matches!(&filter, FormListSettingsFilter::OpaqueStorage { .. }),
+            "{document} produced {filter:?}"
+        );
+    }
+}
+
+/// A `v8ui:Font` reference the platform stored by metadata UUID is resolved to
+/// the style item's own name, and a UUID that resolves to no style item is
+/// refused rather than passed through.
+///
+/// Storage and source bytes are those of
+/// `CommonForms/МашиночитаемыеДоверенности`, whose
+/// `ref="0:4a6c2c50-ce27-4fc2-bd95-d719c0a331be"` is exported as
+/// `ref="style:ЗачеркнутыйШрифтБЭД"`.
+#[test]
+fn transliterated_appearance_resolves_style_item_font_references() {
+    let document = concat!(
+        "<ConditionalAppearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+        "<item><appearance>",
+        "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+        "xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+        "xsi:type=\"dcsset:SettingsParameterValue\">",
+        "<parameter>Шрифт</parameter>",
+        "<value xmlns:d5p1=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"d5p1:Font\" ",
+        "ref=\"0:4a6c2c50-ce27-4fc2-bd95-d719c0a331be\" kind=\"StyleItem\"/>",
+        "</item></appearance></item>",
+        "</ConditionalAppearance>",
+    );
+    let object_refs = BTreeMap::from([(
+        "4a6c2c50-ce27-4fc2-bd95-d719c0a331be".to_string(),
+        "StyleItem.ЗачеркнутыйШрифтБЭД".to_string(),
+    )]);
+    let resolved = parse_form_list_settings_conditional_appearance(
+        &packed_list_settings_child_for_test(document),
+        &object_refs,
+    )
+    .expect("present Appearance must not collapse to absence");
+    let FormListSettingsConditionalAppearance::Transliterated(fragment) = &resolved else {
+        panic!("expected a transliterated appearance, got {resolved:?}");
+    };
+    assert!(
+        fragment.contains(
+            "<dcscor:value xsi:type=\"v8ui:Font\" ref=\"style:ЗачеркнутыйШрифтБЭД\" \
+             kind=\"StyleItem\"/>"
+        ),
+        "{fragment}"
+    );
+
+    let unresolved = parse_form_list_settings_conditional_appearance(
+        &packed_list_settings_child_for_test(document),
+        &BTreeMap::new(),
+    )
+    .expect("present Appearance must not collapse to absence");
+    assert!(
+        matches!(
+            &unresolved,
+            FormListSettingsConditionalAppearance::OpaqueStorage { .. }
+        ),
+        "{unresolved:?}"
+    );
 }
 
 #[test]
@@ -9513,10 +9802,24 @@ fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
             .map(CanonicalText::as_str),
         Some("f5abd21c-a9fb-4b17-8ed5-0505541ef807")
     );
-    assert!(matches!(
-        settings.list_settings.conditional_appearance,
-        Some(FormListSettingsConditionalAppearance::OpaqueStorage { .. })
-    ));
+    // Contract change: the metadata-only `ConditionalAppearance` the typed
+    // cohort refuses is now re-spelled from its own bytes instead of being
+    // retained opaquely.
+    assert!(
+        matches!(
+            &settings.list_settings.conditional_appearance,
+            Some(FormListSettingsConditionalAppearance::Transliterated(fragment))
+                if fragment == concat!(
+                    "\t\t\t\t\t<dcsset:conditionalAppearance>\r\n",
+                    "\t\t\t\t\t\t<dcsset:userSettingID>",
+                    "e5c7c4de-2fd3-4479-9d17-62e044522edd",
+                    "</dcsset:userSettingID>\r\n",
+                    "\t\t\t\t\t</dcsset:conditionalAppearance>\r\n",
+                )
+        ),
+        "{:?}",
+        settings.list_settings.conditional_appearance
+    );
     assert_eq!(
         settings.list_settings.items_user_setting_id.as_deref(),
         Some("971fd96e-2ae3-41d5-9d7a-bad772efb890")
