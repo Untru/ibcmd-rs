@@ -42,6 +42,11 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) default_format_index: Option<usize>,
     pub(super) source_format_map: Option<MoxelSourceFormatMap>,
     pub(super) height: usize,
+    /// Document-level tables the format members at bits 23, 25 and 34 index
+    /// into.
+    pub(super) value_types: Vec<MoxelValueType>,
+    pub(super) control_types: Vec<String>,
+    pub(super) mask_refs: Vec<Vec<MoxelLocalizedValue>>,
 }
 
 pub(super) struct MoxelSourceFormatMap {
@@ -738,6 +743,9 @@ pub(super) struct MoxelFormat {
     pub(super) number_format: Vec<MoxelLocalizedValue>,
     pub(super) edit_format_present: bool,
     pub(super) edit_format: Vec<MoxelLocalizedValue>,
+    pub(super) contains_value: Option<bool>,
+    pub(super) value_type_index: Option<usize>,
+    pub(super) control_type_index: Option<usize>,
     pub(super) drawing_border: Option<usize>,
     pub(super) by_selected_columns: Option<bool>,
     pub(super) details_use: Option<&'static str>,
@@ -750,7 +758,13 @@ pub(super) struct MoxelFormat {
     pub(super) indent: Option<usize>,
     pub(super) auto_indent: Option<usize>,
     pub(super) column_size_change: Option<&'static str>,
-    pub(super) mask: Option<&'static str>,
+    /// `<mask>` is a localized value, not an enumeration: format member 34
+    /// indexes the document's own mask table. Evidence (native 1С:УТ
+    /// 11.5.27.75, all 683 MOXCEL spreadsheet templates): 1379 published masks
+    /// are the empty `<mask/>` and 37 carry an `<v8:item>` payload - `0`, `1`,
+    /// `2`, `3`, `9`, `13`, `999`, `9999`, `9999999999`. Reading member 34 as
+    /// an enumeration whose only value was `0 => <mask/>` dropped all 37.
+    pub(super) mask_index: Option<usize>,
     pub(super) pic_index: Option<usize>,
     pub(super) picture_size_mode: Option<&'static str>,
     pub(super) pic_horizontal_alignment: Option<&'static str>,
@@ -787,6 +801,9 @@ impl MoxelFormat {
             && self.number_format.is_empty()
             && !self.edit_format_present
             && self.edit_format.is_empty()
+            && self.contains_value.is_none()
+            && self.value_type_index.is_none()
+            && self.control_type_index.is_none()
             && self.drawing_border.is_none()
             && self.by_selected_columns.is_none()
             && self.details_use.is_none()
@@ -799,7 +816,7 @@ impl MoxelFormat {
             && self.indent.is_none()
             && self.auto_indent.is_none()
             && self.column_size_change.is_none()
-            && self.mask.is_none()
+            && self.mask_index.is_none()
             && self.pic_index.is_none()
             && self.picture_size_mode.is_none()
             && self.pic_horizontal_alignment.is_none()
@@ -1171,8 +1188,20 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             }
         }
     }
+    // The sheet's own row count is a stored field - the scalar directly behind
+    // the default column-set record - not something to be re-derived from the
+    // rows, merges and named areas that happen to be present.  Evidence (native
+    // 1С:УТ 11.5.27.75, all 683 MOXCEL spreadsheet templates): the declared
+    // value equals the published `<height>` in 681 of them and the remaining
+    // two declare 0, where the platform publishes `<vgRows>0</vgRows>` and no
+    // `<height>` at all - zero counterexamples.  `<vgRows>` never disagrees
+    // with `<height>`.  Re-deriving it overshoots wherever the body keeps rows
+    // past the sheet's end (367 -> 1091 in
+    // `Catalogs/КлассификаторУпаковкиЭПД/.../КлассификаторУпаковки`).
     let height = if zero_column_width_only {
         0
+    } else if let Some(declared_sheet_height) = declared_sheet_height {
+        declared_sheet_height
     } else {
         moxel_spreadsheet_height(
             &rows,
@@ -1181,7 +1210,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             &vertical_unmerges,
             &areas,
         )
-        .max(declared_sheet_height.unwrap_or(0))
     };
     let number_format_refs = parse_moxel_number_format_refs(
         &fields,
@@ -1461,6 +1489,9 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         default_format_index,
         source_format_map,
         height,
+        value_types: parse_moxel_value_types(&fields, object_refs),
+        control_types: parse_moxel_control_types(&fields),
+        mask_refs: parse_moxel_mask_refs(&fields),
     };
     if sparse_source_format_refs
         && let Some(source_font_map) =
@@ -2706,6 +2737,16 @@ const MAX_MOXEL_LINE_WIDTH: usize = 1024;
 /// collapse onto 15 distinct descriptors, each mapping to exactly one published
 /// line. `width` is the published width and `style`/`kind` decode as below.
 /// A descriptor that does not match this shape is refused rather than guessed.
+///
+/// The style code is read against the descriptor's own line kind: the two
+/// `v8ui` enumerations do not share an ordering. Re-measured over all 683
+/// spreadsheet templates (1495 descriptor/line pairs, 0 count mismatches),
+/// cell lines publish 0 None, 1 Solid, 2 Dotted, 3 Double, 4 ThinDashed,
+/// 5 ThickDashed, 6 LargeDashed - while drawing lines publish 0 None (253),
+/// 1 Solid (2) and **3 Dotted** (29). Reading 3 as the cell enum's `Double`
+/// mislabelled every one of those 29 drawing lines. No other drawing code
+/// occurs in the corpus, so any other pairing is a typed refusal rather than
+/// a guess at the rest of that enumeration.
 pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
     let entries = split_1c_braced_fields(fields.get(MOXEL_LINE_TABLE_FIELD)?, 0)?;
     let count = entries.first()?.trim().parse::<usize>().ok()?;
@@ -2727,23 +2768,27 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
         {
             return None;
         }
-        let style = match descriptor.get(3)?.trim() {
-            "0" => "None",
-            "1" => "Solid",
-            "2" => "Dotted",
-            "3" => "Double",
-            "4" => "ThinDashed",
-            "5" => "ThickDashed",
-            "6" => "LargeDashed",
-            _ => return None,
-        };
         let width = descriptor.get(4)?.trim().parse::<usize>().ok()?;
         if width > MAX_MOXEL_LINE_WIDTH {
             return None;
         }
-        let line_type = match descriptor.get(6)?.trim() {
+        let kind = descriptor.get(6)?.trim();
+        let line_type = match kind {
             MOXEL_CELL_LINE_KIND => "v8ui:SpreadsheetDocumentCellLineType",
             MOXEL_DRAWING_LINE_KIND => "v8ui:SpreadsheetDocumentDrawingLineType",
+            _ => return None,
+        };
+        let style = match (kind, descriptor.get(3)?.trim()) {
+            (MOXEL_CELL_LINE_KIND, "0") => "None",
+            (MOXEL_CELL_LINE_KIND, "1") => "Solid",
+            (MOXEL_CELL_LINE_KIND, "2") => "Dotted",
+            (MOXEL_CELL_LINE_KIND, "3") => "Double",
+            (MOXEL_CELL_LINE_KIND, "4") => "ThinDashed",
+            (MOXEL_CELL_LINE_KIND, "5") => "ThickDashed",
+            (MOXEL_CELL_LINE_KIND, "6") => "LargeDashed",
+            (MOXEL_DRAWING_LINE_KIND, "0") => "None",
+            (MOXEL_DRAWING_LINE_KIND, "1") => "Solid",
+            (MOXEL_DRAWING_LINE_KIND, "3") => "Dotted",
             _ => return None,
         };
         lines.push(MoxelLine {
@@ -3479,15 +3524,20 @@ pub(super) fn normalize_moxel_picture_payload(payload: &str) -> String {
     normalized
 }
 
+/// `<zOrder>` is not stored in the drawing record - the fourteen fields are
+/// fully accounted for by format, kind, geometry, id, and the kind-specific
+/// tail - it is the drawing's own position in the sequence.  Evidence (native
+/// 1С:УТ 11.5.27.75, all 1428 `Templates/*/Ext/Template.xml`): 271 documents
+/// publish 695 drawings and every one of them writes its 1-based ordinal, with
+/// no gaps and no repeats, while the `<id>` beside it skips freely (3, 4, 5, 6,
+/// 7, 10, 11 ... in `CommonTemplates/ОшибкиОтчетовСПАРКРиски`).
 pub(super) fn parse_moxel_drawings(fields: &[&str]) -> Vec<MoxelDrawing> {
     let mut drawings = Vec::new();
     for field in fields {
         let Some(mut drawing) = parse_moxel_drawing(field) else {
             continue;
         };
-        if matches!(drawing.kind, MoxelDrawingKind::Chart(_)) {
-            drawing.z_order = drawings.len() + 1;
-        }
+        drawing.z_order = drawings.len() + 1;
         drawings.push(drawing);
     }
     drawings
@@ -3523,7 +3573,7 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
     {
         return None;
     }
-    let (kind, auto_size, z_order) = match fields.get(1)?.trim() {
+    let (kind, auto_size) = match fields.get(1)?.trim() {
         "5" => {
             let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
             let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
@@ -3539,7 +3589,6 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
                     picture_index,
                 },
                 fields.get(13)?.trim() != "0",
-                picture_index,
             )
         }
         "10" if fields.get(11)?.trim().eq_ignore_ascii_case(CHART_TYPE_UUID)
@@ -3548,7 +3597,6 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
             (
                 MoxelDrawingKind::Chart(parse_moxel_chart(fields.get(12)?)?),
                 false,
-                0,
             )
         }
         _ => return None,
@@ -3566,7 +3614,8 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
         end_column,
         end_column_offset,
         auto_size,
-        z_order,
+        // Assigned by `parse_moxel_drawings` from the sequence position.
+        z_order: 0,
         kind,
     })
 }
@@ -4296,6 +4345,207 @@ pub(super) fn parse_moxel_leading_default_format_record(text: &str) -> Option<(u
     }
 }
 
+/// A cell's declared value type, as carried by the document's own type table.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) enum MoxelValueType {
+    Boolean,
+    String {
+        length: usize,
+        allowed_length: &'static str,
+    },
+    Number {
+        digits: usize,
+        fraction_digits: usize,
+        allowed_sign: &'static str,
+    },
+    Date {
+        fractions: &'static str,
+    },
+    /// A configuration object reference, already rendered as its QName local
+    /// part (`DocumentRef.РаспределениеНДС`).
+    ConfigRef(String),
+    /// A type the configuration does not name: published by identity.
+    TypeId(String),
+}
+
+/// Decodes the document's value-type table.
+///
+/// Shape: a count-prefixed run of root fields, each `{"Pattern", {descriptor}}`.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 MOXCEL spreadsheet templates):
+/// 53 documents carry the table and the descriptors collapse onto 36 distinct
+/// shapes. Rendering every one of them through the rules below and comparing
+/// against the published `<valueType>` blocks reproduces 52 of the 53 documents
+/// exactly (the 53rd publishes none), with the qualifier defaults confirmed by
+/// the bare forms: `{"S"}` is `Length 0`/`Variable` and `{"N"}` is
+/// `Digits 0`/`FractionDigits 0`/`Any`.
+///
+/// A descriptor outside these shapes refuses the whole table rather than
+/// letting some formats publish a type and others silently drop theirs.
+pub(super) fn parse_moxel_value_types(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<MoxelValueType> {
+    for (start, count_field) in fields.iter().enumerate() {
+        let Some(count) = parse_moxel_canonical_positive_count(count_field) else {
+            continue;
+        };
+        if count > MAX_MOXEL_VALUE_TYPES {
+            continue;
+        }
+        let Some(entries) = fields.get(start + 1..start + 1 + count) else {
+            continue;
+        };
+        if !entries
+            .iter()
+            .all(|entry| entry.trim_start().starts_with("{\"Pattern\""))
+        {
+            continue;
+        }
+        return entries
+            .iter()
+            .map(|entry| parse_moxel_value_type(entry, object_refs))
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
+    }
+    Vec::new()
+}
+
+const MAX_MOXEL_VALUE_TYPES: usize = 2048;
+
+pub(super) fn parse_moxel_value_type(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelValueType> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if unquote_moxel_string(fields.first()?)? != "Pattern" || fields.len() != 2 {
+        return None;
+    }
+    let payload = split_1c_braced_fields(fields.get(1)?, 0)?;
+    match unquote_moxel_string(payload.first()?)?.as_str() {
+        "B" if payload.len() == 1 => Some(MoxelValueType::Boolean),
+        "S" if payload.len() == 1 => Some(MoxelValueType::String {
+            length: 0,
+            allowed_length: "Variable",
+        }),
+        "S" if payload.len() == 3 => Some(MoxelValueType::String {
+            length: payload.get(1)?.trim().parse().ok()?,
+            allowed_length: match payload.get(2)?.trim() {
+                "0" => "Fixed",
+                "1" => "Variable",
+                _ => return None,
+            },
+        }),
+        "N" if payload.len() == 1 => Some(MoxelValueType::Number {
+            digits: 0,
+            fraction_digits: 0,
+            allowed_sign: "Any",
+        }),
+        "N" if payload.len() == 4 => Some(MoxelValueType::Number {
+            digits: payload.get(1)?.trim().parse().ok()?,
+            fraction_digits: payload.get(2)?.trim().parse().ok()?,
+            allowed_sign: match payload.get(3)?.trim() {
+                "0" => "Any",
+                "1" => "Nonnegative",
+                _ => return None,
+            },
+        }),
+        "D" if payload.len() == 1 => Some(MoxelValueType::Date {
+            fractions: "DateTime",
+        }),
+        "D" if payload.len() == 2 && unquote_moxel_string(payload.get(1)?)? == "D" => {
+            Some(MoxelValueType::Date { fractions: "Date" })
+        }
+        "#" if payload.len() == 2 => {
+            let uuid = parse_uuid_field(payload.get(1)?.trim())?;
+            Some(match moxel_config_type_ref(&uuid, object_refs) {
+                Some(reference) => MoxelValueType::ConfigRef(reference),
+                None => MoxelValueType::TypeId(uuid),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Names a configuration object type the way `<v8:Type>` publishes it.
+///
+/// Evidence: `Reports/АнализРаспределенияНДС/Templates/Таблица` carries both
+/// forms in one table - `fcd1e4a9-753c-4260-96ee-6b847c186dc5` is the УТ
+/// document `РаспределениеНДС` and is published as
+/// `d4p1:DocumentRef.РаспределениеНДС`, while
+/// `48fa9d68-ae46-4d76-988a-88927f7a0ca6` names no configuration object and is
+/// published as `<v8:TypeId>`. Only the object kind that corpus evidences is
+/// mapped; any other kind falls back to the identity form rather than guessing
+/// its reference suffix.
+fn moxel_config_type_ref(uuid: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
+    let name = object_refs.get(uuid)?.strip_prefix("Document.")?;
+    Some(format!("DocumentRef.{name}"))
+}
+
+/// Fixed root trailer every MOXCEL body ends with: `0, 0, 1, 0, 0, 0`.
+/// Constant across all 683 spreadsheet templates, which is what makes the
+/// variable-length table in front of it addressable from the end.
+const MOXEL_ROOT_TRAILER_FIELDS: usize = 6;
+
+/// Decodes the document's input-mask table - a count-prefixed run of localized
+/// values sitting directly in front of the fixed root trailer.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 MOXCEL spreadsheet templates):
+/// walking back from `len - 6` over localized-value fields always lands on a
+/// count that equals the run length, and resolving format member 34 through
+/// the run reproduces every published `<mask>` - 1416 references over 683
+/// documents, zero mismatches. 618 documents declare the empty table (`0`).
+pub(super) fn parse_moxel_mask_refs(fields: &[&str]) -> Vec<Vec<MoxelLocalizedValue>> {
+    let Some(end) = fields.len().checked_sub(MOXEL_ROOT_TRAILER_FIELDS) else {
+        return Vec::new();
+    };
+    let mut start = end;
+    while start > 0 && parse_moxel_localized_values(fields[start - 1]).is_some() {
+        start -= 1;
+    }
+    let Some(count) = start
+        .checked_sub(1)
+        .and_then(|index| fields.get(index))
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    if count != end - start {
+        return Vec::new();
+    }
+    fields[start..end]
+        .iter()
+        .map(|field| parse_moxel_localized_values(field).unwrap_or_default())
+        .collect()
+}
+
+/// Decodes the document's control-type table: a count-prefixed run of bare
+/// UUID root fields. Evidence (same corpus): 51 documents carry it, and the
+/// UUID at the index named by format member 25 equals the published
+/// `<controlType>` in all 51 - 285 references, zero mismatches.
+pub(super) fn parse_moxel_control_types(fields: &[&str]) -> Vec<String> {
+    for (start, count_field) in fields.iter().enumerate() {
+        let Some(count) = parse_moxel_canonical_positive_count(count_field) else {
+            continue;
+        };
+        if count > MAX_MOXEL_VALUE_TYPES {
+            continue;
+        }
+        let Some(entries) = fields.get(start + 1..start + 1 + count) else {
+            continue;
+        };
+        let Some(uuids) = entries
+            .iter()
+            .map(|entry| parse_uuid_field(entry.trim()))
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        return uuids;
+    }
+    Vec::new()
+}
+
 pub(super) fn parse_moxel_default_format(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
@@ -4982,7 +5232,7 @@ pub(super) fn is_moxel_width_only_format(format: &MoxelFormat) -> bool {
         && format.hidden.is_none()
         && format.indent.is_none()
         && format.auto_indent.is_none()
-        && format.mask.is_none()
+        && format.mask_index.is_none()
         && format.pic_index.is_none()
         && format.picture_size_mode.is_none()
         && format.pic_horizontal_alignment.is_none()
@@ -5460,6 +5710,9 @@ pub(super) fn parse_moxel_format(
             .and_then(|index| number_format_refs.get(index))
             .cloned()
             .unwrap_or_default(),
+        contains_value: parse_moxel_format_usize(&values, 22).and_then(moxel_bool_value),
+        value_type_index: parse_moxel_format_usize(&values, 23),
+        control_type_index: parse_moxel_format_usize(&values, 25),
         drawing_border: None,
         by_selected_columns: parse_moxel_format_usize(&values, 20)
             .and_then(moxel_by_selected_columns),
@@ -5474,7 +5727,7 @@ pub(super) fn parse_moxel_format(
         auto_indent: parse_moxel_format_usize(&values, 31),
         column_size_change: parse_moxel_format_usize(&values, 33)
             .and_then(moxel_column_size_change),
-        mask: parse_moxel_format_usize(&values, 34).and_then(moxel_mask),
+        mask_index: parse_moxel_format_usize(&values, 34),
         pic_index: parse_moxel_format_usize(&values, 35),
         pic_horizontal_alignment: parse_moxel_format_usize(&values, 36)
             .and_then(moxel_picture_horizontal_alignment),
@@ -5544,7 +5797,13 @@ pub(super) fn moxel_format_bit_is_supported(bit: usize) -> bool {
             | 19
             | 20
             | 21
+            // 22 containsValue, 23 valueType index, 25 controlType index -
+            // the three members the platform writes between markNegatives and
+            // hyperLink.
+            | 22
+            | 23
             | 24
+            | 25
             | 26
             | 28
             | 29
@@ -5770,32 +6029,38 @@ fn locate_moxel_style_ref_palette(
     candidates.pop()
 }
 
+/// The palette-override container is one count-prefixed table of
+/// `(slot, style-ref)` pairs: `{count, slot, ref, slot, ref, ...}`.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 MOXCEL spreadsheet templates):
+/// 108 documents carry exactly one such container and none carries two. The
+/// pair counts observed are 1 (80 documents), 2 (19), 3 (7) and 4 (2), and the
+/// first slot named is 0, 2, 3, 4 or 5 - the leading value is the pair count,
+/// never a slot index and never a container tag.
+///
+/// The previous reading took the leading `1` as a tag and hard-coded a second
+/// shape `{3,2,...}` whose cursor started at the *second* pair: that shape is
+/// simply `count = 3` whose first pair happens to name slot 2, so those six
+/// documents silently lost their first override, and the 22 documents whose
+/// count is 2, 4, or whose count-3 table starts at slot 3, matched neither
+/// branch and lost every override. A container that does not decode as whole
+/// pairs of `(index, style-ref slot)` is refused rather than partially read.
 pub(super) fn parse_moxel_indexed_style_ref_overrides(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<(usize, Option<String>)>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() == "1" && fields.len() == 3 {
-        let slot_index = fields.get(1)?.trim().parse::<usize>().ok()?;
-        return parse_moxel_style_ref_slot(fields.get(2)?, object_refs)
-            .map(|style_ref| vec![(slot_index, style_ref)]);
-    }
-    if fields.len() < 5
-        || fields.first()?.trim() != "3"
-        || fields.get(1)?.trim() != "2"
-        || (fields.len() - 3) % 2 != 0
-    {
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if count == 0 || count > MAX_MOXCEL_STYLE_REFS || fields.len() != count * 2 + 1 {
         return None;
     }
-    let mut overrides = Vec::new();
-    let mut cursor = 3usize;
-    while cursor + 1 < fields.len() {
-        let slot_index = fields.get(cursor)?.trim().parse::<usize>().ok()?;
-        let style_ref = parse_moxel_style_ref_slot(fields.get(cursor + 1)?, object_refs)?;
+    let mut overrides = Vec::with_capacity(count);
+    for pair in fields.get(1..)?.chunks_exact(2) {
+        let slot_index = pair.first()?.trim().parse::<usize>().ok()?;
+        let style_ref = parse_moxel_style_ref_slot(pair.get(1)?, object_refs)?;
         overrides.push((slot_index, style_ref));
-        cursor += 2;
     }
-    (!overrides.is_empty()).then_some(overrides)
+    Some(overrides)
 }
 
 pub(super) fn parse_moxel_empty_headers_footers(fields: &[&str]) -> bool {
@@ -6211,13 +6476,6 @@ pub(super) fn moxel_by_selected_columns(value: usize) -> Option<bool> {
     }
 }
 
-pub(super) fn moxel_mask(value: usize) -> Option<&'static str> {
-    match value {
-        0 => Some(""),
-        _ => None,
-    }
-}
-
 pub(super) fn moxel_protection(value: usize) -> Option<bool> {
     match value {
         0 => Some(true),
@@ -6618,7 +6876,7 @@ fn render_moxel_spreadsheet_xml(
             "\t<defaultFormatIndex>{default_format_index}</defaultFormatIndex>\r\n"
         ));
     }
-    if spreadsheet.height > 0 || spreadsheet.column_count > 0 {
+    if spreadsheet.height > 0 {
         xml.push_str(&format!("\t<height>{}</height>\r\n", spreadsheet.height));
     }
     if !spreadsheet.vertical_groups.is_empty() {
@@ -7777,12 +8035,31 @@ fn push_moxel_format_xml_with_fonts(
             "\t\t<markNegatives>{mark_negatives}</markNegatives>\r\n"
         ));
     }
+    if let Some(contains_value) = format.contains_value {
+        xml.push_str(&format!(
+            "\t\t<containsValue>{contains_value}</containsValue>\r\n"
+        ));
+    }
+    if let Some(value_type) = format
+        .value_type_index
+        .and_then(|index| spreadsheet.value_types.get(index))
+    {
+        push_moxel_value_type_xml(xml, value_type);
+    }
     push_moxel_localized_values_xml(
         xml,
         "format",
         &format.number_format,
         format.number_format_present,
     );
+    if let Some(control_type) = format
+        .control_type_index
+        .and_then(|index| spreadsheet.control_types.get(index))
+    {
+        xml.push_str(&format!(
+            "\t\t<controlType>{control_type}</controlType>\r\n"
+        ));
+    }
     if let Some(hyper_link) = format.hyper_link {
         xml.push_str(&format!("\t\t<hyperLink>{hyper_link}</hyperLink>\r\n"));
     }
@@ -7805,15 +8082,11 @@ fn push_moxel_format_xml_with_fonts(
         format.edit_format_present,
     );
     push_moxel_format_text(xml, "columnSizeChange", format.column_size_change);
-    if let Some(mask) = format.mask {
-        if mask.is_empty() {
-            xml.push_str("\t\t<mask/>\r\n");
-        } else {
-            xml.push_str(&format!(
-                "\t\t<mask>{}</mask>\r\n",
-                escape_xml_element_text(mask)
-            ));
-        }
+    if let Some(mask) = format
+        .mask_index
+        .and_then(|index| spreadsheet.mask_refs.get(index))
+    {
+        push_moxel_localized_values_xml(xml, "mask", mask, true);
     }
     push_moxel_format_usize(xml, "picIndex", format.pic_index);
     push_moxel_format_text(xml, "pictureSizeMode", format.picture_size_mode);
@@ -7829,6 +8102,50 @@ fn push_moxel_format_xml_with_fonts(
     push_moxel_format_usize(xml, "rightMargin", format.right_margin);
     push_moxel_format_usize(xml, "bottomMargin", format.bottom_margin);
     xml.push_str("\t</format>\r\n");
+}
+
+pub(super) fn push_moxel_value_type_xml(xml: &mut String, value_type: &MoxelValueType) {
+    xml.push_str("\t\t<valueType>\r\n");
+    match value_type {
+        MoxelValueType::Boolean => xml.push_str("\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n"),
+        MoxelValueType::String {
+            length,
+            allowed_length,
+        } => xml.push_str(&format!(
+            "\t\t\t<v8:Type>xs:string</v8:Type>\r\n\
+             \t\t\t<v8:StringQualifiers>\r\n\
+             \t\t\t\t<v8:Length>{length}</v8:Length>\r\n\
+             \t\t\t\t<v8:AllowedLength>{allowed_length}</v8:AllowedLength>\r\n\
+             \t\t\t</v8:StringQualifiers>\r\n"
+        )),
+        MoxelValueType::Number {
+            digits,
+            fraction_digits,
+            allowed_sign,
+        } => xml.push_str(&format!(
+            "\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
+             \t\t\t<v8:NumberQualifiers>\r\n\
+             \t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
+             \t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
+             \t\t\t\t<v8:AllowedSign>{allowed_sign}</v8:AllowedSign>\r\n\
+             \t\t\t</v8:NumberQualifiers>\r\n"
+        )),
+        MoxelValueType::Date { fractions } => xml.push_str(&format!(
+            "\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
+             \t\t\t<v8:DateQualifiers>\r\n\
+             \t\t\t\t<v8:DateFractions>{fractions}</v8:DateFractions>\r\n\
+             \t\t\t</v8:DateQualifiers>\r\n"
+        )),
+        MoxelValueType::ConfigRef(reference) => xml.push_str(&format!(
+            "\t\t\t<v8:Type xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">\
+             d4p1:{}</v8:Type>\r\n",
+            escape_xml_element_text(reference)
+        )),
+        MoxelValueType::TypeId(uuid) => {
+            xml.push_str(&format!("\t\t\t<v8:TypeId>{uuid}</v8:TypeId>\r\n"))
+        }
+    }
+    xml.push_str("\t\t</valueType>\r\n");
 }
 
 pub(super) fn push_moxel_localized_values_xml(
@@ -8849,6 +9166,9 @@ mod moxel_exact_parity_tests {
             header_footer_format_index: None,
             default_format_index: None,
             source_format_map: None,
+            value_types: Vec::new(),
+            control_types: Vec::new(),
+            mask_refs: Vec::new(),
             height: 0,
         };
         let mut xml = String::new();

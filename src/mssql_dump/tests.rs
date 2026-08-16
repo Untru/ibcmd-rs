@@ -10193,7 +10193,12 @@ fn extracts_form_attribute_spreadsheet_document_type_and_settings() {
             ),
             "{xml}"
         );
-    assert!(xml.contains("<mxl:vgRows>1</mxl:vgRows>"), "{xml}");
+    // The embedded spreadsheet declares a row count of zero, and the row count
+    // is published as declared - the platform never re-derives it from the
+    // rows present (683 of 683 native spreadsheet templates), and it writes no
+    // `<height>` when that count is zero.
+    assert!(xml.contains("<mxl:vgRows>0</mxl:vgRows>"), "{xml}");
+    assert!(!xml.contains("<mxl:height>"), "{xml}");
 }
 
 #[test]
@@ -25879,6 +25884,9 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         header_footer_format_index: None,
         default_format_index: Some(1),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 15,
     };
 
@@ -26252,6 +26260,9 @@ fn spreadsheet_extract_omits_default_print_settings() {
         header_footer_format_index: None,
         default_format_index: Some(1),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
 
@@ -26755,6 +26766,9 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         header_footer_format_index: None,
         default_format_index: Some(7),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 1,
     };
 
@@ -26817,6 +26831,9 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
 
@@ -27116,6 +27133,9 @@ fn parses_and_formats_moxel_vertical_groups() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 6,
     };
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -27750,13 +27770,19 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     });
 
     assert!(xml.contains(
         "<rowsItem>\r\n\t\t<index>0</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>1</formatIndex>\r\n"
     ));
-    assert!(xml.contains("<height>0</height>"));
+    // A zero row count is published as `<vgRows>0</vgRows>` alone: no native
+    // spreadsheet template writes `<height>0</height>` (683 of 683).
+    assert!(!xml.contains("\r\n\t<height>"));
+    assert!(xml.contains("<vgRows>0</vgRows>"));
 }
 
 #[test]
@@ -27836,6 +27862,9 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         header_footer_format_index: None,
         default_format_index: Some(2),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 1,
     };
     let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -27887,6 +27916,9 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
         header_footer_format_index: None,
         default_format_index: Some(1),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 1,
     };
 
@@ -28522,6 +28554,9 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             header_footer_format_index: None,
             default_format_index: None,
             source_format_map: None,
+            value_types: Vec::new(),
+            control_types: Vec::new(),
+            mask_refs: Vec::new(),
             height: 0,
         };
         let mut xml = String::new();
@@ -28629,6 +28664,9 @@ fn formats_moxel_field_selection_back_color_style() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
     let mut xml = String::new();
@@ -28668,6 +28706,9 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
     let mut xml = String::new();
@@ -28707,6 +28748,9 @@ fn formats_moxel_field_text_color_style() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
     let mut xml = String::new();
@@ -28746,6 +28790,9 @@ fn formats_moxel_button_text_color_style() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
     let mut xml = String::new();
@@ -28817,6 +28864,9 @@ fn formats_moxel_report_back_color_styles() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
     let mut xml = String::new();
@@ -29061,6 +29111,9 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 0,
     };
     let mut xml = String::new();
@@ -29073,6 +29126,8 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
 
 #[test]
 fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
+    // Member 34 indexes the document's mask table; slot 0 here is the empty
+    // localized value the 618 templates that declare no mask text resolve to.
     let format = parse_moxel_format("{21491613696,0,0,0}", &[], &[Vec::new()]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
         column_count: 0,
@@ -29100,6 +29155,9 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         header_footer_format_index: None,
         default_format_index: None,
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: vec![Vec::new()],
         height: 0,
     };
     let mut xml = String::new();
@@ -29341,7 +29399,11 @@ fn formats_moxel_multiple_column_sets_do_not_synthesize_default_format_index() {
 
 #[test]
 fn formats_moxel_picture_drawing_and_normalized_picture_index() {
-    let drawing = parse_moxel_drawing("{{0,31},5,1,20,24,6,1,20,88,70,1,1,1,0}").unwrap();
+    // `<zOrder>` is the drawing's position in the sequence, so the ordinal is
+    // assigned by the sequence reader rather than by the record decoder.
+    let drawings = parse_moxel_drawings(&["{{0,31},5,1,20,24,6,1,20,88,70,1,1,1,0}"]);
+    assert_eq!(drawings.len(), 1);
+    let drawing = drawings.into_iter().next().unwrap();
 
     assert_eq!(drawing.id, 1);
     assert_eq!(drawing.format_index, 31);
@@ -29381,7 +29443,10 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     assert!(xml.contains("<zOrder>1</zOrder>"));
     assert!(xml.contains("<pictureIndex>1</pictureIndex>"));
 
-    let real_size = parse_moxel_drawing("{{0,137},5,7,1,6,3,11,3,66,54,2,1,0,0}").unwrap();
+    let real_size = parse_moxel_drawings(&["{{0,137},5,7,1,6,3,11,3,66,54,2,1,0,0}"])
+        .into_iter()
+        .next()
+        .unwrap();
     assert_eq!(real_size.id, 2);
     assert!(matches!(
         real_size.kind,
@@ -29393,7 +29458,10 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     assert_eq!(real_size.z_order, 1);
     assert!(!real_size.auto_size);
 
-    let proportional = parse_moxel_drawing("{{0,77},5,1,9,21,9,6,14,12,66,10,1,2,0}").unwrap();
+    let proportional = parse_moxel_drawings(&["{{0,77},5,1,9,21,9,6,14,12,66,10,1,2,0}"])
+        .into_iter()
+        .next()
+        .unwrap();
     assert_eq!(proportional.id, 10);
     assert!(matches!(
         proportional.kind,
@@ -29405,7 +29473,10 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     assert_eq!(proportional.z_order, 1);
     assert!(!proportional.auto_size);
 
-    let auto_size = parse_moxel_drawing("{{0,44},5,5,26,27,30,37,26,15,720,1,1,4,0}").unwrap();
+    let auto_size = parse_moxel_drawings(&["{{0,44},5,5,26,27,30,37,26,15,720,1,1,4,0}"])
+        .into_iter()
+        .next()
+        .unwrap();
     assert_eq!(auto_size.id, 1);
     assert!(matches!(
         auto_size.kind,
@@ -30098,6 +30169,9 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         header_footer_format_index: Some(3),
         default_format_index: Some(5),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 1,
     };
 
@@ -30191,6 +30265,9 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
         header_footer_format_index: Some(5),
         default_format_index: Some(5),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 1,
     };
 
@@ -30272,6 +30349,9 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         header_footer_format_index: Some(4),
         default_format_index: Some(5),
         source_format_map: None,
+        value_types: Vec::new(),
+        control_types: Vec::new(),
+        mask_refs: Vec::new(),
         height: 1,
     };
 
@@ -31082,6 +31162,228 @@ fn moxel_font_table_is_published_in_first_reference_order() {
     let empty_face = xml.find("<font faceName=\"\"").unwrap();
     assert!(arial < system && system < empty_face, "{xml}");
     assert!(xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>73</width>"));
+}
+
+/// Fixture: `tests/fixtures/moxel_document_flow_print_form_raw.txt`, 1201
+/// bytes, sha256
+/// `f30d3f34e56c398df3e83d0cbfc341dbe263db73f96bfb9ce170b4e99fbfb099`. Native
+/// MOXCEL body of the `ПФ_MXL_ПечатнаяФормаДО` template of data processor
+/// `ИнтеграцияС1СДокументооборот3` in 1С:Управление торговлей 11.5.27.75
+/// (`1cv8.cf`), as produced by this project's compatible-MXL decoder.
+///
+/// Its declared row count - the scalar directly behind the default column-set
+/// record - is 5, while the rows and named areas it carries reach row 17.
+/// The platform publishes the declared value.
+#[test]
+fn moxel_sheet_height_is_the_declared_row_count() {
+    let inflated = include_str!("../../tests/fixtures/moxel_document_flow_print_form_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(xml.contains("\t<height>5</height>\r\n"), "{xml}");
+    assert!(xml.contains("\t<vgRows>5</vgRows>\r\n"), "{xml}");
+}
+
+/// Fixture: `tests/fixtures/moxel_counterparty_check_errors_raw.txt`, 2723
+/// bytes, sha256
+/// `e8f15a0788c7e35a87f67d080f06412a11b8f7d37275a8c19429251f85d5328b`. Native
+/// MOXCEL body of the `ОшибкиПроверкиКонтрагента` template of data processor
+/// `ПроверкаКонтрагента` in the same configuration.
+///
+/// Both of its drawings show picture 1, and their record ids are 1 and 3. The
+/// published `<zOrder>` is 1 and 2 - the sequence position, not the picture
+/// index and not the id.
+#[test]
+fn moxel_drawing_z_order_is_the_sequence_position() {
+    let inflated = include_str!("../../tests/fixtures/moxel_counterparty_check_errors_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(
+        xml.contains(
+            "\t\t<zOrder>1</zOrder>\r\n\t\t<pictureIndex>1</pictureIndex>\r\n\t</drawing>\r\n"
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            "\t\t<zOrder>2</zOrder>\r\n\t\t<pictureIndex>1</pictureIndex>\r\n\t</drawing>\r\n"
+        ),
+        "{xml}"
+    );
+    assert!(xml.contains("\t\t<id>3</id>\r\n"), "{xml}");
+}
+
+/// Fixture: `tests/fixtures/moxel_dss_account_connection_raw.txt`, 3083 bytes,
+/// sha256 `0dcb78cdc4979a40e5bd1a5caf54e430b9e71732c72f0c2832ddf63c41424abd`.
+/// Native MOXCEL body of the `ПодключениеУчетнойЗаписиDSS` template of data
+/// processor `УправлениеПодключениемDSS` in the same configuration.
+///
+/// Its line table declares style 1 against the cell-line kind and style 3
+/// against the drawing-line kind. The two `v8ui` enumerations do not share an
+/// ordering: 3 is `Double` for a cell line and `Dotted` for a drawing line.
+#[test]
+fn moxel_drawing_line_style_uses_its_own_enumeration() {
+    let inflated = include_str!("../../tests/fixtures/moxel_dss_account_connection_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(
+        xml.contains(
+            "<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentDrawingLineType\">Dotted</v8ui:style>"
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            "<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">Solid</v8ui:style>"
+        ),
+        "{xml}"
+    );
+    assert!(!xml.contains("Double"), "{xml}");
+}
+
+/// Fixture: `tests/fixtures/moxel_sales_plan_norm_file_load_raw.txt`, 1985
+/// bytes, sha256
+/// `00d7b6f37dd4d8a8410aa1f59f7a10f5ae91aa11b5622110cf52ba0bfd49d05f`. Native
+/// MOXCEL body of the `ЗагрузкаИзФайла` template of document
+/// `НормативРаспределенияПлановПродажПоКатегориям` in the same configuration.
+///
+/// Two independent shapes the previous readings mis-modelled meet here:
+///
+/// * the palette-override container is `{2,2,{3,3,{-28}},3,{3,3,{-25}}}` - a
+///   count of two `(slot, style-ref)` pairs. The old reading demanded a
+///   leading `1` or a leading `3,2`, so both overrides were dropped and the
+///   raw colours behind slots 2 and 3 were published instead;
+/// * `<mask>` is a localized value taken from the document's own mask table
+///   (`1, {1,1,{"ru","13"}}`), not an enumeration.
+#[test]
+fn moxel_style_overrides_and_mask_come_from_their_own_tables() {
+    let inflated = include_str!("../../tests/fixtures/moxel_sales_plan_norm_file_load_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(
+        xml.contains("\t\t<borderColor>style:ReportLineColor</borderColor>\r\n"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("\t\t<backColor>style:ReportHeaderBackColor</backColor>\r\n"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            "\t\t<mask>\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\
+             \t\t\t\t<v8:content>13</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</mask>\r\n"
+        ),
+        "{xml}"
+    );
+}
+
+/// Fixture: `tests/fixtures/moxel_delivery_extra_services_raw.txt`, 5754
+/// bytes, sha256
+/// `4d2f9ebe64d481a1100749e2bca75ed8699f3e915090184d3a33e8fc8d5c48fd`. Native
+/// MOXCEL body of the `ДополнительныеУслуги` template of data processor
+/// `СервисДоставки` in the same configuration.
+///
+/// Format members 22, 23 and 25 were unsupported bits, so every
+/// `<containsValue>`, `<valueType>` and `<controlType>` of this document was
+/// dropped. Member 22 is the flag itself, 23 indexes the document's
+/// `{"Pattern", …}` type table and 25 indexes its control-type UUID table; the
+/// platform writes the first two between `<markNegatives>` and `<format>` and
+/// the third between `<format>` and `<hyperLink>`.
+#[test]
+fn moxel_value_and_control_types_come_from_their_document_tables() {
+    let inflated = include_str!("../../tests/fixtures/moxel_delivery_extra_services_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(
+        xml.contains(
+            "\t\t<containsValue>true</containsValue>\r\n\t\t<valueType>\r\n\
+             \t\t\t<v8:Type>xs:boolean</v8:Type>\r\n\t\t</valueType>\r\n"
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            "\t\t<valueType>\r\n\t\t\t<v8:Type>xs:string</v8:Type>\r\n\
+             \t\t\t<v8:StringQualifiers>\r\n\t\t\t\t<v8:Length>0</v8:Length>\r\n\
+             \t\t\t\t<v8:AllowedLength>Variable</v8:AllowedLength>\r\n\
+             \t\t\t</v8:StringQualifiers>\r\n\t\t</valueType>\r\n"
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("\t\t<controlType>35af3d93-d7c7-4a2e-a8eb-bac87a1a3f26</controlType>\r\n"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("\t\t<controlType>381ed624-9217-4e63-85db-c4c3cb87daae</controlType>\r\n"),
+        "{xml}"
+    );
+}
+
+/// The value-type table's compact descriptors decode to the qualifier sets the
+/// platform publishes, and a shape outside the evidenced grammar is refused
+/// rather than guessed.
+#[test]
+fn moxel_value_type_descriptors_decode_by_their_pattern() {
+    let object_refs = BTreeMap::from([(
+        "fcd1e4a9-753c-4260-96ee-6b847c186dc5".to_string(),
+        "Document.РаспределениеНДС".to_string(),
+    )]);
+
+    let cases = [
+        ("{\"Pattern\",{\"B\"}}", "<v8:Type>xs:boolean</v8:Type>"),
+        ("{\"Pattern\",{\"S\",3,0}}", "<v8:AllowedLength>Fixed<"),
+        (
+            "{\"Pattern\",{\"N\",19,6,1}}",
+            "<v8:AllowedSign>Nonnegative<",
+        ),
+        ("{\"Pattern\",{\"D\",\"D\"}}", "<v8:DateFractions>Date<"),
+        ("{\"Pattern\",{\"D\"}}", "<v8:DateFractions>DateTime<"),
+        (
+            "{\"Pattern\",{\"#\",fcd1e4a9-753c-4260-96ee-6b847c186dc5}}",
+            "d4p1:DocumentRef.РаспределениеНДС</v8:Type>",
+        ),
+        (
+            "{\"Pattern\",{\"#\",48fa9d68-ae46-4d76-988a-88927f7a0ca6}}",
+            "<v8:TypeId>48fa9d68-ae46-4d76-988a-88927f7a0ca6</v8:TypeId>",
+        ),
+    ];
+    for (descriptor, expected) in cases {
+        let value_type = parse_moxel_value_type(descriptor, &object_refs)
+            .unwrap_or_else(|| panic!("{descriptor} should decode"));
+        let mut xml = String::new();
+        push_moxel_value_type_xml(&mut xml, &value_type);
+        assert!(xml.contains(expected), "{descriptor} -> {xml}");
+    }
+
+    // An unknown sign, an unknown length flag, an unknown kind and a member
+    // count the pattern does not account for are all refusals.
+    for descriptor in [
+        "{\"Pattern\",{\"N\",19,6,2}}",
+        "{\"Pattern\",{\"S\",3,2}}",
+        "{\"Pattern\",{\"X\"}}",
+        "{\"Pattern\",{\"S\",3}}",
+        "{\"Pattern\"}",
+    ] {
+        assert!(
+            parse_moxel_value_type(descriptor, &object_refs).is_none(),
+            "{descriptor}"
+        );
+    }
 }
 
 /// Fixture: `tests/fixtures/moxel_marketplace_accounts_font_mask_raw.txt`,
@@ -47502,114 +47804,302 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
     assert!(xml_v21.contains("<Form>SettingsForm</Form>"));
 }
 
+/// A Report attribute wrapper is `{0, <code27 payload>}` — two fields, with no
+/// DataHistory tail. The earlier fixture for this test was hand-written: it
+/// invented a third wrapper field and asserted a `<DataHistory>` element that
+/// the platform never writes under a Report attribute, and the decoder that
+/// matched it rejected every real Report attribute in existence.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage element
+/// `239a7499-7805-4c1f-aed6-931b24258d02` of 1C:Trade Management 11.5.27.75's
+/// `1cv8.cf` — `Reports/КнигаПокупок` — packed body sha256
+/// `ff640fe85962313ba09a8ce1d23c218c5cb2c601d67f4e2a72a706b198496500`. The
+/// platform's own `Reports/КнигаПокупок.xml` from an `ibcmd config export`
+/// capture with 1C:Enterprise 8.3.27.2214 (sha256
+/// `64941cec1ed8835a0d73f92fda1171c573f04a754f87ce3fe377f88273c0e7d0`) opens its
+/// `<ChildObjects>` with `<Attribute uuid="6fbd58c2-60e5-4243-a6ea-524023b67123">`
+/// carrying a boolean `ВыборУправленческойОрганизации` choice parameter, and
+/// carries no `<DataHistory>` element anywhere.
 #[test]
-fn extracts_report_child_attribute_data_history_tail() {
-    let report_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    let object_type_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
-    let object_value_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
-    let manager_type_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
-    let manager_value_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2";
-    let zero_uuid = ZERO_UUID_FOR_REPORT_TEMPLATE_TEST;
-    // `parse_report_attribute` (`src/mssql_dump/mod.rs`) requires the same
-    // canonical code27 attribute wrapper — `{0, <23-field code27 payload>,
-    // <DataHistory tail field>}` — that `parse_strict_common_metadata_attribute`
-    // shares with Document/Catalog/ExchangePlan attributes (compare
-    // `document_attribute_wrapper_for_test`). The old fixture used the
-    // pre-refactor flat long-list wrapper shape (`{5,{2,0,{"Pattern",...}},
-    // {3,...},0,{0},...}`), which the current decoder rejects outright, so
-    // the whole attribute (and thus the whole report) failed to parse.
-    // Paired with a production fix in `parse_report_attribute`: it now reads
-    // that trailing DataHistory field and overrides `properties.data_history`
-    // after calling `parse_strict_common_metadata_attribute`, mirroring
-    // `parse_exchange_plan_attribute` (mod.rs:~10427) — the shared function
-    // always leaves `data_history: None`, and nothing in the Report
-    // attribute pipeline previously set it.
-    let attribute_payload = format!(
-        "{{27,\r\n\
-{{2,\r\n\
-{{3,{{1,0,{attribute_uuid}}},\"TrackChanges\",{{1,\"en\",\"Track changes\"}},\"\",0,0,{zero_uuid},0}},\
-{{\"Pattern\",{{\"B\"}}}}\r\n\
-}},\
-0,{{0}},{{0}},0,\"\",0,\
-{{\"U\"}},{{\"U\"}},0,{zero_uuid},2,0,\
-{{5006,0}},\
-{{3,0,0}},\
-{{0,0}},\
-0,{{0}},{{\"U\"}},0,0,0\r\n\
-}}"
+fn platform_report_attribute_wrapper_carries_no_data_history_tail() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "report-ut-attribute-wrapper/raw-packed.bin.b64"
+    )))
+    .expect("platform-attested report payload");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "ff640fe85962313ba09a8ce1d23c218c5cb2c601d67f4e2a72a706b198496500"
     );
-    let attribute_wrapper = format!("{{0,{attribute_payload},1}}");
-    let attribute_collection =
-        format!("{{{REPORT_ATTRIBUTE_COLLECTION_UUID},1,\r\n{{{attribute_wrapper},0}}\r\n}}");
-    let [
-        _unused_empty_attribute_collection,
-        form_collection,
-        tabular_section_collection,
-        command_collection,
-    ] = report_other_collections_for_test();
-    let template_collection = format!("{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},0}}");
-
-    let report_raw = exact_report_owner_fixture_for_test(
-        report_uuid,
-        "SalesReport",
-        "Sales report",
-        "",
-        object_type_id,
-        object_value_id,
-        manager_type_id,
-        manager_value_id,
-        zero_uuid,
-        zero_uuid,
-        zero_uuid,
-        "1",
-        zero_uuid,
-        zero_uuid,
-        zero_uuid,
-        "1",
-        "{0}",
-        "{0}",
-        &[
-            template_collection,
-            attribute_collection,
-            form_collection,
-            tabular_section_collection,
-            command_collection,
-        ],
+    let inflated = inflate_raw_deflate(&packed).expect("platform-attested report raw-deflate body");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&inflated)),
+        "3b060c13396af443cc6f23b8ab0e5235ca89bff4ed60aa7b29c943790314f41d"
     );
-    let report_blob = deflate_for_test(report_raw.as_bytes());
 
-    let extracted = extract_metadata_source_xml_with_refs(
-        &report_blob,
-        report_uuid,
+    // Every attribute item of the report's attribute collection uses the
+    // two-field wrapper, both here and across the other twenty
+    // attribute-carrying reports of the configuration.
+    let text = String::from_utf8(inflated).expect("report body is UTF-8");
+    let body = text.trim_start_matches('\u{feff}');
+    let root = split_information_register_braced_fields(body).expect("report root");
+    let attributes = root
+        .iter()
+        .find_map(|field| {
+            split_information_register_braced_fields(field).filter(|fields| {
+                fields
+                    .first()
+                    .is_some_and(|marker| marker.trim() == REPORT_ATTRIBUTE_COLLECTION_UUID)
+            })
+        })
+        .expect("report attribute collection");
+    assert_eq!(attributes.len(), 12, "ten attributes plus marker and count");
+    for item in &attributes[2..] {
+        let item = split_information_register_braced_fields(item).expect("attribute item");
+        assert_eq!(item.len(), 2);
+        let wrapper = split_information_register_braced_fields(item[0]).expect("attribute wrapper");
+        assert_eq!(wrapper.len(), 2, "wrapper is {{0, <code27 payload>}}");
+        assert_eq!(wrapper[0].trim(), "0");
+    }
+
+    let type_index = BTreeMap::from([(
+        "55adb97e-a84e-453e-8020-7665bb2abdef".to_string(),
+        "CatalogRef.Организации".to_string(),
+    )]);
+    let child = parse_report_attribute(
+        attributes[2],
+        "КнигаПокупок",
+        false,
+        &type_index,
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        InfobaseConfigSourceVersion::V2_21,
     )
-    .unwrap();
-    let xml = String::from_utf8(extracted.xml).unwrap();
-    let attribute_start = xml
-        .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
-        .unwrap();
-    let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
-    let attribute_xml = &xml[attribute_start..attribute_end];
+    .expect("first report attribute");
+    assert_eq!(child.tag, "Attribute");
+    assert_eq!(child.header.uuid, "6fbd58c2-60e5-4243-a6ea-524023b67123");
+    assert_eq!(child.header.name, "Организация");
+    let properties = child.properties.as_ref().expect("attribute properties");
+    assert_eq!(properties.data_history, None);
+    assert!(!properties.emit_fill_value);
+    assert!(!properties.emit_fill_from_filling_value);
+    assert!(matches!(
+        properties.choice_parameters.as_deref(),
+        Some([parameter])
+            if parameter.name == "ВыборУправленческойОрганизации"
+                && matches!(parameter.value, MetadataChoiceParameterValue::Boolean(false))
+    ));
+}
 
-    assert!(attribute_xml.contains("<ChoiceForm/>"), "{xml}");
+/// `BasedOn` is not restricted to documents: a catalog may be entered on the
+/// basis of another catalog, and the reference list must accept every family
+/// the platform writes there.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage element
+/// `3404cb9a-92ea-42b9-9086-ad481dbc27d7` of 1C:Trade Management 11.5.27.75's
+/// `1cv8.cf` — `Catalogs/ДоговорыКонтрагентов` — packed body sha256
+/// `7eacd8b4a56b5085b77bfec85cacf3ca9fc5a30e6fea2e81d991954de73d2ce7`. The
+/// platform's own `Catalogs/ДоговорыКонтрагентов.xml` (sha256
+/// `608044820211d59da83088048ec5054d5d27eaad0e563c169abb17f7592e50bd`) lists
+/// `Catalog.СоглашенияСКлиентами`, `Catalog.СоглашенияСПоставщиками` and
+/// `Catalog.Партнеры` under `<BasedOn>`.
+#[test]
+fn platform_catalog_based_on_accepts_catalog_references() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "catalog-ut-based-on-catalog/raw-packed.bin.b64"
+    )))
+    .expect("platform-attested catalog payload");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "7eacd8b4a56b5085b77bfec85cacf3ca9fc5a30e6fea2e81d991954de73d2ce7"
+    );
+    let inflated =
+        inflate_raw_deflate(&packed).expect("platform-attested catalog raw-deflate body");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&inflated)),
+        "9e52bb8d828fcdc1f66882e058968928af628ad32e265f557d9cd4c575e39177"
+    );
+
+    let text = String::from_utf8(inflated).expect("catalog body is UTF-8");
+    let body = text.trim_start_matches('\u{feff}');
+    let header = parse_metadata_header_from_text(body, "3404cb9a-92ea-42b9-9086-ad481dbc27d7")
+        .expect("catalog header");
+    let mut diagnostic = None;
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        body,
+        &header,
+        &mut diagnostic,
+    )
+    .expect("catalog owner graph");
+    let object_refs = BTreeMap::from([
+        (
+            "2bb5c12e-1217-4c8d-ae01-3a6253cfe429".to_string(),
+            "Catalog.СоглашенияСКлиентами".to_string(),
+        ),
+        (
+            "04fbd094-37cc-4115-9af5-dd30866902f6".to_string(),
+            "Catalog.СоглашенияСПоставщиками".to_string(),
+        ),
+        (
+            "bf75bcc5-82ee-4bd0-89e1-420b42c99454".to_string(),
+            "Catalog.Партнеры".to_string(),
+        ),
+    ]);
+    let based_on = parse_document_reference_collection(
+        owner_graph.owner_fields[32],
+        &object_refs,
+        &METADATA_BASED_ON_PREFIXES,
+    )
+    .expect("catalog BasedOn list");
+    assert_eq!(based_on.len(), 3, "{based_on:?}");
     assert!(
-        attribute_xml.contains("<DataHistory>Use</DataHistory>"),
-        "{xml}"
+        based_on
+            .iter()
+            .all(|reference| reference.starts_with("Catalog.")),
+        "{based_on:?}"
     );
     assert!(
-        attribute_xml.find("<ChoiceForm/>").unwrap()
-            < attribute_xml
-                .find("<DataHistory>Use</DataHistory>")
-                .unwrap(),
-        "{xml}"
+        parse_document_reference_collection(
+            owner_graph.owner_fields[32],
+            &object_refs,
+            &["Document."],
+        )
+        .is_none(),
+        "the Document-only allow list is what dropped this catalog"
     );
+}
+
+/// The middle slot of a catalog's input-mode envelope is
+/// `FullTextSearchOnInputByString`, not a constant `DontUse`.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage element
+/// `799fac6c-3561-47b4-9482-ac276e504c94` of 1C:Trade Management 11.5.27.75's
+/// `1cv8.cf` — `Catalogs/ВидыОповещенийКлиентам` — packed body sha256
+/// `b4fc357586f65a5742f5e31c385daa245164abec8dd330a43264bc7b9d789adc`. The
+/// platform's own `Catalogs/ВидыОповещенийКлиентам.xml` (sha256
+/// `86b1fdfb336fc4b888984d4e518de76772450ef06959406a1c313dcccfed607e`) carries
+/// `<FullTextSearchOnInputByString>Use</FullTextSearchOnInputByString>`; every
+/// other catalog of that configuration writes `2` in the same slot and exports
+/// `DontUse`.
+#[test]
+fn platform_catalog_input_modes_read_full_text_search_from_its_own_slot() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "catalog-ut-full-text-search-on-input/raw-packed.bin.b64"
+    )))
+    .expect("platform-attested catalog payload");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "b4fc357586f65a5742f5e31c385daa245164abec8dd330a43264bc7b9d789adc"
+    );
+    let inflated =
+        inflate_raw_deflate(&packed).expect("platform-attested catalog raw-deflate body");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&inflated)),
+        "0eb1ac8cc843e2538393c91f04772b8d361e98b768c5f667af1e479dd90d8f7b"
+    );
+
+    let text = String::from_utf8(inflated).expect("catalog body is UTF-8");
+    let body = text.trim_start_matches('\u{feff}');
+    let header = parse_metadata_header_from_text(body, "799fac6c-3561-47b4-9482-ac276e504c94")
+        .expect("catalog header");
+    let mut diagnostic = None;
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        body,
+        &header,
+        &mut diagnostic,
+    )
+    .expect("catalog owner graph");
+    assert_eq!(owner_graph.owner_fields[56].trim(), "{1,1,0}");
+    assert_eq!(
+        parse_catalog_input_modes(owner_graph.owner_fields[56]),
+        Some(("Begin", "Use", "Directly"))
+    );
+    assert_eq!(
+        parse_catalog_input_modes("{1,2,0}"),
+        Some(("Begin", "DontUse", "Directly"))
+    );
+}
+
+/// A referenced style font serializes only the members its mask declares, in
+/// ascending bit order, and the platform's export writes exactly those
+/// attributes. Reading the member set from the tuple's arity instead mislabels
+/// every sparse mask.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage elements
+/// `291539a3-256f-4a02-9408-826755ca0736` (`StyleItems/ЗачеркнутыйШрифт`,
+/// packed sha256
+/// `b5d1e99eecf915b098ff20db59ebac3e42b314423af3fbb46d64a3f87c8446c3`),
+/// `4ae4403e-42a8-443c-8812-23292f10a5a6`
+/// (`StyleItems/УвеличенныйЖирныйШрифтБЭД`, packed sha256
+/// `3564922688293e207818f9ae1fe207126bc17d6364fc8fa8c0960b601608f631`) and
+/// `fc68cd6a-9e07-4c7c-a37a-941053632c02` (`StyleItems/ШрифтВопросаВыполнения`,
+/// packed sha256
+/// `27c6ecded3131f97a29cb3b3824464be9feb7362eeea14b06e56520cc33c6b4f`) of
+/// 1C:Trade Management 11.5.27.75's `1cv8.cf`. Their native exports (sha256
+/// `a52e554624a47f5f7ed2d36ef5563fe32964f484ad854955f1cb6042890f837f`,
+/// `6250f4b80ec02730204b41d84995184b38563463ceeaa2d50a5fe41120d4b374` and
+/// `43a97a20f02ec0cc93cb2a1bec1bf9fe267db4c25b08ebd30cb854119b142385`) carry
+/// `strikeout="true"`, `height="12" bold="true"` and `italic="true"`
+/// respectively, and no other font flag.
+#[test]
+fn platform_style_font_members_follow_the_mask_not_the_arity() {
+    let cases = [
+        (
+            include_str!(concat!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "style-item-ut-font-member-mask/raw-packed-strikeout.bin.b64"
+            )),
+            "b5d1e99eecf915b098ff20db59ebac3e42b314423af3fbb46d64a3f87c8446c3",
+            "76abff18685e58adabaf3734535ba0dafe8d7bebf712d44d3880f8ca170b30b6",
+            "291539a3-256f-4a02-9408-826755ca0736",
+            concat!(
+                r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont""#,
+                r#" strikeout="true" kind="StyleItem"/>"#
+            ),
+        ),
+        (
+            include_str!(concat!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "style-item-ut-font-member-mask/raw-packed-height-bold.bin.b64"
+            )),
+            "3564922688293e207818f9ae1fe207126bc17d6364fc8fa8c0960b601608f631",
+            "39962994264ad50a3c64335b62fadf4438f6507a1ec1a8538cad5e474f657a37",
+            "4ae4403e-42a8-443c-8812-23292f10a5a6",
+            concat!(
+                r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont""#,
+                r#" height="12" bold="true" kind="StyleItem"/>"#
+            ),
+        ),
+        (
+            include_str!(concat!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "style-item-ut-font-member-mask/raw-packed-italic.bin.b64"
+            )),
+            "27c6ecded3131f97a29cb3b3824464be9feb7362eeea14b06e56520cc33c6b4f",
+            "620493f1de0f1b9bc93f78fe346aed6c4d812412298485e0f6f8fe467cf06349",
+            "fc68cd6a-9e07-4c7c-a37a-941053632c02",
+            concat!(
+                r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont""#,
+                r#" italic="true" kind="StyleItem"/>"#
+            ),
+        ),
+    ];
+    for (encoded, packed_sha, unpacked_sha, uuid, expected) in cases {
+        let packed = decode_base64_mime(encoded).expect("platform-attested style payload");
+        assert_eq!(format!("{:x}", Sha256::digest(&packed)), packed_sha);
+        let inflated =
+            inflate_raw_deflate(&packed).expect("platform-attested style raw-deflate body");
+        assert_eq!(format!("{:x}", Sha256::digest(&inflated)), unpacked_sha);
+        let text = String::from_utf8(inflated).expect("style body is UTF-8");
+        let properties =
+            parse_style_item_properties_from_text(text.trim_start_matches('\u{feff}'), uuid)
+                .expect("style item properties");
+        assert_eq!(properties.item_type, "Font");
+        assert_eq!(properties.value_xml, expected);
+    }
 }
 
 #[test]

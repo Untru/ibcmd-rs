@@ -1929,6 +1929,10 @@ struct SpreadsheetDocumentXml {
     print_area: Option<SpreadsheetDocumentXmlArea>,
     print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
     default_format_index: Option<usize>,
+    /// The document's own `<height>`.  The MOXCEL body stores this row count in
+    /// the scalar behind the default column-set record and the extractor reads
+    /// it back verbatim, so packing a re-derived value would not round-trip.
+    sheet_height: Option<usize>,
     formats: Vec<SpreadsheetDocumentXmlFormat>,
     fonts: Vec<SpreadsheetDocumentXmlFont>,
     lines: Vec<SpreadsheetDocumentXmlLine>,
@@ -3209,6 +3213,11 @@ fn apply_spreadsheet_text_value(
                 document.default_format_index = Some(parsed);
             }
         }
+        "height" if path_ends_with(path, &["document", "height"]) => {
+            if let Ok(parsed) = value.parse::<usize>() {
+                document.sheet_height = Some(parsed);
+            }
+        }
         "font" if path_ends_with(path, &["format", "font"]) => {
             set_spreadsheet_format_usize(format, value, |format, parsed| {
                 format.font = Some(parsed)
@@ -3753,13 +3762,15 @@ fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml
         .iter()
         .filter(|column_set| column_set.id.is_some())
         .collect::<Vec<_>>();
-    let height = spreadsheet
-        .rows
-        .iter()
-        .map(|row| *row.expanded_indexes().end())
-        .max()
-        .unwrap_or(0)
-        + 1;
+    let height = spreadsheet.sheet_height.unwrap_or_else(|| {
+        spreadsheet
+            .rows
+            .iter()
+            .map(|row| *row.expanded_indexes().end())
+            .max()
+            .unwrap_or(0)
+            + 1
+    });
     fields.push(height.to_string());
     fields.push(additional_sets.len().to_string());
     for column_set in &additional_sets {

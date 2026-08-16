@@ -21251,8 +21251,11 @@ fn parse_strict_catalog_properties_from_text(
         object_refs,
         &["Catalog.", "ChartOfCharacteristicTypes."],
     )?;
-    let based_on =
-        parse_document_reference_collection(fields.get(32)?, object_refs, &["Document."])?;
+    let based_on = parse_document_reference_collection(
+        fields.get(32)?,
+        object_refs,
+        &METADATA_BASED_ON_PREFIXES,
+    )?;
     let characteristics = decode_owner_characteristics(
         owner_graph::OwnerGraphFamily::Catalog,
         fields,
@@ -21939,7 +21942,7 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
         return Some(("Begin", "DontUse", "Directly"));
     }
     let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3 || fields.get(1)?.trim() != "2" || fields.get(2)?.trim() != "0" {
+    if fields.len() != 3 || fields.get(2)?.trim() != "0" {
         return None;
     }
     Some((
@@ -21948,7 +21951,16 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
             "2" => "AnyPart",
             _ => return None,
         },
-        "DontUse",
+        // The middle slot is FullTextSearchOnInputByString, not a constant.
+        // 1C:Trade Management 11.5.27.75 writes `{1,1,0}` for
+        // Catalog.ВидыОповещенийКлиентам, whose native export reads
+        // `<FullTextSearchOnInputByString>Use</FullTextSearchOnInputByString>`;
+        // every other catalog writes 2 and exports `DontUse`.
+        match fields.get(1)?.trim() {
+            "1" => "Use",
+            "2" => "DontUse",
+            _ => return None,
+        },
         "Directly",
     ))
 }
@@ -22239,12 +22251,20 @@ fn parse_report_attribute(
     if item.len() != 2 || item.get(1)?.trim() != "0" {
         return None;
     }
+    // The platform writes a Report attribute wrapper as `{0, <code27 payload>}`
+    // — two fields, no trailing member. Every one of the 118 direct and 31
+    // tabular-section attribute items across the 21 attribute-carrying Reports
+    // of 1C:Trade Management 11.5.27.75 has exactly this arity, and the native
+    // export of those objects carries no `<DataHistory>` element under a Report
+    // attribute at all. Unlike ExchangePlan (`parse_exchange_plan_attribute`,
+    // mod.rs:~10480), Report therefore has no DataHistory tail to override, and
+    // `parse_strict_common_metadata_attribute` correctly leaves it unset.
     let wrapper = split_information_register_braced_fields(item.first()?)?;
-    if wrapper.len() != 3 || wrapper.first()?.trim() != "0" {
+    if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
         return None;
     }
     let common = split_information_register_braced_fields(wrapper.get(1)?)?;
-    let mut child = parse_strict_common_metadata_attribute(
+    parse_strict_common_metadata_attribute(
         common,
         "Report",
         owner_name,
@@ -22252,18 +22272,7 @@ fn parse_report_attribute(
         object_refs,
         form_refs,
         nested,
-    )?;
-    // Same pattern as `parse_exchange_plan_attribute` (mod.rs:~10427) and the
-    // ChartOfAccounts non-Attribute branch (mod.rs:~19578):
-    // `parse_strict_common_metadata_attribute` always leaves `data_history`
-    // unset (`parse_information_register_common_child_properties` hardcodes
-    // `None`), so each owner family that carries a DataHistory tail field in
-    // its own wrapper (outside the shared code27 `common` payload) overrides
-    // it here from that field. Report's wrapper carries exactly one such
-    // trailing field.
-    let properties = child.properties.as_mut()?;
-    properties.data_history = Some(metadata_data_history_xml(wrapper.get(2)?.trim())?);
-    Some(child)
+    )
 }
 
 fn parse_document_properties_from_text(
@@ -22576,7 +22585,7 @@ fn parse_document_properties_from_text(
         based_on: parse_document_reference_collection(
             fields.get(22)?,
             object_refs,
-            &["Document."],
+            &METADATA_BASED_ON_PREFIXES,
         )?,
         input_by_string,
         create_on_input: metadata_create_on_input_xml(fields.get(46)?.trim())?,
@@ -23294,6 +23303,23 @@ const DOCUMENT_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
     ("-2", "Number"),
 ];
 const DOCUMENT_INPUT_BY_STRING_STANDARD_ATTRIBUTES: [(&str, &str); 1] = [("-2", "Number")];
+
+/// Families the platform writes into a `BasedOn` (Ввод на основании) list.
+///
+/// "Based on" is not restricted to documents: 1C:Trade Management 11.5.27.75
+/// writes 540 `Document.*`, 76 `Catalog.*`, 3 `ChartOfCharacteristicTypes.*`
+/// and 1 `Task.*` item across the `BasedOn` blocks of its Catalog, Document,
+/// BusinessProcess and ExchangePlan roots. Restricting the list to
+/// `Document.` dropped every owner that names any other family — 22 Documents
+/// and 9 Catalogs in that configuration, with no counterexample anywhere in
+/// the native tree (every root carrying a non-`Document.` item failed, and no
+/// root carrying one succeeded).
+const METADATA_BASED_ON_PREFIXES: [&str; 4] = [
+    "Catalog.",
+    "ChartOfCharacteristicTypes.",
+    "Document.",
+    "Task.",
+];
 
 fn parse_document_standard_attributes(
     value: &str,
@@ -28817,6 +28843,52 @@ fn style_system_color_name(code: i32) -> Option<&'static str> {
     }
 }
 
+/// Member-presence bits of a referenced-font style descriptor.
+///
+/// A `kind != 0` style font is serialized as
+/// `{7, <kind>, <member mask>, <ref>, <members...>, <reserved>, <scale>}`:
+/// only the members the mask declares are present, in ascending bit order,
+/// and the platform's own export writes exactly those attributes, no others.
+///
+/// Confirmed by decoding all 406 StyleItems of 1C:Trade Management 11.5.27.75
+/// against their native export: 129 are fonts, 87 of them referenced, and
+/// those carry the masks 0, 2, 6, 8, 16, 20, 32, 60, 62 and 574. Every one
+/// reproduces its native `<Value xsi:type="v8ui:Font" .../>` attribute set
+/// exactly under this rule.
+/// Bit 1 (the face name, which the `Absolute` layout keeps in its own fixed
+/// slot) is never set on a referenced font there, and bit 512 - observed only
+/// alongside the dense masks - consumes no member slot.
+///
+/// The previous decoder inferred the member set from the tuple's arity. That
+/// only happens to agree for the dense masks; it silently mislabeled sparse
+/// ones, reading a strikeout member as `underline` (mask 32), an italic
+/// member as `underline` (mask 8), and dropping height and weight outright
+/// (mask 6).
+const STYLE_FONT_MEMBER_HEIGHT: u32 = 2;
+const STYLE_FONT_MEMBER_WEIGHT: u32 = 4;
+const STYLE_FONT_MEMBER_ITALIC: u32 = 8;
+const STYLE_FONT_MEMBER_UNDERLINE: u32 = 16;
+const STYLE_FONT_MEMBER_STRIKEOUT: u32 = 32;
+const STYLE_FONT_DEFAULT_WEIGHT: i32 = 400;
+const STYLE_FONT_BOLD_WEIGHT: i32 = 700;
+const STYLE_FONT_DEFAULT_SCALE: &str = "100";
+
+/// Reads the member the mask declares at `cursor`, advancing it only when
+/// that member is actually present.
+fn style_font_member<'a>(
+    font_fields: &[&'a str],
+    mask: u32,
+    bit: u32,
+    cursor: &mut usize,
+) -> Option<&'a str> {
+    if mask & bit == 0 {
+        return None;
+    }
+    let value = font_fields.get(*cursor).map(|field| field.trim());
+    *cursor = cursor.saturating_add(1);
+    value
+}
+
 fn parse_style_font_value_xml(value: &str) -> String {
     let fields = split_1c_braced_fields(value, 0).unwrap_or_default();
     let font_fields = fields
@@ -28825,232 +28897,99 @@ fn parse_style_font_value_xml(value: &str) -> String {
         .unwrap_or_default();
     let kind = font_fields.get(1).map(|field| field.trim()).unwrap_or("0");
     let mut attrs = Vec::<(&str, String)>::new();
-    let (height, weight, italic, underline, strikeout, kind_xml, scale, include_false_flags) =
-        match kind {
-            "0" => {
-                attrs.push((
-                    "faceName",
-                    font_fields
-                        .get(16)
-                        .and_then(|field| parse_1c_quoted_string(field.trim()))
-                        .unwrap_or_else(|| "Arial".to_string()),
-                ));
-                (
-                    font_height_xml(font_fields.get(3).map(|field| field.trim())),
-                    font_fields
-                        .get(7)
-                        .and_then(|field| field.trim().parse::<i32>().ok())
-                        .unwrap_or(400),
-                    font_fields
-                        .get(8)
-                        .and_then(|field| parse_1c_bool_flag(field.trim()))
-                        .unwrap_or(false),
-                    font_fields
-                        .get(9)
-                        .and_then(|field| parse_1c_bool_flag(field.trim()))
-                        .unwrap_or(false),
-                    font_fields
-                        .get(10)
-                        .and_then(|field| parse_1c_bool_flag(field.trim()))
-                        .unwrap_or(false),
-                    "Absolute",
-                    font_fields
-                        .get(18)
-                        .map(|field| field.trim())
-                        .unwrap_or("100"),
-                    true,
-                )
+    let kind_xml;
+    let scale;
+    if kind == "0" {
+        // The absolute layout is a complete fixed record rather than a packed
+        // member list: the platform writes all of its slots (mask 575 on all
+        // 42 absolute StyleItems of the reference configuration) and the
+        // native export writes all four flags.
+        kind_xml = "Absolute";
+        attrs.push((
+            "faceName",
+            font_fields
+                .get(16)
+                .and_then(|field| parse_1c_quoted_string(field.trim()))
+                .unwrap_or_else(|| "Arial".to_string()),
+        ));
+        if let Some(height) = font_height_xml(font_fields.get(3).map(|field| field.trim())) {
+            attrs.push(("height", height));
+        }
+        let weight = font_fields
+            .get(7)
+            .and_then(|field| field.trim().parse::<i32>().ok())
+            .unwrap_or(STYLE_FONT_DEFAULT_WEIGHT);
+        attrs.push((
+            "bold",
+            xml_bool(weight >= STYLE_FONT_BOLD_WEIGHT).to_string(),
+        ));
+        for (index, name) in [(8usize, "italic"), (9, "underline"), (10, "strikeout")] {
+            let flag = font_fields
+                .get(index)
+                .and_then(|field| parse_1c_bool_flag(field.trim()))
+                .unwrap_or(false);
+            attrs.push((name, xml_bool(flag).to_string()));
+        }
+        scale = font_fields
+            .get(18)
+            .map(|field| field.trim())
+            .unwrap_or(STYLE_FONT_DEFAULT_SCALE)
+            .to_string();
+    } else {
+        if kind == "1" {
+            kind_xml = "WindowsFont";
+            attrs.push(("ref", "sys:DefaultGUIFont".to_string()));
+        } else {
+            kind_xml = "StyleItem";
+            let raw = font_fields.get(3).copied().unwrap_or("{0}");
+            let raw_fields = split_1c_braced_fields(raw, 0).unwrap_or_default();
+            if let Some(code) = raw_fields
+                .first()
+                .and_then(|field| field.trim().parse::<i32>().ok())
+                && let Some((_, name)) = standard_style_item_for_code(code)
+            {
+                attrs.push(("ref", format!("style:{name}")));
             }
-            "1" => {
-                attrs.push(("ref", "sys:DefaultGUIFont".to_string()));
-                if font_fields.len() >= 11 {
-                    (
-                        font_height_xml(font_fields.get(4).map(|field| field.trim())),
-                        font_fields
-                            .get(5)
-                            .and_then(|field| field.trim().parse::<i32>().ok())
-                            .unwrap_or(400),
-                        font_fields
-                            .get(6)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(7)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(8)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        "WindowsFont",
-                        font_fields
-                            .get(10)
-                            .map(|field| field.trim())
-                            .unwrap_or("100"),
-                        true,
-                    )
-                } else if font_fields.len() >= 10 {
-                    (
-                        None,
-                        font_fields
-                            .get(4)
-                            .and_then(|field| field.trim().parse::<i32>().ok())
-                            .unwrap_or(400),
-                        font_fields
-                            .get(5)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(6)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(7)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        "WindowsFont",
-                        font_fields
-                            .get(9)
-                            .map(|field| field.trim())
-                            .unwrap_or("100"),
-                        true,
-                    )
-                } else {
-                    (
-                        None,
-                        400,
-                        false,
-                        false,
-                        false,
-                        "WindowsFont",
-                        font_fields
-                            .get(5)
-                            .map(|field| field.trim())
-                            .unwrap_or("100"),
-                        false,
-                    )
-                }
+        }
+        let mask = font_fields
+            .get(2)
+            .and_then(|field| field.trim().parse::<u32>().ok())
+            .unwrap_or(0);
+        let mut cursor = 4usize;
+        if let Some(height) =
+            style_font_member(&font_fields, mask, STYLE_FONT_MEMBER_HEIGHT, &mut cursor)
+            && let Some(height) = font_height_xml(Some(height))
+        {
+            attrs.push(("height", height));
+        }
+        if let Some(weight) =
+            style_font_member(&font_fields, mask, STYLE_FONT_MEMBER_WEIGHT, &mut cursor)
+        {
+            let weight = weight.parse::<i32>().unwrap_or(STYLE_FONT_DEFAULT_WEIGHT);
+            attrs.push((
+                "bold",
+                xml_bool(weight >= STYLE_FONT_BOLD_WEIGHT).to_string(),
+            ));
+        }
+        for (bit, name) in [
+            (STYLE_FONT_MEMBER_ITALIC, "italic"),
+            (STYLE_FONT_MEMBER_UNDERLINE, "underline"),
+            (STYLE_FONT_MEMBER_STRIKEOUT, "strikeout"),
+        ] {
+            if let Some(raw) = style_font_member(&font_fields, mask, bit, &mut cursor) {
+                let flag = parse_1c_bool_flag(raw).unwrap_or(false);
+                attrs.push((name, xml_bool(flag).to_string()));
             }
-            _ => {
-                let raw = font_fields.get(3).copied().unwrap_or("{0}");
-                let raw_fields = split_1c_braced_fields(raw, 0).unwrap_or_default();
-                if let Some(code) = raw_fields
-                    .first()
-                    .and_then(|field| field.trim().parse::<i32>().ok())
-                    && let Some((_, name)) = standard_style_item_for_code(code)
-                {
-                    attrs.push(("ref", format!("style:{name}")));
-                }
-                if font_fields.len() >= 11 {
-                    (
-                        font_height_xml(font_fields.get(4).map(|field| field.trim())),
-                        font_fields
-                            .get(5)
-                            .and_then(|field| field.trim().parse::<i32>().ok())
-                            .unwrap_or(400),
-                        font_fields
-                            .get(6)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(7)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(8)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        "StyleItem",
-                        font_fields
-                            .get(10)
-                            .map(|field| field.trim())
-                            .unwrap_or("100"),
-                        true,
-                    )
-                } else if font_fields.len() >= 10 {
-                    (
-                        None,
-                        font_fields
-                            .get(4)
-                            .and_then(|field| field.trim().parse::<i32>().ok())
-                            .unwrap_or(400),
-                        font_fields
-                            .get(5)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(6)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        font_fields
-                            .get(7)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        "StyleItem",
-                        font_fields
-                            .get(9)
-                            .map(|field| field.trim())
-                            .unwrap_or("100"),
-                        true,
-                    )
-                } else if font_fields.get(2).map(|field| field.trim()) == Some("2")
-                    && font_fields.len() >= 7
-                {
-                    (
-                        font_height_xml(font_fields.get(4).map(|field| field.trim())),
-                        400,
-                        false,
-                        false,
-                        false,
-                        "StyleItem",
-                        font_fields
-                            .get(6)
-                            .map(|field| field.trim())
-                            .unwrap_or("100"),
-                        false,
-                    )
-                } else {
-                    (
-                        None,
-                        font_fields
-                            .get(4)
-                            .and_then(|field| field.trim().parse::<i32>().ok())
-                            .unwrap_or(400),
-                        false,
-                        font_fields
-                            .get(5)
-                            .and_then(|field| parse_1c_bool_flag(field.trim()))
-                            .unwrap_or(false),
-                        false,
-                        "StyleItem",
-                        font_fields
-                            .get(7)
-                            .map(|field| field.trim())
-                            .unwrap_or("100"),
-                        false,
-                    )
-                }
-            }
-        };
-    if let Some(height) = height {
-        attrs.push(("height", height));
-    }
-    let bold = weight >= 700;
-    if include_false_flags || bold {
-        attrs.push(("bold", xml_bool(bold).to_string()));
-    }
-    if include_false_flags || italic {
-        attrs.push(("italic", xml_bool(italic).to_string()));
-    }
-    if include_false_flags || underline {
-        attrs.push(("underline", xml_bool(underline).to_string()));
-    }
-    if include_false_flags || strikeout {
-        attrs.push(("strikeout", xml_bool(strikeout).to_string()));
+        }
+        scale = font_fields
+            .get(cursor.saturating_add(1))
+            .map(|field| field.trim())
+            .unwrap_or(STYLE_FONT_DEFAULT_SCALE)
+            .to_string();
     }
     attrs.push(("kind", kind_xml.to_string()));
-    if scale != "100" || kind == "0" {
-        attrs.push(("scale", scale.to_string()));
+    if scale != STYLE_FONT_DEFAULT_SCALE || kind == "0" {
+        attrs.push(("scale", scale));
     }
 
     let mut xml = String::from("<Value xsi:type=\"v8ui:Font\"");
