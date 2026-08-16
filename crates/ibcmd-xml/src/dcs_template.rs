@@ -191,12 +191,24 @@ pub fn analyze_dcs_schema_template_documents_with_references<'a>(
                 inspect_schema_file(document, false, &policy)?;
             }
             Some(DcsSchemaTemplateEnvelopeDocumentRole::Settings) => {
-                analyze_dcs_settings_document(std::str::from_utf8(document).map_err(|_| {
-                    DcsSchemaTemplateError::Malformed(
-                        "native Settings document is not UTF-8".to_string(),
-                    )
-                })?)
-                .map_err(map_settings_error)?;
+                // The envelope owns framing, not the settings cohort. A
+                // document the typed cohort does not describe is still a
+                // well-formed Settings document in the evidenced slot, and
+                // the per-variant canonicalization -- which can fall back to
+                // transliterating it from its own bytes -- is what decides
+                // whether it can be spelled in the source direction. Only a
+                // malformed document is refused here, where nothing
+                // downstream could recover it.
+                if let Err(error) =
+                    analyze_dcs_settings_document(std::str::from_utf8(document).map_err(|_| {
+                        DcsSchemaTemplateError::Malformed(
+                            "native Settings document is not UTF-8".to_string(),
+                        )
+                    })?)
+                    && matches!(error, DcsSettingsDocumentAnalysisError::Malformed(_))
+                {
+                    return Err(map_settings_error(error));
+                }
             }
             Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile) => {
                 if inspect_schema_file(document, true, &policy).is_err() {

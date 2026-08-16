@@ -32,6 +32,7 @@ use quick_xml::Reader as QuickXmlReader;
 use quick_xml::escape::escape;
 use quick_xml::events::Event as QuickXmlEvent;
 
+use crate::node::XmlDocument;
 use crate::node::{AttributeKind, XmlElement, XmlNode};
 use crate::reader::XmlReader;
 
@@ -1710,10 +1711,27 @@ pub fn analyze_dcs_inline_settings_fragment(
     analyze_dcs_settings_document_with_root(document, "settings")
 }
 
-fn analyze_dcs_settings_document_with_root(
+/// Checks only that an inline settings payload *is* one: within the retained
+/// byte budget, well-formed XML, and rooted at the settings-namespace
+/// `settings` element.
+///
+/// This is deliberately the analyzer minus its cohort audit. A fragment
+/// produced by transliterating a standalone `Settings` document byte for byte
+/// carries whatever shapes that document carried, including ones no
+/// enumerated cohort describes; re-auditing our own faithful re-spelling would
+/// only re-ask the question the transliteration exists to route around. What
+/// still must hold -- and is checked here -- is that the bytes we are about to
+/// splice into a schema are a parseable settings element.
+pub fn validate_dcs_inline_settings_fragment_structure(
+    document: &str,
+) -> Result<(), DcsSettingsDocumentAnalysisError> {
+    parse_dcs_settings_root(document, "settings").map(|_| ())
+}
+
+fn parse_dcs_settings_root(
     document: &str,
     expected_root_local: &str,
-) -> Result<DcsSettingsDocumentAnalysis, DcsSettingsDocumentAnalysisError> {
+) -> Result<XmlDocument, DcsSettingsDocumentAnalysisError> {
     if document.len() > MAX_DCS_RETAINED_BYTES {
         return Err(DcsSettingsParseError {
             reason: "settings document exceeds the retained-byte budget",
@@ -1733,6 +1751,15 @@ fn analyze_dcs_settings_document_with_root(
         }
         .into());
     }
+    Ok(document)
+}
+
+fn analyze_dcs_settings_document_with_root(
+    document: &str,
+    expected_root_local: &str,
+) -> Result<DcsSettingsDocumentAnalysis, DcsSettingsDocumentAnalysisError> {
+    let document = parse_dcs_settings_root(document, expected_root_local)?;
+    let root = document.root();
     let source_owned = audit_dcs_settings_direct_children(root)?;
     let typed = parse_dcs_settings_children_root(root)?;
     Ok(DcsSettingsDocumentAnalysis {

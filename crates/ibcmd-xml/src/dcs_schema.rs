@@ -31,7 +31,9 @@ use quick_xml::name::ResolveResult;
 const MAX_DEPTH: usize = 64;
 const MAX_EVENTS: usize = 32_768;
 
-use crate::analyze_dcs_inline_settings_fragment;
+use crate::{
+    analyze_dcs_inline_settings_fragment, validate_dcs_inline_settings_fragment_structure,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DcsInnerSchemaError {
@@ -67,6 +69,28 @@ impl DcsInlineSettingsFragment {
         analyze_dcs_inline_settings_fragment(&closed).map_err(|error| {
             DcsInnerSchemaError::UnsupportedSource(format!(
                 "inline Settings fragment is outside the common contract: {error}"
+            ))
+        })?;
+        Ok(Self(xml))
+    }
+
+    /// Accepts a fragment transliterated from a standalone `Settings`
+    /// document rather than emitted from the typed cohort.
+    ///
+    /// [`Self::parse`] re-runs the full settings analyzer, which is a cohort
+    /// membership test: it asks whether an enumerated shape describes the
+    /// fragment. A transliterated fragment reproduces whatever shapes its
+    /// source document carried, so that question has already been asked and
+    /// answered "no" -- asking it again of our own faithful re-spelling would
+    /// reject the exact bytes the platform itself writes. The structural
+    /// contract every consumer actually relies on (well-formed, rooted at
+    /// `{settings}settings`, declarations closable) is still enforced.
+    pub fn parse_transliterated(xml: String) -> Result<Self, DcsInnerSchemaError> {
+        let policy = policy()?;
+        let closed = close_inline_settings_namespaces(&xml, &policy)?;
+        validate_dcs_inline_settings_fragment_structure(&closed).map_err(|error| {
+            DcsInnerSchemaError::UnsupportedSource(format!(
+                "transliterated inline Settings fragment is not a settings element: {error}"
             ))
         })?;
         Ok(Self(xml))
@@ -2871,6 +2895,25 @@ fn scan_start_tag(tag: &str) -> Result<RawStartTag<'_>, DcsInnerSchemaError> {
     })
 }
 
+/// Whether a namespace prefix is one the platform generated from an element's
+/// depth (`d5p1`, `d12p3`, ...) rather than one it spelled itself.
+///
+/// A generated prefix names the *storage* document's depth, which is one
+/// level deeper than the source document's, so it must be reminted against
+/// the target depth. Every other prefix carries no depth and is copied.
+fn is_generated_depth_prefix(prefix: &str) -> bool {
+    let Some(rest) = prefix.strip_prefix('d') else {
+        return false;
+    };
+    let Some((depth, point)) = rest.split_once('p') else {
+        return false;
+    };
+    !depth.is_empty()
+        && !point.is_empty()
+        && depth.bytes().all(|byte| byte.is_ascii_digit())
+        && point.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 fn split_prefix(name: &str) -> (&str, &str) {
     match name.split_once(':') {
         Some((prefix, local)) => (prefix, local),
@@ -2890,6 +2933,27 @@ enum RewriteFrame {
     Element(String),
 }
 
+/// How an element's character data must be re-spelled for the source
+/// direction.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RewriteTextKind {
+    /// Copied through, only re-indented when it is pretty-printing
+    /// whitespace.
+    Literal,
+    /// A `v8:Type`/`v8:TypeSet` QName. An unprefixed value resolves through
+    /// the default namespace in scope, exactly as an `xsi:type` attribute
+    /// does.
+    TypeQName,
+    /// A `dcscor:value` whose `xsi:type` is `{data/ui}Color`. Its lexical
+    /// space carries two evidenced forms: a QName naming a style colour, and
+    /// a `0:<uuid>` reference to a configuration `StyleItem`. Anything else
+    /// (a literal colour) is copied through untouched, and an unprefixed
+    /// value is *not* resolved through the default namespace -- the default
+    /// there is the DCS core namespace, which would spell a colour
+    /// `dcscor:...`.
+    ColorValue,
+}
+
 /// One open element, with everything a later token needs to decide how to
 /// write itself.
 struct RewriteState {
@@ -2898,12 +2962,25 @@ struct RewriteState {
     /// which is what distinguishes pretty-printing whitespace from character
     /// data in a leaf.
     saw_child: bool,
-    /// Whether this element's character data is a QName to re-prefix.
-    qname_text: bool,
+    /// How this element's character data must be spelled.
+    text: RewriteTextKind,
     /// Storage prefix -> source prefix for the namespaces this element
     /// declared, so its own QName content resolves the same way its
     /// attributes do.
     renamed: Vec<(String, String)>,
+    /// Byte offset in the output at which this element's namespace
+    /// declarations were written, so a declaration only its character data
+    /// turns out to need can still be spliced into its opening tag.
+    declaration_offset: usize,
+    /// The `dNpM` point number the next minted declaration on this element
+    /// takes.
+    next_declaration: usize,
+    /// This element's 1-based depth in the target document.
+    depth: usize,
+    /// Whether a data-core `Type` child has already been written under this
+    /// element, and whether a data-core `TypeId` child has.
+    saw_literal_type: bool,
+    saw_type_id: bool,
 }
 
 impl RewriteState {
@@ -2911,14 +2988,146 @@ impl RewriteState {
         Self {
             frame,
             saw_child: false,
-            qname_text: false,
+            text: RewriteTextKind::Literal,
             renamed: Vec::new(),
+            declaration_offset: 0,
+            next_declaration: 1,
+            depth: 0,
+            saw_literal_type: false,
+            saw_type_id: false,
         }
     }
 }
 
 /// Namespace declarations in scope, innermost last.
 type NamespaceScopes = Vec<Vec<(String, String)>>;
+
+/// The source-direction prefix chosen for every namespace declared in scope,
+/// innermost last -- the mirror of [`NamespaceScopes`], which holds the
+/// storage document's own spelling.
+type SourcePrefixScopes = Vec<Vec<(String, String)>>;
+
+fn resolve_source_prefix(scopes: &SourcePrefixScopes, uri: &str) -> Option<String> {
+    scopes.iter().rev().find_map(|scope| {
+        scope
+            .iter()
+            .rev()
+            .find(|(declared, _)| declared == uri)
+            .map(|(_, prefix)| prefix.clone())
+    })
+}
+
+const DCS_CORE_NAMESPACE_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/core";
+const DATA_UI_STYLE_NAMESPACE_URI: &str = "http://v8.1c.ru/8.1/data/ui/style";
+const XSI_TYPE_EXPANDED_NAME: &str = "{http://www.w3.org/2001/XMLSchema-instance}type";
+const DATA_UI_COLOR_EXPANDED_NAME: &str = "{http://v8.1c.ru/8.1/data/ui}Color";
+
+/// Expands a prefixed attribute name against the scopes in effect. An
+/// unprefixed attribute is in no namespace, which is never what a caller
+/// comparing against an expanded name is looking for.
+fn expanded_attribute_name(scopes: &NamespaceScopes, key: &str) -> Option<String> {
+    let (prefix, local) = split_prefix(key);
+    if prefix.is_empty() {
+        return None;
+    }
+    let uri = resolve_prefix(scopes, prefix)?;
+    Some(format!("{{{uri}}}{local}"))
+}
+
+/// Expands a QName-valued string against the scopes in effect, resolving an
+/// unprefixed value through the default namespace exactly as XML does.
+fn expanded_qname(scopes: &NamespaceScopes, value: &str) -> Option<String> {
+    let (prefix, local) = split_prefix(value);
+    let uri = resolve_prefix(scopes, prefix)?;
+    Some(format!("{{{uri}}}{local}"))
+}
+
+/// A rewritten value plus the namespace declaration its opening tag must gain
+/// for the value to be spellable.
+struct RewrittenColorValue {
+    value: String,
+    declaration: Option<String>,
+}
+
+/// The uuid a `0:<uuid>` storage colour reference names, canonicalized the way
+/// the object-reference index is keyed.
+fn style_item_reference_uuid(text: &str) -> Option<&str> {
+    let uuid = text.trim().strip_prefix("0:")?;
+    let hex = uuid.as_bytes();
+    if hex.len() != 36 {
+        return None;
+    }
+    hex.iter()
+        .enumerate()
+        .all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+        .then_some(uuid)
+}
+
+/// Re-spells the character data of a `dcscor:value` typed `{data/ui}Color`.
+///
+/// Two evidenced storage forms carry information the source direction spells
+/// differently. A `0:<uuid>` names a configuration `StyleItem`, which the
+/// source document spells as a QName in the style namespace -- so the style
+/// namespace has to be declared at the point of use, exactly like any other
+/// namespace the source root does not carry. A value that is already a QName
+/// moves onto whichever prefix the source document uses for its namespace.
+/// A colour literal is neither and is copied through byte for byte.
+///
+/// A `0:<uuid>` the object-reference index cannot resolve fails closed: the
+/// platform writes a name there, and we have no name to write.
+fn rewrite_color_value(
+    policy: &DcsInnerSchemaPolicy,
+    scopes: &NamespaceScopes,
+    source_scopes: &SourcePrefixScopes,
+    state: &RewriteState,
+    style_item_names: &BTreeMap<String, String>,
+    value: &str,
+) -> Result<RewrittenColorValue, DcsInnerSchemaError> {
+    if let Some(uuid) = style_item_reference_uuid(value) {
+        let lowercase = uuid.to_ascii_lowercase();
+        let Some(name) = style_item_names
+            .get(&lowercase)
+            .or_else(|| style_item_names.get(uuid))
+        else {
+            return Err(DcsInnerSchemaError::UnsupportedSource(format!(
+                "style colour reference {uuid} has no configuration StyleItem resolution"
+            )));
+        };
+        // The style namespace may already be spelled in scope -- an inline
+        // settings element declares it for its whole subtree. Only mint a
+        // declaration when nothing in scope names it.
+        if let Some(prefix) = resolve_source_prefix(source_scopes, DATA_UI_STYLE_NAMESPACE_URI) {
+            return Ok(RewrittenColorValue {
+                value: format!("{prefix}:{}", escape(name)),
+                declaration: None,
+            });
+        }
+        let prefix = format!("d{}p{}", state.depth, state.next_declaration);
+        return Ok(RewrittenColorValue {
+            value: format!("{prefix}:{}", escape(name)),
+            declaration: Some(format!(" xmlns:{prefix}=\"{DATA_UI_STYLE_NAMESPACE_URI}\"")),
+        });
+    }
+    let (prefix, _) = split_prefix(value);
+    if prefix.is_empty() {
+        return Ok(RewrittenColorValue {
+            value: value.to_owned(),
+            declaration: None,
+        });
+    }
+    Ok(RewrittenColorValue {
+        // `key` deliberately is not `xsi:type`: an unprefixed colour must not
+        // pick up the default namespace, which here is the DCS core one.
+        value: rewrite_qname_value(policy, scopes, &state.renamed, "", value)?,
+        declaration: None,
+    })
+}
 
 fn resolve_prefix<'a>(scopes: &'a NamespaceScopes, prefix: &str) -> Option<&'a str> {
     scopes
@@ -2963,10 +3172,15 @@ fn dedent_one_level(whitespace: &str) -> String {
 /// no semantic name at all; the platform writes those back verbatim as
 /// `<v8:TypeId>`. A uuid in neither map fails closed rather than being
 /// guessed in either direction.
+///
+/// `style_item_names` maps a configuration object uuid to the `StyleItem`
+/// name it denotes, which is what a `0:<uuid>` colour reference is spelled as
+/// in the source direction.
 pub fn rewrite_dcs_primary_schema_storage_document(
     bytes: &[u8],
     reference_types: &BTreeMap<String, String>,
     opaque_type_ids: &BTreeSet<String>,
+    style_item_names: &BTreeMap<String, String>,
     settings_blocks: &[DcsInlineSettingsFragment],
 ) -> Result<Vec<u8>, DcsInnerSchemaError> {
     let policy = policy()?;
@@ -2986,6 +3200,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
     out.push('\u{feff}');
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
     let mut scopes: NamespaceScopes = Vec::new();
+    let mut source_scopes: SourcePrefixScopes = Vec::new();
     let mut frames: Vec<RewriteState> = Vec::new();
     let mut pending: Option<&str> = None;
     let mut variant = 0usize;
@@ -3019,7 +3234,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                             }
                         }
                         RewriteFrame::TypeId => {}
-                        _ if state.qname_text => {
+                        _ if state.text == RewriteTextKind::TypeQName => {
                             out.push_str(&rewrite_qname_value(
                                 &policy,
                                 &scopes,
@@ -3027,6 +3242,20 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                                 "xsi:type",
                                 value,
                             )?);
+                        }
+                        _ if state.text == RewriteTextKind::ColorValue => {
+                            let rendered = rewrite_color_value(
+                                &policy,
+                                &scopes,
+                                &source_scopes,
+                                state,
+                                style_item_names,
+                                value,
+                            )?;
+                            if let Some(declaration) = rendered.declaration {
+                                out.insert_str(state.declaration_offset, &declaration);
+                            }
+                            out.push_str(&rendered.value);
                         }
                         _ => {
                             if value.trim().is_empty() && (!closing || state.saw_child) {
@@ -3043,6 +3272,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                         DcsInnerSchemaError::Malformed("unexpected closing element".into())
                     })?;
                     scopes.pop();
+                    source_scopes.pop();
                     match state.frame {
                         RewriteFrame::Wrapper => {}
                         RewriteFrame::Root => out.push_str("</DataCompositionSchema>"),
@@ -3084,6 +3314,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     }
                 }
                 scopes.push(declared);
+                source_scopes.push(Vec::new());
                 let (prefix, local) = split_prefix(start.name);
                 let uri = resolve_prefix(&scopes, prefix)
                     .ok_or_else(|| {
@@ -3091,8 +3322,18 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     })?
                     .to_owned();
                 let depth = frames.len();
+                let literal_type = uri == policy.data_core_namespace_uri() && local == "Type";
                 if let Some(state) = frames.last_mut() {
                     state.saw_child = true;
+                    if literal_type {
+                        state.saw_literal_type = true;
+                        if state.saw_type_id {
+                            return unsupported(
+                                "a valueType mixing literal Type with TypeId has no \
+                                 storage-derivable source order",
+                            );
+                        }
+                    }
                 }
                 if depth == 0 {
                     if local != "SchemaFile" || !uri.is_empty() || start.self_closing {
@@ -3130,6 +3371,24 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                 }
 
                 if uri == policy.data_core_namespace_uri() && local == "TypeId" {
+                    // A `TypeId` becomes a `<v8:Type>` too, so a parent that
+                    // carries both spellings ends up with several `v8:Type`
+                    // children whose relative order the source document does
+                    // not take from the storage document: storage sorts its
+                    // `TypeId` list by uuid, while the source keeps the
+                    // configured order, and the literal `Type` lands inside
+                    // that order rather than beside the list. Nothing in the
+                    // stored bytes says where -- fail closed instead of
+                    // guessing a position.
+                    if let Some(parent) = frames.last_mut() {
+                        parent.saw_type_id = true;
+                        if parent.saw_literal_type {
+                            return unsupported(
+                                "a valueType mixing literal Type with TypeId has no \
+                                 storage-derivable source order",
+                            );
+                        }
+                    }
                     let content = match tokens.get(index + 1) {
                         Some(RawToken::Text(value)) => (*value).trim(),
                         _ if start.self_closing => "",
@@ -3165,6 +3424,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     }
                     if start.self_closing {
                         scopes.pop();
+                        source_scopes.pop();
                     } else {
                         frames.push(RewriteState::new(RewriteFrame::TypeId));
                     }
@@ -3183,6 +3443,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                 };
                 let mut declarations = String::new();
                 let mut renamed: Vec<(String, String)> = Vec::new();
+                let mut declared_source: Vec<(String, String)> = Vec::new();
                 let mut local_declarations = 0usize;
                 for (key, value) in &start.attributes {
                     let declared_prefix = if *key == "xmlns" {
@@ -3195,9 +3456,19 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     };
                     match source_namespace_prefix(&policy, value) {
                         Some(source) => {
+                            declared_source.push(((*value).to_owned(), source.to_owned()));
                             renamed.push((declared_prefix.to_owned(), source.to_owned()));
                         }
-                        None => {
+                        // A namespace the source root does not declare keeps
+                        // its own declaration at the point of use. Only a
+                        // generated `dNpM` prefix is renumbered -- it names
+                        // the storage document's own depth, which the source
+                        // document does not share. A prefix the platform
+                        // spelled itself (`style`, `sys`, `web`, `win`) is
+                        // not depth-derived and travels through verbatim, as
+                        // the platform's own export of the same records
+                        // shows.
+                        None if is_generated_depth_prefix(declared_prefix) => {
                             local_declarations += 1;
                             let replacement = format!("d{depth}p{local_declarations}");
                             declarations.push_str(" xmlns:");
@@ -3205,7 +3476,17 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                             declarations.push_str("=\"");
                             declarations.push_str(value);
                             declarations.push('"');
+                            declared_source.push(((*value).to_owned(), replacement.clone()));
                             renamed.push((declared_prefix.to_owned(), replacement));
+                        }
+                        None => {
+                            declarations.push_str(" xmlns:");
+                            declarations.push_str(declared_prefix);
+                            declarations.push_str("=\"");
+                            declarations.push_str(value);
+                            declarations.push('"');
+                            declared_source.push(((*value).to_owned(), declared_prefix.to_owned()));
+                            renamed.push((declared_prefix.to_owned(), declared_prefix.to_owned()));
                         }
                     }
                 }
@@ -3244,13 +3525,18 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     rendered.push_str(&emitted_value);
                     rendered.push('"');
                 }
+                if let Some(scope) = source_scopes.last_mut() {
+                    *scope = declared_source;
+                }
                 out.push('<');
                 out.push_str(&emitted_name);
+                let declaration_offset = out.len();
                 out.push_str(&declarations);
                 out.push_str(&rendered);
                 if start.self_closing {
                     out.push_str("/>");
                     scopes.pop();
+                    source_scopes.pop();
                 } else {
                     out.push('>');
                     let mut state = RewriteState::new(RewriteFrame::Element(emitted_name));
@@ -3259,9 +3545,31 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     // `xsi:type` attribute does: a storage `StandardPeriod`
                     // resolved through the data-core default namespace is
                     // spelled `v8:StandardPeriod` in the source direction.
-                    state.qname_text = uri == policy.data_core_namespace_uri()
-                        && (local == "Type" || local == "TypeSet");
+                    state.text = if uri == policy.data_core_namespace_uri()
+                        && (local == "Type" || local == "TypeSet")
+                    {
+                        RewriteTextKind::TypeQName
+                    } else if uri == DCS_CORE_NAMESPACE_URI
+                        && local == "value"
+                        && start
+                            .attributes
+                            .iter()
+                            .filter(|(key, _)| *key != "xmlns" && !key.starts_with("xmlns:"))
+                            .any(|(key, value)| {
+                                expanded_attribute_name(&scopes, key).as_deref()
+                                    == Some(XSI_TYPE_EXPANDED_NAME)
+                                    && expanded_qname(&scopes, value).as_deref()
+                                        == Some(DATA_UI_COLOR_EXPANDED_NAME)
+                            })
+                    {
+                        RewriteTextKind::ColorValue
+                    } else {
+                        RewriteTextKind::Literal
+                    };
                     state.renamed = renamed;
+                    state.declaration_offset = declaration_offset;
+                    state.next_declaration = local_declarations + 1;
+                    state.depth = depth;
                     frames.push(state);
                 }
             }
@@ -3338,24 +3646,105 @@ fn rewrite_qname_value(
     })
 }
 
+/// Splices a rendered settings fragment in at `depth`, re-indenting its
+/// layout and only its layout.
+///
+/// A line break that falls inside character data -- a multi-line query,
+/// expression or presentation string -- belongs to the stored value, not to
+/// the document's shape. Re-indenting it, or normalizing its line ending,
+/// would change the value; the platform's own export keeps such runs byte for
+/// byte, so this does too.
 fn append_indented_fragment(out: &mut String, fragment: &str, depth: usize) {
-    let fragment = fragment.trim();
-    let base_indent = fragment
-        .lines()
-        .skip(1)
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start_matches(['\t', ' ']).len())
-        .min()
-        .unwrap_or(0);
-    for (index, raw) in fragment.lines().enumerate() {
-        let relative = if index == 0 {
-            raw
-        } else {
-            raw.get(base_indent..).unwrap_or(raw)
+    let literal = character_data_runs(fragment);
+    let start = fragment.len() - fragment.trim_start().len();
+    let body = &fragment[start..fragment.trim_end().len()];
+    // Only the fragment's own layout lines carry indentation to normalize:
+    // a line inside a stored multi-line value has whatever indentation the
+    // value has, which says nothing about how deep the fragment sits.
+    let mut base_indent = usize::MAX;
+    let mut scan = start;
+    for (index, chunk) in body.split_inclusive('\n').enumerate() {
+        let text = chunk.strip_suffix('\n').unwrap_or(chunk);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        if index > 0 && !text.trim().is_empty() && !offset_continues_character_data(&literal, scan)
+        {
+            base_indent = base_indent.min(text.len() - text.trim_start_matches(['\t', ' ']).len());
         }
-        .trim_end();
-        line(out, depth, relative);
+        scan += chunk.len();
     }
+    let base_indent = if base_indent == usize::MAX {
+        0
+    } else {
+        base_indent
+    };
+    let mut offset = start;
+    let mut separator: Option<(usize, usize)> = None;
+    for (index, chunk) in body.split_inclusive('\n').enumerate() {
+        let text = chunk.strip_suffix('\n').unwrap_or(chunk);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        if index > 0 && offset_continues_character_data(&literal, offset) {
+            // Verbatim: the line break the stored value itself carries,
+            // then the value's own bytes with their own indentation.
+            if let Some((from, to)) = separator {
+                out.push_str(&fragment[from..to]);
+            }
+            out.push_str(text);
+        } else {
+            let relative = if index == 0 {
+                text
+            } else {
+                text.get(base_indent..).unwrap_or(text)
+            }
+            .trim_end();
+            line(out, depth, relative);
+        }
+        separator = Some((offset + text.len(), offset + chunk.len()));
+        offset += chunk.len();
+    }
+}
+
+/// Byte ranges of the text runs that carry character data rather than
+/// pretty-printing whitespace.
+///
+/// A text run is everything between a `>` that closes a tag and the `<` that
+/// opens the next one. The scan is quote-aware so a `>` inside an attribute
+/// value cannot end a tag early.
+fn character_data_runs(xml: &str) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut quote: Option<u8> = None;
+    let mut in_tag = false;
+    let mut run_start = 0usize;
+    for (offset, byte) in xml.bytes().enumerate() {
+        if in_tag {
+            match (quote, byte) {
+                (Some(open), byte) if byte == open => quote = None,
+                (Some(_), _) => {}
+                (None, b'"' | b'\'') => quote = Some(byte),
+                (None, b'>') => {
+                    in_tag = false;
+                    run_start = offset + 1;
+                }
+                (None, _) => {}
+            }
+        } else if byte == b'<' {
+            in_tag = true;
+            if run_start < offset && !xml[run_start..offset].trim().is_empty() {
+                runs.push((run_start, offset));
+            }
+        }
+    }
+    if !in_tag && run_start < xml.len() && !xml[run_start..].trim().is_empty() {
+        runs.push((run_start, xml.len()));
+    }
+    runs
+}
+
+/// Whether a line starting at `offset` continues a character-data run rather
+/// than starting one. The run's own first line is still preceded by markup,
+/// so only offsets strictly inside a run are continuations.
+fn offset_continues_character_data(runs: &[(usize, usize)], offset: usize) -> bool {
+    runs.iter()
+        .any(|(start, end)| offset > *start && offset < *end)
 }
 
 #[cfg(test)]

@@ -37,6 +37,7 @@ pub use dcs::{
     parse_form_list_settings_orders, platform_default_form_list_settings_conditional_appearance,
     platform_default_form_list_settings_filter, platform_default_form_list_settings_order,
     preflight_dcs_settings_serialization, rewrite_dcs_settings_children,
+    validate_dcs_inline_settings_fragment_structure,
 };
 pub use dcs_schema::{
     DcsInlineSettingsFragment, DcsInnerSchemaError, emit_dcs_area_template_source_fragment,

@@ -410,6 +410,10 @@ pub(crate) enum DcsSettingsCanonicalizeError {
     CanonicalChildren(CanonicalDcsSettingsAdapterError),
     /// The canonical children could not be spliced back into the document.
     ChildrenRewrite,
+    /// The typed cohort refused the document and the general
+    /// storage-to-source transliteration could not account for its bytes
+    /// either.
+    Transliterate,
 }
 
 impl DcsSettingsCanonicalizeError {
@@ -421,6 +425,26 @@ impl DcsSettingsCanonicalizeError {
             Self::Writer => "dcs.settings-canonicalize.writer",
             Self::CanonicalChildren(_) => "dcs.settings-canonicalize.canonical-children",
             Self::ChildrenRewrite => "dcs.settings-canonicalize.children-rewrite",
+            Self::Transliterate => "dcs.settings-canonicalize.transliterate",
+        }
+    }
+
+    /// Whether this rejection says only "no enumerated shape describes this
+    /// document", as opposed to "these bytes are not a settings document" or
+    /// "an invariant of our own serializer broke".
+    ///
+    /// Only the former may be handed to the transliteration: a malformed
+    /// document has nothing to transliterate, and an invariant break must
+    /// stay loud rather than be silently routed around.
+    const fn is_cohort_refusal(&self) -> bool {
+        match self {
+            Self::Analysis(DcsSettingsDocumentAnalysisError::UnsupportedSource { .. })
+            | Self::UnsupportedChild { .. } => true,
+            Self::Analysis(DcsSettingsDocumentAnalysisError::Malformed(_))
+            | Self::Writer
+            | Self::CanonicalChildren(_)
+            | Self::ChildrenRewrite
+            | Self::Transliterate => false,
         }
     }
 
@@ -435,7 +459,9 @@ impl DcsSettingsCanonicalizeError {
                     MetadataSourceFailureClass::Unsupported
                 }
             },
-            Self::UnsupportedChild { .. } | Self::Writer => MetadataSourceFailureClass::Unsupported,
+            Self::UnsupportedChild { .. } | Self::Writer | Self::Transliterate => {
+                MetadataSourceFailureClass::Unsupported
+            }
             Self::CanonicalChildren(_) | Self::ChildrenRewrite => {
                 MetadataSourceFailureClass::Invariant
             }
@@ -465,6 +491,10 @@ impl std::fmt::Display for DcsSettingsCanonicalizeError {
             ),
             Self::ChildrenRewrite => formatter
                 .write_str("canonical settings children could not be spliced into the document"),
+            Self::Transliterate => formatter.write_str(
+                "no typed cohort described the document and the storage-to-source \
+                 transliteration could not account for its bytes",
+            ),
         }
     }
 }
@@ -533,9 +563,20 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
             target_profile,
         )
         .map_err(|cause| DcsTemplateNormalizeError::SettingsCanonicalize { index, cause })?;
+        // A typed fragment is re-analyzed against the full cohort; a
+        // transliterated one only against the structural contract, because
+        // the cohort question is precisely the one it was produced to route
+        // around. See `DcsInlineSettingsFragment::parse_transliterated`.
+        let fragment = match canonical {
+            CanonicalDcsSettingsDocument::Typed(xml) => DcsInlineSettingsFragment::parse(xml),
+            CanonicalDcsSettingsDocument::Transliterated(xml) => {
+                DcsInlineSettingsFragment::parse_transliterated(xml)
+            }
+        };
         settings.push(
-            DcsInlineSettingsFragment::parse(canonical).map_err(|cause| {
-                DcsTemplateNormalizeError::SettingsFragmentParse { index, cause }
+            fragment.map_err(|cause| DcsTemplateNormalizeError::SettingsFragmentParse {
+                index,
+                cause,
             })?,
         );
     }
@@ -560,6 +601,7 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
                     envelope.primary_schema_file(),
                     &reference_types,
                     &opaque_type_ids,
+                    &style_reference_types,
                     &settings,
                 )
                 .map_err(|transliterate| {
@@ -696,7 +738,83 @@ fn data_composition_style_item_name(
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// Canonicalizes one standalone `Settings` document into its inline source
+/// fragment.
+///
+/// The typed cohort is tried first and, when it describes the document, still
+/// decides every one of its five children. What changes here is only what
+/// happens after it refuses: instead of failing the whole template, the
+/// document is transliterated from its own bytes by the same lexical writer
+/// that already renders the parts no typed child owns. That writer is the
+/// settings-side twin of
+/// [`ibcmd_xml::rewrite_dcs_primary_schema_storage_document`] -- it re-spells
+/// the storage document in the source direction (root rename, prefix mapping,
+/// `dNpM` renumbering, style-item resolution) and fails closed on anything it
+/// cannot account for, rather than emitting a guess.
 fn canonicalize_data_composition_settings_document(
+    document: &str,
+    object_refs: &BTreeMap<String, String>,
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
+) -> std::result::Result<CanonicalDcsSettingsDocument, DcsSettingsCanonicalizeError> {
+    match canonicalize_typed_data_composition_settings_document(
+        document,
+        object_refs,
+        source_profile,
+        target_profile,
+    ) {
+        Ok(canonical) => Ok(CanonicalDcsSettingsDocument::Typed(canonical)),
+        // A cohort refusal is not evidence that the document cannot be
+        // spelled -- only that no enumerated shape describes it. Everything
+        // else (a malformed document, a writer that could not reproduce the
+        // bytes, an invariant break in the canonical serializer) stays fatal.
+        Err(typed) if typed.is_cohort_refusal() => {
+            transliterate_data_composition_settings_document(document, object_refs)
+                .map(CanonicalDcsSettingsDocument::Transliterated)
+                .ok_or(DcsSettingsCanonicalizeError::Transliterate)
+        }
+        Err(typed) => Err(typed),
+    }
+}
+
+/// One canonicalized `Settings` document, tagged with which of the two paths
+/// produced it.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum CanonicalDcsSettingsDocument {
+    /// Emitted by the typed cohort.
+    Typed(String),
+    /// Transliterated from the storage document's own bytes.
+    Transliterated(String),
+}
+
+impl CanonicalDcsSettingsDocument {
+    /// The rendered fragment, whichever path produced it. Production code
+    /// always needs the path too, so it matches on the variant instead; this
+    /// exists for assertions that only care about the bytes.
+    #[cfg(test)]
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::Typed(xml) | Self::Transliterated(xml) => xml,
+        }
+    }
+}
+
+/// Renders one standalone `Settings` document into its inline source fragment
+/// with the lexical writer alone, with no typed child re-emission.
+fn transliterate_data_composition_settings_document(
+    document: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut writer = DataCompositionXmlWriter::new(object_refs);
+    writer.write_document(document, DataCompositionDocumentMode::Settings)?;
+    let settings = writer
+        .output
+        .trim_start_matches(['\r', '\n', '\t'])
+        .to_string();
+    Some(indent_data_composition_settings(&settings))
+}
+
+fn canonicalize_typed_data_composition_settings_document(
     document: &str,
     object_refs: &BTreeMap<String, String>,
     source_profile: &ProfileId,
@@ -913,13 +1031,74 @@ pub(crate) fn canonicalize_form_server_state_conditional_appearances(
         .then_some(captures)
 }
 
+/// Shifts a rendered settings document to the two-tab depth its inline
+/// source position sits at.
+///
+/// Only the document's pretty-printing whitespace moves. A line break inside
+/// character data -- a multi-line query, expression or presentation string --
+/// is part of the value the platform stored, so indenting it would change the
+/// value rather than the layout, and the platform's own export shows it does
+/// not.
 fn indent_data_composition_settings(settings: &str) -> String {
+    let literal = data_composition_character_data_runs(settings);
     let mut indented = String::from("\r\n");
+    let mut offset = 0usize;
     for line in settings.split_inclusive('\n') {
-        indented.push_str("\t\t");
+        if !data_composition_offset_continues_character_data(&literal, offset) {
+            indented.push_str("\t\t");
+        }
         indented.push_str(line);
+        offset += line.len();
     }
     indented
+}
+
+/// Byte ranges of the text runs that carry character data rather than
+/// pretty-printing whitespace.
+///
+/// A text run is everything between a `>` that closes a tag and the `<` that
+/// opens the next one. The scan is quote-aware so a `>` inside an attribute
+/// value cannot end a tag early.
+fn data_composition_character_data_runs(xml: &str) -> Vec<(usize, usize)> {
+    let bytes = xml.as_bytes();
+    let mut runs = Vec::new();
+    let mut quote: Option<u8> = None;
+    let mut in_tag = false;
+    let mut run_start = 0usize;
+    for (offset, byte) in bytes.iter().copied().enumerate() {
+        if in_tag {
+            match (quote, byte) {
+                (Some(open), byte) if byte == open => quote = None,
+                (Some(_), _) => {}
+                (None, b'"' | b'\'') => quote = Some(byte),
+                (None, b'>') => {
+                    in_tag = false;
+                    run_start = offset + 1;
+                }
+                (None, _) => {}
+            }
+        } else if byte == b'<' {
+            in_tag = true;
+            if run_start < offset && !xml[run_start..offset].trim().is_empty() {
+                runs.push((run_start, offset));
+            }
+        }
+    }
+    if !in_tag && run_start < xml.len() && !xml[run_start..].trim().is_empty() {
+        runs.push((run_start, xml.len()));
+    }
+    runs
+}
+
+/// Whether a line starting at `offset` continues a character-data run rather
+/// than starting one. The run's own first line is still preceded by markup,
+/// so only offsets strictly inside a run are continuations.
+fn data_composition_offset_continues_character_data(
+    runs: &[(usize, usize)],
+    offset: usize,
+) -> bool {
+    runs.iter()
+        .any(|(start, end)| offset > *start && offset < *end)
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -2036,13 +2215,13 @@ mod tests {
             "<order><probe/></order>",
             "</Settings>"
         );
-        let error = canonicalize_data_composition_settings_document(
+        let error = canonicalize_typed_data_composition_settings_document(
             settings,
             &BTreeMap::new(),
             &ProfileId::parse("provider:mssql-legacy").unwrap(),
             &ProfileId::parse("xml-2.20").unwrap(),
         )
-        .expect_err("an unparsable order child must fail closed");
+        .expect_err("an unparsable order child must be refused by the typed step");
         assert!(
             matches!(
                 error,
@@ -2052,6 +2231,28 @@ mod tests {
                 }
             ),
             "expected an unsupported `order` child, got: {error}"
+        );
+        // Contract change, named rather than hidden: the typed refusal above
+        // is unchanged and still names the child, but it is no longer the
+        // last word. The document is then accounted for from its own bytes,
+        // exactly as the primary schema is.
+        let canonical = canonicalize_data_composition_settings_document(
+            settings,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a typed refusal hands the document to the transliteration");
+        assert!(
+            matches!(canonical, CanonicalDcsSettingsDocument::Transliterated(_)),
+            "the typed cohort must not claim a document it refused"
+        );
+        assert!(
+            canonical
+                .as_str()
+                .contains("<dcsset:order><dcsset:probe/></dcsset:order>"),
+            "the refused child must survive the rewrite verbatim: {}",
+            canonical.as_str()
         );
     }
 
@@ -2076,6 +2277,13 @@ mod tests {
             &target_profile,
         )
         .unwrap();
+        // This shape is inside the typed cohort, so it must still take the
+        // typed path -- the transliteration is a fallback, not a takeover.
+        assert!(
+            matches!(canonical_settings, CanonicalDcsSettingsDocument::Typed(_)),
+            "a cohort shape must not reach the transliteration"
+        );
+        let canonical_settings = canonical_settings.as_str();
         assert!(canonical_settings.contains("<dcsset:itemsViewMode>Compact"));
 
         let view = canonical_settings
@@ -2573,6 +2781,197 @@ mod tests {
         );
     }
 
+    /// Builds a three-document envelope around one primary schema body, so a
+    /// probe only has to spell the part it is about.
+    fn probe_documents(schema_body: &str) -> [String; 3] {
+        [
+            format!(
+                concat!(
+                    "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+                    "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
+                    " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+                    "\t<dataCompositionSchema",
+                    " xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+                    "{}\r\n",
+                    "\t\t<settingsVariant><name",
+                    " xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"",
+                    ">Default</name></settingsVariant>\r\n",
+                    "\t</dataCompositionSchema>\r\n",
+                    "</SchemaFile>"
+                ),
+                schema_body
+            ),
+            concat!(
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+                "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>"
+            )
+            .to_owned(),
+            concat!(
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+                "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
+                " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+                "\t<dataCompositionSchema",
+                " xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n",
+                "</SchemaFile>"
+            )
+            .to_owned(),
+        ]
+    }
+
+    /// The three point-of-use spellings the transliteration takes from the
+    /// storage bytes rather than from a cohort, each evidenced by the
+    /// platform's own export of 1C:Trade Management 11.5.27.75:
+    ///
+    ///  * a generated `dNpM` prefix names the *storage* document's depth and
+    ///    is reminted against the target depth (`d4p2` -> `d3p1`);
+    ///  * a prefix the platform spelled itself (`sys`) is not depth-derived
+    ///    and travels through verbatim, in the very same element;
+    ///  * a `dcscor:value` typed `{data/ui}Color` carries a QName in its
+    ///    character data, which moves onto the reminted prefix instead of
+    ///    keeping the storage one.
+    #[test]
+    fn transliteration_remints_generated_prefixes_and_keeps_platform_spelled_ones() {
+        let documents = probe_documents(concat!(
+            "\t\t<appearance>\r\n",
+            "\t\t\t<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">\r\n",
+            "\t\t\t\t<parameter>ЦветТекста</parameter>\r\n",
+            "\t\t\t\t<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\"",
+            " xmlns:d4p2=\"http://v8.1c.ru/8.1/data/ui/style\"",
+            " xsi:type=\"d4p1:Color\">d4p2:SpecialTextColor</value>\r\n",
+            "\t\t\t\t<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\"",
+            " xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"",
+            " xsi:type=\"d4p1:Font\" ref=\"sys:DefaultGUIFont\"/>\r\n",
+            "\t\t\t</item>\r\n",
+            "\t\t</appearance>"
+        ));
+        let borrowed: [&[u8]; 3] = [
+            documents[0].as_bytes(),
+            documents[1].as_bytes(),
+            documents[2].as_bytes(),
+        ];
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &borrowed,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("an appearance probe must transliterate");
+        let actual = String::from_utf8(actual).expect("source XML is UTF-8");
+        assert!(
+            actual.contains(concat!(
+                "<dcscor:value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui/style\"",
+                " xsi:type=\"v8ui:Color\">d4p1:SpecialTextColor</dcscor:value>"
+            )),
+            "the generated prefix must be reminted in both the declaration and the value: {actual}"
+        );
+        assert!(
+            actual.contains(concat!(
+                "<dcscor:value xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"",
+                " xsi:type=\"v8ui:Font\" ref=\"sys:DefaultGUIFont\"/>"
+            )),
+            "a platform-spelled prefix must travel through verbatim: {actual}"
+        );
+    }
+
+    /// A `0:<uuid>` colour reference is a `StyleItem` the source document
+    /// spells as a QName, so the style namespace is declared at the point of
+    /// use. An unresolvable uuid has no name to write and fails closed
+    /// instead of being emitted as the raw storage reference.
+    #[test]
+    fn transliteration_resolves_style_item_colour_references_or_fails_closed() {
+        let documents = probe_documents(concat!(
+            "\t\t<appearance>\r\n",
+            "\t\t\t<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">\r\n",
+            "\t\t\t\t<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\"",
+            " xsi:type=\"d4p1:Color\">0:283ce432-3553-4de9-94a2-ca9a590437f5</value>\r\n",
+            "\t\t\t</item>\r\n",
+            "\t\t</appearance>"
+        ));
+        let borrowed: [&[u8]; 3] = [
+            documents[0].as_bytes(),
+            documents[1].as_bytes(),
+            documents[2].as_bytes(),
+        ];
+        let rejection = normalize_data_composition_schema_template_documents_with_profiles(
+            &borrowed,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect_err("an unresolvable style reference must fail closed");
+        assert_eq!(
+            rejection.code(),
+            "dcs.template-normalize.primary-schema-parse",
+            "the rejection must name the step that refused the source: {rejection}"
+        );
+
+        let mut object_refs = BTreeMap::new();
+        object_refs.insert(
+            "283ce432-3553-4de9-94a2-ca9a590437f5".to_owned(),
+            "StyleItem.ПросроченныеДанныеЦвет".to_owned(),
+        );
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &borrowed,
+            &BTreeMap::new(),
+            &object_refs,
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a resolvable style reference must transliterate");
+        let actual = String::from_utf8(actual).expect("source XML is UTF-8");
+        assert!(
+            actual.contains(concat!(
+                "<dcscor:value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui/style\"",
+                " xsi:type=\"v8ui:Color\">d4p1:ПросроченныеДанныеЦвет</dcscor:value>"
+            )),
+            "the style reference must be spelled as a QName at the point of use: {actual}"
+        );
+    }
+
+    /// Fail-closed floor: storage sorts a `valueType`'s `TypeId` list by
+    /// uuid, so where a literal `Type` sits inside the source order is not
+    /// recoverable from the stored bytes once both spellings appear together.
+    #[test]
+    fn transliteration_refuses_a_value_type_mixing_literal_type_with_type_id() {
+        let documents = probe_documents(concat!(
+            "\t\t<calculatedField>\r\n",
+            "\t\t\t<dataPath>Probe</dataPath>\r\n",
+            "\t\t\t<valueType>\r\n",
+            "\t\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>\r\n",
+            "\t\t\t\t<TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">",
+            "3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab</TypeId>\r\n",
+            "\t\t\t</valueType>\r\n",
+            "\t\t</calculatedField>"
+        ));
+        let borrowed: [&[u8]; 3] = [
+            documents[0].as_bytes(),
+            documents[1].as_bytes(),
+            documents[2].as_bytes(),
+        ];
+        let mut type_index = DcsTypeIndex::new();
+        type_index.insert(
+            "3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab".to_owned(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.Probe".to_owned(),
+            },
+        );
+        let rejection = normalize_data_composition_schema_template_documents_with_profiles(
+            &borrowed,
+            &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect_err("a mixed valueType has no storage-derivable source order");
+        assert_eq!(
+            rejection.code(),
+            "dcs.template-normalize.primary-schema-parse",
+            "the rejection must name the step that refused the source: {rejection}"
+        );
+    }
+
     /// A primary schema outside BOTH the inner-schema parser's admitted shape
     /// (not DataSetObject) AND the query-union-link parser's admitted shape
     /// (not exactly dataSource+query+union+link+variant) is neither dropped
@@ -2972,17 +3371,30 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    /// Contract change, named rather than hidden: a direct `Settings` child
+    /// no typed cohort owns used to fail the whole template. It is now
+    /// transliterated instead -- the same move the primary schema made -- so
+    /// what this test pins is that it never reaches *typed* normalization,
+    /// and that the transliteration reproduces the child from its own bytes
+    /// rather than dropping, renaming or inventing anything.
+    ///
+    /// A child in a namespace the source root cannot declare still fails
+    /// closed; that floor is
+    /// `settings_with_undeclarable_namespace_still_fails_closed` below.
+    ///
+    /// `outputParameters` is intentionally not in this list: it is a
+    /// recognized typed element (evidence: dcs-output-parameters), so an
+    /// occurrence with no items does not qualify as "unowned" -- its
+    /// cohort-shape fail-closed cases live in the ibcmd-xml unit tests
+    /// (`output_parameters_rejects_*` in crates/ibcmd-xml/src/dcs.rs).
     #[test]
-    fn unknown_settings_children_never_reach_the_generic_normalizer() {
-        // `outputParameters` is intentionally not in this list: this work
-        // package admits it as a recognized typed element (evidence:
-        // dcs-output-parameters), so an occurrence with no items no longer
-        // qualifies as "unowned" -- the dedicated cohort-shape fail-closed
-        // cases for it are covered by the ibcmd-xml unit tests instead
-        // (`output_parameters_rejects_*` in crates/ibcmd-xml/src/dcs.rs).
-        for unknown in [
-            "<futureProbe/>",
-            "<probe:futureProbe xmlns:probe=\"urn:ibcmd-rs:dcs-probe\"/>",
+    fn unknown_settings_children_transliterate_instead_of_failing_closed() {
+        for (unknown, expected) in [
+            ("<futureProbe/>", "<dcsset:futureProbe/>"),
+            (
+                "<probe:futureProbe xmlns:probe=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>",
+                "<dcsset:futureProbe/>",
+            ),
         ] {
             let settings = format!(
                 "<Settings xmlns=\"{}\" xmlns:xsi=\"{}\">{unknown}</Settings>",
@@ -2991,15 +3403,56 @@ mod tests {
             );
             let source_profile = ProfileId::parse("provider:mssql-legacy").unwrap();
             let target_profile = ProfileId::parse("xml-2.20").unwrap();
+            let canonical = canonicalize_data_composition_settings_document(
+                &settings,
+                &BTreeMap::new(),
+                &source_profile,
+                &target_profile,
+            )
+            .expect("an unowned child must transliterate, not fail the template");
             assert!(
-                canonicalize_data_composition_settings_document(
-                    &settings,
-                    &BTreeMap::new(),
-                    &source_profile,
-                    &target_profile,
-                )
-                .is_err(),
-                "unknown child reached generic normalization: {unknown}"
+                matches!(canonical, CanonicalDcsSettingsDocument::Transliterated(_)),
+                "an unowned child must not be claimed by the typed cohort: {unknown}"
+            );
+            assert!(
+                canonical.as_str().contains(expected),
+                "the unowned child must survive the rewrite verbatim: {unknown} -> {}",
+                canonical.as_str()
+            );
+        }
+    }
+
+    /// Fail-closed floor for the settings transliteration: only a *cohort*
+    /// refusal reaches it. A document that is not a settings document at all
+    /// is refused by the analyzer and stays refused -- there is nothing to
+    /// transliterate, and routing it onward would turn a malformed input into
+    /// invented output.
+    #[test]
+    fn malformed_settings_never_reach_the_transliteration() {
+        for probe in [
+            // Root is not the settings-namespace `Settings` element.
+            "<Probe xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>".to_owned(),
+            format!(
+                "<Settings xmlns=\"urn:ibcmd-rs:not-the-settings-namespace\" xmlns:xsi=\"{}\"/>",
+                std::str::from_utf8(XSI_NS).unwrap()
+            ),
+            // Not well-formed at all.
+            format!(
+                "<Settings xmlns=\"{}\"><order></Settings>",
+                std::str::from_utf8(DCS_SETTINGS_NS).unwrap()
+            ),
+        ] {
+            let rejection = canonicalize_data_composition_settings_document(
+                &probe,
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect_err("a malformed settings document must fail closed");
+            assert_eq!(
+                rejection.code(),
+                "dcs.settings-canonicalize.analysis",
+                "the rejection must name the analyzer, not the transliteration: {rejection}"
             );
         }
     }
