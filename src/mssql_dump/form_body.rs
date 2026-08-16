@@ -2632,6 +2632,17 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "3b644f4f-055f-4808-bdc6-a50ce895e4d9" => Some("NewWriteProcessing"),
         "e91128e6-621d-4dc8-b12e-bd65aeb37e2d" => Some("OnUpdateUserSettingSetAtServer"),
         "fe115cc8-9e33-4684-a166-bd5136fe7a9f" => Some("OnChange"),
+        // Six more platform event identifiers, each read off the native
+        // "1С:Управление торговлей" 11.5.27.75 tree: the platform names the
+        // event whose handler our decoder already emits verbatim beside the
+        // raw identifier, in the same position of the same `<Events>` list
+        // (26 occurrences for the first, 3 for the second, 1 for the rest).
+        "44498116-1641-4bfa-ae33-86e53c205797" => Some("URLListGetProcessing"),
+        "ff33c4d6-a0db-4906-992e-37b3f44cd97a" => Some("RefreshRequestProcessing"),
+        "336b3ee5-d67f-4651-b098-e2c53f8317e2" => Some("OnLoadUserSettingsAtServer"),
+        "49ede602-af78-4a50-b821-ec81f6778f2d" => Some("MultipleValuesDelete"),
+        "2971b9a9-1724-4f34-aaa4-f3db584c3ca0" => Some("OnCurrentParentChange"),
+        "b98da5a8-349c-4159-a6a8-17a34ceb10ec" => Some("OnChangeDisplaySettings"),
         _ => None,
     }
 }
@@ -7264,7 +7275,12 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|properties| properties.group_horizontal_align())
         } else {
-            None
+            parse_form_pages_group_align(
+                tag,
+                fields,
+                FORM_PAGES_GROUP_HORIZONTAL_ALIGN_FROM_END,
+                ["Left", "Center", "Right"],
+            )
         },
         horizontal_location: if tag == "CommandBar" {
             fields
@@ -7465,6 +7481,13 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.group_vertical_align())
+        } else if let Some(value) = parse_form_pages_group_align(
+            tag,
+            fields,
+            FORM_PAGES_GROUP_VERTICAL_ALIGN_FROM_END,
+            ["Top", "Center", "Bottom"],
+        ) {
+            Some(value)
         } else {
             special_field_layout
                 .as_ref()
@@ -8987,6 +9010,35 @@ pub(super) const FORM_GROUP_LAYOUT_TAGS: [&str; 7] = [
     "ButtonGroup",
 ];
 
+/// A `Pages` group closes its tuple with its alignment pair, counted back from
+/// the end so the inline child items in the middle cannot move it: `len - 3`
+/// holds the group horizontal alignment and `len - 2` the vertical one. Both
+/// use `0`/`1`/`2` for the near end, the centre and the far end, and `3` for
+/// the platform default the XML omits. Measured across all 2 373 `Pages`
+/// elements of the native "1С:Управление торговлей" 11.5.27.75 tree: every
+/// `Left`/`Center`/`Right` and `Top`/`Center`/`Bottom` observation matches, and
+/// every element without the property carries `3`, with no counter-example.
+const FORM_PAGES_GROUP_HORIZONTAL_ALIGN_FROM_END: usize = 3;
+const FORM_PAGES_GROUP_VERTICAL_ALIGN_FROM_END: usize = 2;
+
+fn parse_form_pages_group_align(
+    tag: &str,
+    fields: &[&str],
+    from_end: usize,
+    values: [&'static str; 3],
+) -> Option<&'static str> {
+    if tag != "Pages" {
+        return None;
+    }
+    let slot = fields.len().checked_sub(from_end)?;
+    match fields.get(slot)?.trim() {
+        "0" => Some(values[0]),
+        "1" => Some(values[1]),
+        "2" => Some(values[2]),
+        _ => None,
+    }
+}
+
 pub(super) const FORM_GROUP_WIDTH_SLOT: usize = 12;
 pub(super) const FORM_GROUP_HEIGHT_SLOT: usize = 13;
 pub(super) const FORM_GROUP_HORIZONTAL_STRETCH_SLOT: usize = 14;
@@ -9943,9 +9995,15 @@ pub(super) fn parse_form_button_group_representation(field: &str) -> Option<&'st
     }
 }
 
+/// The effective page representation is the **last** member of the `Pages`
+/// representation tuple, not its second one. Both members agree on all 2 325
+/// native `Pages` elements that carry a `<PagesRepresentation>`; they disagree
+/// on exactly the 48 elements whose XML has no `<PagesRepresentation>` at all,
+/// where the second member still reads `1` while the last one reads `6` — the
+/// code the platform never writes out.
 pub(super) fn parse_form_pages_representation(field: &str) -> Option<&'static str> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    match fields.get(1).map(|value| value.trim()) {
+    match fields.last().map(|value| value.trim()) {
         Some("0") => Some("None"),
         Some("1") => Some("TabsOnTop"),
         Some("2") => Some("TabsOnBottom"),
@@ -15957,6 +16015,13 @@ pub(super) fn format_form_child_item_xml(
     let title_location_follows_title =
         FormFieldTitleLocationSchema::follows_title_in_xml(item.tag, !item.title.is_empty());
     let usual_group_title_first = matches!(item.tag, "UsualGroup" | "ButtonGroup");
+    // A `Pages` group carries its geometry behind the title block, not in front
+    // of it: the native tree writes `Title` before `Width` (34 co-occurrences),
+    // `Height` (22), `HorizontalStretch` (106) and `VerticalStretch` (84), and
+    // `ToolTip` before `Width` (2), `HorizontalStretch` (18) and
+    // `VerticalStretch` (14), with no counter-example in either direction. The
+    // whole run still precedes `PagesRepresentation` (32/22/106/82).
+    let pages_geometry_after_title = item.tag == "Pages";
     let mut direct_context_menu_xml = String::new();
     let mut direct_regular_children = Vec::new();
     if is_form_field_direct_service_parent(item.tag) {
@@ -16284,6 +16349,7 @@ pub(super) fn format_form_child_item_xml(
         if item.tag != "Button"
             && item.tag != "PictureDecoration"
             && item.tag != "CommandBar"
+            && !pages_geometry_after_title
             && let Some(group_vertical_align) = item.group_vertical_align
         {
             xml.push_str(&format!(
@@ -16376,6 +16442,7 @@ pub(super) fn format_form_child_item_xml(
         && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && item.tag != "CommandBar"
+        && !pages_geometry_after_title
         && let Some(width) = &item.width
     {
         xml.push_str(&format!(
@@ -16408,6 +16475,7 @@ pub(super) fn format_form_child_item_xml(
         && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && item.tag != "CommandBar"
+        && !pages_geometry_after_title
         && let Some(height) = &item.height
     {
         xml.push_str(&format!(
@@ -16512,7 +16580,16 @@ pub(super) fn format_form_child_item_xml(
             xml_bool(item.picture_load_transparent)
         ));
     }
-    if !matches!(item.tag, "LabelDecoration" | "PictureDecoration") && item.hiperlink == Some(true)
+    // `LabelField` keeps `Hiperlink` behind its stretch pair: the native tree
+    // writes `HorizontalStretch`<`Hiperlink` 98 times, `VerticalStretch`<
+    // `Hiperlink` 5, `AutoMaxHeight`<`Hiperlink` 3 and `MaxHeight`<`Hiperlink` 2,
+    // never the reverse, while `Hiperlink` still precedes `TextColor` (28),
+    // `Font` (9), `BackColor` (5) and `PasswordMode` (1). The remaining control
+    // kinds have no native observation pairing the two, so they stay here.
+    let hiperlink_after_stretch = item.tag == "LabelField";
+    if !matches!(item.tag, "LabelDecoration" | "PictureDecoration")
+        && !hiperlink_after_stretch
+        && item.hiperlink == Some(true)
     {
         xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
     }
@@ -16551,6 +16628,7 @@ pub(super) fn format_form_child_item_xml(
         && item.tag != "CommandBar"
         && let Some(horizontal_stretch) = item.horizontal_stretch
         && !usual_group_title_first
+        && !pages_geometry_after_title
     {
         xml.push_str(&format!(
             "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
@@ -16571,11 +16649,15 @@ pub(super) fn format_form_child_item_xml(
         && item.tag != "Page"
         && let Some(vertical_stretch) = item.vertical_stretch
         && !usual_group_title_first
+        && !pages_geometry_after_title
     {
         xml.push_str(&format!(
             "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
             if vertical_stretch { "true" } else { "false" }
         ));
+    }
+    if hiperlink_after_stretch && item.hiperlink == Some(true) {
+        xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
     }
     xml.push_str(&format_form_spreadsheet_document_properties_xml(
         item,
@@ -17155,6 +17237,47 @@ pub(super) fn format_form_child_item_xml(
     }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
+    }
+    if pages_geometry_after_title {
+        if let Some(width) = &item.width {
+            xml.push_str(&format!(
+                "{tab}\t<Width>{}</Width>\r\n",
+                escape_xml_text(width)
+            ));
+        }
+        if let Some(height) = &item.height {
+            xml.push_str(&format!(
+                "{tab}\t<Height>{}</Height>\r\n",
+                escape_xml_text(height)
+            ));
+        }
+        if let Some(horizontal_stretch) = item.horizontal_stretch {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                xml_bool(horizontal_stretch)
+            ));
+        }
+        if let Some(vertical_stretch) = item.vertical_stretch {
+            xml.push_str(&format!(
+                "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
+                xml_bool(vertical_stretch)
+            ));
+        }
+        // `GroupHorizontalAlign` precedes `GroupVerticalAlign` (3 native
+        // co-occurrences) and both trail the stretch pair (6/6 and 5/3) while
+        // still preceding `PagesRepresentation` (30 and 77).
+        if let Some(group_horizontal_align) = item.group_horizontal_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                escape_xml_text(group_horizontal_align)
+            ));
+        }
+        if let Some(group_vertical_align) = item.group_vertical_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                escape_xml_text(group_vertical_align)
+            ));
+        }
     }
     if item.tag == "Pages"
         && let Some(representation) = item.representation.filter(|representation| {

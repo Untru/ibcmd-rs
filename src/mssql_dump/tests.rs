@@ -11467,6 +11467,127 @@ fn extracts_form_usual_group_group_from_layout_code() {
 }
 
 #[test]
+fn pages_group_writes_its_geometry_and_alignment_behind_the_title() {
+    // Synthetic `Pages` tuple shaped like the native ones: slot 12/13 carry the
+    // extent, 14/15 the stretch pair, 20 the representation tuple whose *last*
+    // member is the effective code, and the last four scalars close the item
+    // with the alignment pair at `len - 3` (horizontal) and `len - 2`
+    // (vertical). Codes: `0`/`1`/`2` are the near end, the centre and the far
+    // end; `3` is the default the XML omits.
+    let item = parse_form_child_item(
+        r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,0},0,1,0,7,14,1,0,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{4,1,{0,1,0},2,0,1},0,1,0,1,2}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(item.tag, "Pages");
+    assert_eq!(item.width.as_deref(), Some("7"));
+    assert_eq!(item.height.as_deref(), Some("14"));
+    assert_eq!(item.horizontal_stretch, Some(true));
+    assert_eq!(item.vertical_stretch, Some(false));
+    assert_eq!(item.group_horizontal_align, Some("Left"));
+    assert_eq!(item.group_vertical_align, Some("Center"));
+    assert_eq!(item.representation, Some("TabsOnTop"));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+
+    let title = xml.find("<Title>").unwrap();
+    let width = xml.find("<Width>7</Width>").unwrap();
+    let height = xml.find("<Height>14</Height>").unwrap();
+    let horizontal = xml
+        .find("<HorizontalStretch>true</HorizontalStretch>")
+        .unwrap();
+    let vertical = xml
+        .find("<VerticalStretch>false</VerticalStretch>")
+        .unwrap();
+    let group_horizontal = xml
+        .find("<GroupHorizontalAlign>Left</GroupHorizontalAlign>")
+        .unwrap();
+    let group_vertical = xml
+        .find("<GroupVerticalAlign>Center</GroupVerticalAlign>")
+        .unwrap();
+    let representation = xml
+        .find("<PagesRepresentation>TabsOnTop</PagesRepresentation>")
+        .unwrap();
+
+    assert!(title < width, "the title opens the Pages tail");
+    assert!(width < height);
+    assert!(height < horizontal);
+    assert!(horizontal < vertical);
+    assert!(vertical < group_horizontal);
+    assert!(group_horizontal < group_vertical);
+    assert!(group_vertical < representation);
+}
+
+#[test]
+fn pages_group_omits_the_representation_the_platform_never_writes() {
+    // Same tuple with the representation tuple's last member set to `6`: the
+    // second member still reads `1`, and the platform writes no
+    // `<PagesRepresentation>` at all for that state.
+    let item = parse_form_child_item(
+        r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{4,1,{0,1,0},2,0,6},0,1,3,3,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(item.representation, None);
+    assert_eq!(item.group_horizontal_align, None);
+    assert_eq!(item.group_vertical_align, None);
+
+    let xml = format_form_child_items_xml(&[item], 1);
+
+    assert!(!xml.contains("<PagesRepresentation>"));
+    assert!(!xml.contains("<GroupHorizontalAlign>"));
+    assert!(!xml.contains("<GroupVerticalAlign>"));
+}
+
+#[test]
+fn maps_the_six_remaining_native_form_event_identifiers() {
+    for (uuid, name) in [
+        (
+            "44498116-1641-4bfa-ae33-86e53c205797",
+            "URLListGetProcessing",
+        ),
+        (
+            "ff33c4d6-a0db-4906-992e-37b3f44cd97a",
+            "RefreshRequestProcessing",
+        ),
+        (
+            "336b3ee5-d67f-4651-b098-e2c53f8317e2",
+            "OnLoadUserSettingsAtServer",
+        ),
+        (
+            "49ede602-af78-4a50-b821-ec81f6778f2d",
+            "MultipleValuesDelete",
+        ),
+        (
+            "2971b9a9-1724-4f34-aaa4-f3db584c3ca0",
+            "OnCurrentParentChange",
+        ),
+        (
+            "b98da5a8-349c-4159-a6a8-17a34ceb10ec",
+            "OnChangeDisplaySettings",
+        ),
+    ] {
+        assert_eq!(
+            form_event_name_from_identifier(uuid),
+            Some(name),
+            "event identifier {uuid}"
+        );
+    }
+}
+
+#[test]
 fn extracts_form_pages_and_page_from_layout_codes() {
     // The nested "Page" child's `group` needs `FormPageSchema` (`src/form_schema.rs`),
     // which requires an *exact* multiple-of-2-past-30 field count and a
@@ -59465,6 +59586,33 @@ fn form_field_default_item_trails_visible_and_user_visible() {
             &["<Visible>false</Visible>", "<UserVisible>", "<DefaultItem>"],
         );
     }
+}
+
+#[test]
+fn form_label_field_hiperlink_trails_the_stretch_pair() {
+    // UT 11.5.27.75 native tree, `LabelField`: `HorizontalStretch`<`Hiperlink`
+    // 98 co-occurrences, `VerticalStretch`<`Hiperlink` 5, `AutoMaxHeight` 3 and
+    // `MaxHeight` 2, with no counter-example, while `Hiperlink` still precedes
+    // `TextColor` (28), `Font` (9) and `BackColor` (5).
+    let mut item = form_child_item_for_order_test("LabelField");
+    item.auto_max_height = Some(false);
+    item.max_height = Some("4".to_string());
+    item.horizontal_stretch = Some(true);
+    item.vertical_stretch = Some(true);
+    item.hiperlink = Some(true);
+    item.text_color = Some("style:FormTextColor".to_string());
+    let xml = format_form_child_item_xml(&item, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<AutoMaxHeight>false</AutoMaxHeight>",
+            "<MaxHeight>4</MaxHeight>",
+            "<HorizontalStretch>true</HorizontalStretch>",
+            "<VerticalStretch>true</VerticalStretch>",
+            "<Hiperlink>true</Hiperlink>",
+            "<TextColor>style:FormTextColor</TextColor>",
+        ],
+    );
 }
 
 #[test]
