@@ -23,6 +23,30 @@ where
     )
 }
 
+/// Compiles requests against a heap-retention budget the caller derived from
+/// the size of the sources it is about to compile.
+///
+/// The budget can only raise the [`MAX_STORAGE_PATCH_RETAINED_BYTES`] floor;
+/// the target count and every other patch invariant are unchanged. This is the
+/// reverse-direction counterpart of deriving the image budget from a CF file:
+/// a compiler that knows how many source bytes it was handed does not need a
+/// fixed constant to guess a memory ceiling for it.
+pub fn compile_overlay_with_retained_budget<'a, I>(
+    axes: &CompileAxes,
+    requests: I,
+    maximum_retained_bytes: usize,
+) -> CompileResult<StoragePatch>
+where
+    I: IntoIterator<Item = CompileRequest<'a>>,
+{
+    compile_overlay_with_limits(
+        axes,
+        requests,
+        MAX_STORAGE_PATCH_ENTRIES,
+        maximum_retained_bytes.max(MAX_STORAGE_PATCH_RETAINED_BYTES),
+    )
+}
+
 fn compile_overlay_with_limits<'a, I>(
     axes: &CompileAxes,
     requests: I,
@@ -61,7 +85,7 @@ where
         retained_bytes = actual;
         entries.push(entry);
     }
-    StoragePatch::new(entries).map_err(Into::into)
+    StoragePatch::with_retained_byte_limit(entries, maximum_retained_bytes).map_err(Into::into)
 }
 
 #[cfg(test)]

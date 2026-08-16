@@ -333,7 +333,11 @@ where
         entries.push(entry);
     }
 
-    let image = StorageImage::new(entries).map_err(ArchiveDecodeError::StorageImage)?;
+    // The retention budget travels with the traversal limits so that a caller
+    // that derived them from the input file also gets a retention ceiling
+    // scaled to that file, instead of the unreachable module constant.
+    let image = StorageImage::with_retained_byte_limit(entries, limits.max_retained_bytes_usize())
+        .map_err(ArchiveDecodeError::StorageImage)?;
     Ok(CfArchive { metadata, image })
 }
 

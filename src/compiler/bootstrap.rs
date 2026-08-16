@@ -76,6 +76,15 @@ use super::{
     versions::compile_versions,
 };
 
+/// Heap-retention headroom the compiled patch gets over its own source bytes.
+///
+/// A compiled patch holds one deflated payload per storage row plus target keys
+/// and provenance, so it is normally *smaller* than the XML it was compiled
+/// from; the factor is deliberate slack for trees whose rows expand rather than
+/// a licence to grow without bound. `MAX_STORAGE_PATCH_RETAINED_BYTES` stays
+/// the floor, so nothing below it changes behaviour.
+const BOOTSTRAP_PATCH_RETENTION_FACTOR: usize = 4;
+
 /// Exact tree-root path of the one non-source document a native `config
 /// export` tree carries.
 const EXPORT_MANIFEST_PATH: &str = "ConfigDumpInfo.xml";
@@ -556,8 +565,21 @@ pub fn compile_bootstrap_source_tree(
         }
     }
 
-    let without_versions = StoragePatch::new(compiled.into_values().collect())
-        .map_err(|source| BootstrapCompileError::Patch(source.to_string()))?;
+    // The heap-retention ceiling for the compiled patch follows the size of the
+    // source tree that produced it, which this function already holds, instead
+    // of a fixed constant that has no way to know how large the input was. The
+    // constant remains the floor, so small trees behave exactly as before.
+    let patch_retained_budget = tree
+        .entries()
+        .iter()
+        .map(|entry| entry.bytes().len())
+        .sum::<usize>()
+        .saturating_mul(BOOTSTRAP_PATCH_RETENTION_FACTOR);
+    let without_versions = StoragePatch::with_retained_byte_limit(
+        compiled.into_values().collect(),
+        patch_retained_budget,
+    )
+    .map_err(|source| BootstrapCompileError::Patch(source.to_string()))?;
     graph
         .validate_patch_inventory(&without_versions, InventoryScope::BeforeVersions)
         .map_err(|source| BootstrapCompileError::Graph(source.to_string()))?;
@@ -571,7 +593,7 @@ pub fn compile_bootstrap_source_tree(
             .as_str()
             .cmp(right.target().key().as_str())
     });
-    let patch = StoragePatch::new(final_entries)
+    let patch = StoragePatch::with_retained_byte_limit(final_entries, patch_retained_budget)
         .map_err(|source| BootstrapCompileError::Patch(source.to_string()))?;
     graph
         .validate_patch_inventory(&patch, InventoryScope::Complete)

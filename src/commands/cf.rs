@@ -43,7 +43,7 @@ use crate::{
     compiler::{
         CompileAxes, CompileRequest, PrepackedSource, SourcePayload,
         bootstrap::{BootstrapCompileError, compile_bootstrap_source_tree},
-        compile_overlay,
+        overlay::compile_overlay_with_retained_budget,
     },
     module_blob::{
         pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
@@ -55,6 +55,56 @@ use crate::{
 };
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// Explicit operator override for the aggregate memory-budget base, in bytes.
+///
+/// Budgets normally follow the size of the input the operator named, which is
+/// the right answer for a CLI reading one local file. The override exists so
+/// that the one case the derivation cannot see — an input whose aggregate
+/// expansion legitimately exceeds `MAX_AGGREGATE_EXPANSION` — is a supported
+/// operator decision rather than a source edit and a rebuild. It can only
+/// raise the base, and an unparsable value fails the command closed instead of
+/// being silently ignored.
+const MEMORY_BUDGET_ENV: &str = "IBCMD_MEMORY_BUDGET_BYTES";
+
+/// Derives this command's resource limits from the input it was pointed at.
+///
+/// The shape defences (nesting depth, entry count, per-payload compression
+/// ratio, per-entry payload size) are identical at every input scale; only the
+/// aggregate byte budgets follow the input.
+fn input_limits(path: &Path) -> Result<ResourceLimits, String> {
+    let input_bytes = fs::metadata(path)
+        .map_err(|source| format!("failed to read the size of `{}`: {source}", path.display()))?
+        .len();
+    Ok(ResourceLimits::for_input_bytes(
+        input_bytes.max(memory_budget_override()?),
+    ))
+}
+
+/// Derives resource limits from an already-loaded input of known length.
+fn limits_for_len(input_bytes: usize) -> Result<ResourceLimits, String> {
+    let input_bytes = u64::try_from(input_bytes).unwrap_or(u64::MAX);
+    Ok(ResourceLimits::for_input_bytes(
+        input_bytes.max(memory_budget_override()?),
+    ))
+}
+
+fn memory_budget_override() -> Result<u64, String> {
+    match std::env::var(MEMORY_BUDGET_ENV) {
+        Err(std::env::VarError::NotPresent) => Ok(0),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+            "{MEMORY_BUDGET_ENV} must be a positive whole number of bytes"
+        )),
+        Ok(raw) => raw
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                format!("{MEMORY_BUDGET_ENV} must be a positive whole number of bytes, got `{raw}`")
+            }),
+    }
+}
 
 /// Family recorded for `--compiled-asset` payloads crossing the prepacked seam.
 const COMPILED_ASSET_FAMILY: &str = "cf-cli-compiled-asset";
@@ -357,6 +407,8 @@ fn extract(args: CfExtractArgs) -> Result<CfCommandReport, CfCommandError> {
         ));
     }
 
+    let limits = input_limits(&args.input)
+        .map_err(|message| extract_failure(&args, profile.clone(), "open_failed", message))?;
     let source = File::open(&args.input).map_err(|source| {
         extract_failure(
             &args,
@@ -365,15 +417,14 @@ fn extract(args: CfExtractArgs) -> Result<CfCommandReport, CfCommandError> {
             format!("failed to open `{}`: {source}", args.input.display()),
         )
     })?;
-    let mut reader =
-        StreamingReader::open(source, ResourceLimits::default()).map_err(|source| {
-            extract_failure(
-                &args,
-                profile.clone(),
-                "invalid_archive",
-                format!("failed to index CF archive: {source}"),
-            )
-        })?;
+    let mut reader = StreamingReader::open(source, limits).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "invalid_archive",
+            format!("failed to index CF archive: {source}"),
+        )
+    })?;
     if let Some(error) = duplicate_name_diagnostic(reader.index()) {
         return Err(extract_failure(&args, profile, error.code, error.message));
     }
@@ -412,7 +463,7 @@ fn extract(args: CfExtractArgs) -> Result<CfCommandReport, CfCommandError> {
             )
         })?;
     let encoding = payload_encoding(args.compression);
-    let mut decoder = PayloadDecoder::new(ResourceLimits::default());
+    let mut decoder = PayloadDecoder::new(limits);
     let unpacked = decoder.decode(encoding, &packed).map_err(|source| {
         extract_failure(
             &args,
@@ -552,6 +603,13 @@ fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
             ),
         )
     })?;
+    let source_bytes = tree
+        .entries()
+        .iter()
+        .map(|entry| entry.bytes().len())
+        .sum::<usize>();
+    let limits = limits_for_len(source_bytes)
+        .map_err(|message| bootstrap_failure(&args, "source_tree_invalid", message))?;
     let axes = args.source_version.version_axes();
     let compilation = compile_bootstrap_source_tree(&tree, axes.xml_dialect().clone(), target)
         .map_err(|source| bootstrap_compile_failure(&args, &source))?;
@@ -573,19 +631,15 @@ fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
     if let Some(page_size) = args.page_size {
         cf_profile = cf_profile.with_page_size(page_size);
     }
-    let publication = publish_bootstrap_patch_new(
-        compilation.into_patch(),
-        cf_profile,
-        &args.output,
-        ResourceLimits::default(),
-    )
-    .map_err(|source| {
-        bootstrap_failure(
-            &args,
-            "bootstrap_publish_failed",
-            format!("failed to publish bootstrap CF: {source}"),
-        )
-    })?;
+    let publication =
+        publish_bootstrap_patch_new(compilation.into_patch(), cf_profile, &args.output, limits)
+            .map_err(|source| {
+                bootstrap_failure(
+                    &args,
+                    "bootstrap_publish_failed",
+                    format!("failed to publish bootstrap CF: {source}"),
+                )
+            })?;
 
     Ok(CfCommandReport::Bootstrap(CfBootstrapReport {
         schema_version: REPORT_SCHEMA_VERSION,
@@ -688,6 +742,8 @@ fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
             format!("invalid storage profile `{}`: {source}", args.profile),
         )
     })?;
+    let limits = input_limits(&args.input)
+        .map_err(|message| export_failure(&args, profile.clone(), "open_failed", message))?;
     let source = File::open(&args.input).map_err(|source| {
         export_failure(
             &args,
@@ -700,7 +756,7 @@ fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
         .expect("static CF export provenance is valid");
     let archive = decode_archive_uniform(
         source,
-        ResourceLimits::default(),
+        limits,
         source_profile,
         provenance,
         payload_encoding(args.compression),
@@ -944,7 +1000,18 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
     let requests = requests
         .collect::<Result<Vec<_>, String>>()
         .map_err(|message| overlay_failure(&args, profile.clone(), "invalid_sources", message))?;
-    let patch = compile_overlay(&axes, requests).map_err(|source| {
+    let source_bytes = sources
+        .iter()
+        .map(|source| source.bytes.len())
+        .sum::<usize>();
+    let patch = compile_overlay_with_retained_budget(
+        &axes,
+        requests,
+        limits_for_len(source_bytes)
+            .map_err(|message| overlay_failure(&args, profile.clone(), "invalid_sources", message))?
+            .max_retained_bytes_usize(),
+    )
+    .map_err(|source| {
         overlay_failure(
             &args,
             profile.clone(),
@@ -953,6 +1020,8 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
         )
     })?;
 
+    let limits = input_limits(&args.base)
+        .map_err(|message| overlay_failure(&args, profile.clone(), "open_failed", message))?;
     let input = File::open(&args.base).map_err(|source| {
         overlay_failure(
             &args,
@@ -965,7 +1034,7 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
         .expect("static CF overlay provenance is valid");
     let archive = decode_archive_uniform(
         input,
-        ResourceLimits::default(),
+        limits,
         source_profile,
         provenance,
         payload_encoding(args.compression),
@@ -984,14 +1053,8 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
             .map(|source| (source.key.as_str(), source))
             .collect(),
     };
-    let published = publish_overlay_new(
-        &archive,
-        &patch,
-        &mut codec,
-        &args.output,
-        ResourceLimits::default(),
-    )
-    .map_err(|source| overlay_publish_failure(&args, profile.clone(), &source))?;
+    let published = publish_overlay_new(&archive, &patch, &mut codec, &args.output, limits)
+        .map_err(|source| overlay_publish_failure(&args, profile.clone(), &source))?;
 
     let publication = CfOverlayPublicationReport {
         revision: match published.publication.write.revision {
@@ -1021,13 +1084,10 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
 /// `StreamEnd` must be reached and the whole input must be consumed, so plain
 /// source bytes (or double-compressed bodies) can never be stored verbatim.
 fn validate_compiled_asset_stream(source: &OverlaySource) -> Result<(), String> {
-    decode_payload(
-        PayloadEncoding::RawDeflate,
-        &source.bytes,
-        ResourceLimits::default(),
-    )
-    .map(|_| ())
-    .map_err(|error| {
+    let limits = limits_for_len(source.bytes.len())?;
+    decode_payload(PayloadEncoding::RawDeflate, &source.bytes, limits)
+        .map(|_| ())
+        .map_err(|error| {
         format!(
             "--compiled-asset source `{}` for `{}` is not one complete raw-deflate stream: {error}; \
              --compiled-asset stores the file verbatim as the final physical payload, so plain \
@@ -1218,6 +1278,16 @@ fn execute(options: RunOptions) -> Result<CfReport, CfCommandError> {
         ));
     }
 
+    let limits = input_limits(&options.input).map_err(|message| {
+        failure(
+            &options,
+            profile.clone(),
+            None,
+            None,
+            Vec::new(),
+            diagnostic("open_failed", message),
+        )
+    })?;
     let source = File::open(&options.input).map_err(|source| {
         failure(
             &options,
@@ -1231,20 +1301,19 @@ fn execute(options: RunOptions) -> Result<CfReport, CfCommandError> {
             ),
         )
     })?;
-    let mut reader =
-        StreamingReader::open(source, ResourceLimits::default()).map_err(|source| {
-            failure(
-                &options,
-                profile.clone(),
-                None,
-                None,
-                Vec::new(),
-                diagnostic(
-                    "invalid_archive",
-                    format!("failed to index CF archive: {source}"),
-                ),
-            )
-        })?;
+    let mut reader = StreamingReader::open(source, limits).map_err(|source| {
+        failure(
+            &options,
+            profile.clone(),
+            None,
+            None,
+            Vec::new(),
+            diagnostic(
+                "invalid_archive",
+                format!("failed to index CF archive: {source}"),
+            ),
+        )
+    })?;
 
     let layout = layout_report(reader.index());
     if let Some(error) = duplicate_name_diagnostic(reader.index()) {
@@ -1279,7 +1348,7 @@ fn execute(options: RunOptions) -> Result<CfReport, CfCommandError> {
     }
 
     let encoding = payload_encoding(options.compression);
-    let mut decoder = PayloadDecoder::new(ResourceLimits::default());
+    let mut decoder = PayloadDecoder::new(limits);
     let mut elements = Vec::with_capacity(selected.len());
     let mut errors = Vec::new();
     for index in selected {
