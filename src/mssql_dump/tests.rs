@@ -59796,3 +59796,264 @@ fn resolves_business_process_object_standard_attribute_markers() {
         "`Posted` is a document marker and is not evidenced for business processes"
     );
 }
+
+/// The third slot of a form font tuple is a member bitmask: every attribute
+/// the platform writes has its own bit, the values appear in the tuple in
+/// mask-bit order with `faceName` stored last, and bit 9 forces the trailing
+/// `scale` even at its `100` default. The tuples below are the shapes observed
+/// in the native "1С:Управление торговлей 11.5.27.75" form dumps.
+#[test]
+fn decodes_form_font_tuple_mask_members() {
+    let object_refs = BTreeMap::new();
+    for (tuple, expected) in [
+        // Mask 0: nothing but the reference.
+        (
+            "{7,1,0,{0},1,100}",
+            r#"<Font ref="sys:DefaultGUIFont" kind="WindowsFont"/>"#,
+        ),
+        // Bit 2 alone: bold, and nothing else.
+        (
+            "{7,1,4,{0},700,1,100}",
+            r#"<Font ref="sys:DefaultGUIFont" bold="true" kind="WindowsFont"/>"#,
+        ),
+        // Bit 4 alone: underline.
+        (
+            "{7,2,16,{-31},1,1,100}",
+            r#"<Font ref="style:NormalTextFont" underline="true" kind="StyleItem"/>"#,
+        ),
+        // Bit 1 alone: height, in tenths of a point.
+        (
+            "{7,2,2,{-20},120,1,100}",
+            r#"<Font ref="style:TextFont" height="12" kind="StyleItem"/>"#,
+        ),
+        // A zero height is still written.
+        (
+            "{7,2,2,{-31},0,1,100}",
+            r#"<Font ref="style:NormalTextFont" height="0" kind="StyleItem"/>"#,
+        ),
+        // Bits 2..5: the four flags without a height.
+        (
+            "{7,1,60,{0},700,0,0,0,1,100}",
+            r#"<Font ref="sys:DefaultGUIFont" bold="true" italic="false" underline="false" strikeout="false" kind="WindowsFont"/>"#,
+        ),
+        // Bits 0 and 1: `faceName` is stored after the height but written before it.
+        (
+            "{7,2,3,{-31},70,\"BatangChe\",1,100}",
+            r#"<Font ref="style:NormalTextFont" faceName="BatangChe" height="7" kind="StyleItem"/>"#,
+        ),
+        // Bit 9 forces the `scale` attribute even at the `100` default.
+        (
+            "{7,2,514,{-31},110,1,100}",
+            r#"<Font ref="style:NormalTextFont" height="11" kind="StyleItem" scale="100"/>"#,
+        ),
+        // The auto kind carries no reference and only reaches the XML with a member set.
+        (
+            "{7,3,4,700,1,100}",
+            r#"<Font bold="true" kind="AutoFont"/>"#,
+        ),
+        (
+            "{7,3,8,1,1,100}",
+            r#"<Font italic="true" kind="AutoFont"/>"#,
+        ),
+        // The absolute kind spells every member out in a fixed 19-slot layout.
+        (
+            "{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"\",1,100}",
+            r#"<Font faceName="" height="8" bold="true" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/>"#,
+        ),
+    ] {
+        assert_eq!(
+            parse_form_font_tuple_xml(tuple, &object_refs).as_deref(),
+            Some(expected),
+            "font tuple {tuple}"
+        );
+    }
+
+    // The empty auto font is the ubiquitous default and is written nowhere.
+    assert_eq!(
+        parse_form_font_tuple_xml("{7,3,0,1,100}", &object_refs),
+        None
+    );
+    // A member count that disagrees with the mask is a refusal, not a guess.
+    assert_eq!(
+        parse_form_font_tuple_xml("{7,1,60,{0},700,0,1,100}", &object_refs),
+        None
+    );
+    // So is a colour tuple that happens to sit in a font slot.
+    assert_eq!(parse_form_font_tuple_xml("{3,4,{0}}", &object_refs), None);
+    // And so is a style reference that cannot be resolved.
+    assert_eq!(
+        parse_form_font_tuple_xml(
+            "{7,2,2,{0,cccccccc-cccc-4ccc-8ccc-cccccccccccc},120,1,100}",
+            &object_refs
+        ),
+        None
+    );
+
+    assert_eq!(
+        parse_form_title_font_tuple_xml("{7,1,4,{0},700,1,100}", &object_refs).as_deref(),
+        Some(r#"<TitleFont ref="sys:DefaultGUIFont" bold="true" kind="WindowsFont"/>"#)
+    );
+}
+
+/// A `UsualGroup` title font is not restricted to the style-item kind: the
+/// platform writes the Windows-font and absolute kinds from the same slot 17.
+#[test]
+fn extracts_usual_group_title_font_for_every_font_kind() {
+    let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#;
+
+    for (tuple, expected) in [
+        (
+            "{7,1,60,{0},700,0,0,0,1,100}",
+            r#"<TitleFont ref="sys:DefaultGUIFont" bold="true" italic="false" underline="false" strikeout="false" kind="WindowsFont"/>"#,
+        ),
+        (
+            "{7,2,62,{-31},90,700,0,0,0,1,100}",
+            r#"<TitleFont ref="style:NormalTextFont" height="9" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem"/>"#,
+        ),
+        (
+            "{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"\",1,100}",
+            r#"<TitleFont faceName="" height="8" bold="true" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/>"#,
+        ),
+    ] {
+        let field = base.replacen("{7,3,0,1,100}", tuple, 1);
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            item.title_font_xml.as_deref(),
+            Some(expected),
+            "tuple {tuple}"
+        );
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        let title_at = xml.find("<Title>").unwrap();
+        let font_at = xml.find(expected).unwrap();
+        let group_at = xml.find("<Group>Vertical</Group>").unwrap();
+        assert!(title_at < font_at && font_at < group_at);
+    }
+
+    // The unset default stays unwritten.
+    let item = parse_form_child_item(
+        base,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.title_font_xml, None);
+}
+
+/// `Hiperlink` is a flag in slot 7 of the `LabelField` option tuple, and the
+/// geometry members live in the tuple's tail (15..19), not next to it.
+#[test]
+#[allow(clippy::too_many_arguments)]
+fn reads_label_field_hyperlink_and_geometry_from_their_own_option_slots() {
+    fn options(
+        width: &str,
+        height: &str,
+        horizontal: &str,
+        vertical: &str,
+        hyperlink: &str,
+        auto_max_width: &str,
+        max_width: &str,
+        auto_max_height: &str,
+        max_height: &str,
+    ) -> String {
+        format!(
+            "{{11,{width},{height},{horizontal},{vertical},0,{{1,0}},{hyperlink},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},2,{{0,1,0}},{{3,4,{{0}}}},{{3,4,{{0}}}},{auto_max_width},{max_width},0,{auto_max_height},{max_height}}}"
+        )
+    }
+    fn parse(options: &str) -> FormLabelFieldOptions {
+        // Slot 6 carries the item name, which is what pins the layout to the
+        // unshifted top-level variant.
+        let mut fields = vec!["0"; 40];
+        fields[6] = "\"Label\"";
+        fields[39] = options;
+        parse_form_label_field_options(&fields, &BTreeMap::new()).unwrap()
+    }
+
+    // The all-default tuple writes nothing at all.
+    let quiet = options("0", "0", "2", "2", "0", "1", "0", "1", "0");
+    let parsed = parse(&quiet);
+    assert!(!parsed.hyperlink_style);
+    assert_eq!(parsed.width, None);
+    assert_eq!(parsed.height, None);
+    assert_eq!(parsed.horizontal_stretch, None);
+    assert_eq!(parsed.vertical_stretch, None);
+    assert_eq!(parsed.auto_max_width, None);
+    assert_eq!(parsed.max_width, None);
+    assert_eq!(parsed.auto_max_height, None);
+    assert_eq!(parsed.max_height, None);
+
+    let loud = options("12", "3", "1", "0", "1", "0", "11", "0", "7");
+    let parsed = parse(&loud);
+    assert!(parsed.hyperlink_style);
+    assert_eq!(parsed.width.as_deref(), Some("12"));
+    assert_eq!(parsed.height.as_deref(), Some("3"));
+    assert_eq!(parsed.horizontal_stretch, Some(true));
+    assert_eq!(parsed.vertical_stretch, Some(false));
+    assert_eq!(parsed.auto_max_width, Some(false));
+    assert_eq!(parsed.max_width.as_deref(), Some("11"));
+    assert_eq!(parsed.auto_max_height, Some(false));
+    assert_eq!(parsed.max_height.as_deref(), Some("7"));
+
+    // A hyperlink label keeps its own geometry; the flag hides nothing.
+    let hyperlink_with_width = options("12", "0", "2", "2", "1", "1", "0", "1", "0");
+    let parsed = parse(&hyperlink_with_width);
+    assert!(parsed.hyperlink_style);
+    assert_eq!(parsed.width.as_deref(), Some("12"));
+}
+
+/// The grouping child items share one geometry window in slots 12..15, where
+/// `0` is the unwritten extent default and `2` the unwritten stretch default.
+#[test]
+fn reads_group_layout_geometry_from_the_shared_slot_window() {
+    let mut fields = vec!["0"; 18];
+    fields[FORM_GROUP_WIDTH_SLOT] = "43";
+    fields[FORM_GROUP_HEIGHT_SLOT] = "0";
+    fields[FORM_GROUP_HORIZONTAL_STRETCH_SLOT] = "1";
+    fields[FORM_GROUP_VERTICAL_STRETCH_SLOT] = "2";
+
+    for tag in FORM_GROUP_LAYOUT_TAGS {
+        assert_eq!(
+            parse_form_group_extent(tag, &fields, FORM_GROUP_WIDTH_SLOT).as_deref(),
+            Some("43"),
+            "{tag} width"
+        );
+        assert_eq!(
+            parse_form_group_extent(tag, &fields, FORM_GROUP_HEIGHT_SLOT),
+            None,
+            "{tag} height"
+        );
+        assert_eq!(
+            parse_form_group_stretch(tag, &fields, FORM_GROUP_HORIZONTAL_STRETCH_SLOT),
+            Some(true),
+            "{tag} horizontal stretch"
+        );
+        assert_eq!(
+            parse_form_group_stretch(tag, &fields, FORM_GROUP_VERTICAL_STRETCH_SLOT),
+            None,
+            "{tag} vertical stretch"
+        );
+    }
+
+    // A field item shares neither the window nor its defaults.
+    assert_eq!(
+        parse_form_group_extent("InputField", &fields, FORM_GROUP_WIDTH_SLOT),
+        None
+    );
+    assert_eq!(
+        parse_form_group_stretch("InputField", &fields, FORM_GROUP_HORIZONTAL_STRETCH_SLOT),
+        None
+    );
+}

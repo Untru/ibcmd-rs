@@ -5444,26 +5444,40 @@ pub(crate) enum FormLabelFieldOptionSlot {
     Width,
     Height,
     HorizontalStretch,
+    VerticalStretch,
     Format,
-    MaxWidth,
+    Hiperlink,
     TextColor,
     Font,
     AutoMaxWidth,
+    MaxWidth,
     AutoMaxHeight,
+    MaxHeight,
 }
 
 impl FormLabelFieldOptionSlot {
+    /// Slots of the 20-member `11`-discriminated `LabelField` option tuple.
+    ///
+    /// The geometry slots are the ones that reproduce every `<Width>`,
+    /// `<Height>`, `<MaxWidth>`, `<MaxHeight>`, `<AutoMaxWidth>`,
+    /// `<AutoMaxHeight>`, `<HorizontalStretch>` and `<VerticalStretch>` the
+    /// platform writes on the 8 337 `LabelField` items of the native
+    /// "1С:Управление торговлей 11.5.27.75" form dumps, with no misses and no
+    /// false positives on the items that carry none of them.
     pub(crate) const fn index(self) -> usize {
         match self {
             Self::Width => 1,
             Self::Height => 2,
             Self::HorizontalStretch => 3,
+            Self::VerticalStretch => 4,
             Self::Format => 6,
-            Self::MaxWidth => 7,
+            Self::Hiperlink => 7,
             Self::TextColor => 8,
             Self::Font => 10,
             Self::AutoMaxWidth => 15,
+            Self::MaxWidth => 16,
             Self::AutoMaxHeight => 18,
+            Self::MaxHeight => 19,
         }
     }
 }

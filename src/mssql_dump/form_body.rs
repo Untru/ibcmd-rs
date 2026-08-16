@@ -7653,8 +7653,12 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             Vec::new()
         },
-        title_font_xml: if tag == "UsualGroup" {
+        title_font_xml: if form_group_layout_tag(tag) {
             parse_form_usual_group_title_font_xml(&fields, object_refs)
+        } else if tag == "Table" {
+            fields
+                .get(FORM_TABLE_TITLE_FONT_SLOT)
+                .and_then(|field| parse_form_title_font_tuple_xml(field, object_refs))
         } else if matches!(wrapper, "37" | "48")
             && matches!(
                 tag,
@@ -7679,7 +7683,10 @@ fn parse_form_child_item_with_metadata_owners(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.font_xml.clone())
-        } else if tag == "LabelDecoration" && !title.is_empty() {
+        } else if tag == "LabelDecoration" {
+            // A titleless decoration still carries its own font: the platform
+            // writes `<Font>` for every decoration whose font tuple has any
+            // member set, title or no title.
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.font_xml.clone())
@@ -7689,8 +7696,16 @@ fn parse_form_child_item_with_metadata_owners(
             parse_form_radio_button_font_xml(radio_button_options.as_deref(), object_refs)
         } else if let Some(field) = button_common_schema.and_then(|schema| schema.font(&fields)) {
             parse_form_button_font_tuple_xml(field, object_refs)
+        } else if tag == "PictureDecoration" {
+            fields
+                .get(FORM_LABEL_DECORATION_FONT_SLOT)
+                .and_then(|field| parse_form_font_tuple_xml(field, object_refs))
+        } else if tag == "Table" {
+            fields
+                .get(FORM_TABLE_FONT_SLOT)
+                .and_then(|field| parse_form_font_tuple_xml(field, object_refs))
         } else {
-            None
+            parse_form_document_field_font_xml(tag, fields, object_refs)
         },
         width: if let Some(schema) = command_bar_schema {
             schema.width(&fields)
@@ -7737,8 +7752,12 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(16 + button_top_level_offset)
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if let Some(value) =
+            parse_form_document_field_extent(tag, fields, |layout| layout.width)
+        {
+            Some(value)
         } else {
-            None
+            parse_form_group_extent(tag, fields, FORM_GROUP_WIDTH_SLOT)
         },
         height: if let Some(schema) = command_bar_schema {
             schema.height(&fields)
@@ -7769,11 +7788,6 @@ fn parse_form_child_item_with_metadata_owners(
                         && default_height != Some(value.as_str())
                         && value.parse::<u32>().is_ok()
                 })
-        } else if tag == "TextDocumentField" && form_input_field_layout_is_extended(&fields) {
-            fields
-                .get(23)
-                .map(|field| field.trim().to_string())
-                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else if tag == "Table" {
             table_schema.and_then(|schema| schema.height(&fields))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
@@ -7797,8 +7811,12 @@ fn parse_form_child_item_with_metadata_owners(
                 .filter(|value| value != "0")
         } else if let Some(schema) = button_common_schema {
             schema.height(&fields)
+        } else if let Some(value) =
+            parse_form_document_field_extent(tag, fields, |layout| layout.height)
+        {
+            Some(value)
         } else {
-            None
+            parse_form_group_extent(tag, fields, FORM_GROUP_HEIGHT_SLOT)
         },
         show_current_date: if tag == "CalendarField" {
             document_field_options
@@ -7858,10 +7876,15 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|properties| properties.auto_max_width())
         } else if let Some((schema, options)) = special_field_layout.as_ref() {
             schema.auto_max_width(options)
-        } else if let Some(schema) = table_schema {
-            schema.auto_max_width(&fields)
+        } else if let Some(value) = table_schema.and_then(|schema| schema.auto_max_width(&fields)) {
+            Some(value)
+        } else if let Some(value) = parse_form_table_off_flag(
+            tag,
+            form_table_tail_slot(fields, FORM_TABLE_AUTO_MAX_WIDTH_FROM_END),
+        ) {
+            Some(value)
         } else {
-            None
+            parse_form_document_field_flag(tag, fields, |layout| layout.auto_max_width)
         },
         max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_max_width(input_field_extended_options.as_deref())
@@ -7879,13 +7902,19 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.max_width().map(str::to_owned))
+        } else if let Some(value) =
+            parse_form_table_max_extent(tag, fields, FORM_TABLE_MAX_WIDTH_FROM_END)
+        {
+            Some(value)
         } else {
-            None
+            parse_form_document_field_max_extent(tag, fields, |layout| layout.max_width)
         },
         auto_max_height: if let Some(properties) = spreadsheet_document_properties.as_ref() {
             properties.auto_max_height
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_auto_max_height(input_field_extended_options.as_deref())
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
+            parse_form_button_auto_max_width(fields.get(37 + button_top_level_offset).copied())
         } else if tag == "LabelField" {
             label_field_options
                 .as_ref()
@@ -7898,16 +7927,22 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.auto_max_height())
-        } else if ordinary_table_layout {
-            match fields.get(53).map(|field| field.trim()) {
-                Some("0") if fields.get(20).map(|field| field.trim()) != Some("0") => Some(false),
-                _ => None,
-            }
+        } else if tag == "Table" {
+            parse_form_table_off_flag(
+                tag,
+                form_table_tail_slot(fields, FORM_TABLE_AUTO_MAX_HEIGHT_FROM_END),
+            )
         } else {
-            None
+            parse_form_document_field_flag(tag, fields, |layout| layout.auto_max_height)
         },
         max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_max_height(input_field_extended_options.as_deref())
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
+            parse_form_button_max_width(fields.get(38 + button_top_level_offset).copied())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.max_height.clone())
         } else if tag == "LabelDecoration" {
             label_decoration_options
                 .as_ref()
@@ -7916,8 +7951,12 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.max_height().map(str::to_owned))
+        } else if let Some(value) =
+            parse_form_table_max_extent(tag, fields, FORM_TABLE_MAX_HEIGHT_FROM_END)
+        {
+            Some(value)
         } else {
-            None
+            parse_form_document_field_max_extent(tag, fields, |layout| layout.max_height)
         },
         horizontal_stretch: if let Some(schema) = command_bar_schema {
             schema.horizontal_stretch(&fields)
@@ -7949,8 +7988,19 @@ fn parse_form_child_item_with_metadata_owners(
             page_properties.and_then(|properties| properties.horizontal_stretch())
         } else if let Some((schema, options)) = special_field_layout.as_ref() {
             schema.horizontal_stretch(options)
+        } else if let Some(value) =
+            parse_form_document_field_flag(tag, fields, |layout| layout.horizontal_stretch)
+        {
+            Some(value)
+        } else if let Some(value) = parse_form_table_off_flag(
+            tag,
+            fields
+                .get(FORM_TABLE_HORIZONTAL_STRETCH_SLOT)
+                .map(|field| field.trim()),
+        ) {
+            Some(value)
         } else {
-            None
+            parse_form_group_stretch(tag, fields, FORM_GROUP_HORIZONTAL_STRETCH_SLOT)
         },
         vertical_stretch: if let Some(schema) = button_common_schema {
             schema.vertical_stretch(&fields)
@@ -7958,6 +8008,10 @@ fn parse_form_child_item_with_metadata_owners(
             properties.vertical_stretch
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_vertical_stretch(input_field_extended_options.as_deref())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.vertical_stretch)
         } else if tag == "LabelDecoration" {
             label_decoration_options
                 .as_ref()
@@ -7974,8 +8028,19 @@ fn parse_form_child_item_with_metadata_owners(
             parse_form_usual_group_vertical_stretch(&fields)
         } else if tag == "Page" {
             page_properties.and_then(|properties| properties.vertical_stretch())
+        } else if let Some(value) =
+            parse_form_document_field_flag(tag, fields, |layout| layout.vertical_stretch)
+        {
+            Some(value)
+        } else if let Some(value) = parse_form_table_off_flag(
+            tag,
+            fields
+                .get(FORM_TABLE_VERTICAL_STRETCH_SLOT)
+                .map(|field| field.trim()),
+        ) {
+            Some(value)
         } else {
-            None
+            parse_form_group_stretch(tag, fields, FORM_GROUP_VERTICAL_STRETCH_SLOT)
         },
         spreadsheet_document_properties,
         max_value: special_field_layout
@@ -8610,7 +8675,9 @@ pub(super) struct FormLabelFieldOptions {
     pub(super) auto_max_width: Option<bool>,
     pub(super) max_width: Option<String>,
     pub(super) auto_max_height: Option<bool>,
+    pub(super) max_height: Option<String>,
     pub(super) horizontal_stretch: Option<bool>,
+    pub(super) vertical_stretch: Option<bool>,
     pub(super) format: Vec<(String, String)>,
     pub(super) font_xml: Option<String>,
     pub(super) text_color: Option<String>,
@@ -8692,69 +8759,26 @@ pub(super) fn parse_form_label_field_options(
     if options.first()?.trim() != "11" {
         return None;
     }
-    let width = options
-        .get(LabelFieldSlot::Width.index())
+    // `Hiperlink` has its own flag in slot 7; it is not a shape inferred from
+    // which geometry members happen to be set. The geometry members below sit
+    // in the tail of the tuple (slots 15..19), which is why a hyperlink label
+    // used to look like a label whose `<Width>` had gone missing.
+    let hyperlink_style = options
+        .get(LabelFieldSlot::Hiperlink.index())
         .map(|field| field.trim())
-        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
-        .map(str::to_string);
-    let max_width = options
-        .get(LabelFieldSlot::MaxWidth.index())
-        .map(|field| field.trim())
-        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
-        .map(str::to_string);
-    let text_color = options
-        .get(LabelFieldSlot::TextColor.index())
-        .and_then(|field| parse_form_label_field_text_color(field, object_refs));
-    let hyperlink_style = width.is_none() && max_width.is_some();
+        == Some("1");
     Some(FormLabelFieldOptions {
-        width: if hyperlink_style { None } else { width },
-        height: if hyperlink_style {
-            None
-        } else {
-            options
-                .get(LabelFieldSlot::Height.index())
-                .map(|field| field.trim())
-                .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
-                .map(str::to_string)
-        },
-        // `AutoMaxWidth` is *not* part of what the hyperlink shape suppresses:
-        // a hyperlink LabelField carries its own `<AutoMaxWidth>false</AutoMaxWidth>`
-        // right next to `<Hiperlink>true</Hiperlink>` in the platform's own
-        // `config export` output, with no `<Width>` and no `<MaxWidth>`
-        // alongside it (352 of the 818 hyperlink LabelFields in the retained
-        // native tree of 1C:Trade Management 11.5.27.75 carry it). Only the
-        // width-bearing properties below are hidden by the hyperlink shape.
-        auto_max_width: match options
-            .get(LabelFieldSlot::AutoMaxWidth.index())
-            .map(|field| field.trim())
-        {
-            Some("0") => Some(false),
-            _ => None,
-        },
-        max_width: if hyperlink_style { None } else { max_width },
-        auto_max_height: if hyperlink_style {
-            None
-        } else {
-            match options
-                .get(LabelFieldSlot::AutoMaxHeight.index())
-                .map(|field| field.trim())
-            {
-                Some("0") => Some(false),
-                _ => None,
-            }
-        },
-        horizontal_stretch: if hyperlink_style {
-            None
-        } else {
-            match options
-                .get(LabelFieldSlot::HorizontalStretch.index())
-                .map(|field| field.trim())
-            {
-                Some("0") => Some(false),
-                Some("1") => Some(true),
-                _ => None,
-            }
-        },
+        width: parse_form_label_field_extent(&options, LabelFieldSlot::Width),
+        height: parse_form_label_field_extent(&options, LabelFieldSlot::Height),
+        auto_max_width: parse_form_label_field_auto_max(&options, LabelFieldSlot::AutoMaxWidth),
+        max_width: parse_form_label_field_extent(&options, LabelFieldSlot::MaxWidth),
+        auto_max_height: parse_form_label_field_auto_max(&options, LabelFieldSlot::AutoMaxHeight),
+        max_height: parse_form_label_field_extent(&options, LabelFieldSlot::MaxHeight),
+        horizontal_stretch: parse_form_label_field_stretch(
+            &options,
+            LabelFieldSlot::HorizontalStretch,
+        ),
+        vertical_stretch: parse_form_label_field_stretch(&options, LabelFieldSlot::VerticalStretch),
         format: options
             .get(LabelFieldSlot::Format.index())
             .map(|field| parse_form_localized_strings(field))
@@ -8762,9 +8786,37 @@ pub(super) fn parse_form_label_field_options(
         font_xml: options
             .get(LabelFieldSlot::Font.index())
             .and_then(|field| parse_form_font_tuple_xml(field, object_refs)),
-        text_color: if hyperlink_style { None } else { text_color },
+        text_color: options
+            .get(LabelFieldSlot::TextColor.index())
+            .and_then(|field| parse_form_label_field_text_color(field, object_refs)),
         hyperlink_style,
     })
+}
+
+/// A zero extent slot means the platform writes no element at all.
+fn parse_form_label_field_extent(options: &[&str], slot: LabelFieldSlot) -> Option<String> {
+    options
+        .get(slot.index())
+        .map(|field| field.trim())
+        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+        .map(str::to_string)
+}
+
+/// The auto-max flags default to on and are only written when switched off.
+fn parse_form_label_field_auto_max(options: &[&str], slot: LabelFieldSlot) -> Option<bool> {
+    match options.get(slot.index()).map(|field| field.trim()) {
+        Some("0") => Some(false),
+        _ => None,
+    }
+}
+
+/// The stretch flags carry a third `2` state that means "unset".
+fn parse_form_label_field_stretch(options: &[&str], slot: LabelFieldSlot) -> Option<bool> {
+    match options.get(slot.index()).map(|field| field.trim()) {
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        _ => None,
+    }
 }
 
 pub(super) fn parse_form_label_field_text_color(
@@ -8873,7 +8925,7 @@ pub(super) fn parse_form_label_decoration_options(
     Some(FormLabelDecorationOptions {
         hyperlink: options.get(1).map(|field| field.trim()) == Some("1"),
         font_xml: fields
-            .get(15)
+            .get(FORM_LABEL_DECORATION_FONT_SLOT)
             .and_then(|field| parse_form_font_tuple_xml(field, object_refs)),
         text_color: fields
             .get(14)
@@ -8918,31 +8970,282 @@ pub(super) fn parse_form_usual_group_title_text_color(
     None
 }
 
-fn form_usual_group_title_font_fields<'a>(
-    raw: &'a str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<&'a str>> {
-    let font = split_1c_braced_fields(raw, 0)?;
-    if !matches!(font.first()?.trim(), "7" | "8") || font.get(1)?.trim() != "2" {
+/// The grouping child items -- `UsualGroup` and its `Popup`/`Pages`/`Page`/
+/// `ColumnGroup` siblings -- all carry their title font in the same top-level
+/// slot 17.
+pub(super) const FORM_GROUP_TITLE_FONT_SLOT: usize = 17;
+
+/// The child items that share the grouping layout: their geometry sits in the
+/// same four top-level slots ahead of the title colour and title font.
+pub(super) const FORM_GROUP_LAYOUT_TAGS: [&str; 7] = [
+    "UsualGroup",
+    "Popup",
+    "Pages",
+    "Page",
+    "ColumnGroup",
+    "CommandBar",
+    "ButtonGroup",
+];
+
+pub(super) const FORM_GROUP_WIDTH_SLOT: usize = 12;
+pub(super) const FORM_GROUP_HEIGHT_SLOT: usize = 13;
+pub(super) const FORM_GROUP_HORIZONTAL_STRETCH_SLOT: usize = 14;
+pub(super) const FORM_GROUP_VERTICAL_STRETCH_SLOT: usize = 15;
+
+pub(super) fn form_group_layout_tag(tag: &str) -> bool {
+    FORM_GROUP_LAYOUT_TAGS.contains(&tag)
+}
+
+/// A `Table`'s max-extent geometry sits in a fixed window counted back from
+/// the end of the item tuple, which is what keeps it in place across the
+/// several `Table` layout lengths.
+const FORM_TABLE_AUTO_MAX_WIDTH_FROM_END: usize = 15;
+const FORM_TABLE_MAX_WIDTH_FROM_END: usize = 14;
+const FORM_TABLE_AUTO_MAX_HEIGHT_FROM_END: usize = 12;
+const FORM_TABLE_MAX_HEIGHT_FROM_END: usize = 11;
+const FORM_TABLE_HORIZONTAL_STRETCH_SLOT: usize = 41;
+const FORM_TABLE_VERTICAL_STRETCH_SLOT: usize = 42;
+pub(super) const FORM_TABLE_FONT_SLOT: usize = 48;
+pub(super) const FORM_TABLE_TITLE_FONT_SLOT: usize = 50;
+
+/// `LabelDecoration` and `PictureDecoration` share a layout whose font tuple
+/// sits in top-level slot 15.
+pub(super) const FORM_LABEL_DECORATION_FONT_SLOT: usize = 15;
+
+fn form_table_tail_slot<'a>(fields: &[&'a str], from_end: usize) -> Option<&'a str> {
+    fields
+        .len()
+        .checked_sub(from_end)
+        .and_then(|slot| fields.get(slot))
+        .map(|field| field.trim())
+}
+
+fn parse_form_table_max_extent(tag: &str, fields: &[&str], from_end: usize) -> Option<String> {
+    if tag != "Table" {
         return None;
     }
-    match font.len() {
-        6 if font.get(2)?.trim() == "0"
-            && font.get(4)?.trim() == "1"
-            && font.get(5)?.trim() == "100" => {}
-        10 if font.get(8)?.trim() == "1" => {}
-        _ => return None,
+    form_table_tail_slot(fields, from_end)
+        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+        .map(str::to_string)
+}
+
+/// The `Table` auto-max and stretch flags default to on; only the `0` state
+/// reaches the XML.
+fn parse_form_table_off_flag(tag: &str, value: Option<&str>) -> Option<bool> {
+    if tag != "Table" {
+        return None;
     }
-    style_body_ref_name(font.get(3)?.trim(), object_refs)?;
-    Some(font)
+    (value? == "0").then_some(false)
+}
+
+/// Geometry slots of the document-field option tuple in top-level slot 39.
+///
+/// Each document field kind has its own discriminator, its own tuple length
+/// and its own tail slots, but they all share the same shape: an extent slot
+/// whose default value means "unwritten", and an auto-max/stretch flag whose
+/// default `1` likewise means "unwritten". The slot numbers and defaults are
+/// the ones that reproduce every geometry element the platform writes on the
+/// document fields of the native "1С:Управление торговлей 11.5.27.75" form
+/// dumps without writing one it leaves out.
+struct FormDocumentFieldGeometry {
+    discriminator: &'static str,
+    len: usize,
+    /// `(slot, default)` for `<Width>`, `<Height>`, `<MaxWidth>`, `<MaxHeight>`.
+    width: Option<(usize, &'static str)>,
+    height: Option<(usize, &'static str)>,
+    max_width: Option<usize>,
+    max_height: Option<usize>,
+    /// `slot` for the flags whose unwritten default is `1`.
+    auto_max_width: Option<usize>,
+    auto_max_height: Option<usize>,
+    horizontal_stretch: Option<usize>,
+    vertical_stretch: Option<usize>,
+    /// Slot of the field's own `<Font>` tuple, where the kind has one.
+    font: Option<usize>,
+}
+
+const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
+    (
+        "HTMLDocumentField",
+        FormDocumentFieldGeometry {
+            discriminator: "3",
+            len: 13,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: Some(7),
+            max_height: Some(10),
+            auto_max_width: Some(6),
+            auto_max_height: Some(9),
+            horizontal_stretch: Some(11),
+            vertical_stretch: Some(12),
+            font: None,
+        },
+    ),
+    (
+        "TextDocumentField",
+        FormDocumentFieldGeometry {
+            discriminator: "5",
+            len: 16,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: Some(11),
+            max_height: None,
+            auto_max_width: Some(10),
+            auto_max_height: Some(13),
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            font: None,
+        },
+    ),
+    (
+        "SpreadSheetDocumentField",
+        FormDocumentFieldGeometry {
+            discriminator: "13",
+            len: 32,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: Some(21),
+            max_height: Some(24),
+            auto_max_width: Some(20),
+            auto_max_height: Some(23),
+            horizontal_stretch: Some(3),
+            vertical_stretch: Some(4),
+            font: None,
+        },
+    ),
+    (
+        "PictureField",
+        FormDocumentFieldGeometry {
+            discriminator: "10",
+            len: 24,
+            width: Some((1, "0")),
+            height: Some((2, "0")),
+            max_width: Some(18),
+            max_height: Some(21),
+            auto_max_width: Some(17),
+            auto_max_height: Some(20),
+            horizontal_stretch: Some(3),
+            vertical_stretch: Some(4),
+            font: Some(12),
+        },
+    ),
+    (
+        "FormattedDocumentField",
+        FormDocumentFieldGeometry {
+            discriminator: "1",
+            len: 16,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: None,
+            auto_max_width: Some(11),
+            auto_max_height: Some(14),
+            horizontal_stretch: Some(3),
+            vertical_stretch: Some(4),
+            font: Some(9),
+        },
+    ),
+];
+
+fn form_document_field_geometry_options<'a>(
+    tag: &str,
+    fields: &[&'a str],
+) -> Option<(&'static FormDocumentFieldGeometry, Vec<&'a str>)> {
+    let layout = FORM_DOCUMENT_FIELD_GEOMETRY
+        .iter()
+        .find_map(|(candidate, layout)| (*candidate == tag).then_some(layout))?;
+    let options = split_1c_braced_fields(fields.get(39)?.trim(), 0)?;
+    (options.first()?.trim() == layout.discriminator && options.len() == layout.len)
+        .then_some((layout, options))
+}
+
+/// `None` for every document-field kind that has no such slot, and for the
+/// slot's own default -- which is exactly what the platform leaves unwritten.
+fn parse_form_document_field_extent(
+    tag: &str,
+    fields: &[&str],
+    pick: fn(&FormDocumentFieldGeometry) -> Option<(usize, &'static str)>,
+) -> Option<String> {
+    let (layout, options) = form_document_field_geometry_options(tag, fields)?;
+    let (slot, default) = pick(layout)?;
+    options
+        .get(slot)
+        .map(|field| field.trim())
+        .filter(|value| *value != default && *value != "0" && value.parse::<u32>().is_ok())
+        .map(str::to_string)
+}
+
+fn parse_form_document_field_max_extent(
+    tag: &str,
+    fields: &[&str],
+    pick: fn(&FormDocumentFieldGeometry) -> Option<usize>,
+) -> Option<String> {
+    let (layout, options) = form_document_field_geometry_options(tag, fields)?;
+    let slot = pick(layout)?;
+    options
+        .get(slot)
+        .map(|field| field.trim())
+        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+        .map(str::to_string)
+}
+
+fn parse_form_document_field_font_xml(
+    tag: &str,
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let (layout, options) = form_document_field_geometry_options(tag, fields)?;
+    parse_form_font_tuple_xml(options.get(layout.font?)?, object_refs)
+}
+
+/// The auto-max and stretch flags all default to `1`, which the platform
+/// leaves unwritten; only the `0` state reaches the XML.
+fn parse_form_document_field_flag(
+    tag: &str,
+    fields: &[&str],
+    pick: fn(&FormDocumentFieldGeometry) -> Option<usize>,
+) -> Option<bool> {
+    let (layout, options) = form_document_field_geometry_options(tag, fields)?;
+    let slot = pick(layout)?;
+    match options.get(slot).map(|field| field.trim()) {
+        Some("0") => Some(false),
+        _ => None,
+    }
+}
+
+/// Reads a grouping item's `<Width>`/`<Height>`; `0` means the platform writes
+/// no element.
+pub(super) fn parse_form_group_extent(tag: &str, fields: &[&str], slot: usize) -> Option<String> {
+    if !form_group_layout_tag(tag) {
+        return None;
+    }
+    fields
+        .get(slot)
+        .map(|field| field.trim())
+        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+        .map(str::to_string)
+}
+
+/// Reads a grouping item's `<HorizontalStretch>`/`<VerticalStretch>`; the `2`
+/// state means "unset" and is the one the platform leaves unwritten.
+pub(super) fn parse_form_group_stretch(tag: &str, fields: &[&str], slot: usize) -> Option<bool> {
+    if !form_group_layout_tag(tag) {
+        return None;
+    }
+    match fields.get(slot).map(|field| field.trim()) {
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        _ => None,
+    }
 }
 
 pub(super) fn parse_form_usual_group_title_font_xml(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let raw = fields.get(17)?.trim();
-    let font = form_usual_group_title_font_fields(raw, object_refs)?;
+    let raw = fields.get(FORM_GROUP_TITLE_FONT_SLOT)?.trim();
+    let font = split_1c_braced_fields(raw, 0)?;
+    // A leading `8` is the same tuple under the wider group layout.
     let normalized = (font.first()?.trim() == "8").then(|| {
         let mut normalized = font.clone();
         normalized[0] = "7";
@@ -9738,74 +10041,191 @@ pub(super) fn parse_form_font_tuple_xml_tag(
     object_refs: &BTreeMap<String, String>,
     tag_name: &str,
 ) -> Option<String> {
-    parse_form_font_tuple_xml_tag_with_absolute(field, object_refs, tag_name, false)
+    parse_form_font_mask_tuple_xml(field, object_refs, tag_name)
+}
+
+/// The optional-member bitmask a form font tuple carries in its third slot.
+///
+/// A form font tuple is `{7,<kind>,<mask>[,<style ref>],<present values...>,1,<scale>}`.
+/// Every attribute the platform writes on a `<Font>`/`<TitleFont>` element
+/// corresponds to one mask bit; an attribute whose bit is clear is simply
+/// absent from both the tuple and the XML. The values themselves appear in
+/// the tuple in `FORM_FONT_MASK_MEMBERS` order, which is *not* the attribute
+/// order the platform writes -- `faceName` is stored last but written first.
+///
+/// Bit assignments and the value order are the ones that reproduce all 3 674
+/// `<Font>`/`<TitleFont>` elements of the 5 201 native "1С:Управление
+/// торговлей 11.5.27.75" form dumps with no misses and no false positives.
+const FORM_FONT_MASK_MEMBERS: [(u32, FormFontMember); 6] = [
+    (1, FormFontMember::Height),
+    (2, FormFontMember::Bold),
+    (3, FormFontMember::Italic),
+    (4, FormFontMember::Underline),
+    (5, FormFontMember::Strikeout),
+    (0, FormFontMember::FaceName),
+];
+
+/// The bit that makes the platform write the trailing `scale` attribute even
+/// when the tuple's scale value is the `100` default.
+const FORM_FONT_MASK_SCALE_BIT: u32 = 9;
+
+/// The attribute order the platform writes, independent of the tuple order.
+const FORM_FONT_XML_ATTRIBUTE_ORDER: [FormFontMember; 6] = [
+    FormFontMember::FaceName,
+    FormFontMember::Height,
+    FormFontMember::Bold,
+    FormFontMember::Italic,
+    FormFontMember::Underline,
+    FormFontMember::Strikeout,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FormFontMember {
+    FaceName,
+    Height,
+    Bold,
+    Italic,
+    Underline,
+    Strikeout,
+}
+
+impl FormFontMember {
+    fn attribute(self) -> &'static str {
+        match self {
+            Self::FaceName => "faceName",
+            Self::Height => "height",
+            Self::Bold => "bold",
+            Self::Italic => "italic",
+            Self::Underline => "underline",
+            Self::Strikeout => "strikeout",
+        }
+    }
+}
+
+/// Decodes a form font tuple into the element the platform writes for it.
+///
+/// `None` means the platform writes no element at all: an `AutoFont` tuple
+/// with an empty mask (the ubiquitous `{7,3,0,1,100}` default), a slot that
+/// does not hold a font tuple at all, a member count that disagrees with the
+/// mask, or a `StyleItem` kind whose style reference cannot be resolved --
+/// every native `StyleItem` font carries a `ref`, so an unresolved one is a
+/// refusal rather than a `ref`-less guess.
+fn parse_form_font_mask_tuple_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    tag_name: &str,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first()?.trim() != "7" {
+        return None;
+    }
+    let kind = fields.get(1)?.trim();
+    let mask = fields.get(2)?.trim().parse::<u32>().ok()?;
+    let mut attributes = Vec::<(&str, String)>::new();
+    let (kind_xml, value_start) = match kind {
+        "0" => {
+            // The absolute kind spells every member out in a fixed 19-slot
+            // layout instead of packing the present ones behind the mask.
+            if fields.len() != 19 {
+                return None;
+            }
+            attributes.push((
+                "faceName",
+                parse_1c_quoted_string(fields.get(16)?.trim()).unwrap_or_default(),
+            ));
+            attributes.push(("height", form_font_mask_height(fields.get(3)?.trim())?));
+            attributes.push(("bold", form_font_mask_bold(fields.get(7)?.trim())?));
+            for (slot, member) in [
+                (8, FormFontMember::Italic),
+                (9, FormFontMember::Underline),
+                (10, FormFontMember::Strikeout),
+            ] {
+                attributes.push((
+                    member.attribute(),
+                    form_font_mask_flag(fields.get(slot)?.trim())?,
+                ));
+            }
+            attributes.push(("kind", "Absolute".to_string()));
+            if (mask >> FORM_FONT_MASK_SCALE_BIT) & 1 == 1 {
+                attributes.push(("scale", fields.get(18)?.trim().to_string()));
+            }
+            let rendered = attributes
+                .iter()
+                .map(|(name, value)| format!(" {name}=\"{}\"", escape_xml_text(value)))
+                .collect::<String>();
+            return Some(format!("<{tag_name}{rendered}/>"));
+        }
+        "1" => {
+            attributes.push(("ref", "sys:DefaultGUIFont".to_string()));
+            ("WindowsFont", 4)
+        }
+        "2" => {
+            attributes.push(("ref", parse_form_font_style_ref(&fields, object_refs)?));
+            ("StyleItem", 4)
+        }
+        "3" => ("AutoFont", 3),
+        _ => return None,
+    };
+    let values = fields.get(value_start..fields.len().checked_sub(2)?)?;
+    let present = FORM_FONT_MASK_MEMBERS
+        .iter()
+        .filter(|(bit, _)| (mask >> bit) & 1 == 1)
+        .map(|(_, member)| *member)
+        .collect::<Vec<_>>();
+    if present.len() != values.len() {
+        return None;
+    }
+    let scale = (mask >> FORM_FONT_MASK_SCALE_BIT) & 1 == 1;
+    if present.is_empty() && !scale && kind_xml == "AutoFont" {
+        return None;
+    }
+    for member in FORM_FONT_XML_ATTRIBUTE_ORDER {
+        let Some(index) = present.iter().position(|candidate| *candidate == member) else {
+            continue;
+        };
+        let raw = values.get(index)?.trim();
+        let value = match member {
+            FormFontMember::FaceName => parse_1c_quoted_string(raw)?,
+            FormFontMember::Height => form_font_mask_height(raw)?,
+            FormFontMember::Bold => form_font_mask_bold(raw)?,
+            _ => form_font_mask_flag(raw)?,
+        };
+        attributes.push((member.attribute(), value));
+    }
+    attributes.push(("kind", kind_xml.to_string()));
+    if scale {
+        attributes.push(("scale", fields.last()?.trim().to_string()));
+    }
+    let rendered = attributes
+        .iter()
+        .map(|(name, value)| format!(" {name}=\"{}\"", escape_xml_text(value)))
+        .collect::<String>();
+    Some(format!("<{tag_name}{rendered}/>"))
+}
+
+/// Font heights are stored in tenths of a point and written whole, including
+/// the `height="0"` the platform writes for a zero-tenths height.
+fn form_font_mask_height(raw: &str) -> Option<String> {
+    Some((raw.parse::<i32>().ok()? / 10).to_string())
+}
+
+fn form_font_mask_bold(raw: &str) -> Option<String> {
+    Some(xml_bool(raw.parse::<i32>().ok()? >= 700).to_string())
+}
+
+fn form_font_mask_flag(raw: &str) -> Option<String> {
+    match raw {
+        "0" => Some("false".to_string()),
+        "1" => Some("true".to_string()),
+        _ => None,
+    }
 }
 
 fn parse_form_button_font_tuple_xml(
     field: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let parsed = parse_form_font_tuple_xml_tag_with_absolute(field, object_refs, "Font", true);
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let style_relative = fields.len() == 8
-        && fields.first().map(|value| value.trim()) == Some("7")
-        && fields.get(1).map(|value| value.trim()) == Some("2")
-        && fields.get(2).map(|value| value.trim()) == Some("3")
-        && fields.get(6).map(|value| value.trim()) == Some("1")
-        && fields.get(7).map(|value| value.trim()) == Some("100");
-    if !style_relative {
-        return parsed;
-    }
-
-    let Some(style_ref) = parse_form_font_style_ref(&fields, object_refs) else {
-        return parsed;
-    };
-    let Some(height) = font_height_xml(fields.get(4).map(|value| value.trim())) else {
-        return parsed;
-    };
-    let Some(face_name) = fields
-        .get(5)
-        .and_then(|value| parse_1c_quoted_string(value.trim()))
-    else {
-        return parsed;
-    };
-    Some(format!(
-        r#"<Font ref="{}" faceName="{}" height="{}" kind="StyleItem"/>"#,
-        escape_xml_text(&style_ref),
-        escape_xml_text(&face_name),
-        escape_xml_text(&height)
-    ))
-}
-
-fn parse_form_font_tuple_xml_tag_with_absolute(
-    field: &str,
-    object_refs: &BTreeMap<String, String>,
-    tag_name: &str,
-    allow_absolute: bool,
-) -> Option<String> {
-    let trimmed = field.trim();
-    let fields = split_1c_braced_fields(trimmed, 0)?;
-    if fields.first()?.trim() != "7" {
-        return None;
-    }
-    match fields.get(1).map(|value| value.trim()) {
-        Some("0") if allow_absolute => {}
-        Some("1" | "2") => {}
-        _ => return None,
-    }
-    let wrapped = format!("{{\"#\",00000000-0000-0000-0000-000000000000,1,{trimmed},0}}");
-    let value_xml = parse_style_font_value_xml(&wrapped);
-    let attrs = value_xml
-        .strip_prefix(r#"<Value xsi:type="v8ui:Font""#)?
-        .strip_suffix("/>")?;
-    let attrs = if attrs.contains(" ref=") {
-        attrs.to_string()
-    } else if let Some(style_ref) = parse_form_font_style_ref(&fields, object_refs) {
-        format!(r#" ref="{}"{attrs}"#, escape_xml_text(&style_ref))
-    } else {
-        attrs.to_string()
-    };
-    Some(format!("<{tag_name}{attrs}/>"))
+    parse_form_font_mask_tuple_xml(field, object_refs, "Font")
 }
 
 pub(super) fn parse_form_font_style_ref(
