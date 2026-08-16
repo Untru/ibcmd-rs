@@ -17,6 +17,7 @@ use ibcmd_xml::{
     parse_dcs_inner_schema_storage_document_with_references,
     parse_dcs_query_union_link_storage_document_with_references,
     rewrite_dcs_primary_schema_storage_document, rewrite_dcs_settings_children,
+    rewrite_dcs_terminal_area_template_storage_fragment,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -223,6 +224,10 @@ pub(crate) enum DcsTemplateNormalizeError {
     QueryUnionLinkEmit(DcsInnerSchemaError),
     /// The terminal AreaTemplate parsed but its source fragment was rejected.
     AreaTemplateEmit(DcsInnerSchemaError),
+    /// The typed AreaTemplate coordinate refused the terminal document and the
+    /// storage-to-source fragment transliteration could not account for its
+    /// bytes either.
+    TerminalFragmentRewrite(DcsInnerSchemaError),
     /// The emitted schema had no `settingsVariant` anchor to splice against.
     AreaTemplateAnchorMissing,
     /// The spliced document length overflowed the platform size boundary.
@@ -241,6 +246,7 @@ impl DcsTemplateNormalizeError {
             Self::InnerSchemaEmit(_) => "dcs.template-normalize.inner-schema-emit",
             Self::QueryUnionLinkEmit(_) => "dcs.template-normalize.query-union-link-emit",
             Self::AreaTemplateEmit(_) => "dcs.template-normalize.area-template-emit",
+            Self::TerminalFragmentRewrite(_) => "dcs.template-normalize.terminal-fragment-rewrite",
             Self::AreaTemplateAnchorMissing => {
                 "dcs.template-normalize.area-template-anchor-missing"
             }
@@ -268,7 +274,8 @@ impl DcsTemplateNormalizeError {
             Self::SettingsFragmentParse { cause, .. }
             | Self::InnerSchemaEmit(cause)
             | Self::QueryUnionLinkEmit(cause)
-            | Self::AreaTemplateEmit(cause) => inner_schema_failure_class(cause),
+            | Self::AreaTemplateEmit(cause)
+            | Self::TerminalFragmentRewrite(cause) => inner_schema_failure_class(cause),
             // Neither admitted parser recognized the shape: the source is
             // outside the evidenced cohort, not malformed.
             Self::PrimarySchemaParse { .. } => MetadataSourceFailureClass::Unsupported,
@@ -344,6 +351,12 @@ impl std::fmt::Display for DcsTemplateNormalizeError {
             Self::AreaTemplateEmit(error) => write!(
                 formatter,
                 "terminal AreaTemplate source fragment emit failed: {error}"
+            ),
+            Self::TerminalFragmentRewrite(error) => write!(
+                formatter,
+                "no typed coordinate described the terminal SchemaFile and the \
+                 storage-to-source fragment transliteration could not account for its \
+                 bytes: {error}"
             ),
             Self::AreaTemplateAnchorMissing => formatter.write_str(
                 "emitted schema has no settingsVariant anchor to splice the AreaTemplate against",
@@ -636,14 +649,35 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         }
     };
     let terminal = envelope.terminal_schema_file();
-    if let Ok(area) = parse_dcs_area_template_storage_document_with_references(
+    // The typed coordinate still decides every terminal document it describes.
+    // What changes after it refuses is only that the document is transliterated
+    // from its own bytes instead of being dropped: an empty terminal
+    // contributes no fragment, and a template-carrying one that cannot be
+    // spelled fails the template closed rather than silently exporting a
+    // schema with its area templates missing.
+    let fragment = match parse_dcs_area_template_storage_document_with_references(
         terminal,
         source_profile.clone(),
         "mssql:dcs-schema-template/area-template",
         &style_reference_types,
     ) {
-        let fragment = emit_dcs_area_template_source_fragment(&area)
-            .map_err(DcsTemplateNormalizeError::AreaTemplateEmit)?;
+        Ok(area) => Some(
+            emit_dcs_area_template_source_fragment(&area)
+                .map_err(DcsTemplateNormalizeError::AreaTemplateEmit)?,
+        ),
+        Err(_) if envelope.terminal_carries_templates() => {
+            rewrite_dcs_terminal_area_template_storage_fragment(
+                terminal,
+                &reference_types,
+                &type_set_types,
+                &opaque_type_ids,
+                &style_reference_types,
+            )
+            .map_err(DcsTemplateNormalizeError::TerminalFragmentRewrite)?
+        }
+        Err(_) => None,
+    };
+    if let Some(fragment) = fragment {
         let variant = b"\r\n\t<settingsVariant>";
         let offset = source
             .windows(variant.len())
@@ -1535,7 +1569,11 @@ impl<'a> DataCompositionXmlWriter<'a> {
             let value = if attr_name == "ref" && is_data_ui_picture_value {
                 canonical_data_composition_picture_ref(reader, &value).unwrap_or(value)
             } else if attr_name == "ref"
-                && *mode == DataCompositionDocumentMode::FormListSettingsChild
+                && matches!(
+                    *mode,
+                    DataCompositionDocumentMode::FormListSettingsChild
+                        | DataCompositionDocumentMode::Settings
+                )
                 && value.trim_start().starts_with("0:")
             {
                 // A style-item reference the platform stored by metadata
@@ -1543,9 +1581,15 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 // under the globally declared `style` prefix -- proven by
                 // `CommonForms/МашиночитаемыеДоверенности`, whose
                 // `ref="0:4a6c2c50-..."` is exported as
-                // `ref="style:ЗачеркнутыйШрифтБЭД"`. A UUID that resolves to
-                // no style item is refused rather than passed through, since
-                // the raw form is not a spelling the platform ever writes.
+                // `ref="style:ЗачеркнутыйШрифтБЭД"`, and by the four UT
+                // `ЭлементовКонструктораВидовПродукцииИС` templates, whose
+                // standalone `Settings` documents carry the same storage
+                // spelling and the same `style:ВажнаяНадписьШрифт` export.
+                // Both positions declare `style` at their root, so the
+                // prefix is in scope wherever the value lands. A UUID that
+                // resolves to no style item is refused rather than passed
+                // through, since the raw form is not a spelling the platform
+                // ever writes.
                 format!(
                     "style:{}",
                     data_composition_style_item_name(&value, self.object_refs)?
@@ -2826,6 +2870,312 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    /// The terminal `SchemaFile` carrying a real report's area template, with
+    /// its table cell's appearance held in the envelope's side table and
+    /// selected by ordinal.
+    ///
+    /// Storage writes `<dcsat:appIndex>0</dcsat:appIndex>` inside the cell and
+    /// a `<appearance xmlns="...area-template" xsi:type="TableCellAppearance">`
+    /// child of `SchemaFile` itself; the source document writes that child's
+    /// items inline as `<dcsat:appearance>` -- no ordinal, no discriminator,
+    /// and no declaration, because `dcsat` is already bound by the
+    /// `AreaTemplate` element the fragment sits under. This is the join and
+    /// the inherited-prefix rule in their simplest form.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `2bf9c338-d31e-467e-8281-d1d6a3a6b2e2.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `f26cb51838fbdd3d1ab60381ce694d7cecb61e034793bd4c11aaf48dd149b734`;
+    /// the expectation is the platform's own
+    /// `Reports/ДлительностьОтложенногоОбновления/Templates/ОсновнаяСхемаКомпоновкиДанных/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `8cb4cddc8ecc053d74cf349ba3d4f78fe2d6f080ea966a9a3488184b2a2360a2`.
+    #[test]
+    fn platform_terminal_area_template_appearance_index_exports_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-area-template-appearance-index/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-area-template-appearance-index/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "f26cb51838fbdd3d1ab60381ce694d7cecb61e034793bd4c11aaf48dd149b734"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "8cb4cddc8ecc053d74cf349ba3d4f78fe2d6f080ea966a9a3488184b2a2360a2"
+        );
+
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        let terminal = body.documents()[body.documents().len() - 1];
+        let terminal = std::str::from_utf8(terminal).expect("the terminal document is UTF-8");
+        assert!(
+            terminal.contains("<dcsat:appIndex>0</dcsat:appIndex>")
+                && terminal.contains(
+                    "<appearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/\
+                     area-template\" xsi:type=\"TableCellAppearance\">"
+                ),
+            "the fixture is the out-of-line appearance shape this exercises"
+        );
+
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a template-carrying terminal must export through the live codec");
+
+        assert_eq!(actual, expected);
+        let actual = String::from_utf8(actual).expect("the source document is UTF-8");
+        assert!(
+            !actual.contains("appIndex") && actual.contains("<dcsat:appearance>"),
+            "the ordinal is resolved away and the appearance written inline"
+        );
+    }
+
+    /// The same join where the appearance carries typed values, so both prefix
+    /// rules the source direction applies inside it are visible at once.
+    ///
+    /// The storage `<value xmlns:d4p1="http://v8.1c.ru/8.1/data/ui" ...>` binds
+    /// a generated prefix to a namespace the source root does declare, so the
+    /// declaration is dropped and the value moves onto `v8ui`; a generated
+    /// prefix bound to one the root does *not* declare is renumbered by the
+    /// element's depth in the target document, not the storage one. Two
+    /// templates select two different side-table entries by ordinal, and the
+    /// schema's `fieldTemplate`/`groupTemplate` children ride along in
+    /// document order.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `cc43c5a3-5e72-4f37-9e1a-016c70f94d85.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `fc95f8e0bb82f09f15a741c2e5bd2a6755448a3c7abe17b9815ebe0d7c76bdd2`;
+    /// the expectation is the platform's own
+    /// `InformationRegisters/МестаПримененияЭлементовКонструктораВидовПродукцииИС/Templates/МакетНастроекМестПрименения/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `d2f420275b235890de29152125610f97bc995114e98c62a834bd7e54201efbde`.
+    #[test]
+    fn platform_terminal_area_template_style_prefixes_export_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-area-template-style-prefixes/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-area-template-style-prefixes/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "fc95f8e0bb82f09f15a741c2e5bd2a6755448a3c7abe17b9815ebe0d7c76bdd2"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "d2f420275b235890de29152125610f97bc995114e98c62a834bd7e54201efbde"
+        );
+
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        // The style item this configuration's Settings document names by uuid.
+        let object_refs = BTreeMap::from([(
+            "fa2a9ef2-00a1-44f4-a82c-6c7288dd62dc".to_string(),
+            "StyleItem.ВажнаяНадписьШрифт".to_string(),
+        )]);
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &object_refs,
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("two ordinals into the side table must export through the live codec");
+
+        assert_eq!(actual, expected);
+        let rendered = String::from_utf8(actual).expect("the source document is UTF-8");
+        assert!(
+            rendered.contains("<dcscor:value xsi:type=\"v8ui:VerticalAlign\">Bottom"),
+            "a generated prefix bound to a root-declared namespace collapses \
+             onto the root's own and loses its declaration"
+        );
+        assert!(
+            rendered
+                .contains("<dcscor:value xsi:type=\"dcscor:DataCompositionTextPlacementType\">"),
+            "an unprefixed xsi:type picks up the prefix of the default \
+             namespace it resolved through"
+        );
+        assert_eq!(
+            rendered.matches("<dcsat:appearance>").count(),
+            2,
+            "both ordinals resolved into their own inline appearance"
+        );
+    }
+
+    /// Everything about the side table that the platform's own bytes do not
+    /// account for is refused rather than guessed.
+    ///
+    /// The join is by ordinal and nothing else, so an ordinal that names no
+    /// entry has no appearance to inline; an entry no ordinal names would be
+    /// dropped, since the source document has no side table to put it in, and
+    /// dropping stored content is exactly the silent wrongness this direction
+    /// exists to avoid; and an entry whose discriminator is not the evidenced
+    /// `TableCellAppearance` is a shape whose inline spelling nothing here has
+    /// seen. All three keep the fragment out of the export entirely.
+    #[test]
+    fn terminal_side_table_shapes_without_evidence_fail_closed() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-area-template-appearance-index/raw-packed.bin.b64"
+        )));
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        let documents = body.documents();
+        let terminal = std::str::from_utf8(documents[documents.len() - 1])
+            .expect("the terminal document is UTF-8");
+
+        for (what, mutated) in [
+            (
+                "an ordinal past the end of the side table",
+                terminal.replace(
+                    "<dcsat:appIndex>0</dcsat:appIndex>",
+                    "<dcsat:appIndex>1</dcsat:appIndex>",
+                ),
+            ),
+            (
+                "a side-table entry no table cell selects",
+                terminal.replace("\t\t\t\t\t\t<dcsat:appIndex>0</dcsat:appIndex>\r\n", ""),
+            ),
+            (
+                "a discriminator beyond TableCellAppearance",
+                terminal.replace(
+                    "xsi:type=\"TableCellAppearance\"",
+                    "xsi:type=\"FutureAppearance\"",
+                ),
+            ),
+        ] {
+            assert_ne!(mutated, terminal, "{what}: the mutation must bite");
+            let mut mutated_documents = documents.clone();
+            let last = mutated_documents.len() - 1;
+            mutated_documents[last] = mutated.as_bytes();
+            let error = normalize_data_composition_schema_template_documents_with_profiles(
+                &mutated_documents,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("{what} must not export"));
+            assert_eq!(
+                error.class(),
+                MetadataSourceFailureClass::Unsupported,
+                "{what}: the refusal is `no evidence describes this`"
+            );
+        }
+    }
+
+    /// A `{data/ui}Font`'s `ref` attribute naming a configuration `StyleItem`
+    /// by storage uuid, in both places this configuration writes one: inside
+    /// the terminal document's inlined appearance and inside a standalone
+    /// `Settings` document's own.
+    ///
+    /// The platform pre-declares `xmlns:style` on the very element carrying
+    /// the reference in the first position and inherits the settings root's
+    /// declaration in the second, and writes `ref="style:<Name>"` in both.
+    /// A uuid the object-reference index cannot name is refused rather than
+    /// written in its `0:<uuid>` storage spelling, which the platform never
+    /// produces.
+    ///
+    /// Provenance (`manifest.json` in the fixture directory): storage element
+    /// `e0ef648e-3e13-4aba-bd7f-206fbb42572d.0` of 1C:Trade Management
+    /// 11.5.27.75's `1cv8.cf`, packed body sha256
+    /// `31b6cd7d91e8314f2f3614ba4daa94b1007d092459eb78dbcd0f344984679084`;
+    /// the expectation is the platform's own
+    /// `InformationRegisters/ДоступныеЗначенияЭлементовКонструктораВидовПродукцииИС/Templates/МакетНастроекДоступныхЗначений/Ext/Template.xml`
+    /// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214,
+    /// sha256 `0d1894d8624dd00fd566afcc37d6816cf71dd223f4124f1cbcff97502c200082`.
+    #[test]
+    fn platform_terminal_area_template_style_item_ref_exports_byte_exact() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-area-template-style-item-ref/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-ut-area-template-style-item-ref/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "31b6cd7d91e8314f2f3614ba4daa94b1007d092459eb78dbcd0f344984679084"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "0d1894d8624dd00fd566afcc37d6816cf71dd223f4124f1cbcff97502c200082"
+        );
+
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested DCS body must decode");
+        // The two style items this template's documents name by uuid: one on
+        // a `Font`'s `ref` attribute, one as a `Color` value's character data.
+        let object_refs = BTreeMap::from([
+            (
+                "fa2a9ef2-00a1-44f4-a82c-6c7288dd62dc".to_string(),
+                "StyleItem.ВажнаяНадписьШрифт".to_string(),
+            ),
+            (
+                "fe63db47-3ece-4518-b6a2-0b6499f60a61".to_string(),
+                "StyleItem.ТекстЗапрещеннойЯчейкиЦвет".to_string(),
+            ),
+        ]);
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &object_refs,
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect("a named style item must export through the live codec");
+
+        assert_eq!(actual, expected);
+        let rendered = String::from_utf8(actual).expect("the source document is UTF-8");
+        assert_eq!(
+            rendered.matches("ref=\"style:ВажнаяНадписьШрифт\"").count(),
+            2,
+            "both the inlined appearance and the Settings document name it"
+        );
+        assert!(
+            !rendered.contains("0:fa2a9ef2"),
+            "the storage uuid spelling never reaches the source document"
+        );
+
+        // Without the name, both positions refuse rather than fall back to the
+        // storage spelling.
+        let error = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect_err("an unnamed style item has no source spelling");
+        assert_eq!(error.class(), MetadataSourceFailureClass::Unsupported);
+    }
+
     /// Four external Settings documents in one envelope -- twice the count the
     /// clean-room corpus could exhibit, and the shape the attested-range gate
     /// refused outright. The header declares the count and the framing formula
@@ -3860,17 +4210,43 @@ mod tests {
         .unwrap();
         assert_eq!(actual, expected);
 
-        // Without the resolver entry, decode must fail closed instead of
-        // silently dropping the AreaTemplate appearance or emitting a
-        // fabricated value.
-        let without_resolver = normalize_data_composition_schema_template_documents_with_profiles(
-            &body.documents(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &ProfileId::parse("provider:mssql-legacy").unwrap(),
-            &ProfileId::parse("xml-2.20").unwrap(),
-        );
-        assert_ne!(without_resolver.ok(), Some(expected));
+        // Without the resolver entry the export must fail closed instead of
+        // silently dropping the AreaTemplate appearance or emitting the raw
+        // `0:<uuid>` storage spelling, which the platform never writes.
+        //
+        // This is where the resolver gate lives now. The envelope admits this
+        // terminal document either way -- its frame is decidable without
+        // naming the style item, which is what lets real configurations'
+        // area templates be transliterated at all -- so the typed coordinate
+        // refuses for want of the name and the fragment transliteration,
+        // reached next, refuses for exactly the same reason rather than
+        // guessing one. See
+        // `crate::compiler::bodies::dcs::tests::area_style_item_uuid_strict_decode_admits_the_frame_without_a_resolver`.
+        for resolver in [
+            BTreeMap::new(),
+            BTreeMap::from([(
+                "00000000-0000-0000-0000-000000000000".to_string(),
+                "StyleItem.SomeOtherStyleItem".to_string(),
+            )]),
+        ] {
+            let error = normalize_data_composition_schema_template_documents_with_profiles(
+                &body.documents(),
+                &BTreeMap::new(),
+                &resolver,
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect_err("an unresolvable style reference has no source spelling");
+            assert_eq!(
+                error.class(),
+                MetadataSourceFailureClass::Unsupported,
+                "the refusal is `no evidence names this`, not a broken invariant"
+            );
+            assert!(
+                format!("{error}").contains("StyleItem resolution"),
+                "the refusal names the missing resolution: {error}"
+            );
+        }
     }
 
     #[test]

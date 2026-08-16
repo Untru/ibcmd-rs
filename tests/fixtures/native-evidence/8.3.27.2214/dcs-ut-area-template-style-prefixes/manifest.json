@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-ut-area-template-style-prefixes",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "storage_element": "cc43c5a3-5e72-4f37-9e1a-016c70f94d85.0",
+    "source_path": "InformationRegisters/МестаПримененияЭлементовКонструктораВидовПродукцииИС/Templates/МакетНастроекМестПрименения/Ext/Template.xml",
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 2742,
+      "sha256": "fc95f8e0bb82f09f15a741c2e5bd2a6755448a3c7abe17b9815ebe0d7c76bdd2"
+    },
+    "native_template": {
+      "size": 19777,
+      "sha256": "d2f420275b235890de29152125610f97bc995114e98c62a834bd7e54201efbde"
+    }
+  },
+  "envelope": {
+    "documents": 3
+  }
+}

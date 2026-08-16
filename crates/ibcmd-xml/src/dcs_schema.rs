@@ -1,5 +1,6 @@
 //! Evidence-bounded codec for the first typed inner DCS schema cohort.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display, Formatter};
 
@@ -2923,14 +2924,78 @@ fn split_prefix(name: &str) -> (&str, &str) {
 
 /// What the rewriter is currently inside, so a close tag knows what to write.
 enum RewriteFrame {
+    /// An element the rewriter did not open itself: a placeholder standing in
+    /// for the ancestors a seeded sub-rewrite starts underneath. Closing one
+    /// means the token range was not balanced.
+    Outer,
     /// The dropped `SchemaFile` wrapper.
     Wrapper,
-    /// The schema root, re-spelled as `DataCompositionSchema`.
+    /// The schema root, re-spelled as `DataCompositionSchema` when a whole
+    /// document is being written and dropped when only its children are.
     Root,
     /// A `v8:TypeId` element whose content is replaced wholesale.
     TypeId,
+    /// A `dcsat:appIndex` element replaced wholesale by the side-table
+    /// `dcsat:appearance` it selects.
+    AppIndex,
     /// Any other element, already re-prefixed for the source direction.
     Element(String),
+}
+
+/// Which of the two storage documents -- and which part of it -- the token
+/// loop is spelling in the source direction.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RewriteMode {
+    /// The whole primary `SchemaFile`, becoming the whole source
+    /// `DataCompositionSchema` document.
+    PrimaryDocument,
+    /// The terminal `SchemaFile`'s `dataCompositionSchema`, becoming just the
+    /// run of root-level `template`/`fieldTemplate`/`groupTemplate`/
+    /// `groupHeaderTemplate` children the source document carries inline.
+    TerminalFragment,
+    /// The children of one side-table `<appearance>` element, being inlined
+    /// at the `dcsat:appIndex` that selects it.
+    InlineAppearance,
+}
+
+/// The maps every rewrite direction resolves storage identifiers through,
+/// plus the terminal envelope's side-table `<appearance>` elements.
+struct RewriteContext<'a> {
+    policy: &'a DcsInnerSchemaPolicy,
+    reference_types: &'a BTreeMap<String, String>,
+    type_set_types: &'a BTreeMap<String, String>,
+    opaque_type_ids: &'a BTreeSet<String>,
+    style_item_names: &'a BTreeMap<String, String>,
+    settings_blocks: &'a [DcsInlineSettingsFragment],
+    /// Token index ranges (start tag, end tag) of the terminal `SchemaFile`'s
+    /// direct `<appearance>` children, in document order -- exactly what a
+    /// `dcsat:appIndex` numbers. Empty for the primary document.
+    appearances: &'a [(usize, usize)],
+    /// Which of them some `appIndex` actually selected. The source document
+    /// has no side table, so an appearance nothing selects would simply be
+    /// dropped; every one of the 486 in the reference configuration is
+    /// selected, so an unselected one is an unevidenced shape and is refused
+    /// rather than silently discarded.
+    selected: &'a RefCell<BTreeSet<usize>>,
+}
+
+/// Everything a rewrite of one token range starts out holding, so a nested
+/// range can be spelled as if it stood where it is being inlined.
+struct RewriteSeed {
+    mode: RewriteMode,
+    /// How many elements are already open above the range, which is both the
+    /// depth its first element sits at and the `dNpM` number a declaration
+    /// minted there takes.
+    depth: usize,
+    /// Tabs to add to (or, negative, remove from) every layout whitespace run.
+    indent_delta: isize,
+    /// The storage document's namespace declarations in effect above the
+    /// range -- taken from where the range physically sits.
+    scopes: NamespaceScopes,
+    /// The target document's prefixes in effect above the range -- taken from
+    /// where the range is being written, which for an inlined `<appearance>`
+    /// is not where it physically sits.
+    source_scopes: SourcePrefixScopes,
 }
 
 /// How an element's character data must be re-spelled for the source
@@ -3018,6 +3083,10 @@ fn resolve_source_prefix(scopes: &SourcePrefixScopes, uri: &str) -> Option<Strin
 }
 
 const DCS_CORE_NAMESPACE_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/core";
+const DCS_AREA_TEMPLATE_NAMESPACE_URI: &str =
+    "http://v8.1c.ru/8.1/data-composition-system/area-template";
+const TABLE_CELL_APPEARANCE_EXPANDED_NAME: &str =
+    "{http://v8.1c.ru/8.1/data-composition-system/area-template}TableCellAppearance";
 const DATA_UI_STYLE_NAMESPACE_URI: &str = "http://v8.1c.ru/8.1/data/ui/style";
 const XSI_TYPE_EXPANDED_NAME: &str = "{http://www.w3.org/2001/XMLSchema-instance}type";
 const DATA_UI_COLOR_EXPANDED_NAME: &str = "{http://v8.1c.ru/8.1/data/ui}Color";
@@ -3069,6 +3138,63 @@ fn style_item_reference_uuid(text: &str) -> Option<&str> {
         .then_some(uuid)
 }
 
+/// Re-spells a `0:<uuid>` configuration `StyleItem` reference as the QName the
+/// source direction writes: the style item's own name under whatever prefix
+/// the style namespace has where the value lands.
+///
+/// The platform stores the reference by uuid in two places that reach here --
+/// the character data of a `{data/ui}Color` value and the `ref` attribute of a
+/// `{data/ui}Font` value -- and writes the same QName for both. `declared` is
+/// the current element's own namespace declarations, which are in scope for
+/// its attributes but not yet pushed onto `source_scopes`; a namespace named
+/// by neither gets a declaration minted at `depth`/`point`.
+///
+/// A uuid the object-reference index cannot resolve fails closed: the platform
+/// writes a name there, and we have no name to write.
+fn rewrite_style_item_reference(
+    declared: &[(String, String)],
+    source_scopes: &SourcePrefixScopes,
+    depth: usize,
+    point: usize,
+    style_item_names: &BTreeMap<String, String>,
+    value: &str,
+) -> Result<RewrittenColorValue, DcsInnerSchemaError> {
+    let Some(uuid) = style_item_reference_uuid(value) else {
+        return Err(DcsInnerSchemaError::UnsupportedSource(
+            "style item reference is not a storage uuid".into(),
+        ));
+    };
+    let lowercase = uuid.to_ascii_lowercase();
+    let Some(name) = style_item_names
+        .get(&lowercase)
+        .or_else(|| style_item_names.get(uuid))
+    else {
+        return Err(DcsInnerSchemaError::UnsupportedSource(format!(
+            "style reference {uuid} has no configuration StyleItem resolution"
+        )));
+    };
+    // The style namespace may already be spelled in scope -- an inline
+    // settings element declares it for its whole subtree, and the platform
+    // pre-declares it on the very element carrying the reference. Only mint a
+    // declaration when nothing names it.
+    let in_scope = declared
+        .iter()
+        .find(|(uri, _)| uri == DATA_UI_STYLE_NAMESPACE_URI)
+        .map(|(_, prefix)| prefix.clone())
+        .or_else(|| resolve_source_prefix(source_scopes, DATA_UI_STYLE_NAMESPACE_URI));
+    if let Some(prefix) = in_scope.filter(|prefix| !prefix.is_empty()) {
+        return Ok(RewrittenColorValue {
+            value: format!("{prefix}:{}", escape(name)),
+            declaration: None,
+        });
+    }
+    let prefix = format!("d{depth}p{point}");
+    Ok(RewrittenColorValue {
+        value: format!("{prefix}:{}", escape(name)),
+        declaration: Some(format!(" xmlns:{prefix}=\"{DATA_UI_STYLE_NAMESPACE_URI}\"")),
+    })
+}
+
 /// Re-spells the character data of a `dcscor:value` typed `{data/ui}Color`.
 ///
 /// Two evidenced storage forms carry information the source direction spells
@@ -3089,30 +3215,15 @@ fn rewrite_color_value(
     style_item_names: &BTreeMap<String, String>,
     value: &str,
 ) -> Result<RewrittenColorValue, DcsInnerSchemaError> {
-    if let Some(uuid) = style_item_reference_uuid(value) {
-        let lowercase = uuid.to_ascii_lowercase();
-        let Some(name) = style_item_names
-            .get(&lowercase)
-            .or_else(|| style_item_names.get(uuid))
-        else {
-            return Err(DcsInnerSchemaError::UnsupportedSource(format!(
-                "style colour reference {uuid} has no configuration StyleItem resolution"
-            )));
-        };
-        // The style namespace may already be spelled in scope -- an inline
-        // settings element declares it for its whole subtree. Only mint a
-        // declaration when nothing in scope names it.
-        if let Some(prefix) = resolve_source_prefix(source_scopes, DATA_UI_STYLE_NAMESPACE_URI) {
-            return Ok(RewrittenColorValue {
-                value: format!("{prefix}:{}", escape(name)),
-                declaration: None,
-            });
-        }
-        let prefix = format!("d{}p{}", state.depth, state.next_declaration);
-        return Ok(RewrittenColorValue {
-            value: format!("{prefix}:{}", escape(name)),
-            declaration: Some(format!(" xmlns:{prefix}=\"{DATA_UI_STYLE_NAMESPACE_URI}\"")),
-        });
+    if style_item_reference_uuid(value).is_some() {
+        return rewrite_style_item_reference(
+            &[],
+            source_scopes,
+            state.depth,
+            state.next_declaration,
+            style_item_names,
+            value,
+        );
     }
     let (prefix, _) = split_prefix(value);
     if prefix.is_empty() {
@@ -3143,19 +3254,32 @@ fn resolve_prefix<'a>(scopes: &'a NamespaceScopes, prefix: &str) -> Option<&'a s
         .or(if prefix.is_empty() { Some("") } else { None })
 }
 
-/// Removes exactly one indentation tab after every line break.
+/// Shifts every indentation run after a line break by `delta` tabs.
 ///
-/// Storage nests the schema one level deeper than the source document, so
-/// every pretty-printing whitespace run is one tab longer. Only whitespace
+/// Storage nests the schema one level deeper than the source document, so the
+/// whole-document directions shift by `-1`. An `<appearance>` the envelope
+/// lifted out of a table cell into its side table is shifted the other way,
+/// back down to the depth the cell it is inlined at sits at. Only whitespace
 /// runs that separate sibling elements are shifted; character data (a query
-/// text, an expression) is never touched.
-fn dedent_one_level(whitespace: &str) -> String {
+/// text, an expression) never reaches this function.
+fn shift_indent(whitespace: &str, delta: isize) -> String {
+    if delta == 0 {
+        return whitespace.to_owned();
+    }
     let mut out = String::with_capacity(whitespace.len());
     let mut rest = whitespace;
     while let Some(index) = rest.find('\n') {
         out.push_str(&rest[..=index]);
         rest = &rest[index + 1..];
-        rest = rest.strip_prefix('\t').unwrap_or(rest);
+        if delta < 0 {
+            for _ in 0..-delta {
+                rest = rest.strip_prefix('\t').unwrap_or(rest);
+            }
+        } else {
+            for _ in 0..delta {
+                out.push('\t');
+            }
+        }
     }
     out.push_str(rest);
     out
@@ -3189,28 +3313,276 @@ pub fn rewrite_dcs_primary_schema_storage_document(
     settings_blocks: &[DcsInlineSettingsFragment],
 ) -> Result<Vec<u8>, DcsInnerSchemaError> {
     let policy = policy()?;
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| DcsInnerSchemaError::Malformed("primary schema is not UTF-8".into()))?;
-    let text = text
-        .strip_prefix('\u{feff}')
-        .ok_or_else(|| DcsInnerSchemaError::Malformed("primary schema has no UTF-8 BOM".into()))?;
-    let body = text
-        .strip_prefix("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n")
-        .ok_or_else(|| {
-            DcsInnerSchemaError::Malformed("primary schema has no canonical declaration".into())
-        })?;
+    let body = storage_document_body(bytes, "primary schema")?;
     let tokens = scan_raw_tokens(body)?;
-
+    let context = RewriteContext {
+        policy: &policy,
+        reference_types,
+        type_set_types,
+        opaque_type_ids,
+        style_item_names,
+        settings_blocks,
+        appearances: &[],
+        selected: &RefCell::new(BTreeSet::new()),
+    };
     let mut out = String::with_capacity(bytes.len() + 1024);
     out.push('\u{feff}');
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
-    let mut scopes: NamespaceScopes = Vec::new();
-    let mut source_scopes: SourcePrefixScopes = Vec::new();
-    let mut frames: Vec<RewriteState> = Vec::new();
+    out.push_str(&rewrite_tokens(
+        &context,
+        &tokens,
+        0..tokens.len(),
+        RewriteSeed {
+            mode: RewriteMode::PrimaryDocument,
+            depth: 0,
+            indent_delta: -1,
+            scopes: Vec::new(),
+            source_scopes: Vec::new(),
+        },
+    )?);
+    Ok(out.into_bytes())
+}
+
+/// Rewrites the platform's terminal `SchemaFile` storage document into the run
+/// of root-level template elements the source `DataCompositionSchema` document
+/// carries between its last `parameter` and its first `settingsVariant`.
+///
+/// The envelope keeps a report's area templates -- and only those -- in this
+/// second document, with every table cell's appearance lifted out into
+/// `<appearance>` children of `SchemaFile` itself that the cells select by
+/// ordinal. The source document has no such side table: it writes the selected
+/// appearance's items inline at the cell. That join, and the fact that the
+/// fragment inherits its `dcsat` prefix from the `AreaTemplate` element it
+/// sits under rather than from a root declaration, are the only two things
+/// this direction does beyond what
+/// [`rewrite_dcs_primary_schema_storage_document`] already does.
+///
+/// Returns `Ok(None)` for the empty terminal document the overwhelming
+/// majority of templates carry, which contributes no fragment at all. The
+/// resolver maps are the same ones the primary direction takes.
+pub fn rewrite_dcs_terminal_area_template_storage_fragment(
+    bytes: &[u8],
+    reference_types: &BTreeMap<String, String>,
+    type_set_types: &BTreeMap<String, String>,
+    opaque_type_ids: &BTreeSet<String>,
+    style_item_names: &BTreeMap<String, String>,
+) -> Result<Option<Vec<u8>>, DcsInnerSchemaError> {
+    let policy = policy()?;
+    let body = storage_document_body(bytes, "terminal schema")?;
+    let tokens = scan_raw_tokens(body)?;
+    let (root_declarations, children) = schema_file_children(&tokens)?;
+    let Some((schema_start, schema_end)) = children.first().copied() else {
+        return unsupported("terminal SchemaFile wraps no dataCompositionSchema");
+    };
+    // Nothing to inline and nothing to write: the schema element is either
+    // self-closing or carries only layout whitespace.
+    if schema_end == schema_start
+        || tokens[schema_start + 1..schema_end]
+            .iter()
+            .all(|token| matches!(token, RawToken::Text(value) if value.trim().is_empty()))
+    {
+        if children.len() != 1 {
+            return unsupported(
+                "an empty terminal dataCompositionSchema carries a side-table appearance",
+            );
+        }
+        return Ok(None);
+    }
+    let appearances = &children[1..];
+    for (start, _) in appearances {
+        let RawToken::Tag(tag) = &tokens[*start] else {
+            return Err(DcsInnerSchemaError::Malformed(
+                "SchemaFile child range does not start at a tag".into(),
+            ));
+        };
+        let appearance = scan_start_tag(tag)?;
+        let (prefix, local) = split_prefix(appearance.name);
+        // The side-table element carries its own default declaration, so its
+        // name only resolves against the root plus its own scope.
+        let mut own = Vec::new();
+        for (key, value) in &appearance.attributes {
+            if *key == "xmlns" {
+                own.push((String::new(), (*value).to_owned()));
+            } else if let Some(prefix) = key.strip_prefix("xmlns:") {
+                own.push((prefix.to_owned(), (*value).to_owned()));
+            }
+        }
+        let scopes: NamespaceScopes = vec![root_declarations.clone(), own];
+        if local != "appearance"
+            || resolve_prefix(&scopes, prefix) != Some(DCS_AREA_TEMPLATE_NAMESPACE_URI)
+        {
+            return unsupported(
+                "a terminal SchemaFile child beside dataCompositionSchema is not an appearance",
+            );
+        }
+    }
+    let selected = RefCell::new(BTreeSet::new());
+    let context = RewriteContext {
+        policy: &policy,
+        reference_types,
+        type_set_types,
+        opaque_type_ids,
+        style_item_names,
+        settings_blocks: &[],
+        appearances,
+        selected: &selected,
+    };
+    let fragment = rewrite_tokens(
+        &context,
+        &tokens,
+        schema_start..schema_end + 1,
+        RewriteSeed {
+            mode: RewriteMode::TerminalFragment,
+            depth: 1,
+            indent_delta: -1,
+            scopes: vec![root_declarations],
+            source_scopes: vec![Vec::new()],
+        },
+    )?;
+    if selected.borrow().len() != appearances.len() {
+        return unsupported("the terminal side table holds an appearance no table cell selects");
+    }
+    // The schema element contributed the line break before its first child and
+    // the one before its own closing tag; the caller owns both.
+    let fragment = fragment
+        .trim_start_matches(['\r', '\n'])
+        .trim_end_matches(['\r', '\n', '\t']);
+    if fragment.is_empty() {
+        return unsupported("terminal dataCompositionSchema rewrote to nothing");
+    }
+    Ok(Some(fragment.as_bytes().to_vec()))
+}
+
+/// A `SchemaFile` root's own namespace declarations paired with the token
+/// index range (start tag, end tag) of each of its direct children, in
+/// document order.
+type SchemaFileChildren = (Vec<(String, String)>, Vec<(usize, usize)>);
+
+/// Splits a scanned terminal document into [`SchemaFileChildren`]. A
+/// self-closing child reports the same index twice.
+fn schema_file_children(
+    tokens: &[RawToken<'_>],
+) -> Result<SchemaFileChildren, DcsInnerSchemaError> {
+    let mut root_declarations: Option<Vec<(String, String)>> = None;
+    let mut children = Vec::new();
+    let mut depth = 0usize;
+    let mut open: Option<usize> = None;
+    for (index, token) in tokens.iter().enumerate() {
+        let RawToken::Tag(tag) = token else {
+            continue;
+        };
+        if tag.starts_with("<?") || tag.starts_with("<!") {
+            return unsupported("comments, PI and doctype are outside the cohort");
+        }
+        if tag.starts_with("</") {
+            depth = depth.checked_sub(1).ok_or_else(|| {
+                DcsInnerSchemaError::Malformed("unexpected closing element".into())
+            })?;
+            if depth == 1
+                && let Some(start) = open.take()
+            {
+                children.push((start, index));
+            }
+            continue;
+        }
+        let start = scan_start_tag(tag)?;
+        if depth == 0 {
+            let (prefix, local) = split_prefix(start.name);
+            if !prefix.is_empty() || local != "SchemaFile" || start.self_closing {
+                return unsupported("terminal schema root is not a SchemaFile wrapper");
+            }
+            let mut declarations = Vec::new();
+            for (key, value) in &start.attributes {
+                if *key == "xmlns" {
+                    declarations.push((String::new(), (*value).to_owned()));
+                } else if let Some(prefix) = key.strip_prefix("xmlns:") {
+                    declarations.push((prefix.to_owned(), (*value).to_owned()));
+                }
+            }
+            root_declarations = Some(declarations);
+        } else if depth == 1 {
+            if start.self_closing {
+                children.push((index, index));
+            } else {
+                open = Some(index);
+            }
+        }
+        if !start.self_closing {
+            depth += 1;
+        }
+    }
+    if depth != 0 || open.is_some() {
+        return Err(DcsInnerSchemaError::Malformed("unclosed element".into()));
+    }
+    let root_declarations = root_declarations
+        .ok_or_else(|| DcsInnerSchemaError::Malformed("terminal schema has no root".into()))?;
+    Ok((root_declarations, children))
+}
+
+/// Strips the BOM and the canonical XML declaration every platform-written
+/// DCS storage document begins with, naming `what` in the failure.
+fn storage_document_body<'a>(bytes: &'a [u8], what: &str) -> Result<&'a str, DcsInnerSchemaError> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| DcsInnerSchemaError::Malformed(format!("{what} is not UTF-8")))?;
+    let text = text
+        .strip_prefix('\u{feff}')
+        .ok_or_else(|| DcsInnerSchemaError::Malformed(format!("{what} has no UTF-8 BOM")))?;
+    text.strip_prefix("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n")
+        .ok_or_else(|| {
+            DcsInnerSchemaError::Malformed(format!("{what} has no canonical declaration"))
+        })
+}
+
+/// The source prefix an element or attribute namespace already has in the
+/// target document, for a namespace the source root does not declare.
+///
+/// This only ever answers where the whole-document direction fails closed, and
+/// only in the terminal directions: the terminal's `dcsat` prefix is declared
+/// by the `AreaTemplate` element the fragment carries with it, so everything
+/// under it is spelled through that declaration rather than through one of
+/// its own. The primary direction never asks, so its output cannot change.
+fn inherited_source_prefix(
+    mode: RewriteMode,
+    source_scopes: &SourcePrefixScopes,
+    uri: &str,
+) -> Option<String> {
+    if mode == RewriteMode::PrimaryDocument {
+        return None;
+    }
+    resolve_source_prefix(source_scopes, uri).filter(|prefix| !prefix.is_empty())
+}
+
+/// Rewrites `tokens[range]` in the source direction, starting from `seed`.
+///
+/// The same loop serves all three directions; `seed.mode` decides only what
+/// the two outermost storage frames turn into and whether the terminal's
+/// `appIndex`/inherited-prefix rules are in play.
+fn rewrite_tokens(
+    context: &RewriteContext<'_>,
+    tokens: &[RawToken<'_>],
+    range: std::ops::Range<usize>,
+    seed: RewriteSeed,
+) -> Result<String, DcsInnerSchemaError> {
+    let policy = context.policy;
+    let mode = seed.mode;
+    let settings_blocks = context.settings_blocks;
+    let reference_types = context.reference_types;
+    let type_set_types = context.type_set_types;
+    let opaque_type_ids = context.opaque_type_ids;
+    let style_item_names = context.style_item_names;
+
+    let mut out = String::new();
+    let mut scopes: NamespaceScopes = seed.scopes;
+    let mut source_scopes: SourcePrefixScopes = seed.source_scopes;
+    let mut frames: Vec<RewriteState> = (0..seed.depth)
+        .map(|_| RewriteState::new(RewriteFrame::Outer))
+        .collect();
+    let base_frames = frames.len();
     let mut pending: Option<&str> = None;
     let mut variant = 0usize;
 
-    for (index, token) in tokens.iter().enumerate() {
+    for index in range.clone() {
+        let token = &tokens[index];
         match token {
             RawToken::Text(value) => {
                 if pending.is_some() {
@@ -3233,15 +3605,21 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                         continue;
                     };
                     match state.frame {
+                        RewriteFrame::Outer => {
+                            if !value.trim().is_empty() {
+                                return unsupported("rewritten range carries loose character data");
+                            }
+                            out.push_str(&shift_indent(value, seed.indent_delta));
+                        }
                         RewriteFrame::Wrapper => {
                             if !value.trim().is_empty() {
                                 return unsupported("SchemaFile wrapper carries character data");
                             }
                         }
-                        RewriteFrame::TypeId => {}
+                        RewriteFrame::TypeId | RewriteFrame::AppIndex => {}
                         _ if state.text == RewriteTextKind::TypeQName => {
                             out.push_str(&rewrite_qname_value(
-                                &policy,
+                                policy,
                                 &scopes,
                                 &state.renamed,
                                 "xsi:type",
@@ -3250,7 +3628,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                         }
                         _ if state.text == RewriteTextKind::ColorValue => {
                             let rendered = rewrite_color_value(
-                                &policy,
+                                policy,
                                 &scopes,
                                 &source_scopes,
                                 state,
@@ -3264,7 +3642,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                         }
                         _ => {
                             if value.trim().is_empty() && (!closing || state.saw_child) {
-                                out.push_str(&dedent_one_level(value));
+                                out.push_str(&shift_indent(value, seed.indent_delta));
                             } else {
                                 out.push_str(value);
                             }
@@ -3279,12 +3657,22 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     scopes.pop();
                     source_scopes.pop();
                     match state.frame {
+                        RewriteFrame::Outer => {
+                            return Err(DcsInnerSchemaError::Malformed(
+                                "rewritten token range is not balanced".into(),
+                            ));
+                        }
                         RewriteFrame::Wrapper => {}
-                        RewriteFrame::Root => out.push_str("</DataCompositionSchema>"),
-                        RewriteFrame::TypeId => {}
+                        RewriteFrame::Root => {
+                            if mode == RewriteMode::PrimaryDocument {
+                                out.push_str("</DataCompositionSchema>");
+                            }
+                        }
+                        RewriteFrame::TypeId | RewriteFrame::AppIndex => {}
                         RewriteFrame::Element(emitted) => {
-                            if name.split_once(':').map_or(name, |(_, local)| local)
-                                == "settingsVariant"
+                            if mode == RewriteMode::PrimaryDocument
+                                && name.split_once(':').map_or(name, |(_, local)| local)
+                                    == "settingsVariant"
                                 && frames.len() == 2
                             {
                                 let block = settings_blocks.get(variant).ok_or_else(|| {
@@ -3340,19 +3728,26 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                         }
                     }
                 }
-                if depth == 0 {
+                if mode == RewriteMode::PrimaryDocument && depth == 0 {
                     if local != "SchemaFile" || !uri.is_empty() || start.self_closing {
                         return unsupported("primary schema root is not a SchemaFile wrapper");
                     }
                     frames.push(RewriteState::new(RewriteFrame::Wrapper));
                     continue;
                 }
-                if depth == 1 {
+                if mode != RewriteMode::InlineAppearance && depth == 1 {
                     if local != "dataCompositionSchema"
                         || uri != policy.schema_namespace_uri()
                         || start.self_closing
                     {
                         return unsupported("SchemaFile does not wrap a dataCompositionSchema");
+                    }
+                    // The fragment direction writes only what the schema root
+                    // contains: the source document's own root, and every
+                    // namespace it declares, come from the primary document.
+                    if mode == RewriteMode::TerminalFragment {
+                        frames.push(RewriteState::new(RewriteFrame::Root));
+                        continue;
                     }
                     out.push_str("<DataCompositionSchema xmlns=\"");
                     out.push_str(policy.schema_namespace_uri());
@@ -3372,6 +3767,113 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     out.push_str(policy.xsi_namespace_uri());
                     out.push_str("\">");
                     frames.push(RewriteState::new(RewriteFrame::Root));
+                    continue;
+                }
+
+                if mode == RewriteMode::TerminalFragment
+                    && uri == DCS_AREA_TEMPLATE_NAMESPACE_URI
+                    && local == "appIndex"
+                {
+                    // The terminal envelope keeps a table cell's appearance
+                    // out of line: the cell carries the ordinal of one of the
+                    // `SchemaFile`'s own `<appearance>` children, and the
+                    // source document carries that child's items inline in
+                    // its place. The join is by position and nothing else.
+                    let selected = match tokens.get(index + 1) {
+                        Some(RawToken::Text(value)) => value.trim(),
+                        _ => return unsupported("appIndex has no storage ordinal"),
+                    };
+                    let selected: usize = selected.parse().map_err(|_| {
+                        DcsInnerSchemaError::UnsupportedSource(format!(
+                            "appIndex {selected} is not an ordinal"
+                        ))
+                    })?;
+                    let (appearance_start, appearance_end) =
+                        *context.appearances.get(selected).ok_or_else(|| {
+                            DcsInnerSchemaError::UnsupportedSource(format!(
+                                "appIndex {selected} selects no side-table appearance"
+                            ))
+                        })?;
+                    context.selected.borrow_mut().insert(selected);
+                    let RawToken::Tag(appearance_tag) = &tokens[appearance_start] else {
+                        return Err(DcsInnerSchemaError::Malformed(
+                            "side-table appearance range does not start at a tag".into(),
+                        ));
+                    };
+                    let appearance = scan_start_tag(appearance_tag)?;
+                    // The side table sits directly under `SchemaFile`, so its
+                    // storage namespaces are the root's declarations plus its
+                    // own -- not the ones in scope where it is being inlined.
+                    let mut appearance_scopes: NamespaceScopes =
+                        vec![scopes.first().cloned().unwrap_or_default(), Vec::new()];
+                    for (key, value) in &appearance.attributes {
+                        if *key == "xmlns" {
+                            appearance_scopes[1].push((String::new(), (*value).to_owned()));
+                        } else if let Some(prefix) = key.strip_prefix("xmlns:") {
+                            appearance_scopes[1].push((prefix.to_owned(), (*value).to_owned()));
+                        }
+                    }
+                    // The side-table element needs its own discriminator
+                    // because the slot it sits in is untyped; the inline
+                    // element does not, because `dcsat:appearance` already is
+                    // that type, so the discriminator is dropped rather than
+                    // re-spelled. Any other one is a shape with no evidence
+                    // for how it is written inline.
+                    for (key, value) in &appearance.attributes {
+                        if *key == "xmlns" || key.starts_with("xmlns:") {
+                            continue;
+                        }
+                        if expanded_attribute_name(&appearance_scopes, key).as_deref()
+                            != Some(XSI_TYPE_EXPANDED_NAME)
+                            || expanded_qname(&appearance_scopes, value).as_deref()
+                                != Some(TABLE_CELL_APPEARANCE_EXPANDED_NAME)
+                        {
+                            return unsupported(
+                                "a side-table appearance carries an attribute beyond its \
+                                 TableCellAppearance discriminator",
+                            );
+                        }
+                    }
+                    let Some(appearance_prefix) = inherited_source_prefix(
+                        mode,
+                        &source_scopes,
+                        DCS_AREA_TEMPLATE_NAMESPACE_URI,
+                    ) else {
+                        return unsupported(
+                            "no area-template prefix is in scope where an appearance is inlined",
+                        );
+                    };
+                    // The inlined element takes the place of the `appIndex`
+                    // it replaces, so its children sit one deeper than it and
+                    // its layout moves from the side table's own indentation
+                    // to this cell's.
+                    let body = rewrite_tokens(
+                        context,
+                        tokens,
+                        appearance_start + 1..appearance_end,
+                        RewriteSeed {
+                            mode: RewriteMode::InlineAppearance,
+                            depth: depth + 1,
+                            indent_delta: isize::try_from(depth).map_err(|_| {
+                                DcsInnerSchemaError::Malformed("XML depth overflow".into())
+                            })? - 2,
+                            scopes: appearance_scopes,
+                            source_scopes: source_scopes.clone(),
+                        },
+                    )?;
+                    out.push('<');
+                    out.push_str(&appearance_prefix);
+                    out.push_str(":appearance>");
+                    out.push_str(&body);
+                    out.push_str("</");
+                    out.push_str(&appearance_prefix);
+                    out.push_str(":appearance>");
+                    if start.self_closing {
+                        scopes.pop();
+                        source_scopes.pop();
+                    } else {
+                        frames.push(RewriteState::new(RewriteFrame::AppIndex));
+                    }
                     continue;
                 }
 
@@ -3454,10 +3956,16 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     continue;
                 }
 
-                let Some(element_prefix) = source_namespace_prefix(&policy, &uri) else {
-                    return unsupported(format!(
-                        "element namespace {uri} is outside the source root declaration"
-                    ));
+                let element_prefix = match source_namespace_prefix(policy, &uri) {
+                    Some(prefix) => prefix.to_owned(),
+                    None => match inherited_source_prefix(mode, &source_scopes, &uri) {
+                        Some(prefix) => prefix,
+                        None => {
+                            return unsupported(format!(
+                                "element namespace {uri} is outside the source root declaration"
+                            ));
+                        }
+                    },
                 };
                 let emitted_name = if element_prefix.is_empty() {
                     local.to_owned()
@@ -3477,10 +3985,27 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                     let Some(declared_prefix) = declared_prefix else {
                         continue;
                     };
-                    match source_namespace_prefix(&policy, value) {
+                    // A default declaration is unusable in the source
+                    // direction whenever the namespace already has a prefix
+                    // there: the source root binds the default to the schema
+                    // namespace, so the spelling that reaches the output is
+                    // the prefixed one and the declaration has nothing left
+                    // to say. This is how a side-table `<appearance
+                    // xmlns="...area-template">` becomes a bare
+                    // `<dcsat:appearance>`.
+                    let inherited_default = declared_prefix
+                        .is_empty()
+                        .then(|| inherited_source_prefix(mode, &source_scopes, value))
+                        .flatten();
+                    match source_namespace_prefix(policy, value) {
                         Some(source) => {
                             declared_source.push(((*value).to_owned(), source.to_owned()));
                             renamed.push((declared_prefix.to_owned(), source.to_owned()));
+                        }
+                        None if inherited_default.is_some() => {
+                            let source = inherited_default.unwrap_or_default();
+                            declared_source.push(((*value).to_owned(), source.clone()));
+                            renamed.push((declared_prefix.to_owned(), source));
                         }
                         // A namespace the source root does not declare keeps
                         // its own declaration at the point of use. Only a
@@ -3528,7 +4053,7 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                                     "unbound namespace prefix {attribute_prefix}"
                                 ))
                             })?;
-                        let Some(source) = source_namespace_prefix(&policy, attribute_uri) else {
+                        let Some(source) = source_namespace_prefix(policy, attribute_uri) else {
                             return unsupported(format!(
                                 "attribute namespace {attribute_uri} is outside the source root declaration"
                             ));
@@ -3540,8 +4065,32 @@ pub fn rewrite_dcs_primary_schema_storage_document(
                         }
                         format!("{source}:{attribute_local}")
                     };
+                    // The one attribute whose value is a stored reference
+                    // rather than a QName or a literal: a `{data/ui}Font`'s
+                    // `ref`, which names a configuration `StyleItem` by uuid
+                    // in storage and by name in the source direction.
                     let emitted_value =
-                        rewrite_qname_value(&policy, &scopes, &renamed, &emitted_key, value)?;
+                        if emitted_key == "ref" && style_item_reference_uuid(value).is_some() {
+                            let rendered = rewrite_style_item_reference(
+                                &declared_source,
+                                &source_scopes,
+                                depth,
+                                local_declarations + 1,
+                                style_item_names,
+                                value,
+                            )?;
+                            if let Some(declaration) = rendered.declaration {
+                                declarations.push_str(&declaration);
+                                local_declarations += 1;
+                                declared_source.push((
+                                    DATA_UI_STYLE_NAMESPACE_URI.to_owned(),
+                                    format!("d{depth}p{local_declarations}"),
+                                ));
+                            }
+                            rendered.value
+                        } else {
+                            rewrite_qname_value(policy, &scopes, &renamed, &emitted_key, value)?
+                        };
                     rendered.push(' ');
                     rendered.push_str(&emitted_key);
                     rendered.push_str("=\"");
@@ -3598,13 +4147,22 @@ pub fn rewrite_dcs_primary_schema_storage_document(
             }
         }
     }
-    if !frames.is_empty() {
+    // A range that ends inside its parent -- an inlined `<appearance>`'s
+    // children -- ends on the layout whitespace before the closing tag the
+    // caller writes, so that run is still held back here.
+    if let Some(value) = pending.take() {
+        if !value.trim().is_empty() {
+            return unsupported("rewritten range ends in character data");
+        }
+        out.push_str(&shift_indent(value, seed.indent_delta));
+    }
+    if frames.len() != base_frames {
         return Err(DcsInnerSchemaError::Malformed("unclosed element".into()));
     }
-    if variant != settings_blocks.len() {
+    if mode == RewriteMode::PrimaryDocument && variant != settings_blocks.len() {
         return unsupported("settingsVariant count does not match the Settings document count");
     }
-    Ok(out.into_bytes())
+    Ok(out)
 }
 
 /// Re-prefixes a QName-valued attribute for the source direction.

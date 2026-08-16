@@ -1787,8 +1787,20 @@ mod tests {
         );
     }
 
+    /// The resolver gate this pins moved one stage later.
+    ///
+    /// Decoding is framing plus role assignment, and this fixture's terminal
+    /// document is a well-formed `SchemaFile` carrying a `dataCompositionSchema`
+    /// and one area-template `appearance` whether or not a `StyleItem`
+    /// resolver is on hand -- so the envelope, which now admits any terminal of
+    /// that frame so real configurations' area templates can be transliterated,
+    /// answers yes either way. What must still fail closed without the
+    /// resolver is producing source bytes, and
+    /// `crate::mssql_dump::dcs::tests::platform_area_style_item_uuid_exports_byte_exact_through_common_codec`
+    /// is where that is now asserted: a `0:<uuid>` the object-reference index
+    /// cannot name is refused rather than written in its storage spelling.
     #[test]
-    fn area_style_item_uuid_strict_decode_gates_resolver() {
+    fn area_style_item_uuid_strict_decode_admits_the_frame_without_a_resolver() {
         let profile = DcsCodecProfile::fixture();
         let packed = decode_base64_fixture(include_str!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
@@ -1798,39 +1810,22 @@ mod tests {
             format!("{:x}", Sha256::digest(&packed)),
             "680d04d34a12c54be75ac69a5c20ff82d2136736e11998b070c77d7abbbe3235"
         );
-        // Without a resolver: still fails closed, exactly as before this
-        // work package.
-        assert!(matches!(
-            decode_dcs(&profile, DcsTemplateKind::Schema, &packed),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
-        assert!(matches!(
-            decode_dcs_with_references(
-                &profile,
-                DcsTemplateKind::Schema,
-                &packed,
-                &BTreeMap::new()
-            ),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
-        // A non-empty resolver that lacks the specific uuid this coordinate
-        // needs must fail closed exactly like an empty one -- having *some*
-        // entries is not the same as having the *right* one.
-        let mut irrelevant_only = BTreeMap::new();
-        irrelevant_only.insert(
-            "00000000-0000-0000-0000-000000000000".to_string(),
-            "SomeOtherStyleItem".to_string(),
-        );
-        assert!(matches!(
-            decode_dcs_with_references(
-                &profile,
-                DcsTemplateKind::Schema,
-                &packed,
-                &irrelevant_only,
-            ),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
-        // With the evidenced resolver entry: now decodes.
+        for resolver in [
+            BTreeMap::new(),
+            BTreeMap::from([(
+                "00000000-0000-0000-0000-000000000000".to_string(),
+                "SomeOtherStyleItem".to_string(),
+            )]),
+        ] {
+            assert!(
+                decode_dcs_with_references(&profile, DcsTemplateKind::Schema, &packed, &resolver)
+                    .is_ok(),
+                "the terminal frame is decidable without naming the style item"
+            );
+        }
+        assert!(decode_dcs(&profile, DcsTemplateKind::Schema, &packed).is_ok());
+        // With the evidenced resolver entry: decodes through the typed
+        // AreaTemplate coordinate rather than the frame check.
         let mut style_reference_types = BTreeMap::new();
         style_reference_types.insert(
             "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),

@@ -24,6 +24,8 @@ use crate::{
 const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
 const XML_DECLARATION: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
 const SCHEMA_FILE_OPEN: &str = "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
+const DCS_AREA_TEMPLATE_NAMESPACE_URI: &str =
+    "http://v8.1c.ru/8.1/data-composition-system/area-template";
 const MAX_XML_DEPTH: usize = 256;
 const MAX_XML_EVENTS: usize = 1_000_000;
 const EMPTY_SETTINGS_DOCUMENT: &str = "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>";
@@ -59,6 +61,7 @@ pub struct DcsSchemaTemplateDocuments<'a> {
     primary_schema_file: &'a [u8],
     settings: Vec<&'a [u8]>,
     terminal_schema_file: &'a [u8],
+    terminal_carries_templates: bool,
 }
 
 impl<'a> DcsSchemaTemplateDocuments<'a> {
@@ -72,6 +75,17 @@ impl<'a> DcsSchemaTemplateDocuments<'a> {
 
     pub const fn terminal_schema_file(&self) -> &'a [u8] {
         self.terminal_schema_file
+    }
+
+    /// Whether the terminal document holds area templates that neither the
+    /// empty shape nor the typed `AreaTemplate` coordinate accounts for, and
+    /// so has to be transliterated from its own bytes.
+    ///
+    /// The overwhelming majority of envelopes carry an empty terminal
+    /// document and answer `false`, which is what keeps the fragment rewriter
+    /// -- and its preconditions -- off every template that never needed it.
+    pub const fn terminal_carries_templates(&self) -> bool {
+        self.terminal_carries_templates
     }
 }
 
@@ -179,6 +193,7 @@ pub fn analyze_dcs_schema_template_documents_with_references<'a>(
             "native DCS envelope settings count is below the framed minimum",
         ));
     }
+    let mut terminal_carries_templates = false;
 
     for (index, document) in documents.iter().enumerate() {
         if policy.documents_require_utf8_bom() && !document.starts_with(UTF8_BOM) {
@@ -211,8 +226,8 @@ pub fn analyze_dcs_schema_template_documents_with_references<'a>(
                 }
             }
             Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile) => {
-                if inspect_schema_file(document, true, &policy).is_err() {
-                    parse_dcs_area_template_storage_document_with_references(
+                terminal_carries_templates = inspect_schema_file(document, true, &policy).is_err()
+                    && parse_dcs_area_template_storage_document_with_references(
                         document,
                         ProfileId::parse("provider:mssql-legacy").map_err(|error| {
                             DcsSchemaTemplateError::InvalidEvidence(error.to_string())
@@ -220,11 +235,17 @@ pub fn analyze_dcs_schema_template_documents_with_references<'a>(
                         "dcs-envelope:terminal-area-template",
                         reference_types,
                     )
-                    .map_err(|_| {
-                        DcsSchemaTemplateError::UnsupportedSource(
-                            "terminal SchemaFile is neither empty nor the evidenced AreaTemplate",
-                        )
-                    })?;
+                    .is_err();
+                if terminal_carries_templates {
+                    // As with the Settings role, the envelope owns framing and
+                    // not the template cohort. A terminal document the typed
+                    // AreaTemplate coordinate does not describe is still a
+                    // well-formed SchemaFile in the evidenced slot, and the
+                    // storage-to-source fragment rewriter -- which reproduces
+                    // it from its own bytes -- is what decides whether it can
+                    // be spelled at all. Refused here only when it is not that
+                    // shape, where nothing downstream could recover it.
+                    inspect_terminal_template_schema_file(document, &policy)?;
                 }
             }
             None => {
@@ -239,6 +260,7 @@ pub fn analyze_dcs_schema_template_documents_with_references<'a>(
         primary_schema_file: documents[0],
         settings: documents[1..documents.len() - 1].to_vec(),
         terminal_schema_file: documents[documents.len() - 1],
+        terminal_carries_templates,
     })
 }
 
@@ -1082,6 +1104,111 @@ fn inspect_schema_file(
     Ok(())
 }
 
+/// Accepts the physical shape a template-carrying terminal `SchemaFile` has:
+/// one `dataCompositionSchema` followed by the area-template `appearance`
+/// children its table cells select by ordinal.
+///
+/// This says nothing about what those elements contain -- that question
+/// belongs to the fragment rewriter, which answers it from the bytes.
+fn inspect_terminal_template_schema_file(
+    document: &[u8],
+    policy: &ibcmd_schema::DcsSchemaTemplateEnvelopePolicy,
+) -> Result<(), DcsSchemaTemplateError> {
+    let mut reader = NsReader::from_reader(document);
+    reader.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut stack = Vec::<(Option<Vec<u8>>, Vec<u8>)>::new();
+    let mut schema_children = 0usize;
+    let mut events = 0usize;
+    loop {
+        let event = reader
+            .read_event_into(&mut buffer)
+            .map_err(|error| DcsSchemaTemplateError::Malformed(error.to_string()))?;
+        events = events.checked_add(1).ok_or_else(|| {
+            DcsSchemaTemplateError::Malformed("DCS XML event count overflow".to_string())
+        })?;
+        if events > MAX_XML_EVENTS {
+            return Err(DcsSchemaTemplateError::UnsupportedSource(
+                "DCS XML event count exceeds the bounded envelope limit",
+            ));
+        }
+        let (start, name) = match &event {
+            Event::Start(event) => (true, Some(event.name())),
+            Event::Empty(event) => (false, Some(event.name())),
+            Event::End(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let namespace = namespace_bytes(&namespace)?;
+                let Some((open_namespace, open_local)) = stack.pop() else {
+                    return Err(DcsSchemaTemplateError::Malformed(
+                        "DCS XML closing element has no opener".to_string(),
+                    ));
+                };
+                if open_namespace.as_deref() != namespace || open_local.as_slice() != local.as_ref()
+                {
+                    return Err(DcsSchemaTemplateError::Malformed(
+                        "DCS XML element nesting is inconsistent".to_string(),
+                    ));
+                }
+                buffer.clear();
+                continue;
+            }
+            Event::Eof => break,
+            _ => {
+                buffer.clear();
+                continue;
+            }
+        };
+        let Some(name) = name else {
+            buffer.clear();
+            continue;
+        };
+        let (namespace, local) = reader.resolve_element(name);
+        let namespace = namespace_bytes(&namespace)?.map(<[u8]>::to_vec);
+        let depth = stack.len();
+        if depth == 0 {
+            if namespace.is_some() || local.as_ref() != b"SchemaFile" {
+                return Err(DcsSchemaTemplateError::UnsupportedSource(
+                    "native DCS primary and terminal roots must be unqualified SchemaFile",
+                ));
+            }
+        } else if depth == 1 {
+            schema_children += 1;
+            let expected: &[u8] = if schema_children == 1 {
+                b"dataCompositionSchema"
+            } else {
+                b"appearance"
+            };
+            let expected_namespace = if schema_children == 1 {
+                policy.schema_namespace_uri()
+            } else {
+                DCS_AREA_TEMPLATE_NAMESPACE_URI
+            };
+            if local.as_ref() != expected
+                || namespace.as_deref() != Some(expected_namespace.as_bytes())
+            {
+                return Err(DcsSchemaTemplateError::UnsupportedSource(
+                    "terminal SchemaFile carries neither a dataCompositionSchema nor its \
+                     area-template appearance table",
+                ));
+            }
+        }
+        if start {
+            stack.push((namespace, local.as_ref().to_vec()));
+            if stack.len() > MAX_XML_DEPTH {
+                return Err(DcsSchemaTemplateError::UnsupportedSource(
+                    "DCS XML depth exceeds the bounded envelope limit",
+                ));
+            }
+        }
+    }
+    if !stack.is_empty() || schema_children == 0 {
+        return Err(DcsSchemaTemplateError::Malformed(
+            "SchemaFile must contain exactly one direct dataCompositionSchema".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_schema_file_element(
     depth: usize,
     namespace: Option<&[u8]>,
@@ -1472,8 +1599,19 @@ mod tests {
         ));
     }
 
+    /// The envelope owns the terminal document's *frame*, not its contents.
+    ///
+    /// This assertion used to read "and terminal must be empty": a terminal
+    /// `dataCompositionSchema` with any child at all was refused here. Real
+    /// configurations put a report's area templates in exactly that place, so
+    /// the question "can these children be spelled in the source direction"
+    /// moved to [`crate::rewrite_dcs_terminal_area_template_storage_fragment`],
+    /// which answers it from the bytes and fails closed on its own. What the
+    /// envelope still refuses is a terminal that is not this frame -- a
+    /// `SchemaFile` direct child that is neither the schema element nor one of
+    /// the area-template `appearance` elements its cells select.
     #[test]
-    fn authentic_one_variant_documents_are_role_checked_and_terminal_must_be_empty() {
+    fn authentic_one_variant_documents_are_role_checked_and_terminal_frame_is_enforced() {
         let plain = include_bytes!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/raw/",
             "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin"
@@ -1490,23 +1628,40 @@ mod tests {
         let analysis = analyze_dcs_schema_template_documents(&documents).unwrap();
         assert_eq!(analysis.settings().len(), 1);
 
-        let mut terminal = documents[2].to_vec();
-        let schema_start = terminal
-            .windows(b"<dataCompositionSchema".len())
-            .position(|window| window == b"<dataCompositionSchema")
-            .unwrap();
-        let empty_end = terminal[schema_start..]
-            .windows(2)
-            .position(|window| window == b"/>")
-            .map(|offset| schema_start + offset)
-            .unwrap();
-        terminal.splice(
-            empty_end..empty_end + 2,
+        let empty_end = |terminal: &[u8]| {
+            let schema_start = terminal
+                .windows(b"<dataCompositionSchema".len())
+                .position(|window| window == b"<dataCompositionSchema")
+                .unwrap();
+            terminal[schema_start..]
+                .windows(2)
+                .position(|window| window == b"/>")
+                .map(|offset| schema_start + offset)
+                .unwrap()
+        };
+
+        // A child inside the terminal schema is now the rewriter's question.
+        let mut carrying = documents[2].to_vec();
+        let at = empty_end(&carrying);
+        carrying.splice(
+            at..at + 2,
             b"><future/></dataCompositionSchema>".iter().copied(),
         );
-        let invalid = [documents[0], documents[1], terminal.as_slice()];
+        let carrying = [documents[0], documents[1], carrying.as_slice()];
+        analyze_dcs_schema_template_documents(&carrying)
+            .expect("a template-carrying terminal is a framing question the envelope answers yes");
+
+        // A `SchemaFile` child that is neither the schema element nor an
+        // area-template appearance is still not this envelope.
+        let mut foreign = documents[2].to_vec();
+        let at = empty_end(&foreign);
+        foreign.splice(
+            at..at + 2,
+            b"/><future xmlns=\"urn:future\"/>".iter().copied(),
+        );
+        let foreign = [documents[0], documents[1], foreign.as_slice()];
         assert!(matches!(
-            analyze_dcs_schema_template_documents(&invalid),
+            analyze_dcs_schema_template_documents(&foreign),
             Err(DcsSchemaTemplateError::UnsupportedSource(_))
         ));
     }
