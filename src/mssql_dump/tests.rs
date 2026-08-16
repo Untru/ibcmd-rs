@@ -8847,7 +8847,7 @@ fn extracts_form_attributes_conditional_appearance_from_body_tail() {
         "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{}}}}}",
         encoded.trim()
     );
-    let section = extract_form_body_attributes_section(&[tail]);
+    let section = extract_form_body_attributes_section(&[tail], &BTreeMap::new());
     let Some(FormAttributesConditionalAppearance::Typed(value)) =
         section.conditional_appearance.as_ref()
     else {
@@ -8860,8 +8860,11 @@ fn extracts_form_attributes_conditional_appearance_from_body_tail() {
     );
 }
 
+/// A payload the typed cohort refuses is re-spelled rather than dropped: the
+/// cohort decides what can be represented, the bytes decide what can be
+/// written, and only a document the writer cannot account for stays opaque.
 #[test]
-fn form_attributes_unsupported_conditional_appearance_stays_opaque() {
+fn form_attributes_conditional_appearance_outside_the_cohort_is_transliterated() {
     let encoded = include_str!(
         "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
@@ -8869,17 +8872,32 @@ fn form_attributes_unsupported_conditional_appearance_stays_opaque() {
         .unwrap()
         .replace("xs:string\">A", "xs:boolean\">true");
     let payload = crate::module_blob::encode_base64(storage.as_bytes());
-    let section = extract_form_body_attributes_section(&[format!(
-        "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
-    )]);
-    assert!(matches!(
-        section.conditional_appearance,
-        Some(FormAttributesConditionalAppearance::OpaqueStorage { .. })
-    ));
-    assert!(matches!(
-        format_form_attributes_section_xml(&[], &section),
-        Err(FormSchemaWriteError::OpaqueDcsFormAttributesConditionalAppearance { .. })
-    ));
+    let section = extract_form_body_attributes_section(
+        &[format!(
+            "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
+        )],
+        &BTreeMap::new(),
+    );
+    let Some(FormAttributesConditionalAppearance::Transliterated(fragment)) =
+        section.conditional_appearance.as_ref()
+    else {
+        panic!("a well-formed payload outside the cohort must be re-spelled");
+    };
+    assert!(
+        fragment.starts_with("\t\t<ConditionalAppearance>\r\n"),
+        "{fragment}"
+    );
+    assert!(
+        fragment.ends_with("\t\t</ConditionalAppearance>\r\n"),
+        "{fragment}"
+    );
+    assert!(fragment.contains("\t\t\t<dcsset:item>\r\n"), "{fragment}");
+    assert!(
+        fragment.contains("<dcsset:right xsi:type=\"xs:boolean\">true</dcsset:right>"),
+        "{fragment}"
+    );
+    let xml = format_form_attributes_section_xml(&[], &section).unwrap();
+    assert!(xml.contains(fragment.as_str()), "{xml}");
 }
 
 #[test]
@@ -8891,9 +8909,12 @@ fn form_attributes_malformed_conditional_appearance_fails_closed() {
         .unwrap()
         .replace("</conditionalAppearance>", "");
     let payload = crate::module_blob::encode_base64(storage.as_bytes());
-    let section = extract_form_body_attributes_section(&[format!(
-        "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
-    )]);
+    let section = extract_form_body_attributes_section(
+        &[format!(
+            "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
+        )],
+        &BTreeMap::new(),
+    );
     assert!(matches!(
         section.conditional_appearance,
         Some(FormAttributesConditionalAppearance::OpaqueStorage { .. })
@@ -8917,6 +8938,106 @@ fn prefix_default_xml_tags_preserves_utf8_text() {
     );
 }
 
+/// The tail's two leading extras are counts, not an enumerated marker pair:
+/// sub-tables come first and bindings after them, and both scale. These are
+/// synthetic layouts assembled from the shapes the UT bodies carry -- a body
+/// with sub-tables and no binding, and one with two bindings whose paths have
+/// different arities -- so that reading them as `0,0`/`0,1` markers cannot
+/// pass.
+#[test]
+fn form_attributes_tail_counts_sub_tables_and_bindings_independently() {
+    let empty = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
+    );
+    let filled = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+    );
+
+    // Two sub-tables, no binding: the property is absent and the sub-tables
+    // are not mistaken for a marker.
+    let section = extract_form_body_attributes_section(
+        &[format!(
+            "{{4,0,2,{{7,{{\"a\"}}}},{{7,{{\"b\"}}}},0,{{#base64:{}}}}}",
+            empty.trim()
+        )],
+        &BTreeMap::new(),
+    );
+    assert!(section.conditional_appearance.is_none());
+
+    // One sub-table and two bindings of differing arity, the second with an
+    // unresolved storage path and so an empty chain.
+    let section = extract_form_body_attributes_section(
+        &[format!(
+            "{{4,0,1,{{7,{{\"a\"}}}},2,\
+             \"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},\
+             \"Список.ПометкаУдаления\",\"\",{{0}},{{0}},\
+             {{#base64:{}}}}}",
+            filled.trim()
+        )],
+        &BTreeMap::new(),
+    );
+    assert!(matches!(
+        section.conditional_appearance,
+        Some(FormAttributesConditionalAppearance::Typed(_))
+    ));
+}
+
+/// A tail split on the wrong field boundaries has to fail, not read past: the
+/// chain must carry one segment per step of its own resolved path, and the
+/// owner chain must be a prefix of it.
+#[test]
+fn form_attributes_tail_binding_relations_fail_closed() {
+    let filled = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+    );
+    for binding in [
+        // A one-segment chain against a two-step path.
+        "\"Список.SortKey\",\"Список.SortKey\",{1,{26}},{1,{26}}",
+        // An owner chain that is not a prefix of the resolved chain.
+        "\"Список.SortKey\",\"Список.SortKey\",{2,{26},{9}},{1,{9}}",
+        // A count that does not match the segments it carries.
+        "\"Список.SortKey\",\"Список.SortKey\",{3,{26},{9}},{1,{26}}",
+    ] {
+        let section = extract_form_body_attributes_section(
+            &[format!(
+                "{{4,0,0,1,{binding},{{#base64:{}}}}}",
+                filled.trim()
+            )],
+            &BTreeMap::new(),
+        );
+        assert!(
+            matches!(
+                section.conditional_appearance,
+                Some(FormAttributesConditionalAppearance::OpaqueStorage {
+                    reason: "malformed Form Attributes conditional-appearance physical tail",
+                    ..
+                })
+            ),
+            "{binding}"
+        );
+    }
+}
+
+/// A tail carrying a field its own counts do not reach is refused rather than
+/// read up to the last field and hoped to be the payload.
+#[test]
+fn form_attributes_tail_with_unaccounted_fields_fails_closed() {
+    let empty = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
+    );
+    let section = extract_form_body_attributes_section(
+        &[format!("{{4,0,0,0,{{0}},{{#base64:{}}}}}", empty.trim())],
+        &BTreeMap::new(),
+    );
+    assert!(matches!(
+        section.conditional_appearance,
+        Some(FormAttributesConditionalAppearance::OpaqueStorage {
+            reason: "malformed Form Attributes conditional-appearance physical tail",
+            ..
+        })
+    ));
+}
+
 #[test]
 fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
     let encoded = include_str!(
@@ -8926,7 +9047,7 @@ fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
         "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{}}}}}",
         encoded.trim()
     );
-    let section = extract_form_body_attributes_section(&[tail]);
+    let section = extract_form_body_attributes_section(&[tail], &BTreeMap::new());
     let xml = format_form_attributes_section_xml(&[], &section).unwrap();
 
     assert!(xml.contains("\t<Attributes>\r\n"), "{xml}");

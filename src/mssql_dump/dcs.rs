@@ -1068,6 +1068,104 @@ fn indent_form_list_settings_child_fragment(fragment: &str, indent: &str) -> Str
     indented
 }
 
+/// Re-spells the Form-wide `Attributes/ConditionalAppearance` storage
+/// document as the inline source fragment the platform's own export writes
+/// for it.
+///
+/// This is the same lexical rewrite the `ListSettings` children get, applied
+/// one position higher: the storage document wraps its `conditionalAppearance`
+/// in a `Settings` root, while the inline position is a bare
+/// `<ConditionalAppearance>` under `<Attributes>` whose children are the
+/// settings-namespace contents of that child. So the whole document is handed
+/// to the writer in the `ListSettings`-child mode -- the vocabulary, the
+/// prefix rules and the style-item resolution are identical -- and the two
+/// spellings that differ are corrected afterwards: the `Settings` wrapper is
+/// dropped and the child is renamed to the wrapper element the policy names.
+///
+/// The mode's depth-numbered `dNpM` minting cannot fire here, because it fires
+/// only for a namespace the `Form` root does not declare, and none of the 126
+/// UT payloads declares one anywhere -- root or below. A payload that did
+/// would be spelled at the `ListSettings` depth rather than this one, so
+/// instead of trusting that, the whole rewrite is refused when the writer
+/// mints anything at all.
+///
+/// Returns `None`, leaving the caller's typed refusal in place, for anything
+/// the bytes do not account for.
+pub(crate) fn transliterate_form_attributes_conditional_appearance_document(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    indent: &str,
+) -> Option<String> {
+    if bytes.len() > MAX_FORM_LIST_SETTINGS_CHILD_STORAGE_BYTES {
+        return None;
+    }
+    let document = std::str::from_utf8(bytes).ok()?;
+    let document = document.strip_prefix('\u{feff}').unwrap_or(document);
+    let mut writer = DataCompositionXmlWriter::new_for_mode(
+        object_refs,
+        DataCompositionDocumentMode::FormListSettingsChild,
+    );
+    writer.write_document(document, DataCompositionDocumentMode::FormListSettingsChild)?;
+    let fragment = writer.output.trim_start_matches(['\r', '\n', '\t', ' ']);
+    if fragment.contains(" xmlns:") {
+        return None;
+    }
+    let wrapper = form_attributes_conditional_appearance_wrapper_local()?;
+    let body = fragment
+        .strip_prefix("<dcsset:settings>")?
+        .strip_suffix("</dcsset:settings>")?;
+    // The storage document puts its one child on its own line, one tab in.
+    let body = body.strip_prefix("\r\n")?.strip_suffix("\r\n")?;
+    let body = body
+        .strip_prefix("\t<dcsset:conditionalAppearance")?
+        .strip_suffix("</dcsset:conditionalAppearance>")?;
+    // Nothing may separate the child's own close tag from the root's, so a
+    // second top-level child cannot be swallowed into the rename.
+    if !body.starts_with(['>', ' ', '\t', '\r', '\n']) {
+        return None;
+    }
+    let renamed = format!("<{wrapper}{body}</{wrapper}>");
+    Some(reindent_form_attributes_conditional_appearance_fragment(
+        &renamed, indent,
+    ))
+}
+
+/// The inline element name the Form-wide conditional appearance is spelled
+/// with, taken from the same policy the typed writer emits against.
+fn form_attributes_conditional_appearance_wrapper_local() -> Option<String> {
+    let policy = ibcmd_schema::bundled_dcs_form_attributes_conditional_appearance_policy().ok()?;
+    let qname = policy.wrapper_qname();
+    let local = qname.rsplit_once('}').map(|(_, local)| local)?;
+    (!local.is_empty() && !local.contains(':')).then(|| local.to_string())
+}
+
+/// Moves a rendered Form-wide conditional appearance from the depth its
+/// storage document spells it at to the depth its inline position sits at.
+///
+/// The storage document indents the appearance one level deeper than the
+/// inline form does, since it carries a `Settings` root the inline form has
+/// no counterpart for. Only pretty-printing whitespace moves: a line that
+/// continues character data is left exactly as the platform stored it.
+fn reindent_form_attributes_conditional_appearance_fragment(
+    fragment: &str,
+    indent: &str,
+) -> String {
+    let literal = data_composition_character_data_runs(fragment);
+    let mut output = String::with_capacity(fragment.len() + indent.len() * 8);
+    let mut offset = 0usize;
+    for line in fragment.split_inclusive('\n') {
+        if data_composition_offset_continues_character_data(&literal, offset) {
+            output.push_str(line);
+        } else {
+            output.push_str(indent);
+            output.push_str(line.strip_prefix('\t').unwrap_or(line));
+        }
+        offset += line.len();
+    }
+    output.push_str("\r\n");
+    output
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct CanonicalFormServerStateFragment {
     pub(crate) start: usize,

@@ -289,7 +289,8 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_attributes_cpu_ms += elapsed_ms(started);
     }
-    let attributes_section = extract_form_body_attributes_section(&body.trailing);
+    let attributes_section =
+        extract_form_body_attributes_section(&body.trailing, context.object_refs);
 
     let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
@@ -828,6 +829,9 @@ pub(super) struct FormAttributesSection {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum FormAttributesConditionalAppearance {
     Typed(DcsConditionalAppearance),
+    /// The storage document re-spelled as the inline source fragment, for
+    /// payloads the typed cohort refuses but the lexical writer accounts for.
+    Transliterated(String),
     OpaqueStorage {
         bytes: Vec<u8>,
         reason: &'static str,
@@ -1555,6 +1559,7 @@ fn preflight_form_writer_paths_with_dcs_profiles(
                 value, "\t\t",
             )?);
         }
+        Some(FormAttributesConditionalAppearance::Transliterated(_)) => {}
         Some(FormAttributesConditionalAppearance::OpaqueStorage { reason, .. }) => {
             return Err(
                 FormSchemaWriteError::OpaqueDcsFormAttributesConditionalAppearance { reason },
@@ -2927,26 +2932,66 @@ fn extract_form_body_attributes_with_dcs_type_index(
         .collect()
 }
 
-pub(super) fn extract_form_body_attributes_section(trailing: &[String]) -> FormAttributesSection {
+/// Indent of the Form-wide `ConditionalAppearance` inside a decompiled
+/// `Form.xml`: `Form`(1) / `Attributes`(2), so the wrapper itself sits one
+/// level in from `<Attributes>`.
+pub(super) const FORM_ATTRIBUTES_CONDITIONAL_APPEARANCE_INDENT: &str = "\t\t";
+
+pub(super) fn extract_form_body_attributes_section(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> FormAttributesSection {
     let Some(text) = trailing.first() else {
         return FormAttributesSection::default();
     };
+    let storage =
+        match crate::module_blob::form_attributes_conditional_appearance_tail_storage_document(text)
+        {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                return FormAttributesSection {
+                    conditional_appearance: None,
+                };
+            }
+            // The physical layout itself did not read, so there is no storage
+            // document to re-spell and the refusal stands on the raw tail.
+            Err(_) => {
+                return FormAttributesSection {
+                    conditional_appearance: Some(
+                        FormAttributesConditionalAppearance::OpaqueStorage {
+                            bytes: text.as_bytes().to_vec(),
+                            reason: "malformed Form Attributes conditional-appearance physical tail",
+                        },
+                    ),
+                };
+            }
+        };
+    // A cohort refusal says only that no enumerated shape describes the
+    // document, never that the document cannot be spelled, so the lexical
+    // writer is asked next and the typed refusal stands only if it too
+    // cannot account for the bytes.
+    let refused =
+        |reason: &'static str| match transliterate_form_attributes_conditional_appearance_document(
+            &storage,
+            object_refs,
+            FORM_ATTRIBUTES_CONDITIONAL_APPEARANCE_INDENT,
+        ) {
+            Some(xml) => FormAttributesConditionalAppearance::Transliterated(xml),
+            None => FormAttributesConditionalAppearance::OpaqueStorage {
+                bytes: storage.clone(),
+                reason,
+            },
+        };
     let conditional_appearance =
         match crate::module_blob::parse_form_attributes_conditional_appearance_tail(text) {
             Ok(DcsChildParseOutcome::Typed(value)) => {
                 Some(FormAttributesConditionalAppearance::Typed(value))
             }
-            Ok(DcsChildParseOutcome::Unsupported(reason)) => {
-                Some(FormAttributesConditionalAppearance::OpaqueStorage {
-                    bytes: text.as_bytes().to_vec(),
-                    reason,
-                })
-            }
+            Ok(DcsChildParseOutcome::Unsupported(reason)) => Some(refused(reason)),
             Ok(DcsChildParseOutcome::Absent) => None,
-            Err(_) => Some(FormAttributesConditionalAppearance::OpaqueStorage {
-                bytes: text.as_bytes().to_vec(),
-                reason: "malformed Form Attributes conditional-appearance physical tail",
-            }),
+            Err(_) => Some(refused(
+                "Form Attributes conditional-appearance storage document is unreadable",
+            )),
         };
     FormAttributesSection {
         conditional_appearance,
@@ -9936,8 +9981,16 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                     }
                     FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
                         type_link_data_path_by_table_column
-                            .get(&(table_id, format!("0|{uuid}")))
+                            .get(&(table_id.clone(), format!("0|{uuid}")))
                             .cloned()
+                            .or_else(|| {
+                                resolve_form_table_current_data_metadata_uuid_path(
+                                    &table_id,
+                                    uuid,
+                                    table_name_by_id,
+                                    object_refs,
+                                )
+                            })
                     }
                     FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
                         binding_id,
@@ -13685,6 +13738,45 @@ fn resolve_form_constants_set_data_path(
         return None;
     }
     Some(format!("{}.{}", attribute.name, constant_name))
+}
+
+/// Resolves a table-current-data choice link whose column is addressed by the
+/// metadata UUID of the member it displays, rather than by a form binding id.
+///
+/// The route table is built from bindings the layout states outright, so it
+/// has no entry when the link names the member itself. What the platform
+/// writes in that case is the table element's own name joined to the member's
+/// own name -- not the member's owner, which need not be the table's:
+/// `Documents/ВводОстатковТоваров/Forms/ФормаТовары` addresses
+/// `Document.ВводОстатковТоваров.TabularSection.Товары.Attribute.Характеристика`
+/// from a table named `ПереданныеПереработчикамТовары` and the export reads
+/// `Items.ПереданныеПереработчикамТовары.CurrentData.Характеристика`. The same
+/// join holds for a register dimension: `Catalogs/Новости/Forms/ФормаДокумента`
+/// addresses `InformationRegister.КатегорииНовостейПростые.Dimension.
+/// КатегорияНовостей` from a table named `КатегорииПростые` and exports
+/// `Items.КатегорииПростые.CurrentData.КатегорияНовостей`.
+///
+/// So the owner is deliberately not required to match: it is the member's
+/// leaf name that the column carries. A UUID that resolves to no metadata
+/// member, or to a reference with no member name, still fails closed.
+fn resolve_form_table_current_data_metadata_uuid_path(
+    table_id: &str,
+    uuid: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let table_name = table_name_by_id.get(table_id)?;
+    let uuid = parse_non_zero_uuid(uuid)?;
+    let reference = object_refs.get(&uuid)?;
+    let (_, relative_path) = form_metadata_data_path_route(reference)?;
+    let member = relative_path.rsplit('.').next()?;
+    if member.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Items.{table_name}.CurrentData.{}",
+        normalize_form_table_column_name(table_name, member)
+    ))
 }
 
 pub(super) fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
@@ -18851,8 +18943,12 @@ fn format_form_attributes_section_xml_with_dcs_profiles(
         match conditional_appearance {
             FormAttributesConditionalAppearance::Typed(value) => {
                 xml.push_str(&emit_form_attributes_conditional_appearance_fragment(
-                    value, "\t\t",
+                    value,
+                    FORM_ATTRIBUTES_CONDITIONAL_APPEARANCE_INDENT,
                 )?);
+            }
+            FormAttributesConditionalAppearance::Transliterated(fragment) => {
+                xml.push_str(fragment);
             }
             FormAttributesConditionalAppearance::OpaqueStorage { reason, .. } => {
                 return Err(
