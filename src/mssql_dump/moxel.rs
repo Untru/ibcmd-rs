@@ -351,7 +351,7 @@ pub(super) struct MoxelFont {
     pub(super) scale: Option<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MoxelLine {
     pub(super) style: &'static str,
     pub(super) line_type: &'static str,
@@ -1278,18 +1278,50 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let has_sparse_column_sets = column_sets
         .iter()
         .any(|column_set| column_set.columns.len() != column_set.size);
-    let mut resolved_lines = parse_moxel_lines_with_raw_spans(
-        &fields,
-        &spanned_fields,
-        &all_formats,
-        has_sparse_column_sets,
-    );
-    normalize_moxel_single_set_report_header_tail(
-        &column_sets,
-        &column_formats,
-        &mut resolved_lines,
-        &mut formats,
-    );
+    // The document's own line table is authoritative wherever it decodes; the
+    // legacy reconstruction below only runs when the slot refuses.
+    let resolved_lines = match parse_moxel_line_table(&fields)
+        .filter(|lines| moxel_line_table_covers_references(lines, &all_formats))
+    {
+        Some(lines) => {
+            let lines = finalize_moxel_line_slots(
+                lines
+                    .into_iter()
+                    .map(|line| ResolvedMoxelLine {
+                        line,
+                        raw_parents: Vec::new(),
+                        transformations: Vec::new(),
+                        format_support: Vec::new(),
+                        ambiguous: false,
+                        fail_closed: false,
+                    })
+                    .collect(),
+                &all_formats,
+            );
+            normalize_moxel_report_header_tail_back_color(
+                &column_sets,
+                &column_formats,
+                &lines,
+                &mut formats,
+            );
+            lines
+        }
+        None => {
+            let mut lines = parse_moxel_lines_with_raw_spans(
+                &fields,
+                &spanned_fields,
+                &all_formats,
+                has_sparse_column_sets,
+            );
+            normalize_moxel_single_set_report_header_tail(
+                &column_sets,
+                &column_formats,
+                &mut lines,
+                &mut formats,
+            );
+            lines
+        }
+    };
     // XML keeps consuming the same projected palette as before.  The optional
     // sink sees exactly this final carried state, before it is projected away.
     trace_final_moxel_lines(&resolved_lines, trace_sink);
@@ -2565,6 +2597,89 @@ pub(super) fn parse_moxel_lines(
     shift_default_line_styles: bool,
 ) -> Vec<ResolvedMoxelLine> {
     parse_moxel_lines_with_raw_spans(fields, &[], formats, shift_default_line_styles)
+}
+
+/// Root slot of the MOXCEL line table.  It sits directly behind the language
+/// settings and the column-size descriptor and holds the document's shared
+/// `<line>` resources verbatim.
+const MOXEL_LINE_TABLE_FIELD: usize = 5;
+/// Line-kind identities carried by every line descriptor.
+const MOXEL_CELL_LINE_KIND: &str = "f527dc88-1d39-40b3-bcbb-d98b690ead68";
+const MOXEL_DRAWING_LINE_KIND: &str = "b7438842-27cc-42a3-846f-2250cd9c1bc3";
+/// A shared line table is a document-level resource, not per-cell data.
+const MAX_MOXEL_LINE_TABLE_ENTRIES: usize = 2048;
+const MAX_MOXEL_LINE_WIDTH: usize = 1024;
+
+/// Decodes the document's shared line table from its own root slot.
+///
+/// Shape: `{count, (1, {4,0,{0},style,width,0,kind,0}, 0) * count}`.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 604 spreadsheet templates the dump
+/// emits): the declared count equals the published `<line>` count in every one
+/// of the 604 documents — 0 mismatches — and the 1296 descriptor/line pairs
+/// collapse onto 15 distinct descriptors, each mapping to exactly one published
+/// line. `width` is the published width and `style`/`kind` decode as below.
+/// A descriptor that does not match this shape is refused rather than guessed.
+pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
+    let entries = split_1c_braced_fields(fields.get(MOXEL_LINE_TABLE_FIELD)?, 0)?;
+    let count = entries.first()?.trim().parse::<usize>().ok()?;
+    if count > MAX_MOXEL_LINE_TABLE_ENTRIES || entries.len() != count * 3 + 1 {
+        return None;
+    }
+    let mut lines = Vec::with_capacity(count);
+    for entry in entries.get(1..)?.chunks_exact(3) {
+        if entry.first()?.trim() != "1" || entry.get(2)?.trim() != "0" {
+            return None;
+        }
+        let descriptor = split_1c_braced_fields(entry.get(1)?, 0)?;
+        if descriptor.len() != 8
+            || descriptor.first()?.trim() != "4"
+            || descriptor.get(1)?.trim() != "0"
+            || descriptor.get(2)?.trim() != "{0}"
+            || descriptor.get(5)?.trim() != "0"
+            || descriptor.get(7)?.trim() != "0"
+        {
+            return None;
+        }
+        let style = match descriptor.get(3)?.trim() {
+            "0" => "None",
+            "1" => "Solid",
+            "2" => "Dotted",
+            "3" => "Double",
+            "4" => "ThinDashed",
+            "5" => "ThickDashed",
+            "6" => "LargeDashed",
+            _ => return None,
+        };
+        let width = descriptor.get(4)?.trim().parse::<usize>().ok()?;
+        if width > MAX_MOXEL_LINE_WIDTH {
+            return None;
+        }
+        let line_type = match descriptor.get(6)?.trim() {
+            MOXEL_CELL_LINE_KIND => "v8ui:SpreadsheetDocumentCellLineType",
+            MOXEL_DRAWING_LINE_KIND => "v8ui:SpreadsheetDocumentDrawingLineType",
+            _ => return None,
+        };
+        lines.push(MoxelLine {
+            style,
+            line_type,
+            width,
+        });
+    }
+    Some(lines)
+}
+
+/// A line table that does not cover every reference the format table makes is
+/// not the table those formats were written against.
+///
+/// Native bodies never disagree here: in all 604 spreadsheet templates the
+/// referenced slots are exactly `0..count`. Bodies this project packs itself
+/// still carry their lines in the legacy palette slot, so the check routes
+/// them back to the reconstruction path instead of dropping their lines.
+fn moxel_line_table_covers_references(lines: &[MoxelLine], formats: &[MoxelFormat]) -> bool {
+    moxel_used_line_indexes(formats)
+        .iter()
+        .all(|line_index| *line_index < lines.len())
 }
 
 fn parse_moxel_lines_with_raw_spans(
@@ -4581,39 +4696,83 @@ fn normalize_moxel_drawing_format_with_pattern_color(
     }
 }
 
+const REPORT_HEADER_TAIL_START: usize = 48;
+const REPORT_HEADER_TAIL_LEN: usize = 11;
+
+/// Locates the single-set report-header tail whose back colour the platform
+/// writes as a literal instead of the style reference the body carries.
+fn moxel_single_set_report_header_tail(
+    column_sets: &[MoxelColumnSet],
+    column_formats: &[MoxelFormat],
+    formats: &[MoxelFormat],
+) -> Option<usize> {
+    let tail_start = REPORT_HEADER_TAIL_START.checked_sub(column_formats.len() + 1)?;
+    let tail = formats.get(tail_start..tail_start + REPORT_HEADER_TAIL_LEN)?;
+    (column_sets.len() == 1
+        && column_formats.len() == 8
+        && tail.iter().all(|format| {
+            format.back_color.as_deref() == Some("style:ReportHeaderBackColor")
+                && format.border_color.is_none()
+                && format.text_placement == Some("Wrap")
+        }))
+    .then_some(tail_start)
+}
+
+fn apply_moxel_report_header_tail_back_color(formats: &mut [MoxelFormat], tail_start: usize) {
+    for format in formats
+        .iter_mut()
+        .skip(tail_start)
+        .take(REPORT_HEADER_TAIL_LEN)
+    {
+        format.back_color = Some("#F4ECC5".to_string());
+    }
+}
+
+/// The back-colour half alone, for documents whose own line table decoded.
+/// Such a document already carries the Solid/2 header line the legacy palette
+/// reconstruction had to synthesize, so only the colour compensation is left.
+fn normalize_moxel_report_header_tail_back_color(
+    column_sets: &[MoxelColumnSet],
+    column_formats: &[MoxelFormat],
+    lines: &[ResolvedMoxelLine],
+    formats: &mut [MoxelFormat],
+) {
+    let Some(line) = lines.get(1) else {
+        return;
+    };
+    if line.style != "Solid" || line.width != 2 {
+        return;
+    }
+    let Some(tail_start) =
+        moxel_single_set_report_header_tail(column_sets, column_formats, formats)
+    else {
+        return;
+    };
+    apply_moxel_report_header_tail_back_color(formats, tail_start);
+}
+
 pub(super) fn normalize_moxel_single_set_report_header_tail(
     column_sets: &[MoxelColumnSet],
     column_formats: &[MoxelFormat],
     lines: &mut [ResolvedMoxelLine],
     formats: &mut [MoxelFormat],
 ) {
-    const REPORT_HEADER_TAIL_START: usize = 48;
-    const REPORT_HEADER_TAIL_LEN: usize = 11;
-
     let Some(line) = lines.get(1) else {
         return;
     };
-    let Some(tail_start) = REPORT_HEADER_TAIL_START.checked_sub(column_formats.len() + 1) else {
-        return;
-    };
-    let Some(tail) = formats.get(tail_start..tail_start + REPORT_HEADER_TAIL_LEN) else {
-        return;
-    };
-    if column_sets.len() != 1
-        || column_formats.len() != 8
-        || line.style != "Dotted"
+    if line.style != "Dotted"
         || line.width != 1
         || !line.transformations.iter().any(|transformation| {
             matches!(transformation, MoxelLineTransformation::DefaultShift { .. })
         })
-        || !tail.iter().all(|format| {
-            format.back_color.as_deref() == Some("style:ReportHeaderBackColor")
-                && format.border_color.is_none()
-                && format.text_placement == Some("Wrap")
-        })
     {
         return;
     }
+    let Some(tail_start) =
+        moxel_single_set_report_header_tail(column_sets, column_formats, formats)
+    else {
+        return;
+    };
     if let Some(line) = lines.get_mut(1) {
         line.style = "Solid";
         line.width = 2;
@@ -4622,13 +4781,7 @@ pub(super) fn normalize_moxel_single_set_report_header_tail(
                 reason: "Dotted/1 to Solid/2",
             });
     }
-    for format in formats
-        .iter_mut()
-        .skip(tail_start)
-        .take(REPORT_HEADER_TAIL_LEN)
-    {
-        format.back_color = Some("#F4ECC5".to_string());
-    }
+    apply_moxel_report_header_tail_back_color(formats, tail_start);
 }
 
 pub(super) fn split_moxel_formats_by_source_refs(
@@ -6234,6 +6387,57 @@ pub(super) fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> St
     )
 }
 
+/// The `<font>` table a spreadsheet document actually publishes.
+///
+/// Evidence (native 1С:УТ 11.5.27.75 dump, all 1335 `Templates/*/Ext/
+/// Template.xml`): every published `<font>` table is exactly the set of fonts
+/// the written `<format>` table references, listed in first-reference order.
+/// 555 documents carry font references; every one of them is
+/// first-reference-exact, none has an unreferenced entry, and there is no
+/// counterexample. The MOXCEL font run itself is stored in an unrelated order.
+///
+/// The projection is derived from the very sequence of `<format>` elements the
+/// writer is about to emit, which makes it an identity on any document that
+/// already satisfies the invariant.
+struct MoxelFontProjection {
+    /// Published font slots, in order, as indices into the decoded run.
+    fonts: Vec<usize>,
+    /// Decoded font slot -> published slot, or `None` when unreferenced.
+    font_slots: Vec<Option<usize>>,
+}
+
+impl MoxelFontProjection {
+    fn font(&self, decoded_slot: Option<usize>) -> Option<usize> {
+        decoded_slot.and_then(|slot| self.font_slots.get(slot).copied().flatten())
+    }
+}
+
+fn moxel_font_projection(
+    spreadsheet: &MoxelSpreadsheet,
+    output_format_indices: &[usize],
+) -> Option<MoxelFontProjection> {
+    let mut fonts = Vec::new();
+    let mut font_slots = vec![None; spreadsheet.fonts.len()];
+    for format_index in output_format_indices.iter().copied() {
+        let format = moxel_format_for_index(spreadsheet, format_index);
+        // An empty format is written as `<format/>` and references nothing.
+        if format.is_empty() {
+            continue;
+        }
+        let Some(decoded_slot) = format.font else {
+            continue;
+        };
+        // A dangling reference means the decoded run is not the one the format
+        // table was written against; renumbering it would invent a font.
+        let slot = font_slots.get_mut(decoded_slot)?;
+        if slot.is_none() {
+            *slot = Some(fonts.len());
+            fonts.push(decoded_slot);
+        }
+    }
+    Some(MoxelFontProjection { fonts, font_slots })
+}
+
 fn format_moxel_spreadsheet_xml_with_plan(
     spreadsheet: &MoxelSpreadsheet,
     plan: &MxlSpreadsheetWritePlan,
@@ -6332,22 +6536,44 @@ fn render_moxel_spreadsheet_xml(
     for named_item in &spreadsheet.named_items {
         push_moxel_named_item_xml(&mut xml, named_item);
     }
-    if let Some(print_area) = &spreadsheet.print_area {
-        push_moxel_print_area_xml(&mut xml, print_area);
-    }
+    // Evidence (native 1С:УТ 11.5.27.75, all 1335 `Templates/*/Ext/
+    // Template.xml`): where a document writes both, `<printSettings>` always
+    // precedes `<printArea>` — 12 documents carry the pair and none inverts it.
     if let Some(print_settings) = &spreadsheet.print_settings
         && !print_settings.is_default_margins_only()
     {
         push_moxel_print_settings_xml(&mut xml, print_settings);
     }
+    if let Some(print_area) = &spreadsheet.print_area {
+        push_moxel_print_area_xml(&mut xml, print_area);
+    }
     for line in &spreadsheet.lines {
         push_moxel_line_xml(&mut xml, line);
     }
-    for font in &spreadsheet.fonts {
-        push_moxel_font_xml(&mut xml, font);
+    let font_projection = moxel_font_projection(spreadsheet, output_format_indices);
+    match &font_projection {
+        Some(projection) => {
+            for font in projection
+                .fonts
+                .iter()
+                .filter_map(|slot| spreadsheet.fonts.get(*slot))
+            {
+                push_moxel_font_xml(&mut xml, font);
+            }
+        }
+        None => {
+            for font in &spreadsheet.fonts {
+                push_moxel_font_xml(&mut xml, font);
+            }
+        }
     }
     for &format_index in output_format_indices {
-        push_moxel_format_xml(&mut xml, spreadsheet, format_index);
+        push_moxel_format_xml_with_fonts(
+            &mut xml,
+            spreadsheet,
+            format_index,
+            font_projection.as_ref(),
+        );
     }
     for picture in &spreadsheet.pictures {
         push_moxel_picture_xml(&mut xml, picture);
@@ -7371,18 +7597,36 @@ impl MoxelPrintSettings {
     }
 }
 
+/// Writes one `<format>` with the decoded font slot verbatim.  Production
+/// rendering goes through the font projection below; this entry point exists
+/// for format-level unit coverage.
+#[cfg(test)]
 pub(super) fn push_moxel_format_xml(
     xml: &mut String,
     spreadsheet: &MoxelSpreadsheet,
     format_index: usize,
+) {
+    push_moxel_format_xml_with_fonts(xml, spreadsheet, format_index, None);
+}
+
+fn push_moxel_format_xml_with_fonts(
+    xml: &mut String,
+    spreadsheet: &MoxelSpreadsheet,
+    format_index: usize,
+    font_projection: Option<&MoxelFontProjection>,
 ) {
     let format = moxel_format_for_index(spreadsheet, format_index);
     if format.is_empty() {
         xml.push_str("\t<format/>\r\n");
         return;
     };
+    // Without an admitted projection the decoded slot is written verbatim.
+    let font = match font_projection {
+        Some(projection) => projection.font(format.font),
+        None => format.font,
+    };
     xml.push_str("\t<format>\r\n");
-    push_moxel_format_usize(xml, "font", format.font);
+    push_moxel_format_usize(xml, "font", font);
     push_moxel_format_usize(xml, "border", format.border);
     if format.border.is_none() {
         push_moxel_format_usize(xml, "leftBorder", format.left_border);

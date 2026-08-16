@@ -30295,6 +30295,103 @@ fn formats_moxel_stamp_crypto_preserves_native_line_widths() {
     );
 }
 
+/// Fixture: `tests/fixtures/moxel_hotkeys_line_table_raw.txt`, 1622 bytes,
+/// sha256 `0b26cfab7233d0feb9f5235c70f627f5a7f26fe72c6235452d79a47a80cb90b6`.
+/// It is the native MOXCEL body of the `ПФ_MXL_ГорячиеКлавиши` template of
+/// catalog `ГорячиеКлавиши` in 1С:Управление торговлей 11.5.27.75 (`1cv8.cf`),
+/// as produced by this project's compatible-MXL decoder.
+///
+/// The platform's own export of the same template publishes two cell lines,
+/// `width="2" Solid` and `width="1" Solid`, and the document's line table is
+/// the only place those widths exist: the count-prefixed root palette holds
+/// `{3,3,{-1}}` and `{3,3,{-3}}`, which are style-referencing colours and carry
+/// no width at all.
+#[test]
+fn moxel_line_table_carries_the_widths_the_colour_palette_cannot() {
+    let inflated = include_str!("../../tests/fixtures/moxel_hotkeys_line_table_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    assert_eq!(
+        spreadsheet
+            .lines
+            .iter()
+            .map(|line| (line.width, line.style, line.line_type))
+            .collect::<Vec<_>>(),
+        vec![
+            (2, "Solid", "v8ui:SpreadsheetDocumentCellLineType"),
+            (1, "Solid", "v8ui:SpreadsheetDocumentCellLineType"),
+        ]
+    );
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(xml.contains(
+        "\t<line width=\"2\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">Solid</v8ui:style>\r\n\t</line>\r\n\t<line width=\"1\" gap=\"false\">"
+    ));
+}
+
+/// Fixture: `tests/fixtures/moxel_budget_revenue_admins_raw.txt`, 2131 bytes,
+/// sha256 `b236f20ac010f4a908c455b0ede9d39390c833ee016a01296f7806248e5c3b11`.
+/// It is the native MOXCEL body of the `МакетАдминистраторыДоходовБюджетов`
+/// template of catalog `ГосударственныеКонтракты` in the same configuration.
+///
+/// MOXCEL stores its three fonts as system-reference, empty face, then Arial;
+/// the platform publishes Arial first, because the first written `<format>`
+/// references it. The published table is the referenced fonts in
+/// first-reference order.
+#[test]
+fn moxel_font_table_is_published_in_first_reference_order() {
+    let inflated = include_str!("../../tests/fixtures/moxel_budget_revenue_admins_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    assert_eq!(
+        spreadsheet
+            .fonts
+            .iter()
+            .map(|font| (font.ref_name.clone(), font.face_name.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("sys:DefaultGUIFont".to_string()), None),
+            (None, Some(String::new())),
+            (None, Some("Arial".to_string())),
+        ]
+    );
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let arial = xml.find("<font faceName=\"Arial\"").unwrap();
+    let system = xml.find("ref=\"sys:DefaultGUIFont\"").unwrap();
+    let empty_face = xml.find("<font faceName=\"\"").unwrap();
+    assert!(arial < system && system < empty_face, "{xml}");
+    assert!(xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>73</width>"));
+}
+
+#[test]
+fn moxel_line_table_refuses_an_unknown_line_descriptor() {
+    let cell = "f527dc88-1d39-40b3-bcbb-d98b690ead68";
+    let known = format!("{{1,1,{{4,0,{{0}},1,2,0,{cell},0}},0}}");
+    let fields = ["8", "1", "12", "{0}", "{0}", known.as_str()];
+    assert_eq!(
+        parse_moxel_line_table(&fields),
+        Some(vec![MoxelLine {
+            style: "Solid",
+            line_type: "v8ui:SpreadsheetDocumentCellLineType",
+            width: 2,
+        }])
+    );
+
+    for refused in [
+        format!("{{1,1,{{4,0,{{0}},99,2,0,{cell},0}},0}}"),
+        format!("{{1,1,{{4,0,{{0}},1,2,0,00000000-0000-0000-0000-000000000000,0}},0}}"),
+        format!("{{2,1,{{4,0,{{0}},1,2,0,{cell},0}},0}}"),
+    ] {
+        let fields = ["8", "1", "12", "{0}", "{0}", refused.as_str()];
+        assert_eq!(parse_moxel_line_table(&fields), None, "{refused}");
+    }
+}
+
 #[test]
 fn writes_xdto_package_body_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
