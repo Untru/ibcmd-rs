@@ -5739,6 +5739,103 @@ fn extracts_command_interface_visibility_placement_order_and_groups() {
     assert!(xml.find("<CommandsPlacement>").unwrap() < xml.find("<CommandsOrder>").unwrap());
 }
 
+/// A command-visibility atom is adjustable: the common value is followed by a
+/// counted list of per-role overrides, and the common value is a real `false`
+/// even when an override next to it is `true`.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage element
+/// `86e05022-b8c0-4115-b7db-bc4853c53e50.1` of 1C:Trade Management
+/// 11.5.27.75's `1cv8.cf`, packed body sha256
+/// `54110a7878d50cca7c5decd9d2b11d6e6ef4e2628853e94763d190e7c0e271fd`; the
+/// expectation is the platform's own
+/// `Subsystems/CRMИМаркетинг/Ext/CommandInterface.xml` from an
+/// `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214, sha256
+/// `acf24545f6aaf23e091aae4f563c19f979fd5f5f925e4ac6dca362494f8daadf`.
+#[test]
+fn platform_subsystem_command_interface_keeps_per_role_visibility() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "command-interface-ut-role-visibility/raw-packed.bin.b64"
+    )))
+    .expect("platform-attested command interface payload");
+    let native = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "command-interface-ut-role-visibility/native-command-interface.xml.b64"
+    )))
+    .expect("platform-attested command interface export");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "54110a7878d50cca7c5decd9d2b11d6e6ef4e2628853e94763d190e7c0e271fd"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&native)),
+        "acf24545f6aaf23e091aae4f563c19f979fd5f5f925e4ac6dca362494f8daadf"
+    );
+
+    let command_refs = BTreeMap::from([
+        (
+            "4da477fc-4589-4f1c-b406-b657511d1b71".to_string(),
+            "CommonCommand.ПанельОтчетовCRMИМаркетинг".to_string(),
+        ),
+        (
+            "20797666-f9bb-4ac7-913d-3cd76bfdc5da".to_string(),
+            "CommonCommand.ДополнительныеОтчетыCRMИМаркетинг".to_string(),
+        ),
+    ]);
+    let metadata_refs = BTreeMap::from([
+        (
+            "9f082b87-a215-4bc7-9b04-a554322be6cd".to_string(),
+            MetadataCommandReference {
+                kind: "DocumentJournal".to_string(),
+                name: "РеестрТорговыхДокументов".to_string(),
+            },
+        ),
+        (
+            "d131c610-218f-4a96-a660-8fcb7d3c347a".to_string(),
+            MetadataCommandReference {
+                kind: "Report".to_string(),
+                name: "КонтактнаяИнформация".to_string(),
+            },
+        ),
+        (
+            "775035d0-dd99-4d68-83bb-d506d93fb18d".to_string(),
+            MetadataCommandReference {
+                kind: "Role".to_string(),
+                name: "ОтчетыМаркетолога".to_string(),
+            },
+        ),
+        (
+            "39849230-e25f-45c6-8f91-42499144c1ed".to_string(),
+            MetadataCommandReference {
+                kind: "Role".to_string(),
+                name: "ОтчетыРуководителяОтделаПродаж".to_string(),
+            },
+        ),
+        (
+            "fdb012c9-583a-42af-95da-070e75a58078".to_string(),
+            MetadataCommandReference {
+                kind: "Role".to_string(),
+                name: "ПолныеПрава".to_string(),
+            },
+        ),
+    ]);
+
+    let command_interface = parse_command_interface_blob(&packed, &command_refs, &metadata_refs)
+        .expect("platform-attested command interface body must decode");
+    let xml = format_command_interface_xml(&command_interface);
+
+    let native_xml = std::str::from_utf8(&native).expect("native command interface is UTF-8");
+    const CLOSE: &str = "\t</CommandsVisibility>\r\n";
+    let start = native_xml
+        .find("\t<CommandsVisibility>\r\n")
+        .expect("native CommandsVisibility section");
+    let end = native_xml
+        .find(CLOSE)
+        .expect("native CommandsVisibility end")
+        + CLOSE.len();
+    assert!(xml.contains(&native_xml[start..end]), "{xml}");
+}
+
 #[test]
 fn extracts_standalone_content_used_items() {
     let first_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
@@ -24222,6 +24319,220 @@ fn parses_and_formats_metadata_child_choice_parameter_values() {
     assert!(xml.contains("Enum.ФормыОплаты.EnumValue.Безналичная"));
 }
 
+/// A chart of characteristic types carries its data-lock mode in owner slot 36,
+/// not slot 51: the 8.3.27.2214 `CorpusCharacteristics` corpus has `0` there and
+/// exports `Automatic`, while this chart has `1` and exports `Managed`. Slot 51
+/// is `1` in both, so it cannot carry the mode.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage element
+/// `dabae379-6356-497a-aab5-cf102f16a72a` of 1C:Trade Management 11.5.27.75's
+/// `1cv8.cf`, packed body sha256
+/// `6988feda821613ac0866240949273f7fb115f4ec8237a781bac30088751be053`; the
+/// platform's own `ChartsOfCharacteristicTypes/ВопросыДляАнкетирования.xml`
+/// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214
+/// (sha256 `a2105a5985e5452e8c4004f2f04dcf552ff584bb07c38ac1772bec98662329f3`)
+/// carries `<DataLockControlMode>Managed</DataLockControlMode>`.
+#[test]
+fn platform_chart_of_characteristic_types_carries_the_data_lock_mode_in_slot_36() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "chart-of-characteristic-types-ut-managed-lock/raw-packed.bin.b64"
+    )))
+    .expect("platform-attested chart payload");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "6988feda821613ac0866240949273f7fb115f4ec8237a781bac30088751be053"
+    );
+    let inflated = inflate_raw_deflate(&packed).expect("platform-attested chart raw-deflate body");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&inflated)),
+        "e215b50a4b159affe09b6392b4d675aa5b17c9f5bc43be2053b759ad9e874395"
+    );
+
+    let text = String::from_utf8(inflated).expect("chart body is UTF-8");
+    let body = text.trim_start_matches('\u{feff}');
+    let header = parse_metadata_header_from_text(body, "dabae379-6356-497a-aab5-cf102f16a72a")
+        .expect("chart header");
+    let mut diagnostic = None;
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        body,
+        &header,
+        &mut diagnostic,
+    )
+    .expect("chart owner graph");
+
+    assert_eq!(
+        owner_graph.owner_fields.get(36).map(|field| field.trim()),
+        Some("1")
+    );
+    assert_eq!(
+        owner_graph.owner_fields.get(51).map(|field| field.trim()),
+        Some("1")
+    );
+}
+
+/// The atom that follows a link name is the data-path segment count, not the
+/// change mode: a two-segment path with a trailing `0` is `Clear`. Wire and
+/// expectation come from 1C:УТ 11.5.27.75
+/// `DataProcessor.ПечатьЭтикетокИЦенников` (tabular section `Товары`).
+#[test]
+fn reads_metadata_child_link_change_mode_from_the_trailing_atom() {
+    let object_refs = BTreeMap::from([
+        (
+            "4438e3aa-37d2-485b-9f8f-27653f9473b0".to_string(),
+            "DataProcessor.ПечатьЭтикетокИЦенников.TabularSection.Товары".to_string(),
+        ),
+        (
+            "4e5b7a37-6e75-430c-b26a-4a30b4d68f92".to_string(),
+            "DataProcessor.ПечатьЭтикетокИЦенников.TabularSection.Товары.Attribute.Номенклатура"
+                .to_string(),
+        ),
+    ]);
+    let links = parse_metadata_child_choice_parameter_links(
+        Some(
+            r##"{5006,1,"Номенклатура",2,{0,4438e3aa-37d2-485b-9f8f-27653f9473b0},{0,4e5b7a37-6e75-430c-b26a-4a30b4d68f92},0}"##,
+        ),
+        &object_refs,
+    )
+    .unwrap();
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].name, "Номенклатура");
+    assert_eq!(
+        links[0].data_path,
+        "DataProcessor.ПечатьЭтикетокИЦенников.TabularSection.Товары.Attribute.Номенклатура"
+    );
+    assert_eq!(links[0].value_change, "Clear");
+}
+
+/// A literal string choice-parameter value is written as `{"S","<text>"}`, and a
+/// fixed array keeps the order its members were written in. Wire and
+/// expectations come from 1C:УТ 11.5.27.75 `DataProcessor.ПодборСерийВДокументы`
+/// and `DataProcessor.ГенерацияТопологииСклада`.
+#[test]
+fn parses_string_and_ordered_fixed_array_choice_parameter_values() {
+    let object_refs = BTreeMap::from([
+        (
+            "aaf17114-0c7a-4709-bc08-5b3eac621a02".to_string(),
+            "Enum.НастройкиАдресногоХранения.EnumValue.ЯчейкиСправочно".to_string(),
+        ),
+        (
+            "ee67d3ea-8ef0-4319-ad37-83a152d02237".to_string(),
+            "Enum.НастройкиАдресногоХранения.EnumValue.ЯчейкиОстатки".to_string(),
+        ),
+        (
+            "547ae60a-335d-4529-8a04-c07afb777818".to_string(),
+            "Enum.НастройкиАдресногоХранения.EnumValue.ОпределяетсяНастройкамиПомещения"
+                .to_string(),
+        ),
+    ]);
+    let parameters = parse_metadata_child_choice_parameters(
+        Some(
+            r##"{0,2,"РежимВыбораНазначений",{"S","Все"},"АдресноеХранение",{"#",4500381b-db30-4a10-9db4-990038032acf,{3,{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,09b67064-0478-4ebf-a7a9-1f06d3b62882,aaf17114-0c7a-4709-bc08-5b3eac621a02}},{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,09b67064-0478-4ebf-a7a9-1f06d3b62882,ee67d3ea-8ef0-4319-ad37-83a152d02237}},{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,09b67064-0478-4ebf-a7a9-1f06d3b62882,547ae60a-335d-4529-8a04-c07afb777818}}}}}"##,
+        ),
+        &object_refs,
+    )
+    .unwrap();
+
+    assert_eq!(parameters.len(), 2);
+    assert!(matches!(
+        parameters[0].value,
+        MetadataChoiceParameterValue::String(ref text) if text == "Все"
+    ));
+    let MetadataChoiceParameterValue::FixedArray(ref members) = parameters[1].value else {
+        panic!("second choice parameter must decode as a fixed array");
+    };
+    assert_eq!(
+        members
+            .iter()
+            .map(|member| match member {
+                MetadataChoiceParameterValue::DesignTimeRef(value) => value.as_str(),
+                _ => panic!("fixed-array member must be a design-time reference"),
+            })
+            .collect::<Vec<_>>(),
+        [
+            "Enum.НастройкиАдресногоХранения.EnumValue.ЯчейкиСправочно",
+            "Enum.НастройкиАдресногоХранения.EnumValue.ЯчейкиОстатки",
+            "Enum.НастройкиАдресногоХранения.EnumValue.ОпределяетсяНастройкамиПомещения",
+        ]
+    );
+
+    let mut xml = String::new();
+    push_metadata_child_choice_parameters_xml(&mut xml, "\t\t\t", &parameters);
+    assert!(
+        xml.contains(r#"<app:value xsi:type="xs:string">Все</app:value>"#),
+        "{xml}"
+    );
+}
+
+/// The wrapped data-processor child uses the same flat property layout the
+/// register and document decoders already prove. Wire and expectations come
+/// from 1C:УТ 11.5.27.75 `DataProcessor.ПечатьЭтикетокИЦенников`, attribute
+/// `Склад`.
+#[test]
+fn wrapped_data_processor_child_reads_the_proven_property_slots() {
+    let object_refs = BTreeMap::from([(
+        "1b09dfb7-8fec-4ddf-8f7f-2285584cea0b".to_string(),
+        "Enum.ТипыСкладов.EnumValue.РозничныйМагазин".to_string(),
+    )]);
+    let fields = [
+        "2",
+        r##"{3,{1,0,2aa2ee52-b373-4c46-98f3-faffeb07fa88},"Склад",{1,"ru","Розничный магазин"},"",0,0,00000000-0000-0000-0000-000000000000,0}"##,
+        r##"{"Pattern",{"#",e63fc7d1-3d01-4fbb-8cbe-9d4bf8fe2126}}"##,
+        "0",
+        "{0}",
+        "{0}",
+        "0",
+        r#""""#,
+        "0",
+        r#"{"U"}"#,
+        r#"{"U"}"#,
+        "2",
+        "00000000-0000-0000-0000-000000000000",
+        "2",
+        "0",
+        "{5006,0}",
+        "{3,0,0}",
+        r##"{0,1,"Отбор.ТипСклада",{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,d19811b1-1650-47cd-a01c-a79958cb224c,1b09dfb7-8fec-4ddf-8f7f-2285584cea0b}}}"##,
+        "0",
+        "{0}",
+        r#"{"S",""}"#,
+        "0",
+        "0",
+        "0",
+    ];
+
+    let properties = parse_data_processor_wrapped_child_properties(&fields, 1, &[], &object_refs)
+        .expect("wrapped data-processor child layout");
+
+    assert_eq!(properties.choice_folders_and_items, Some("FoldersAndItems"));
+    assert!(
+        properties
+            .choice_parameter_links
+            .as_deref()
+            .is_some_and(<[_]>::is_empty)
+    );
+    assert!(properties.link_by_type_empty);
+    assert!(properties.link_by_type.is_none());
+    assert_eq!(properties.quick_choice, Some("Auto"));
+    assert_eq!(properties.create_on_input, Some("Auto"));
+    assert_eq!(properties.choice_history_on_input, Some("Auto"));
+    assert!(!properties.fill_from_filling_value);
+    assert!(!properties.extended_edit);
+    let parameters = properties
+        .choice_parameters
+        .as_deref()
+        .expect("choice parameters");
+    assert_eq!(parameters.len(), 1);
+    assert_eq!(parameters[0].name, "Отбор.ТипСклада");
+    assert!(matches!(
+        parameters[0].value,
+        MetadataChoiceParameterValue::DesignTimeRef(ref value)
+            if value == "Enum.ТипыСкладов.EnumValue.РозничныйМагазин"
+    ));
+}
+
 fn generated_type_source_row(file_name: &str, type_id: &str, name: &str) -> MetadataTextRow {
     MetadataTextRow {
         file_name: file_name.to_string(),
@@ -24355,6 +24666,45 @@ fn rewrites_help_picture_sources_to_metadata_references() {
     assert!(rewritten.contains(
         r#"<img src="../../mdpicture/id00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000000">"#
     ));
+}
+
+#[test]
+fn keeps_the_anchor_of_an_internal_help_link() {
+    let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let refs = BTreeMap::from([(uuid.to_string(), "Catalog.Products".to_string())]);
+    let html =
+        format!(r#"<a href="../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a#abc123">One</a>"#);
+
+    let rewritten = String::from_utf8(rewrite_help_links(html.as_bytes(), &refs)).unwrap();
+
+    assert_eq!(
+        rewritten,
+        r#"<a href="Catalog.Products/Help#abc123">One</a>"#
+    );
+}
+
+#[test]
+fn rewrites_help_attachment_folder_to_the_exported_files_directory() {
+    let refs = BTreeMap::new();
+    let html = concat!(
+        r#"<img src="038b5c85-fb1c-4082-9c4c-e69f8928bf3a_files/error.png"></img>"#,
+        r#"<img src="_files/plain.png"></img>"#,
+        r#"<img src="notauuid_files/kept.png"></img>"#,
+        r#"<img src="00000000-0000-0000-0000-000000000000_files/kept.png"></img>"#
+    );
+
+    let rewritten = String::from_utf8(rewrite_help_links(html.as_bytes(), &refs)).unwrap();
+
+    assert!(
+        rewritten.contains(r#"<img src="_files/error.png">"#),
+        "{rewritten}"
+    );
+    assert!(rewritten.contains(r#"<img src="_files/plain.png">"#));
+    assert!(rewritten.contains(r#"<img src="notauuid_files/kept.png">"#));
+    assert!(
+        rewritten.contains(r#"<img src="00000000-0000-0000-0000-000000000000_files/kept.png">"#),
+        "{rewritten}"
+    );
 }
 
 #[test]
@@ -31903,7 +32253,8 @@ fn writes_nested_subsystem_metadata_and_help_to_source_layout() {
     );
     let parent_xml = fs::read_to_string(root.join("Subsystems/StandardSubsystems.xml")).unwrap();
     assert!(
-        parent_xml.contains("<Subsystem>Subsystem.StandardSubsystems.Subsystem.Users</Subsystem>")
+        parent_xml.contains("<Subsystem>Users</Subsystem>"),
+        "{parent_xml}"
     );
     assert!(
         fs::read_to_string(
@@ -32241,7 +32592,10 @@ fn extracts_subsystem_child_objects_to_metadata_xml() {
     );
     assert!(xml.contains(r#"version="2.21""#));
     assert!(xml.contains("<ChildObjects>"));
-    assert!(xml.contains("<Subsystem>Subsystem.Parent.Subsystem.Child</Subsystem>"));
+    // `ChildObjects` lists child object names, not qualified references:
+    // 1C:УТ 11.5.27.75 writes `<Subsystem>Child</Subsystem>` here.
+    assert!(xml.contains("<Subsystem>Child</Subsystem>"), "{xml}");
+    assert!(!xml.contains("<Subsystem>Subsystem.Parent.Subsystem.Child</Subsystem>"));
     assert!(xml.find("\t\t</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
 }
 

@@ -1226,6 +1226,22 @@ pub(super) fn subsystem_source_reference_name(
     Some(reference)
 }
 
+/// `ChildObjects` in a subsystem source document lists child object *names*,
+/// exactly like every other metadata family, rather than the qualified
+/// `Subsystem.Owner.Subsystem.Child` reference that cross-object properties
+/// use. Native 1C:УТ 11.5.27.75 writes the bare leaf name here.
+pub(super) fn subsystem_source_reference_child_name(
+    subsystem_ref: &SubsystemSourceReference,
+) -> Option<String> {
+    Some(
+        subsystem_ref
+            .relative_path
+            .file_stem()?
+            .to_str()?
+            .to_string(),
+    )
+}
+
 #[allow(dead_code)]
 pub(super) fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
     let metadata_texts = build_metadata_text_rows(rows);

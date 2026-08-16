@@ -2169,6 +2169,7 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
         return content.to_vec();
     };
     let text = rewrite_help_picture_refs(text, refs);
+    let text = rewrite_help_attachment_folder_refs(&text);
     let pattern = "../id";
     let mut output = String::with_capacity(text.len());
     let mut offset = 0usize;
@@ -2199,6 +2200,13 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
         output.push_str(&text[offset..start]);
         output.push_str(reference);
         output.push_str("/Help");
+        // A stored help link may address an anchor inside the target page
+        // (`../id<uuid>/<page>#<anchor>`). The platform keeps that fragment on
+        // the rewritten `<Reference>/Help` link; only the storage path in front
+        // of it is replaced.
+        if let Some(relative_fragment) = text[uuid_end..quote_end].find('#') {
+            output.push_str(&text[uuid_end + relative_fragment..quote_end]);
+        }
         offset = quote_end;
     }
     output.push_str(&text[offset..]);
@@ -2223,6 +2231,44 @@ pub(super) fn rewrite_help_picture_refs(text: &str, refs: &BTreeMap<String, Stri
             None => output.push_str(&text[start..value_end]),
         }
         offset = value_end;
+    }
+    output.push_str(&text[offset..]);
+    output
+}
+
+/// Help and HTML-document attachments are exported into a single `_files`
+/// directory beside the page, which this exporter already writes. Inside the
+/// stored HTML the platform still addresses that directory through the storage
+/// identifier of the owning document (`src="<uuid>_files/name.png"`); the
+/// exported page addresses it relatively (`src="_files/name.png"`). Only an
+/// attribute value that starts with a non-nil UUID immediately followed by
+/// `_files/` is requalified; every other occurrence is copied through.
+pub(super) fn rewrite_help_attachment_folder_refs(text: &str) -> String {
+    const MARKER: &str = "_files/";
+    const ATTRIBUTE_PREFIX: &str = "=\"";
+    const UUID_LEN: usize = 36;
+    const QUALIFIER_LEN: usize = ATTRIBUTE_PREFIX.len() + UUID_LEN;
+
+    let mut output = String::with_capacity(text.len());
+    let mut offset = 0usize;
+
+    while let Some(relative_start) = text[offset..].find(MARKER) {
+        let marker_start = offset + relative_start;
+        let qualified = marker_start >= offset + QUALIFIER_LEN
+            && text.get(marker_start - QUALIFIER_LEN..marker_start - UUID_LEN)
+                == Some(ATTRIBUTE_PREFIX)
+            && text
+                .get(marker_start - UUID_LEN..marker_start)
+                .and_then(parse_non_zero_uuid)
+                .is_some();
+        let copy_end = if qualified {
+            marker_start - UUID_LEN
+        } else {
+            marker_start
+        };
+        output.push_str(&text[offset..copy_end]);
+        output.push_str(MARKER);
+        offset = marker_start + MARKER.len();
     }
     output.push_str(&text[offset..]);
     output

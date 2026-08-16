@@ -25,6 +25,12 @@ pub(super) struct CommandInterfaceOrderEntry {
 pub(super) struct CommandInterfaceVisibilityEntry {
     pub(super) name: String,
     pub(super) common: bool,
+    pub(super) values: Vec<CommandInterfaceVisibilityValue>,
+}
+
+pub(super) struct CommandInterfaceVisibilityValue {
+    pub(super) name: String,
+    pub(super) value: bool,
 }
 
 pub(super) struct HomePageWorkArea {
@@ -107,9 +113,21 @@ pub(super) fn parse_command_interface_sectioned_fields(
             true,
         )?;
         index += 1;
-        let common = parse_command_interface_common_flag(fields.get(index)?)?;
+        let field = fields.get(index)?;
+        let (common, values) =
+            match parse_command_interface_adjustable_visibility(field, metadata_refs) {
+                Some(parsed) => parsed,
+                // The adjustable shape is the only one whose per-role overrides are
+                // proven; any other wire shape keeps the previously verified
+                // common-only reading instead of inventing values.
+                None => (parse_command_interface_common_flag(field)?, Vec::new()),
+            };
         index += 1;
-        commands_visibility.push(CommandInterfaceVisibilityEntry { name, common });
+        commands_visibility.push(CommandInterfaceVisibilityEntry {
+            name,
+            common,
+            values,
+        });
     }
 
     // The legacy visibility-only profile terminates after exactly three empty
@@ -248,6 +266,52 @@ pub(super) fn command_interface_placement_name(code: &str) -> Option<&'static st
     match code {
         "0" => Some("Auto"),
         "1" => Some("Manual"),
+        _ => None,
+    }
+}
+
+/// An adjustable command-visibility atom carries the common value followed by a
+/// counted list of per-role overrides:
+/// `{0,{0,{"B",c},N,<role-uuid>,{"B",v},...}}`. The list is written in the same
+/// order the platform emits `<xr:Value name="Role.X">` children.
+fn parse_command_interface_adjustable_visibility(
+    field: &str,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<(bool, Vec<CommandInterfaceVisibilityValue>)> {
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    let [tag, body] = outer.as_slice() else {
+        return None;
+    };
+    if tag.trim() != "0" {
+        return None;
+    }
+    let inner = split_1c_braced_fields(body.trim(), 0)?;
+    if inner.first()?.trim() != "0" {
+        return None;
+    }
+    let common = parse_command_interface_boolean_atom(inner.get(1)?)?;
+    let count = inner.get(2)?.trim().parse::<usize>().ok()?;
+    if inner.len() != count.checked_mul(2)?.checked_add(3)? {
+        return None;
+    }
+    let mut values = Vec::with_capacity(count);
+    for slot in 0..count {
+        let uuid = parse_non_zero_uuid(inner.get(3 + slot * 2)?)?;
+        let reference = metadata_refs
+            .get(&uuid)
+            .filter(|entry| entry.kind == "Role")?;
+        values.push(CommandInterfaceVisibilityValue {
+            name: format!("Role.{}", reference.name),
+            value: parse_command_interface_boolean_atom(inner.get(4 + slot * 2)?)?,
+        });
+    }
+    Some((common, values))
+}
+
+fn parse_command_interface_boolean_atom(value: &str) -> Option<bool> {
+    match value.trim() {
+        r#"{"B",1}"# => Some(true),
+        r#"{"B",0}"# => Some(false),
         _ => None,
     }
 }
@@ -551,7 +615,7 @@ pub(super) fn command_interface_standard_command_for_code(
         ("0" | "100", "Constant") => Some("Open"),
         ("0" | "100", "CalculationRegister") => Some("OpenList"),
         ("0" | "100", _) => command_interface_standard_command(kind),
-        ("1", "BusinessProcess" | "Catalog" | "Document") => Some("Create"),
+        ("1", "BusinessProcess" | "Catalog" | "Document" | "InformationRegister") => Some("Create"),
         ("1", "ChartOfCharacteristicTypes") => Some("CreateFolder"),
         ("2", "Catalog") => Some("CreateFolder"),
         ("2", "ChartOfCharacteristicTypes") => Some("Create"),
@@ -570,12 +634,21 @@ pub(super) fn format_command_interface_xml(command_interface: &CommandInterface)
             xml.push_str(&format!(
                 "\t\t<Command name=\"{}\">\r\n\
 \t\t\t<Visibility>\r\n\
-\t\t\t\t<xr:Common>{}</xr:Common>\r\n\
-\t\t\t</Visibility>\r\n\
-\t\t</Command>\r\n",
+\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
                 escape_xml_text(&entry.name),
                 xml_bool(entry.common)
             ));
+            for value in &entry.values {
+                xml.push_str(&format!(
+                    "\t\t\t\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+                    escape_xml_text(&value.name),
+                    xml_bool(value.value)
+                ));
+            }
+            xml.push_str(
+                "\t\t\t</Visibility>\r\n\
+\t\t</Command>\r\n",
+            );
         }
         xml.push_str("\t</CommandsVisibility>\r\n");
     }

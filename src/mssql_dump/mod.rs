@@ -9980,7 +9980,7 @@ fn parse_subsystem_child_references(
         .take(count)
         .filter_map(|field| parse_uuid_field(field.trim()))
         .filter_map(|uuid| subsystem_refs.get(&uuid))
-        .filter_map(subsystem_source_reference_name)
+        .filter_map(subsystem_source_reference_child_name)
         .collect()
 }
 
@@ -18430,9 +18430,14 @@ fn parse_data_processor_wrapped_child_properties(
         return None;
     }
 
-    let (quick_choice, create_on_input) = data_processor_wrapped_quick_create_modes(
-        fields.get(13).map(|field| field.trim()).unwrap_or("2"),
-    );
+    // QuickChoice and CreateOnInput occupy their own slots in the flat child
+    // layout; they are not two readings of one atom.
+    let quick_choice =
+        catalog_quick_choice_xml(fields.get(13).map(|field| field.trim()).unwrap_or("2"))
+            .or(Some("Auto"));
+    let create_on_input =
+        catalog_create_on_input_xml(fields.get(22).map(|field| field.trim()).unwrap_or("0"))
+            .or(Some("Auto"));
     Some(MetadataChildProperties {
         password_mode: parse_1c_bool_field(fields.get(3).copied()).unwrap_or(false),
         format: parse_1c_synonyms(fields.get(4).copied().unwrap_or("{0}")),
@@ -18444,10 +18449,10 @@ fn parse_data_processor_wrapped_child_properties(
             .and_then(|field| parse_1c_quoted_string(field.trim()))
             .unwrap_or_default(),
         multi_line: parse_1c_bool_field(fields.get(8).copied()).unwrap_or(false),
-        extended_edit: parse_1c_bool_field(fields.get(21).copied()).unwrap_or(false),
+        extended_edit: parse_1c_bool_field(fields.get(18).copied()).unwrap_or(false),
         min_value: parse_constant_bound_value(fields.get(9).copied()),
         max_value: parse_constant_bound_value(fields.get(10).copied()),
-        fill_from_filling_value: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
+        fill_from_filling_value: parse_1c_bool_field(fields.get(21).copied()).unwrap_or(false),
         emit_fill_from_filling_value: true,
         fill_value: parse_metadata_child_fill_value(
             fields.get(20).copied(),
@@ -18459,23 +18464,29 @@ fn parse_data_processor_wrapped_child_properties(
             Some("1") => "ShowError",
             _ => "DontCheck",
         },
-        choice_folders_and_items: Some("Items"),
+        // The wrapped data-processor child shares the flat property layout that
+        // the register/document decoders already prove: choice folders and items
+        // sit before the choice form, and the choice-parameter-link collection is
+        // followed by LinkByType and only then by ChoiceParameters.
+        choice_folders_and_items: fields
+            .get(11)
+            .and_then(|field| metadata_choice_folders_and_items_xml(field.trim())),
         choice_parameter_links: parse_metadata_child_choice_parameter_links(
             fields.get(15).copied(),
             object_refs,
         ),
         choice_parameters: parse_metadata_child_choice_parameters(
-            fields.get(16).copied(),
+            fields.get(17).copied(),
             object_refs,
         ),
         self_close_empty_choice_parameter_refs: false,
         quick_choice,
         create_on_input,
         choice_form: parse_metadata_child_choice_form(fields.get(12).copied(), object_refs),
-        link_by_type_empty: metadata_child_collection_is_empty(fields.get(17).copied()),
+        link_by_type_empty: metadata_child_collection_is_empty(fields.get(16).copied()),
         link_by_type: None,
         choice_history_on_input: fields
-            .get(18)
+            .get(23)
             .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
             .or(Some("Auto")),
         master: None,
@@ -18559,16 +18570,6 @@ fn register_child_full_text_search_xml(value: &str) -> Option<&'static str> {
         "0" => Some("DontUse"),
         "1" => Some("Use"),
         _ => None,
-    }
-}
-
-fn data_processor_wrapped_quick_create_modes(
-    value: &str,
-) -> (Option<&'static str>, Option<&'static str>) {
-    match value {
-        "0" => (Some("DontUse"), Some("Use")),
-        "1" => (Some("Use"), Some("DontUse")),
-        _ => (Some("Auto"), Some("Auto")),
     }
 }
 
@@ -20137,8 +20138,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             &header.name,
             form_refs,
         )?,
-        data_lock_control_mode: match fields.get(51)?.trim() {
-            "1" => "Automatic",
+        // Slot 51 is a fixed marker in every observed native chart; the data-lock
+        // mode itself lives in slot 36 and uses the shared 0/1 encoding
+        // (8.3.27.2214 CorpusCharacteristics = 0/Automatic, 1C:УТ 11.5.27.75
+        // charts = 1/Managed).
+        data_lock_control_mode: match (fields.get(51)?.trim(), fields.get(36)?.trim()) {
+            ("1", "0") => "Automatic",
+            ("1", "1") => "Managed",
             _ => return None,
         },
         full_text_search: match fields.get(37)?.trim() {
@@ -26472,6 +26478,15 @@ fn parse_metadata_choice_parameter_value(
     {
         return Some(MetadataChoiceParameterValue::Boolean(boolean));
     }
+    // A literal string parameter value is stored as `{"S","<text>"}`; the platform
+    // writes it as `xsi:type="xs:string"`.
+    if let Some(fields) = split_1c_braced_fields(value, 0)
+        && fields.len() == 2
+        && parse_1c_quoted_string(fields[0].trim()).as_deref() == Some("S")
+        && let Some(text) = parse_1c_quoted_string(fields[1].trim())
+    {
+        return Some(MetadataChoiceParameterValue::String(text));
+    }
     let value_refs = parse_design_time_references(value, object_refs);
     match value_refs.len() {
         0 => None,
@@ -26516,12 +26531,10 @@ fn parse_metadata_child_choice_parameter_links(
         else {
             break;
         };
-        let value_change = metadata_choice_link_value_change_xml(
-            fields
-                .get(index + 1)
-                .map(|field| field.trim())
-                .unwrap_or("1"),
-        );
+        // A link is written as `<name>, <segment-count>, <segment>..., <value-change>`.
+        // The atom that follows the name is the data-path segment count, and the
+        // change mode is the trailing atom, encoded the same way the proven form
+        // dialect encodes it (`0` = Clear, `1` = DontChange).
         index += 2;
 
         let mut data_path = None;
@@ -26536,10 +26549,13 @@ fn parse_metadata_child_choice_parameter_links(
         let Some(data_path) = data_path else {
             break;
         };
-        if fields
+        let mut value_change = "Clear";
+        if let Some(field) = fields
             .get(index)
-            .is_some_and(|field| field.trim().chars().all(|ch| ch.is_ascii_digit()))
+            .map(|field| field.trim())
+            .filter(|field| field.chars().all(|ch| ch.is_ascii_digit()))
         {
+            value_change = metadata_choice_link_value_change_xml(field);
             index += 1;
         }
         links.push(MetadataChoiceParameterLink {
@@ -26554,7 +26570,7 @@ fn parse_metadata_child_choice_parameter_links(
 
 fn metadata_choice_link_value_change_xml(value: &str) -> &'static str {
     match value {
-        "2" => "DontChange",
+        "1" => "DontChange",
         _ => "Clear",
     }
 }
@@ -26571,7 +26587,9 @@ fn parse_design_time_reference(
 }
 
 fn parse_design_time_references(text: &str, object_refs: &BTreeMap<String, String>) -> Vec<String> {
-    uuid_like_values(text)
+    // A fixed-array choice-parameter value keeps the order the members were
+    // written in; sorting by identifier is not the platform's order.
+    uuid_like_values_in_text_order(text)
         .into_iter()
         .filter_map(|uuid| object_refs.get(&uuid).cloned())
         .collect()
@@ -28104,6 +28122,7 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "f6532868-30b9-44ab-803c-78f0f0b06b02" => Some("StdPicture.CloneObject"),
         "448d6f55-d885-496c-870d-d1bd78374745" => Some("StdPicture.CloneListItem"),
         "977e831a-0e73-4d60-af51-091a6fa8612e" => Some("StdPicture.CreateListItem"),
+        "0e2da390-5c04-46a2-a74b-1b7e13a40f2b" => Some("StdPicture.HidePassword"),
         "723765ab-0b92-4745-a621-1ba0f77c92c9" => Some("StdPicture.EventLog"),
         "4fddea39-5129-4b4c-83fe-4e443cd61940" => Some("StdPicture.EventLogByUser"),
         "ffab30f1-da11-44b5-b34c-24da22badcf4" => Some("StdPicture.Find"),
