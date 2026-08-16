@@ -58868,3 +58868,199 @@ fn characteristics_three_family_call_sites_share_decoder_and_xml_writer_seams() 
     }
     assert!(!production.contains("fn push_document_characteristics_xml"));
 }
+
+/// Builds a bare `FormChildItem` of the given tag for XML-order regression tests.
+///
+/// The record is the same minimal tooltip-representation shape the surrounding
+/// tests reuse; every property under test is set explicitly afterwards.
+fn form_child_item_for_order_test(tag: &'static str) -> FormChildItem {
+    let mut item = parse_tooltip_representation_field_for_test(
+        &tooltip_representation_field_record_for_test("37", "2", 59, "3", "{1,0}"),
+    );
+    item.tag = tag;
+    item.tooltip_representation = None;
+    item
+}
+
+fn assert_xml_order(xml: &str, expected: &[&str]) {
+    let mut previous = 0usize;
+    for needle in expected {
+        let at = xml
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle} in {xml}"));
+        assert!(previous <= at, "expected {expected:?} in order, got {xml}");
+        previous = at;
+    }
+}
+
+#[test]
+fn form_field_default_item_trails_visible_and_user_visible() {
+    // UT 11.5.27.75 native tree: `Visible`/`UserVisible` precede `DefaultItem`
+    // on every control kind that carries them (`LabelField` 7/68 co-occurrences,
+    // `InputField` 1/6, `CheckBoxField` 1/1) with no counter-example.
+    for tag in ["LabelField", "InputField", "CheckBoxField"] {
+        let mut item = form_child_item_for_order_test(tag);
+        item.visible = Some(false);
+        item.user_visible_common = Some(false);
+        item.default_item = Some(true);
+        let xml = format_form_child_item_xml(&item, 1, false);
+        assert_xml_order(
+            &xml,
+            &["<Visible>false</Visible>", "<UserVisible>", "<DefaultItem>"],
+        );
+    }
+}
+
+#[test]
+fn form_button_width_trails_default_button_and_skip_on_input() {
+    // Native `Button` order is `… DefaultButton SkipOnInput Enabled DefaultItem
+    // Width …` (43/38/2 co-occurrences, no counter-example).
+    let mut item = form_child_item_for_order_test("Button");
+    item.default_button = Some(true);
+    item.skip_on_input = Some(true);
+    item.enabled = Some(false);
+    item.default_item = Some(true);
+    item.width = Some("10".to_string());
+    let xml = format_form_child_item_xml(&item, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<DefaultButton>true</DefaultButton>",
+            "<SkipOnInput>true</SkipOnInput>",
+            "<Enabled>false</Enabled>",
+            "<DefaultItem>true</DefaultItem>",
+            "<Width>10</Width>",
+        ],
+    );
+}
+
+#[test]
+fn form_radio_button_field_tooltip_precedes_radio_button_properties() {
+    // Native `RadioButtonField` emits `ToolTip` in the shared field slot, ahead
+    // of `ToolTipRepresentation` (99), `RadioButtonType` (148), `ColumnsCount`
+    // (22) and `ChoiceList` (146).
+    let mut item = form_child_item_for_order_test("RadioButtonField");
+    item.tooltip = vec![("ru".to_string(), "Подсказка".to_string())];
+    item.tooltip_representation = Some("Button");
+    item.radio_button_type = Some("Auto");
+    item.columns_count = Some(2);
+    let xml = format_form_child_item_xml(&item, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<ToolTip>",
+            "<ToolTipRepresentation>",
+            "<RadioButtonType>Auto</RadioButtonType>",
+            "<ColumnsCount>2</ColumnsCount>",
+        ],
+    );
+}
+
+#[test]
+fn form_control_max_width_precedes_height() {
+    // `MaxWidth` sits between `AutoMaxWidth` and `Height` on every control kind
+    // observed natively (`InputField` 6163/54, `LabelField` 408/23, …).
+    for tag in ["InputField", "LabelField"] {
+        let mut item = form_child_item_for_order_test(tag);
+        item.auto_max_width = Some(false);
+        item.max_width = Some("40".to_string());
+        item.height = Some("3".to_string());
+        let xml = format_form_child_item_xml(&item, 1, false);
+        assert_xml_order(
+            &xml,
+            &[
+                "<AutoMaxWidth>false</AutoMaxWidth>",
+                "<MaxWidth>40</MaxWidth>",
+                "<Height>3</Height>",
+            ],
+        );
+    }
+}
+
+#[test]
+fn form_input_field_colors_precede_font_and_input_hint() {
+    // Native `InputField` order is `… TextColor BackColor BorderColor Font …
+    // InputHint …` (90/11/8 colour-before-`Font` co-occurrences; `Font` before
+    // `InputHint` 15).
+    let mut item = form_child_item_for_order_test("InputField");
+    item.text_color = Some("Style.Text".to_string());
+    item.back_color = Some("Style.Back".to_string());
+    item.border_color = Some("Style.Border".to_string());
+    item.font_xml = Some("<Font ref=\"style:Normal\" kind=\"StyleItem\"/>".to_string());
+    item.input_hint = vec![("ru".to_string(), "Введите".to_string())];
+    let xml = format_form_child_item_xml(&item, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<TextColor>Style.Text</TextColor>",
+            "<BackColor>Style.Back</BackColor>",
+            "<BorderColor>Style.Border</BorderColor>",
+            "<Font ref=",
+            "<InputHint>",
+        ],
+    );
+}
+
+#[test]
+fn form_table_visible_precedes_user_visible_and_title_location() {
+    // Native `Table` runs `Representation Visible UserVisible TitleLocation`.
+    use crate::form_schema::{FORM_TABLE_XML_ORDER, FormTableXmlProperty};
+
+    let order = FORM_TABLE_XML_ORDER;
+    let position = |property| {
+        order
+            .iter()
+            .position(|candidate| *candidate == property)
+            .unwrap()
+    };
+    assert!(
+        position(FormTableXmlProperty::Representation) < position(FormTableXmlProperty::Visible)
+    );
+    assert!(position(FormTableXmlProperty::Visible) < position(FormTableXmlProperty::UserVisible));
+    assert!(
+        position(FormTableXmlProperty::UserVisible) < position(FormTableXmlProperty::TitleLocation)
+    );
+}
+
+#[test]
+fn form_document_properties_trail_command_set_and_precede_show_title() {
+    // Native document forms emit `CommandSet` then the `AutoTime`/
+    // `UsePostingMode`/`RepostOnWrite` trio (238 co-occurrences), and place
+    // `ShowTitle` ahead of `UseForFoldersAndItems` (1).
+    let properties = FormBodyProperties {
+        command_set_excluded_commands: vec!["Form.Command"],
+        scaling_mode: Some("Normal"),
+        command_bar_location: Some("Top"),
+        auto_time: Some("DontUse"),
+        use_posting_mode: Some("RegularPosting"),
+        repost_on_write: Some(true),
+        show_title: Some(false),
+        use_for_folders_and_items: Some("Items"),
+        ..FormBodyProperties::default()
+    };
+    let xml = format_form_body_xml(
+        &properties,
+        None,
+        &[],
+        &[],
+        &[],
+        &FormAttributesSection::default(),
+        &[],
+        &[],
+        &None,
+    )
+    .unwrap();
+    assert_xml_order(
+        &xml,
+        &[
+            "<CommandBarLocation>Top</CommandBarLocation>",
+            "<ScalingMode>Normal</ScalingMode>",
+            "<CommandSet>",
+            "<AutoTime>DontUse</AutoTime>",
+            "<UsePostingMode>RegularPosting</UsePostingMode>",
+            "<RepostOnWrite>true</RepostOnWrite>",
+            "<ShowTitle>false</ShowTitle>",
+            "<UseForFoldersAndItems>Items</UseForFoldersAndItems>",
+        ],
+    );
+}

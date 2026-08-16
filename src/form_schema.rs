@@ -4369,9 +4369,12 @@ pub(crate) fn encode_form_table_command_bar_location(value: &str) -> Option<&'st
 
 pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Representation,
-    FormTableXmlProperty::TitleLocation,
-    FormTableXmlProperty::UserVisible,
+    // Native `Table` bodies run `Visible` -> `UserVisible` -> `TitleLocation`
+    // (UT 11.5.27.75 native tree: Visible<UserVisible 2, Visible<TitleLocation 1,
+    // UserVisible<TitleLocation 1, no counter-example).
     FormTableXmlProperty::Visible,
+    FormTableXmlProperty::UserVisible,
+    FormTableXmlProperty::TitleLocation,
     FormTableXmlProperty::CommandBarLocation,
     FormTableXmlProperty::Autofill,
     FormTableXmlProperty::ReadOnly,

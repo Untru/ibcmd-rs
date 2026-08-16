@@ -14192,14 +14192,17 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(value)
         ));
     }
-    if properties.save_window_settings == Some(false) {
-        xml.push_str("\t<SaveWindowSettings>false</SaveWindowSettings>\r\n");
-    }
+    // Native `Form` bodies order `SaveDataInSettings` ahead of `SaveWindowSettings`
+    // whenever both are present (UT 11.5.27.75 native tree: 1 co-occurrence, no
+    // counter-example anywhere in the 5 201 native `Form.xml` documents).
     if let Some(value) = properties.save_data_in_settings {
         xml.push_str(&format!(
             "\t<SaveDataInSettings>{}</SaveDataInSettings>\r\n",
             escape_xml_text(value)
         ));
+    }
+    if properties.save_window_settings == Some(false) {
+        xml.push_str("\t<SaveWindowSettings>false</SaveWindowSettings>\r\n");
     }
     if properties.auto_title == Some(false) {
         xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
@@ -14210,20 +14213,18 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(group) = properties.group.filter(|group| *group != "Vertical") {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
     }
-    if let Some(value) = properties.scaling_mode {
-        xml.push_str(&format!(
-            "\t<ScalingMode>{}</ScalingMode>\r\n",
-            escape_xml_text(value)
-        ));
-    }
-    if properties.vertical_scroll.is_none() {
-        append_form_document_properties_xml(&mut xml, properties);
-    }
     if properties.auto_fill_check == Some(false) {
         xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
     }
-    if properties.customizable == Some(false) {
-        xml.push_str("\t<Customizable>false</Customizable>\r\n");
+    // `HorizontalAlign` precedes `VerticalAlign`, `Customizable`,
+    // `CommandBarLocation`, `VerticalScroll`, `ConversationsRepresentation`,
+    // `CommandSet` and `UseForFoldersAndItems` in the native tree (2/3/4/2/1/3/2
+    // co-occurrences respectively, no counter-example).
+    if let Some(horizontal_align) = properties.horizontal_align {
+        xml.push_str(&format!(
+            "\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+            escape_xml_text(horizontal_align)
+        ));
     }
     if let Some(vertical_align) = properties.vertical_align {
         xml.push_str(&format!(
@@ -14231,25 +14232,29 @@ fn format_form_body_xml_with_dcs_profiles(
             vertical_align.xml_value()
         ));
     }
+    if properties.customizable == Some(false) {
+        xml.push_str("\t<Customizable>false</Customizable>\r\n");
+    }
     if let Some(command_bar_location) = properties.command_bar_location {
         xml.push_str(&format!(
             "\t<CommandBarLocation>{}</CommandBarLocation>\r\n",
             escape_xml_text(command_bar_location)
         ));
     }
+    // `ScalingMode` follows `Customizable` (3) and `CommandBarLocation` (6) and
+    // precedes `CommandSet` (3), `ConversationsRepresentation` (1), `ShowTitle`
+    // (1), `ShowCloseButton` (1) and `UseForFoldersAndItems` (1) in the native
+    // tree, with no counter-example.
+    if let Some(value) = properties.scaling_mode {
+        xml.push_str(&format!(
+            "\t<ScalingMode>{}</ScalingMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     if let Some(vertical_scroll) = properties.vertical_scroll {
         xml.push_str(&format!(
             "\t<VerticalScroll>{}</VerticalScroll>\r\n",
             escape_xml_text(vertical_scroll)
-        ));
-    }
-    if properties.vertical_scroll.is_some() {
-        append_form_document_properties_xml(&mut xml, properties);
-    }
-    if let Some(horizontal_align) = properties.horizontal_align {
-        xml.push_str(&format!(
-            "\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
-            escape_xml_text(horizontal_align)
         ));
     }
     if let Some(conversations_representation) = properties.conversations_representation {
@@ -14271,17 +14276,24 @@ fn format_form_body_xml_with_dcs_profiles(
         }
         xml.push_str("\t</CommandSet>\r\n");
     }
-    if let Some(value) = properties.use_for_folders_and_items {
-        xml.push_str(&format!(
-            "\t<UseForFoldersAndItems>{}</UseForFoldersAndItems>\r\n",
-            escape_xml_text(value)
-        ));
-    }
+    // The document trio (`AutoTime`/`UsePostingMode`/`RepostOnWrite`) is always
+    // contiguous in the native tree and always follows `CommandSet` (238),
+    // `MobileDeviceCommandBarContent` (1), `CommandBarLocation` (14),
+    // `VerticalScroll` (20) and `Customizable` (2), with no counter-example.
+    append_form_document_properties_xml(&mut xml, properties);
     if properties.show_title == Some(false) {
         xml.push_str("\t<ShowTitle>false</ShowTitle>\r\n");
     }
     if properties.show_close_button == Some(false) {
         xml.push_str("\t<ShowCloseButton>false</ShowCloseButton>\r\n");
+    }
+    // `ShowTitle` precedes `UseForFoldersAndItems` in the native tree (1
+    // co-occurrence, no counter-example).
+    if let Some(value) = properties.use_for_folders_and_items {
+        xml.push_str(&format!(
+            "\t<UseForFoldersAndItems>{}</UseForFoldersAndItems>\r\n",
+            escape_xml_text(value)
+        ));
     }
     if let Some(value) = &properties.report_result {
         xml.push_str(&format!(
@@ -15307,14 +15319,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(horizontal_location)
         ));
     }
-    if item.tag == "Button"
-        && let Some(width) = &item.width
-    {
-        xml.push_str(&format!(
-            "{tab}\t<Width>{}</Width>\r\n",
-            escape_xml_text(width)
-        ));
-    }
     if item.tag != "Button"
         && let Some(command_name) = &item.command_name
     {
@@ -15349,9 +15353,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(data_path)
         ));
     }
-    if item.tag != "Table" && item.tag != "Button" && item.default_item == Some(true) {
-        xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
-    }
     if !matches!(item.tag, "Button" | "Table") && item.visible == Some(false) {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
@@ -15359,6 +15360,13 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
         ));
+    }
+    // `DefaultItem` trails `Visible` and `UserVisible` on every control kind that
+    // exposes it in the UT 11.5.27.75 native tree (`LabelField` 7/68,
+    // `InputField` 1/6, `CheckBoxField` 1/1, `Button` 2/-), never the other way
+    // round.
+    if item.tag != "Table" && item.tag != "Button" && item.default_item == Some(true) {
+        xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
     if matches!(
         item.tag,
@@ -15451,6 +15459,17 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "Button" && item.default_item == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
+    // A `Button`'s geometry opens at `Width`, which the native tree always places
+    // after `DefaultButton` (43 co-occurrences), `SkipOnInput` (38) and `Enabled`
+    // (2) — never before any of them.
+    if item.tag == "Button"
+        && let Some(width) = &item.width
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Width>{}</Width>\r\n",
+            escape_xml_text(width)
+        ));
+    }
     if item.tag != "Table"
         && !title_location_follows_title
         && let Some(title_location) = item.title_location
@@ -15484,12 +15503,18 @@ pub(super) fn format_form_child_item_xml(
         }
         xml.push_str(&format!("{tab}\t</CommandSet>\r\n"));
     }
+    // `RadioButtonField` carries `ToolTip` in the same slot as the other fields —
+    // right after the title block and ahead of `ToolTipRepresentation` (99
+    // native co-occurrences), `RadioButtonType` (148), `ChoiceList` (146),
+    // `ColumnsCount` (22), `GroupHorizontalAlign` (2), `VerticalAlign` (1) and
+    // `GroupVerticalAlign` (1), with no counter-example.
     if matches!(
         item.tag,
         "InputField"
             | "LabelField"
             | "CheckBoxField"
             | "PictureField"
+            | "RadioButtonField"
             | "CalendarField"
             | "ProgressBarField"
             | "TrackBarField"
@@ -15656,6 +15681,19 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
     }
+    // `MaxWidth` sits between `AutoMaxWidth` and `Height` on every control kind
+    // observed in the native tree (`InputField` 6163/54, `LabelField` 408/23,
+    // `Button` 119/103, `PictureField` 62/16, `Table` 36/2, … — zero
+    // counter-examples in either direction).
+    if item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
+        && let Some(max_width) = &item.max_width
+    {
+        xml.push_str(&format!(
+            "{tab}\t<MaxWidth>{}</MaxWidth>\r\n",
+            escape_xml_text(max_width)
+        ));
+    }
     if item.tag != "Table"
         && item.tag != "Button"
         && item.tag != "LabelDecoration"
@@ -15700,15 +15738,6 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
             if skip_on_input { "true" } else { "false" }
-        ));
-    }
-    if item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
-        && let Some(max_width) = &item.max_width
-    {
-        xml.push_str(&format!(
-            "{tab}\t<MaxWidth>{}</MaxWidth>\r\n",
-            escape_xml_text(max_width)
         ));
     }
     if item.tag == "Button" {
@@ -15778,8 +15807,11 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
     }
+    // `LabelField` carries `TextColor` at the very end of its visual tail, after
+    // `AutoMaxHeight` (23 native co-occurrences), `HorizontalStretch` (108),
+    // `Format` (28) and `Border` (1); the remaining control kinds keep it here.
     if item.tag != "PictureDecoration"
-        && !matches!(item.tag, "Button" | "InputField" | "Table")
+        && !matches!(item.tag, "Button" | "InputField" | "LabelField" | "Table")
         && let Some(text_color) = &item.text_color
     {
         xml.push_str(&format!(
@@ -15930,7 +15962,6 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(choice_folders_and_items)
             ));
         }
-        xml.push_str(&format_form_auto_mark_incomplete_xml(item, indent + 1));
         if !item.format.is_empty() {
             xml.push_str(&format_form_localized_section(
                 "Format",
@@ -15945,6 +15976,9 @@ pub(super) fn format_form_child_item_xml(
                 indent + 1,
             ));
         }
+        // `AutoMarkIncomplete` trails `Format` (4 native co-occurrences) and
+        // `EditFormat` (31) on `InputField`, never precedes either.
+        xml.push_str(&format_form_auto_mark_incomplete_xml(item, indent + 1));
     }
     if item.choose_type == Some(false) {
         xml.push_str(&format!("{tab}\t<ChooseType>false</ChooseType>\r\n"));
@@ -15986,6 +16020,17 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(value)
         ));
     }
+    // `ChoiceParameterLinks`/`ChoiceParameters` precede the choice-list block in
+    // the native tree — `ChoiceParameters` before `ChoiceList` (4),
+    // `ChoiceListButton` (13), `ChoiceListHeight` (4) and `DropListWidth` (1);
+    // `ChoiceParameterLinks` before `ChoiceList` (1) and `ChoiceListButton` (3) —
+    // with no counter-example.
+    if let Some(cluster) = &item.choice_parameter_cluster {
+        xml.push_str(
+            &format_form_choice_parameter_cluster_xml(cluster, indent + 1)
+                .expect("ChoiceParameters must pass the Form writer tree typed preflight"),
+        );
+    }
     if !item.choice_list.is_empty() {
         let choice_list_xml = format_form_choice_list_xml(&item.choice_list, indent + 1)
             .expect("ChoiceList must pass both Form writer trees' typed preflight");
@@ -16004,23 +16049,10 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(drop_list_width)
         ));
     }
-    if let Some(cluster) = &item.choice_parameter_cluster {
-        xml.push_str(
-            &format_form_choice_parameter_cluster_xml(cluster, indent + 1)
-                .expect("ChoiceParameters must pass the Form writer tree typed preflight"),
-        );
-    }
     if item.tag == "InputField"
         && let Some(type_link) = &item.type_link
     {
         xml.push_str(&format_form_type_link_xml(type_link, indent + 1));
-    }
-    if item.tag == "InputField" && !item.input_hint.is_empty() {
-        xml.push_str(&format_form_localized_section(
-            "InputHint",
-            &item.input_hint,
-            indent + 1,
-        ));
     }
     if usual_group_title_first {
         if item.tag == "ButtonGroup" {
@@ -16140,8 +16172,32 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
     }
+    if item.tag == "LabelField"
+        && let Some(text_color) = &item.text_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TextColor>{}</TextColor>\r\n",
+            escape_xml_text(text_color)
+        ));
+    }
+    // The colour triple precedes `Font` on every control kind that carries both
+    // (`InputField` 90/11/8, `Button` 273/79/35, `LabelField` 177/1, …), with no
+    // counter-example outside `LabelDecoration`, which has its own emitter.
+    if item.tag == "InputField" {
+        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
+    }
     if let Some(font_xml) = &item.font_xml {
         xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
+    }
+    // `InputHint` trails the colour/`Font` block in the native tree
+    // (`Font`<`InputHint` 15, `TextColor`<`InputHint` 12, `BackColor` 10,
+    // `BorderColor` 7), never precedes it.
+    if item.tag == "InputField" && !item.input_hint.is_empty() {
+        xml.push_str(&format_form_localized_section(
+            "InputHint",
+            &item.input_hint,
+            indent + 1,
+        ));
     }
     if item.tag == "PictureDecoration"
         && let Some(text_color) = &item.text_color
@@ -16324,6 +16380,7 @@ pub(super) fn format_form_child_item_xml(
             | "LabelField"
             | "CheckBoxField"
             | "PictureField"
+            | "RadioButtonField"
             | "CalendarField"
             | "ProgressBarField"
             | "TrackBarField"
@@ -16352,9 +16409,6 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<CommandSource>{}</CommandSource>\r\n",
             escape_xml_text(command_source)
         ));
-    }
-    if item.tag == "InputField" {
-        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
     }
     if item.tag == "PictureField"
         && let Some(file_drag_mode) = item.file_drag_mode
