@@ -11769,6 +11769,270 @@ fn extracts_form_usual_group_group_from_layout_code() {
     assert!(xml.contains("<ShowTitle>false</ShowTitle>"));
 }
 
+/// A `LabelField` tuple with the shape the platform writes for a table column:
+/// slot 13 is `Enabled`, slot 24 `HeaderHorizontalAlign`, slot 37 the
+/// `{0, virtual-key, modifier-mask}` shortcut, and member 5 of the `11` option
+/// tuple `MarkNegatives`. Every scalar outside those four keeps the value a
+/// native column carries, so the fixture also pins the surrounding output.
+fn label_field_column_layout(
+    enabled: &str,
+    header_horizontal_align: &str,
+    shortcut: &str,
+    mark_negatives: &str,
+) -> String {
+    format!(
+        r#"{{37,{{8,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,1,"Код",1,0,{{1,0}},{{1,0}},{{0}},{{0}},{enabled},0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,{header_horizontal_align},3,1,3,0,{{4,0,{{0}},"",-1,-1,1,0,""}},{{4,0,{{0}},"",-1,-1,1,0,""}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{shortcut},1,{{11,0,0,2,2,{mark_negatives},{{1,0}},0,{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},2,{{0,1,0}},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,0,0,1,0}},{{0,1,0}},1,{{22,{{9,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,8,"КодКонтекстноеМеню",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{1,1}},0,1,0,0,0,3,3,0}},1,{{"Pattern"}},{{"Pattern"}},"","",{{0}},0,0,1,{{12,{{18,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,0,"КодРасширеннаяПодсказка",{{1,0}},{{1,0}},1,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{5,0,0,3,0,{{0,1,0}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}}},0,1,2,{{1,{{1,0}},0}},0,0,1,0,0,1,0,3,3,0,0}},3,3,0,0,0,0}}"#
+    )
+}
+
+fn parse_label_field_column(layout: &str) -> FormChildItem {
+    parse_form_child_item(
+        layout,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn label_field_column_writes_the_four_properties_the_platform_keeps_in_its_own_slots() {
+    let item = parse_label_field_column(&label_field_column_layout("0", "1", "{0,83,8}", "1"));
+
+    assert_eq!(item.tag, "LabelField");
+    assert_eq!(item.enabled, Some(false));
+    assert_eq!(item.header_horizontal_align, Some("Center"));
+    assert_eq!(item.item_shortcut.as_deref(), Some("Ctrl+S"));
+    assert_eq!(item.mark_negatives, Some(true));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+
+    let enabled = xml.find("<Enabled>false</Enabled>").unwrap();
+    let shortcut = xml.find("<Shortcut>Ctrl+S</Shortcut>").unwrap();
+    let header = xml
+        .find("<HeaderHorizontalAlign>Center</HeaderHorizontalAlign>")
+        .unwrap();
+    let mark = xml.find("<MarkNegatives>true</MarkNegatives>").unwrap();
+    let data_path_end = xml.find("</DataPath>").unwrap_or(0);
+    let context_menu = xml.find("<ContextMenu ").unwrap();
+
+    // `Enabled` opens the property block behind `DataPath`, `Shortcut` follows
+    // the title/tooltip block, `HeaderHorizontalAlign` trails `ShowInHeader` and
+    // `MarkNegatives` trails the geometry block - all four ahead of
+    // `ContextMenu`, exactly as the native tree writes them.
+    assert!(data_path_end < enabled || data_path_end == 0);
+    assert!(enabled < shortcut);
+    assert!(shortcut < header);
+    assert!(header < mark);
+    assert!(mark < context_menu);
+}
+
+#[test]
+fn label_field_column_omits_the_four_properties_on_their_default_codes() {
+    let item = parse_label_field_column(&label_field_column_layout("1", "0", "{0,0,0}", "2"));
+
+    assert_eq!(item.enabled, None);
+    assert_eq!(item.header_horizontal_align, None);
+    assert_eq!(item.item_shortcut, None);
+    assert_eq!(item.mark_negatives, None);
+
+    let xml = format_form_child_items_xml(&[item], 1);
+
+    assert!(!xml.contains("<Enabled>"));
+    assert!(!xml.contains("<HeaderHorizontalAlign>"));
+    assert!(!xml.contains("<Shortcut>"));
+    assert!(!xml.contains("<MarkNegatives>"));
+}
+
+#[test]
+fn field_header_horizontal_align_reads_the_slot_behind_horizontal_align() {
+    // The codes the native tree shows on the field kinds: `0` is the default the
+    // platform omits, and `Left` never occurs there.
+    let mut fields = vec!["0"; 30];
+    for (code, expected) in [
+        ("0", None),
+        ("1", Some("Center")),
+        ("2", Some("Right")),
+        ("3", Some("Auto")),
+    ] {
+        fields[24] = code;
+        assert_eq!(
+            parse_form_field_header_horizontal_align(&fields, 0),
+            expected
+        );
+        // The whole layout shifts by one when the item carries no direct name.
+        let mut shifted = fields.clone();
+        shifted[24] = "0";
+        shifted[25] = code;
+        assert_eq!(
+            parse_form_field_header_horizontal_align(&shifted, 1),
+            expected
+        );
+    }
+    // A short layout carries no slot at all.
+    assert_eq!(
+        parse_form_field_header_horizontal_align(&["0"; 20], 0),
+        None
+    );
+}
+
+#[test]
+fn column_group_header_horizontal_align_uses_the_shared_alignment_codes() {
+    let mut options = vec!["0"; 12];
+    for (code, expected) in [
+        ("0", Some("Left")),
+        ("1", Some("Center")),
+        ("2", Some("Right")),
+        ("3", None),
+    ] {
+        options[4] = code;
+        assert_eq!(
+            parse_form_column_group_header_horizontal_align(&options),
+            expected
+        );
+    }
+}
+
+#[test]
+fn container_enabled_reads_the_slot_of_each_kind() {
+    let mut fields = vec!["1"; 20];
+    fields[9] = "0";
+    assert_eq!(
+        parse_form_container_enabled("LabelDecoration", &fields),
+        Some(false)
+    );
+    assert_eq!(
+        parse_form_container_enabled("PictureDecoration", &fields),
+        Some(false)
+    );
+    assert_eq!(parse_form_container_enabled("Page", &fields), None);
+
+    let mut fields = vec!["1"; 20];
+    fields[10] = "0";
+    for tag in [
+        "Page",
+        "SearchStringAddition",
+        "SearchControlAddition",
+        "ViewStatusAddition",
+    ] {
+        assert_eq!(parse_form_container_enabled(tag, &fields), Some(false));
+    }
+    assert_eq!(
+        parse_form_container_enabled("LabelDecoration", &fields),
+        None
+    );
+    // Kinds whose flag lives elsewhere stay untouched by this reader.
+    assert_eq!(parse_form_container_enabled("InputField", &fields), None);
+}
+
+#[test]
+fn table_header_height_omits_the_single_row_default() {
+    let mut fields = vec!["0"; 30];
+    for (code, expected) in [("1", None), ("2", Some("2")), ("3", Some("3"))] {
+        fields[27] = code;
+        assert_eq!(parse_form_table_header_height(&fields).as_deref(), expected);
+    }
+    // A non-numeric slot is not a height.
+    fields[27] = "{0}";
+    assert_eq!(parse_form_table_header_height(&fields), None);
+}
+
+#[test]
+fn input_field_option_tail_reads_its_own_slots() {
+    let mut options = vec!["0"; 66];
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::MarkNegatives.index()] = "1";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceListHeight.index()] = "20";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::AutoChoiceIncomplete.index()] =
+        "0";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::TypeDomainEnabled.index()] = "0";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::HeightControlVariant.index()] =
+        "2";
+
+    assert_eq!(
+        parse_form_option_mark_negatives(
+            &options,
+            crate::form_schema::FormInputFieldExtendedOptionSlot::MarkNegatives.index()
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        parse_form_input_field_choice_list_height(Some(&options)).as_deref(),
+        Some("20")
+    );
+    assert_eq!(
+        parse_form_input_field_auto_choice_incomplete(Some(&options)),
+        Some(false)
+    );
+    assert_eq!(
+        parse_form_input_field_type_domain_enabled(Some(&options)),
+        Some(false)
+    );
+    assert_eq!(
+        parse_form_input_field_height_control_variant(Some(&options)),
+        Some("UseContentHeight")
+    );
+
+    // The codes the platform writes when it emits nothing at all.
+    let mut quiet = vec!["0"; 66];
+    quiet[crate::form_schema::FormInputFieldExtendedOptionSlot::MarkNegatives.index()] = "2";
+    quiet[crate::form_schema::FormInputFieldExtendedOptionSlot::AutoChoiceIncomplete.index()] = "2";
+    quiet[crate::form_schema::FormInputFieldExtendedOptionSlot::TypeDomainEnabled.index()] = "1";
+    assert_eq!(
+        parse_form_option_mark_negatives(
+            &quiet,
+            crate::form_schema::FormInputFieldExtendedOptionSlot::MarkNegatives.index()
+        ),
+        None
+    );
+    assert_eq!(
+        parse_form_input_field_choice_list_height(Some(&quiet)),
+        None
+    );
+    assert_eq!(
+        parse_form_input_field_auto_choice_incomplete(Some(&quiet)),
+        None
+    );
+    assert_eq!(
+        parse_form_input_field_type_domain_enabled(Some(&quiet)),
+        None
+    );
+    assert_eq!(
+        parse_form_input_field_height_control_variant(Some(&quiet)),
+        None
+    );
+}
+
+#[test]
+fn radio_button_option_tail_reads_its_own_slots() {
+    let mut options = vec!["0"; 12];
+    options[6] = "1";
+    options[11] = "1";
+    assert_eq!(
+        parse_form_radio_button_item_height(Some(&options)).as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        parse_form_radio_button_equal_columns_width(Some(&options)),
+        Some(true)
+    );
+
+    options[11] = "0";
+    assert_eq!(
+        parse_form_radio_button_equal_columns_width(Some(&options)),
+        Some(false)
+    );
+    options[6] = "0";
+    options[11] = "2";
+    assert_eq!(parse_form_radio_button_item_height(Some(&options)), None);
+    assert_eq!(
+        parse_form_radio_button_equal_columns_width(Some(&options)),
+        None
+    );
+}
+
 #[test]
 fn pages_group_writes_its_geometry_and_alignment_behind_the_title() {
     // Synthetic `Pages` tuple shaped like the native ones: slot 12/13 carry the
@@ -18681,6 +18945,16 @@ fn formats_table_search_additions_as_direct_sections() {
         default_button: None,
         scroll_on_compress: None,
         show_title: None,
+        header_horizontal_align: None,
+        mark_negatives: None,
+        header_height: None,
+        item_shortcut: None,
+        choice_list_height: None,
+        type_domain_enabled: None,
+        height_control_variant: None,
+        equal_columns_width: None,
+        item_height: None,
+        table_vertical_scroll_bar: None,
         show_in_header: None,
         user_visible_common: None,
         visible: None,
@@ -18866,6 +19140,16 @@ fn formats_table_search_additions_as_direct_sections() {
                 default_button: None,
                 scroll_on_compress: None,
                 show_title: None,
+                header_horizontal_align: None,
+                mark_negatives: None,
+                header_height: None,
+                item_shortcut: None,
+                choice_list_height: None,
+                type_domain_enabled: None,
+                height_control_variant: None,
+                equal_columns_width: None,
+                item_height: None,
+                table_vertical_scroll_bar: None,
                 show_in_header: None,
                 user_visible_common: None,
                 visible: None,
@@ -19052,6 +19336,16 @@ fn formats_table_search_additions_as_direct_sections() {
                 default_button: None,
                 scroll_on_compress: None,
                 show_title: None,
+                header_horizontal_align: None,
+                mark_negatives: None,
+                header_height: None,
+                item_shortcut: None,
+                choice_list_height: None,
+                type_domain_enabled: None,
+                height_control_variant: None,
+                equal_columns_width: None,
+                item_height: None,
+                table_vertical_scroll_bar: None,
                 show_in_header: None,
                 user_visible_common: None,
                 visible: None,

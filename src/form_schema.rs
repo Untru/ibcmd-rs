@@ -4290,6 +4290,8 @@ pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlPropert
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTableXmlProperty {
     Representation,
+    HeaderHeight,
+    VerticalScrollBar,
     TitleLocation,
     UserVisible,
     Visible,
@@ -4394,8 +4396,20 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::RowSelectionMode,
     FormTableXmlProperty::Header,
     FormTableXmlProperty::HorizontalScrollBar,
+    // `VerticalScrollBar` trails `HorizontalScrollBar` (4), `Header` (13),
+    // `ChangeRowOrder` (7), `SkipOnInput` (3), `SelectionMode` (2) and
+    // `ChoiceMode` (2) and precedes `HorizontalLines` (7),
+    // `UseAlternationRowColor` and `AutoInsertNewRow`, with no counter-example.
+    FormTableXmlProperty::VerticalScrollBar,
     FormTableXmlProperty::HorizontalLines,
     FormTableXmlProperty::VerticalLines,
+    // `HeaderHeight` trails `Representation`, `CommandBarLocation`, `ReadOnly`,
+    // `SkipOnInput`, `DefaultItem`, `ChangeRowSet`, `ChangeRowOrder`, `Width`,
+    // `Height`, `HeightInTableRows`, `SelectionMode`, `RowSelectionMode` and
+    // `Header`, and precedes `UseAlternationRowColor`, `AutoInsertNewRow`,
+    // `EnableStartDrag`, `FileDragMode`, `DataPath`, `Title` and `CommandSet`
+    // on all 32 native occurrences, with no counter-example.
+    FormTableXmlProperty::HeaderHeight,
     FormTableXmlProperty::UseAlternationRowColor,
     FormTableXmlProperty::AutoInsertNewRow,
     FormTableXmlProperty::AutoAddIncomplete,
@@ -5334,6 +5348,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     PasswordMode,
     MultiLine,
     ExtendedEdit,
+    MarkNegatives,
     ChoiceListButton,
     ChoiceButton,
     ClearButton,
@@ -5344,6 +5359,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     Mask,
     ListChoiceMode,
     ChoiceButtonPicture,
+    ChoiceListHeight,
     DropListWidth,
     QuickChoice,
     AutoCellHeight,
@@ -5368,6 +5384,8 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     MaxWidth,
     AutoMaxHeight,
     MaxHeight,
+    TypeDomainEnabled,
+    HeightControlVariant,
     ChoiceParameterLinksDuplicate,
     ExtendedEditMultipleValues,
 }
@@ -5384,6 +5402,10 @@ impl FormInputFieldExtendedOptionSlot {
             Self::PasswordMode => 7,
             Self::MultiLine => 8,
             Self::ExtendedEdit => 9,
+            // `1` writes `<MarkNegatives>true</MarkNegatives>` and `2` writes
+            // nothing, on every one of the 46 850 `InputField` items of the
+            // attributable native forms with no counter-example.
+            Self::MarkNegatives => 10,
             Self::ChoiceListButton => 11,
             Self::ChoiceButton => 12,
             Self::ClearButton => 13,
@@ -5394,6 +5416,9 @@ impl FormInputFieldExtendedOptionSlot {
             Self::Mask => 18,
             Self::ListChoiceMode => 19,
             Self::ChoiceButtonPicture => 20,
+            // A zero writes nothing; any other value is written verbatim. Holds on
+            // all 46 850 attributable `InputField` items with no counter-example.
+            Self::ChoiceListHeight => 21,
             Self::DropListWidth => 22,
             Self::QuickChoice => 23,
             Self::ChoiceFoldersAndItems => 24,
@@ -5418,6 +5443,11 @@ impl FormInputFieldExtendedOptionSlot {
             Self::MaxWidth => 50,
             Self::AutoMaxHeight => 52,
             Self::MaxHeight => 53,
+            // `0` writes `<TypeDomainEnabled>false</TypeDomainEnabled>`, `1`
+            // writes nothing; no other code occurs on the attributable items.
+            Self::TypeDomainEnabled => 35,
+            // `2 -> UseContentHeight`, `1 -> UseHeightInFormRows`, `0 -> nothing`.
+            Self::HeightControlVariant => 54,
             Self::ChoiceParameterLinksDuplicate => 64,
             Self::ExtendedEditMultipleValues => 65,
         }
@@ -5445,6 +5475,7 @@ pub(crate) enum FormLabelFieldOptionSlot {
     Height,
     HorizontalStretch,
     VerticalStretch,
+    MarkNegatives,
     Format,
     Hiperlink,
     TextColor,
@@ -5470,6 +5501,10 @@ impl FormLabelFieldOptionSlot {
             Self::Height => 2,
             Self::HorizontalStretch => 3,
             Self::VerticalStretch => 4,
+            // `1` writes `<MarkNegatives>true</MarkNegatives>` and `2` writes
+            // nothing, on every one of the 28 558 `LabelField` items of the
+            // attributable native forms with no counter-example.
+            Self::MarkNegatives => 5,
             Self::Format => 6,
             Self::Hiperlink => 7,
             Self::TextColor => 8,

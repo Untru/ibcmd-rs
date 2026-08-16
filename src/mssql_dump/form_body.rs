@@ -1102,6 +1102,16 @@ pub(super) struct FormChildItem {
     pub(super) scroll_on_compress: Option<bool>,
     pub(super) show_title: Option<bool>,
     pub(super) show_in_header: Option<bool>,
+    pub(super) header_horizontal_align: Option<&'static str>,
+    pub(super) mark_negatives: Option<bool>,
+    pub(super) header_height: Option<String>,
+    pub(super) item_shortcut: Option<String>,
+    pub(super) choice_list_height: Option<String>,
+    pub(super) type_domain_enabled: Option<bool>,
+    pub(super) height_control_variant: Option<&'static str>,
+    pub(super) equal_columns_width: Option<bool>,
+    pub(super) item_height: Option<String>,
+    pub(super) table_vertical_scroll_bar: Option<FormTableHorizontalScrollBar>,
     pub(super) user_visible_common: Option<bool>,
     pub(super) visible: Option<bool>,
     pub(super) enabled: Option<bool>,
@@ -7387,6 +7397,79 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_deref()
                 .and_then(|options| schema.show_title(options))
         }),
+        header_horizontal_align: if tag == "ColumnGroup" {
+            column_group_options
+                .as_ref()
+                .and_then(|options| options.header_horizontal_align)
+        } else if matches!(
+            tag,
+            "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+        ) {
+            parse_form_field_header_horizontal_align(fields, input_field_top_level_offset)
+        } else {
+            None
+        },
+        mark_negatives: if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.mark_negatives)
+        } else if tag == "InputField" {
+            input_field_extended_options.as_ref().and_then(|options| {
+                parse_form_option_mark_negatives(options, InputFieldSlot::MarkNegatives.index())
+            })
+        } else {
+            None
+        },
+        header_height: (tag == "Table")
+            .then(|| parse_form_table_header_height(fields))
+            .flatten(),
+        // The item `Shortcut` is the same `{0, virtual-key, modifier-mask}` tuple
+        // the platform writes for a `Command`: slot `37 + offset` on the five
+        // field kinds and slot 18 on a `Page`. Decoding every attributable item
+        // with the shared `Command` reader reproduces the native value on all
+        // 91 949 field items and all 6 668 `Page` items with no mismatch.
+        item_shortcut: match tag {
+            "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => {
+                fields
+                    .get(37 + input_field_top_level_offset)
+                    .and_then(|field| parse_common_command_shortcut_value(field))
+            }
+            "Page" => fields
+                .get(18)
+                .and_then(|field| parse_common_command_shortcut_value(field)),
+            _ => None,
+        },
+        choice_list_height: (tag == "InputField")
+            .then(|| {
+                parse_form_input_field_choice_list_height(input_field_extended_options.as_deref())
+            })
+            .flatten(),
+        type_domain_enabled: (tag == "InputField")
+            .then(|| {
+                parse_form_input_field_type_domain_enabled(input_field_extended_options.as_deref())
+            })
+            .flatten(),
+        height_control_variant: (tag == "InputField")
+            .then(|| {
+                parse_form_input_field_height_control_variant(
+                    input_field_extended_options.as_deref(),
+                )
+            })
+            .flatten(),
+        equal_columns_width: parse_form_radio_button_equal_columns_width(
+            radio_button_options.as_deref(),
+        ),
+        item_height: parse_form_radio_button_item_height(radio_button_options.as_deref()),
+        // `Table` `VerticalScrollBar` shares the horizontal scroll bar's code map
+        // (`0 -> DontUse`, `1 -> UseAlways`, `2 -> nothing`) in the plain
+        // top-level slot 31, on all 4 410 attributable `Table` items.
+        table_vertical_scroll_bar: (tag == "Table")
+            .then(|| match fields.get(31).map(|field| field.trim()) {
+                Some("0") => Some(FormTableHorizontalScrollBar::DontUse),
+                Some("1") => Some(FormTableHorizontalScrollBar::UseAlways),
+                _ => None,
+            })
+            .flatten(),
         show_in_header: if tag == "ColumnGroup" {
             column_group_options
                 .as_ref()
@@ -7428,7 +7511,8 @@ fn parse_form_child_item_with_metadata_owners(
             .as_ref()
             .and_then(|(schema, _)| schema.enabled(&fields))
             .or_else(|| button_common_schema.and_then(|schema| schema.enabled(&fields)))
-            .or_else(|| command_bar_schema.and_then(|schema| schema.enabled(&fields))),
+            .or_else(|| command_bar_schema.and_then(|schema| schema.enabled(&fields)))
+            .or_else(|| parse_form_container_enabled(tag, fields)),
         read_only: if let Some(schema) = container_read_only_schema {
             schema.read_only(&fields)
         } else if tag == "UsualGroup" {
@@ -8765,6 +8849,7 @@ pub(super) struct FormUsualGroupExtendedOptions {
 pub(super) struct FormColumnGroupOptions {
     pub(super) group: Option<&'static str>,
     pub(super) show_in_header: Option<bool>,
+    pub(super) header_horizontal_align: Option<&'static str>,
     pub(super) fixing_in_table: Option<FormFixingInTable>,
 }
 
@@ -8780,6 +8865,7 @@ pub(super) struct FormLabelFieldOptions {
     pub(super) format: Vec<(String, String)>,
     pub(super) font_xml: Option<String>,
     pub(super) text_color: Option<String>,
+    pub(super) mark_negatives: Option<bool>,
     pub(super) hyperlink_style: bool,
 }
 
@@ -8818,6 +8904,7 @@ pub(super) fn parse_form_column_group_options(fields: &[&str]) -> Option<FormCol
         show_in_header: options
             .get(3)
             .and_then(|field| parse_form_child_item_show_title(field)),
+        header_horizontal_align: parse_form_column_group_header_horizontal_align(&options),
         fixing_in_table: strict_schema.and_then(|schema| schema.fixing_in_table(&options)),
     })
 }
@@ -8888,6 +8975,10 @@ pub(super) fn parse_form_label_field_options(
         text_color: options
             .get(LabelFieldSlot::TextColor.index())
             .and_then(|field| parse_form_label_field_text_color(field, object_refs)),
+        mark_negatives: parse_form_option_mark_negatives(
+            &options,
+            LabelFieldSlot::MarkNegatives.index(),
+        ),
         hyperlink_style,
     })
 }
@@ -9615,6 +9706,72 @@ pub(super) fn parse_form_page_scroll_on_compress(tag: &str, fields: &[&str]) -> 
         .filter(|field| field.trim_start().starts_with('{'))
         .and_then(|_| fields.get(11))
         .and_then(|field| parse_form_child_item_show_title(field))
+}
+
+/// `HeaderHorizontalAlign` of a table column control.
+///
+/// The code sits in its own top-level slot right after `HorizontalAlign`
+/// (`23 + offset`). Over every `InputField` (46 850), `LabelField` (28 558) and
+/// `PictureField` (2 126) item of the 5 021 attributable native forms the map
+/// `1 -> Center`, `2 -> Right`, `3 -> Auto`, `0 -> nothing written` holds with no
+/// counter-example, and no other code occurs.
+pub(super) fn parse_form_field_header_horizontal_align(
+    fields: &[&str],
+    top_level_offset: usize,
+) -> Option<&'static str> {
+    if !form_input_field_layout_is_extended(fields) {
+        return None;
+    }
+    match fields.get(24 + top_level_offset)?.trim() {
+        "1" => Some("Center"),
+        "2" => Some("Right"),
+        "3" => Some("Auto"),
+        _ => None,
+    }
+}
+
+/// `HeaderHorizontalAlign` of a `ColumnGroup` lives in member 4 of the option
+/// tuple, and uses the alignment codes the platform reuses for group alignment:
+/// `0 -> Left`, `1 -> Center`, `2 -> Right`, `3` being the default it omits.
+/// Confirmed on all 5 654 `ColumnGroup` items with no counter-example.
+pub(super) fn parse_form_column_group_header_horizontal_align(
+    options: &[&str],
+) -> Option<&'static str> {
+    match options.get(4)?.trim() {
+        "0" => Some("Left"),
+        "1" => Some("Center"),
+        "2" => Some("Right"),
+        _ => None,
+    }
+}
+
+/// `Enabled` of container, decoration and table-addition items.
+///
+/// Each kind carries the flag in a plain top-level slot; `0` writes
+/// `<Enabled>false</Enabled>` and `1` writes nothing. No other code occurs on the
+/// 11 308 `LabelDecoration`, 3 601 `PictureDecoration`, 6 668 `Page`, 4 638
+/// `SearchStringAddition`, 4 492 `SearchControlAddition` and 4 410
+/// `ViewStatusAddition` items of the attributable native forms.
+pub(super) fn parse_form_container_enabled(tag: &str, fields: &[&str]) -> Option<bool> {
+    let slot = match tag {
+        "LabelDecoration" | "PictureDecoration" => 9,
+        "Page" | "SearchStringAddition" | "SearchControlAddition" | "ViewStatusAddition" => 10,
+        _ => return None,
+    };
+    (fields.get(slot)?.trim() == "0").then_some(false)
+}
+
+/// `MarkNegatives` is a tri-state option member: `1` writes `true`, `2` writes
+/// nothing. It never carries any other code.
+pub(super) fn parse_form_option_mark_negatives(options: &[&str], slot: usize) -> Option<bool> {
+    (options.get(slot)?.trim() == "1").then_some(true)
+}
+
+/// `HeaderHeight` of a `Table` is the plain top-level slot 27; `1` is the default
+/// the platform omits. Confirmed on all 4 410 `Table` items.
+pub(super) fn parse_form_table_header_height(fields: &[&str]) -> Option<String> {
+    let value = fields.get(27)?.trim();
+    (value != "1" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
 }
 
 pub(super) fn parse_form_child_item_show_in_header(fields: &[&str]) -> Option<bool> {
@@ -10785,6 +10942,8 @@ pub(super) fn parse_form_input_field_choose_type(
     }
 }
 
+/// `1` writes `true`, `0` writes `false` and `2` writes nothing; no other code
+/// occurs on the 46 850 attributable `InputField` items.
 pub(super) fn parse_form_input_field_auto_choice_incomplete(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
@@ -10793,8 +10952,62 @@ pub(super) fn parse_form_input_field_auto_choice_incomplete(
         .map(|field| field.trim())?
     {
         "1" => Some(true),
+        "0" => Some(false),
         _ => None,
     }
+}
+
+/// `ChoiceListHeight` is written verbatim unless the slot is zero.
+pub(super) fn parse_form_input_field_choice_list_height(
+    extended_options: Option<&[&str]>,
+) -> Option<String> {
+    let value = extended_options?
+        .get(InputFieldSlot::ChoiceListHeight.index())?
+        .trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+}
+
+pub(super) fn parse_form_input_field_type_domain_enabled(
+    extended_options: Option<&[&str]>,
+) -> Option<bool> {
+    (extended_options?
+        .get(InputFieldSlot::TypeDomainEnabled.index())?
+        .trim()
+        == "0")
+        .then_some(false)
+}
+
+pub(super) fn parse_form_input_field_height_control_variant(
+    extended_options: Option<&[&str]>,
+) -> Option<&'static str> {
+    match extended_options?
+        .get(InputFieldSlot::HeightControlVariant.index())?
+        .trim()
+    {
+        "1" => Some("UseHeightInFormRows"),
+        "2" => Some("UseContentHeight"),
+        _ => None,
+    }
+}
+
+/// `RadioButtonField` option members: `1 -> true`, `0 -> false`, `2 -> nothing`
+/// for `EqualColumnsWidth` (slot 11) and a verbatim non-zero `ItemHeight`
+/// (slot 6). Both hold on all 1 375 attributable `RadioButtonField` items.
+pub(super) fn parse_form_radio_button_equal_columns_width(
+    extended_options: Option<&[&str]>,
+) -> Option<bool> {
+    match extended_options?.get(11)?.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_radio_button_item_height(
+    extended_options: Option<&[&str]>,
+) -> Option<String> {
+    let value = extended_options?.get(6)?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
 }
 
 pub(super) fn parse_form_input_field_auto_mark_incomplete(
@@ -15437,11 +15650,14 @@ fn format_form_input_field_tail_xml(
 }
 
 fn format_form_auto_choice_incomplete_xml(item: &FormChildItem, indent: usize) -> String {
-    if item.auto_choice_incomplete != Some(true) {
+    let Some(value) = item.auto_choice_incomplete else {
         return String::new();
-    }
+    };
     let tab = "\t".repeat(indent);
-    format!("{tab}<AutoChoiceIncomplete>true</AutoChoiceIncomplete>\r\n")
+    format!(
+        "{tab}<AutoChoiceIncomplete>{}</AutoChoiceIncomplete>\r\n",
+        xml_bool(value)
+    )
 }
 
 fn format_form_direct_auto_mark_incomplete_xml(item: &FormChildItem, indent: usize) -> String {
@@ -15550,6 +15766,25 @@ fn format_form_table_property_xml(
                 format!(
                     "{tab}<Representation>{}</Representation>\r\n",
                     escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::HeaderHeight => item
+            .header_height
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<HeaderHeight>{}</HeaderHeight>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::VerticalScrollBar => item
+            .table_vertical_scroll_bar
+            .map(|value| {
+                format!(
+                    "{tab}<VerticalScrollBar>{}</VerticalScrollBar>\r\n",
+                    value.xml_value()
                 )
             })
             .unwrap_or_default(),
@@ -16218,9 +16453,22 @@ pub(super) fn format_form_child_item_xml(
     if item.tag != "Table" && item.tag != "Button" && item.default_item == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
+    // `Enabled` trails `DataPath`, `Visible` and `UserVisible` and precedes every
+    // other property on every kind that writes it in the native tree, so all the
+    // kinds share this one position.
     if matches!(
         item.tag,
-        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "CommandBar"
+        "InputField"
+            | "LabelField"
+            | "CheckBoxField"
+            | "PictureField"
+            | "CommandBar"
+            | "LabelDecoration"
+            | "PictureDecoration"
+            | "Page"
+            | "SearchStringAddition"
+            | "SearchControlAddition"
+            | "ViewStatusAddition"
     ) && item.enabled == Some(false)
     {
         xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
@@ -16393,6 +16641,21 @@ pub(super) fn format_form_child_item_xml(
         &item.warning_on_edit,
         indent + 1,
     ));
+    // A field's `Shortcut` trails `DataPath`, `Visible`, `ReadOnly`, `SkipOnInput`,
+    // the title block, `ToolTip`, `ToolTipRepresentation` and `WarningOnEdit`, and
+    // precedes `GroupHorizontalAlign`, `HeaderPicture`, the geometry block,
+    // `ChoiceList`, `CheckBoxType`, `ValuesPicture`, `ContextMenu` and
+    // `ExtendedTooltip`, with no counter-example in the native tree.
+    if matches!(
+        item.tag,
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
+    ) && let Some(shortcut) = &item.item_shortcut
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Shortcut>{}</Shortcut>\r\n",
+            escape_xml_text(shortcut)
+        ));
+    }
     if FormFieldSchema::supports_item_tag(&item.tag) {
         if let Some(horizontal_align) = item
             .horizontal_align
@@ -16473,6 +16736,19 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
     }
     xml.push_str(&format_form_field_header_picture_xml(item, indent + 1));
+    // Native writes `HeaderHorizontalAlign` after `ShowInHeader`/`HeaderPicture`
+    // and before `ShowInFooter`, `FooterHorizontalAlign`, `CheckBoxType`,
+    // `ValuesPicture` and the geometry tail, on all 185 native occurrences.
+    if matches!(
+        item.tag,
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+    ) && let Some(header_horizontal_align) = item.header_horizontal_align
+    {
+        xml.push_str(&format!(
+            "{tab}\t<HeaderHorizontalAlign>{}</HeaderHorizontalAlign>\r\n",
+            escape_xml_text(header_horizontal_align)
+        ));
+    }
     if item.show_in_footer == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowInFooter>false</ShowInFooter>\r\n"));
     }
@@ -16497,9 +16773,26 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(radio_button_type)
         ));
     }
+    // `ItemHeight` trails `RadioButtonType` (11) and precedes `ColumnsCount` (5),
+    // `ChoiceList` (10), `ContextMenu` and `ExtendedTooltip`; `EqualColumnsWidth`
+    // trails `RadioButtonType` (48), `ItemWidth` (19) and `ColumnsCount` (15) and
+    // precedes `ChoiceList` (44), `Events` (46), `ContextMenu` and
+    // `ExtendedTooltip`, with no counter-example.
+    if let Some(item_height) = &item.item_height {
+        xml.push_str(&format!(
+            "{tab}\t<ItemHeight>{}</ItemHeight>\r\n",
+            escape_xml_text(item_height)
+        ));
+    }
     if let Some(columns_count) = item.columns_count {
         xml.push_str(&format!(
             "{tab}\t<ColumnsCount>{columns_count}</ColumnsCount>\r\n"
+        ));
+    }
+    if let Some(equal_columns_width) = item.equal_columns_width {
+        xml.push_str(&format!(
+            "{tab}\t<EqualColumnsWidth>{}</EqualColumnsWidth>\r\n",
+            xml_bool(equal_columns_width)
         ));
     }
     xml.push_str(&format_form_usual_group_properties_xml(
@@ -16774,6 +17067,14 @@ pub(super) fn format_form_child_item_xml(
     if item.wrap == Some(false) {
         xml.push_str(&format!("{tab}\t<Wrap>false</Wrap>\r\n"));
     }
+    // `MarkNegatives` trails the geometry block - `Width` (71 native
+    // co-occurrences on `InputField`, 13 on `LabelField`), `HorizontalStretch`,
+    // `VerticalStretch`, `Wrap` and `EditMode` - and precedes `Format` (35),
+    // `EditFormat`, `Font`, `TextColor`, `AutoMarkIncomplete` (11),
+    // `AutoChoiceIncomplete` (3) and `SpinButton` (1), with no counter-example.
+    if item.mark_negatives == Some(true) {
+        xml.push_str(&format!("{tab}\t<MarkNegatives>true</MarkNegatives>\r\n"));
+    }
     if let Some(password_mode) = item.password_mode {
         xml.push_str(&format!(
             "{tab}\t<PasswordMode>{}</PasswordMode>\r\n",
@@ -16850,6 +17151,16 @@ pub(super) fn format_form_child_item_xml(
     if item.choose_type == Some(false) {
         xml.push_str(&format!("{tab}\t<ChooseType>false</ChooseType>\r\n"));
     }
+    // `TypeDomainEnabled` trails `Wrap` (17 native co-occurrences), `ChooseType`
+    // (15), `ListChoiceMode` (13), `ExtendedEditMultipleValues` (8),
+    // `AutoMarkIncomplete` (7) and `EditFormat` (5) and precedes `AvailableTypes`
+    // (8), `BorderColor` (6), `ChoiceList` (5), `TextEdit` (4), `MinValue` (2),
+    // `MaxValue` (1), `InputHint` (1) and `ChoiceHistoryOnInput` (1).
+    if item.type_domain_enabled == Some(false) {
+        xml.push_str(&format!(
+            "{tab}\t<TypeDomainEnabled>false</TypeDomainEnabled>\r\n"
+        ));
+    }
     if let Some(incomplete_choice_mode) = item.incomplete_choice_mode {
         xml.push_str(&format!(
             "{tab}\t<IncompleteChoiceMode>{}</IncompleteChoiceMode>\r\n",
@@ -16908,6 +17219,16 @@ pub(super) fn format_form_child_item_xml(
             item,
             FormInputFieldXmlProperty::ChoiceListButton,
             indent + 1,
+        ));
+    }
+    // `ChoiceListHeight` trails `ChoiceList` (14), `ChoiceListButton`,
+    // `TextEdit` (14), `QuickChoice` (15), `ChooseType` (15), `ListChoiceMode`
+    // (22) and the geometry block, and precedes `DropListWidth` (10),
+    // `InputHint` (14) and `ChoiceHistoryOnInput` (2), with no counter-example.
+    if let Some(choice_list_height) = &item.choice_list_height {
+        xml.push_str(&format!(
+            "{tab}\t<ChoiceListHeight>{}</ChoiceListHeight>\r\n",
+            escape_xml_text(choice_list_height)
         ));
     }
     if let Some(drop_list_width) = &item.drop_list_width {
@@ -17024,6 +17345,17 @@ pub(super) fn format_form_child_item_xml(
     ));
     if item.tag == "ColumnGroup" && item.show_in_header == Some(true) {
         xml.push_str(&format!("{tab}\t<ShowInHeader>true</ShowInHeader>\r\n"));
+    }
+    // On a `ColumnGroup` the property is the last one before `ExtendedTooltip`,
+    // directly behind `ShowInHeader` (85 native occurrences) or behind `Group`
+    // when the group is not shown in the header (5), with no counter-example.
+    if item.tag == "ColumnGroup"
+        && let Some(header_horizontal_align) = item.header_horizontal_align
+    {
+        xml.push_str(&format!(
+            "{tab}\t<HeaderHorizontalAlign>{}</HeaderHorizontalAlign>\r\n",
+            escape_xml_text(header_horizontal_align)
+        ));
     }
     if !matches!(item.tag, "UsualGroup" | "InputField") && !item.format.is_empty() {
         xml.push_str(&format_form_localized_section(
@@ -17311,6 +17643,16 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(choice_history_on_input)
         ));
     }
+    // `HeightControlVariant` is the last property an `InputField` writes: it
+    // trails `MultiLine` (16), `AutoMaxHeight` (15), `VerticalStretch` (11),
+    // `TextEdit` (7), `AutoCellHeight` (7), `MaxHeight` (5) and `DropListWidth`,
+    // and precedes only `Events`, `ContextMenu` and `ExtendedTooltip`.
+    if let Some(height_control_variant) = item.height_control_variant {
+        xml.push_str(&format!(
+            "{tab}\t<HeightControlVariant>{}</HeightControlVariant>\r\n",
+            escape_xml_text(height_control_variant)
+        ));
+    }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
     }
@@ -17363,6 +17705,16 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<PagesRepresentation>{}</PagesRepresentation>\r\n",
             escape_xml_text(representation)
+        ));
+    }
+    // A `Page` writes its `Shortcut` after `Title` and before `TitleDataPath` (1)
+    // and `ExtendedTooltip` (5), with no counter-example.
+    if item.tag == "Page"
+        && let Some(shortcut) = &item.item_shortcut
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Shortcut>{}</Shortcut>\r\n",
+            escape_xml_text(shortcut)
         ));
     }
     if matches!(item.tag, "Page" | "UsualGroup")
@@ -18286,9 +18638,15 @@ pub(super) fn format_form_choice_list_xml(
                     xml.push_str(&format!(
                         "{tab}\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"
                     ));
-                    if item.presentation_present && item.presentation.is_empty() {
+                    // Every one of the 6 912 `FormChoiceListDesTimeValue`
+                    // elements in the 5 201 native `Form.xml` documents carries a
+                    // `Presentation` child - 4 505 with content and 2 407 empty -
+                    // with no counter-example, so an empty presentation still
+                    // writes the self-closing element regardless of which option
+                    // layout the list was decoded from.
+                    if item.presentation.is_empty() {
                         xml.push_str(&format!("{tab}\t\t\t<Presentation/>\r\n"));
-                    } else if !item.presentation.is_empty() {
+                    } else {
                         xml.push_str(&format_form_localized_section(
                             "Presentation",
                             &item.presentation,
