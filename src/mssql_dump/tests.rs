@@ -25122,6 +25122,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: Some(72),
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
         rows: vec![MoxelRow {
@@ -25506,6 +25507,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: Some(72),
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
         rows: vec![MoxelRow {
@@ -25970,6 +25972,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         ],
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat {
             width: Some(70),
             ..MoxelFormat::default()
@@ -26076,6 +26079,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         column_formats: vec![MoxelFormat::default(); 9],
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
         rows: Vec::new(),
@@ -26344,6 +26348,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         }],
         extra_formats: BTreeMap::new(),
         default_format_width: Some(72),
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
         rows: vec![MoxelRow {
@@ -26380,10 +26385,10 @@ fn parses_and_formats_moxel_vertical_groups() {
             ref_name: None,
             face_name: Some("Arial".to_string()),
             height: Some("8".to_string()),
-            bold: false,
-            italic: false,
-            underline: false,
-            strikeout: false,
+            bold: Some(false),
+            italic: Some(false),
+            underline: Some(false),
+            strikeout: Some(false),
             kind: "Absolute",
             scale: Some(100),
         }],
@@ -26997,6 +27002,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat {
             height: Some(165),
@@ -27076,6 +27082,7 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         ],
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
         rows: vec![MoxelRow {
@@ -27128,6 +27135,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: Some(72),
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat {
             width: Some(72),
@@ -27776,6 +27784,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             column_formats: Vec::new(),
             extra_formats: BTreeMap::new(),
             default_format_width: None,
+            default_format_font: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
             rows: Vec::new(),
@@ -27847,21 +27856,11 @@ fn formats_moxel_load_goods_style_slots_keep_border_color_at_zero() {
 
 #[test]
 fn formats_moxel_windows_font_serializes_like_native() {
+    // Mask 6 carries the height and the weight and nothing else, which is why
+    // the platform writes `height` and `bold` and omits the other three flags.
+    let font = parse_moxel_font("{7,1,6,{0},100,400,1,100}", &BTreeMap::new()).unwrap();
     let mut xml = String::new();
-    push_moxel_font_xml(
-        &mut xml,
-        &MoxelFont {
-            ref_name: Some("sys:DefaultGUIFont".to_string()),
-            face_name: None,
-            height: Some("10".to_string()),
-            bold: false,
-            italic: false,
-            underline: false,
-            strikeout: false,
-            kind: "WindowsFont",
-            scale: Some(100),
-        },
-    );
+    push_moxel_font_xml(&mut xml, &font);
 
     assert_eq!(
         xml,
@@ -27871,21 +27870,10 @@ fn formats_moxel_windows_font_serializes_like_native() {
 
 #[test]
 fn formats_moxel_plain_style_item_font_omits_false_flags() {
+    // Mask 0 carries no member at all, so only the style reference is written.
+    let font = parse_moxel_font("{7,2,0,{-20},1,100}", &BTreeMap::new()).unwrap();
     let mut xml = String::new();
-    push_moxel_font_xml(
-        &mut xml,
-        &MoxelFont {
-            ref_name: Some("style:TextFont".to_string()),
-            face_name: None,
-            height: None,
-            bold: false,
-            italic: false,
-            underline: false,
-            strikeout: false,
-            kind: "StyleItem",
-            scale: None,
-        },
-    );
+    push_moxel_font_xml(&mut xml, &font);
 
     assert_eq!(
         xml,
@@ -27903,6 +27891,7 @@ fn formats_moxel_field_selection_back_color_style() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
         rows: Vec::new(),
@@ -27941,6 +27930,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
         rows: Vec::new(),
@@ -27979,6 +27969,7 @@ fn formats_moxel_field_text_color_style() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
         rows: Vec::new(),
@@ -28017,6 +28008,7 @@ fn formats_moxel_button_text_color_style() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
         rows: Vec::new(),
@@ -28087,6 +28079,7 @@ fn formats_moxel_report_back_color_styles() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
         rows: Vec::new(),
@@ -28330,6 +28323,7 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
         rows: Vec::new(),
@@ -28368,6 +28362,7 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         column_formats: Vec::new(),
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
         rows: Vec::new(),
@@ -28488,10 +28483,10 @@ fn formats_moxel_inserts_implicit_text_font_before_last_explicit_font() {
             ref_name: None,
             face_name: Some("Arial".to_string()),
             height: Some("9".to_string()),
-            bold: false,
-            italic: false,
-            underline: false,
-            strikeout: false,
+            bold: Some(false),
+            italic: Some(false),
+            underline: Some(false),
+            strikeout: Some(false),
             kind: "Absolute",
             scale: Some(100),
         },
@@ -28499,10 +28494,10 @@ fn formats_moxel_inserts_implicit_text_font_before_last_explicit_font() {
             ref_name: None,
             face_name: Some("Arial".to_string()),
             height: Some("10".to_string()),
-            bold: true,
-            italic: false,
-            underline: false,
-            strikeout: false,
+            bold: Some(true),
+            italic: Some(false),
+            underline: Some(false),
+            strikeout: Some(false),
             kind: "Absolute",
             scale: Some(100),
         },
@@ -28906,12 +28901,12 @@ fn formats_moxel_request_offer_preserves_native_default_and_report_header_styles
     assert_eq!(spreadsheet.lines[1].style, "Solid");
     assert_eq!(spreadsheet.lines[1].width, 2);
     assert_eq!(spreadsheet.fonts.len(), 3);
-    assert!(spreadsheet.fonts[0].bold);
-    assert!(!spreadsheet.fonts[0].italic);
-    assert!(!spreadsheet.fonts[1].bold);
-    assert!(spreadsheet.fonts[1].italic);
-    assert!(!spreadsheet.fonts[2].bold);
-    assert!(!spreadsheet.fonts[2].italic);
+    assert_eq!(spreadsheet.fonts[0].bold, Some(true));
+    assert_eq!(spreadsheet.fonts[0].italic, Some(false));
+    assert_eq!(spreadsheet.fonts[1].bold, Some(false));
+    assert_eq!(spreadsheet.fonts[1].italic, Some(true));
+    assert_eq!(spreadsheet.fonts[2].bold, Some(false));
+    assert_eq!(spreadsheet.fonts[2].italic, Some(false));
     assert!(xml.contains("<defaultFormatIndex>15</defaultFormatIndex>"));
     assert!(xml.contains(
             "<line width=\"1\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">Solid</v8ui:style>\r\n\t</line>"
@@ -29365,6 +29360,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         column_formats: vec![MoxelFormat::default(), MoxelFormat::default()],
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat::default(), MoxelFormat::default()],
         rows: Vec::new(),
@@ -29448,6 +29444,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
         ],
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![
             MoxelFormat {
@@ -29537,6 +29534,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         ],
         extra_formats: BTreeMap::new(),
         default_format_width: None,
+        default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat::default(), MoxelFormat::default()],
         rows: Vec::new(),
@@ -30366,6 +30364,113 @@ fn moxel_font_table_is_published_in_first_reference_order() {
     let empty_face = xml.find("<font faceName=\"\"").unwrap();
     assert!(arial < system && system < empty_face, "{xml}");
     assert!(xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>73</width>"));
+}
+
+/// Fixture: `tests/fixtures/moxel_marketplace_accounts_font_mask_raw.txt`,
+/// 1461 bytes, sha256
+/// `e86f8cc9a503a765ca0cdbf32cc2b5ad4ed0edc2c36f2480c16126bc1832096e`. It is the
+/// native MOXCEL body of the `ПростойШаблон` template of catalog
+/// `УчетныеЗаписиМаркетплейсов` in 1С:Управление торговлей 11.5.27.75
+/// (`1cv8.cf`), as produced by this project's compatible-MXL decoder.
+///
+/// The two style-item descriptors are `{7,2,0,{-31},1,100}` and
+/// `{7,2,63,{-20},80,700,0,0,0,"Arial",1,100}`. Field 2 is a member mask: mask 0
+/// carries nothing, mask 63 carries the face name, height, weight, italic,
+/// underline and strikeout, and the members follow in slot order, which puts
+/// the face name after the four flags. The platform publishes exactly the
+/// members the mask names.
+#[test]
+fn moxel_font_members_follow_the_descriptor_mask() {
+    let inflated =
+        include_str!("../../tests/fixtures/moxel_marketplace_accounts_font_mask_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(
+        xml.contains("\t<font ref=\"style:NormalTextFont\" kind=\"StyleItem\"/>\r\n"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            "\t<font ref=\"style:TextFont\" faceName=\"Arial\" height=\"8\" bold=\"true\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"StyleItem\"/>\r\n"
+        ),
+        "{xml}"
+    );
+}
+
+/// A style item the configuration defines is named by uuid rather than by a
+/// predefined index, and the mask still decides which members are written.
+#[test]
+fn moxel_font_resolves_a_configuration_style_item_by_uuid() {
+    let object_refs = BTreeMap::from([(
+        "fa2a9ef2-00a1-44f4-a82c-6c7288dd62dc".to_string(),
+        "StyleItem.ВажнаяНадписьШрифт".to_string(),
+    )]);
+
+    let plain = parse_moxel_font(
+        "{7,2,0,{0,fa2a9ef2-00a1-44f4-a82c-6c7288dd62dc},1,100}",
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(plain.ref_name.as_deref(), Some("style:ВажнаяНадписьШрифт"));
+    assert_eq!(plain.bold, None);
+
+    let weighted = parse_moxel_font(
+        "{7,2,4,{0,fa2a9ef2-00a1-44f4-a82c-6c7288dd62dc},400,1,100}",
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(weighted.bold, Some(false));
+    assert_eq!(weighted.italic, None);
+
+    // An unresolvable uuid, an unknown mask bit and a member count the mask
+    // does not account for are all refused rather than guessed.
+    assert!(
+        parse_moxel_font(
+            "{7,2,0,{0,fa2a9ef2-00a1-44f4-a82c-6c7288dd62dc},1,100}",
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(parse_moxel_font("{7,2,64,{-20},0,1,100}", &object_refs).is_none());
+    assert!(parse_moxel_font("{7,2,4,{-20},400,0,1,100}", &object_refs).is_none());
+}
+
+/// Fixture: `tests/fixtures/moxel_edo_notice_default_format_raw.txt`,
+/// 3536 bytes, sha256
+/// `47a3d3e5ac6b80ca6d3a6cc5da6ea182ee64347554c8160042c7763e18f474d7`. It is the
+/// native MOXCEL body of the `ШаблонУведомленияОбИспользованииПЭП_УНЭП_ru`
+/// template of data processor `НастройкиВнутреннегоЭДО` in the same
+/// configuration.
+///
+/// Root field 4 is `{129,0,72}`: 129 is the format member mask for the font
+/// slot and the width slot, so the record carries font 0 as well as width 72.
+/// The platform writes both members when it materializes this default format as
+/// the document's trailing `<format>`.
+#[test]
+fn moxel_default_format_publishes_the_font_beside_its_width() {
+    let inflated = include_str!("../../tests/fixtures/moxel_edo_notice_default_format_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
+    assert_eq!(
+        parse_moxel_leading_default_format_record(fields[4]),
+        Some((72, 0))
+    );
+    // The 161 shape names the border colour between the two members.
+    assert_eq!(
+        parse_moxel_leading_default_format_record("{161,0,0,72}"),
+        Some((72, 0))
+    );
+
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    assert!(
+        xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>72</width>\r\n\t</format>"),
+        "{xml}"
+    );
 }
 
 #[test]

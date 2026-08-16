@@ -18,6 +18,9 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) column_formats: Vec<MoxelFormat>,
     pub(super) extra_formats: BTreeMap<usize, MoxelFormat>,
     pub(super) default_format_width: Option<usize>,
+    /// Font slot carried by the same leading record the default width came
+    /// from, published with that width when the default format is materialized.
+    pub(super) default_format_font: Option<usize>,
     pub(super) default_format: MoxelFormat,
     pub(super) formats: Vec<MoxelFormat>,
     pub(super) rows: Vec<MoxelRow>,
@@ -338,15 +341,21 @@ pub(super) struct MoxelMerge {
     pub(super) columns_id: Option<String>,
 }
 
+/// A decoded MOXCEL font descriptor.
+///
+/// Every optional member is `None` when the descriptor's member mask does not
+/// carry it, which is exactly when the platform omits the matching XML
+/// attribute. A descriptor that sets no member at all is published as
+/// `<font ref="..." kind="StyleItem"/>`.
 #[derive(Clone)]
 pub(super) struct MoxelFont {
     pub(super) ref_name: Option<String>,
     pub(super) face_name: Option<String>,
     pub(super) height: Option<String>,
-    pub(super) bold: bool,
-    pub(super) italic: bool,
-    pub(super) underline: bool,
-    pub(super) strikeout: bool,
+    pub(super) bold: Option<bool>,
+    pub(super) italic: Option<bool>,
+    pub(super) underline: Option<bool>,
+    pub(super) strikeout: Option<bool>,
     pub(super) kind: &'static str,
     pub(super) scale: Option<usize>,
 }
@@ -1025,7 +1034,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         source_column_format_order,
         has_explicit_sparse_column_set_default,
     ) = parse_moxel_column_sets_with_source_format_order(&fields);
-    let fonts = parse_moxel_fonts(&fields);
+    let fonts = parse_moxel_fonts(&fields, object_refs);
     let pictures = parse_moxel_pictures(&fields, object_refs);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
     let mut default_format = parse_moxel_default_format(&fields, object_refs);
@@ -1103,6 +1112,14 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         normalize_moxel_zero_column_format_refs(&mut rows);
     }
     let mut default_format_width = parse_moxel_default_format_width(&fields, column_format_slots);
+    // The leading default-format record writes a font member next to its width;
+    // it is kept only while the width in force is still that record's own.
+    let default_format_font = fields
+        .iter()
+        .take(8)
+        .find_map(|field| parse_moxel_leading_default_format_record(field))
+        .filter(|(width, _)| Some(*width) == default_format_width)
+        .map(|(_, font)| font);
     let has_equal_width_only_format_table =
         parse_moxel_equal_width_only_format_table(&fields, column_count).is_some();
     let sparse_source_format_refs = moxel_uses_sparse_source_format_refs(
@@ -1423,6 +1440,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         column_formats,
         extra_formats,
         default_format_width,
+        default_format_font,
         default_format,
         formats,
         rows,
@@ -1478,10 +1496,10 @@ pub(super) fn normalize_moxel_fonts(fonts: &mut Vec<MoxelFont>, formats: &[Moxel
             ref_name: Some("style:TextFont".to_string()),
             face_name: None,
             height: None,
-            bold: false,
-            italic: false,
-            underline: false,
-            strikeout: false,
+            bold: None,
+            italic: None,
+            underline: None,
+            strikeout: None,
             kind: "StyleItem",
             scale: None,
         },
@@ -2435,112 +2453,180 @@ pub(super) fn parse_moxel_print_area(fields: &[&str]) -> Option<MoxelArea> {
     })
 }
 
-pub(super) fn parse_moxel_fonts(fields: &[&str]) -> Vec<MoxelFont> {
+pub(super) fn parse_moxel_fonts(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<MoxelFont> {
     fields
         .iter()
-        .filter_map(|field| parse_moxel_font(field))
+        .filter_map(|field| parse_moxel_font(field, object_refs))
         .collect()
 }
 
-pub(super) fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
+/// Member-mask bits of a MOXCEL font descriptor.
+///
+/// Evidence: the 3 143 font descriptors of the 674 distinct MOXCEL bodies
+/// behind the 683 spreadsheet templates of 1С:УТ 11.5.27.75 use bits 0..=5 and
+/// bit 9 and no other bit, and the variable-length forms carry exactly one
+/// field per member bit. A member the mask omits is a member the platform omits
+/// from the XML: reconstructing every published `<font>` element from these
+/// bits reproduces all 683 published tables with no counterexample.
+const MOXCEL_FONT_FACE_NAME_BIT: usize = 0;
+const MOXCEL_FONT_HEIGHT_BIT: usize = 1;
+const MOXCEL_FONT_WEIGHT_BIT: usize = 2;
+const MOXCEL_FONT_ITALIC_BIT: usize = 3;
+const MOXCEL_FONT_UNDERLINE_BIT: usize = 4;
+const MOXCEL_FONT_STRIKEOUT_BIT: usize = 5;
+const MOXCEL_FONT_SCALE_BIT: usize = 9;
+const MOXCEL_FONT_KNOWN_MASK: usize = (1 << MOXCEL_FONT_FACE_NAME_BIT)
+    | (1 << MOXCEL_FONT_HEIGHT_BIT)
+    | (1 << MOXCEL_FONT_WEIGHT_BIT)
+    | (1 << MOXCEL_FONT_ITALIC_BIT)
+    | (1 << MOXCEL_FONT_UNDERLINE_BIT)
+    | (1 << MOXCEL_FONT_STRIKEOUT_BIT)
+    | (1 << MOXCEL_FONT_SCALE_BIT);
+/// The one mask an absolute descriptor carries; it fills every slot anyway.
+const MOXCEL_ABSOLUTE_FONT_MASK: usize = MOXCEL_FONT_KNOWN_MASK;
+/// Members appear in slot order, which puts the face name last.
+const MOXCEL_FONT_MEMBER_ORDER: [usize; 6] = [
+    MOXCEL_FONT_HEIGHT_BIT,
+    MOXCEL_FONT_WEIGHT_BIT,
+    MOXCEL_FONT_ITALIC_BIT,
+    MOXCEL_FONT_UNDERLINE_BIT,
+    MOXCEL_FONT_STRIKEOUT_BIT,
+    MOXCEL_FONT_FACE_NAME_BIT,
+];
+const MOXCEL_FONT_BOLD_WEIGHT: usize = 700;
+
+fn moxel_font_mask_has(mask: usize, bit: usize) -> bool {
+    mask >> bit & 1 == 1
+}
+
+/// Style items a font descriptor can name by predefined index.
+fn moxel_predefined_font_style_ref(index: &str) -> Option<&'static str> {
+    match index {
+        "-20" => Some("style:TextFont"),
+        "-30" => Some("style:SmallTextFont"),
+        "-31" => Some("style:NormalTextFont"),
+        "-32" => Some("style:LargeTextFont"),
+        "-33" => Some("style:ExtraLargeTextFont"),
+        _ => None,
+    }
+}
+
+/// System fonts a Windows-font descriptor can name by index.
+fn moxel_system_font_ref(index: &str) -> Option<&'static str> {
+    match index {
+        "0" => Some("sys:DefaultGUIFont"),
+        "2" => Some("sys:ANSIFixedFont"),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_moxel_font(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelFont> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "7" {
         return None;
     }
     match fields.get(1)?.trim() {
-        "0" if fields.len() >= 19 => {
+        // An absolute descriptor writes every slot, so its members are read at
+        // fixed offsets; only the one observed mask is admitted.
+        "0" if fields.len() == 19 => {
+            if fields.get(2)?.trim().parse::<usize>().ok()? != MOXCEL_ABSOLUTE_FONT_MASK {
+                return None;
+            }
             let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
             let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
             Some(MoxelFont {
                 ref_name: None,
                 face_name: Some(parse_1c_string(fields.get(16)?)?),
                 height: Some(format_moxel_font_height(height_raw)),
-                bold: weight >= 700,
-                italic: fields.get(8)?.trim() != "0",
-                underline: fields.get(9)?.trim() != "0",
-                strikeout: fields.get(10)?.trim() != "0",
+                bold: Some(weight >= MOXCEL_FONT_BOLD_WEIGHT),
+                italic: Some(fields.get(8)?.trim() != "0"),
+                underline: Some(fields.get(9)?.trim() != "0"),
+                strikeout: Some(fields.get(10)?.trim() != "0"),
                 kind: "Absolute",
                 scale: Some(fields.get(18)?.trim().parse::<usize>().ok()?),
             })
         }
-        "2" if fields.len() >= 10 => {
-            let raw_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
-            let (ref_name, face_name) = match raw_fields.first()?.trim() {
-                "-20" => (
-                    "style:TextFont",
-                    fields.get(8).and_then(|field| parse_1c_string(field)),
-                ),
-                "-31" => ("style:NormalTextFont", None),
-                "-32" => ("style:LargeTextFont", None),
-                _ => return None,
-            };
-            let weight = fields.get(4)?.trim().parse::<usize>().ok()?;
-            Some(MoxelFont {
-                ref_name: Some(ref_name.to_string()),
-                face_name,
-                height: None,
-                bold: weight >= 700,
-                italic: fields.get(5)?.trim() != "0",
-                underline: fields.get(6)?.trim() != "0",
-                strikeout: fields.get(7)?.trim() != "0",
-                kind: "StyleItem",
-                scale: None,
-            })
-        }
-        "1" if fields.len() >= 6 => {
-            let (height, weight, italic, underline, strikeout, scale) = if fields.len() >= 11 {
+        kind @ ("1" | "2") => {
+            let reference = split_1c_braced_fields(fields.get(3)?, 0)?;
+            let (ref_name, kind) = if kind == "1" {
+                if reference.len() != 1 {
+                    return None;
+                }
                 (
-                    fields
-                        .get(4)
-                        .and_then(|field| field.trim().parse::<usize>().ok())
-                        .map(format_moxel_font_height),
-                    fields
-                        .get(5)
-                        .and_then(|field| field.trim().parse::<usize>().ok())
-                        .unwrap_or(400),
-                    fields
-                        .get(6)
-                        .map(|field| field.trim() != "0")
-                        .unwrap_or(false),
-                    fields
-                        .get(7)
-                        .map(|field| field.trim() != "0")
-                        .unwrap_or(false),
-                    fields
-                        .get(8)
-                        .map(|field| field.trim() != "0")
-                        .unwrap_or(false),
-                    fields
-                        .get(10)
-                        .and_then(|field| field.trim().parse::<usize>().ok()),
-                )
-            } else if fields.len() >= 8 {
-                (
-                    fields
-                        .get(4)
-                        .and_then(|field| field.trim().parse::<usize>().ok())
-                        .map(format_moxel_font_height),
-                    fields
-                        .get(5)
-                        .and_then(|field| field.trim().parse::<usize>().ok())
-                        .unwrap_or(400),
-                    false,
-                    false,
-                    false,
-                    None,
+                    moxel_system_font_ref(reference.first()?.trim())?.to_string(),
+                    "WindowsFont",
                 )
             } else {
-                (None, 400, false, false, false, None)
+                let style_ref = match reference.len() {
+                    1 => moxel_predefined_font_style_ref(reference.first()?.trim())?.to_string(),
+                    2 if reference.first()?.trim() == "0" => {
+                        let uuid = parse_uuid_field(reference.get(1)?.trim())?;
+                        object_refs
+                            .get(&uuid)
+                            .and_then(|reference| reference.strip_prefix("StyleItem."))
+                            .map(|name| format!("style:{name}"))?
+                    }
+                    _ => return None,
+                };
+                (style_ref, "StyleItem")
+            };
+            let mask = fields.get(2)?.trim().parse::<usize>().ok()?;
+            if mask & !MOXCEL_FONT_KNOWN_MASK != 0 {
+                return None;
+            }
+            let members = MOXCEL_FONT_MEMBER_ORDER
+                .iter()
+                .copied()
+                .filter(|bit| moxel_font_mask_has(mask, *bit))
+                .collect::<Vec<_>>();
+            // Four framing fields, one field per member bit, then the two
+            // trailing slots the descriptor always carries.
+            if fields.len() != members.len() + 6 || fields.get(fields.len() - 2)?.trim() != "1" {
+                return None;
+            }
+            let mut face_name = None;
+            let mut height = None;
+            let mut bold = None;
+            let mut italic = None;
+            let mut underline = None;
+            let mut strikeout = None;
+            for (bit, value) in members.iter().copied().zip(fields.iter().skip(4)) {
+                match bit {
+                    MOXCEL_FONT_FACE_NAME_BIT => face_name = Some(parse_1c_string(value)?),
+                    MOXCEL_FONT_HEIGHT_BIT => {
+                        height = Some(format_moxel_font_height(
+                            value.trim().parse::<usize>().ok()?,
+                        ));
+                    }
+                    MOXCEL_FONT_WEIGHT_BIT => {
+                        bold = Some(value.trim().parse::<usize>().ok()? >= MOXCEL_FONT_BOLD_WEIGHT);
+                    }
+                    MOXCEL_FONT_ITALIC_BIT => italic = Some(value.trim() != "0"),
+                    MOXCEL_FONT_UNDERLINE_BIT => underline = Some(value.trim() != "0"),
+                    MOXCEL_FONT_STRIKEOUT_BIT => strikeout = Some(value.trim() != "0"),
+                    _ => return None,
+                }
+            }
+            let scale = if moxel_font_mask_has(mask, MOXCEL_FONT_SCALE_BIT) {
+                Some(fields.last()?.trim().parse::<usize>().ok()?)
+            } else {
+                None
             };
             Some(MoxelFont {
-                ref_name: Some("sys:DefaultGUIFont".to_string()),
-                face_name: None,
+                ref_name: Some(ref_name),
+                face_name,
                 height,
-                bold: weight >= 700,
+                bold,
                 italic,
                 underline,
                 strikeout,
-                kind: "WindowsFont",
+                kind,
                 scale,
             })
         }
@@ -4182,6 +4268,32 @@ pub(super) fn parse_moxel_leading_default_format_width_129(text: &str) -> Option
         return None;
     }
     fields.get(2)?.trim().parse::<usize>().ok()
+}
+
+/// The leading default-format record, as `(width, font)`.
+///
+/// Its leading value is the format member mask. 129 names font slot 0 and width
+/// slot 7, 161 names those two and the border-colour slot in between, so both
+/// shapes carry a font member next to the width, and the platform publishes
+/// that font reference whenever it writes this default format out as a
+/// `<format>`.
+///
+/// Evidence (1С:УТ 11.5.27.75): 45 spreadsheet templates carry the 129 record
+/// and 11 carry the 161 record; the font member is slot 0 in all 56. Of those,
+/// 35 materialize the record as the document's trailing `<format>`, and the
+/// platform writes `<font>0</font>` before that `<width>` in all 35. The rest
+/// resolve their default format to an entry of the written table instead and
+/// are left alone by the width filter at the call site.
+pub(super) fn parse_moxel_leading_default_format_record(text: &str) -> Option<(usize, usize)> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let font = fields.get(1)?.trim().parse::<usize>().ok()?;
+    match fields.first()?.trim() {
+        "129" if fields.len() == 3 => Some((fields.get(2)?.trim().parse::<usize>().ok()?, font)),
+        "161" if fields.len() == 4 && fields.get(2)?.trim() == "0" => {
+            Some((fields.get(3)?.trim().parse::<usize>().ok()?, font))
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn parse_moxel_default_format(
@@ -7783,6 +7895,9 @@ pub(super) fn moxel_format_for_index(
         let mut format = spreadsheet.default_format.clone();
         if format.width.is_none() {
             format.width = spreadsheet.default_format_width;
+            if format.font.is_none() {
+                format.font = spreadsheet.default_format_font;
+            }
         }
         if !format.is_empty() {
             return format;
@@ -8381,34 +8496,21 @@ pub(super) fn push_moxel_font_xml(xml: &mut String, font: &MoxelFont) {
     if let Some(height) = &font.height {
         xml.push_str(&format!(" height=\"{}\"", escape_xml_text(height)));
     }
-    if font.kind == "WindowsFont" {
-        xml.push_str(&format!(" bold=\"{}\"", font.bold));
-        if font.italic {
-            xml.push_str(" italic=\"true\"");
+    // A member the descriptor's mask does not carry is a member the platform
+    // does not write, so each attribute is emitted exactly when it is present.
+    for (member, name) in [
+        (font.bold, "bold"),
+        (font.italic, "italic"),
+        (font.underline, "underline"),
+        (font.strikeout, "strikeout"),
+    ] {
+        if let Some(value) = member {
+            xml.push_str(&format!(" {name}=\"{value}\""));
         }
-        if font.underline {
-            xml.push_str(" underline=\"true\"");
-        }
-        if font.strikeout {
-            xml.push_str(" strikeout=\"true\"");
-        }
-        xml.push_str(" kind=\"WindowsFont\"");
-    } else if font.kind == "StyleItem"
-        && !font.bold
-        && !font.italic
-        && !font.underline
-        && !font.strikeout
-        && font.scale.is_none()
-    {
-        xml.push_str(" kind=\"StyleItem\"");
-    } else {
-        xml.push_str(&format!(
-            " bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\" kind=\"{}\"",
-            font.bold, font.italic, font.underline, font.strikeout, font.kind
-        ));
-        if let Some(scale) = font.scale {
-            xml.push_str(&format!(" scale=\"{scale}\""));
-        }
+    }
+    xml.push_str(&format!(" kind=\"{}\"", font.kind));
+    if let Some(scale) = font.scale {
+        xml.push_str(&format!(" scale=\"{scale}\""));
     }
     xml.push_str("/>\r\n");
 }
@@ -8727,6 +8829,7 @@ mod moxel_exact_parity_tests {
             column_formats: Vec::new(),
             extra_formats: BTreeMap::new(),
             default_format_width: None,
+            default_format_font: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
             rows: Vec::new(),
