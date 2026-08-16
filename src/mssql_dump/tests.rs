@@ -59064,3 +59064,284 @@ fn form_document_properties_trail_command_set_and_precede_show_title() {
         ],
     );
 }
+
+/// Builds a minimal managed-form `InputField` layout item carrying `binding`
+/// in the bound-data slot, in the shape UT 11.5.27.75 writes for a plain field.
+fn data_path_input_field(id: &str, name: &str, binding: &str) -> String {
+    format!(
+        r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,2,"{name}",1,0,{{1,0}},{{1,0}},{binding},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+    )
+}
+
+fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>) -> FormAttribute {
+    FormAttribute {
+        id: id.to_string(),
+        name: name.to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        exact_single_type_uuid: exact_type_uuid.map(ToOwned::to_owned),
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: false,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }
+}
+
+fn data_path_dynamic_list_settings(fields: Vec<FormDynamicListField>) -> FormDynamicListSettings {
+    FormDynamicListSettings {
+        auto_save_user_settings: false,
+        manual_query: false,
+        manual_query_explicit: false,
+        dynamic_data_read: false,
+        dynamic_data_read_explicit: false,
+        query_text: None,
+        main_table: None,
+        explicit_fields: Vec::new(),
+        fields,
+        server_state_xml: None,
+        server_state_envelope: None,
+        list_settings: FormListSettings::default(),
+    }
+}
+
+fn data_path_dynamic_list_field(item_id: &str, name: &str) -> FormDynamicListField {
+    FormDynamicListField {
+        item_id: Some(item_id.to_string()),
+        data_path: name.to_string(),
+        field: name.to_string(),
+    }
+}
+
+/// Resolves `binding` through the owner-scoped resolver with the indexes those
+/// `attributes` produce.
+fn data_path_owner_scoped_resolution(
+    binding: &str,
+    attributes: &[FormAttribute],
+) -> Option<String> {
+    let indexes =
+        collect_form_child_item_indexes_with_object_refs(&[], attributes, &BTreeMap::new(), None);
+    indexes.resolve_owner_scoped_data_path_for_test(binding, attributes, &BTreeMap::new())
+}
+
+fn data_path_child_items_xml(
+    items: &[&str],
+    attributes: &[FormAttribute],
+    object_refs: &BTreeMap<String, String>,
+) -> String {
+    // The layout slice a form body carries is `{count, uuid, item, uuid, …}`.
+    let mut layout = vec![items.len().to_string()];
+    for (index, item) in items.iter().enumerate() {
+        layout.push(format!(
+            "{:08x}-0000-4000-8000-000000000000",
+            index as u32 + 1
+        ));
+        layout.push((*item).to_string());
+    }
+    let layout = layout.iter().map(String::as_str).collect::<Vec<_>>();
+    let indexes =
+        collect_form_child_item_indexes_with_object_refs(&layout, attributes, object_refs, None);
+    let items = extract_form_child_items(
+        &layout,
+        attributes,
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+        &indexes,
+        None,
+    );
+    format_form_child_items_xml(&items, 1)
+}
+
+/// Column id `0` on a value-list attribute names its `Value` column, and only
+/// there: the same id against any other owner stays unresolved.
+///
+/// Evidence: UT 11.5.27.75 `CommonForms/СписокЗначенийОтбора/Ext/Form.xml`,
+/// whose InputField `СписокЗначение` carries the bound slot `{2,{1},{0}}`
+/// against the `Список` value-list attribute while the platform writes
+/// `<DataPath>Список.Value</DataPath>`.
+#[test]
+fn resolves_value_list_zero_column_to_the_value_property_only_for_value_lists() {
+    let value_list_uuid = "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3";
+    let binding = "{2,{1},{0}}";
+
+    let value_list = vec![data_path_form_attribute(
+        "1",
+        "Список",
+        Some(value_list_uuid),
+    )];
+    assert_eq!(
+        data_path_owner_scoped_resolution(binding, &value_list).as_deref(),
+        Some("Список.Value")
+    );
+
+    let value_table = vec![data_path_form_attribute("1", "Список", None)];
+    assert_eq!(
+        data_path_owner_scoped_resolution(binding, &value_table),
+        None,
+        "a zero column id off a value list must not be read as `Value`"
+    );
+}
+
+/// A bound slot owned by a *form item* addresses that item's current row, not
+/// the attribute that happens to share the numeric id.
+///
+/// Evidence: UT 11.5.27.75 `Catalogs/ВидыСделокСКлиентами/Forms/ФормаСписка`,
+/// LabelField `Описание` carries `{2,{1,02023637-…},{40}}` against the `Список`
+/// dynamic-list table and the platform writes
+/// `<DataPath>Items.Список.CurrentData.Описание</DataPath>`.
+#[test]
+fn resolves_form_item_owned_bindings_through_the_table_current_data_route() {
+    let dynamic_list_uuid = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
+    let table = r#"{73,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Список",0,0,1,{1,0},0,{1,{1}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#;
+    let field = data_path_input_field(
+        "15",
+        "Описание",
+        "{2,{1,02023637-7868-4a5f-8576-835a76e0c9ba},{40}}",
+    );
+    let mut attribute = data_path_form_attribute("1", "Список", Some(dynamic_list_uuid));
+    attribute.settings = Some(data_path_dynamic_list_settings(vec![
+        data_path_dynamic_list_field("40", "Описание"),
+    ]));
+
+    let xml = data_path_child_items_xml(&[table, field.as_str()], &[attribute], &BTreeMap::new());
+    assert!(
+        xml.contains("<DataPath>Items.Список.CurrentData.Описание</DataPath>"),
+        "{xml}"
+    );
+    assert!(
+        !xml.contains("<DataPath>Список.Описание</DataPath>"),
+        "the form-item owner must not be read as an attribute id: {xml}"
+    );
+}
+
+/// A multi-segment binding against a dynamic list is answered by the leaf
+/// field-map entry alone, which already spells the whole dotted relative path.
+///
+/// Evidence: UT 11.5.27.75
+/// `AccumulationRegisters/ОтклоненияВСтоимостиТоваров/Forms/ФормаСписка`,
+/// InputField `АналитикаУчетаПоПартнерамПартнер` carries `{3,{1},{582},{2009}}`
+/// against the `Список` dynamic list whose field map holds `582` ->
+/// `АналитикаУчетаПоПартнерам` and `2009` ->
+/// `АналитикаУчетаПоПартнерам.Партнер`; the platform writes
+/// `<DataPath>Список.АналитикаУчетаПоПартнерам.Партнер</DataPath>`.
+#[test]
+fn resolves_dynamic_list_chain_bindings_from_the_leaf_field_map_entry() {
+    let dynamic_list_uuid = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
+    let binding = "{3,{1},{582},{2009}}";
+
+    let mut attribute = data_path_form_attribute("1", "Список", Some(dynamic_list_uuid));
+    attribute.settings = Some(data_path_dynamic_list_settings(vec![
+        data_path_dynamic_list_field("582", "АналитикаУчетаПоПартнерам"),
+        data_path_dynamic_list_field("2009", "АналитикаУчетаПоПартнерам.Партнер"),
+    ]));
+    assert_eq!(
+        data_path_owner_scoped_resolution(binding, &[attribute]).as_deref(),
+        Some("Список.АналитикаУчетаПоПартнерам.Партнер")
+    );
+
+    // A leaf whose dotted depth disagrees with the chain length is not
+    // corroborated by the chain and must stay unresolved.
+    let mut shallow = data_path_form_attribute("1", "Список", Some(dynamic_list_uuid));
+    shallow.settings = Some(data_path_dynamic_list_settings(vec![
+        data_path_dynamic_list_field("582", "АналитикаУчетаПоПартнерам"),
+        data_path_dynamic_list_field("2009", "Партнер"),
+    ]));
+    assert_eq!(
+        data_path_owner_scoped_resolution(binding, &[shallow]),
+        None,
+        "a leaf shallower than its chain must not be joined blind"
+    );
+
+    // The same chain against a plain value table has no field map to
+    // corroborate it and stays unresolved.
+    let plain = data_path_form_attribute("1", "Список", None);
+    assert_eq!(data_path_owner_scoped_resolution(binding, &[plain]), None);
+}
+
+/// A chain whose leaf names a metadata attribute of an *intermediate* segment's
+/// type is the shorter binding's path plus that attribute's name.
+///
+/// Evidence: UT 11.5.27.75
+/// `Catalogs/Назначения/Forms/ФормаВыбораПоОстаткамВПодразделении`, InputField
+/// `ТаблицаОстатковНоменклатураЕдиницаИзмерения` carries
+/// `{3,{1},{3},{0,3d295926-ac21-4f62-b76e-64c929f1fc0e}}`, whose leaf uuid is
+/// `Catalog.Номенклатура.Attribute.ЕдиницаИзмерения` and whose column `3` on the
+/// `ТаблицаОстатков` value table is `Номенклатура`; the platform writes
+/// `<DataPath>ТаблицаОстатков.Номенклатура.ЕдиницаИзмерения</DataPath>`.
+#[test]
+fn resolves_metadata_attribute_leaves_against_the_shorter_binding() {
+    let attribute_uuid = "3d295926-ac21-4f62-b76e-64c929f1fc0e";
+    let field = data_path_input_field(
+        "13",
+        "ТаблицаОстатковНоменклатураЕдиницаИзмерения",
+        &format!("{{3,{{1}},{{3}},{{0,{attribute_uuid}}}}}"),
+    );
+    let mut attribute = data_path_form_attribute("1", "ТаблицаОстатков", None);
+    attribute.columns = vec![FormAttributeColumn {
+        id: "3".to_string(),
+        name: "Номенклатура".to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        explicit_empty_type: false,
+        functional_options: Vec::new(),
+    }];
+    let object_refs = BTreeMap::from([(
+        attribute_uuid.to_string(),
+        "Catalog.Номенклатура.Attribute.ЕдиницаИзмерения".to_string(),
+    )]);
+
+    let xml = data_path_child_items_xml(&[field.as_str()], &[attribute.clone()], &object_refs);
+    assert!(
+        xml.contains("<DataPath>ТаблицаОстатков.Номенклатура.ЕдиницаИзмерения</DataPath>"),
+        "{xml}"
+    );
+
+    // Without the referenced metadata the leaf contributes nothing, and the
+    // prefix alone must not be passed off as the whole path.
+    let xml = data_path_child_items_xml(&[field.as_str()], &[attribute], &BTreeMap::new());
+    assert!(
+        !xml.contains("<DataPath>ТаблицаОстатков.Номенклатура</DataPath>"),
+        "an unresolvable leaf must not collapse to its prefix: {xml}"
+    );
+}
+
+/// Business-process objects expose the same `Date`/`Number` markers documents
+/// do, and only those two are evidenced.
+///
+/// Evidence: UT 11.5.27.75
+/// `BusinessProcesses/СогласованиеЗакупки/Forms/ФормаБизнесПроцесса`, InputField
+/// `Дата` carries `{2,{1},{-3}}` and InputField `Номер` carries `{2,{1},{-2}}`
+/// against the `Объект` attribute; the platform writes
+/// `<DataPath>Объект.Date</DataPath>` and `<DataPath>Объект.Number</DataPath>`.
+#[test]
+fn resolves_business_process_object_standard_attribute_markers() {
+    let mut attribute = data_path_form_attribute("1", "Объект", None);
+    attribute.main_attribute = true;
+    attribute.value_types = vec![ConstantValueType::Reference {
+        reference: "cfg:BusinessProcessObject.СогласованиеЗакупки".to_string(),
+    }];
+    let owner = form_attribute_metadata_owner(&attribute);
+
+    assert_eq!(
+        resolve_form_owner_scoped_standard_attribute_data_path(&owner, "-3").as_deref(),
+        Some("Объект.Date")
+    );
+    assert_eq!(
+        resolve_form_owner_scoped_standard_attribute_data_path(&owner, "-2").as_deref(),
+        Some("Объект.Number")
+    );
+    assert_eq!(
+        resolve_form_owner_scoped_standard_attribute_data_path(&owner, "-7"),
+        None,
+        "`Posted` is a document marker and is not evidenced for business processes"
+    );
+}

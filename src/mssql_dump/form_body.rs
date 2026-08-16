@@ -4990,6 +4990,15 @@ struct FormAttributePlatformColumn {
 // Platform-owned columns of built-in value types, independent of infobase metadata.
 const FORM_DYNAMIC_LIST_TYPE_UUID: &str = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
 const FORM_VALUE_LIST_TYPE_UUID: &str = "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3";
+/// `ValueListItem.Value` is addressed by column id `0`, unlike every other
+/// platform column of the built-in value types. Evidence: UT 11.5.27.75
+/// `CommonForms/СписокЗначенийОтбора`, InputField `СписокЗначение` carries the
+/// binding `{2,{1},{0}}` against the `Список` value-list attribute and the
+/// platform writes `<DataPath>Список.Value</DataPath>`.
+const FORM_VALUE_LIST_VALUE_COLUMN: FormAttributePlatformColumn = FormAttributePlatformColumn {
+    id: "0",
+    name: "Value",
+};
 const FORM_VALUE_LIST_PRESENTATION_COLUMN: FormAttributePlatformColumn =
     FormAttributePlatformColumn {
         id: "1",
@@ -5020,6 +5029,7 @@ const FORM_SETTINGS_COMPOSER_FIELD_PICTURE_COLUMN: FormAttributePlatformColumn =
     };
 
 const FORM_VALUE_LIST_DATA_PATH_COLUMNS: &[FormAttributePlatformColumn] = &[
+    FORM_VALUE_LIST_VALUE_COLUMN,
     FORM_VALUE_LIST_PRESENTATION_COLUMN,
     FORM_VALUE_LIST_CHECK_COLUMN,
 ];
@@ -5212,14 +5222,25 @@ struct FormAttributeColumnKey {
 #[derive(Default)]
 pub(super) struct FormOwnerScopedBindingIndexes {
     attribute_columns: BTreeMap<FormAttributeColumnKey, Option<String>>,
+    /// Attribute ids whose declared type is exactly the built-in value list.
+    /// Column id `0` is only a real column name (`Value`) for those; for every
+    /// other owner a zero column id is not evidence of a bound column and stays
+    /// unresolved.
+    value_list_attribute_ids: BTreeSet<String>,
+    /// Attribute ids whose declared type is exactly the built-in dynamic list.
+    /// Their field-map entries already spell out the whole relative path of a
+    /// field, so a multi-segment binding against one of them is answered by the
+    /// leaf entry alone rather than by joining the intermediate segments.
+    dynamic_list_attribute_ids: BTreeSet<String>,
     table_paths: BTreeMap<FormBoundTableKey, Option<String>>,
     column_names: BTreeMap<FormBoundColumnKey, Option<String>>,
 }
 
 fn collect_form_attribute_data_path_columns(
-    index: &mut BTreeMap<FormAttributeColumnKey, Option<String>>,
+    owner_scoped_bindings: &mut FormOwnerScopedBindingIndexes,
     attribute: &FormAttribute,
 ) {
+    let index = &mut owner_scoped_bindings.attribute_columns;
     let mut insert = |column_id: &str, column_name: &str| {
         insert_unambiguous_form_binding(
             index,
@@ -5243,9 +5264,10 @@ fn collect_form_attribute_data_path_columns(
             }
         }
     }
+    let is_value_list = form_attribute_is_exact_value_list(attribute);
     let platform_columns = if is_dynamic_list {
         FORM_DYNAMIC_LIST_DATA_PATH_COLUMNS
-    } else if form_attribute_is_exact_value_list(attribute) {
+    } else if is_value_list {
         FORM_VALUE_LIST_DATA_PATH_COLUMNS
     } else if form_attribute_is_exact_settings_composer(attribute) {
         FORM_SETTINGS_COMPOSER_DATA_PATH_COLUMNS
@@ -5254,6 +5276,16 @@ fn collect_form_attribute_data_path_columns(
     };
     for column in platform_columns {
         insert(column.id, column.name);
+    }
+    if is_value_list {
+        owner_scoped_bindings
+            .value_list_attribute_ids
+            .insert(attribute.id.clone());
+    }
+    if is_dynamic_list {
+        owner_scoped_bindings
+            .dynamic_list_attribute_ids
+            .insert(attribute.id.clone());
     }
 }
 
@@ -5449,10 +5481,7 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
             .or_insert(data_path);
     }
     for attribute in attributes {
-        collect_form_attribute_data_path_columns(
-            &mut indexes.owner_scoped_bindings.attribute_columns,
-            attribute,
-        );
+        collect_form_attribute_data_path_columns(&mut indexes.owner_scoped_bindings, attribute);
         if !attribute.columns.is_empty() {
             indexes
                 .table_column_names_by_id
@@ -5847,7 +5876,8 @@ fn collect_form_child_item_indexes_from_field_traced(
                         .map(|attribute_name| {
                             format!("{attribute_name}.{}", indexes.table_name_by_id[id])
                         }),
-                    FormMetadataDataPathResolution::Invalid => None,
+                    FormMetadataDataPathResolution::Invalid
+                    | FormMetadataDataPathResolution::ForeignOwner => None,
                 };
                 if let Some(table_path) = table_path {
                     insert_unambiguous_form_binding(
@@ -9269,7 +9299,8 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
                         FormMetadataDataPathResolution::NotMetadata
                         | FormMetadataDataPathResolution::ReferenceAbsent
-                        | FormMetadataDataPathResolution::Invalid => None,
+                        | FormMetadataDataPathResolution::Invalid
+                        | FormMetadataDataPathResolution::ForeignOwner => None,
                     }
                 }
             },
@@ -12079,7 +12110,7 @@ pub(super) fn parse_form_child_item_data_path(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<ResolvedFormChildItemDataPath> {
     let owner_scoped_metadata = !matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField");
-    let parse_direct_bound = |field: &&str| {
+    let parse_bound_slot = |field: &str| {
         let scoped = if strict_field_data_path {
             FormOwnerScopedDataPath::from_option(resolve_form_strict_field_model_data_path(
                 field,
@@ -12102,6 +12133,14 @@ pub(super) fn parse_form_child_item_data_path(
             }
         });
         scoped
+            .or_else(|| {
+                FormOwnerScopedDataPath::from_option(resolve_form_item_scoped_current_data_path(
+                    field,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    type_link_data_path_by_table_column,
+                ))
+            })
             .or_else(|| {
                 let data_path = if owner_scoped_metadata {
                     parse_form_bound_data_path_with_metadata_owner(
@@ -12127,6 +12166,23 @@ pub(super) fn parse_form_child_item_data_path(
                     )
                 };
                 FormOwnerScopedDataPath::from_option(data_path)
+            })
+    };
+    let parse_direct_bound = |field: &&str| {
+        parse_bound_slot(field)
+            .or_else(|| {
+                // A chain whose leaf names a metadata attribute is the same
+                // binding one segment shorter plus that attribute's name.
+                let Some((prefix, suffix)) = split_form_metadata_attribute_tail(field, object_refs)
+                else {
+                    return FormOwnerScopedDataPath::Unknown;
+                };
+                match parse_bound_slot(&prefix) {
+                    FormOwnerScopedDataPath::Resolved(prefix_path) => {
+                        FormOwnerScopedDataPath::Resolved(format!("{prefix_path}.{suffix}"))
+                    }
+                    unresolved => unresolved,
+                }
             })
             .with_provenance(FormChildItemDataPathProvenance::DirectRawSlot)
     };
@@ -12321,6 +12377,134 @@ fn resolve_form_owner_scoped_button_data_path(
     ))
 }
 
+/// Resolves a multi-segment binding against a dynamic-list attribute.
+///
+/// A bound slot is a chain `{K,s1,…,sK}` of `K` segments. When the owner is a
+/// dynamic list, every following segment is a numeric field-map id and the
+/// field-map entry of the *leaf* id already spells out the whole relative path,
+/// dots included — so the answer is the attribute name joined with that one
+/// entry, never a join of the per-segment names.
+///
+/// Evidence: UT 11.5.27.75
+/// `AccumulationRegisters/ОтклоненияВСтоимостиТоваров/Forms/ФормаСписка`,
+/// InputField `АналитикаУчетаПоПартнерамПартнер` carries `{3,{1},{582},{2009}}`
+/// against the `Список` dynamic list, whose field map holds `582` ->
+/// `АналитикаУчетаПоПартнерам` and `2009` -> `АналитикаУчетаПоПартнерам.Партнер`;
+/// the platform writes `<DataPath>Список.АналитикаУчетаПоПартнерам.Партнер</DataPath>`.
+///
+/// The leaf entry must carry exactly `K-1` dot-separated components, which is
+/// what makes the chain and the field map corroborate each other; a leaf whose
+/// shape disagrees with the chain length stays unresolved rather than guessed.
+fn resolve_form_dynamic_list_chain_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> FormOwnerScopedDataPath {
+    let Some(segments) = parse_form_bound_chain_segments(field) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    if segments.len() < 3 {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let mut numeric = Vec::with_capacity(segments.len());
+    for segment in &segments {
+        let [id] = segment.as_slice() else {
+            return FormOwnerScopedDataPath::Unknown;
+        };
+        let id = id.trim();
+        if id.parse::<u64>().map(|value| value.to_string()) != Ok(id.to_string()) {
+            return FormOwnerScopedDataPath::Unknown;
+        }
+        numeric.push(id);
+    }
+    let attribute_id = numeric[0];
+    if !owner_scoped_bindings
+        .dynamic_list_attribute_ids
+        .contains(attribute_id)
+    {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let key = FormAttributeColumnKey {
+        attribute_id: attribute_id.to_string(),
+        column_id: numeric[numeric.len() - 1].to_string(),
+    };
+    let Some(field_name) = owner_scoped_bindings.attribute_columns.get(&key) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let Some(field_name) = field_name else {
+        return FormOwnerScopedDataPath::Ambiguous;
+    };
+    if field_name.split('.').count() != numeric.len() - 1 {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, field_name))
+}
+
+/// Splits a bound slot `{K,s1,…,sK}` into its `K` segments, each already split
+/// into its own fields. The leading count must agree with the number of
+/// segments actually present; a slot that disagrees is not a chain.
+fn parse_form_bound_chain_segments(field: &str) -> Option<Vec<Vec<&str>>> {
+    form_bound_chain_segment_fields(field)?
+        .iter()
+        .map(|segment| split_1c_braced_fields(segment.trim(), 0))
+        .collect()
+}
+
+fn form_bound_chain_segment_fields(field: &str) -> Option<Vec<&str>> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let (count, segments) = fields.split_first()?;
+    (count.trim().parse::<usize>().ok()? == segments.len()).then(|| segments.to_vec())
+}
+
+/// Peels a metadata-attribute leaf off a bound slot, returning the slot one
+/// segment shorter plus the attribute name that leaf contributes.
+///
+/// A chain `{K,s1,…,sK}` whose last segment is `{0,<uuid>}` pointing at an
+/// `…​.Attribute.<name>` reference addresses `<name>` on whatever the first
+/// `K-1` segments address, so the whole path is the shorter binding's path with
+/// `<name>` appended. Resolving the shorter binding through the ordinary
+/// resolvers keeps every owner rule that applies to it in force, instead of
+/// re-deriving the prefix from the item name.
+///
+/// Evidence: UT 11.5.27.75 `Documents/ВводОстатков/Forms/ФормаОптовыеПродажи`,
+/// LabelField `ОптовыеПродажиНоменклатураЕдиницаИзмерения` carries
+/// `{4,{1},{0,300cfbc7-…},{0,fb0ae716-…},{0,3d295926-…}}`, whose leaf uuid is
+/// `Catalog.Номенклатура.Attribute.ЕдиницаИзмерения` and whose three-segment
+/// prefix already exports as `Объект.ОптовыеПродажи.Номенклатура`; the platform
+/// writes `<DataPath>Объект.ОптовыеПродажи.Номенклатура.ЕдиницаИзмерения</DataPath>`.
+fn split_form_metadata_attribute_tail(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(String, String)> {
+    let segments = form_bound_chain_segment_fields(field)?;
+    if segments.len() < 3 {
+        return None;
+    }
+    let (leaf, prefix) = segments.split_last()?;
+    let leaf = split_1c_braced_fields(leaf.trim(), 0)?;
+    let [kind, uuid] = leaf.as_slice() else {
+        return None;
+    };
+    if kind.trim() != "0" {
+        return None;
+    }
+    let uuid = parse_non_zero_uuid(uuid.trim())?;
+    let suffix = form_metadata_attribute_suffix(object_refs.get(&uuid)?)?;
+    let prefix_field = format!(
+        "{{{},{}}}",
+        prefix.len(),
+        prefix
+            .iter()
+            .map(|segment| segment.trim())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    Some((prefix_field, suffix.to_string()))
+}
+
 fn resolve_form_owner_scoped_bound_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
@@ -12335,6 +12519,14 @@ fn resolve_form_owner_scoped_bound_data_path(
     if !matches!(attribute_column, FormOwnerScopedDataPath::Unknown) {
         return attribute_column;
     }
+    let dynamic_list_field = resolve_form_dynamic_list_chain_data_path(
+        field,
+        attribute_metadata_owners_by_id,
+        owner_scoped_bindings,
+    );
+    if !matches!(dynamic_list_field, FormOwnerScopedDataPath::Unknown) {
+        return dynamic_list_field;
+    }
     match resolve_form_owner_scoped_metadata_data_path_status(
         field,
         attribute_metadata_owners_by_id,
@@ -12345,6 +12537,15 @@ fn resolve_form_owner_scoped_bound_data_path(
         }
         FormMetadataDataPathResolution::Invalid => {
             return FormOwnerScopedDataPath::Ambiguous;
+        }
+        FormMetadataDataPathResolution::ForeignOwner => {
+            // Only a two-segment binding pins the terminal on the owner
+            // attribute itself; a longer chain routes through an intermediate
+            // segment, so a foreign owner leaves the slot open for the
+            // chain-aware resolvers rather than condemning it.
+            if !form_bound_chain_segment_fields(field).is_some_and(|segments| segments.len() > 2) {
+                return FormOwnerScopedDataPath::Ambiguous;
+            }
         }
         FormMetadataDataPathResolution::NotMetadata
         | FormMetadataDataPathResolution::ReferenceAbsent => {}
@@ -12433,7 +12634,17 @@ fn resolve_form_attribute_column_data_path(
     let Ok(column_number) = column_id.parse::<u64>() else {
         return FormOwnerScopedDataPath::Unknown;
     };
-    if column_number == 0 || column_number.to_string() != column_id {
+    if column_number.to_string() != column_id {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    // A zero column id only names a column on the built-in value list, whose
+    // `Value` column the platform numbers `0`; anywhere else it is not evidence
+    // of a bound column.
+    if column_number == 0
+        && !owner_scoped_bindings
+            .value_list_attribute_ids
+            .contains(attribute_id)
+    {
         return FormOwnerScopedDataPath::Unknown;
     }
     let key = FormAttributeColumnKey {
@@ -12479,7 +12690,9 @@ fn parse_form_bound_data_path_with_metadata_owner(
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
         ),
-        FormMetadataDataPathResolution::Invalid => None,
+        FormMetadataDataPathResolution::Invalid | FormMetadataDataPathResolution::ForeignOwner => {
+            None
+        }
     }
 }
 
@@ -12497,7 +12710,8 @@ pub(super) fn resolve_form_owner_scoped_metadata_data_path(
         FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
         FormMetadataDataPathResolution::NotMetadata
         | FormMetadataDataPathResolution::ReferenceAbsent
-        | FormMetadataDataPathResolution::Invalid => None,
+        | FormMetadataDataPathResolution::Invalid
+        | FormMetadataDataPathResolution::ForeignOwner => None,
     }
 }
 
@@ -12505,6 +12719,11 @@ enum FormMetadataDataPathResolution {
     NotMetadata,
     ReferenceAbsent,
     Invalid,
+    /// The terminal names metadata of a type the owner attribute is not. On a
+    /// two-segment binding that is a contradiction, but on a longer chain it is
+    /// the ordinary case: the terminal belongs to the type an *intermediate*
+    /// segment reaches, not to the attribute the chain starts from.
+    ForeignOwner,
     Resolved(String),
 }
 
@@ -12586,7 +12805,7 @@ fn resolve_form_owner_scoped_metadata_uuid_data_path_status(
         return FormMetadataDataPathResolution::Invalid;
     };
     if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
-        return FormMetadataDataPathResolution::Invalid;
+        return FormMetadataDataPathResolution::ForeignOwner;
     }
     FormMetadataDataPathResolution::Resolved(format!("{}.{}", attribute.name, relative_path))
 }
@@ -12640,10 +12859,28 @@ pub(super) fn resolve_form_owner_scoped_standard_attribute_data_path(
         (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Object) => {
             chart_of_accounts_standard_attribute_name(marker)
         }
+        (GeneratedMetadataOwnerFamily::BusinessProcess, GeneratedMetadataOwnerRole::Object) => {
+            BUSINESS_PROCESS_STANDARD_ATTRIBUTES
+                .iter()
+                .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+        }
         _ => None,
     }?;
     Some(format!("{}.{}", attribute.name, attribute_name))
 }
+
+/// Business-process standard attributes reachable through a bound field slot,
+/// limited to the markers the platform bytes actually spell out.
+///
+/// Evidence: UT 11.5.27.75
+/// `BusinessProcesses/СогласованиеЗакупки/Forms/ФормаБизнесПроцесса`, where
+/// InputField `Дата` carries `{2,{1},{-3}}` and InputField `Номер` carries
+/// `{2,{1},{-2}}` against the `Объект` attribute, and the platform writes
+/// `<DataPath>Объект.Date</DataPath>` and `<DataPath>Объект.Number</DataPath>`.
+/// The remaining business-process standard attributes are deliberately absent:
+/// no observed slot names them, and the document marker table is not evidence
+/// for a different family.
+const BUSINESS_PROCESS_STANDARD_ATTRIBUTES: [(&str, &str); 2] = [("-3", "Date"), ("-2", "Number")];
 
 fn resolve_form_constants_set_data_path(
     attribute: &FormAttributeMetadataOwner,
@@ -13566,6 +13803,58 @@ pub(super) fn parse_form_button_data_path(
         }
         _ => None,
     }
+}
+
+/// Resolves a bound-field slot whose owner is a *form item* rather than a form
+/// attribute.
+///
+/// A kind-2 binding carries its owner as `{id}` for an attribute and as
+/// `{id,02023637-…}` for a form item — the trailing literal is the form-item id
+/// namespace already spelled out by [`FORM_ITEM_TYPE_UUID`]. Reading the item
+/// form as an attribute id silently addresses an unrelated owner, so the two
+/// shapes must be told apart before any attribute lookup.
+///
+/// Evidence: UT 11.5.27.75 `Catalogs/ВидыСделокСКлиентами/Forms/ФормаСписка`,
+/// LabelField `Описание` carries `{2,{1,02023637-7868-4a5f-8576-835a76e0c9ba},{40}}`
+/// against the `Список` dynamic-list table (form item 1, dynamic-list field 40)
+/// and the platform writes `<DataPath>Items.Список.CurrentData.Описание</DataPath>`.
+///
+/// Global binding-key routes are deliberately not consulted here: the
+/// column key of an item-scoped binding is only unique within its own table, so
+/// a form-wide index would cross-wire sibling tables that reuse a key.
+fn resolve_form_item_scoped_current_data_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let [kind, owner, terminal] = fields.as_slice() else {
+        return None;
+    };
+    if kind.trim() != "2" {
+        return None;
+    }
+    let owner = split_1c_braced_fields(owner.trim(), 0)?;
+    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+    if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID || terminal.len() != 1 {
+        return None;
+    }
+    let table_id = owner.first()?.trim();
+    let column_id = terminal.first()?.trim();
+    if let Some(data_path) =
+        type_link_data_path_by_table_column.get(&(table_id.to_string(), column_id.to_string()))
+    {
+        return Some(data_path.clone());
+    }
+    let no_global_binding_paths = BTreeMap::new();
+    resolve_form_item_current_data_path(
+        table_id,
+        column_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        &no_global_binding_paths,
+    )
 }
 
 fn resolve_form_item_current_data_path(
