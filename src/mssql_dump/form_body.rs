@@ -116,6 +116,9 @@ pub(super) struct FormParseContext<'a> {
     /// it is configuration-wide, while a parse context is per form.
     field_type_refs: &'a Arc<BTreeMap<String, String>>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+    /// Master dimensions in declaration order, shared for the same reason as
+    /// `field_type_refs`: configuration-wide against a per-form context.
+    information_register_master_dimensions: &'a Arc<InformationRegisterMasterDimensionIndex>,
     form_owner_reference: Option<&'a str>,
     dcs_source_profile: ProfileId,
     dcs_target_profile: ProfileId,
@@ -148,6 +151,7 @@ pub(crate) struct FormItemTraceScalar {
 }
 
 impl<'a> FormParseContext<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         type_index: &'a BTreeMap<String, String>,
         type_index_collisions: &'a BTreeSet<String>,
@@ -155,6 +159,7 @@ impl<'a> FormParseContext<'a> {
         object_refs: &'a BTreeMap<String, String>,
         field_type_refs: &'a Arc<BTreeMap<String, String>>,
         information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+        information_register_master_dimensions: &'a Arc<InformationRegisterMasterDimensionIndex>,
         form_owner_reference: Option<&'a str>,
     ) -> Self {
         Self {
@@ -164,6 +169,7 @@ impl<'a> FormParseContext<'a> {
             object_refs,
             field_type_refs,
             information_register_field_refs,
+            information_register_master_dimensions,
             form_owner_reference,
             dcs_source_profile: ProfileId::parse("provider:mssql-legacy")
                 .expect("static MSSQL provider profile is valid"),
@@ -212,6 +218,7 @@ pub(super) fn extract_form_body_xml_from_body(
             object_refs,
             &Arc::new(BTreeMap::new()),
             &BTreeMap::new(),
+            &Arc::new(InformationRegisterMasterDimensionIndex::new()),
             None,
         ),
         None,
@@ -412,6 +419,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &commands,
         context.object_refs,
         context.information_register_field_refs,
+        context.information_register_master_dimensions,
         context.form_owner_reference,
         &attributes,
         &child_item_indexes,
@@ -650,6 +658,7 @@ pub(crate) fn trace_form_body_with_context(
     object_refs: &BTreeMap<String, String>,
     field_type_refs: &Arc<BTreeMap<String, String>>,
     information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    information_register_master_dimensions: &Arc<InformationRegisterMasterDimensionIndex>,
     form_owner_reference: Option<&str>,
     trace_sink: &dyn FormItemTraceSink,
 ) -> Option<()> {
@@ -661,6 +670,7 @@ pub(crate) fn trace_form_body_with_context(
         object_refs,
         field_type_refs,
         information_register_field_refs,
+        information_register_master_dimensions,
         form_owner_reference,
     )
     .with_trace_sink(trace_sink);
@@ -16530,17 +16540,20 @@ pub(super) fn extract_form_command_interface_with_commands(
         commands,
         object_refs,
         &BTreeMap::new(),
+        &InformationRegisterMasterDimensionIndex::new(),
         None,
         &[],
         &FormChildItemIndexes::default(),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn extract_form_command_interface_with_context(
     trailing: &[String],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    information_register_master_dimensions: &InformationRegisterMasterDimensionIndex,
     form_owner_reference: Option<&str>,
     attributes: &[FormAttribute],
     child_item_indexes: &FormChildItemIndexes,
@@ -16553,6 +16566,7 @@ pub(super) fn extract_form_command_interface_with_context(
         commands,
         object_refs,
         information_register_field_refs,
+        information_register_master_dimensions,
         form_owner_reference,
         attribute_names_by_id: &attribute_names_by_id,
         child_item_indexes,
@@ -16578,6 +16592,7 @@ pub(super) struct FormCommandInterfaceParseContext<'a> {
     commands: &'a [FormCommand],
     object_refs: &'a BTreeMap<String, String>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+    information_register_master_dimensions: &'a InformationRegisterMasterDimensionIndex,
     form_owner_reference: Option<&'a str>,
     attribute_names_by_id: &'a BTreeMap<String, String>,
     child_item_indexes: &'a FormChildItemIndexes,
@@ -16850,25 +16865,33 @@ pub(super) fn parse_form_command_interface_command(
                 format!("{reference}.StandardCommand.{standard}")
             })
         }
-        "3" => resolve_information_register_open_by_value_command(target?, context).or_else(|| {
-            let uuid = parse_non_zero_uuid(target?)?;
-            let reference = context.object_refs.get(&uuid)?;
-            // A catalog names its "create based on" command from slot 3, where a
-            // document or business process names the same command from slot 2.
-            if is_top_level_reference_of_kind(reference, "Catalog") {
-                return Some(format!("{reference}.StandardCommand.CreateBasedOn"));
-            }
-            (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
-                .then(|| reference.clone())
-        }),
+        "3" => resolve_information_register_open_by_value_command(kind, target?, context).or_else(
+            || {
+                let uuid = parse_non_zero_uuid(target?)?;
+                let reference = context.object_refs.get(&uuid)?;
+                // A catalog names its "create based on" command from slot 3, where a
+                // document or business process names the same command from slot 2.
+                if is_top_level_reference_of_kind(reference, "Catalog") {
+                    return Some(format!("{reference}.StandardCommand.CreateBasedOn"));
+                }
+                (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
+                    .then(|| reference.clone())
+            },
+        ),
         "4" => {
             let uuid = parse_non_zero_uuid(target?)?;
             let reference = context.object_refs.get(&uuid)?;
             (reference.starts_with("Catalog.") && reference.matches('.').count() == 1)
                 .then(|| format!("{reference}.StandardCommand.OpenByValue"))
-                .or_else(|| resolve_information_register_open_by_value_command(target?, context))
+                .or_else(|| {
+                    resolve_information_register_open_by_value_command(kind, target?, context)
+                })
         }
-        "5" => resolve_information_register_open_by_value_command(target?, context),
+        // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
+        // theirs with the object commands handled above.
+        "5" | "6" | "7" => {
+            resolve_information_register_open_by_value_command(kind, target?, context)
+        }
         _ => None,
     }
 }
@@ -16878,6 +16901,7 @@ pub(super) fn parse_form_command_interface_command_for_test(
     field: &str,
     object_refs: &BTreeMap<String, String>,
     information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    information_register_master_dimensions: &InformationRegisterMasterDimensionIndex,
     form_owner_reference: &str,
 ) -> Option<String> {
     let attribute_names_by_id = BTreeMap::new();
@@ -16888,6 +16912,7 @@ pub(super) fn parse_form_command_interface_command_for_test(
             commands: &[],
             object_refs,
             information_register_field_refs,
+            information_register_master_dimensions,
             form_owner_reference: Some(form_owner_reference),
             attribute_names_by_id: &attribute_names_by_id,
             child_item_indexes: &child_item_indexes,
@@ -16903,21 +16928,48 @@ fn is_top_level_reference_of_kind(reference: &str, kind: &str) -> bool {
         .is_some_and(|(head, tail)| head == kind && !tail.contains('.'))
 }
 
+/// Names the dimension an "open by value" register command opens on.
+///
+/// When the target already names the field, it is read straight off. When it
+/// names the register, the slot the record sits in selects one of the register's
+/// master dimensions positionally, in declaration order, from slot 3 onwards -
+/// so slot 3 is the first master dimension, slot 4 the second, and so on. Across
+/// 1C:УТ 11.5.27.75 all 156 records of this shape resolve, and the multiset of
+/// (register, dimension) pairs they produce is equal to the multiset the
+/// platform writes: no surplus, no deficit. Slots below 3 belong to other
+/// commands and are declined here rather than approximated.
 fn resolve_information_register_open_by_value_command(
+    kind: &str,
     target: &str,
     context: &FormCommandInterfaceParseContext<'_>,
 ) -> Option<String> {
     let uuid = parse_non_zero_uuid(target)?;
     let reference = context.object_refs.get(&uuid)?;
-    form_information_register_open_by_value_reference(reference).or_else(|| {
-        let form_owner_reference = context.form_owner_reference?;
-        let field_reference = resolve_information_register_field_reference(
-            context.information_register_field_refs,
-            &uuid,
-            form_owner_reference,
-        )?;
-        form_information_register_open_by_value_reference(field_reference)
-    })
+    if let Some(command) = form_information_register_open_by_value_reference(reference) {
+        return Some(command);
+    }
+    if !is_top_level_reference_of_kind(reference, "InformationRegister") {
+        return None;
+    }
+    let index = kind.parse::<usize>().ok()?.checked_sub(3)?;
+    if let Some(dimensions) = context.information_register_master_dimensions.get(&uuid) {
+        let dimension = dimensions.get(index)?;
+        return Some(format!(
+            "{reference}.StandardCommand.OpenByValue.{dimension}"
+        ));
+    }
+    // A register that declares no master dimension at all is outside everything
+    // the corpus shows: no such record occurs in it, positionally or otherwise.
+    // The older reading - the register's one unambiguous field - is kept for that
+    // case rather than widened into it, and it cannot contradict the rule above
+    // because the two are reached on disjoint inputs.
+    let form_owner_reference = context.form_owner_reference?;
+    let field_reference = resolve_information_register_field_reference(
+        context.information_register_field_refs,
+        &uuid,
+        form_owner_reference,
+    )?;
+    form_information_register_open_by_value_reference(field_reference)
 }
 
 pub(super) fn resolve_information_register_field_reference<'a>(

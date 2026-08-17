@@ -2386,6 +2386,7 @@ struct DumpRowContext<'a> {
     field_refs: &'a BTreeMap<String, String>,
     field_type_refs: &'a Arc<BTreeMap<String, String>>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+    information_register_master_dimensions: &'a Arc<InformationRegisterMasterDimensionIndex>,
     functional_option_refs: &'a BTreeMap<String, String>,
     help_refs: &'a BTreeMap<String, String>,
     standalone_refs: &'a StandaloneContentReferences,
@@ -2650,6 +2651,17 @@ fn dump_table_rows_with_options_mode(
     } else {
         BTreeMap::new()
     };
+    let information_register_master_dimensions = Arc::new(if extract_metadata_xml {
+        build_information_register_master_dimension_index_from_texts(
+            metadata_texts,
+            &type_index,
+            &object_refs,
+            &form_refs,
+            source_version == InfobaseConfigSourceVersion::V2_21,
+        )
+    } else {
+        InformationRegisterMasterDimensionIndex::new()
+    });
     let functional_option_refs = if extract_metadata_xml {
         build_functional_option_reference_index_from_texts(
             &metadata_texts,
@@ -2792,6 +2804,7 @@ fn dump_table_rows_with_options_mode(
         field_refs: &field_refs,
         field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
+        information_register_master_dimensions: &information_register_master_dimensions,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
         standalone_refs: &standalone_refs,
@@ -3659,6 +3672,19 @@ fn dump_table_rows_streamed(
         } else {
             BTreeMap::new()
         };
+    let information_register_master_dimensions = Arc::new(
+        if extract_metadata_xml && source_reference_needs.field_refs {
+            build_information_register_master_dimension_index_from_texts(
+                &index_metadata_texts,
+                &type_index,
+                &object_refs,
+                &form_refs,
+                source_version == InfobaseConfigSourceVersion::V2_21,
+            )
+        } else {
+            InformationRegisterMasterDimensionIndex::new()
+        },
+    );
     timings.prepare_field_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let functional_option_refs =
@@ -3865,6 +3891,7 @@ fn dump_table_rows_streamed(
         field_refs: &field_refs,
         field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
+        information_register_master_dimensions: &information_register_master_dimensions,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
         standalone_refs: &standalone_refs,
@@ -6551,6 +6578,9 @@ pub(crate) struct InformationRegisterFieldReference {
 
 pub(crate) type InformationRegisterFieldReferenceIndex =
     BTreeMap<String, Vec<InformationRegisterFieldReference>>;
+
+/// Register uuid -> its master dimension names in declaration order.
+pub(crate) type InformationRegisterMasterDimensionIndex = BTreeMap<String, Vec<String>>;
 
 type DefinedTypeValueOwnerReferenceIndex = BTreeMap<String, BTreeSet<String>>;
 
@@ -28095,6 +28125,16 @@ fn parse_common_command_picture_value(
         if ref_fields.first()?.trim() == "-4" {
             return Some((Some("StdPicture.MoveDown".to_string()), load_transparent));
         }
+        // `-5` was the one negative code this table lacked while its sibling
+        // table for help-topic picture tokens already carried it, so the two
+        // disagreed about the same platform identity. The native tree writes
+        // `StdPicture.InputFieldCalendar` for all 12 of its occurrences.
+        if ref_fields.first()?.trim() == "-5" {
+            return Some((
+                Some("StdPicture.InputFieldCalendar".to_string()),
+                load_transparent,
+            ));
+        }
         if ref_fields.first()?.trim() == "-9" {
             return Some((Some("StdPicture.MoveRight".to_string()), load_transparent));
         }
@@ -28195,6 +28235,8 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "448d6f55-d885-496c-870d-d1bd78374745" => Some("StdPicture.CloneListItem"),
         "977e831a-0e73-4d60-af51-091a6fa8612e" => Some("StdPicture.CreateListItem"),
         "0e2da390-5c04-46a2-a74b-1b7e13a40f2b" => Some("StdPicture.HidePassword"),
+        "97f87955-b88a-4225-a0d8-03af981ecd86" => Some("StdPicture.ShowPassword"),
+        "fc6a06a8-1308-4385-b1b2-9d302d2054ed" => Some("StdPicture.SearchControl"),
         "723765ab-0b92-4745-a621-1ba0f77c92c9" => Some("StdPicture.EventLog"),
         "4fddea39-5129-4b4c-83fe-4e443cd61940" => Some("StdPicture.EventLogByUser"),
         "ffab30f1-da11-44b5-b34c-24da22badcf4" => Some("StdPicture.Find"),

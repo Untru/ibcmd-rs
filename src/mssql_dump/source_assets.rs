@@ -500,6 +500,11 @@ pub(crate) enum PredefinedDataRowsetLayout {
 #[derive(Clone, Copy)]
 pub(crate) enum PredefinedItemLayout {
     Generic,
+    /// Reads exactly like `Generic`, but its items carry a value-type slot, so
+    /// every item writes a `Type` element -- empty for the folders that have no
+    /// type. All 166 items of this shape in 1C:УТ 11.5.27.75 write one: 144
+    /// typed leaves and 22 empty folders, with no counterexample.
+    Characteristic,
     Account,
     Calculation,
 }
@@ -1361,6 +1366,7 @@ pub(super) fn write_source_asset(
                 context.object_refs,
                 context.field_type_refs,
                 context.information_register_field_refs,
+                context.information_register_master_dimensions,
                 owner_reference.as_deref(),
             )
             .with_dcs_profiles(adapter.provider_id().clone(), dcs_target_profile);
@@ -2326,7 +2332,7 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
             root_tag: "1",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
             unwrap_single_root: true,
-            item_layout: PredefinedItemLayout::Generic,
+            item_layout: PredefinedItemLayout::Characteristic,
         },
     ),
     (
@@ -2521,7 +2527,7 @@ fn parse_predefined_data_blob_inner(
     };
 
     match model.item_layout {
-        PredefinedItemLayout::Generic => {
+        PredefinedItemLayout::Generic | PredefinedItemLayout::Characteristic => {
             let root_items = parse_predefined_rowset_roots(rowset_value, type_index)?;
             if model.unwrap_single_root {
                 let [root_item] = root_items.as_slice() else {
@@ -3434,9 +3440,14 @@ pub(super) fn push_predefined_item_xml(
                 value_types,
                 is_folder,
             },
-            PredefinedItemLayout::Generic,
+            PredefinedItemLayout::Generic | PredefinedItemLayout::Characteristic,
         ) => {
-            xml.push_str(&format_predefined_type_xml(value_types, indent + 1));
+            let type_xml = format_predefined_type_xml(value_types, indent + 1);
+            if type_xml.is_empty() && matches!(layout, PredefinedItemLayout::Characteristic) {
+                xml.push_str(&format!("{tab}\t<Type/>\r\n"));
+            } else {
+                xml.push_str(&type_xml);
+            }
             xml.push_str(&format!(
                 "{tab}\t<IsFolder>{}</IsFolder>\r\n",
                 xml_bool(*is_folder)
@@ -3645,12 +3656,18 @@ pub(super) fn format_predefined_type_xml(
         return String::new();
     }
     let tab = "\t".repeat(indent);
+    // The current-config prefix is numbered by the absolute element depth of the
+    // `v8:Type` element it sits on, not by a constant: `PredefinedData` is 1, the
+    // outermost `Item` is 2, its `Type` is 3 and the `v8:Type` inside it is 4,
+    // and every `ChildItems`/`Item` pair below adds 2. All 466 occurrences in
+    // 1C:УТ 11.5.27.75 follow it - 367 at depth 4, 68 at 6, 29 at 8 and 2 at 10.
+    let prefix = format!("d{}p1", indent + 2);
     let mut xml = format!("{tab}<Type>\r\n");
     for value_type in value_types {
         match value_type {
             ConstantValueType::Reference { reference } if reference.starts_with("cfg:") => {
                 xml.push_str(&format!(
-                    "{tab}\t<v8:Type xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">d4p1:{}</v8:Type>\r\n",
+                    "{tab}\t<v8:Type xmlns:{prefix}=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">{prefix}:{}</v8:Type>\r\n",
                     escape_xml_text(reference.trim_start_matches("cfg:"))
                 ));
             }

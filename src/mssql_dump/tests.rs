@@ -23,9 +23,92 @@ use crate::module_blob::{
     parse_simple_metadata_xml_properties,
 };
 
+/// Slots 3 upwards name the register's master dimensions positionally, in
+/// declaration order.
+///
+/// The test this replaces asserted that slots 3, 4 and 5 all name the *same*
+/// dimension, a layout the platform never writes: the whole point of the slot is
+/// that it selects a different one. Measured over 1C:УТ 11.5.27.75, the five
+/// slots occur 111, 26, 13, 5 and 1 times and pick the first through fifth
+/// master dimension respectively.
 #[test]
-fn form_navigation_panel_kinds_3_4_and_5_resolve_register_open_by_value() {
+fn form_navigation_panel_slots_from_three_name_master_dimensions_in_order() {
     let register_uuid = "11111111-1111-4111-8111-111111111111".to_string();
+    let object_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        "InformationRegister.RegisterProbe".to_string(),
+    )]);
+    let master_dimensions = BTreeMap::from([(
+        register_uuid.clone(),
+        ["Склад", "Помещение", "Номенклатура", "Серия", "Упаковка"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+    )]);
+
+    for (kind, dimension) in [
+        ("3", "Склад"),
+        ("4", "Помещение"),
+        ("5", "Номенклатура"),
+        ("6", "Серия"),
+        ("7", "Упаковка"),
+    ] {
+        assert_eq!(
+            form_body::parse_form_command_interface_command_for_test(
+                &format!("{{{kind},{register_uuid}}}"),
+                &object_refs,
+                &BTreeMap::new(),
+                &master_dimensions,
+                "Catalog.Products",
+            ),
+            Some(format!(
+                "InformationRegister.RegisterProbe.StandardCommand.OpenByValue.{dimension}"
+            )),
+            "kind {kind}"
+        );
+    }
+}
+
+/// A slot past the last master dimension refuses rather than falling back to the
+/// nearest one: the platform writes nothing there.
+#[test]
+fn form_navigation_panel_register_open_by_value_refuses_slot_past_last_master_dimension() {
+    let register_uuid = "22222222-2222-4222-8222-222222222222".to_string();
+    let object_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        "InformationRegister.RegisterProbe".to_string(),
+    )]);
+    let master_dimensions = BTreeMap::from([(
+        register_uuid.clone(),
+        vec!["Организация".to_string(), "Склад".to_string()],
+    )]);
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{4,{register_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            &master_dimensions,
+            "Catalog.Products",
+        ),
+        Some("InformationRegister.RegisterProbe.StandardCommand.OpenByValue.Склад".to_string())
+    );
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{5,{register_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            &master_dimensions,
+            "Catalog.Products",
+        ),
+        None
+    );
+}
+
+/// A non-master dimension is never named, however well it matches the form's
+/// owner: all 156 occurrences in the corpus name a master dimension.
+#[test]
+fn form_navigation_panel_register_open_by_value_ignores_non_master_dimensions() {
+    let register_uuid = "12121212-1212-4212-8212-121212121212".to_string();
     let object_refs = BTreeMap::from([(
         register_uuid.clone(),
         "InformationRegister.RegisterProbe".to_string(),
@@ -33,52 +116,23 @@ fn form_navigation_panel_kinds_3_4_and_5_resolve_register_open_by_value() {
     let field_refs = BTreeMap::from([(
         register_uuid.clone(),
         vec![InformationRegisterFieldReference {
-            field_reference: "InformationRegister.RegisterProbe.Dimension.Owner".to_string(),
+            field_reference: "InformationRegister.RegisterProbe.Dimension.Плательщик".to_string(),
             value_owner_references: BTreeSet::from(["Catalog.Products".to_string()]),
         }],
     )]);
-    let expected =
-        Some("InformationRegister.RegisterProbe.StandardCommand.OpenByValue.Owner".to_string());
-
-    for kind in ["3", "4", "5"] {
-        assert_eq!(
-            form_body::parse_form_command_interface_command_for_test(
-                &format!("{{{kind},{register_uuid}}}"),
-                &object_refs,
-                &field_refs,
-                "Catalog.Products",
-            ),
-            expected,
-            "kind {kind}"
-        );
-    }
-}
-
-#[test]
-fn form_navigation_panel_register_open_by_value_is_fail_closed_on_ambiguity() {
-    let register_uuid = "22222222-2222-4222-8222-222222222222".to_string();
-    let object_refs = BTreeMap::from([(
-        register_uuid.clone(),
-        "InformationRegister.RegisterProbe".to_string(),
-    )]);
-    let field_refs = BTreeMap::from([(
-        register_uuid.clone(),
-        ["First", "Second"]
-            .into_iter()
-            .map(|name| InformationRegisterFieldReference {
-                field_reference: format!("InformationRegister.RegisterProbe.Dimension.{name}"),
-                value_owner_references: BTreeSet::from(["Catalog.Products".to_string()]),
-            })
-            .collect(),
-    )]);
+    let master_dimensions =
+        BTreeMap::from([(register_uuid.clone(), vec!["Получатель".to_string()])]);
     assert_eq!(
         form_body::parse_form_command_interface_command_for_test(
-            &format!("{{5,{register_uuid}}}"),
+            &format!("{{3,{register_uuid}}}"),
             &object_refs,
             &field_refs,
+            &master_dimensions,
             "Catalog.Products",
         ),
-        None
+        Some(
+            "InformationRegister.RegisterProbe.StandardCommand.OpenByValue.Получатель".to_string()
+        )
     );
 }
 
@@ -95,6 +149,7 @@ fn form_navigation_panel_kind_3_keeps_external_command_fallback() {
             &format!("{{3,{command_uuid}}}"),
             &object_refs,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             "Catalog.Products",
         ),
         Some("CommonCommand.OpenProductCard".to_string())
@@ -110,6 +165,7 @@ fn form_navigation_panel_kind_4_keeps_catalog_precedence() {
         form_body::parse_form_command_interface_command_for_test(
             &format!("{{4,{catalog_uuid}}}"),
             &object_refs,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             "Catalog.Products",
         ),
@@ -134,6 +190,7 @@ fn form_navigation_panel_resolves_standard_form_and_open_by_recorder_commands() 
             "{0,71e0226e-ebb2-4e33-8745-0a94a01bbf15}",
             &object_refs,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             "Document.Invoice",
         ),
         Some("Form.StandardCommand.RestoreValues".to_string())
@@ -142,6 +199,7 @@ fn form_navigation_panel_resolves_standard_form_and_open_by_recorder_commands() 
         form_body::parse_form_command_interface_command_for_test(
             &format!("{{1,{register_uuid}}}"),
             &object_refs,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             "Document.Invoice",
         ),
@@ -152,14 +210,18 @@ fn form_navigation_panel_resolves_standard_form_and_open_by_recorder_commands() 
             &format!("{{1,{catalog_uuid}}}"),
             &object_refs,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             "Document.Invoice",
         ),
         None
     );
 }
 
+/// Only for a register that declares no master dimension at all - a shape the
+/// corpus never shows in this slot - does the older single-field reading apply,
+/// and it stays fail-closed on ambiguity there.
 #[test]
-fn form_navigation_panel_open_by_value_uses_only_unambiguous_register_field_fallback() {
+fn form_navigation_panel_open_by_value_field_reading_is_limited_to_masterless_registers() {
     let register_uuid = "77777777-7777-4777-8777-777777777777".to_string();
     let object_refs = BTreeMap::from([(
         register_uuid.clone(),
@@ -177,6 +239,7 @@ fn form_navigation_panel_open_by_value_uses_only_unambiguous_register_field_fall
             &format!("{{3,{register_uuid}}}"),
             &object_refs,
             &one_field,
+            &BTreeMap::new(),
             "Catalog.CurrentOwner",
         ),
         Some("InformationRegister.Queue.StandardCommand.OpenByValue.Message".to_string())
@@ -197,6 +260,7 @@ fn form_navigation_panel_open_by_value_uses_only_unambiguous_register_field_fall
             &format!("{{3,{register_uuid}}}"),
             &object_refs,
             &ambiguous,
+            &BTreeMap::new(),
             "Catalog.CurrentOwner",
         ),
         None
@@ -221,6 +285,7 @@ fn form_navigation_panel_kind_3_names_catalog_create_based_on() {
             &format!("{{3,{catalog_uuid}}}"),
             &object_refs,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             "Catalog.Partners",
         ),
         Some("Catalog.Claims.StandardCommand.CreateBasedOn".to_string())
@@ -230,6 +295,7 @@ fn form_navigation_panel_kind_3_names_catalog_create_based_on() {
         form_body::parse_form_command_interface_command_for_test(
             &format!("{{2,{document_uuid}}}"),
             &object_refs,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             "Catalog.Partners",
         ),
@@ -251,6 +317,7 @@ fn form_navigation_panel_kind_2_names_information_register_open_by_recorder() {
         form_body::parse_form_command_interface_command_for_test(
             &format!("{{2,{register_uuid}}}"),
             &object_refs,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             "Document.Invoice",
         ),
@@ -280,6 +347,7 @@ fn form_navigation_panel_kind_0_names_filter_criterion_open_by_value() {
             &format!("{{0,{criterion_uuid}}}"),
             &object_refs,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             "Catalog.Partners",
         ),
         Some("FilterCriterion.ContactInteractions.StandardCommand.OpenByValue".to_string())
@@ -289,6 +357,7 @@ fn form_navigation_panel_kind_0_names_filter_criterion_open_by_value() {
         form_body::parse_form_command_interface_command_for_test(
             &format!("{{0,{command_uuid}}}"),
             &object_refs,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             "Catalog.Partners",
         ),
@@ -311,6 +380,7 @@ fn form_navigation_panel_resolves_retry_and_open_from_standalone_server() {
         assert_eq!(
             form_body::parse_form_command_interface_command_for_test(
                 &format!("{{0,{uuid}}}"),
+                &BTreeMap::new(),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 "Document.Order",
@@ -11093,6 +11163,8 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
     let dcs_type_index = DcsTypeIndex::new();
     let type_index_collisions = BTreeSet::new();
     let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let information_register_master_dimensions =
+        std::sync::Arc::new(InformationRegisterMasterDimensionIndex::new());
     let field_type_refs = std::sync::Arc::new(BTreeMap::new());
     let legacy = extract_form_body_xml_from_body(&body, &type_index, &object_refs).unwrap();
     let sink = Sink(std::cell::RefCell::new(Vec::new()));
@@ -11103,6 +11175,7 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
         &object_refs,
         &field_type_refs,
         &information_register_field_refs,
+        &information_register_master_dimensions,
         None,
     )
     .with_trace_sink(&sink);
@@ -23304,6 +23377,8 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
     let dcs_type_index = DcsTypeIndex::new();
     let object_refs = BTreeMap::new();
     let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let information_register_master_dimensions =
+        std::sync::Arc::new(InformationRegisterMasterDimensionIndex::new());
     let field_type_refs = std::sync::Arc::new(BTreeMap::new());
     let context = FormParseContext::new(
         &type_index,
@@ -23312,6 +23387,7 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
         &object_refs,
         &field_type_refs,
         &information_register_field_refs,
+        &information_register_master_dimensions,
         None,
     );
 

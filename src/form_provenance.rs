@@ -212,6 +212,7 @@ pub fn run_form_provenance_corpus(
             &context.object_refs,
             &context.field_type_refs,
             &context.information_register_field_refs,
+            &context.information_register_master_dimensions,
             owner,
             &sink,
         )

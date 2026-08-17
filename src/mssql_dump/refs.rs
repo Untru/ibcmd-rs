@@ -1289,6 +1289,68 @@ pub(super) fn build_metadata_field_type_reference_index_from_texts(
     index
 }
 
+/// The *ordered* names of every information-register dimension that declares
+/// itself master, keyed by the register's uuid.
+///
+/// The alphabetic field index beside it cannot serve this: it sorts its keys, it
+/// mixes resources and attributes in with the dimensions, and it carries no
+/// master flag. The one consumer needs the declaration order because it selects
+/// a dimension positionally.
+///
+/// Order and flag both come from the metadata emitter's own calls -- the same
+/// header walk and the same `parse_information_register_child_payload` that
+/// decides what the register's `Dimension` elements say -- so the index cannot
+/// name a dimension the export does not write, nor order them differently.
+pub(super) fn build_information_register_master_dimension_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> InformationRegisterMasterDimensionIndex {
+    let mut index = InformationRegisterMasterDimensionIndex::new();
+    for row in rows {
+        let (Some("InformationRegister"), Some(register)) =
+            (row.kind.as_deref(), row.header.as_ref())
+        else {
+            continue;
+        };
+        let mut masters = Vec::new();
+        for (field, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            let Some(tag) =
+                register_child_object_tag("InformationRegister", &row.text, marker_start)
+            else {
+                continue;
+            };
+            if tag != "Dimension" {
+                continue;
+            }
+            let Some((_, properties)) = parse_information_register_child_payload(
+                &row.text,
+                marker_start,
+                &field,
+                &register.name,
+                tag,
+                type_index,
+                object_refs,
+                form_refs,
+                preserve_raw_data_paths,
+            ) else {
+                continue;
+            };
+            if properties.master == Some(true) {
+                masters.push(field.name);
+            }
+        }
+        if !masters.is_empty() {
+            index.insert(register.uuid.clone(), masters);
+        }
+    }
+    index
+}
+
 pub(super) fn build_information_register_field_reference_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,
