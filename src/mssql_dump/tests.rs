@@ -10524,6 +10524,95 @@ fn extracts_form_attribute_use_always_default_picture_from_dynamic_list_required
 }
 
 #[test]
+fn extracts_form_attribute_use_always_default_picture_without_marker_when_list_has_a_main_table() {
+    let attribute = parse_form_attribute(
+            r##"{9,{3},0,"Список",{1,1,{"ru","Список"}},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,12,"QueryText",{"S","ВЫБРАТЬ Ссылка КАК Ссылка ИЗ Справочник.Пользователи"},"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Ссылка"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Ссылка"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",10000000}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+                "Catalog.ПравилаИнтеграцииС1СДокументооборотом3".to_string(),
+            )]),
+        )
+        .unwrap();
+
+    assert_eq!(
+        attribute.use_always,
+        vec![
+            "Список.DefaultPicture".to_string(),
+            "Список.Ссылка".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn extracts_form_attribute_use_always_predefined_from_object_property_code() {
+    let attribute = parse_form_attribute(
+            r##"{9,{5},0,"Объект",{1,0},{"Pattern",{"#",b3245d95-cb77-46a2-b658-259f9abc0fc8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,2,{1,{-10}},{1,{0,0249bef8-62d9-4f0e-ad44-6ee1998ff21d}}},{0,0},0,1,0,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "0249bef8-62d9-4f0e-ad44-6ee1998ff21d".to_string(),
+                "Catalog.СоглашенияСКлиентами.Attribute.ВидЦен".to_string(),
+            )]),
+        )
+        .unwrap();
+
+    assert_eq!(
+        attribute.use_always,
+        vec!["Объект.Predefined".to_string(), "Объект.ВидЦен".to_string()]
+    );
+}
+
+#[test]
+fn extracts_form_attribute_save_fields_from_standard_period_property_indexes() {
+    let attribute = parse_form_attribute(
+            r##"{9,{6},0,"Период",{1,0},{"Pattern",{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,4,{0},{1,{0}},{1,{1}},{1,{2}}},0,1,0,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        attribute.save_fields,
+        vec![
+            "Период".to_string(),
+            "Период.Variant".to_string(),
+            "Период.StartDate".to_string(),
+            "Период.EndDate".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn extracts_form_attribute_save_fields_from_a_single_standard_period_property_index() {
+    let attribute = parse_form_attribute(
+            r##"{9,{6},0,"Период",{1,0},{"Pattern",{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,2,{0},{1,{0}}},0,1,0,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        attribute.save_fields,
+        vec!["Период".to_string(), "Период.Variant".to_string()]
+    );
+}
+
+#[test]
+fn leaves_unobserved_value_type_property_indexes_out_of_form_attribute_save_fields() {
+    let attribute = parse_form_attribute(
+            r##"{9,{6},0,"ДатаПлатежа",{1,0},{"Pattern",{"#",0387f3a2-7df5-4804-948b-4580a51e4a15}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,3,{0},{1,{0}},{1,{7}}},0,1,0,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        attribute.save_fields,
+        vec!["ДатаПлатежа".to_string(), "ДатаПлатежа.Variant".to_string()]
+    );
+}
+
+#[test]
 fn extracts_form_attribute_use_always_from_native_fields_map_required_fields() {
     let attribute = parse_form_attribute(
             r##"{9,{2},0,"НайденныеОбъекты",{1,1,{"ru","Найденные объекты"}},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,18,"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",6},"FieldsMapItemName0",{"S","regNumber"},"FiledsMapItemId0",{"N",6},"FiledsMapItemName0",{"S","regNumber"},"FieldsMapItemId1",{"N",8},"FieldsMapItemName1",{"S","regDate"},"FiledsMapItemId1",{"N",8},"FiledsMapItemName1",{"S","regDate"},"FieldsMapItemId2",{"N",17},"FieldsMapItemName2",{"S","organization"},"FiledsMapItemId2",{"N",17},"FiledsMapItemName2",{"S","organization"},"ReqMapFieldId0",{"N",6},"ReqMapFieldId1",{"N",8},"ReqMapFieldId2",{"N",17}},{0,0}}"##,

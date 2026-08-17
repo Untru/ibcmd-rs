@@ -744,6 +744,9 @@ pub(super) struct FormAttributeSaveFieldBinding {
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum FormAttributeSaveEntry {
     SelfValue,
+    /// `{1,{<index>}}`: the saved field is the `index`-th property of the
+    /// attribute's own value type, not a binding into the form item tree.
+    ValueTypeProperty(usize),
     Binding(FormAttributeSaveFieldBinding),
 }
 
@@ -3107,7 +3110,11 @@ fn parse_form_attribute_with_dcs_type_index(
     let saved_data = fields.get(11).map(|value| value.trim()) == Some("1");
     let fill_check =
         matches!(fields.get(12).map(|value| value.trim()), Some("1")).then_some("ShowError");
-    let save_fields = parse_form_attribute_save_fields(fields.get(9).copied(), &name);
+    let save_fields = parse_form_attribute_save_fields(
+        fields.get(9).copied(),
+        &name,
+        exact_single_type_uuid.as_deref(),
+    );
     let functional_options = fields
         .get(15)
         .map(|field| parse_form_reference_list(field, object_refs))
@@ -3270,15 +3277,46 @@ fn default_form_list_settings_filter() -> DcsFilter {
 pub(super) fn parse_form_attribute_save_fields(
     field: Option<&str>,
     attribute_name: &str,
+    value_type_uuid: Option<&str>,
 ) -> Vec<String> {
     let Some(entries) = field.and_then(parse_form_attribute_save_entries) else {
         return Vec::new();
     };
-    entries
-        .iter()
-        .any(|entry| matches!(entry, FormAttributeSaveEntry::SelfValue))
-        .then(|| vec![attribute_name.to_string()])
-        .unwrap_or_default()
+    let mut parsed = Vec::new();
+    for entry in &entries {
+        match entry {
+            FormAttributeSaveEntry::SelfValue => parsed.push(attribute_name.to_string()),
+            FormAttributeSaveEntry::ValueTypeProperty(index) => {
+                if let Some(property) =
+                    value_type_uuid.and_then(|uuid| form_value_type_property_name(uuid, *index))
+                {
+                    parsed.push(format!("{attribute_name}.{property}"));
+                }
+            }
+            FormAttributeSaveEntry::Binding(_) => {}
+        }
+    }
+    parsed
+}
+
+/// Properties of the platform value types that a saved-field entry addresses by
+/// index. Every pair below is read off platform output: `v8:StandardPeriod`
+/// index 0 alone yields `Variant`, and indexes 0/1/2 together yield
+/// `EndDate`/`StartDate`/`Variant`; `v8:StandardBeginningDate` index 0 yields
+/// `Variant`; `dcsset:SettingsComposer` index 0 yields `Settings`. Indexes with
+/// no observation stay unresolved rather than being guessed.
+pub(super) fn form_value_type_property_name(uuid: &str, index: usize) -> Option<&'static str> {
+    match (uuid, index) {
+        // v8:StandardPeriod
+        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", 0) => Some("Variant"),
+        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", 1) => Some("StartDate"),
+        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", 2) => Some("EndDate"),
+        // v8:StandardBeginningDate
+        ("0387f3a2-7df5-4804-948b-4580a51e4a15", 0) => Some("Variant"),
+        // dcsset:SettingsComposer
+        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", 0) => Some("Settings"),
+        _ => None,
+    }
 }
 
 fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSaveEntry>> {
@@ -3298,8 +3336,18 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
             match entry.as_slice() {
                 [kind] if kind.trim() == "0" => Some(FormAttributeSaveEntry::SelfValue),
                 [kind, payload] if kind.trim() == "1" => {
-                    let key = parse_form_binding_key(payload.trim())?;
                     let payload_fields = split_1c_braced_fields(payload.trim(), 0)?;
+                    // A single bare index is a property of the attribute's own value
+                    // type; a `{0,<uuid>}` pair is a binding into the form item tree.
+                    // Both used to collapse into the same string binding key, which is
+                    // why value-type properties were resolved against unrelated form
+                    // items.
+                    if let [index] = payload_fields.as_slice()
+                        && let Ok(index) = index.trim().parse::<usize>()
+                    {
+                        return Some(FormAttributeSaveEntry::ValueTypeProperty(index));
+                    }
+                    let key = parse_form_binding_key(payload.trim())?;
                     let metadata_uuid = match payload_fields.as_slice() {
                         [kind, uuid] if kind.trim() == "0" => parse_non_zero_uuid(uuid.trim()),
                         _ => None,
@@ -3329,7 +3377,9 @@ pub(super) fn parse_form_attribute_save_field_bindings(
     entries
         .into_iter()
         .filter_map(|entry| match entry {
-            FormAttributeSaveEntry::SelfValue => None,
+            FormAttributeSaveEntry::SelfValue | FormAttributeSaveEntry::ValueTypeProperty(_) => {
+                None
+            }
             FormAttributeSaveEntry::Binding(binding) => Some(binding),
         })
         .collect()
@@ -3906,6 +3956,7 @@ pub(super) fn parse_form_attribute_use_always(
             }
         }
     }
+    let has_main_table = settings.is_some_and(|settings| settings.main_table.is_some());
     let mut parsed = Vec::new();
     let mut seen = BTreeSet::<String>::new();
     for item_id in required_item_ids {
@@ -3913,6 +3964,7 @@ pub(super) fn parse_form_attribute_use_always(
             attribute_name,
             &item_id,
             &field_name_by_item_id,
+            has_main_table,
         ) else {
             continue;
         };
@@ -3997,6 +4049,7 @@ pub(super) fn form_attribute_direct_use_always_field_name(
         return Some(format!("{attribute_name}.{}", column.name));
     }
     match code {
+        "-10" => Some(format!("{attribute_name}.Predefined")),
         "-8" => Some(format!("{attribute_name}.RegisterRecords")),
         "-1" => Some(format!("{attribute_name}.Picture")),
         "1" => Some(format!("{attribute_name}.Presentation")),
@@ -4020,12 +4073,19 @@ pub(super) fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]
     parsed
 }
 
+/// Item id `10000000` is the list's default-picture pseudo field. It carries the
+/// `~` marker exactly when the list has no main table to resolve it against:
+/// across the 22 platform observations, all five lists with a nil `MainTable`
+/// wrote `~<attr>.DefaultPicture` and all seventeen with a real main table wrote
+/// `<attr>.DefaultPicture`.
 pub(super) fn form_dynamic_list_use_always_field_name(
     attribute_name: &str,
     item_id: &str,
     field_name_by_item_id: &BTreeMap<String, String>,
+    has_main_table: bool,
 ) -> Option<String> {
     match item_id {
+        "10000000" if has_main_table => Some(format!("{}.DefaultPicture", attribute_name)),
         "10000000" => Some(format!("~{}.DefaultPicture", attribute_name)),
         _ => field_name_by_item_id
             .get(item_id)
