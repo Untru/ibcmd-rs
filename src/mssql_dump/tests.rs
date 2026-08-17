@@ -5026,10 +5026,34 @@ fn writes_document_additional_indexes_to_source_layout() {
     let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let document_metadata =
         deflate_for_test(document_metadata_text_for_test(uuid, "Order").as_bytes());
-    let additional_indexes =
-        b"\xef\xbb\xbf<AdditionalIndexes><AdditionalIndex id=\"idx\"/></AdditionalIndexes>"
-            .to_vec();
-    let additional_indexes_blob = deflate_for_test(&additional_indexes);
+    // The stored body is a serialized 1C value, not the XML: every
+    // `AdditionalIndexes` row in UT 11.5.27.75 spells out
+    // `{1,{<count>,{"#",<index type>,{1,<id>,<fields>,<fields>,"<name>",
+    // {0,<table>},1,<uuid>}}}}`. This fixture is that grammar with both field
+    // lists empty and the table pointing at the owner document itself.
+    let index_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let additional_indexes_body = format!(
+        "\u{feff}{{1,{{1,{{\"#\",4b3b32e1-14f6-4ce8-b4c4-1bc85a74237e,\
+{{1,{index_uuid},{{0}},{{0}},\"ByDate\",{{0,{uuid}}},1,\
+00000000-0000-0000-0000-000000000000}}}}}}}}"
+    );
+    let additional_indexes = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<AdditionalIndexes xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" \
+xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" \
+xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" \
+xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" \
+xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<AdditionalIndex id=\"{index_uuid}\">\r\n\
+\t\t<Name>ByDate</Name>\r\n\
+\t\t<Table>Document.Order</Table>\r\n\
+\t\t<IndexedFields/>\r\n\
+\t\t<AdditionalFields/>\r\n\
+\t</AdditionalIndex>\r\n\
+</AdditionalIndexes>"
+    )
+    .into_bytes();
+    let additional_indexes_blob = deflate_for_test(additional_indexes_body.as_bytes());
     let rows = vec![
         ConfigRow {
             file_name: uuid.to_string(),

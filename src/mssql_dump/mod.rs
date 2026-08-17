@@ -902,6 +902,7 @@ mod characteristics {
         )
     }
 }
+mod additional_indexes;
 mod command_interface;
 mod config_dump_info;
 mod config_rows;

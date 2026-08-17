@@ -518,9 +518,22 @@ pub(crate) struct PredefinedDataSourceModel {
     item_layout: PredefinedItemLayout,
 }
 
+/// Owner identity an `Ext/AdditionalIndexes.xml` body needs to be readable.
+///
+/// The stored body is a serialized 1C value whose records name their table by
+/// uuid, so the owner has to travel with the asset: only it turns that uuid into
+/// a source table name.
+#[derive(Clone)]
+pub(crate) struct AdditionalIndexesOwner {
+    pub(crate) kind: String,
+    pub(crate) name: String,
+    pub(crate) uuid: String,
+}
+
 #[derive(Clone)]
 pub(crate) enum SourceAssetKind {
     AccumulationRegisterAggregates { register_name: String },
+    AdditionalIndexes { owner: AdditionalIndexesOwner },
     CommandInterface,
     ClientApplicationInterface,
     ExchangePlanContent,
@@ -1016,7 +1029,13 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 additional_indexes_id,
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("AdditionalIndexes.xml"),
-                    kind: SourceAssetKind::InflatedBinary,
+                    kind: SourceAssetKind::AdditionalIndexes {
+                        owner: AdditionalIndexesOwner {
+                            kind: kind.to_string(),
+                            name: header.name.clone(),
+                            uuid: uuid.to_string(),
+                        },
+                    },
                 },
             ));
         }
@@ -1739,6 +1758,35 @@ pub(super) fn write_source_asset(
             write_source_xml_file(
                 &path,
                 format_exchange_plan_content_xml(&items),
+                context.source_version,
+            )?;
+        }
+        SourceAssetKind::AdditionalIndexes { owner } => {
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let indexes = super::additional_indexes::parse_additional_indexes(
+                &inflated,
+                owner,
+                context.object_refs,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract additional indexes from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            write_source_xml_file(
+                &path,
+                super::additional_indexes::format_additional_indexes_xml(&indexes),
                 context.source_version,
             )?;
         }
