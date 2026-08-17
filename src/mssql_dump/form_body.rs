@@ -1238,6 +1238,7 @@ pub(super) struct FormChildItem {
     pub(super) choice_button_picture_load_transparent: bool,
     pub(super) drop_list_width: Option<String>,
     pub(super) choice_history_on_input: Option<&'static str>,
+    pub(super) auto_show_open_button_mode: Option<&'static str>,
     pub(super) item_type: Option<&'static str>,
     pub(super) addition_source_item: Option<String>,
     pub(super) picture_ref: Option<String>,
@@ -8707,6 +8708,9 @@ fn parse_form_child_item_with_metadata_owners(
             .and_then(|(schema, options)| {
                 parse_form_input_field_choice_history_on_input(*schema, options)
             }),
+        auto_show_open_button_mode: field_schema_and_options.as_ref().and_then(
+            |(schema, options)| parse_form_input_field_auto_show_open_button_mode(*schema, options),
+        ),
         item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(form_extended_button_type_slot(
@@ -10272,6 +10276,60 @@ pub(super) fn parse_form_input_field_choice_parameter_links(
     })
 }
 
+/// The physical marker a mode-2 standard choice-parameter-link terminal spells.
+///
+/// The three variants the raw grammar admits are the three markers the platform
+/// writes into this slot; the marker, not the variant name, is what the
+/// standard-attribute tables are keyed by.
+const fn form_choice_parameter_link_standard_terminal_marker(
+    standard: FormChoiceParameterLinkStandardTerminal,
+) -> &'static str {
+    match standard {
+        FormChoiceParameterLinkStandardTerminal::Date => "-3",
+        FormChoiceParameterLinkStandardTerminal::Owner => "-5",
+        FormChoiceParameterLinkStandardTerminal::Ref => "-8",
+    }
+}
+
+/// The member name a standard choice-parameter-link terminal reaches.
+///
+/// A marker names a *position* in the standard-attribute list of the type the
+/// attribute is declared as, not a fixed member: `-5` is `Owner` on a catalog
+/// object and `Ref` on a document object. The bound-field chain walk already
+/// reads it that way against one family-scoped table per generated owner type,
+/// and this is the same physical marker in the same role, so it is read against
+/// the same table here instead of a second, family-blind one.
+///
+/// Evidence: UT 11.5.27.75. The configuration spells out 84 such terminals.
+/// Where the attribute declares exactly one type and that type's table names
+/// the marker, the table's name is the one the platform writes -- the six
+/// `cfg:DocumentObject`/`-5` links of `Documents/План*` all write
+/// `Объект.Ref`, which the family-blind reading spelled `Объект.Owner`, and the
+/// six `cfg:CatalogObject`/`-5` links of `Catalogs/*` all write `Объект.Owner`,
+/// as do the `cfg:DocumentObject`/`-3` links with `Объект.Date`. The two
+/// remaining terminals name a marker their own table does not list
+/// (`cfg:CatalogRef.ДоговорыЭквайринга`/`-8`) or sit on an attribute with no
+/// single declared type (`DataProcessor.НастройкиВнутреннегоЭДО`, `-8`); both
+/// write `Ref`, which is what the marker's own variant already spelled, so that
+/// spelling is kept as the reading of last resort rather than turned into a
+/// rejection of two files the export already writes correctly.
+fn form_choice_parameter_link_standard_terminal_member(
+    attribute_id: &str,
+    standard: FormChoiceParameterLinkStandardTerminal,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+) -> &'static str {
+    let marker = form_choice_parameter_link_standard_terminal_marker(standard);
+    attribute_metadata_owners_by_id
+        .get(attribute_id)
+        .and_then(|owner| owner.exact_single_type_reference.as_deref())
+        .and_then(|reference| form_standard_attribute_name_for_type_reference(reference, marker))
+        .unwrap_or(match standard {
+            FormChoiceParameterLinkStandardTerminal::Date => "Date",
+            FormChoiceParameterLinkStandardTerminal::Owner => "Owner",
+            FormChoiceParameterLinkStandardTerminal::Ref => "Ref",
+        })
+}
+
 pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     primary: &str,
     duplicate: &str,
@@ -10294,21 +10352,16 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                 FormChoiceParameterLinkTerminal::Absent => {
                     attribute_names_by_id.get(attribute_id).cloned()
                 }
-                FormChoiceParameterLinkTerminal::Standard(
-                    FormChoiceParameterLinkStandardTerminal::Date,
-                ) => attribute_names_by_id
-                    .get(attribute_id)
-                    .map(|attribute| format!("{attribute}.Date")),
-                FormChoiceParameterLinkTerminal::Standard(
-                    FormChoiceParameterLinkStandardTerminal::Owner,
-                ) => attribute_names_by_id
-                    .get(attribute_id)
-                    .map(|attribute| format!("{attribute}.Owner")),
-                FormChoiceParameterLinkTerminal::Standard(
-                    FormChoiceParameterLinkStandardTerminal::Ref,
-                ) => attribute_names_by_id
-                    .get(attribute_id)
-                    .map(|attribute| format!("{attribute}.Ref")),
+                FormChoiceParameterLinkTerminal::Standard(standard) => {
+                    let member = form_choice_parameter_link_standard_terminal_member(
+                        attribute_id,
+                        *standard,
+                        attribute_metadata_owners_by_id,
+                    );
+                    attribute_names_by_id
+                        .get(attribute_id)
+                        .map(|attribute| format!("{attribute}.{member}"))
+                }
                 FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
                     match resolve_form_owner_scoped_metadata_uuid_data_path_status(
                         attribute_id,
@@ -10376,15 +10429,21 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                                     data_path_by_binding_key,
                                 )
                             });
-                        match (uuid_route, numeric_route) {
-                            (Some(uuid_route), Some(numeric_route))
-                                if uuid_route != numeric_route =>
-                            {
-                                None
-                            }
-                            (Some(uuid_route), _) => Some(uuid_route),
-                            (None, _) => None,
-                        }
+                        // The UUID here is the fixed value-table-column binding
+                        // marker, so `{column_id, marker}` addresses the very
+                        // column `{column_id}` alone addresses: the two keys are
+                        // one reference written two ways, not two references.
+                        // The route table is keyed by both spellings, but only
+                        // the bare numeric key carries the route the layout
+                        // states outright; the `id|uuid` key is filled in by the
+                        // supplemental `AdditionalColumns` representation, whose
+                        // documented precedence is *below* the layout route.
+                        // Requiring the supplemental key and condemning a
+                        // disagreement inverted that precedence, so 17 links
+                        // whose layout route the platform writes were rejected
+                        // in favour of an `AdditionalColumns` name the platform
+                        // never writes there.
+                        numeric_route.or(uuid_route)
                     }
                 }
             }
@@ -11103,6 +11162,29 @@ fn parse_form_input_field_choice_history_on_input(
     {
         "0" => None,
         "1" => Some("DontUse"),
+        _ => None,
+    }
+}
+
+/// Reads the open-button auto-show mode out of the `InputField` option tuple.
+///
+/// Evidence: UT 11.5.27.75, all 49 951 `InputField` option tuples. `0` on
+/// 49 936 of them and no `<AutoShowOpenButtonMode>` on any of those items; `1`
+/// on exactly the two items the platform writes `Always` on
+/// (`DataProcessors/РасширенныйВводКонтактнойИнформации/Forms/ВводАдреса`,
+/// items `АдресНаДату` and `Строение`) and `2` on exactly the eight it writes
+/// `FilledOnly` on. No third code occurs, so an unrecognised code stays unread
+/// rather than being spelled as one of the two observed names.
+pub(super) fn parse_form_input_field_auto_show_open_button_mode(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<&'static str> {
+    match schema
+        .input_field_option(options, InputFieldSlot::AutoShowOpenButtonMode)?
+        .trim()
+    {
+        "1" => Some("Always"),
+        "2" => Some("FilledOnly"),
         _ => None,
     }
 }
@@ -18908,6 +18990,20 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(border_color)
             ));
         }
+    }
+    // `AutoShowOpenButtonMode` stands immediately ahead of
+    // `ChoiceHistoryOnInput`: on the ten items UT 11.5.27.75 writes it, the five
+    // that also carry a `ChoiceHistoryOnInput` put it directly after, and the
+    // other five are followed only by `SpellCheckingOnTextInput`, `ContextMenu`
+    // and `ExtendedTooltip`, which all trail that slot too. Its own
+    // predecessors there -- `AutoMarkIncomplete`, `TextEdit`, `QuickChoice`,
+    // `ChoiceButton`, `ChooseType`, `ChoiceParameters`, `CreateButton` -- are
+    // all written ahead of this point already.
+    if let Some(auto_show_open_button_mode) = item.auto_show_open_button_mode {
+        xml.push_str(&format!(
+            "{tab}\t<AutoShowOpenButtonMode>{}</AutoShowOpenButtonMode>\r\n",
+            escape_xml_text(auto_show_open_button_mode)
+        ));
     }
     if let Some(choice_history_on_input) = item.choice_history_on_input {
         xml.push_str(&format!(

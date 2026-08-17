@@ -19414,6 +19414,7 @@ fn formats_table_search_additions_as_direct_sections() {
         choice_button_picture_load_transparent: false,
         drop_list_width: None,
         choice_history_on_input: None,
+        auto_show_open_button_mode: None,
         item_type: None,
         addition_source_item: None,
         picture_ref: None,
@@ -19615,6 +19616,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choice_button_picture_load_transparent: false,
                 drop_list_width: None,
                 choice_history_on_input: None,
+                auto_show_open_button_mode: None,
                 item_type: Some("SearchStringRepresentation"),
                 addition_source_item: Some("Rows".to_string()),
                 picture_ref: None,
@@ -19817,6 +19819,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choice_button_picture_load_transparent: false,
                 drop_list_width: None,
                 choice_history_on_input: None,
+                auto_show_open_button_mode: None,
                 item_type: None,
                 addition_source_item: None,
                 picture_ref: None,
@@ -22387,8 +22390,93 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
     ));
 }
 
+/// A `{column_id, value-table-column-marker}` terminal is the very column
+/// `{column_id}` alone names, so the layout route decides and the supplemental
+/// `AdditionalColumns` route only fills a gap the layout leaves.
+///
+/// Evidence: UT 11.5.27.75 spells out 72 such terminals. On 38 the two keys
+/// carry the same path; on the other 34 they disagree, and on every one of those
+/// the platform writes the layout route. `Documents/ПриобретениеТоваровУслуг/
+/// Forms/ФормаДокумента` addresses `{35,02023637-…}` / `{18,5bdad865-…}` under
+/// the name `Отбор.СтранаПроисхождения`, where the layout states
+/// `Items.Товары.CurrentData.СтранаПроисхождения` and the additional-columns
+/// representation offers `…НомерГТДСтранаПроисхождения`; the platform writes the
+/// former. Requiring the two to agree rejected all 34 and, with them, 16 whole
+/// form files.
 #[test]
-fn input_field_choice_parameter_links_require_authoritative_binding_uuid_route_agreement() {
+fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
+    let binding_uuid = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let primary = format!(
+        r#"{{5006,1,"Отбор.СтранаПроисхождения",2,{{35,02023637-7868-4a5f-8576-835a76e0c9ba}},{{18,{binding_uuid}}},0}}"#
+    );
+    let duplicate = format!(
+        r#"{{5007,1,"Отбор.СтранаПроисхождения",2,{{35,02023637-7868-4a5f-8576-835a76e0c9ba}},{{18,{binding_uuid}}},0,"",""}}"#
+    );
+    let layout = "Items.Товары.CurrentData.СтранаПроисхождения";
+    let disagreeing_routes = BTreeMap::from([
+        (
+            ("35".to_string(), format!("18|{binding_uuid}")),
+            "Items.Товары.CurrentData.НомерГТДСтранаПроисхождения".to_string(),
+        ),
+        (("35".to_string(), "18".to_string()), layout.to_string()),
+    ]);
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &disagreeing_routes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].name(), "Отбор.СтранаПроисхождения");
+    assert_eq!(links[0].data_path(), layout);
+
+    // With no layout route the supplemental one is all the bytes offer, and it
+    // is read rather than condemned.
+    let supplemental_only = BTreeMap::from([(
+        ("35".to_string(), format!("18|{binding_uuid}")),
+        layout.to_string(),
+    )]);
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &supplemental_only,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links[0].data_path(), layout);
+
+    // Neither key stated: still a typed refusal, never a guessed path.
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(
+            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("35".to_string())
+        )
+    );
+}
+
+#[test]
+fn input_field_choice_parameter_links_read_agreeing_binding_uuid_routes() {
     let binding_uuid = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
     let primary = format!(
         r#"{{5006,1,"Отбор.Организация",2,{{94,02023637-7868-4a5f-8576-835a76e0c9ba}},{{18,{binding_uuid}}},0}}"#
@@ -22421,33 +22509,6 @@ fn input_field_choice_parameter_links_require_authoritative_binding_uuid_route_a
     assert_eq!(
         links[0].value_change(),
         ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
-    );
-
-    let disagreeing_routes = BTreeMap::from([
-        (
-            ("94".to_string(), format!("18|{binding_uuid}")),
-            expected.to_string(),
-        ),
-        (
-            ("94".to_string(), "18".to_string()),
-            "Items.КассыККМ.CurrentData.ДругаяОрганизация".to_string(),
-        ),
-    ]);
-    assert_eq!(
-        parse_form_input_field_choice_parameter_links_with_metadata(
-            &primary,
-            &duplicate,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &disagreeing_routes,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        ),
-        Err(
-            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("94".to_string())
-        )
     );
 }
 
@@ -63559,4 +63620,154 @@ fn reads_table_footer_from_the_slot_past_the_header() {
     );
     assert!(footer_at < xml.find("<FileDragMode>").unwrap(), "{xml}");
     assert!(footer_at < xml.find("<DataPath>").unwrap(), "{xml}");
+}
+
+/// A standard choice-parameter-link terminal is a *position* in the standard
+/// attributes of the type the attribute is declared as, not a fixed member.
+///
+/// Evidence: UT 11.5.27.75 spells out 84 such terminals. `-5` is `Ref` on the
+/// six `cfg:DocumentObject` links of `Documents/План*` (`Источник` ->
+/// `Объект.Ref`) and `Owner` on the six `cfg:CatalogObject` links of
+/// `Catalogs/*` (`Отбор.Владелец` -> `Объект.Owner`); reading it as a fixed
+/// `Owner` spelled the first six wrong. `-3` is `Date` under
+/// `cfg:DocumentObject`. The two terminals whose own family table does not list
+/// the marker -- `cfg:CatalogRef.ДоговорыЭквайринга`/`-8` in
+/// `Documents/ОперацияПоПлатежнойКарте` and the multi-typed `Организация` of
+/// `DataProcessors/НастройкиВнутреннегоЭДО`/`-8` -- both write `Ref`.
+#[test]
+fn choice_parameter_link_standard_terminals_follow_the_attribute_family() {
+    let link = |reference: Option<&str>, marker: &str| {
+        let primary = format!(r#"{{5006,1,"П",2,{{1}},{{{marker}}},0}}"#);
+        let duplicate = format!(r#"{{5007,1,"П",2,{{1}},{{{marker}}},0,"",""}}"#);
+        let attributes = match reference {
+            Some(reference) => vec![data_path_typed_form_attribute("1", "Объект", reference)],
+            None => {
+                let mut attribute = data_path_form_attribute("1", "Объект", None);
+                attribute.value_types = vec![
+                    ConstantValueType::Reference {
+                        reference: "cfg:CatalogRef.Организации".to_string(),
+                    },
+                    ConstantValueType::Reference {
+                        reference: "cfg:CatalogRef.Партнеры".to_string(),
+                    },
+                ];
+                vec![attribute]
+            }
+        };
+        let links = parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+            &form_attribute_metadata_owners_by_id(&attributes),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(links.len(), 1);
+        links[0].data_path().to_owned()
+    };
+
+    for (reference, marker, expected) in [
+        (Some("cfg:DocumentObject.ПланПродаж"), "-5", "Объект.Ref"),
+        (Some("cfg:DocumentObject.ПланЗакупок"), "-5", "Объект.Ref"),
+        (
+            Some("cfg:CatalogObject.ЗначенияСвойствОбъектов"),
+            "-5",
+            "Объект.Owner",
+        ),
+        (Some("cfg:CatalogObject.Кассы"), "-5", "Объект.Owner"),
+        (
+            Some("cfg:DocumentObject.ОтчетКомиссионера"),
+            "-3",
+            "Объект.Date",
+        ),
+        (
+            Some("cfg:CatalogRef.ДоговорыЭквайринга"),
+            "-8",
+            "Объект.Ref",
+        ),
+        (None, "-8", "Объект.Ref"),
+    ] {
+        assert_eq!(link(reference, marker), expected, "{reference:?} {marker}");
+    }
+}
+
+/// Slot 30 of the `SpreadSheetDocumentField` option tuple is one selection-show
+/// code, and `2` is the `DontShow` the reading previously left as a hole.
+///
+/// Evidence: UT 11.5.27.75 spells out 222 such tuples -- 190 hold `1` and write
+/// nothing, 15 hold `0` and write `WhenActive`, 1 holds `3` and writes
+/// `WhenMultipleCellsSelected`, and the 16 that hold `2` are exactly the 16
+/// items the platform writes `DontShow` on, among them `КарточкаКатегории` of
+/// `DataProcessors/РаботаСНоменклатурой/Forms/КарточкаКатегории`.
+#[test]
+fn spreadsheet_document_field_selection_show_mode_reads_every_observed_code() {
+    for (code, expected) in [
+        ("0", Some("WhenActive")),
+        ("1", None),
+        ("2", Some("DontShow")),
+        ("3", Some("WhenMultipleCellsSelected")),
+        ("4", None),
+    ] {
+        let mut fields = vec!["0"; 59];
+        fields[5] = "6";
+        let mut options = vec!["0"; 32];
+        options[0] = "13";
+        options[30] = code;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "SpreadSheetDocumentField",
+            0,
+            Some("6"),
+            &options,
+        )
+        .expect("spreadsheet field schema");
+        let properties = schema
+            .spreadsheet_document_properties(&fields, &options)
+            .expect("spreadsheet properties");
+        assert_eq!(properties.selection_show_mode, expected, "code {code}");
+    }
+}
+
+/// Slot 56 of the `InputField` option tuple is the open-button auto-show mode.
+///
+/// Evidence: UT 11.5.27.75, all 49 951 `InputField` option tuples. 49 936 hold
+/// `0` and carry no `<AutoShowOpenButtonMode>`; the two that hold `1` are
+/// exactly the two items written `Always`
+/// (`DataProcessors/РасширенныйВводКонтактнойИнформации/Forms/ВводАдреса`,
+/// `АдресНаДату` and `Строение`) and the 13 that hold `2` are exactly the items
+/// written `FilledOnly`, among them `ХранимыеДанныеГруз` of
+/// `Documents/ЭлектроннаяТранспортнаяНакладная/Forms/ТитулГрузоотправителяГрузы`.
+#[test]
+fn input_field_auto_show_open_button_mode_reads_slot_fifty_six() {
+    let slot = crate::form_schema::FormInputFieldExtendedOptionSlot::AutoShowOpenButtonMode.index();
+    assert_eq!(slot, 56);
+    for (code, expected) in [
+        ("0", None),
+        ("1", Some("Always")),
+        ("2", Some("FilledOnly")),
+        ("3", None),
+    ] {
+        let mut options = vec!["0"; 66];
+        options[0] = "36";
+        options[slot] = code;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            parse_form_input_field_auto_show_open_button_mode(schema, &options),
+            expected,
+            "code {code}"
+        );
+    }
 }

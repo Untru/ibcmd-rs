@@ -5457,8 +5457,17 @@ impl FormSpreadsheetDocumentFieldProperties {
             vertical_scroll_bar: scroll_bar(28),
             horizontal_scroll_bar: scroll_bar(29),
             edit: explicit_true(13),
+            // Slot 30 is one code, not a two-value flag with a hole in it: of
+            // the 222 `SpreadSheetDocumentField` option tuples UT 11.5.27.75
+            // spells out, 190 hold `1` and write nothing, 15 hold `0` and write
+            // `WhenActive`, 1 holds `3` and writes
+            // `WhenMultipleCellsSelected`, and the remaining 16 hold `2` --
+            // which are, item for item, exactly the 16 items the platform
+            // writes `<SelectionShowMode>DontShow</SelectionShowMode>` on, with
+            // no miss and no item written where the platform writes none.
             selection_show_mode: match option(30) {
                 Some("0") => Some("WhenActive"),
+                Some("2") => Some("DontShow"),
                 Some("3") => Some("WhenMultipleCellsSelected"),
                 _ => None,
             },
@@ -5590,6 +5599,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     HeightControlVariant,
     ChoiceParameterLinksDuplicate,
     ExtendedEditMultipleValues,
+    AutoShowOpenButtonMode,
 }
 
 impl FormInputFieldExtendedOptionSlot {
@@ -5652,6 +5662,14 @@ impl FormInputFieldExtendedOptionSlot {
             Self::HeightControlVariant => 54,
             Self::ChoiceParameterLinksDuplicate => 64,
             Self::ExtendedEditMultipleValues => 65,
+            // `1 -> Always`, `2 -> FilledOnly`, `0` writes nothing. Of the
+            // 49 951 `InputField` option tuples the UT 11.5.27.75 form bodies
+            // spell out, 49 936 hold `0` here and none of their items carries
+            // an `<AutoShowOpenButtonMode>`; the 13 that hold `2` and the 2
+            // that hold `1` are, item for item, exactly the eight items the
+            // platform writes `FilledOnly` on and the two it writes `Always`
+            // on -- no other code occurs and there is no miss on either side.
+            Self::AutoShowOpenButtonMode => 56,
         }
     }
 }
