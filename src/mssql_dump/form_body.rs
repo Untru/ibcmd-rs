@@ -30,9 +30,10 @@ use crate::form_schema::{
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
     FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
     FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
-    FormRootCustomizableSchema, FormRootGroupSchema, FormRootMobileDeviceCommandBarContentSchema,
-    FormRootPropertyBagSchema, FormRootVerticalAlign, FormRootVerticalAlignSchema,
-    FormRootVerticalScrollSchema, FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
+    FormRootCustomizableSchema, FormRootGroupSchema, FormRootGroupingSchema,
+    FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema, FormRootVerticalAlign,
+    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
+    FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRootPropertyBagKey as TableRootBagKey,
@@ -684,6 +685,10 @@ pub(super) struct FormBodyProperties {
     pub(super) use_posting_mode: Option<&'static str>,
     pub(super) repost_on_write: Option<bool>,
     pub(super) auto_fill_check: Option<bool>,
+    pub(super) horizontal_spacing: Option<&'static str>,
+    pub(super) vertical_spacing: Option<&'static str>,
+    pub(super) child_items_width: Option<&'static str>,
+    pub(super) collapse_items_by_importance_variant: Option<&'static str>,
     pub(super) command_set_excluded_commands: Vec<&'static str>,
     pub(super) use_for_folders_and_items: Option<&'static str>,
     pub(super) customizable: Option<bool>,
@@ -1109,6 +1114,7 @@ pub(super) struct FormChildItem {
     pub(super) enable_start_drag: Option<bool>,
     pub(super) enable_drag: Option<bool>,
     pub(super) file_drag_mode: Option<&'static str>,
+    pub(super) table_refresh_request: Option<&'static str>,
     pub(super) auto_refresh: Option<bool>,
     pub(super) auto_refresh_period: Option<String>,
     pub(super) period: Option<FormTablePeriod>,
@@ -1791,6 +1797,12 @@ pub(super) fn extract_form_body_properties(
         use_posting_mode: extract_form_use_posting_mode(fields),
         repost_on_write: extract_form_repost_on_write(fields),
         auto_fill_check: extract_form_auto_fill_check(fields),
+        horizontal_spacing: extract_form_horizontal_spacing(fields),
+        vertical_spacing: extract_form_vertical_spacing(fields),
+        child_items_width: extract_form_child_items_width(fields),
+        collapse_items_by_importance_variant: extract_form_collapse_items_by_importance_variant(
+            fields,
+        ),
         command_set_excluded_commands: extract_form_command_set_excluded_commands(
             fields,
             form_owner_reference,
@@ -2219,6 +2231,39 @@ pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static 
         "2" => Some("Right"),
         _ => None,
     }
+}
+
+pub(super) fn extract_form_horizontal_spacing(fields: &[&str]) -> Option<&'static str> {
+    let trailer = fields.get(form_root_child_items_tail_start(fields)?..)?;
+    FormRootGroupingSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+    )?
+    .horizontal_spacing(trailer)
+}
+
+pub(super) fn extract_form_vertical_spacing(fields: &[&str]) -> Option<&'static str> {
+    let trailer = fields.get(form_root_child_items_tail_start(fields)?..)?;
+    FormRootGroupingSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+    )?
+    .vertical_spacing(trailer)
+}
+
+pub(super) fn extract_form_collapse_items_by_importance_variant(
+    fields: &[&str],
+) -> Option<&'static str> {
+    let trailer = fields.get(form_root_child_items_tail_start(fields)?..)?;
+    FormRootGroupingSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+    )?
+    .collapse_items_by_importance_variant(trailer)
+}
+
+pub(super) fn extract_form_child_items_width(fields: &[&str]) -> Option<&'static str> {
+    FormRootGroupingSchema::child_items_width(fields.first().map(|field| field.trim()), fields)
 }
 
 pub(super) fn extract_form_conversations_representation(fields: &[&str]) -> Option<&'static str> {
@@ -7590,12 +7635,22 @@ fn parse_form_child_item_with_metadata_owners(
         usual_group_children_align: extended_group_options
             .as_ref()
             .and_then(|options| options.children_align),
-        usual_group_horizontal_spacing: extended_group_options
-            .as_ref()
-            .and_then(|options| options.horizontal_spacing),
-        usual_group_vertical_spacing: extended_group_options
-            .as_ref()
-            .and_then(|options| options.vertical_spacing),
+        // A `Page` carries the same spacing pair as a `UsualGroup`, in its own
+        // option slots, so it feeds the same two fields.
+        usual_group_horizontal_spacing: page_properties
+            .and_then(|properties| properties.horizontal_spacing())
+            .or_else(|| {
+                extended_group_options
+                    .as_ref()
+                    .and_then(|options| options.horizontal_spacing)
+            }),
+        usual_group_vertical_spacing: page_properties
+            .and_then(|properties| properties.vertical_spacing())
+            .or_else(|| {
+                extended_group_options
+                    .as_ref()
+                    .and_then(|options| options.vertical_spacing)
+            }),
         usual_group_horizontal_align: page_properties
             .and_then(|properties| properties.horizontal_align())
             .or_else(|| {
@@ -7676,6 +7731,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        table_refresh_request: table_schema.and_then(|schema| schema.refresh_request(fields)),
         auto_refresh: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, TableBagKey::AutoRefresh)
         } else {
@@ -17010,6 +17066,28 @@ fn format_form_body_xml_with_dcs_profiles(
     if properties.auto_fill_check == Some(false) {
         xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
     }
+    // The root's spacing pair sits between `Group` and the `*Align` pair, which
+    // is where both other owners of the property put it. UT 11.5.27.75 native
+    // tree: `HorizontalSpacing` trails `AutoTitle` (23), `Title` (22),
+    // `AutoSaveDataInSettings` (16) and `WindowOpeningMode` (1), and leads
+    // `VerticalSpacing` (24), `CommandBarLocation` (21), `Customizable` (19),
+    // `CollapseItemsByImportanceVariant` (20), `CommandSet` (1) and the document
+    // trio (1 each); `VerticalSpacing` repeats those relations and additionally
+    // leads `ConversationsRepresentation` (2), `VerticalScroll` (1), `ShowTitle`
+    // (1) and `ShowCloseButton` (1) and trails `Width` (3) and
+    // `EnterKeyBehavior` (1). No pair is observed in both directions.
+    if let Some(value) = properties.horizontal_spacing {
+        xml.push_str(&format!(
+            "\t<HorizontalSpacing>{}</HorizontalSpacing>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.vertical_spacing {
+        xml.push_str(&format!(
+            "\t<VerticalSpacing>{}</VerticalSpacing>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     // `HorizontalAlign` precedes `VerticalAlign`, `Customizable`,
     // `CommandBarLocation`, `VerticalScroll`, `ConversationsRepresentation`,
     // `CommandSet` and `UseForFoldersAndItems` in the native tree (2/3/4/2/1/3/2
@@ -17024,6 +17102,19 @@ fn format_form_body_xml_with_dcs_profiles(
         xml.push_str(&format!(
             "\t<VerticalAlign>{}</VerticalAlign>\r\n",
             vertical_align.xml_value()
+        ));
+    }
+    // `ChildItemsWidth` follows the `*Align` pair, as it does on `Page`. UT
+    // 11.5.27.75 native tree, 14 occurrences: it trails `AutoTitle` (9), `Title`
+    // (6), `Width` (5), `Group` (5), `WindowOpeningMode` (4),
+    // `AutoSaveDataInSettings` (1) and `AutoURL` (1), and leads `CommandInterface`
+    // (6), `CommandBarLocation` (6), the document trio (6 each), `VerticalScroll`
+    // (5), `Customizable` (4), `CommandSet` (3), `ScalingMode` (1) and every
+    // collection section. No pair is observed in both directions.
+    if let Some(value) = properties.child_items_width {
+        xml.push_str(&format!(
+            "\t<ChildItemsWidth>{}</ChildItemsWidth>\r\n",
+            escape_xml_text(value)
         ));
     }
     if properties.customizable == Some(false) {
@@ -17055,6 +17146,20 @@ fn format_form_body_xml_with_dcs_profiles(
         xml.push_str(&format!(
             "\t<ConversationsRepresentation>{}</ConversationsRepresentation>\r\n",
             escape_xml_text(conversations_representation)
+        ));
+    }
+    // `CollapseItemsByImportanceVariant` trails everything it is ever seen with
+    // except the collections: `AutoTitle` (26), `CommandBarLocation` (25),
+    // `Title` (23), `Customizable` (21), the spacing pair (20 each),
+    // `AutoSaveDataInSettings` (17), `WindowOpeningMode` (4), `VerticalScroll`
+    // (2), `Width` (2), `AutoURL` (2), `ConversationsRepresentation` (1),
+    // `HorizontalAlign` (1), `AutoFillCheck` (1) and `SaveWindowSettings` (1);
+    // it leads `UseForFoldersAndItems` (1) and every collection section, and no
+    // pair is observed in both directions.
+    if let Some(value) = properties.collapse_items_by_importance_variant {
+        xml.push_str(&format!(
+            "\t<CollapseItemsByImportanceVariant>{}</CollapseItemsByImportanceVariant>\r\n",
+            escape_xml_text(value)
         ));
     }
     xml.push_str(&format_form_mobile_device_command_bar_content_xml(
@@ -17889,6 +17994,15 @@ fn format_form_table_property_xml(
                 format!(
                     "{tab}<SearchControlLocation>{}</SearchControlLocation>\r\n",
                     value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::RefreshRequest => item
+            .table_refresh_request
+            .map(|value| {
+                format!(
+                    "{tab}<RefreshRequest>{}</RefreshRequest>\r\n",
+                    escape_xml_text(value)
                 )
             })
             .unwrap_or_default(),
@@ -19778,6 +19892,22 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
                     xml.push_str(&format!(
                         "{tab}<Group>{}</Group>\r\n",
                         escape_xml_text(group)
+                    ));
+                }
+            }
+            FormPageXmlProperty::HorizontalSpacing => {
+                if let Some(value) = item.usual_group_horizontal_spacing {
+                    xml.push_str(&format!(
+                        "{tab}<HorizontalSpacing>{}</HorizontalSpacing>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormPageXmlProperty::VerticalSpacing => {
+                if let Some(value) = item.usual_group_vertical_spacing {
+                    xml.push_str(&format!(
+                        "{tab}<VerticalSpacing>{}</VerticalSpacing>\r\n",
+                        escape_xml_text(value)
                     ));
                 }
             }

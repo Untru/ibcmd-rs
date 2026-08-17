@@ -19471,6 +19471,7 @@ fn formats_table_search_additions_as_direct_sections() {
         enable_start_drag: None,
         enable_drag: None,
         file_drag_mode: None,
+        table_refresh_request: None,
         auto_refresh: None,
         auto_refresh_period: None,
         period: None,
@@ -19676,6 +19677,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 enable_start_drag: None,
                 enable_drag: None,
                 file_drag_mode: None,
+                table_refresh_request: None,
                 auto_refresh: None,
                 auto_refresh_period: None,
                 period: None,
@@ -19882,6 +19884,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 enable_start_drag: None,
                 enable_drag: None,
                 file_drag_mode: None,
+                table_refresh_request: None,
                 auto_refresh: None,
                 auto_refresh_period: None,
                 period: None,
@@ -64388,4 +64391,206 @@ fn empty_group_items_storage_document_renders_no_grouping_chain() {
         ),
         Some(dcs::FormListSettingsChildTransliteration::Empty)
     );
+}
+
+/// One enumeration table per property, exercised over every ordinal the platform
+/// writes, through the real item parser and the real writer.
+///
+/// The layout is the synthetic `UsualGroup` already used above, whose bytes come
+/// from the native tree; only the two spacing ordinals and the children-width
+/// ordinal move.  Reading these three per owner instead of from one table had
+/// left `HorizontalSpacing` without `OneAndHalf` and `VerticalSpacing` without
+/// `Single` and `Double`, so the loop over every ordinal is the point.
+#[test]
+fn writes_every_usual_group_spacing_and_children_width_ordinal() {
+    const BASE: &str = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#;
+    const OPTIONS_FIELD: usize = 20;
+    const HORIZONTAL_SPACING_OPTION: usize = 15;
+    const VERTICAL_SPACING_OPTION: usize = 16;
+    const CHILD_ITEMS_WIDTH_OPTION: usize = 2;
+
+    fn with_option(raw: &str, option: usize, value: &str) -> String {
+        let mut fields = split_1c_braced_fields(raw, 0)
+            .unwrap()
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        let mut options = split_1c_braced_fields(&fields[OPTIONS_FIELD], 0)
+            .unwrap()
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        options[option] = value.to_string();
+        fields[OPTIONS_FIELD] = format!("{{{}}}", options.join(","));
+        format!("{{{}}}", fields.join(","))
+    }
+
+    fn xml_for(raw: &str) -> String {
+        let item = parse_form_child_item(
+            raw,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .expect("the synthetic usual group parses");
+        format_form_child_items_xml(&[item], 1)
+    }
+
+    for (raw_code, expected) in [
+        ("1", "None"),
+        ("2", "Half"),
+        ("3", "Single"),
+        ("4", "OneAndHalf"),
+        ("5", "Double"),
+    ] {
+        let xml = xml_for(&with_option(BASE, HORIZONTAL_SPACING_OPTION, raw_code));
+        assert!(
+            xml.contains(&format!(
+                "<HorizontalSpacing>{expected}</HorizontalSpacing>"
+            )),
+            "raw {raw_code} should write HorizontalSpacing {expected}, got {xml}"
+        );
+        let xml = xml_for(&with_option(BASE, VERTICAL_SPACING_OPTION, raw_code));
+        assert!(
+            xml.contains(&format!("<VerticalSpacing>{expected}</VerticalSpacing>")),
+            "raw {raw_code} should write VerticalSpacing {expected}, got {xml}"
+        );
+    }
+
+    for (raw_code, expected) in [
+        ("1", "Equal"),
+        ("2", "LeftWide"),
+        ("3", "LeftWidest"),
+        ("4", "LeftNarrow"),
+        ("5", "LeftNarrowest"),
+    ] {
+        let xml = xml_for(&with_option(BASE, CHILD_ITEMS_WIDTH_OPTION, raw_code));
+        assert!(
+            xml.contains(&format!("<ChildItemsWidth>{expected}</ChildItemsWidth>")),
+            "raw {raw_code} should write ChildItemsWidth {expected}, got {xml}"
+        );
+    }
+
+    // `0` is the platform's "unset", not a sixth value of any of the three.
+    let unset = xml_for(BASE);
+    assert!(!unset.contains("<HorizontalSpacing>"));
+    assert!(!unset.contains("<VerticalSpacing>"));
+    assert!(!unset.contains("<ChildItemsWidth>"));
+}
+
+/// The `UsualGroup` layout guard is structural, so the wide layouts the old
+/// field-count whitelist did not happen to list still resolve.
+///
+/// 56, 58 and 88 are three of the thirteen even counts the whitelist omitted
+/// while listing 60; on the native tree the omission discarded the whole property
+/// bag of 48 groups, one of which carries four of these properties at once.  The
+/// padding only appends neutral `0` scalars, keeping the `30 + 2n` shape.
+#[test]
+fn resolves_usual_group_layouts_the_field_count_whitelist_omitted() {
+    const BASE: &str = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#;
+
+    let mut fields = split_1c_braced_fields(BASE, 0)
+        .unwrap()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(fields.len(), 30);
+    let mut options = split_1c_braced_fields(&fields[20], 0)
+        .unwrap()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    options[15] = "3".to_string();
+    options[16] = "5".to_string();
+    fields[20] = format!("{{{}}}", options.join(","));
+
+    for target in [30usize, 56, 58, 60, 88] {
+        let mut padded = fields.clone();
+        while padded.len() < target {
+            padded.push("0".to_string());
+        }
+        // The alignment pair is addressed from the tail, so hold it at the
+        // platform's "unset" ordinal while the tuple grows.
+        let len = padded.len();
+        padded[len - 3] = "3".to_string();
+        padded[len - 2] = "3".to_string();
+        let raw = format!("{{{}}}", padded.join(","));
+        let item = parse_form_child_item(
+            &raw,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap_or_else(|| panic!("a {target}-field usual group must still parse"));
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(
+            xml.contains("<HorizontalSpacing>Single</HorizontalSpacing>")
+                && xml.contains("<VerticalSpacing>Double</VerticalSpacing>"),
+            "a {target}-field usual group lost its spacing pair: {xml}"
+        );
+        assert!(!xml.contains("<GroupHorizontalAlign>"));
+        assert!(!xml.contains("<GroupVerticalAlign>"));
+    }
+}
+
+/// Every ordinal of the shared alignment table, over the two owners whose
+/// transcribed copies were missing an end of it.
+///
+/// `3` is the platform's "unset"; the four ordinals are one table, which is why
+/// both owners are driven from the same loop.
+#[test]
+fn writes_every_group_alignment_ordinal_for_the_tail_addressed_owners() {
+    const BASE: &str = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#;
+
+    let base = split_1c_braced_fields(BASE, 0)
+        .unwrap()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    for (raw_code, horizontal, vertical) in [
+        ("0", Some("Left"), Some("Top")),
+        ("1", Some("Center"), Some("Center")),
+        ("2", Some("Right"), Some("Bottom")),
+        ("3", None, None),
+    ] {
+        let mut fields = base.clone();
+        let len = fields.len();
+        fields[len - 3] = raw_code.to_string();
+        fields[len - 2] = raw_code.to_string();
+        let raw = format!("{{{}}}", fields.join(","));
+        let item = parse_form_child_item(
+            &raw,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .expect("the synthetic usual group parses");
+        let xml = format_form_child_items_xml(&[item], 1);
+        match horizontal {
+            Some(value) => assert!(
+                xml.contains(&format!(
+                    "<GroupHorizontalAlign>{value}</GroupHorizontalAlign>"
+                )),
+                "raw {raw_code} should write GroupHorizontalAlign {value}, got {xml}"
+            ),
+            None => assert!(!xml.contains("<GroupHorizontalAlign>"), "got {xml}"),
+        }
+        match vertical {
+            Some(value) => assert!(
+                xml.contains(&format!("<GroupVerticalAlign>{value}</GroupVerticalAlign>")),
+                "raw {raw_code} should write GroupVerticalAlign {value}, got {xml}"
+            ),
+            None => assert!(!xml.contains("<GroupVerticalAlign>"), "got {xml}"),
+        }
+    }
 }

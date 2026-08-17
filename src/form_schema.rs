@@ -156,6 +156,66 @@ impl FormAttributeColumnSchema {
     }
 }
 
+/// The four enumerations the grouping controls share, as one table each.
+///
+/// `HorizontalSpacing`/`VerticalSpacing`, `ChildItemsWidth` and the two
+/// `Group*Align` properties are plain enumerations: the raw slot holds the
+/// ordinal and `0` (spacing, width) or `3` (alignment) means "the platform omits
+/// the property". Every owner reads the *same* table, so there is one table per
+/// enumeration here instead of a per-owner transcription that drifts.
+///
+/// Measured on the UT 11.5.27.75 native tree, keyed by output path so every one
+/// of the 5 201 native `Form.xml` documents is attributable:
+///
+/// * spacing - 26 258 `UsualGroup`, 6 807 `Page` and 5 184 `Form` observations;
+///   `1->None 2->Half 3->Single 4->OneAndHalf 5->Double`, `0` absent, and the
+///   map is a total function on every owner with no counter-example.  Reading it
+///   per owner had left `UsualGroup` without `Single` and `Double`, `Page`
+///   without every value but two, and `Form` without the property entirely.
+/// * children width - `1->Equal 2->LeftWide 3->LeftWidest 4->LeftNarrow
+///   5->LeftNarrowest`, `0` absent; same three owners, no counter-example.
+/// * alignment - `0->Left/Top 1->Center 2->Right/Bottom`, `3` absent, over all
+///   18 owner tags that carry it (109 262 observations), no counter-example.
+pub(crate) fn form_item_spacing_xml(raw: &str) -> Option<&'static str> {
+    match raw.trim() {
+        "1" => Some("None"),
+        "2" => Some("Half"),
+        "3" => Some("Single"),
+        "4" => Some("OneAndHalf"),
+        "5" => Some("Double"),
+        _ => None,
+    }
+}
+
+pub(crate) fn form_children_width_xml(raw: &str) -> Option<&'static str> {
+    match raw.trim() {
+        "1" => Some("Equal"),
+        "2" => Some("LeftWide"),
+        "3" => Some("LeftWidest"),
+        "4" => Some("LeftNarrow"),
+        "5" => Some("LeftNarrowest"),
+        _ => None,
+    }
+}
+
+pub(crate) fn form_group_horizontal_align_xml(raw: &str) -> Option<&'static str> {
+    match raw.trim() {
+        "0" => Some("Left"),
+        "1" => Some("Center"),
+        "2" => Some("Right"),
+        _ => None,
+    }
+}
+
+pub(crate) fn form_group_vertical_align_xml(raw: &str) -> Option<&'static str> {
+    match raw.trim() {
+        "0" => Some("Top"),
+        "1" => Some("Center"),
+        "2" => Some("Bottom"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormPageXmlProperty {
     EnableContentChange,
@@ -166,6 +226,8 @@ pub(crate) enum FormPageXmlProperty {
     HorizontalStretch,
     VerticalStretch,
     Group,
+    HorizontalSpacing,
+    VerticalSpacing,
     HorizontalAlign,
     VerticalAlign,
     ChildItemsWidth,
@@ -182,6 +244,17 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::HorizontalStretch,
     FormPageXmlProperty::VerticalStretch,
     FormPageXmlProperty::Group,
+    // `HorizontalSpacing` then `VerticalSpacing` sit between `Group` and the
+    // `*Align` pair on `Page`, which is where `UsualGroup` already puts them.
+    // UT 11.5.27.75 native tree, 7 016 `Page` instances: HorizontalSpacing
+    // trails Group (53), VerticalStretch (35), HorizontalStretch (34), Height
+    // (24), EnableContentChange (17) and Title (87), and leads VerticalSpacing
+    // (61), HorizontalAlign (30), VerticalAlign (3), ShowTitle (40), BackColor
+    // (31) and ChildItems (96); VerticalSpacing repeats the same relations
+    // (31/45/44/24/17/94 and 33/5/43/39/110).  No pair is observed in both
+    // directions.
+    FormPageXmlProperty::HorizontalSpacing,
+    FormPageXmlProperty::VerticalSpacing,
     FormPageXmlProperty::HorizontalAlign,
     FormPageXmlProperty::VerticalAlign,
     FormPageXmlProperty::ChildItemsWidth,
@@ -573,10 +646,20 @@ pub(crate) struct FormPageProperties {
     horizontal_align: Option<&'static str>,
     vertical_align: Option<&'static str>,
     child_items_width: Option<&'static str>,
+    horizontal_spacing: Option<&'static str>,
+    vertical_spacing: Option<&'static str>,
 }
 
 impl FormPageSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
+    /// Option slots of the spacing pair and the children width on a `Page`.
+    /// UT 11.5.27.75 native tree, 6 807 traced pages: slot 10 is a total
+    /// function for `HorizontalSpacing` (95 present), slot 11 for
+    /// `VerticalSpacing` (110) and slot 3 for `ChildItemsWidth` (39), all three
+    /// under the shared enumeration tables and with no counter-example.
+    const HORIZONTAL_SPACING_OPTION_SLOT: usize = 10;
+    const VERTICAL_SPACING_OPTION_SLOT: usize = 11;
+    const CHILD_ITEMS_WIDTH_OPTION_SLOT: usize = 3;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -632,11 +715,15 @@ impl FormPageSchema {
                 Some("2") => Some("Bottom"),
                 _ => None,
             },
-            child_items_width: match options.get(3).map(|field| field.trim()) {
-                Some("3") => Some("LeftWidest"),
-                Some("5") => Some("LeftNarrowest"),
-                _ => None,
-            },
+            child_items_width: options
+                .get(Self::CHILD_ITEMS_WIDTH_OPTION_SLOT)
+                .and_then(|field| form_children_width_xml(field)),
+            horizontal_spacing: options
+                .get(Self::HORIZONTAL_SPACING_OPTION_SLOT)
+                .and_then(|field| form_item_spacing_xml(field)),
+            vertical_spacing: options
+                .get(Self::VERTICAL_SPACING_OPTION_SLOT)
+                .and_then(|field| form_item_spacing_xml(field)),
         }
     }
 
@@ -681,6 +768,14 @@ impl FormPageProperties {
 
     pub(crate) const fn child_items_width(self) -> Option<&'static str> {
         self.child_items_width
+    }
+
+    pub(crate) const fn horizontal_spacing(self) -> Option<&'static str> {
+        self.horizontal_spacing
+    }
+
+    pub(crate) const fn vertical_spacing(self) -> Option<&'static str> {
+        self.vertical_spacing
     }
 }
 
@@ -814,6 +909,17 @@ pub(crate) enum FormUsualGroupGroupVerticalAlign {
 }
 
 impl FormUsualGroupGroupVerticalAlign {
+    /// Decoded through the one shared alignment table, so this owner cannot
+    /// drift away from the other seventeen that read the same enumeration.
+    pub(crate) fn from_raw_value(raw: &str) -> Option<Self> {
+        match form_group_vertical_align_xml(raw)? {
+            "Top" => Some(Self::Top),
+            "Center" => Some(Self::Center),
+            "Bottom" => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+
     pub(crate) const fn xml_value(self) -> &'static str {
         match self {
             Self::Top => "Top",
@@ -827,6 +933,13 @@ impl FormUsualGroupSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
     const GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET: usize = 3;
     const GROUP_VERTICAL_ALIGN_REVERSE_OFFSET: usize = 2;
+    /// UT 11.5.27.75 native tree, 26 258 traced groups: option slot 15 is a
+    /// total function for `HorizontalSpacing` (825 present), slot 16 for
+    /// `VerticalSpacing` (732) and slot 2 for `ChildItemsWidth` (472), all under
+    /// the shared enumeration tables and with no counter-example.
+    const HORIZONTAL_SPACING_OPTION_SLOT: usize = 15;
+    const VERTICAL_SPACING_OPTION_SLOT: usize = 16;
+    const CHILD_ITEMS_WIDTH_OPTION_SLOT: usize = 2;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -835,19 +948,27 @@ impl FormUsualGroupSchema {
         direct_discriminator: Option<&str>,
         options: &[&str],
     ) -> Option<Self> {
-        (matches!(
-            field_count,
-            30 | 32 | 34 | 36 | 38 | 40 | 42 | 44 | 46 | 48 | 50 | 52 | 54 | 60
-        ) && matches!(
-            (
-                wrapper,
-                item_tag,
-                direct_discriminator,
-                options.len(),
-                options.first().map(|field| field.trim()),
-            ),
-            ("22", "UsualGroup", Some("5"), 29, Some("29"))
-        ))
+        // A `UsualGroup` is the same `30 + 2n` layout family that `Page` and
+        // `Popup` already state structurally, so it is tested structurally here
+        // too.  The previous guard listed the fourteen even counts that happened
+        // to be in view when it was written and so rejected 48 of the 26 258
+        // native groups outright - every count of 56, 58, 62, 64, 66, 68, 70,
+        // 72, 74, 76, 80, 86 and 88 - while admitting 60.  Rejecting the item
+        // discards the whole property bag, not just one property: one of the 48
+        // carries `GroupVerticalAlign`, `HorizontalSpacing`, `VerticalSpacing`
+        // and `ChildItemsWidth` at once.
+        (field_count >= 30
+            && (field_count - 30).is_multiple_of(2)
+            && matches!(
+                (
+                    wrapper,
+                    item_tag,
+                    direct_discriminator,
+                    options.len(),
+                    options.first().map(|field| field.trim()),
+                ),
+                ("22", "UsualGroup", Some("5"), 29, Some("29"))
+            ))
         .then_some(Self)
     }
 
@@ -866,27 +987,15 @@ impl FormUsualGroupSchema {
                 "6" => Some("TitlesLeftDataAuto"),
                 _ => None,
             }),
-            horizontal_spacing: options.get(15).and_then(|field| match field.trim() {
-                "1" => Some("None"),
-                "2" => Some("Half"),
-                "3" => Some("Single"),
-                "5" => Some("Double"),
-                _ => None,
-            }),
-            vertical_spacing: options.get(16).and_then(|field| match field.trim() {
-                "1" => Some("None"),
-                "2" => Some("Half"),
-                "4" => Some("OneAndHalf"),
-                _ => None,
-            }),
-            child_items_width: options.get(2).and_then(|field| match field.trim() {
-                "1" => Some("Equal"),
-                "2" => Some("LeftWide"),
-                "3" => Some("LeftWidest"),
-                "4" => Some("LeftNarrow"),
-                "5" => Some("LeftNarrowest"),
-                _ => None,
-            }),
+            horizontal_spacing: options
+                .get(Self::HORIZONTAL_SPACING_OPTION_SLOT)
+                .and_then(|field| form_item_spacing_xml(field)),
+            vertical_spacing: options
+                .get(Self::VERTICAL_SPACING_OPTION_SLOT)
+                .and_then(|field| form_item_spacing_xml(field)),
+            child_items_width: options
+                .get(Self::CHILD_ITEMS_WIDTH_OPTION_SLOT)
+                .and_then(|field| form_children_width_xml(field)),
             control_representation: (options.get(11).map(|field| field.trim()) == Some("1"))
                 .then_some("Picture"),
             collapsed: (options.get(12).map(|field| field.trim()) == Some("1")).then_some(true),
@@ -937,24 +1046,14 @@ impl FormUsualGroupSchema {
         let slot = fields
             .len()
             .checked_sub(Self::GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET)?;
-        match fields.get(slot)?.trim() {
-            "0" => Some("Left"),
-            "1" => Some("Center"),
-            "2" => Some("Right"),
-            _ => None,
-        }
+        form_group_horizontal_align_xml(fields.get(slot)?)
     }
 
     fn group_vertical_align(self, fields: &[&str]) -> Option<FormUsualGroupGroupVerticalAlign> {
         let slot = fields
             .len()
             .checked_sub(Self::GROUP_VERTICAL_ALIGN_REVERSE_OFFSET)?;
-        match fields.get(slot)?.trim() {
-            "0" => Some(FormUsualGroupGroupVerticalAlign::Top),
-            "1" => Some(FormUsualGroupGroupVerticalAlign::Center),
-            "2" => Some(FormUsualGroupGroupVerticalAlign::Bottom),
-            _ => None,
-        }
+        FormUsualGroupGroupVerticalAlign::from_raw_value(fields.get(slot)?)
     }
 }
 
@@ -1751,17 +1850,16 @@ impl FormPictureDecorationSchema {
             max_width: Self::non_zero_u32(fields, 28),
             auto_max_height: Self::false_or_omit(fields, 30),
             max_height: Self::non_zero_u32(fields, 31),
-            group_horizontal_align: fields.get(32).and_then(|field| match field.trim() {
-                "0" => Some("Left"),
-                "1" => Some("Center"),
-                "2" => Some("Right"),
-                _ => None,
-            }),
-            group_vertical_align: fields.get(33).and_then(|field| match field.trim() {
-                "0" => Some("Top"),
-                "1" => Some("Center"),
-                _ => None,
-            }),
+            // Slots 32 and 33 are total functions for the two alignment
+            // properties on all 3 666 traced picture decorations under the
+            // shared tables (110 and 417 present).  Reading vertical alignment
+            // without the `Bottom` ordinal had dropped 28 of those 417.
+            group_horizontal_align: fields
+                .get(32)
+                .and_then(|field| form_group_horizontal_align_xml(field)),
+            group_vertical_align: fields
+                .get(33)
+                .and_then(|field| form_group_vertical_align_xml(field)),
         }
     }
 
@@ -1997,13 +2095,12 @@ impl FormLabelDecorationSchema {
         options: &[&str],
     ) -> FormLabelDecorationAlignment {
         FormLabelDecorationAlignment {
+            // 11 463 traced label decorations, 438 carrying the property: slot 33
+            // is a total function under the shared table.  Omitting the `Top`
+            // ordinal had dropped 44 of the 438.
             group_vertical_align: fields
                 .get(self.group_vertical_align_slot())
-                .and_then(|field| match field.trim() {
-                    "1" => Some("Center"),
-                    "2" => Some("Bottom"),
-                    _ => None,
-                }),
+                .and_then(|field| form_group_vertical_align_xml(field)),
             horizontal_align: options
                 .get(self.horizontal_align_option_slot())
                 .and_then(|field| match field.trim() {
@@ -3253,28 +3350,20 @@ impl FormCheckBoxFieldSchema {
         }
     }
 
+    // 6 210 traced check boxes: both slots are total functions under the shared
+    // alignment tables (47 and 22 present).  The transcribed pair had omitted
+    // `Center` from the horizontal table and `Bottom` from the vertical one,
+    // which dropped 4 of the 22.
     pub(crate) fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
-        match fields
-            .get(Self::GROUP_HORIZONTAL_ALIGN_SLOT + self.top_level_offset)?
-            .trim()
-        {
-            "0" => Some("Left"),
-            "2" => Some("Right"),
-            "3" => None,
-            _ => None,
-        }
+        form_group_horizontal_align_xml(
+            fields.get(Self::GROUP_HORIZONTAL_ALIGN_SLOT + self.top_level_offset)?,
+        )
     }
 
     pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
-        match fields
-            .get(Self::GROUP_VERTICAL_ALIGN_SLOT + self.top_level_offset)?
-            .trim()
-        {
-            "0" => Some("Top"),
-            "1" => Some("Center"),
-            "3" => None,
-            _ => None,
-        }
+        form_group_vertical_align_xml(
+            fields.get(Self::GROUP_VERTICAL_ALIGN_SLOT + self.top_level_offset)?,
+        )
     }
 
     pub(crate) fn check_box_type(self, options: &[&str]) -> Option<&'static str> {
@@ -3607,6 +3696,12 @@ impl FormCommandBarSchema {
                     .map(|field| field.trim()),
                 Some("0" | "1" | "2")
             )
+            // The two alignment slots are enumerations with four ordinals, so the
+            // layout test admits all four.  Admitting only the values that had
+            // been seen (`2|3` and `1|2|3`) rejected 15 of the 1 840 native
+            // command bars outright - and rejecting the item discards every
+            // property this schema reads, not just the alignment: 14 of those 15
+            // carry `GroupHorizontalAlign` and 8 carry `GroupVerticalAlign`.
             || !matches!(
                 fields
                     .get(
@@ -3615,7 +3710,7 @@ impl FormCommandBarSchema {
                             .checked_sub(Self::GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET)?
                     )
                     .map(|field| field.trim()),
-                Some("2" | "3")
+                Some("0" | "1" | "2" | "3")
             )
             || !matches!(
                 fields
@@ -3625,7 +3720,7 @@ impl FormCommandBarSchema {
                             .checked_sub(Self::GROUP_VERTICAL_ALIGN_REVERSE_OFFSET)?
                     )
                     .map(|field| field.trim()),
-                Some("1" | "2" | "3")
+                Some("0" | "1" | "2" | "3")
             )
         {
             return None;
@@ -3664,33 +3759,27 @@ impl FormCommandBarSchema {
         }
     }
 
+    // Reverse slots 3 and 2 are total functions on all 1 840 traced command bars
+    // under the shared alignment tables (111 and 29 present).  The transcribed
+    // pair had omitted `Left` and `Top`, losing 11 and 4 respectively.
     pub(crate) fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
-        match fields
-            .get(
+        form_group_horizontal_align_xml(
+            fields.get(
                 fields
                     .len()
                     .checked_sub(Self::GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET)?,
-            )?
-            .trim()
-        {
-            "2" => Some("Right"),
-            _ => None,
-        }
+            )?,
+        )
     }
 
     pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
-        match fields
-            .get(
+        form_group_vertical_align_xml(
+            fields.get(
                 fields
                     .len()
                     .checked_sub(Self::GROUP_VERTICAL_ALIGN_REVERSE_OFFSET)?,
-            )?
-            .trim()
-        {
-            "1" => Some("Center"),
-            "2" => Some("Bottom"),
-            _ => None,
-        }
+            )?,
+        )
     }
 
     fn dimension(fields: &[&str], slot: usize) -> Option<String> {
@@ -3971,6 +4060,73 @@ impl FormRootConversationsRepresentationSchema {
     }
 }
 
+/// The form root's own grouping properties: the spacing pair and
+/// `CollapseItemsByImportanceVariant` in the 24-slot trailer, and
+/// `ChildItemsWidth` in root field 12.
+///
+/// UT 11.5.27.75 native tree, 5 184 traced roots keyed by output path: trailer
+/// slot 9 is a total function for `HorizontalSpacing` (24 present), trailer slot
+/// 10 for `VerticalSpacing` (33), trailer slot 20 for
+/// `CollapseItemsByImportanceVariant` (27, `1->Use 2->DontUse`, `0` absent) and
+/// root field 12 for `ChildItemsWidth` (14).  No counter-example on any of the
+/// four; the spacing pair and the width read the same shared tables as
+/// `UsualGroup` and `Page`.  The root carried none of the four before.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootGroupingSchema {
+    horizontal_spacing_trailer_slot: usize,
+    vertical_spacing_trailer_slot: usize,
+    collapse_items_by_importance_trailer_slot: usize,
+}
+
+impl FormRootGroupingSchema {
+    const CHILD_ITEMS_WIDTH_SLOT: usize = 12;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        trailer_field_count: usize,
+    ) -> Option<Self> {
+        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
+            horizontal_spacing_trailer_slot: 9,
+            vertical_spacing_trailer_slot: 10,
+            collapse_items_by_importance_trailer_slot: 20,
+        })
+    }
+
+    pub(crate) fn horizontal_spacing(self, trailer: &[&str]) -> Option<&'static str> {
+        form_item_spacing_xml(trailer.get(self.horizontal_spacing_trailer_slot)?)
+    }
+
+    pub(crate) fn vertical_spacing(self, trailer: &[&str]) -> Option<&'static str> {
+        form_item_spacing_xml(trailer.get(self.vertical_spacing_trailer_slot)?)
+    }
+
+    pub(crate) fn collapse_items_by_importance_variant(
+        self,
+        trailer: &[&str],
+    ) -> Option<&'static str> {
+        match trailer
+            .get(self.collapse_items_by_importance_trailer_slot)?
+            .trim()
+        {
+            "1" => Some("Use"),
+            "2" => Some("DontUse"),
+            _ => None,
+        }
+    }
+
+    /// The width lives in the fixed root header, not in the trailer, so it is
+    /// read from the root field array directly.
+    pub(crate) fn child_items_width(
+        root_discriminator: Option<&str>,
+        fields: &[&str],
+    ) -> Option<&'static str> {
+        if root_discriminator != Some("50") {
+            return None;
+        }
+        form_children_width_xml(fields.get(Self::CHILD_ITEMS_WIDTH_SLOT)?)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormRootVerticalScrollSchema {
     qualifier_slot: usize,
@@ -4243,9 +4399,14 @@ impl FormSpecialFieldSchema {
         }
     }
 
+    /// Slot 54 is the shared alignment slot of the 59-field field layout, so it
+    /// goes through the shared table.  Pinning it to raw `1` had made the reader
+    /// answer `Center` for an ordinal the corpus never carries here while
+    /// answering nothing for the one progress bar that does carry the property -
+    /// raw `2`, which the platform writes as `Bottom`.
     pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
-        match (self.kind, fields.get(54).map(|field| field.trim())) {
-            (FormSpecialFieldKind::ProgressBar, Some("1")) => Some("Center"),
+        match self.kind {
+            FormSpecialFieldKind::ProgressBar => form_group_vertical_align_xml(fields.get(54)?),
             _ => None,
         }
     }
@@ -4609,6 +4770,7 @@ pub(crate) enum FormTableXmlProperty {
     SearchStringLocation,
     ViewStatusLocation,
     SearchControlLocation,
+    RefreshRequest,
     AutoRefresh,
     AutoRefreshPeriod,
     Period,
@@ -4714,6 +4876,19 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::ViewStatusLocation,
     FormTableXmlProperty::SearchControlLocation,
     FormTableXmlProperty::CurrentRowUse,
+    // `RefreshRequest` closes the table's own scalar block, immediately ahead of
+    // the `AutoRefresh` group.  UT 11.5.27.75 native tree, 4 543 `Table`
+    // instances and 30 carrying the property: it trails `CommandBarLocation`
+    // (28), `EnableStartDrag` (27), `ChangeRowOrder` (27), `SearchStringLocation`
+    // (27), `Representation` (26), `InitialListView` (26), `CommandSet` (25),
+    // `ViewStatusLocation` (25), `EnableDrag` (23), `Header` (22),
+    // `SearchControlLocation` (22), `DataPath` (30) and `Title` (7), and leads
+    // `AutoRefresh`, `AutoRefreshPeriod`, `Period`, `ChoiceFoldersAndItems`,
+    // `RestoreCurrentRow`, `TopLevelParent`, `ShowRoot`, `AllowRootChoice`,
+    // `UpdateOnDataChange` and `AllowGettingCurrentRowURL` (6 each), plus
+    // `RowFilter` (23), `Events` (30) and `ChildItems` (30).  No pair is observed
+    // in both directions, and `CurrentRowUse` never co-occurs with it.
+    FormTableXmlProperty::RefreshRequest,
     FormTableXmlProperty::AutoRefresh,
     FormTableXmlProperty::AutoRefreshPeriod,
     FormTableXmlProperty::Period,
@@ -5059,6 +5234,12 @@ impl FormTableSchema {
     const AUTO_MAX_WIDTH_REVERSE_OFFSET: usize = 15;
     // Fixed tail scalar: 0=false, 1=true, 2=platform default (omitted).
     const AUTO_ADD_INCOMPLETE_REVERSE_OFFSET: usize = 36;
+    /// `RefreshRequest` is a fixed-tail scalar addressed from the end, which is
+    /// why no forward slot explains it.  UT 11.5.27.75 native tree, 4 509 traced
+    /// tables: reverse offset 16 is a total function - `1` on all 30 tables whose
+    /// native document says `PullFromTop` and `0` on the other 4 479, with no
+    /// counter-example.
+    const REFRESH_REQUEST_REVERSE_OFFSET: usize = 16;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -5299,6 +5480,16 @@ impl FormTableSchema {
             "0" => Some(false),
             "1" => Some(true),
             "2" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) fn refresh_request(self, fields: &[&str]) -> Option<&'static str> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::REFRESH_REQUEST_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "1" => Some("PullFromTop"),
             _ => None,
         }
     }
