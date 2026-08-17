@@ -4780,9 +4780,162 @@ fn normalize_form_server_state_inner_xml_with_dcs_type_index(
         .replace("<AllowedLength>", "<v8:AllowedLength>")
         .replace("</AllowedLength>", "</v8:AllowedLength>")
         .replace("<DateFractions>", "<v8:DateFractions>")
-        .replace("</DateFractions>", "</v8:DateFractions>");
+        .replace("</DateFractions>", "</v8:DateFractions>")
+        // A calculated field arrives named for its base type with the concrete
+        // type in `xsi:type`; ibcmd writes the concrete element name instead,
+        // exactly as it does for `<Parameter xsi:type="dcssch:Parameter">` above.
+        // All 35 occurrences in UT 11.5.27.75 are written `<CalculatedField>`
+        // by the platform and none keeps the `ExpressionField` spelling.
+        .replace(
+            r#"<ExpressionField xsi:type="dcssch:CalculatedField">"#,
+            "<CalculatedField>",
+        )
+        .replace("</ExpressionField>", "</CalculatedField>");
+    rewrite_form_server_state_dcs_core_items(&mut normalized);
     rewrite_form_server_state_type_ids(&mut normalized, dcs_type_index);
     normalized
+}
+
+const DCS_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data-composition-system/core";
+const DCS_SETTINGS_NAMESPACE: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+
+/// Prefix the Form document declares for a namespace the ServerState blob
+/// re-declares under a generated `dNpM` alias.
+///
+/// Only URIs actually observed in that position are mapped; anything else is
+/// left untouched so an unseen namespace stays visibly wrong instead of being
+/// silently renamed.
+fn form_document_namespace_prefix(uri: &str) -> Option<&'static str> {
+    match uri {
+        "http://v8.1c.ru/8.1/data/ui" => Some("v8ui"),
+        _ => None,
+    }
+}
+
+/// Rewrite the settings-parameter items of a calculated field's appearance.
+///
+/// The blob serialises such an item with the data-composition core namespace as
+/// the element default, so the item and its `parameter` / `value` children carry
+/// no prefix and the item repeats the settings namespace locally. ibcmd writes
+/// the same nodes with the document-level `dcscor` prefix and no local
+/// declarations. All six blocks of this shape in UT 11.5.27.75 are written that
+/// way; none is left in the default-namespace spelling.
+fn rewrite_form_server_state_dcs_core_items(xml: &mut String) {
+    let opener = format!("<item xmlns=\"{DCS_CORE_NAMESPACE}\"");
+    let mut cursor = 0usize;
+    let mut out = String::with_capacity(xml.len());
+    while let Some(relative) = xml[cursor..].find(opener.as_str()) {
+        let start = cursor + relative;
+        let Some(open_end) = xml[start..].find('>').map(|i| start + i + 1) else {
+            break;
+        };
+        let Some(close_rel) = xml[open_end..].find("</item>") else {
+            break;
+        };
+        let body_end = open_end + close_rel;
+        let close_end = body_end + "</item>".len();
+        // Nested items would make the first close tag the wrong one; leave the
+        // whole block alone rather than guess at its shape.
+        if xml[open_end..body_end].contains("<item") {
+            out.push_str(&xml[cursor..close_end]);
+            cursor = close_end;
+            continue;
+        }
+        out.push_str(&xml[cursor..start]);
+        out.push_str(&rewrite_dcs_core_item_open_tag(&xml[start..open_end]));
+        out.push_str(&rewrite_dcs_core_item_body(&xml[open_end..body_end]));
+        out.push_str("</dcscor:item>");
+        cursor = close_end;
+    }
+    if cursor == 0 {
+        return;
+    }
+    out.push_str(&xml[cursor..]);
+    *xml = out;
+}
+
+/// `<item xmlns="core" xmlns:dcsset="settings" xsi:type="..">` ->
+/// `<dcscor:item xsi:type="..">`.
+fn rewrite_dcs_core_item_open_tag(tag: &str) -> String {
+    let mut attrs = tag
+        .trim_start_matches("<item")
+        .trim_end_matches('>')
+        .replace(&format!(" xmlns=\"{DCS_CORE_NAMESPACE}\""), "")
+        .replace(&format!(" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\""), "");
+    attrs = attrs.trim_end().to_string();
+    format!("<dcscor:item{attrs}>")
+}
+
+/// Prefix the `parameter` and `value` children, resolving any locally declared
+/// namespace alias on `value` back to the document prefix.
+fn rewrite_dcs_core_item_body(body: &str) -> String {
+    let mut out = body
+        .replace("<parameter>", "<dcscor:parameter>")
+        .replace("</parameter>", "</dcscor:parameter>")
+        .replace("<parameter/>", "<dcscor:parameter/>")
+        .replace("</value>", "</dcscor:value>");
+    out = rewrite_dcs_core_value_tags(&out);
+    out
+}
+
+fn rewrite_dcs_core_value_tags(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut cursor = 0usize;
+    while let Some(relative) = body[cursor..].find("<value") {
+        let start = cursor + relative;
+        let after = start + "<value".len();
+        // `<valueSomething>` is a different element; only a delimiter may follow.
+        if !body[after..]
+            .chars()
+            .next()
+            .is_some_and(|c| c == '>' || c == '/' || c.is_whitespace())
+        {
+            out.push_str(&body[cursor..after]);
+            cursor = after;
+            continue;
+        }
+        let Some(end) = body[start..].find('>').map(|i| start + i + 1) else {
+            break;
+        };
+        out.push_str(&body[cursor..start]);
+        let attrs = body[after..end - 1].to_string();
+        let self_closing = attrs.ends_with('/');
+        let attrs = attrs.trim_end_matches('/');
+        out.push_str("<dcscor:value");
+        out.push_str(&rewrite_local_namespace_alias(attrs));
+        out.push_str(if self_closing { "/>" } else { ">" });
+        cursor = end;
+    }
+    if cursor == 0 {
+        return body.to_string();
+    }
+    out.push_str(&body[cursor..]);
+    out
+}
+
+/// Drop a `xmlns:alias="uri"` declaration and rewrite `alias:` QNames to the
+/// prefix the Form document already declares for that namespace.
+fn rewrite_local_namespace_alias(attrs: &str) -> String {
+    const DECL: &str = " xmlns:";
+    let Some(decl_start) = attrs.find(DECL) else {
+        return attrs.to_string();
+    };
+    let name_start = decl_start + DECL.len();
+    let Some(eq) = attrs[name_start..].find("=\"").map(|i| name_start + i) else {
+        return attrs.to_string();
+    };
+    let alias = &attrs[name_start..eq];
+    let uri_start = eq + 2;
+    let Some(uri_end) = attrs[uri_start..].find('"').map(|i| uri_start + i) else {
+        return attrs.to_string();
+    };
+    let Some(prefix) = form_document_namespace_prefix(&attrs[uri_start..uri_end]) else {
+        return attrs.to_string();
+    };
+    let mut rest = String::with_capacity(attrs.len());
+    rest.push_str(&attrs[..decl_start]);
+    rest.push_str(&attrs[uri_end + 1..]);
+    rest.replace(&format!("\"{alias}:"), &format!("\"{prefix}:"))
 }
 
 fn replace_form_server_state_fragments(
@@ -15648,6 +15801,10 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("Form.StandardCommand.CreateFolder"),
         "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("Form.StandardCommand.OK"),
         "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Form.StandardCommand.Write"),
+        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => {
+            Some("Form.StandardCommand.OpenFromStandaloneServer")
+        }
+        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Form.StandardCommand.Retry"),
         _ => None,
     }
 }
@@ -16384,11 +16541,24 @@ pub(super) fn parse_form_command_interface_command(
                 Some("0".to_string())
             } else {
                 let uuid = parse_non_zero_uuid(target)?;
-                context.object_refs.get(&uuid).cloned().or_else(|| {
-                    form_standard_button_command_name(&uuid)
-                        .or_else(|| form_standard_command_name(&uuid))
-                        .map(ToOwned::to_owned)
-                })
+                context
+                    .object_refs
+                    .get(&uuid)
+                    .map(|reference| {
+                        // A filter criterion carries no command of its own, so this
+                        // slot names its "open by value" standard command; every
+                        // other target in this slot is already a command reference.
+                        if is_top_level_reference_of_kind(reference, "FilterCriterion") {
+                            format!("{reference}.StandardCommand.OpenByValue")
+                        } else {
+                            reference.clone()
+                        }
+                    })
+                    .or_else(|| {
+                        form_standard_button_command_name(&uuid)
+                            .or_else(|| form_standard_command_name(&uuid))
+                            .map(ToOwned::to_owned)
+                    })
             }
         }
         "1" => {
@@ -16407,14 +16577,25 @@ pub(super) fn parse_form_command_interface_command(
         }
         "2" => {
             let uuid = parse_non_zero_uuid(target?)?;
-            context
-                .object_refs
-                .get(&uuid)
-                .map(|reference| format!("{reference}.StandardCommand.CreateBasedOn"))
+            context.object_refs.get(&uuid).map(|reference| {
+                // An information register names its recorder command from this
+                // slot; every other object kind names "create based on".
+                let standard = if is_top_level_reference_of_kind(reference, "InformationRegister") {
+                    "OpenByRecorder"
+                } else {
+                    "CreateBasedOn"
+                };
+                format!("{reference}.StandardCommand.{standard}")
+            })
         }
         "3" => resolve_information_register_open_by_value_command(target?, context).or_else(|| {
             let uuid = parse_non_zero_uuid(target?)?;
             let reference = context.object_refs.get(&uuid)?;
+            // A catalog names its "create based on" command from slot 3, where a
+            // document or business process names the same command from slot 2.
+            if is_top_level_reference_of_kind(reference, "Catalog") {
+                return Some(format!("{reference}.StandardCommand.CreateBasedOn"));
+            }
             (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
                 .then(|| reference.clone())
         }),
@@ -16450,6 +16631,14 @@ pub(super) fn parse_form_command_interface_command_for_test(
             child_item_indexes: &child_item_indexes,
         },
     )
+}
+
+/// True when `reference` names a metadata object of `kind` itself, not one of its
+/// children: `Catalog.Партнеры` but not `Catalog.Партнеры.Command.X`.
+fn is_top_level_reference_of_kind(reference: &str, kind: &str) -> bool {
+    reference
+        .split_once('.')
+        .is_some_and(|(head, tail)| head == kind && !tail.contains('.'))
 }
 
 fn resolve_information_register_open_by_value_command(

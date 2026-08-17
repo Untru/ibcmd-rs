@@ -204,6 +204,124 @@ fn form_navigation_panel_open_by_value_uses_only_unambiguous_register_field_fall
 }
 
 #[test]
+fn form_navigation_panel_kind_3_names_catalog_create_based_on() {
+    // A catalog names "create based on" from slot 3, where a document or a
+    // business process names the same command from slot 2. Layout taken from
+    // `{3,<Catalog.Претензии uuid>}` on Catalog.Партнеры's element form, where
+    // the platform writes Catalog.Претензии.StandardCommand.CreateBasedOn.
+    let catalog_uuid = "aaaaaaaa-1111-4111-8111-111111111111".to_string();
+    let document_uuid = "bbbbbbbb-2222-4222-8222-222222222222".to_string();
+    let object_refs = BTreeMap::from([
+        (catalog_uuid.clone(), "Catalog.Claims".to_string()),
+        (document_uuid.clone(), "Document.Invoice".to_string()),
+    ]);
+
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{3,{catalog_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Catalog.Partners",
+        ),
+        Some("Catalog.Claims.StandardCommand.CreateBasedOn".to_string())
+    );
+    // Slot 2 keeps naming CreateBasedOn for the kinds that use it there.
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{2,{document_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Catalog.Partners",
+        ),
+        Some("Document.Invoice.StandardCommand.CreateBasedOn".to_string())
+    );
+}
+
+#[test]
+fn form_navigation_panel_kind_2_names_information_register_open_by_recorder() {
+    // An information register names its recorder command from slot 2, unlike
+    // every other object kind in that slot.
+    let register_uuid = "cccccccc-3333-4333-8333-333333333333".to_string();
+    let object_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        "InformationRegister.Costs".to_string(),
+    )]);
+
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{2,{register_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Document.Invoice",
+        ),
+        Some("InformationRegister.Costs.StandardCommand.OpenByRecorder".to_string())
+    );
+}
+
+#[test]
+fn form_navigation_panel_kind_0_names_filter_criterion_open_by_value() {
+    // A filter criterion has no command of its own, so slot 0 names its
+    // "open by value" standard command rather than the bare reference.
+    let criterion_uuid = "dddddddd-4444-4444-8444-444444444444".to_string();
+    let command_uuid = "eeeeeeee-5555-4555-8555-555555555555".to_string();
+    let object_refs = BTreeMap::from([
+        (
+            criterion_uuid.clone(),
+            "FilterCriterion.ContactInteractions".to_string(),
+        ),
+        (
+            command_uuid.clone(),
+            "CommonCommand.Attachments".to_string(),
+        ),
+    ]);
+
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{0,{criterion_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Catalog.Partners",
+        ),
+        Some("FilterCriterion.ContactInteractions.StandardCommand.OpenByValue".to_string())
+    );
+    // Every other slot-0 target is already a command reference and stays bare.
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{0,{command_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Catalog.Partners",
+        ),
+        Some("CommonCommand.Attachments".to_string())
+    );
+}
+
+#[test]
+fn form_navigation_panel_resolves_retry_and_open_from_standalone_server() {
+    for (uuid, expected) in [
+        (
+            "0ea1a92b-3477-44dd-b152-ea7d411f1c5d",
+            "Form.StandardCommand.OpenFromStandaloneServer",
+        ),
+        (
+            "5174ad3f-0569-42fd-8adf-011d8206db6c",
+            "Form.StandardCommand.Retry",
+        ),
+    ] {
+        assert_eq!(
+            form_body::parse_form_command_interface_command_for_test(
+                &format!("{{0,{uuid}}}"),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "Document.Order",
+            ),
+            Some(expected.to_string()),
+            "uuid {uuid}"
+        );
+    }
+}
+
+#[test]
 fn form_navigation_panel_preserves_raw_item_order_and_rejects_bad_counts() {
     let register_uuid = "88888888-8888-4888-8888-888888888888";
     let command_uuid = "99999999-9999-4999-8999-999999999999";
@@ -8818,6 +8936,82 @@ fn normalizes_form_server_state_conditional_appearance_qnames() {
         ),
         "{inner}"
     );
+}
+
+#[test]
+fn normalizes_form_server_state_calculated_field_and_appearance_item() {
+    // Layout copied from the ServerState of
+    // Catalogs/ТСПИоТ/Forms/ФормаСписка: a calculated field arrives named for
+    // its base type, and its appearance item arrives with the data-composition
+    // core namespace as the element default plus a generated alias for the UI
+    // namespace on `value`.
+    let native = concat!(
+        "<ExpressionField xsi:type=\"dcssch:CalculatedField\">",
+        "<dcssch:dataPath>State</dcssch:dataPath>",
+        "<dcssch:appearance>",
+        "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\"",
+        " xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\"",
+        " xsi:type=\"dcsset:SettingsParameterValue\">",
+        "<parameter>ЦветТекста</parameter>",
+        "<value xmlns:d5p1=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"d5p1:Color\">#1C55AE</value>",
+        "</item>",
+        "</dcssch:appearance>",
+        "</ExpressionField>"
+    );
+    let expected = concat!(
+        "<CalculatedField>",
+        "<dcssch:dataPath>State</dcssch:dataPath>",
+        "<dcssch:appearance>",
+        "<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">",
+        "<dcscor:parameter>ЦветТекста</dcscor:parameter>",
+        "<dcscor:value xsi:type=\"v8ui:Color\">#1C55AE</dcscor:value>",
+        "</dcscor:item>",
+        "</dcssch:appearance>",
+        "</CalculatedField>"
+    );
+
+    let normalized = normalize_form_server_state_inner_xml(native);
+    assert_eq!(normalized, expected);
+    assert_eq!(normalize_form_server_state_inner_xml(&normalized), expected);
+}
+
+#[test]
+fn normalizes_form_server_state_appearance_item_without_local_alias() {
+    // The `xs:` prefix is declared by the Form document, so a plain string
+    // value keeps its QName and only the element names gain the prefix.
+    let native = concat!(
+        "<dcssch:appearance>",
+        "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\"",
+        " xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\"",
+        " xsi:type=\"dcsset:SettingsParameterValue\">",
+        "<parameter>Формат</parameter>",
+        "<value xsi:type=\"xs:string\">ЧДЦ=2</value>",
+        "</item>",
+        "</dcssch:appearance>"
+    );
+    let expected = concat!(
+        "<dcssch:appearance>",
+        "<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">",
+        "<dcscor:parameter>Формат</dcscor:parameter>",
+        "<dcscor:value xsi:type=\"xs:string\">ЧДЦ=2</dcscor:value>",
+        "</dcscor:item>",
+        "</dcssch:appearance>"
+    );
+    assert_eq!(normalize_form_server_state_inner_xml(native), expected);
+}
+
+#[test]
+fn form_server_state_leaves_unknown_default_namespace_items_alone() {
+    // Only the data-composition core default is rewritten; an item defaulted to
+    // some other namespace is left exactly as it arrived.
+    let native = concat!(
+        "<dcssch:appearance>",
+        "<item xmlns=\"http://example.invalid/other\" xsi:type=\"other:Value\">",
+        "<parameter>Формат</parameter>",
+        "</item>",
+        "</dcssch:appearance>"
+    );
+    assert_eq!(normalize_form_server_state_inner_xml(native), native);
 }
 
 #[test]
