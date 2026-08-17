@@ -55,6 +55,33 @@ pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Opt
         .then_some("dcsset:Filter")
 }
 
+/// Slot holding `FormButtonType` in the long extended Button layout, before the
+/// top-level name offset is applied.
+const FORM_LONG_BUTTON_TYPE_SLOT: usize = 46;
+/// Slot the shorter extended Button layout uses for the same property.
+const FORM_SHORT_BUTTON_TYPE_SLOT: usize = 4;
+/// Field count of the long extended Button layout, before the offset.
+const FORM_LONG_BUTTON_FIELD_COUNT: usize = 52;
+
+/// Which slot of an extended Button layout carries `FormButtonType`.
+///
+/// Every Button the platform wrote into the UT 11.5.27.75 native tree uses the
+/// long layout: 27 771 items with 52 fields and no name offset, 20 items with
+/// 53 fields and offset 1 - one shape, no third variant. There, slot
+/// `FORM_LONG_BUTTON_TYPE_SLOT` is the four-valued `FormButtonType` code, while
+/// slot `FORM_SHORT_BUTTON_TYPE_SLOT` folds `CommandBarHyperlink` onto
+/// `CommandBarButton` and so cannot express the enumeration. The short extended
+/// layout is unobserved in every corpus available here (UT, the three reference
+/// trees and the nine bundled configurations contain no such Button), so it
+/// keeps reading the slot it always read rather than being changed on a guess.
+pub(crate) fn form_extended_button_type_slot(field_count: usize, offset: usize) -> usize {
+    if field_count >= FORM_LONG_BUTTON_FIELD_COUNT + offset {
+        FORM_LONG_BUTTON_TYPE_SLOT + offset
+    } else {
+        FORM_SHORT_BUTTON_TYPE_SLOT + offset
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormAttributeAdditionalColumnsBindingKind {
     Attribute,

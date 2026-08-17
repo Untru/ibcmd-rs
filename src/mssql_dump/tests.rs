@@ -15600,6 +15600,39 @@ fn extracts_form_button_type_from_layout_code() {
     }
 }
 
+/// The two layouts below are the bytes the platform wrote for two sibling
+/// buttons of `CommonForms/ОтправкаURLОнлайнЗаказов`, one rendered
+/// `CommandBarHyperlink` and one `CommandBarButton` by native ibcmd. They agree
+/// on slot 4 (`0`) and differ on slot 46 (`3` against `0`), which is why only
+/// the latter slot can carry the four-valued `FormButtonType`.
+#[test]
+fn long_extended_button_layout_reads_its_type_from_the_four_valued_slot() {
+    const HYPERLINK: &str = r#"{31,{563,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"НастроитьСтраницу",{1,1,{"ru","Настроить"}},1,{11,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},0,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{564,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"НастроитьСтраницуРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,2,3,3,0,0,3,0,0,0,1,0}"#;
+    const COMMAND_BAR: &str = r#"{31,{494,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ВложенияВыбратьВсеВложения",{1,0},1,{9,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{495,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ВложенияВыбратьВсеВложенияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0}"#;
+
+    for (layout, expected) in [
+        (HYPERLINK, "CommandBarHyperlink"),
+        (COMMAND_BAR, "CommandBarButton"),
+    ] {
+        let item = parse_form_child_item(
+            layout,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Button");
+        assert_eq!(item.item_type, Some(expected));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains(&format!("<Type>{expected}</Type>")));
+    }
+}
+
 #[test]
 fn extracts_form_extended_button_properties_from_layout_code() {
     let item = parse_form_child_item(

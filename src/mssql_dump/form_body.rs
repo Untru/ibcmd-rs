@@ -42,8 +42,8 @@ use crate::form_schema::{
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
-    form_tooltip_representation_xml_order,
+    form_extended_button_type_slot, form_text_document_context_menu_child_is_valid,
+    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 #[cfg(test)]
@@ -8667,7 +8667,10 @@ fn parse_form_child_item_with_metadata_owners(
             }),
         item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(4 + button_top_level_offset)
+                .get(form_extended_button_type_slot(
+                    fields.len(),
+                    button_top_level_offset,
+                ))
                 .and_then(|field| parse_form_extended_button_type(field))
         } else if tag == "Button" {
             fields
@@ -10564,11 +10567,21 @@ pub(super) fn parse_form_button_type(field: &str) -> Option<&'static str> {
     }
 }
 
+/// `FormButtonType` as the extended Button layout stores it.
+///
+/// The code is a four-valued enumeration, not a three-valued one: the slot the
+/// decoder used to read folds `CommandBarHyperlink` onto `CommandBarButton`,
+/// which is why the writer could never produce the fourth member. The slot
+/// `form_extended_button_type_slot` selects keeps all four apart, and across
+/// every Button of the UT 11.5.27.75 native tree the mapping below reproduces
+/// the native `<Type>` text exactly: `0` 22 976 times, `1` 2 866, `2` 1 898,
+/// `3` 51 - 27 791 observations, no counter-example, nothing left unclassified.
 pub(super) fn parse_form_extended_button_type(field: &str) -> Option<&'static str> {
     match field.trim() {
         "0" => Some("CommandBarButton"),
         "1" => Some("UsualButton"),
         "2" => Some("Hyperlink"),
+        "3" => Some("CommandBarHyperlink"),
         _ => None,
     }
 }
