@@ -62147,3 +62147,320 @@ fn reads_group_layout_geometry_from_the_shared_slot_window() {
         None
     );
 }
+
+/// Builds the per-attribute member indexes the chain walker reads, the way the
+/// form body does once additional columns have been applied.
+fn chain_walk_indexes(attributes: &[FormAttribute]) -> FormChildItemIndexes {
+    let mut indexes =
+        collect_form_child_item_indexes_with_object_refs(&[], attributes, &BTreeMap::new(), None);
+    collect_form_chain_walk_member_indexes(&mut indexes, attributes);
+    indexes
+}
+
+fn chain_walk_column(id: &str, name: &str, reference: Option<&str>) -> FormAttributeColumn {
+    FormAttributeColumn {
+        id: id.to_string(),
+        name: name.to_string(),
+        title: Vec::new(),
+        value_types: reference
+            .map(|reference| {
+                vec![ConstantValueType::Reference {
+                    reference: reference.to_string(),
+                }]
+            })
+            .unwrap_or_default(),
+        explicit_empty_type: false,
+        functional_options: Vec::new(),
+    }
+}
+
+/// A bound slot is one chain, and an additional-column segment names a member
+/// no other index this parser builds carries.
+///
+/// Evidence: UT 11.5.27.75 `Catalogs/МЧД003/Forms/ДобавлениеПредставителя`,
+/// InputField `СвУпПредПредСведИПИННФЛ` carries
+/// `{7,{1},{0,e67e2953-…},{2},{0,e67e2953-…},{2,5bdad865-…},{0,e67e2953-…},{5,5bdad865-…}}`
+/// against attribute `СвУпПред`, whose column `2` is `Пред`, whose additional
+/// columns for `СвУпПред.Пред` hold `2` -> `СведИП` and whose additional columns
+/// for `СвУпПред.Пред.СведИП` hold `5` -> `ИННФЛ`; the platform writes
+/// `<DataPath>СвУпПред[0].Пред[0].СведИП[0].ИННФЛ</DataPath>`.
+#[test]
+fn walks_a_bound_chain_through_index_and_additional_column_segments() {
+    let index = "0,e67e2953-cebe-4d97-bb93-12b17e6384f8";
+    let mut attribute = data_path_form_attribute("1", "СвУпПред", None);
+    attribute.columns = vec![chain_walk_column("2", "Пред", None)];
+    attribute.additional_columns = vec![
+        FormAttributeAdditionalColumns {
+            table: "СвУпПред.Пред".to_string(),
+            columns: vec![chain_walk_column("2", "СведИП", None)],
+        },
+        FormAttributeAdditionalColumns {
+            table: "СвУпПред.Пред.СведИП".to_string(),
+            columns: vec![chain_walk_column("5", "ИННФЛ", None)],
+        },
+    ];
+    let attributes = vec![attribute];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = BTreeMap::from([("1".to_string(), "СвУпПред".to_string())]);
+
+    let binding = format!(
+        "{{7,{{1}},{{{index}}},{{2}},{{{index}}},{{2,5bdad865-f2c5-434b-8041-ba4aad3b6687}},{{{index}}},{{5,5bdad865-f2c5-434b-8041-ba4aad3b6687}}}}"
+    );
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &binding,
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &BTreeMap::new(),
+            false,
+        )
+        .as_deref(),
+        Some("СвУпПред[0].Пред[0].СведИП[0].ИННФЛ")
+    );
+
+    // An additional-column id no declaration carries leaves the whole chain
+    // unresolved rather than truncating it to the prefix it did reach.
+    let unknown = format!("{{3,{{1}},{{{index}}},{{9,5bdad865-f2c5-434b-8041-ba4aad3b6687}}}}");
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &unknown,
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &BTreeMap::new(),
+            false,
+        ),
+        None
+    );
+}
+
+/// The aggregate marker writes two different leaves from identical bytes; the
+/// discriminator is where the item sits, not what the slot says.
+///
+/// Evidence: UT 11.5.27.75. `Documents/АктВыполненныхРабот/Forms/ФормаДокумента`
+/// carries `{3,{1},{0,<tabular section>},{101000000,<column>}}` on InputField
+/// `УслугиСумма`, which sits inside the `Услуги` table, and the platform writes
+/// `Объект.Услуги.Сумма`. `Documents/ВыкупТоваровХранителем/Forms/ФормаДокумента`
+/// carries the same shape on InputField `СуммаНДС`, which sits in a footer group
+/// outside the table, and the platform writes `Объект.Товары.TotalСуммаНДС`.
+/// Over all 256 such slots the item's parent path decides with no exception:
+/// 125 inside the table write the bare member, 131 outside write `Total`.
+#[test]
+fn writes_the_aggregate_marker_only_for_items_outside_their_table() {
+    let table_uuid = "d77b0709-0750-4069-be54-7f07810fb4e6";
+    let column_uuid = "41c36a6f-5b3d-42d6-9606-a177fa4551df";
+    let attributes = vec![data_path_form_attribute("1", "Объект", None)];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let object_refs = BTreeMap::from([
+        (
+            table_uuid.to_string(),
+            "Document.ВыкупТоваровХранителем.TabularSection.Товары".to_string(),
+        ),
+        (
+            column_uuid.to_string(),
+            "Document.ВыкупТоваровХранителем.TabularSection.Товары.Attribute.СуммаНДС".to_string(),
+        ),
+    ]);
+    let binding = format!("{{3,{{1}},{{0,{table_uuid}}},{{101000000,{column_uuid}}}}}");
+
+    for (aggregate, expected) in [
+        (false, "Объект.Товары.СуммаНДС"),
+        (true, "Объект.Товары.TotalСуммаНДС"),
+    ] {
+        assert_eq!(
+            resolve_form_bound_chain_member_path(
+                &binding,
+                &names,
+                indexes.owner_scoped_bindings_for_test(),
+                &object_refs,
+                aggregate,
+            )
+            .as_deref(),
+            Some(expected),
+            "aggregate={aggregate}"
+        );
+    }
+
+    // Every other marker is inert: only `101000000` carries the aggregate.
+    let plain = format!("{{3,{{1}},{{0,{table_uuid}}},{{0,{column_uuid}}}}}");
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &plain,
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            true,
+        )
+        .as_deref(),
+        Some("Объект.Товары.СуммаНДС")
+    );
+}
+
+/// A settings-composer chain walks a typed namespace: the same numeric id means
+/// different members depending on the type reached so far.
+///
+/// Evidence: UT 11.5.27.75.
+/// `Catalogs/ЗакладкиВзаимодействий/Forms/ФормаЭлемента` carries `{3,{2},{0},{1}}`
+/// and the platform writes `КомпоновщикНастроек.Settings.Filter`, so `1` is
+/// `Filter` on the settings; `Catalogs/РассылкиОтчетов/Forms/ФормаЭлемента`
+/// carries `{3,{16},{1},{10002}}` and the platform writes
+/// `КомпоновщикНастроекКД.UserSettings.Setting`, so `10002` is `Setting` on a
+/// user setting while it is `LeftValue` on a filter.
+#[test]
+fn walks_settings_composer_chains_through_their_typed_namespace() {
+    let index = "0,e67e2953-cebe-4d97-bb93-12b17e6384f8";
+    let attribute =
+        data_path_typed_form_attribute("2", "КомпоновщикНастроек", "dcsset:SettingsComposer");
+    let owners = form_attribute_metadata_owners_by_id(std::slice::from_ref(&attribute));
+
+    for (binding, expected) in [
+        ("{2,{2},{0}}", "КомпоновщикНастроек.Settings"),
+        ("{3,{2},{0},{1}}", "КомпоновщикНастроек.Settings.Filter"),
+        (
+            "{4,{2},{0},{3},{0}}",
+            "КомпоновщикНастроек.Settings.Order.OrderAvailableFields",
+        ),
+        (
+            "{4,{2},{0},{1},{10002}}",
+            "КомпоновщикНастроек.Settings.Filter.LeftValue",
+        ),
+        (
+            "{3,{2},{1},{10002}}",
+            "КомпоновщикНастроек.UserSettings.Setting",
+        ),
+    ] {
+        assert_eq!(
+            resolve_form_settings_composer_chain_data_path(binding, &owners).as_deref(),
+            Some(expected),
+            "{binding}"
+        );
+    }
+
+    let indexed = format!("{{6,{{2}},{{0}},{{4}},{{{index}}},{{10002}},{{10003}}}}");
+    assert_eq!(
+        resolve_form_settings_composer_chain_data_path(&indexed, &owners).as_deref(),
+        Some("КомпоновщикНастроек.Settings.ConditionalAppearance[0].Filter.ComparisonType")
+    );
+
+    // An id the type was never observed to carry stays unresolved, and so does
+    // a member read off a type that carries no members at all.
+    assert_eq!(
+        resolve_form_settings_composer_chain_data_path("{3,{2},{0},{9}}", &owners),
+        None
+    );
+    assert_eq!(
+        resolve_form_settings_composer_chain_data_path("{4,{2},{0},{1},{10000},{0}}", &owners),
+        None
+    );
+
+    // The namespace belongs to the composer type alone.
+    let plain = data_path_typed_form_attribute("2", "КомпоновщикНастроек", "v8:ValueTable");
+    assert_eq!(
+        resolve_form_settings_composer_chain_data_path(
+            "{3,{2},{0},{1}}",
+            &form_attribute_metadata_owners_by_id(std::slice::from_ref(&plain))
+        ),
+        None
+    );
+}
+
+/// The built-in standard period carries a third column beyond the two the
+/// special-column index already holds.
+///
+/// Evidence: UT 11.5.27.75 `CommonForms/ПодборТоваровПоПоступлениям`, InputField
+/// `ПериодВариант` carries `{2,{6},{0}}` against the `Период` attribute of type
+/// `v8:StandardPeriod` and the platform writes
+/// `<DataPath>Период.Variant</DataPath>`; all 9 such slots write `Variant`.
+#[test]
+fn resolves_the_standard_period_variant_column() {
+    let attribute = data_path_typed_form_attribute("6", "Период", "v8:StandardPeriod");
+    let owners = form_attribute_metadata_owners_by_id(std::slice::from_ref(&attribute));
+    for (binding, expected) in [
+        ("{2,{6},{0}}", "Период.Variant"),
+        ("{2,{6},{1}}", "Период.StartDate"),
+        ("{2,{6},{2}}", "Период.EndDate"),
+    ] {
+        assert_eq!(
+            resolve_form_standard_period_column_data_path(binding, &owners).as_deref(),
+            Some(expected),
+            "{binding}"
+        );
+    }
+    assert_eq!(
+        resolve_form_standard_period_column_data_path("{2,{6},{3}}", &owners),
+        None
+    );
+
+    // Column `0` is `Variant` only on a standard period.
+    let table = data_path_typed_form_attribute("6", "Период", "v8:ValueTable");
+    assert_eq!(
+        resolve_form_standard_period_column_data_path(
+            "{2,{6},{0}}",
+            &form_attribute_metadata_owners_by_id(std::slice::from_ref(&table))
+        ),
+        None
+    );
+}
+
+/// Dereferencing a declared column reads the standard attributes of that
+/// column's own declared type; the marker alone does not decide.
+///
+/// Evidence: UT 11.5.27.75
+/// `Documents/ЗаказПоставщику/Forms/СозданиеЗаказовПоставщикамНаОсновании`,
+/// InputField `ЗаказыНомер` carries `{3,{5},{1},{-2}}` where column `1` of
+/// attribute `Заказы` is `Ссылка` of type `cfg:DocumentRef.ЗаказПоставщику`, and
+/// the platform writes `Заказы.Ссылка.Number`; `DataProcessors/ПрайсЛист/Forms/Форма`
+/// carries the same `-2` against a column of type `cfg:CatalogRef.Номенклатура`
+/// and the platform writes `ДеревоЦен.Номенклатура.Code`.
+#[test]
+fn dereferences_a_declared_column_through_its_own_type_family() {
+    for (reference, marker, expected) in [
+        (
+            "cfg:DocumentRef.ЗаказПоставщику",
+            "-2",
+            "Заказы.Ссылка.Number",
+        ),
+        (
+            "cfg:DocumentRef.ЗаказПоставщику",
+            "-3",
+            "Заказы.Ссылка.Date",
+        ),
+        ("cfg:CatalogRef.Номенклатура", "-2", "Заказы.Ссылка.Code"),
+    ] {
+        let mut attribute = data_path_form_attribute("5", "Заказы", None);
+        attribute.columns = vec![chain_walk_column("1", "Ссылка", Some(reference))];
+        let attributes = vec![attribute];
+        let indexes = chain_walk_indexes(&attributes);
+        let names = BTreeMap::from([("5".to_string(), "Заказы".to_string())]);
+        assert_eq!(
+            resolve_form_bound_chain_member_path(
+                &format!("{{3,{{5}},{{1}},{{{marker}}}}}"),
+                &names,
+                indexes.owner_scoped_bindings_for_test(),
+                &BTreeMap::new(),
+                false,
+            )
+            .as_deref(),
+            Some(expected),
+            "{reference} {marker}"
+        );
+    }
+
+    // A column with no single declared reference type states no family, and the
+    // marker is not read against the attribute's own type instead.
+    let mut attribute = data_path_form_attribute("5", "Заказы", None);
+    attribute.columns = vec![chain_walk_column("1", "Ссылка", None)];
+    let attributes = vec![attribute];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = BTreeMap::from([("5".to_string(), "Заказы".to_string())]);
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            "{3,{5},{1},{-2}}",
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &BTreeMap::new(),
+            false,
+        ),
+        None
+    );
+}
