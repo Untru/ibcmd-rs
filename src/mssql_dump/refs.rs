@@ -1260,6 +1260,35 @@ pub(super) fn build_metadata_field_reference_index_from_texts(
     index
 }
 
+/// The single reference type each nested metadata child is *declared* to hold,
+/// keyed by that child's uuid.
+///
+/// The child names themselves already have an index -- this is its type-side
+/// twin, built from the same walk over the same headers. A child that declares
+/// no type, several types, or a non-reference type is left out entirely rather
+/// than approximated: the only consumer dereferences the declared type to reach
+/// its standard attributes, and a value with more than one possible type has no
+/// single set of those.
+pub(super) fn build_metadata_field_type_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        for (header, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            let value_types =
+                parse_metadata_child_value_types(&row.text, marker_start, &header.uuid, type_index);
+            let [ConstantValueType::Reference { reference }] = value_types.as_slice() else {
+                continue;
+            };
+            index.insert(header.uuid, reference.clone());
+        }
+    }
+    index
+}
+
 pub(super) fn build_information_register_field_reference_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,

@@ -10813,6 +10813,7 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
     let dcs_type_index = DcsTypeIndex::new();
     let type_index_collisions = BTreeSet::new();
     let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let field_type_refs = std::sync::Arc::new(BTreeMap::new());
     let legacy = extract_form_body_xml_from_body(&body, &type_index, &object_refs).unwrap();
     let sink = Sink(std::cell::RefCell::new(Vec::new()));
     let context = FormParseContext::new(
@@ -10820,6 +10821,7 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
         &type_index_collisions,
         &dcs_type_index,
         &object_refs,
+        &field_type_refs,
         &information_register_field_refs,
         None,
     )
@@ -22629,11 +22631,13 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
     let dcs_type_index = DcsTypeIndex::new();
     let object_refs = BTreeMap::new();
     let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let field_type_refs = std::sync::Arc::new(BTreeMap::new());
     let context = FormParseContext::new(
         &type_index,
         &type_index_collisions,
         &dcs_type_index,
         &object_refs,
+        &field_type_refs,
         &information_register_field_refs,
         None,
     );
@@ -62347,9 +62351,20 @@ fn reads_group_layout_geometry_from_the_shared_slot_window() {
 /// Builds the per-attribute member indexes the chain walker reads, the way the
 /// form body does once additional columns have been applied.
 fn chain_walk_indexes(attributes: &[FormAttribute]) -> FormChildItemIndexes {
+    chain_walk_indexes_with_metadata_field_types(attributes, BTreeMap::new())
+}
+
+fn chain_walk_indexes_with_metadata_field_types(
+    attributes: &[FormAttribute],
+    metadata_field_types: BTreeMap<String, String>,
+) -> FormChildItemIndexes {
     let mut indexes =
         collect_form_child_item_indexes_with_object_refs(&[], attributes, &BTreeMap::new(), None);
-    collect_form_chain_walk_member_indexes(&mut indexes, attributes);
+    collect_form_chain_walk_member_indexes(
+        &mut indexes,
+        attributes,
+        std::sync::Arc::new(metadata_field_types),
+    );
     indexes
 }
 
@@ -62872,4 +62887,183 @@ fn marks_a_default_picture_the_declared_main_table_cannot_hold() {
     assert!(!form_dynamic_list_default_picture_is_out_of_main_table(
         &owner_for(None, false)
     ));
+}
+
+/// A chain segment that names a metadata field reaches a value of that field's
+/// *declared* type, and a following marker reads that type's standard
+/// attributes -- exactly as it does after a declared form column.
+///
+/// Evidence: UT 11.5.27.75.
+/// `Catalogs/БанковскиеСчетаКонтрагентов/Forms/ФормаЭлемента` carries
+/// `{3,{1},{0,9e7b0920-…},{-2}}` and `{3,{1},{0,9e7b0920-…},{-3}}` on the same
+/// field, which is `Catalog.БанковскиеСчетаКонтрагентов.Attribute.Банк`
+/// declared `cfg:CatalogRef.КлассификаторБанков`; the platform writes
+/// `<DataPath>Объект.Банк.Code</DataPath>` and
+/// `<DataPath>Объект.Банк.Description</DataPath>`.
+/// `Documents/СчетФактураПолученныйАванс/Forms/ФормаДокумента` carries
+/// `{3,{1},{0,f9c452ce-…},{-2}}` on a field declared
+/// `cfg:DocumentRef.СчетФактураПолученныйАванс` and the platform writes
+/// `Объект.СчетФактураОснование.Number`, while
+/// `Documents/СчетФактураВыданныйАванс/Forms/ФормаДокумента` carries `{-3}` in
+/// the same place and writes `Объект.СчетФактураОснование.Date`. The same `-2`
+/// therefore writes `Code` under one declared type and `Number` under another,
+/// so the marker alone establishes nothing and the declared type decides.
+#[test]
+fn dereferences_a_metadata_field_through_its_declared_type() {
+    let bank_uuid = "9e7b0920-3d4f-481a-9dce-a789a4e9ef73";
+    let invoice_uuid = "f9c452ce-e7db-4048-9486-d5a5d219135d";
+    let attributes = vec![data_path_form_attribute("1", "Объект", None)];
+    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let object_refs = BTreeMap::from([
+        (
+            bank_uuid.to_string(),
+            "Catalog.БанковскиеСчетаКонтрагентов.Attribute.Банк".to_string(),
+        ),
+        (
+            invoice_uuid.to_string(),
+            "Document.СчетФактураПолученныйАванс.Attribute.СчетФактураОснование".to_string(),
+        ),
+    ]);
+    let field_types = BTreeMap::from([
+        (
+            bank_uuid.to_string(),
+            "cfg:CatalogRef.КлассификаторБанков".to_string(),
+        ),
+        (
+            invoice_uuid.to_string(),
+            "cfg:DocumentRef.СчетФактураПолученныйАванс".to_string(),
+        ),
+    ]);
+    let indexes = chain_walk_indexes_with_metadata_field_types(&attributes, field_types);
+
+    for (uuid, marker, expected) in [
+        (bank_uuid, "-2", "Объект.Банк.Code"),
+        (bank_uuid, "-3", "Объект.Банк.Description"),
+        (invoice_uuid, "-2", "Объект.СчетФактураОснование.Number"),
+        (invoice_uuid, "-3", "Объект.СчетФактураОснование.Date"),
+    ] {
+        assert_eq!(
+            resolve_form_bound_chain_member_path(
+                &format!("{{3,{{1}},{{0,{uuid}}},{{{marker}}}}}"),
+                &names,
+                indexes.owner_scoped_bindings_for_test(),
+                &object_refs,
+                false,
+            )
+            .as_deref(),
+            Some(expected),
+            "{uuid} {marker}"
+        );
+    }
+
+    // A marker the declared type's table does not list stays fail-closed rather
+    // than borrowing a name from a table that belongs to another family.
+    for marker in ["-4", "-8", "-9"] {
+        assert_eq!(
+            resolve_form_bound_chain_member_path(
+                &format!("{{3,{{1}},{{0,{bank_uuid}}},{{{marker}}}}}"),
+                &names,
+                indexes.owner_scoped_bindings_for_test(),
+                &object_refs,
+                false,
+            ),
+            None,
+            "marker {marker}"
+        );
+    }
+
+    // Without the declared type the same slot resolves to nothing at all: the
+    // rule is a function of that type, and a route without it has no answer to
+    // guess at. A field declaring several types, or none, is absent from the
+    // index for the same reason and lands here too.
+    let starved = chain_walk_indexes(&attributes);
+    for marker in ["-2", "-3"] {
+        assert_eq!(
+            resolve_form_bound_chain_member_path(
+                &format!("{{3,{{1}},{{0,{bank_uuid}}},{{{marker}}}}}"),
+                &names,
+                starved.owner_scoped_bindings_for_test(),
+                &object_refs,
+                false,
+            ),
+            None,
+            "starved {marker}"
+        );
+    }
+}
+
+/// The chain keeps walking past a dereferenced field: the owner a marker reaches
+/// is itself a value whose own members the following segments name.
+///
+/// Evidence: UT 11.5.27.75
+/// `Documents/АннулированиеПодарочныхСертификатов/Forms/ФормаДокумента` carries
+/// `{5,{1},{0,be38028f-…},{0,1d4e714f-…},{-5},{0,66664988-…}}`, where
+/// `1d4e714f-…` is the tabular-section field `ПодарочныйСертификат` declared
+/// `cfg:CatalogRef.ПодарочныеСертификаты`, `-5` is that catalog's `Owner`, and
+/// `66664988-…` is `Catalog.ВидыПодарочныхСертификатов.Attribute.Валюта`, a
+/// field of the owning catalog. The platform writes `<DataPath>Объект.
+/// ПодарочныеСертификаты.ПодарочныйСертификат.Owner.Валюта</DataPath>`. Seven
+/// forms carry this shape and none writes any other standard attribute under
+/// that prefix.
+#[test]
+fn dereferences_the_owner_of_a_field_reached_through_its_declared_type() {
+    let section_uuid = "be38028f-6f5b-41b4-9f7e-431e3174c12c";
+    let certificate_uuid = "1d4e714f-5d56-4139-86fd-4e09eca1f6d8";
+    let currency_uuid = "66664988-b912-4c0e-9868-4d67bbf9c65f";
+    let attributes = vec![data_path_form_attribute("1", "Объект", None)];
+    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let object_refs = BTreeMap::from([
+        (
+            section_uuid.to_string(),
+            "Document.АннулированиеПодарочныхСертификатов.TabularSection.ПодарочныеСертификаты"
+                .to_string(),
+        ),
+        (
+            certificate_uuid.to_string(),
+            "Document.АннулированиеПодарочныхСертификатов.TabularSection.\
+             ПодарочныеСертификаты.Attribute.ПодарочныйСертификат"
+                .to_string(),
+        ),
+        (
+            currency_uuid.to_string(),
+            "Catalog.ВидыПодарочныхСертификатов.Attribute.Валюта".to_string(),
+        ),
+    ]);
+    let slot = format!(
+        "{{5,{{1}},{{0,{section_uuid}}},{{0,{certificate_uuid}}},{{-5}},{{0,{currency_uuid}}}}}"
+    );
+
+    let indexes = chain_walk_indexes_with_metadata_field_types(
+        &attributes,
+        BTreeMap::from([(
+            certificate_uuid.to_string(),
+            "cfg:CatalogRef.ПодарочныеСертификаты".to_string(),
+        )]),
+    );
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &slot,
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("Объект.ПодарочныеСертификаты.ПодарочныйСертификат.Owner.Валюта")
+    );
+
+    // The declared type of the field the marker follows is what the chain needs;
+    // without it the whole five-segment slot stays unresolved rather than
+    // dropping the marker and joining the rest.
+    let starved = chain_walk_indexes(&attributes);
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &slot,
+            &names,
+            starved.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        ),
+        None
+    );
 }

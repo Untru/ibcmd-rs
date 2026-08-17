@@ -7,7 +7,11 @@ use std::{
     path::{Component, Path},
 };
 
-pub(crate) const OFFLINE_FORM_CONTEXT_SCHEMA_VERSION: u32 = 1;
+/// Bumped to 2 when the declared type of every metadata field joined the
+/// context: a trace run that lacked it would resolve fewer bound chains than
+/// the production export does, and an offline harness that silently differs
+/// from production is worse than no harness.
+pub(crate) const OFFLINE_FORM_CONTEXT_SCHEMA_VERSION: u32 = 2;
 
 /// Reuses the production metadata-text builders for a saved `Config_inflated`
 /// corpus. It intentionally accepts only already-inflated UTF-8 text rows.
@@ -19,6 +23,7 @@ pub struct OfflineFormContext {
     pub(crate) type_index: BTreeMap<String, String>,
     pub(crate) dcs_type_index: DcsTypeIndex,
     pub(crate) object_refs: BTreeMap<String, String>,
+    pub(crate) field_type_refs: Arc<BTreeMap<String, String>>,
     pub(crate) information_register_field_refs: InformationRegisterFieldReferenceIndex,
     pub(crate) form_owner_references: BTreeMap<String, String>,
     pub summary: OfflineFormContextSummary,
@@ -33,6 +38,7 @@ pub struct OfflineFormContextSummary {
     pub(crate) type_index_entries: usize,
     pub(crate) dcs_type_index_entries: usize,
     pub(crate) object_ref_entries: usize,
+    pub(crate) field_type_ref_entries: usize,
     pub(crate) information_register_field_ref_entries: usize,
     pub(crate) form_owner_entries: usize,
     pub(crate) type_collisions: usize,
@@ -145,6 +151,10 @@ impl OfflineFormContextFactory {
         }
         let type_index = indexes.references;
         let object_refs = build_metadata_object_reference_index_from_texts(&metadata);
+        let field_type_refs = Arc::new(build_metadata_field_type_reference_index_from_texts(
+            &metadata,
+            &type_index,
+        ));
         let defined =
             build_defined_type_value_owner_reference_index_from_texts(&metadata, &type_index);
         let information_register_field_refs =
@@ -166,6 +176,9 @@ impl OfflineFormContextFactory {
         }
         for (key, value) in &object_refs {
             canonical.push(format!("object\0{key}\0{value}"));
+        }
+        for (key, value) in field_type_refs.iter() {
+            canonical.push(format!("fieldtype\0{key}\0{value}"));
         }
         for (key, value) in &form_owner_references {
             canonical.push(format!("owner\0{key}\0{value}"));
@@ -223,6 +236,7 @@ impl OfflineFormContextFactory {
             type_index_entries: type_index.len(),
             dcs_type_index_entries: dcs_type_index.len(),
             object_ref_entries: object_refs.len(),
+            field_type_ref_entries: field_type_refs.len(),
             information_register_field_ref_entries: information_register_field_refs.len(),
             form_owner_entries: form_owner_references.len(),
             type_collisions: 0,
@@ -234,6 +248,7 @@ impl OfflineFormContextFactory {
             type_index,
             dcs_type_index,
             object_refs,
+            field_type_refs,
             information_register_field_refs,
             form_owner_references,
             summary,

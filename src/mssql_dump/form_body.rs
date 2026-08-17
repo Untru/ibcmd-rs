@@ -111,6 +111,9 @@ pub(super) struct FormParseContext<'a> {
     type_index_collisions: &'a BTreeSet<String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
+    /// The declared type of every metadata field, shared rather than copied:
+    /// it is configuration-wide, while a parse context is per form.
+    field_type_refs: &'a Arc<BTreeMap<String, String>>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
     form_owner_reference: Option<&'a str>,
     dcs_source_profile: ProfileId,
@@ -149,6 +152,7 @@ impl<'a> FormParseContext<'a> {
         type_index_collisions: &'a BTreeSet<String>,
         dcs_type_index: &'a DcsTypeIndex,
         object_refs: &'a BTreeMap<String, String>,
+        field_type_refs: &'a Arc<BTreeMap<String, String>>,
         information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
         form_owner_reference: Option<&'a str>,
     ) -> Self {
@@ -157,6 +161,7 @@ impl<'a> FormParseContext<'a> {
             type_index_collisions,
             dcs_type_index,
             object_refs,
+            field_type_refs,
             information_register_field_refs,
             form_owner_reference,
             dcs_source_profile: ProfileId::parse("provider:mssql-legacy")
@@ -204,6 +209,7 @@ pub(super) fn extract_form_body_xml_from_body(
             &BTreeSet::new(),
             &DcsTypeIndex::new(),
             object_refs,
+            &Arc::new(BTreeMap::new()),
             &BTreeMap::new(),
             None,
         ),
@@ -373,7 +379,11 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &mut child_item_indexes,
         &attributes,
     );
-    collect_form_chain_walk_member_indexes(&mut child_item_indexes, &attributes);
+    collect_form_chain_walk_member_indexes(
+        &mut child_item_indexes,
+        &attributes,
+        Arc::clone(context.field_type_refs),
+    );
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
@@ -631,11 +641,13 @@ pub(crate) struct FormItemSchemaTraceEvent {
     pub(crate) root_attribute_dynamic_list: Option<bool>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn trace_form_body_with_context(
     body: &ParsedFormBodyBlob,
     type_index: &BTreeMap<String, String>,
     dcs_type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
+    field_type_refs: &Arc<BTreeMap<String, String>>,
     information_register_field_refs: &InformationRegisterFieldReferenceIndex,
     form_owner_reference: Option<&str>,
     trace_sink: &dyn FormItemTraceSink,
@@ -646,6 +658,7 @@ pub(crate) fn trace_form_body_with_context(
         &type_index_collisions,
         dcs_type_index,
         object_refs,
+        field_type_refs,
         information_register_field_refs,
         form_owner_reference,
     )
@@ -5512,6 +5525,12 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// holds exactly one. A chain that dereferences a column reads its standard
     /// attributes, and which name a marker spells depends on that type's family.
     declared_column_types: BTreeMap<FormAttributeColumnKey, Option<String>>,
+    /// The single reference type each *metadata* field is declared to hold,
+    /// keyed by that field's uuid. Configuration-wide and shared, not form
+    /// local: a chain segment that names a metadata field reaches a value of
+    /// that field's declared type exactly as a declared column does, and the
+    /// standard attributes a following marker may address follow from it.
+    metadata_field_types: Arc<BTreeMap<String, String>>,
     /// Additional columns reachable through a *form item* rather than through
     /// the attribute, keyed by the table item id and the column id.
     table_additional_columns: BTreeMap<(String, String), Option<String>>,
@@ -5585,6 +5604,7 @@ fn collect_form_attribute_data_path_columns(
 pub(super) fn collect_form_chain_walk_member_indexes(
     indexes: &mut FormChildItemIndexes,
     attributes: &[FormAttribute],
+    metadata_field_types: Arc<BTreeMap<String, String>>,
 ) {
     // A table's own additional columns, keyed by the table item the binding
     // names. The column id is only unambiguous across the whole attribute, so a
@@ -5618,6 +5638,7 @@ pub(super) fn collect_form_chain_walk_member_indexes(
     }
     let owner_scoped_bindings = &mut indexes.owner_scoped_bindings;
     owner_scoped_bindings.table_additional_columns = table_additional_columns;
+    owner_scoped_bindings.metadata_field_types = metadata_field_types;
     for attribute in attributes {
         for column in &attribute.columns {
             let key = FormAttributeColumnKey {
@@ -14009,6 +14030,10 @@ pub(super) fn resolve_form_bound_chain_member_path(
                 }
                 path.push_str(member);
                 reached_metadata_reference = Some(reference.as_str());
+                reached_type = owner_scoped_bindings
+                    .metadata_field_types
+                    .get(&uuid)
+                    .map(String::as_str);
             }
             _ => return None,
         }
@@ -14538,7 +14563,18 @@ const CATALOG_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-5", "Owner"),
     ("-8", "Ref"),
 ];
-const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Code"), ("-3", "Description")];
+/// Reached by dereferencing a value whose declared type is exactly one catalog
+/// reference, whether that value is a form column or a metadata field.
+///
+/// `-5` joined the table when metadata fields started reaching it. Evidence:
+/// UT 11.5.27.75, the 7 forms whose chain reaches
+/// `Объект.ПодарочныеСертификаты.ПодарочныйСертификат` -- a field declared
+/// `cfg:CatalogRef.ПодарочныеСертификаты` -- and then carries `{-5}`; the
+/// platform writes `Owner` on every one, and writes no other standard attribute
+/// under that prefix. The same marker is `Owner` under `cfg:CatalogObject` too,
+/// and this is the only role a catalog reference was observed to carry it in.
+const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] =
+    &[("-2", "Code"), ("-3", "Description"), ("-5", "Owner")];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),

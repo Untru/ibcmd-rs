@@ -1359,6 +1359,7 @@ pub(super) fn write_source_asset(
                 context.type_index_collisions,
                 context.dcs_type_index,
                 context.object_refs,
+                context.field_type_refs,
                 context.information_register_field_refs,
                 owner_reference.as_deref(),
             )

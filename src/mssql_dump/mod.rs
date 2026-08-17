@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -2384,6 +2384,7 @@ struct DumpRowContext<'a> {
     role_rights_object_refs: &'a BTreeMap<String, String>,
     metadata_order: &'a BTreeMap<String, usize>,
     field_refs: &'a BTreeMap<String, String>,
+    field_type_refs: &'a Arc<BTreeMap<String, String>>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
     functional_option_refs: &'a BTreeMap<String, String>,
     help_refs: &'a BTreeMap<String, String>,
@@ -2633,6 +2634,11 @@ fn dump_table_rows_with_options_mode(
     } else {
         BTreeMap::new()
     };
+    let field_type_refs = Arc::new(if extract_metadata_xml {
+        build_metadata_field_type_reference_index_from_texts(metadata_texts, &type_index)
+    } else {
+        BTreeMap::new()
+    });
     let information_register_field_refs = if extract_metadata_xml {
         let defined_type_value_owner_refs =
             build_defined_type_value_owner_reference_index_from_texts(&metadata_texts, &type_index);
@@ -2784,6 +2790,7 @@ fn dump_table_rows_with_options_mode(
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,
+        field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
@@ -3630,6 +3637,13 @@ fn dump_table_rows_streamed(
     } else {
         BTreeMap::new()
     };
+    let field_type_refs = Arc::new(
+        if extract_metadata_xml && source_reference_needs.field_refs {
+            build_metadata_field_type_reference_index_from_texts(&index_metadata_texts, &type_index)
+        } else {
+            BTreeMap::new()
+        },
+    );
     let information_register_field_refs =
         if extract_metadata_xml && source_reference_needs.field_refs {
             let defined_type_value_owner_refs =
@@ -3849,6 +3863,7 @@ fn dump_table_rows_streamed(
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,
+        field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
