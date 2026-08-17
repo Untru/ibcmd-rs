@@ -19293,6 +19293,7 @@ fn formats_table_search_additions_as_direct_sections() {
         table_multiple_choice: None,
         table_selection_mode: None,
         table_header: None,
+        table_footer: None,
         table_horizontal_scroll_bar: None,
         table_horizontal_lines: None,
         table_vertical_lines: None,
@@ -19359,6 +19360,8 @@ fn formats_table_search_additions_as_direct_sections() {
         border_color: None,
         control_border: None,
         title_text_color: None,
+        footer_text_color: None,
+        footer_font_xml: None,
         mark_required_complete: None,
         auto_edit_mode: None,
         auto_insert_new_row: None,
@@ -19431,6 +19434,9 @@ fn formats_table_search_additions_as_direct_sections() {
         events: Vec::new(),
         data_path: Some("List".to_string()),
         data_path_provenance: None,
+        footer_data_path: None,
+        multiple_value_data_path: None,
+        multiple_value_present_data_path: None,
         title_data_path: None,
         command_name: None,
         command_source: None,
@@ -19488,6 +19494,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 table_multiple_choice: None,
                 table_selection_mode: None,
                 table_header: None,
+                table_footer: None,
                 table_horizontal_scroll_bar: None,
                 table_horizontal_lines: None,
                 table_vertical_lines: None,
@@ -19554,6 +19561,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 border_color: None,
                 control_border: None,
                 title_text_color: None,
+                footer_text_color: None,
+                footer_font_xml: None,
                 mark_required_complete: None,
                 auto_edit_mode: None,
                 auto_insert_new_row: None,
@@ -19626,6 +19635,9 @@ fn formats_table_search_additions_as_direct_sections() {
                 events: Vec::new(),
                 data_path: None,
                 data_path_provenance: None,
+                footer_data_path: None,
+                multiple_value_data_path: None,
+                multiple_value_present_data_path: None,
                 title_data_path: None,
                 command_name: None,
                 command_source: None,
@@ -19684,6 +19696,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 table_multiple_choice: None,
                 table_selection_mode: None,
                 table_header: None,
+                table_footer: None,
                 table_horizontal_scroll_bar: None,
                 table_horizontal_lines: None,
                 table_vertical_lines: None,
@@ -19750,6 +19763,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 border_color: None,
                 control_border: None,
                 title_text_color: None,
+                footer_text_color: None,
+                footer_font_xml: None,
                 mark_required_complete: None,
                 auto_edit_mode: None,
                 auto_insert_new_row: None,
@@ -19822,6 +19837,9 @@ fn formats_table_search_additions_as_direct_sections() {
                 events: Vec::new(),
                 data_path: Some("List.Name".to_string()),
                 data_path_provenance: None,
+                footer_data_path: None,
+                multiple_value_data_path: None,
+                multiple_value_present_data_path: None,
                 title_data_path: None,
                 command_name: None,
                 command_source: None,
@@ -63237,4 +63255,308 @@ fn dereferences_the_owner_of_a_field_reached_through_its_declared_type() {
         ),
         None
     );
+}
+
+/// The native `InputField` `РаспоряженияНаДоставкуВес` of
+/// `Documents/ЗаданиеНаПеревозку/Forms/ФормаПодбораРаспоряжений`: a strict
+/// 59-slot field layout that carries a footer colour and a footer font and an
+/// empty footer binding.
+fn footer_family_field_layout() -> String {
+    r#"{37,{904,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"РаспоряженияНаДоставкуВес",1,0,{1,0},{1,0},{2,{6},{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,3,{0,03e2d194-7682-4221-bc60-42df38104045}},{3,4,{0}},{7,1,60,{0},700,0,0,0,1,100},{0,0,0},1,{36,{3,0},8,0,1,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,1,{"ru","ЧДЦ=0"}},{1,1,{"ru","ЧДЦ=0"}},2,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{0,1,0},1,{22,{905,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"РаспоряженияНаДоставкуВесКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{1259,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"РаспоряженияНаДоставкуВесРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#.to_string()
+}
+
+/// The native `InputField` `Полномочие` of
+/// `Catalogs/КлассификаторПолномочийМЧД003/Forms/ФормаПодбораСоставныхПолномочий`,
+/// the only kind of item that carries the multiple-value editor bag.
+fn multiple_value_field_layout() -> String {
+    r#"{37,{252,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Полномочие",1,0,{1,0},{1,0},{1,{32}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,1,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},2,1,0,{"Pattern"},1,{1,1960479b-4d89-4eba-8b39-0aa802020558,"ПолномочиеНачалоВыбора",1,0,1960479b-4d89-4eba-8b39-0aa802020558,0,1},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{1,2,0,0,2,{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{4,0,{0},"",-1,-1,1,0,""},{1,{33}},"",{"Pattern"},{0},"",{"Pattern"},{1,{34}},"",{"Pattern"},0,0},0,{5007,0},1},{0,1,0},1,{22,{253,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПолномочиеКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{254,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПолномочиеРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#.to_string()
+}
+
+/// The native `Table` `РегионыПродажи` already used for the height-in-rows
+/// reading, whose own footer slot is `0`.
+fn table_footer_layout() -> String {
+    r#"{55,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"РегионыПродажи",0,0,1,{1,1,{"ru","Регионы продаж и поставок"}},{1,0},{1,{2}},0,1,0,0,0,1,1,0,0,1,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{4,1282f000-23b6-4887-87f4-9e8e79db3d32,"РегионыПродажиВыбор",2391e7b8-7235-45d7-ab7e-6ff3dc086396,"РегионыПродажиПередНачаломДобавления",ab930362-ff94-4dcb-ad16-188805d23e3c,"РегионыПродажиПередНачаломИзменения",fe115cc8-9e33-4684-a166-bd5136fe7a9f,"РегионыПродажиПриИзменении",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1,2391e7b8-7235-45d7-ab7e-6ff3dc086396,0,1,ab930362-ff94-4dcb-ad16-188805d23e3c,0,1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},{0},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#.to_string()
+}
+
+/// Renders `items` the way the form body does, with the chain-walk member
+/// indexes built as well.
+fn footer_family_child_items_xml(
+    items: &[&str],
+    attributes: &[FormAttribute],
+    object_refs: &BTreeMap<String, String>,
+) -> String {
+    let mut layout = vec![items.len().to_string()];
+    for (index, item) in items.iter().enumerate() {
+        layout.push(format!(
+            "{:08x}-0000-4000-8000-000000000000",
+            index as u32 + 1
+        ));
+        layout.push((*item).to_string());
+    }
+    let layout = layout.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut indexes =
+        collect_form_child_item_indexes_with_object_refs(&layout, attributes, object_refs, None);
+    collect_form_chain_walk_member_indexes(&mut indexes, attributes, Arc::new(BTreeMap::new()));
+    let items = extract_form_child_items(
+        &layout,
+        attributes,
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+        &indexes,
+        None,
+    );
+    format_form_child_items_xml(&items, 1)
+}
+
+fn footer_family_column(id: &str, name: &str) -> FormAttributeColumn {
+    FormAttributeColumn {
+        id: id.to_string(),
+        name: name.to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        explicit_empty_type: false,
+        functional_options: Vec::new(),
+    }
+}
+
+/// A field control carries its column footer's bound path in the second bound
+/// slot, the one right behind the slot the `DataPath` comes from.
+///
+/// Evidence: UT 11.5.27.75 spells out 59 149 field items; the slot holds the
+/// empty binding `{0}` on exactly the 58 936 that carry no `<FooterDataPath>`
+/// and a chain on exactly the 213 that do, with no counter-example either way.
+/// The bound shape put into the layout below is the one
+/// `CommonForms/ПодборТоваровПоПоступлениям` writes for
+/// `ТаблицаТоваровКоличествоУпаковок`: a one-segment chain naming a form
+/// attribute.
+#[test]
+fn reads_field_footer_data_path_from_the_second_bound_slot() {
+    let base = footer_family_field_layout();
+    let mut collection = data_path_form_attribute("6", "РаспоряженияНаДоставку", None);
+    collection.columns = vec![footer_family_column("8", "Вес")];
+    let total = data_path_form_attribute("7", "ВесВсего", None);
+    let attributes = vec![collection, total];
+
+    // The empty binding the native item itself carries writes no element.
+    let xml = footer_family_child_items_xml(&[base.as_str()], &attributes, &BTreeMap::new());
+    assert!(
+        xml.contains("<DataPath>РаспоряженияНаДоставку.Вес</DataPath>"),
+        "{xml}"
+    );
+    assert!(!xml.contains("<FooterDataPath>"), "{xml}");
+
+    let bound = base.replacen("{2,{6},{8}},{0}", "{2,{6},{8}},{1,{7}}", 1);
+    assert_ne!(bound, base);
+    let xml = footer_family_child_items_xml(&[bound.as_str()], &attributes, &BTreeMap::new());
+    assert!(
+        xml.contains("<FooterDataPath>ВесВсего</FooterDataPath>"),
+        "{xml}"
+    );
+    // The primary slot keeps its own path: the footer slot is read in addition
+    // to it, never instead of it.
+    assert!(
+        xml.contains("<DataPath>РаспоряженияНаДоставку.Вес</DataPath>"),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<DataPath>").unwrap() < xml.find("<FooterDataPath>").unwrap(),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<FooterDataPath>").unwrap() < xml.find("<FooterFont ").unwrap(),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<FooterDataPath>").unwrap() < xml.find("<ContextMenu").unwrap(),
+        "{xml}"
+    );
+}
+
+/// The footer's own colour and font sit two and four slots past the title font,
+/// and `FooterTextColor` is written ahead of `FooterFont`.
+///
+/// Evidence: the layout below carries both elements natively; across the whole
+/// configuration the colour slot holds the unset tuple on every field item
+/// without a `<FooterTextColor>` and the font slot the empty `AutoFont` default
+/// on every one without a `<FooterFont>`.
+#[test]
+fn reads_field_footer_text_color_and_font_from_their_own_slots() {
+    let style_uuid = "03e2d194-7682-4221-bc60-42df38104045";
+    let object_refs = BTreeMap::from([(
+        style_uuid.to_string(),
+        "StyleItem.ЦветИтоговыхПоказателейДокументов".to_string(),
+    )]);
+    let base = footer_family_field_layout();
+
+    let item = parse_form_child_item(
+        &base,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(item.tag, "InputField");
+    assert_eq!(
+        item.footer_text_color.as_deref(),
+        Some("style:ЦветИтоговыхПоказателейДокументов")
+    );
+    assert_eq!(
+        item.footer_font_xml.as_deref(),
+        Some(
+            r#"<FooterFont ref="sys:DefaultGUIFont" bold="true" italic="false" underline="false" strikeout="false" kind="WindowsFont"/>"#
+        )
+    );
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    let color_at = xml
+        .find("<FooterTextColor>style:ЦветИтоговыхПоказателейДокументов</FooterTextColor>")
+        .unwrap_or_else(|| panic!("{xml}"));
+    let font_at = xml.find("<FooterFont ").unwrap_or_else(|| panic!("{xml}"));
+    assert!(color_at < font_at, "{xml}");
+    assert!(font_at < xml.find("<ContextMenu").unwrap(), "{xml}");
+
+    // Both slots switched back to their unset tuples write nothing, so the rule
+    // is a reading of the slots and not a shape guess.
+    let unset = base
+        .replacen(&format!("{{3,3,{{0,{style_uuid}}}}}"), "{3,4,{0}}", 1)
+        .replacen("{7,1,60,{0},700,0,0,0,1,100}", "{7,3,0,1,100}", 1);
+    assert_ne!(unset, base);
+    let item = parse_form_child_item(
+        &unset,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(item.footer_text_color, None);
+    assert_eq!(item.footer_font_xml, None);
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(!xml.contains("<FooterTextColor>"), "{xml}");
+    assert!(!xml.contains("<FooterFont"), "{xml}");
+}
+
+/// The multiple-value editor keeps its two bound paths in the twenty-member bag
+/// the extended option bag carries at slot 62: member 9 is the value path and
+/// member 15 the presentation path, each naming one column of the attribute the
+/// field itself is bound to.
+///
+/// Evidence: in the native layout below attribute 32 `Полномочие` declares
+/// column 33 `Код` and column 34 `Наименование`, and the platform writes
+/// `Полномочие.Код` for the value path and `Полномочие.Наименование` for the
+/// presentation path. Only 6 of the 34 838 `InputField` items carry the bag at
+/// all and only 3 have member 9 set -- exactly the 3 that carry the elements.
+#[test]
+fn reads_multiple_value_data_paths_from_the_editor_bag() {
+    let base = multiple_value_field_layout();
+    let mut attribute = data_path_form_attribute("32", "Полномочие", None);
+    attribute.columns = vec![
+        footer_family_column("33", "Код"),
+        footer_family_column("34", "Наименование"),
+    ];
+
+    let xml =
+        footer_family_child_items_xml(&[base.as_str()], &[attribute.clone()], &BTreeMap::new());
+    let value_at = xml
+        .find("<MultipleValueDataPath>Полномочие.Код</MultipleValueDataPath>")
+        .unwrap_or_else(|| panic!("{xml}"));
+    let present_at = xml
+        .find(
+            "<MultipleValuePresentDataPath>Полномочие.Наименование</MultipleValuePresentDataPath>",
+        )
+        .unwrap_or_else(|| panic!("{xml}"));
+    assert!(value_at < present_at, "{xml}");
+    assert!(
+        xml.find("<ExtendedEditMultipleValues>true</ExtendedEditMultipleValues>")
+            .unwrap_or_else(|| panic!("{xml}"))
+            < value_at,
+        "{xml}"
+    );
+    assert!(present_at < xml.find("<ContextMenu").unwrap(), "{xml}");
+
+    // Declaring the columns the other way round changes nothing: the two paths
+    // are told apart by their position in the bag, exactly as the native
+    // `ТипСуммы` item shows, whose attribute declares `Наименование` first and
+    // still spells `Код` at member 9.
+    let mut reversed = attribute.clone();
+    reversed.columns.reverse();
+    let xml = footer_family_child_items_xml(&[base.as_str()], &[reversed], &BTreeMap::new());
+    assert!(
+        xml.contains("<MultipleValueDataPath>Полномочие.Код</MultipleValueDataPath>"),
+        "{xml}"
+    );
+
+    // An empty value binding writes neither element.
+    let unset = base.replacen(
+        r#"{4,0,{0},"",-1,-1,1,0,""},{1,{33}},"",{"Pattern"}"#,
+        r#"{4,0,{0},"",-1,-1,1,0,""},{0},"",{"Pattern"}"#,
+        1,
+    );
+    assert_ne!(unset, base);
+    let xml = footer_family_child_items_xml(&[unset.as_str()], &[attribute], &BTreeMap::new());
+    assert!(!xml.contains("<MultipleValueDataPath>"), "{xml}");
+}
+
+/// A `Table` states that it shows a footer in the slot right past the one that
+/// states whether it shows a header.
+///
+/// Evidence: the slot reads `1` on all 39 native tables that write
+/// `<Footer>true</Footer>` and `0` on all 4 490 that write nothing, with no
+/// counter-example.
+#[test]
+fn reads_table_footer_from_the_slot_past_the_header() {
+    let base = table_footer_layout();
+    let parse = |field: &str| {
+        parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::from([("2".to_string(), "РегионыПродажи".to_string())]),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap()
+    };
+
+    let item = parse(&base);
+    assert_eq!(item.tag, "Table");
+    assert_eq!(item.table_footer, None);
+    assert!(!format_form_child_items_xml(&[item], 1).contains("<Footer>"));
+
+    let shown = base.replacen(
+        "1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0}",
+        "1,0,1,1,1,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0}",
+        1,
+    );
+    assert_ne!(shown, base);
+    let item = parse(&shown);
+    assert_eq!(item.table_footer, Some(true));
+    let xml = format_form_child_items_xml(&[item], 1);
+    let footer_at = xml
+        .find("<Footer>true</Footer>")
+        .unwrap_or_else(|| panic!("{xml}"));
+    assert!(
+        footer_at
+            > xml
+                .find("<Representation>List</Representation>")
+                .unwrap_or_else(|| panic!("{xml}")),
+        "{xml}"
+    );
+    assert!(
+        footer_at
+            > xml
+                .find("<HeightInTableRows>1</HeightInTableRows>")
+                .unwrap_or_else(|| panic!("{xml}")),
+        "{xml}"
+    );
+    assert!(footer_at < xml.find("<FileDragMode>").unwrap(), "{xml}");
+    assert!(footer_at < xml.find("<DataPath>").unwrap(), "{xml}");
 }

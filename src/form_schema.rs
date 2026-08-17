@@ -4448,6 +4448,8 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormInputFieldTailXmlProperty {
+    MultipleValueDataPath,
+    MultipleValuePresentDataPath,
     ListChoiceMode,
     ExtendedEditMultipleValues,
     AutoMarkIncomplete,
@@ -4456,6 +4458,12 @@ pub(crate) enum FormInputFieldTailXmlProperty {
 pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlProperty] = &[
     FormInputFieldTailXmlProperty::ListChoiceMode,
     FormInputFieldTailXmlProperty::ExtendedEditMultipleValues,
+    // The two multiple-value bound paths trail `ExtendedEditMultipleValues`,
+    // `ChoiceButton` and `DataPath` and precede `ContextMenu`, `ExtendedTooltip`
+    // and `Events`, and the value path precedes the presentation path, on all 3
+    // native items that carry them.
+    FormInputFieldTailXmlProperty::MultipleValueDataPath,
+    FormInputFieldTailXmlProperty::MultipleValuePresentDataPath,
     FormInputFieldTailXmlProperty::AutoMarkIncomplete,
 ];
 
@@ -4485,6 +4493,7 @@ pub(crate) enum FormTableXmlProperty {
     SelectionMode,
     RowSelectionMode,
     Header,
+    Footer,
     HorizontalScrollBar,
     HorizontalLines,
     VerticalLines,
@@ -4582,6 +4591,17 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // `EnableStartDrag`, `FileDragMode`, `DataPath`, `Title` and `CommandSet`
     // on all 32 native occurrences, with no counter-example.
     FormTableXmlProperty::HeaderHeight,
+    // `Footer` trails `Representation` (31), `SkipOnInput` (13),
+    // `ChangeRowOrder` (8), `ChangeRowSet` (8), `ReadOnly` (4),
+    // `TitleLocation` (4), `CommandBarLocation` (3), `AutoMaxHeight` (2),
+    // `HeightInTableRows` (2), `AutoMaxWidth` (1), `DefaultItem` (1),
+    // `HeaderHeight` (1) and `Height` (1), and precedes `DataPath` (39),
+    // `Events` (31), `FileDragMode` (29), `Title` (27), `EnableDrag` (23),
+    // `EnableStartDrag` (23), `AutoInsertNewRow` (22), `CommandSet` (9),
+    // `AutoAddIncomplete` (7), the three search/status locations (4 each),
+    // `VerticalStretch` (3) and `UseAlternationRowColor` (2), across all 39
+    // native occurrences with no pair counted both ways.
+    FormTableXmlProperty::Footer,
     FormTableXmlProperty::UseAlternationRowColor,
     FormTableXmlProperty::AutoInsertNewRow,
     FormTableXmlProperty::AutoAddIncomplete,
@@ -4633,6 +4653,7 @@ enum FormTableSlot {
     SelectionMode,
     RowSelectionMode,
     Header,
+    Footer,
     HorizontalScrollBar,
     HorizontalLines,
     VerticalLines,
@@ -4683,6 +4704,11 @@ impl FormTableSlot {
             Self::SelectionMode => 24,
             Self::RowSelectionMode => 25,
             Self::Header => 26,
+            // The column footer's own switch, one slot past the header's, and
+            // the only slot that tells the two apart: `1` on all 39 native
+            // tables that write `<Footer>true</Footer>` and `0` on all 4 490
+            // that write nothing, with no counter-example.
+            Self::Footer => 28,
             Self::HorizontalScrollBar => 30,
             Self::HorizontalLines => 32,
             Self::VerticalLines => 33,
@@ -5253,6 +5279,10 @@ impl FormTableSchema {
         self.explicit_false(fields, FormTableSlot::Header)
     }
 
+    pub(crate) fn footer(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(FormTableSlot::Footer.index())?.trim() == "1").then_some(true)
+    }
+
     pub(crate) const fn horizontal_scroll_bar_slot(self) -> usize {
         FormTableSlot::HorizontalScrollBar.index()
     }
@@ -5631,6 +5661,8 @@ pub(crate) enum FormFieldTopLevelSlot {
     DefaultItem,
     TitleTextColor,
     TitleFont,
+    FooterTextColor,
+    FooterFont,
 }
 
 impl FormFieldTopLevelSlot {
@@ -5645,6 +5677,14 @@ impl FormFieldTopLevelSlot {
             // on every one of the 180 that carry it.
             Self::TitleTextColor => 31 + top_level_offset,
             Self::TitleFont => 32 + top_level_offset,
+            // The footer's own colour and font sit two and four slots past the
+            // title's. The colour slot holds the unset tuple on every native
+            // field item without a `<FooterTextColor>` and a readable style
+            // reference on all 6 that carry one; the font slot holds the empty
+            // `AutoFont` default on every item without a `<FooterFont>` and a
+            // font tuple on all 43 that carry one.
+            Self::FooterTextColor => 34 + top_level_offset,
+            Self::FooterFont => 36 + top_level_offset,
         }
     }
 }

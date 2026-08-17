@@ -1117,6 +1117,7 @@ pub(super) struct FormChildItem {
     pub(super) table_multiple_choice: Option<bool>,
     pub(super) table_selection_mode: Option<&'static str>,
     pub(super) table_header: Option<bool>,
+    pub(super) table_footer: Option<bool>,
     pub(super) table_horizontal_scroll_bar: Option<FormTableHorizontalScrollBar>,
     pub(super) table_horizontal_lines: Option<bool>,
     pub(super) table_vertical_lines: Option<bool>,
@@ -1183,6 +1184,8 @@ pub(super) struct FormChildItem {
     pub(super) border_color: Option<String>,
     pub(super) control_border: Option<FormControlBorderStyle>,
     pub(super) title_text_color: Option<String>,
+    pub(super) footer_text_color: Option<String>,
+    pub(super) footer_font_xml: Option<String>,
     pub(super) mark_required_complete: Option<bool>,
     pub(super) auto_edit_mode: Option<bool>,
     pub(super) auto_insert_new_row: Option<bool>,
@@ -1256,6 +1259,9 @@ pub(super) struct FormChildItem {
     pub(super) events: Vec<FormBodyEvent>,
     pub(super) data_path: Option<String>,
     pub(super) data_path_provenance: Option<FormChildItemDataPathProvenance>,
+    pub(super) footer_data_path: Option<String>,
+    pub(super) multiple_value_data_path: Option<String>,
+    pub(super) multiple_value_present_data_path: Option<String>,
     pub(super) title_data_path: Option<String>,
     pub(super) command_name: Option<String>,
     pub(super) command_source: Option<String>,
@@ -6916,7 +6922,7 @@ fn parse_form_child_item_with_metadata_owners(
     let strict_field_data_path = field_schema_and_options.is_some();
     let owner_scoped_data_path =
         strict_field_data_path || table_schema.is_some() || button_data_path_slot.is_some();
-    let data_path_resolution = parse_form_child_item_data_path(
+    let data_paths = parse_form_child_item_data_path(
         tag,
         &fields,
         &name,
@@ -6937,6 +6943,10 @@ fn parse_form_child_item_with_metadata_owners(
         owner_scoped_bindings,
         object_refs,
     );
+    let data_path_resolution = data_paths.primary;
+    let footer_data_path = data_paths.footer;
+    let multiple_value_data_path = data_paths.multiple_value;
+    let multiple_value_present_data_path = data_paths.multiple_value_present;
     let data_path_provenance = data_path_resolution
         .as_ref()
         .map(|resolved| resolved.provenance);
@@ -7506,6 +7516,7 @@ fn parse_form_child_item_with_metadata_owners(
         table_multiple_choice: table_schema.and_then(|schema| schema.multiple_choice(&fields)),
         table_selection_mode: table_schema.and_then(|schema| schema.selection_mode(&fields)),
         table_header: table_schema.and_then(|schema| schema.header(&fields)),
+        table_footer: table_schema.and_then(|schema| schema.footer(fields)),
         table_horizontal_scroll_bar: table_schema
             .and_then(|schema| schema.horizontal_scroll_bar(&fields)),
         table_horizontal_lines: table_schema.and_then(|schema| schema.horizontal_lines(&fields)),
@@ -8109,6 +8120,16 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        footer_text_color: field_schema_and_options
+            .as_ref()
+            .and_then(|_| {
+                fields.get(FieldSlot::FooterTextColor.index(input_field_top_level_offset))
+            })
+            .and_then(|field| parse_form_control_color(field, object_refs)),
+        footer_font_xml: field_schema_and_options
+            .as_ref()
+            .and_then(|_| fields.get(FieldSlot::FooterFont.index(input_field_top_level_offset)))
+            .and_then(|field| parse_form_font_tuple_xml_tag(field, object_refs, "FooterFont")),
         mark_required_complete: if tag == "InputField"
             && form_input_field_layout_is_extended(&fields)
         {
@@ -8885,6 +8906,9 @@ fn parse_form_child_item_with_metadata_owners(
         },
         data_path: data_path_resolution.map(|resolved| resolved.data_path),
         data_path_provenance,
+        footer_data_path,
+        multiple_value_data_path,
+        multiple_value_present_data_path,
         title_data_path: parse_form_title_data_path(
             tag,
             wrapper,
@@ -13302,13 +13326,13 @@ pub(super) fn parse_form_child_item_data_path(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
-) -> Option<ResolvedFormChildItemDataPath> {
+) -> FormChildItemDataPaths {
     let owner_scoped_metadata = !matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField");
     // An item that sits inside the table it addresses reads the row's own
     // column; one that sits outside reads the column total. Nothing in the slot
     // tells the two apart.
     let aggregate_member = parent_data_path.is_none();
-    let parse_bound_slot = |field: &str| {
+    let parse_bound_slot = |field: &str, aggregate: bool| {
         let chain = FormOwnerScopedDataPath::from_option(
             resolve_form_settings_composer_chain_data_path(field, attribute_metadata_owners_by_id)
                 .or_else(|| {
@@ -13323,7 +13347,7 @@ pub(super) fn parse_form_child_item_data_path(
                         attribute_names_by_id,
                         owner_scoped_bindings,
                         object_refs,
-                        aggregate_member,
+                        aggregate,
                     )
                 }),
         );
@@ -13389,22 +13413,24 @@ pub(super) fn parse_form_child_item_data_path(
                 FormOwnerScopedDataPath::from_option(data_path)
             })
     };
-    let parse_direct_bound = |field: &&str| {
-        parse_bound_slot(field)
-            .or_else(|| {
-                // A chain whose leaf names a metadata attribute is the same
-                // binding one segment shorter plus that attribute's name.
-                let Some((prefix, suffix)) = split_form_metadata_attribute_tail(field, object_refs)
-                else {
-                    return FormOwnerScopedDataPath::Unknown;
-                };
-                match parse_bound_slot(&prefix) {
-                    FormOwnerScopedDataPath::Resolved(prefix_path) => {
-                        FormOwnerScopedDataPath::Resolved(format!("{prefix_path}.{suffix}"))
-                    }
-                    unresolved => unresolved,
+    let parse_direct_slot = |field: &str, aggregate: bool| {
+        parse_bound_slot(field, aggregate).or_else(|| {
+            // A chain whose leaf names a metadata attribute is the same
+            // binding one segment shorter plus that attribute's name.
+            let Some((prefix, suffix)) = split_form_metadata_attribute_tail(field, object_refs)
+            else {
+                return FormOwnerScopedDataPath::Unknown;
+            };
+            match parse_bound_slot(&prefix, aggregate) {
+                FormOwnerScopedDataPath::Resolved(prefix_path) => {
+                    FormOwnerScopedDataPath::Resolved(format!("{prefix_path}.{suffix}"))
                 }
-            })
+                unresolved => unresolved,
+            }
+        })
+    };
+    let parse_direct_bound = |field: &&str| {
+        parse_direct_slot(field, aggregate_member)
             .with_provenance(FormChildItemDataPathProvenance::DirectRawSlot)
     };
     let parse_bound = |field: &&str| {
@@ -13429,7 +13455,7 @@ pub(super) fn parse_form_child_item_data_path(
             }
             FormChildItemDataPathResolution::Unknown
         };
-    let input_field_offset = matches!(
+    let field_layout_tag = matches!(
         tag,
         "InputField"
             | "LabelField"
@@ -13445,13 +13471,14 @@ pub(super) fn parse_form_child_item_data_path(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
-    )
-    .then(|| {
-        form_input_field_layout_is_extended(fields)
-            .then(|| form_input_field_top_level_offset(fields))
-    })
-    .flatten()
-    .unwrap_or(0);
+    );
+    let input_field_offset = field_layout_tag
+        .then(|| {
+            form_input_field_layout_is_extended(fields)
+                .then(|| form_input_field_top_level_offset(fields))
+        })
+        .flatten()
+        .unwrap_or(0);
     let input_slots = [11 + input_field_offset, 12 + input_field_offset];
     // Both bound slots spelling the empty binding `{0}` is the platform's own
     // statement that the item shows no data, and it then writes no `DataPath`
@@ -13465,8 +13492,54 @@ pub(super) fn parse_form_child_item_data_path(
             None | Some("{0}")
         );
     if unbound_slots {
-        return None;
+        return FormChildItemDataPaths::default();
     }
+    // The second bound slot is the column footer's own binding, written in the
+    // same chain grammar as the first. Over all 59 149 field items UT
+    // 11.5.27.75 spells out, the slot holds the empty binding `{0}` on exactly
+    // the 58 936 that carry no `<FooterDataPath>` and a chain on exactly the
+    // 213 that do, with no counter-example either way. The aggregate marker is
+    // read as the aggregate it names here: a footer states the column total
+    // even when the item sits inside the table it addresses, which is the one
+    // place the primary slot's placement rule does not reach.
+    let footer_data_path = field_layout_tag
+        .then(|| fields.get(input_slots[1]))
+        .flatten()
+        .filter(|field| field.trim() != "{0}")
+        .and_then(|field| match parse_direct_slot(field, true) {
+            FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+            FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+        });
+    // The multiple-value editor keeps its own two bound slots in a twenty-member
+    // bag the extended option bag carries at slot 62. Across all 34 838
+    // `InputField` items UT 11.5.27.75 spells out, only 6 carry that bag at all
+    // and only 3 have its first binding set -- exactly the 3 the platform writes
+    // `<MultipleValueDataPath>` and `<MultipleValuePresentDataPath>` for. Member
+    // 9 is the value path and member 15 the presentation path: the item over
+    // `ТипСуммы` declares `Наименование` before `Код` yet still spells `Код` at
+    // member 9, so the two are told apart by position and not by the order the
+    // attribute declares its columns. Member 12 is bound on none of the 34 838.
+    let multiple_value_paths = (tag == "InputField")
+        .then(|| form_input_field_extended_options(fields))
+        .flatten()
+        .and_then(|options| {
+            let members = split_1c_braced_fields(options.get(62)?.trim(), 0)?;
+            if members.len() != 20 {
+                return None;
+            }
+            let attribute_id =
+                parse_form_single_segment_chain_id(fields.get(input_slots[0])?.trim())?;
+            let resolve = |member: usize| {
+                resolve_form_attribute_declared_column_path(
+                    members.get(member)?.trim(),
+                    &attribute_id,
+                    attribute_names_by_id,
+                    owner_scoped_bindings,
+                )
+            };
+            Some((resolve(9), resolve(15)))
+        })
+        .unwrap_or((None, None));
     let data_path = match tag {
         "Table" => fields
             .get(11)
@@ -13518,7 +13591,57 @@ pub(super) fn parse_form_child_item_data_path(
             FormChildItemDataPathProvenance::InferredFallback,
         ),
     };
-    data_path.into_option()
+    FormChildItemDataPaths {
+        primary: data_path.into_option(),
+        footer: footer_data_path,
+        multiple_value: multiple_value_paths.0,
+        multiple_value_present: multiple_value_paths.1,
+    }
+}
+
+/// The id a one-segment bound chain `{1,{<id>}}` names, and nothing else.
+fn parse_form_single_segment_chain_id(field: &str) -> Option<String> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let [only] = segments.as_slice() else {
+        return None;
+    };
+    let [id] = only.as_slice() else {
+        return None;
+    };
+    Some(parse_form_chain_numeric_id(id)?.to_string())
+}
+
+/// Spells out a bound slot that names one column an attribute declares, given
+/// the attribute from elsewhere.
+///
+/// This is the `{c}` segment of the chain grammar standing on its own: the slot
+/// carries the column id with no attribute ahead of it, because the attribute is
+/// the one the item is already bound to. The column name comes from the same
+/// declared-column index the chain walker reads.
+fn resolve_form_attribute_declared_column_path(
+    field: &str,
+    attribute_id: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> Option<String> {
+    let column_id = parse_form_single_segment_chain_id(field)?;
+    let key = FormAttributeColumnKey {
+        attribute_id: attribute_id.to_string(),
+        column_id,
+    };
+    let column = owner_scoped_bindings.declared_columns.get(&key)?.as_ref()?;
+    let attribute = attribute_names_by_id.get(attribute_id)?;
+    Some(format!("{attribute}.{column}"))
+}
+
+/// The two bound data paths a field item spells out: the one it edits and the
+/// one its column footer shows.
+#[derive(Default)]
+pub(super) struct FormChildItemDataPaths {
+    pub(super) primary: Option<ResolvedFormChildItemDataPath>,
+    pub(super) footer: Option<String>,
+    pub(super) multiple_value: Option<String>,
+    pub(super) multiple_value_present: Option<String>,
 }
 
 pub(super) struct ResolvedFormChildItemDataPath {
@@ -16710,6 +16833,22 @@ fn format_form_input_field_tail_xml(
                     "{tab}<ExtendedEditMultipleValues>true</ExtendedEditMultipleValues>\r\n"
                 ));
             }
+            FormInputFieldTailXmlProperty::MultipleValueDataPath => {
+                if let Some(path) = &item.multiple_value_data_path {
+                    xml.push_str(&format!(
+                        "{tab}<MultipleValueDataPath>{}</MultipleValueDataPath>\r\n",
+                        escape_xml_text(path)
+                    ));
+                }
+            }
+            FormInputFieldTailXmlProperty::MultipleValuePresentDataPath => {
+                if let Some(path) = &item.multiple_value_present_data_path {
+                    xml.push_str(&format!(
+                        "{tab}<MultipleValuePresentDataPath>{}</MultipleValuePresentDataPath>\r\n",
+                        escape_xml_text(path)
+                    ));
+                }
+            }
             FormInputFieldTailXmlProperty::AutoMarkIncomplete
                 if include_auto_mark_incomplete
                     && item.extended_edit_multiple_values == Some(true)
@@ -17022,6 +17161,10 @@ fn format_form_table_property_xml(
         },
         FormTableXmlProperty::Header => match item.table_header {
             Some(false) => format!("{tab}<Header>false</Header>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::Footer => match item.table_footer {
+            Some(true) => format!("{tab}<Footer>true</Footer>\r\n"),
             _ => String::new(),
         },
         FormTableXmlProperty::HorizontalScrollBar => item
@@ -17834,6 +17977,34 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.show_in_footer == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowInFooter>false</ShowInFooter>\r\n"));
+    }
+    // Placed from pairwise counts over every native item that carries the
+    // element: `FooterDataPath` trails `DataPath` (213), `EditMode` (114),
+    // `Title` (85), `SkipOnInput` (46), `ReadOnly` (45), `ShowInHeader` (19),
+    // `UserVisible` (4), `Visible` (3), `TitleLocation` (2) and `HeaderPicture`
+    // (1), and precedes `ContextMenu` (213), `ExtendedTooltip` (213), `Width`
+    // (154), `Events` (105), `Wrap` (74), `FooterFont` (26), `MarkNegatives`
+    // (9) and `FooterHorizontalAlign` (1), with no pair counted both ways.
+    if let Some(footer_data_path) = &item.footer_data_path {
+        xml.push_str(&format!(
+            "{tab}\t<FooterDataPath>{}</FooterDataPath>\r\n",
+            escape_xml_text(footer_data_path)
+        ));
+    }
+    // `FooterTextColor` precedes `FooterFont` on all 6 native items that carry
+    // both, and both trail `FooterDataPath` (26 for the font, 6 for the colour)
+    // and precede `Width`, `Wrap`, `Format`, `EditFormat`, `BorderColor`,
+    // `ChoiceButton`, `SpinButton`, `MaxValue`, `DropListButton`,
+    // `ChoiceButtonRepresentation`, `FooterPicture`, `Events`, `ContextMenu`
+    // and `ExtendedTooltip`, with no pair counted both ways.
+    if let Some(footer_text_color) = &item.footer_text_color {
+        xml.push_str(&format!(
+            "{tab}\t<FooterTextColor>{}</FooterTextColor>\r\n",
+            escape_xml_text(footer_text_color)
+        ));
+    }
+    if let Some(footer_font) = &item.footer_font_xml {
+        xml.push_str(&format!("{tab}\t{footer_font}\r\n"));
     }
     if let Some(footer_horizontal_align) = item.footer_horizontal_align {
         xml.push_str(&format!(
