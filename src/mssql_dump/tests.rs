@@ -4095,7 +4095,7 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
     );
     let duplicate_direct_items = [direct_items[0].as_str(), direct_items[0].as_str()];
     let duplicate_direct =
-        parse_document_attribute_collection_indexed(&duplicate_direct_items, Some(6)).unwrap_err();
+        parse_document_attribute_collection_indexed(&duplicate_direct_items, &[6]).unwrap_err();
     assert_eq!(duplicate_direct.item_index, 1);
     assert_eq!(
         duplicate_direct.reason,
@@ -4111,8 +4111,10 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
         Some("direct_attribute")
     );
     assert_eq!(duplicate_direct_diagnostic.collection_index, Some(1));
+    // A code 6 wrapper is a Document attribute; a BusinessProcess admits only
+    // its own generation pair (2 and 3), so this stays WrongKind.
     let wrong_bp_direct =
-        parse_document_attribute_collection_indexed(&duplicate_direct_items[..1], Some(2))
+        parse_document_attribute_collection_indexed(&duplicate_direct_items[..1], &[2, 3])
             .unwrap_err();
     assert_eq!(wrong_bp_direct.item_index, 0);
     assert_eq!(
@@ -4344,7 +4346,7 @@ fn owner_graph_tabular_section_item_for_test(
 /// (`{11,gen0..3,header,fill_checking,standard_attributes_presence,tooltip}`,
 /// indexes 6/7/8) consumed by `parse_exact_metadata_tabular_section`, and
 /// (b) the collection envelope's trailing use-mode field consumed by
-/// `catalog_tabular_section_use_from_envelope`, instead of duplicating the
+/// `parse_tabular_section_envelope`, instead of duplicating the
 /// canonical tabular-section wire layout for tests that need the section's
 /// own properties (not just its declared child attributes) populated.
 fn catalog_tabular_section_item_with_overrides_for_test(
@@ -24467,16 +24469,17 @@ fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
         true
     ));
 
-    assert!(cct_tabular_section_wrapper_is_exact(&["0", "payload", "0"]));
-    assert!(cct_tabular_section_wrapper_is_exact(&[
-        "1", "payload", "0", "5"
-    ]));
-    assert!(!cct_tabular_section_wrapper_is_exact(&[
-        "1", "payload", "0", "4"
-    ]));
-    assert!(!cct_tabular_section_wrapper_is_exact(&[
-        "1", "payload", "0"
-    ]));
+    let cct_section = |wrapper: &[&str]| {
+        parse_tabular_section_envelope("ChartOfCharacteristicTypes", wrapper).is_some()
+    };
+    assert!(cct_section(&["0", "payload", "0"]));
+    assert!(cct_section(&["1", "payload", "0", "5"]));
+    // The trailing slot is the section's stored LineNumberLength: one CCT
+    // section of UT 11.5.27.75 writes 9 and its native XML says 9, so the
+    // envelope grammar reads the slot instead of pinning it to 5.
+    assert!(cct_section(&["1", "payload", "0", "9"]));
+    assert!(!cct_section(&["1", "payload", "0"]));
+    assert!(!cct_section(&["2", "payload", "0", "5"]));
 }
 
 #[test]
@@ -55826,14 +55829,26 @@ fn document_tabular_sections_accept_legacy_and_extended_envelopes_only() {
         .ok()
     };
 
-    for envelope in [format!("{{1,{payload}}}"), format!("{{2,{payload},5}}")] {
+    // The trailing slot of the extended envelope is the section's stored
+    // LineNumberLength, not the constant 5: seven Document sections of UT
+    // 11.5.27.75 write 9 there and their native XML says 9, so every value the
+    // slot can hold is admitted and only the arity and the envelope code are
+    // structural.
+    for envelope in [
+        format!("{{1,{payload}}}"),
+        format!("{{2,{payload},5}}"),
+        format!("{{2,{payload},9}}"),
+        format!("{{2,{payload},4}}"),
+    ] {
         assert_eq!(
             parse(envelope).map(|sections| sections[0].attribute_uuids.clone()),
             Some(vec![attribute_uuid.to_string()])
         );
     }
-    assert!(parse(format!("{{2,{payload},4}}")).is_none());
     assert!(parse(format!("{{2,{payload},5,0}}")).is_none());
+    assert!(parse(format!("{{2,{payload}}}")).is_none());
+    assert!(parse(format!("{{1,{payload},5}}")).is_none());
+    assert!(parse(format!("{{2,{payload},x}}")).is_none());
 }
 
 #[test]

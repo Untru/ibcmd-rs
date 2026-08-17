@@ -14578,8 +14578,6 @@ const OWNER_CHILD_TABULAR_SECTION_TAG: &str = "TabularSection";
 const NATIVE_COLLECTION_ITEM_TAIL: &str = "0";
 const NATIVE_COLLECTION_ITEM_PRESENT: &str = "1";
 const TABULAR_SECTION_PAYLOAD_CODE: &str = "11";
-const TABULAR_SECTION_EXTENDED_WRAPPER_CODE: &str = "2";
-const TABULAR_SECTION_EXTENDED_WRAPPER_TAIL: &str = "5";
 const METADATA_NAME_SEPARATOR: char = '.';
 const DIAGNOSTIC_TOKEN_SEPARATORS: [char; 3] = ['_', '-', METADATA_NAME_SEPARATOR];
 const PASSWORD_SOURCE_NONE: &str = "none";
@@ -15687,24 +15685,10 @@ fn parse_exact_metadata_tabular_section(
             None => (None, Vec::new()),
         };
     let tooltip = parse_information_register_owner_localized_value(fields.get(8)?)?;
-    let use_mode = match owner_kind {
-        "Catalog" => Some(parse_exact_catalog_tabular_section_use(
-            text,
-            marker_start,
-            &header.uuid,
-        )?),
-        "ChartOfCharacteristicTypes" => Some("ForItem"),
-        _ => None,
-    };
-    let line_number_length = match owner_kind {
-        "Catalog"
-        | "Document"
-        | "ExchangePlan"
-        | "ChartOfCharacteristicTypes"
-        | "BusinessProcess" => Some(5),
-        "Report" | "DataProcessor" => None,
-        _ => return None,
-    };
+    let TabularSectionEnvelope {
+        use_mode,
+        line_number_length,
+    } = parse_exact_tabular_section_envelope(owner_kind, text, marker_start, &header.uuid)?;
 
     Some(Some(ExactMetadataTabularSection {
         generated_types: vec![
@@ -15746,7 +15730,16 @@ fn parse_exact_tabular_section_standard_attributes_presence(
         [marker] if marker.trim() == "0" => Some(None),
         [marker, payload] if marker.trim() == "1" => {
             let expected_attribute_marker = match owner_kind {
-                "Catalog" | "Document" | "ExchangePlan" | "ChartOfCharacteristicTypes" => "-10",
+                // A BusinessProcess writes the same `-10` LineNumber marker as
+                // the four families already listed: all five tabular sections
+                // of the seven business processes of UT 11.5.27.75 carry it,
+                // byte for byte the same standard-attribute record the
+                // catalogs, documents and characteristic charts carry.
+                "Catalog"
+                | "Document"
+                | "ExchangePlan"
+                | "ChartOfCharacteristicTypes"
+                | OWNER_KIND_BUSINESS_PROCESS => "-10",
                 "Report" | "DataProcessor" => "-3",
                 _ => return None,
             };
@@ -15790,13 +15783,20 @@ fn parse_exact_tabular_section_standard_attributes_presence(
     }
 }
 
-fn parse_exact_catalog_tabular_section_use(
+/// Locates the envelope that wraps this section's nine-field payload and reads
+/// the section's own stored properties out of it.
+///
+/// The enclosing envelope is unambiguous: across the 1 438 tabular sections
+/// that reach this scan in UT 11.5.27.75 exactly one brace group encloses the
+/// marker and carries the section as its second field.
+fn parse_exact_tabular_section_envelope(
+    owner_kind: &str,
     text: &str,
     marker_start: usize,
     child_uuid: &str,
-) -> Option<&'static str> {
+) -> Option<TabularSectionEnvelope> {
     let mut search_end = marker_start;
-    let mut matches = Vec::<(usize, &'static str)>::new();
+    let mut matches = Vec::<(usize, TabularSectionEnvelope)>::new();
     while let Some(start) = text[..search_end].rfind('{') {
         search_end = start;
         let Some(end) = scan_1c_braced_value(text, start) else {
@@ -15817,30 +15817,101 @@ fn parse_exact_catalog_tabular_section_use(
         {
             continue;
         }
-        let Some(use_mode) = catalog_tabular_section_use_from_envelope(&fields) else {
+        let Some(envelope) = parse_tabular_section_envelope(owner_kind, &fields) else {
             continue;
         };
-        matches.push((end.saturating_sub(start), use_mode));
+        matches.push((end.saturating_sub(start), envelope));
     }
     matches.sort_by_key(|(span, _)| *span);
     match matches.as_slice() {
-        [(_, use_mode)] => Some(*use_mode),
+        [(_, envelope)] => Some(*envelope),
         _ => None,
     }
 }
 
-fn catalog_tabular_section_use_from_envelope(fields: &[&str]) -> Option<&'static str> {
-    Some(match fields {
-        [kind, _, mode] if kind.trim() == "1" => match mode.trim() {
-            "0" => "ForItem",
-            "2" => "ForFolderAndItem",
-            _ => return None,
-        },
-        [kind, _, mode, tail] if kind.trim() == "2" && tail.trim() == "5" => match mode.trim() {
-            "0" => "ForItem",
-            _ => return None,
-        },
+/// The section's own stored properties, read out of the envelope that wraps its
+/// nine-field payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TabularSectionEnvelope {
+    use_mode: Option<&'static str>,
+    line_number_length: Option<u32>,
+}
+
+/// `(envelope code, carries Use, carries LineNumberLength)` for one owner
+/// family.
+///
+/// The tabular-section envelope is one grammar across every family that owns
+/// tabular sections: slot 0 is a per-family envelope code, slot 1 is the
+/// nine-field section payload, and the trailing slots hold the section's own
+/// stored properties - `Use` for the two families whose native XML carries it,
+/// then `LineNumberLength`. The families that store no length also carry the
+/// code one lower, so a single rule reproduces every observed envelope:
+/// `Catalog` and `Document` write code 2, `ChartOfCharacteristicTypes`,
+/// `BusinessProcess` and `ExchangePlan` write code 1, and `Report` and
+/// `DataProcessor` - whose native XML has no `LineNumberLength` at all - write
+/// code 0 with no trailing slots.
+fn tabular_section_envelope_spec(owner_kind: &str) -> Option<(u32, bool, bool)> {
+    Some(match owner_kind {
+        "Catalog" => (2, true, true),
+        "Document" => (2, false, true),
+        "ChartOfCharacteristicTypes" => (1, true, true),
+        OWNER_KIND_BUSINESS_PROCESS | "ExchangePlan" => (1, false, true),
+        "Report" | "DataProcessor" => (0, false, false),
         _ => return None,
+    })
+}
+
+/// `LineNumberLength` for the predecessor envelope, which stores none.
+///
+/// UT 11.5.27.75 never writes that envelope; the reference trees that do are
+/// byte-exact with this value, so it is the platform's answer for them rather
+/// than a guess carried into the observed shape.
+const TABULAR_SECTION_PREDECESSOR_LINE_NUMBER_LENGTH: u32 = 5;
+
+/// Reads the tabular-section envelope through the single family grammar.
+///
+/// Both trailing slots used to be pinned to constants in four separate
+/// hand-written tables - `Use` to `ForItem` and `LineNumberLength` to 5 - so
+/// every owner holding a section that stores anything else was refused whole.
+/// Across the 1 203 tabular sections of UT 11.5.27.75 the last slot equals the
+/// native `LineNumberLength` in every case (1 195 write 5, eight write 9) and
+/// the `Use` slot equals the native `Use` in every case (387 `ForItem`, 11
+/// `ForFolderAndItem`).
+fn parse_tabular_section_envelope(
+    owner_kind: &str,
+    fields: &[&str],
+) -> Option<TabularSectionEnvelope> {
+    let (code, carries_use, carries_line_number_length) =
+        tabular_section_envelope_spec(owner_kind)?;
+    let use_slots = usize::from(carries_use);
+    let observed_code = parse_information_register_usize(fields.first()?)
+        .and_then(|value| u32::try_from(value).ok())?;
+    let stores_length =
+        carries_line_number_length && fields.len() == 2 + use_slots + 1 && observed_code == code;
+    if !stores_length
+        && (fields.len() != 2 + use_slots
+            || observed_code != code.checked_sub(u32::from(carries_line_number_length))?)
+    {
+        return None;
+    }
+    let use_mode = if carries_use {
+        Some(metadata_attribute_use_mode_xml(fields.get(2)?.trim())?)
+    } else {
+        None
+    };
+    let line_number_length = if carries_line_number_length {
+        Some(if stores_length {
+            parse_information_register_usize(fields.get(2 + use_slots)?)
+                .and_then(|value| u32::try_from(value).ok())?
+        } else {
+            TABULAR_SECTION_PREDECESSOR_LINE_NUMBER_LENGTH
+        })
+    } else {
+        None
+    };
+    Some(TabularSectionEnvelope {
+        use_mode,
+        line_number_length,
     })
 }
 
@@ -17703,9 +17774,16 @@ fn parse_document_attribute_wrapper_fields<'a>(
     expected_child_uuid: Option<&str>,
 ) -> Option<(Vec<&'a str>, Vec<&'a str>, u32, String)> {
     let wrapper_code = fields.first()?.trim().parse::<u32>().ok()?;
+    // 3 and 6 are the successor codes of 2 and 5: they carry the same slots and
+    // append the reserved `0` plus the reserved pair. 6 is what a Document
+    // writes for a direct attribute, and 3 is what a BusinessProcess writes -
+    // all 81 direct attributes of all seven business processes of UT
+    // 11.5.27.75 use it, while the collection reader demanded 2, so no
+    // BusinessProcess had ever been decoded. `standalone_child_reference`
+    // already reads the same code 3 wrapper for its attribute references.
     let expected_len = match wrapper_code {
         2 | 5 | 8 => 5,
-        6 => 7,
+        3 | 6 => 7,
         _ => return None,
     };
     if fields.len() != expected_len {
@@ -17718,7 +17796,7 @@ fn parse_document_attribute_wrapper_fields<'a>(
     metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
     register_child_full_text_search_xml(fields.get(3)?.trim())?;
     metadata_data_history_xml(fields.get(4)?.trim())?;
-    if wrapper_code == 6
+    if matches!(wrapper_code, 3 | 6)
         && (fields.get(5)?.trim() != "0" || !metadata_reserved_wrapper_tail(fields.get(6)?))
     {
         return None;
@@ -18668,8 +18746,23 @@ fn metadata_object_field_candidates_around_header<'a>(
         let Some(fields) = split_1c_braced_fields(text, start) else {
             continue;
         };
-        if matches!(fields.first().map(|field| field.trim()), Some("1" | "3")) {
-            continue;
+        match fields.first().map(|field| field.trim()) {
+            Some("1") => continue,
+            // `{3,{1,0,uuid},…}` is the child's own header record and never an
+            // envelope around it, so it stays excluded. `{3,{27,…},…}` is the
+            // wrapper a BusinessProcess writes for a direct attribute - the
+            // same leading code in a different grammar - and excluding it
+            // together with the header record left every BusinessProcess
+            // attribute with no layout at all, so no BusinessProcess could be
+            // decoded even once its collection was read.
+            Some("3")
+                if fields
+                    .get(1)
+                    .is_some_and(|field| field.trim() == format!("{{1,0,{uuid}}}")) =>
+            {
+                continue;
+            }
+            _ => {}
         }
         if metadata_header_field_index(&fields, uuid).is_none() {
             continue;
@@ -20751,7 +20844,13 @@ fn parse_business_process_child_properties(
         metadata_object_field_candidates_around_header(text, marker_start, child_uuid)
             .into_iter()
             .filter_map(|fields| parse_document_attribute_wrapper_fields(&fields, Some(child_uuid)))
-            .filter(|(_, _, wrapper_code, _)| *wrapper_code == if expected_nested { 8 } else { 2 })
+            .filter(|(_, _, wrapper_code, _)| {
+                if expected_nested {
+                    *wrapper_code == 8
+                } else {
+                    matches!(*wrapper_code, 2 | 3)
+                }
+            })
             .collect::<Vec<_>>();
     if layouts.len() != 1 {
         return None;
@@ -20810,12 +20909,14 @@ fn parse_cct_tabular_sections_indexed(
                     owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                 )
             })?;
-        if !cct_tabular_section_wrapper_is_exact(&wrapper) {
+        let Some(section_envelope) =
+            parse_tabular_section_envelope("ChartOfCharacteristicTypes", &wrapper)
+        else {
             return Err(failure(
                 owner_graph::OwnerGraphReference::ChildUuid,
                 owner_graph::OwnerGraphOwnedChildReason::WrongKind,
             ));
-        }
+        };
         let payload =
             split_information_register_braced_fields(wrapper.get(1).copied().unwrap_or_default())
                 .ok_or_else(|| {
@@ -21009,8 +21110,8 @@ fn parse_cct_tabular_sections_indexed(
                 },
                 line_number_fill_value,
                 line_number_synonym,
-                use_mode: Some("ForItem"),
-                line_number_length: Some(5),
+                use_mode: section_envelope.use_mode,
+                line_number_length: section_envelope.line_number_length,
             }),
             child_objects,
         };
@@ -21020,17 +21121,6 @@ fn parse_cct_tabular_sections_indexed(
         result.push(child);
     }
     Ok(result)
-}
-
-fn cct_tabular_section_wrapper_is_exact(wrapper: &[&str]) -> bool {
-    match (wrapper.first().map(|value| value.trim()), wrapper.len()) {
-        (Some("0"), 3) => wrapper.get(2).is_some_and(|value| value.trim() == "0"),
-        (Some("1"), 4) => {
-            wrapper.get(2).is_some_and(|value| value.trim() == "0")
-                && wrapper.get(3).is_some_and(|value| value.trim() == "5")
-        }
-        _ => false,
-    }
 }
 
 fn parse_strict_catalog_properties_from_text(
@@ -21565,15 +21655,7 @@ struct CatalogTabularSectionLayout {
 }
 
 fn is_catalog_tabular_section_wrapper(wrapper: &[&str]) -> bool {
-    let is_legacy_wrapper = wrapper.len() == 3
-        && wrapper.first().map(|value| value.trim()) == Some("1")
-        && matches!(wrapper.get(2).map(|value| value.trim()), Some("0" | "2"));
-    // The extended catalog tabular-section envelope keeps the payload unchanged.
-    let is_extended_wrapper = wrapper.len() == 4
-        && wrapper.first().map(|value| value.trim()) == Some("2")
-        && wrapper.get(2).map(|value| value.trim()) == Some("0")
-        && wrapper.get(3).map(|value| value.trim()) == Some("5");
-    is_legacy_wrapper || is_extended_wrapper
+    parse_tabular_section_envelope("Catalog", wrapper).is_some()
 }
 
 fn parse_catalog_tabular_sections_indexed(
@@ -22860,12 +22942,17 @@ fn parse_document_child_templates(
 fn parse_document_direct_attribute_collection_indexed(
     items: &[&str],
 ) -> Result<Vec<String>, DeclaredOwnerChildFailure> {
-    parse_document_attribute_collection_indexed(items, None)
+    parse_document_attribute_collection_indexed(items, &[5, 6])
 }
 
+/// Reads one attribute collection, admitting the wrapper codes its owner writes.
+///
+/// Every collection uses a single code throughout; the admitted set names the
+/// generation pair the owner may write (`5`/`6` for a Document's own
+/// attributes, `2`/`3` for a BusinessProcess's) rather than one pinned code.
 fn parse_document_attribute_collection_indexed(
     items: &[&str],
-    expected_code: Option<u32>,
+    admitted_codes: &[u32],
 ) -> Result<Vec<String>, DeclaredOwnerChildFailure> {
     let mut wrapper_code = None;
     let mut seen = BTreeSet::new();
@@ -22905,10 +22992,8 @@ fn parse_document_attribute_collection_indexed(
                     owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                 )
             })?;
-        let valid_code = expected_code.map_or_else(
-            || matches!(code, 5 | 6) && wrapper_code.is_none_or(|expected| expected == code),
-            |expected| code == expected,
-        );
+        let valid_code =
+            admitted_codes.contains(&code) && wrapper_code.is_none_or(|expected| expected == code);
         if !valid_code {
             return Err(owner_collection_item_failure(
                 owner_graph::OwnerCollectionRole::DirectAttribute,
@@ -22923,9 +23008,7 @@ fn parse_document_attribute_collection_indexed(
                 owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
             ));
         }
-        if expected_code.is_none() {
-            wrapper_code = Some(code);
-        }
+        wrapper_code = Some(code);
         result.push(child_uuid);
     }
     Ok(result)
@@ -22971,21 +23054,13 @@ fn parse_document_tabular_sections_indexed(
                         owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                     )
                 })?;
-        let payload = match envelope.as_slice() {
-            [code, payload] if code.trim() == NATIVE_COLLECTION_ITEM_PRESENT => *payload,
-            [code, payload, tail]
-                if code.trim() == TABULAR_SECTION_EXTENDED_WRAPPER_CODE
-                    && tail.trim() == TABULAR_SECTION_EXTENDED_WRAPPER_TAIL =>
-            {
-                *payload
-            }
-            _ => {
-                return Err(failure(
-                    owner_graph::OwnerGraphReference::ChildUuid,
-                    owner_graph::OwnerGraphOwnedChildReason::WrongKind,
-                ));
-            }
-        };
+        if parse_tabular_section_envelope("Document", &envelope).is_none() {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            ));
+        }
+        let payload = envelope.get(1).copied().unwrap_or_default();
         let fields = split_information_register_braced_fields(payload).ok_or_else(|| {
             failure(
                 owner_graph::OwnerGraphReference::ChildUuid,
@@ -23082,15 +23157,13 @@ fn parse_document_tabular_sections_indexed(
                 owner_graph::OwnerGraphOwnedChildReason::WrongKind,
             ));
         }
-        let attribute_uuids =
-            parse_document_attribute_collection_indexed(&collection.items, Some(8)).map_err(
-                |nested_failure| {
-                    failure(
-                        owner_graph::OwnerGraphReference::ChildUuid,
-                        nested_failure.reason,
-                    )
-                },
-            )?;
+        let attribute_uuids = parse_document_attribute_collection_indexed(&collection.items, &[8])
+            .map_err(|nested_failure| {
+                failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    nested_failure.reason,
+                )
+            })?;
         result.push(DocumentTabularSectionLayout {
             uuid: header.uuid,
             generated_ids,
@@ -23551,7 +23624,7 @@ fn parse_business_process_properties_from_text(
     }
 
     let direct_attribute_uuids =
-        parse_document_attribute_collection_indexed(&direct_attribute_collection.items, Some(2))
+        parse_document_attribute_collection_indexed(&direct_attribute_collection.items, &[2, 3])
             .map_err(|failure| {
                 *owner_graph_diagnostic = Some(declared_owner_child_failure_diagnostic(
                     owner_graph::OwnerGraphFamily::BusinessProcess,
@@ -24101,11 +24174,7 @@ fn parse_business_process_tabular_sections_indexed(
                         owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                     )
                 })?;
-        if wrapper.len() != 2
-            || wrapper
-                .first()
-                .is_none_or(|value| value.trim() != NATIVE_COLLECTION_ITEM_TAIL)
-        {
+        if parse_tabular_section_envelope(OWNER_KIND_BUSINESS_PROCESS, &wrapper).is_none() {
             return Err(failure(
                 owner_graph::OwnerGraphReference::ChildUuid,
                 owner_graph::OwnerGraphOwnedChildReason::WrongKind,
@@ -24211,13 +24280,13 @@ fn parse_business_process_tabular_sections_indexed(
                 owner_graph::OwnerGraphOwnedChildReason::WrongKind,
             )
         })?;
-        let attribute_uuids = parse_document_attribute_collection_indexed(&nested_items, Some(8))
+        let attribute_uuids = parse_document_attribute_collection_indexed(&nested_items, &[8])
             .map_err(|nested_failure| {
-            failure(
-                owner_graph::OwnerGraphReference::ChildUuid,
-                nested_failure.reason,
-            )
-        })?;
+                failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    nested_failure.reason,
+                )
+            })?;
         for uuid in &attribute_uuids {
             if !seen_uuids.insert(uuid.to_ascii_lowercase()) {
                 return Err(failure(
@@ -36592,26 +36661,99 @@ mod catalog_tabular_section_wrapper_tests {
             "0",
             "5"
         ]));
-        assert!(!is_catalog_tabular_section_wrapper(&[
+        // The trailing slot is the section's stored LineNumberLength, not a
+        // constant: UT 11.5.27.75 writes 9 for one catalog section and 5 for
+        // the other 386, and both match the native XML.
+        assert!(is_catalog_tabular_section_wrapper(&[
             "2",
             "{payload}",
             "0",
-            "4"
+            "9"
+        ]));
+        // The Use slot admits the same three codes in the extended envelope as
+        // in its predecessor; pinning it to 0 refused eleven catalog sections.
+        assert!(is_catalog_tabular_section_wrapper(&[
+            "2",
+            "{payload}",
+            "2",
+            "5"
+        ]));
+        assert!(!is_catalog_tabular_section_wrapper(&[
+            "2",
+            "{payload}",
+            "3",
+            "5"
+        ]));
+        assert!(!is_catalog_tabular_section_wrapper(&[
+            "3",
+            "{payload}",
+            "0"
         ]));
     }
 
     #[test]
     fn parses_use_from_extended_catalog_tabular_section_envelope() {
+        let use_mode = |envelope: &[&str]| {
+            super::parse_tabular_section_envelope("Catalog", envelope)
+                .and_then(|envelope| envelope.use_mode)
+        };
+        assert_eq!(use_mode(&["2", "{section}", "0", "5"]), Some("ForItem"));
+        assert_eq!(use_mode(&["2", "{section}", "1", "5"]), Some("ForFolder"));
         assert_eq!(
-            super::catalog_tabular_section_use_from_envelope(&["2", "{section}", "0", "5"]),
-            Some("ForItem")
+            use_mode(&["2", "{section}", "2", "5"]),
+            Some("ForFolderAndItem")
         );
+        assert_eq!(use_mode(&["2", "{section}", "3", "5"]), None);
+    }
+
+    #[test]
+    fn reads_line_number_length_from_every_family_envelope() {
+        use super::parse_tabular_section_envelope;
+        for (owner_kind, envelope, expected_use, expected_length) in [
+            (
+                "Catalog",
+                vec!["2", "{section}", "2", "9"],
+                Some("ForFolderAndItem"),
+                Some(9),
+            ),
+            ("Document", vec!["2", "{section}", "9"], None, Some(9)),
+            (
+                "ChartOfCharacteristicTypes",
+                vec!["1", "{section}", "0", "9"],
+                Some("ForItem"),
+                Some(9),
+            ),
+            (
+                "BusinessProcess",
+                vec!["1", "{section}", "5"],
+                None,
+                Some(5),
+            ),
+            ("ExchangePlan", vec!["1", "{section}", "5"], None, Some(5)),
+            // Report and DataProcessor sections store no length and their
+            // native XML carries no LineNumberLength element.
+            ("Report", vec!["0", "{section}"], None, None),
+            ("DataProcessor", vec!["0", "{section}"], None, None),
+            // The predecessor envelope drops the length slot and the code with
+            // it.
+            ("Document", vec!["1", "{section}"], None, Some(5)),
+            (
+                "ChartOfCharacteristicTypes",
+                vec!["0", "{section}", "0"],
+                Some("ForItem"),
+                Some(5),
+            ),
+        ] {
+            let parsed = parse_tabular_section_envelope(owner_kind, &envelope)
+                .unwrap_or_else(|| panic!("{owner_kind} envelope {envelope:?} was refused"));
+            assert_eq!(parsed.use_mode, expected_use, "{owner_kind} use");
+            assert_eq!(
+                parsed.line_number_length, expected_length,
+                "{owner_kind} length"
+            );
+        }
         assert_eq!(
-            super::catalog_tabular_section_use_from_envelope(&["2", "{section}", "0", "4"]),
-            None
-        );
-        assert_eq!(
-            super::catalog_tabular_section_use_from_envelope(&["2", "{section}", "2", "5"]),
+            parse_tabular_section_envelope("InformationRegister", &["2", "{section}", "5"]),
             None
         );
     }
