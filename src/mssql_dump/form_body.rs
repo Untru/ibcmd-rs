@@ -1383,8 +1383,13 @@ pub(super) struct OpaqueFormChoiceParameterLinksValue {
 
 pub(super) type CanonicalFormChoiceParameterLinks =
     FormChoiceParameterLinks<OpaqueFormChoiceParameterLinksValue>;
-pub(super) type CanonicalFormChoiceParameterAvailableTypes =
-    FormChoiceParameterAvailableTypes<(), OpaqueFormChoiceParameterClusterValue>;
+/// The `Typed` payload is the decoded type description of slot
+/// `InputFieldSlot::AvailableTypes`, which is an ordinary serialized type
+/// pattern and is read with the same grammar as every other form type block.
+pub(super) type CanonicalFormChoiceParameterAvailableTypes = FormChoiceParameterAvailableTypes<
+    Vec<ConstantValueType>,
+    OpaqueFormChoiceParameterClusterValue,
+>;
 pub(super) type CanonicalFormChoiceParameterCluster = FormChoiceParameterCluster<
     CanonicalFormChoiceParameterLinks,
     CanonicalFormChoiceParameters,
@@ -1415,7 +1420,10 @@ pub(super) enum FormSchemaWriteError {
     OpaqueChoiceParameterAvailableTypes {
         slot: usize,
     },
-    UnsupportedTypedChoiceParameterAvailableTypes,
+    /// The decoded `AvailableTypes` block did not come back in the shape the one
+    /// shared form type-block writer produces, so it is refused rather than
+    /// re-wrapped on a guess.
+    UnexpectedAvailableTypesBlockShape,
     ChoiceParametersEmit(FormChoiceParametersEmitError),
     OpaqueDcsOrder {
         reason: &'static str,
@@ -1750,13 +1758,40 @@ pub(super) fn validate_canonical_form_choice_parameter_available_types(
 ) -> Result<(), FormSchemaWriteError> {
     match value {
         FormChoiceParameterAvailableTypes::Absent => Ok(()),
-        FormChoiceParameterAvailableTypes::Typed(()) => {
-            Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+        FormChoiceParameterAvailableTypes::Typed(value_types) => {
+            emit_form_choice_parameter_available_types(value_types, 0).map(drop)
         }
         FormChoiceParameterAvailableTypes::Opaque(value) => {
             Err(FormSchemaWriteError::OpaqueChoiceParameterAvailableTypes { slot: value.slot })
         }
     }
+}
+
+/// `<AvailableTypes>` carrying the same type-description body the sibling
+/// `<Type>` block of the same form carries.
+///
+/// The body is produced by the one shared form type-block writer and re-wrapped,
+/// so the element names, the qualifier set and the qualifier order can never
+/// drift from `<Type>`; the wrapper swap is checked rather than assumed, and a
+/// body that does not arrive in that shape is refused.
+fn emit_form_choice_parameter_available_types(
+    value_types: &[ConstantValueType],
+    indent: usize,
+) -> Result<String, FormSchemaWriteError> {
+    if value_types.is_empty() {
+        return Ok(String::new());
+    }
+    let tab = "\t".repeat(indent);
+    let block = format_form_metadata_types_xml_with_indent(value_types, &tab);
+    let body = block
+        .strip_prefix(&format!("{tab}<Type>{FORM_XML_LINE_ENDING}"))
+        .and_then(|rest| rest.strip_suffix(&format!("{tab}</Type>{FORM_XML_LINE_ENDING}")))
+        .ok_or(FormSchemaWriteError::UnexpectedAvailableTypesBlockShape)?;
+    Ok(format!(
+        "{tab}<AvailableTypes>{FORM_XML_LINE_ENDING}\
+{body}\
+{tab}</AvailableTypes>{FORM_XML_LINE_ENDING}"
+    ))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3810,24 +3845,56 @@ pub(super) fn parse_form_attribute_column_type_pattern(
     field: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    parse_form_type_pattern(field.trim(), type_index)
-        .or_else(|| parse_form_attribute_column_builtin_type_pattern(field))
+    let trimmed = field.trim();
+    if let Some(value_types) = parse_form_type_pattern(trimmed, type_index) {
+        return Some(value_types);
+    }
+    // A column pattern may name a platform type that neither the
+    // configuration-wide index nor the shared builtin table carries. Those are
+    // resolved by overlaying the column-scoped table onto the index and running
+    // the one pattern grammar again - not by recognising a pattern shape.
+    //
+    // Matching a shape is what this fallback used to do, and it admitted exactly
+    // one element. That rejected the very layout it exists to serve: the
+    // `ЛевоеЗначение` column of `CommonForms/ФормаНастроекОтчета` pairs
+    // `dcscor:Field` with the platform `Null` type, two elements, and the
+    // platform writes both. Going through the shared grammar also keeps the
+    // elements the shared tables already resolve resolving exactly as before -
+    // the overlay only adds identifiers the index does not define, so it can
+    // never shadow an entry, and it is built only when the pattern actually
+    // names one, so the common path is untouched.
+    let overlay = form_attribute_column_type_index_overlay(trimmed, type_index)?;
+    parse_form_type_pattern(trimmed, &overlay)
 }
 
-fn parse_form_attribute_column_builtin_type_pattern(field: &str) -> Option<Vec<ConstantValueType>> {
-    let pattern = split_1c_braced_fields(field.trim(), 0)?;
-    if pattern.len() != 2 || pattern.first()?.trim() != r#""Pattern""# {
+/// `type_index` plus the column-scoped platform references the pattern names and
+/// the index lacks, or `None` when the pattern names none of them.
+fn form_attribute_column_type_index_overlay(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<BTreeMap<String, String>> {
+    let pattern = split_1c_braced_fields(field, 0)?;
+    if pattern.first()?.trim() != r#""Pattern""# {
         return None;
     }
-    let value_type = split_1c_braced_fields(pattern.get(1)?.trim(), 0)?;
-    if value_type.len() != 2 || value_type.first()?.trim() != r##""#""## {
+    let mut additions = BTreeMap::new();
+    for element in pattern.iter().skip(1) {
+        let Some(type_id) = metadata_type_pattern_field_type_id(element) else {
+            continue;
+        };
+        if type_id.is_empty() || type_index.contains_key(&type_id) {
+            continue;
+        }
+        if let Some(reference) = form_attribute_column_builtin_type_reference(&type_id) {
+            additions.insert(type_id, reference.to_string());
+        }
+    }
+    if additions.is_empty() {
         return None;
     }
-    let type_id = parse_non_zero_uuid(value_type.get(1)?.trim())?;
-    let reference = form_attribute_column_builtin_type_reference(&type_id)?;
-    Some(vec![ConstantValueType::Reference {
-        reference: reference.to_string(),
-    }])
+    let mut overlay = type_index.clone();
+    overlay.extend(additions);
+    Some(overlay)
 }
 
 #[cfg(test)]
@@ -9176,7 +9243,7 @@ fn parse_form_child_item_with_metadata_owners(
                         type_index_collisions,
                         object_refs,
                     ),
-                    FormChoiceParameterAvailableTypes::Absent,
+                    canonical_form_input_field_available_types(*schema, options, type_index),
                 ))
             },
         ),
@@ -10880,6 +10947,36 @@ pub(super) fn canonical_form_input_field_choice_parameters(
             raw: raw.to_owned(),
             slot,
         },
+    }
+}
+
+/// Reads `<AvailableTypes>` out of `InputFieldSlot::AvailableTypes`.
+///
+/// The slot is an ordinary serialized type pattern, so it goes through the same
+/// `parse_form_type_pattern` grammar as every other form type block. An empty
+/// pattern is `Absent`, not an empty element: of the 49 951 native `InputField`
+/// option tuples 49 937 hold the empty pattern and the platform writes no
+/// `<AvailableTypes>` on any of their items, and it never writes the element
+/// empty - all 14 blocks it does write carry at least one type.
+pub(super) fn canonical_form_input_field_available_types(
+    schema: FormFieldSchema,
+    options: &[&str],
+    type_index: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceParameterAvailableTypes {
+    let slot = InputFieldSlot::AvailableTypes.index();
+    let Some(raw) = schema.input_field_option(options, InputFieldSlot::AvailableTypes) else {
+        return FormChoiceParameterAvailableTypes::Absent;
+    };
+    match parse_form_type_pattern(raw.trim(), type_index) {
+        Some(value_types) if value_types.is_empty() => FormChoiceParameterAvailableTypes::Absent,
+        Some(value_types) => FormChoiceParameterAvailableTypes::Typed(value_types),
+        // Unobserved on the whole native tree: the slot parses on all 49 951
+        // tuples. Kept as a typed refusal with a diagnostic rather than a silent
+        // omission, so an unknown pattern is reported instead of dropped.
+        None => FormChoiceParameterAvailableTypes::Opaque(OpaqueFormChoiceParameterClusterValue {
+            raw: raw.to_owned(),
+            slot,
+        }),
     }
 }
 
@@ -20751,13 +20848,17 @@ pub(super) fn format_form_choice_parameter_cluster_xml(
                     )?);
                 }
             }
+            // `AvailableTypes` is last inside the cluster, matching the platform:
+            // on the two native items that carry both, `<ChoiceParameters>`
+            // precedes `<AvailableTypes>`, and the reverse is never observed.
             FormChoiceParameterClusterMember::AvailableTypes => match cluster.available_types() {
                 FormChoiceParameterAvailableTypes::Absent
                 | FormChoiceParameterAvailableTypes::Opaque(_) => {}
-                FormChoiceParameterAvailableTypes::Typed(()) => {
-                    return Err(
-                        FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes,
-                    );
+                FormChoiceParameterAvailableTypes::Typed(value_types) => {
+                    xml.push_str(&emit_form_choice_parameter_available_types(
+                        value_types,
+                        indent,
+                    )?);
                 }
             },
         }

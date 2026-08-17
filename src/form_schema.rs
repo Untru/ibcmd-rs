@@ -46,13 +46,51 @@ pub(crate) fn form_text_document_context_menu_child_is_valid(tag: &str) -> bool 
     tag == "ContextMenu"
 }
 
-// Platform type ID used by serialized Form column patterns for a DCS filter.
-const FORM_DATA_COMPOSITION_FILTER_TYPE_UUID: &str = "f6841c6b-6c71-4c82-ae9e-d08b49db326c";
+// Platform type IDs used by serialized Form column patterns. Every prefix below
+// - `dcscor`, `dcsset` and `v8` - is declared on the root element of every
+// `Form.xml` the platform writes, so these references are emitted bare, with no
+// namespace attribute of their own, exactly as the platform writes them.
+//
+// The whole table is scoped to a Form attribute column because that is the only
+// role in which these identifiers occur: across the 1 245 files that still
+// differ from the native UT 11.5.27.75 tree, the seven references below appear
+// on 13 native-only lines in 6 files and every one of those lines is inside a
+// `<Column>` of a Form attribute. None of the seven appears on our side at all,
+// in any role, so resolving them can only add lines that the platform writes.
+const FORM_COLUMN_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
+    ("f6841c6b-6c71-4c82-ae9e-d08b49db326c", "dcsset:Filter"),
+    (
+        "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+        "dcsset:DataCompositionComparisonType",
+    ),
+    (
+        "a090004e-b706-453f-aa10-090a77b53757",
+        "dcsset:DataCompositionFieldPlacement",
+    ),
+    (
+        "af4a19b5-da3d-406f-be0c-81143e400452",
+        "dcscor:DataCompositionSortDirection",
+    ),
+    (
+        "0e0850cf-0634-414e-85ba-9a88a8bd44c4",
+        "dcscor:DataCompositionGroupType",
+    ),
+    (
+        "c6a52555-d20f-452c-bfc2-1b53e9a56063",
+        "dcscor:DataCompositionPeriodAdditionType",
+    ),
+    ("913e8016-6e90-47a0-b2a0-4513f4edad61", "dcscor:Field"),
+    ("98ea8e5a-b586-442b-b944-6e3447734aa7", "v8:FillChecking"),
+];
 
 pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Option<&'static str> {
-    type_id
-        .eq_ignore_ascii_case(FORM_DATA_COMPOSITION_FILTER_TYPE_UUID)
-        .then_some("dcsset:Filter")
+    FORM_COLUMN_BUILTIN_TYPE_REFERENCES
+        .iter()
+        .find_map(|(candidate, reference)| {
+            type_id
+                .eq_ignore_ascii_case(candidate)
+                .then_some(*reference)
+        })
 }
 
 /// Slot holding `FormButtonType` in the long extended Button layout, before the
@@ -5860,6 +5898,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     AutoMarkIncomplete,
     ChooseType,
     IncompleteChoiceMode,
+    AvailableTypes,
     Format,
     EditFormat,
     Font,
@@ -5922,6 +5961,18 @@ impl FormInputFieldExtendedOptionSlot {
             Self::AutoMarkIncomplete => 31,
             Self::ChooseType => 32,
             Self::IncompleteChoiceMode => 33,
+            // The slot holds an ordinary serialized type pattern, and it is the
+            // only slot of the tuple that does: sweeping every slot of every one
+            // of the 49 951 `InputField` option tuples of the native UT
+            // 11.5.27.75 forms, slot 34 parses as a type pattern on all 49 951
+            // and no other slot parses on any. It is empty (`{"Pattern"}`) on
+            // 49 937 of them and carries types on 14 - exactly, item for item,
+            // the 14 `InputField` items across 13 forms on which the platform
+            // writes an `<AvailableTypes>` block, with no item missing from
+            // either side. The decoded type sequence equals the platform's own
+            // `<v8:Type>` sequence on all 14, including the one item that lists
+            // five types with three qualifier groups.
+            Self::AvailableTypes => 34,
             Self::Font => 40,
             Self::TextEdit => 41,
             Self::TypeLink => 42,

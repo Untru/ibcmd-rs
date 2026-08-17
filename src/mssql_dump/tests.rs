@@ -10375,15 +10375,12 @@ fn parses_form_attribute_value_table_columns() {
         attribute.columns[0].title,
         vec![("ru".to_string(), "Организация".to_string())]
     );
-    // `parse_form_attribute_column_type_pattern` tries the generic
+    // `parse_form_attribute_column_type_pattern` runs the generic
     // `parse_form_type_pattern` first, which resolves a single `"#"`+UUID
-    // pattern against `type_index` as `ReferenceTypeSet` (the
-    // `ConstantValueType::Reference` variant is only reached via the
-    // builtin-type fallback, for UUIDs *not* present in `type_index` — see
-    // `parse_form_attribute_column_builtin_type_pattern`, form_body.rs).
-    // `33c3e710-...` *is* in this test's `type_index`, so the old expected
-    // `Reference` variant is stale; `ReferenceTypeSet` is the current,
-    // correct classification.
+    // pattern against `type_index`; a `cfg:` reference with no dot classifies as
+    // `ReferenceTypeSet`. `33c3e710-...` *is* in this test's `type_index`, so no
+    // fallback is reached at all. Identifiers the index lacks are covered by
+    // `form_attribute_column_type_pattern_resolves_platform_references`.
     assert_eq!(
         attribute.columns[0].value_types,
         vec![ConstantValueType::ReferenceTypeSet {
@@ -10409,6 +10406,94 @@ fn parses_form_attribute_value_table_columns() {
     let xml = format_form_attributes_xml(&[attribute]);
     assert!(xml.contains("<FunctionalOptions>"));
     assert!(xml.contains("<Item>FunctionalOption.ИспользоватьНесколькоВалют</Item>"));
+}
+
+/// A column pattern naming a platform type the configuration index does not
+/// carry resolves through the column-scoped table, at any element count.
+///
+/// The layouts below are the bytes the native UT 11.5.27.75 forms hold, and the
+/// expected references are the ones the platform writes for them. The two-element
+/// case is the reason the resolver may not filter on pattern shape: the old
+/// fallback admitted exactly one element and so rejected it outright, taking the
+/// element beside it - which resolves fine - down with it.
+#[test]
+fn form_attribute_column_type_pattern_resolves_platform_references() {
+    let reference = |name: &str| ConstantValueType::Reference {
+        reference: name.to_string(),
+    };
+    for (raw, expected) in [
+        (
+            r##"{"Pattern",{"#",dcbf2698-3c1f-4a22-997f-48070ae9bd64}}"##,
+            vec![reference("dcsset:DataCompositionComparisonType")],
+        ),
+        (
+            r##"{"Pattern",{"#",98ea8e5a-b586-442b-b944-6e3447734aa7}}"##,
+            vec![reference("v8:FillChecking")],
+        ),
+        (
+            r##"{"Pattern",{"#",af4a19b5-da3d-406f-be0c-81143e400452}}"##,
+            vec![reference("dcscor:DataCompositionSortDirection")],
+        ),
+        (
+            r##"{"Pattern",{"#",a090004e-b706-453f-aa10-090a77b53757}}"##,
+            vec![reference("dcsset:DataCompositionFieldPlacement")],
+        ),
+        (
+            r##"{"Pattern",{"#",0e0850cf-0634-414e-85ba-9a88a8bd44c4}}"##,
+            vec![reference("dcscor:DataCompositionGroupType")],
+        ),
+        (
+            r##"{"Pattern",{"#",c6a52555-d20f-452c-bfc2-1b53e9a56063}}"##,
+            vec![reference("dcscor:DataCompositionPeriodAdditionType")],
+        ),
+        (
+            r##"{"Pattern",{"#",f6841c6b-6c71-4c82-ae9e-d08b49db326c}}"##,
+            vec![reference("dcsset:Filter")],
+        ),
+        // Two elements, and the platform writes both, in this order.
+        (
+            r##"{"Pattern",{"#",913e8016-6e90-47a0-b2a0-4513f4edad61},{"L"}}"##,
+            vec![reference("dcscor:Field"), reference("v8:Null")],
+        ),
+    ] {
+        assert_eq!(
+            parse_form_attribute_column_type_pattern(raw, &BTreeMap::new()),
+            Some(expected.clone()),
+            "column pattern {raw} must resolve"
+        );
+        // And the sibling `<Type>` writer renders them bare - every prefix used
+        // is declared on the Form root, so no namespace attribute is added.
+        let xml = format_form_attribute_column_xml(
+            &FormAttributeColumn {
+                id: "6".to_owned(),
+                name: "ВидСравнения".to_owned(),
+                title: Vec::new(),
+                value_types: expected.clone(),
+                explicit_empty_type: false,
+                functional_options: Vec::new(),
+            },
+            "\t",
+        );
+        for value_type in &expected {
+            let ConstantValueType::Reference { reference: name } = value_type else {
+                unreachable!("every expectation above is a plain reference");
+            };
+            assert!(
+                xml.contains(&format!("<v8:Type>{name}</v8:Type>")),
+                "{name} must be emitted bare, got {xml}"
+            );
+        }
+        assert!(!xml.contains("xmlns:"), "no inline namespace: {xml}");
+    }
+
+    // A genuinely unknown identifier stays a refusal, so no `<Type>` is invented.
+    assert_eq!(
+        parse_form_attribute_column_type_pattern(
+            r##"{"Pattern",{"#",00000000-0000-4000-8000-000000000009}}"##,
+            &BTreeMap::new(),
+        ),
+        None
+    );
 }
 
 #[test]
@@ -22215,7 +22300,7 @@ fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
 }
 
 #[test]
-fn choice_parameter_cluster_emits_exact_typed_order_and_rejects_available_types_guessing() {
+fn choice_parameter_cluster_emits_exact_typed_order_including_available_types() {
     let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
     let nil = "00000000-0000-0000-0000-000000000000";
     let boolean = format!(r##"{{"#",{discriminator},{{0,1,{{"B",1}},{nil},{nil},{{1,0}}}}}}"##);
@@ -22257,29 +22342,201 @@ fn choice_parameter_cluster_emits_exact_typed_order_and_rejects_available_types_
 \t</ChoiceParameters>\r\n"
     );
 
-    *cluster.available_types_mut() = CanonicalFormChoiceParameterAvailableTypes::Typed(());
+    // A decoded `AvailableTypes` follows `ChoiceParameters` inside the cluster,
+    // which is the order the platform writes on the two native items carrying
+    // both. The payload is the type description of
+    // `InformationRegisters/НастройкаРаспределенияПоНаправлениямДеятельности`
+    // item 17, whose slot holds `{"Pattern",{"#",<uuid>}}`.
+    *cluster.available_types_mut() =
+        CanonicalFormChoiceParameterAvailableTypes::Typed(vec![ConstantValueType::Reference {
+            reference: "cfg:CatalogRef.НаправленияДеятельности".to_owned(),
+        }]);
     assert_eq!(
         validate_canonical_form_choice_parameter_available_types(cluster.available_types()),
-        Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+        Ok(())
     );
-    assert_eq!(
-        format_form_choice_parameter_cluster_xml(&cluster, 1),
-        Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+    let typed_xml = format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap();
+    assert!(typed_xml.ends_with(
+        "\t<AvailableTypes>\r\n\
+\t\t<v8:Type>cfg:CatalogRef.НаправленияДеятельности</v8:Type>\r\n\
+\t</AvailableTypes>\r\n"
+    ));
+    assert!(
+        typed_xml.find("<ChoiceParameters>").unwrap() < typed_xml.find("<AvailableTypes>").unwrap()
     );
 
+    // The one native item that lists several types carries all three qualifier
+    // groups, in the order the shared form type-block writer emits them.
+    *cluster.available_types_mut() = CanonicalFormChoiceParameterAvailableTypes::Typed(vec![
+        ConstantValueType::Boolean,
+        ConstantValueType::String {
+            length: Some(0),
+            allowed_length_flag: 1,
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:CatalogRef.ЗначенияКатегорийНовостей".to_owned(),
+        },
+        ConstantValueType::DateTime {
+            date_fractions: "DateTime",
+        },
+        ConstantValueType::Number {
+            digits: 0,
+            fraction_digits: 0,
+            allowed_sign_flag: 0,
+        },
+    ]);
+    let multi_xml = format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap();
+    assert!(multi_xml.ends_with(
+        "\t<AvailableTypes>\r\n\
+\t\t<v8:Type>xs:boolean</v8:Type>\r\n\
+\t\t<v8:Type>xs:string</v8:Type>\r\n\
+\t\t<v8:Type>cfg:CatalogRef.ЗначенияКатегорийНовостей</v8:Type>\r\n\
+\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
+\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
+\t\t<v8:NumberQualifiers>\r\n\
+\t\t\t<v8:Digits>0</v8:Digits>\r\n\
+\t\t\t<v8:FractionDigits>0</v8:FractionDigits>\r\n\
+\t\t\t<v8:AllowedSign>Any</v8:AllowedSign>\r\n\
+\t\t</v8:NumberQualifiers>\r\n\
+\t\t<v8:StringQualifiers>\r\n\
+\t\t\t<v8:Length>0</v8:Length>\r\n\
+\t\t\t<v8:AllowedLength>Variable</v8:AllowedLength>\r\n\
+\t\t</v8:StringQualifiers>\r\n\
+\t\t<v8:DateQualifiers>\r\n\
+\t\t\t<v8:DateFractions>DateTime</v8:DateFractions>\r\n\
+\t\t</v8:DateQualifiers>\r\n\
+\t</AvailableTypes>\r\n"
+    ));
+
+    // An unparsable slot stays a typed refusal and is omitted, not guessed. The
+    // slot number is the real one, `InputFieldSlot::AvailableTypes`.
+    let available_types_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::AvailableTypes.index();
+    assert_eq!(available_types_slot, 34);
     *cluster.available_types_mut() =
         CanonicalFormChoiceParameterAvailableTypes::Opaque(OpaqueFormChoiceParameterClusterValue {
             raw: "{unconfirmed-available-types}".to_owned(),
-            slot: 63,
+            slot: available_types_slot,
         });
     assert_eq!(
         validate_canonical_form_choice_parameter_available_types(cluster.available_types()),
-        Err(FormSchemaWriteError::OpaqueChoiceParameterAvailableTypes { slot: 63 })
+        Err(FormSchemaWriteError::OpaqueChoiceParameterAvailableTypes {
+            slot: available_types_slot
+        })
     );
     let opaque_xml = format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap();
     assert!(!opaque_xml.contains("AvailableTypes"));
     assert!(opaque_xml.contains("<ChoiceParameterLinks>"));
     assert!(opaque_xml.contains("<ChoiceParameters>"));
+}
+
+/// The slot that carries `<AvailableTypes>` reads through the shared type-pattern
+/// grammar, and an empty pattern is `Absent` rather than an empty element.
+#[test]
+fn input_field_available_types_read_the_observed_slot_and_keep_empty_absent() {
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let slot = crate::form_schema::FormInputFieldExtendedOptionSlot::AvailableTypes.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+
+    // 49 937 of the 49 951 native option tuples hold exactly this, and the
+    // platform writes no `<AvailableTypes>` on any of their items.
+    options[slot] = r#"{"Pattern"}"#;
+    assert_eq!(
+        canonical_form_input_field_available_types(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterAvailableTypes::Absent
+    );
+
+    // `CommonForms/ФормаПоиска` item 3 and six more carry the string pattern.
+    options[slot] = "{\"Pattern\",\n{\"S\"}\n}";
+    assert_eq!(
+        canonical_form_input_field_available_types(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterAvailableTypes::Typed(vec![ConstantValueType::String {
+            length: None,
+            allowed_length_flag: 1,
+        }])
+    );
+    // Which the shared writer renders as the platform's own qualifier pair.
+    assert_eq!(
+        format_form_choice_parameter_cluster_xml(
+            &CanonicalFormChoiceParameterCluster::new(
+                CanonicalFormChoiceParameterLinks::Absent,
+                CanonicalFormChoiceParameters::Absent,
+                canonical_form_input_field_available_types(
+                    make_schema(&options),
+                    &options,
+                    &BTreeMap::new(),
+                ),
+            ),
+            1,
+        )
+        .unwrap(),
+        "\t<AvailableTypes>\r\n\
+\t\t<v8:Type>xs:string</v8:Type>\r\n\
+\t\t<v8:StringQualifiers>\r\n\
+\t\t\t<v8:Length>0</v8:Length>\r\n\
+\t\t\t<v8:AllowedLength>Variable</v8:AllowedLength>\r\n\
+\t\t</v8:StringQualifiers>\r\n\
+\t</AvailableTypes>\r\n"
+    );
+
+    // `ChartsOfCharacteristicTypes/КатегорииНовостей` item 10: five elements, the
+    // configuration reference resolved through the type index, order preserved.
+    options[slot] = "{\"Pattern\",\n{\"B\"},\n{\"S\"},\n{\"#\",a1f87530-5261-4cac-aad9-a636c0e39e38},\n{\"D\"},\n{\"N\"}\n}";
+    let typed = canonical_form_input_field_available_types(
+        make_schema(&options),
+        &options,
+        &BTreeMap::from([(
+            "a1f87530-5261-4cac-aad9-a636c0e39e38".to_owned(),
+            "cfg:CatalogRef.ЗначенияКатегорийНовостей".to_owned(),
+        )]),
+    );
+    let CanonicalFormChoiceParameterAvailableTypes::Typed(value_types) = &typed else {
+        panic!("the observed five-element pattern must decode, got {typed:?}");
+    };
+    assert_eq!(
+        value_types
+            .iter()
+            .map(metadata_type_xml_name)
+            .collect::<Vec<_>>(),
+        vec![
+            "xs:boolean",
+            "xs:string",
+            "cfg:CatalogRef.ЗначенияКатегорийНовостей",
+            "xs:dateTime",
+            "xs:decimal",
+        ]
+    );
+
+    // A pattern the grammar cannot read is a typed refusal at the real slot, not
+    // a silent omission. Unobserved across the whole native tree.
+    options[slot] = r#"{"Pattern",{"?"}}"#;
+    assert!(matches!(
+        canonical_form_input_field_available_types(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterAvailableTypes::Opaque(value) if value.slot == slot
+    ));
 }
 
 #[test]
