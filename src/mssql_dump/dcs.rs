@@ -957,13 +957,17 @@ fn canonicalize_typed_data_composition_settings_document(
     Ok(indent_data_composition_settings(&settings))
 }
 
-/// The three storage documents a packed form body carries under its dynamic
-/// list `ListSettings`, paired with the inline element each becomes.
+/// The storage documents a packed form body carries under its dynamic list
+/// `ListSettings`, paired with the inline element each becomes.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormListSettingsChildKind {
     Filter,
     Order,
     ConditionalAppearance,
+    /// The grouping document, stored under the `Group` property. Its rendered
+    /// root is only an intermediate: the inline position nests it, see
+    /// [`transliterate_form_list_settings_group_items_document`].
+    GroupItems,
 }
 
 impl FormListSettingsChildKind {
@@ -971,13 +975,14 @@ impl FormListSettingsChildKind {
     /// Form.xml.
     ///
     /// Its storage spelling differs only in the initial letter (`Filter`,
-    /// `Order`, `ConditionalAppearance`), so pinning the rendered name pins
-    /// the storage root the writer accepted as well.
+    /// `Order`, `ConditionalAppearance`, `GroupItems`), so pinning the rendered
+    /// name pins the storage root the writer accepted as well.
     const fn source_root_local(self) -> &'static str {
         match self {
             Self::Filter => "filter",
             Self::Order => "order",
             Self::ConditionalAppearance => "conditionalAppearance",
+            Self::GroupItems => "groupItems",
         }
     }
 }
@@ -1043,6 +1048,129 @@ pub(crate) fn transliterate_form_list_settings_child_document(
     Some(FormListSettingsChildTransliteration::Fragment(
         indent_form_list_settings_child_fragment(fragment, indent),
     ))
+}
+
+/// Re-spells the `Group` storage document as the nested `StructureItemGroup`
+/// chain the platform writes inline under `<ListSettings>`.
+///
+/// Storage keeps the grouping as one flat `<GroupItems>` list; the inline
+/// position spells the same content as a right-nested chain, one
+/// `StructureItemGroup` per stored item, each carrying that one item in its own
+/// `groupItems` and the next group beside it:
+///
+/// ```text
+/// <dcsset:item xsi:type="dcsset:StructureItemGroup">
+///     <dcsset:groupItems> <item 1> </dcsset:groupItems>
+///     <dcsset:item xsi:type="dcsset:StructureItemGroup">
+///         <dcsset:groupItems> <item 2> </dcsset:groupItems>
+///         ...
+/// ```
+///
+/// Evidence: UT 11.5.27.75. 254 forms store a `Group` document; 220 of them
+/// store the empty `<GroupItems/>` and their native `<ListSettings>` carries no
+/// `dcsset:item`, and the 17 forms that store items are exactly the 17 native
+/// `<ListSettings>` blocks that carry one. The chain above is the shape of all
+/// of them, the deepest being the six-item
+/// `Catalogs/ВидыЦен/Forms/ФормаНастройкиРасписанияАвтообновленияЦен`.
+///
+/// Everything below the stored items is re-spelled by the same lexical writer
+/// the other three children use, so the item vocabulary needs no typed model;
+/// only the nesting is composed here. Returns `None`, writing nothing, for a
+/// document that writer does not account for or a rendered root that is not the
+/// bare `<dcsset:groupItems>` this composition splices.
+pub(crate) fn transliterate_form_list_settings_group_items_document(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    indent: &str,
+) -> Option<FormListSettingsChildTransliteration> {
+    let flat = match transliterate_form_list_settings_child_document(
+        bytes,
+        FormListSettingsChildKind::GroupItems,
+        object_refs,
+        "",
+    )? {
+        FormListSettingsChildTransliteration::Empty => {
+            return Some(FormListSettingsChildTransliteration::Empty);
+        }
+        FormListSettingsChildTransliteration::Fragment(fragment) => fragment,
+    };
+    let inner = flat
+        .strip_prefix("<dcsset:groupItems>")?
+        .strip_suffix("\r\n")?
+        .strip_suffix("</dcsset:groupItems>")?;
+    let runs = data_composition_group_item_runs(inner)?;
+    if runs.is_empty() {
+        return Some(FormListSettingsChildTransliteration::Empty);
+    }
+    let mut output = String::new();
+    let mut pad = indent.to_string();
+    for run in &runs {
+        output.push_str(pad.as_str());
+        output.push_str("<dcsset:item xsi:type=\"dcsset:StructureItemGroup\">\r\n");
+        output.push_str(&format!("{pad}\t<dcsset:groupItems>\r\n"));
+        output.push_str(&indent_form_list_settings_child_fragment(
+            run,
+            &format!("{pad}\t"),
+        ));
+        output.push_str(&format!("{pad}\t</dcsset:groupItems>\r\n"));
+        pad.push('\t');
+    }
+    for _ in &runs {
+        pad.pop();
+        output.push_str(&format!("{pad}</dcsset:item>\r\n"));
+    }
+    Some(FormListSettingsChildTransliteration::Fragment(output))
+}
+
+/// The top-level `<dcsset:item>` elements of a rendered `groupItems` body, each
+/// with the indentation of its own line so the chain can re-indent them
+/// uniformly.
+///
+/// Refuses a body that carries anything besides those elements and the
+/// whitespace between them, so no stored content can be dropped silently.
+fn data_composition_group_item_runs(inner: &str) -> Option<Vec<&str>> {
+    const OPEN: &str = "<dcsset:item";
+    const CLOSE: &str = "</dcsset:item>";
+    let whitespace = ['\r', '\n', '\t', ' '];
+    let mut runs = Vec::new();
+    let mut rest = inner;
+    loop {
+        let Some(open) = rest.find(OPEN) else {
+            return rest.trim_matches(whitespace).is_empty().then_some(runs);
+        };
+        if !rest[..open].trim_matches(whitespace).is_empty() {
+            return None;
+        }
+        let line_start = rest[..open].rfind('\n').map_or(0, |index| index + 1);
+        let mut depth = 0usize;
+        let mut cursor = open;
+        let end = loop {
+            let next_open = rest[cursor..].find(OPEN).map(|at| cursor + at);
+            let next_close = rest[cursor..].find(CLOSE).map(|at| cursor + at);
+            match (next_open, next_close) {
+                (Some(next_open), close) if close.is_none_or(|close| next_open < close) => {
+                    let tag_end = rest[next_open..].find('>').map(|at| next_open + at + 1)?;
+                    if !rest[..tag_end].ends_with("/>") {
+                        depth += 1;
+                    } else if depth == 0 {
+                        break tag_end;
+                    }
+                    cursor = tag_end;
+                }
+                (_, Some(next_close)) => {
+                    depth = depth.checked_sub(1)?;
+                    let tag_end = next_close + CLOSE.len();
+                    if depth == 0 {
+                        break tag_end;
+                    }
+                    cursor = tag_end;
+                }
+                _ => return None,
+            }
+        };
+        runs.push(&rest[line_start..end]);
+        rest = &rest[end..];
+    }
 }
 
 /// Bounds one `ListSettings` child storage document. The largest such

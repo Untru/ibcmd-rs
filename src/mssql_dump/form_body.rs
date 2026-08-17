@@ -879,6 +879,11 @@ pub(super) struct FormListSettings {
     pub(super) conditional_appearance: Option<FormListSettingsConditionalAppearance>,
     pub(super) items_view_mode: Option<String>,
     pub(super) items_user_setting_id: Option<String>,
+    /// The grouping chain the `Group` storage document re-spells to, ready to
+    /// splice. Held as the rendered fragment for the same reason the other
+    /// children keep a `Transliterated` arm: the content is the platform's own
+    /// bytes re-spelled lexically, not a typed representation.
+    pub(super) group_items: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1133,6 +1138,8 @@ pub(super) struct FormChildItem {
     pub(super) top_level_parent_nil: Option<bool>,
     pub(super) update_on_data_change: Option<&'static str>,
     pub(super) user_settings_group: Option<String>,
+    pub(super) table_settings_view_mode: Option<&'static str>,
+    pub(super) settings_named_item_detailed_representation: Option<bool>,
     pub(super) allow_getting_current_row_url: Option<bool>,
     pub(super) button_representation: Option<&'static str>,
     pub(super) shape_representation: Option<&'static str>,
@@ -3845,6 +3852,29 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             "GroupSelectedSettingId" => {
                 list_settings.items_user_setting_id = parse_form_setting_string(window[1])
             }
+            "Group" => {
+                list_settings.group_items =
+                    parse_form_list_settings_group_items(window[1], object_refs)
+            }
+            // `GroupSelectedSettingViewMode` is the record that decides
+            // `dcsset:itemsViewMode` whenever the bag carries the group family;
+            // the identifier next to it decides nothing about it.
+            //
+            // Evidence: UT 11.5.27.75, the 1 517 forms whose single bag record
+            // pairs with a single native `<ListSettings>`. All 34 records with
+            // `{"N",0}` sit in a block the platform closes with
+            // `<dcsset:itemsViewMode>Normal`, all 19 with `{"N",1}` in a block it
+            // closes without one -- and that holds whether
+            // `GroupSelectedSettingId` is empty (23 / 15) or not (11 / 4), so the
+            // identifier is not the discriminator the inference below took it for.
+            // Over the whole tree the record occurs 124 times, `{"N",0}` 48 and
+            // `{"N",1}` 76, no other value, and no form carries fewer native
+            // `itemsViewMode` elements than it has `{"N",0}` records.
+            "GroupSelectedSettingViewMode" => {
+                if let Some(value) = parse_form_group_selected_setting_view_mode(window[1]) {
+                    list_settings.items_view_mode = Some(value.to_string());
+                }
+            }
             "ServerState" => {
                 server_state_xml = parse_form_server_state_xml_with_indexes(
                     window[1],
@@ -4207,6 +4237,18 @@ pub(super) fn parse_form_setting_bool(field: &str) -> Option<bool> {
     }
 }
 
+/// `dcsset:itemsViewMode` as the list-settings bag spells it.
+///
+/// `0` is the mode the platform writes as `Normal`; `1` is the mode it writes
+/// nothing for. Those are the only two ordinals the UT 11.5.27.75 tree carries
+/// (48 and 76 records), and an unrecognised one is not this reader's case.
+pub(super) fn parse_form_group_selected_setting_view_mode(field: &str) -> Option<&'static str> {
+    match parse_form_setting_number(field)?.as_str() {
+        "0" => Some("Normal"),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_form_setting_number(field: &str) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.first().map(|value| value.trim()) != Some("\"N\"") {
@@ -4395,6 +4437,29 @@ pub(super) fn parse_form_list_settings_filter(
             Some(refused("present storage Filter parsed as absent"))
         }
         Err(error) => Some(refused(error.reason())),
+    }
+}
+
+/// The grouping chain the `Group` property re-spells to, or nothing.
+///
+/// An empty stored `<GroupItems/>` writes nothing -- 220 of the 254 UT
+/// 11.5.27.75 `Group` documents are that document, and none of their forms
+/// carries a `dcsset:item` inline. A document the writer cannot account for
+/// writes nothing either: this property is only ever additive, so leaving it out
+/// keeps the rest of the block exactly as it was.
+pub(super) fn parse_form_list_settings_group_items(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let payload = extract_base64_payload(field)?;
+    let bytes = decode_base64_mime(payload)?;
+    match transliterate_form_list_settings_group_items_document(
+        &bytes,
+        object_refs,
+        FORM_LIST_SETTINGS_CHILD_INDENT,
+    )? {
+        FormListSettingsChildTransliteration::Empty => None,
+        FormListSettingsChildTransliteration::Fragment(fragment) => Some(fragment),
     }
 }
 
@@ -7613,6 +7678,22 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         user_settings_group: None,
+        table_settings_view_mode: if tag == "Table" {
+            table_schema.and_then(|schema| parse_form_table_settings_view_mode(schema, fields))
+        } else {
+            None
+        },
+        settings_named_item_detailed_representation: if tag == "Table" {
+            table_schema.and_then(|schema| {
+                parse_form_table_counted_bag_bool(
+                    schema,
+                    fields,
+                    FORM_TABLE_SETTINGS_NAMED_ITEM_DETAILED_REPRESENTATION_BAG_KEY,
+                )
+            })
+        } else {
+            None
+        },
         allow_getting_current_row_url: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, TableBagKey::AllowGettingCurrentRowUrl)
         } else {
@@ -12141,6 +12222,96 @@ pub(super) fn parse_form_table_property_bag_undefined(
 ) -> Option<bool> {
     let value = form_table_property_bag_value(fields, key)?;
     parse_form_standalone_undefined_marker(value)
+}
+
+/// Bag key of the settings table's `ViewMode`.
+const FORM_TABLE_SETTINGS_VIEW_MODE_BAG_KEY: &str = "3";
+/// Bag key of the settings table's `SettingsNamedItemDetailedRepresentation`.
+const FORM_TABLE_SETTINGS_NAMED_ITEM_DETAILED_REPRESENTATION_BAG_KEY: &str = "4";
+/// The enum whose values the settings table's `ViewMode` names.
+const FORM_TABLE_SETTINGS_VIEW_MODE_UUID: &str = "c04ead79-749a-4981-915e-6fcb144f44e4";
+
+/// Value of one key of a `Table`'s counted property bag, read structurally.
+///
+/// The bag is a counted record list: slot 54 declares the pair count and the
+/// pairs follow it, so the walk is bounded by that count and every key on the
+/// way has to be a canonical decimal that occurs once. Scanning the whole field
+/// list for a field that happens to equal the key is not the same read: the keys
+/// are bare decimals, and over the 4 529 `Table` items of the UT 11.5.27.75
+/// native tree such a scan answers for key `3` on 6 tables whose bag does not
+/// carry it -- it lands on a `Title` collection that follows a literal `3` --
+/// while the counted walk answers on exactly the 71 that do.
+fn form_table_counted_bag_value<'a>(
+    schema: FormTableSchema,
+    fields: &[&'a str],
+    key: &str,
+) -> Option<&'a str> {
+    let (start, end) = schema.counted_property_bag_bounds(fields)?;
+    let mut value = None;
+    for key_slot in (start..end).step_by(2) {
+        let raw_key = fields.get(key_slot)?.trim();
+        let parsed = raw_key.parse::<usize>().ok()?;
+        if parsed.to_string() != raw_key
+            || (start..key_slot)
+                .step_by(2)
+                .any(|previous| fields[previous].trim() == raw_key)
+        {
+            return None;
+        }
+        if raw_key == key {
+            value = Some(*fields.get(key_slot + 1)?);
+        }
+    }
+    value
+}
+
+fn parse_form_table_counted_bag_bool(
+    schema: FormTableSchema,
+    fields: &[&str],
+    key: &str,
+) -> Option<bool> {
+    let value = form_table_counted_bag_value(schema, fields, key)?;
+    let value = split_1c_braced_fields(value.trim(), 0)?;
+    if value.first().and_then(|field| parse_1c_string(field))? != "B" {
+        return None;
+    }
+    match value.get(1).map(|field| field.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+/// `ViewMode` of a settings table, an enum reference in bag key `3`.
+///
+/// Evidence: UT 11.5.27.75, 4 529 `Table` items. 71 carry bag key `3`, and every
+/// one of them is `{"#",c04ead79-749a-4981-915e-6fcb144f44e4,n}`: `n=0` on the
+/// 60 tables the platform writes `All` for and `n=1` on the 11 it writes
+/// `QuickAccess` for. The other 4 458 carry no key `3` and the platform writes
+/// no `ViewMode`. No counter-example.
+fn parse_form_table_settings_view_mode(
+    schema: FormTableSchema,
+    fields: &[&str],
+) -> Option<&'static str> {
+    let value =
+        form_table_counted_bag_value(schema, fields, FORM_TABLE_SETTINGS_VIEW_MODE_BAG_KEY)?;
+    let value = split_1c_braced_fields(value.trim(), 0)?;
+    match (
+        value.first().and_then(|field| parse_1c_string(field)),
+        value.get(1).map(|field| field.trim()),
+        value.get(2).map(|field| field.trim()),
+    ) {
+        (Some(marker), Some(FORM_TABLE_SETTINGS_VIEW_MODE_UUID), Some(ordinal))
+            if marker == "#" =>
+        {
+            match ordinal {
+                "0" => Some("All"),
+                "1" => Some("QuickAccess"),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn parse_form_table_period(fields: &[&str]) -> Option<FormTablePeriod> {
@@ -19112,6 +19283,31 @@ pub(super) fn format_form_child_item_xml(
         }
         xml.push_str(&format!("{tab}\t</Events>\r\n"));
     }
+    // A settings table closes its own properties with `ViewMode` and then
+    // `SettingsNamedItemDetailedRepresentation`, immediately ahead of the nested
+    // sections below. Evidence: UT 11.5.27.75, all 71 native `ViewMode` and all
+    // 56 native `SettingsNamedItemDetailedRepresentation` occurrences trail every
+    // scalar `Table` property they ever share an element with (`DataPath` 71/56,
+    // `Autofill` 64/50, `Title` 57/43, `CommandSet` 42/26, `Width` 14/14,
+    // `CurrentRowUse` 2/2, ... ) and precede `ContextMenu`, `AutoCommandBar`,
+    // `ExtendedTooltip`, the three search/status additions, `Events` and
+    // `ChildItems` (71/56 each); `ViewMode` precedes
+    // `SettingsNamedItemDetailedRepresentation` on all 51 elements that write
+    // both. No counter-example either way.
+    if item.tag == "Table" {
+        if let Some(view_mode) = item.table_settings_view_mode {
+            xml.push_str(&format!(
+                "{tab}\t<ViewMode>{}</ViewMode>\r\n",
+                escape_xml_text(view_mode)
+            ));
+        }
+        if let Some(detailed) = item.settings_named_item_detailed_representation {
+            xml.push_str(&format!(
+                "{tab}\t<SettingsNamedItemDetailedRepresentation>{}</SettingsNamedItemDetailedRepresentation>\r\n",
+                xml_bool(detailed)
+            ));
+        }
+    }
     if item.tag == "Table" {
         let mut context_menu_children = Vec::new();
         let mut auto_command_bar_children = Vec::new();
@@ -20485,6 +20681,7 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         && !form_list_settings_conditional_appearance_has_output(
             settings.conditional_appearance.as_ref(),
         )
+        && settings.group_items.is_none()
         && canonical_parts.tail().is_empty()
     {
         // No child renders. Whether the container itself is written is
@@ -20538,6 +20735,15 @@ fn format_form_list_settings_xml_with_dcs_profiles(
                 xml.push_str(canonical_parts.conditional_appearance().unwrap_or_default());
             }
         }
+    }
+    // The grouping chain sits between the three settings children and the tail.
+    // Evidence: UT 11.5.27.75, the 17 native `<ListSettings>` blocks that carry
+    // a `dcsset:item` -- it trails `dcsset:filter` 17/17, `dcsset:order` 16/16
+    // and `dcsset:conditionalAppearance` 16/16, and precedes
+    // `dcsset:itemsViewMode` 16/16 and `dcsset:itemsUserSettingID` 13/13, with
+    // no counter-example.
+    if let Some(group_items) = settings.group_items.as_deref() {
+        xml.push_str(group_items);
     }
     xml.push_str(canonical_parts.tail());
     xml.push_str("\t\t\t\t</ListSettings>\r\n");

@@ -9719,6 +9719,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
             )),
             items_view_mode: None,
             items_user_setting_id: Some("971fd96e-2ae3-41d5-9d7a-bad772efb890".to_string()),
+            group_items: None,
         },
     };
 
@@ -19309,6 +19310,8 @@ fn formats_table_search_additions_as_direct_sections() {
         top_level_parent_nil: None,
         update_on_data_change: None,
         user_settings_group: None,
+        table_settings_view_mode: None,
+        settings_named_item_detailed_representation: None,
         allow_getting_current_row_url: None,
         button_representation: None,
         shape_representation: None,
@@ -19511,6 +19514,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 top_level_parent_nil: None,
                 update_on_data_change: None,
                 user_settings_group: None,
+                table_settings_view_mode: None,
+                settings_named_item_detailed_representation: None,
                 allow_getting_current_row_url: None,
                 button_representation: None,
                 shape_representation: None,
@@ -19714,6 +19719,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 top_level_parent_nil: None,
                 update_on_data_change: None,
                 user_settings_group: None,
+                table_settings_view_mode: None,
+                settings_named_item_detailed_representation: None,
                 allow_getting_current_row_url: None,
                 button_representation: None,
                 shape_representation: None,
@@ -63770,4 +63777,168 @@ fn input_field_auto_show_open_button_mode_reads_slot_fifty_six() {
             "code {code}"
         );
     }
+}
+
+/// The strict wrapper-55 `Table` layout `extracts_real_wrapper55_table_auto_refresh_properties`
+/// already pins, with `extra` records spliced in ahead of its counted property
+/// bag and the declared pair count raised to match.
+///
+/// Only the bag content changes, and the records substituted below are the bytes
+/// the UT 11.5.27.75 tree stores, never a shape invented here.
+fn strict_wrapper55_table_with_bag_records_for_test(pairs: usize, extra: &str) -> FormChildItem {
+    let mut attribute_names_by_id = BTreeMap::new();
+    attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
+    let field = format!(
+        r##"{{55,{{1,02023637-7868-4a5f-8576-835a76e0c9ba}},0,1,0,"Rows",0,0,0,{{1,1,{{"en","Rows"}}}},{{1,0}},{{1,{{6}}}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{{1,{{10000000}}}},{{4,0,{{0}},"",-1,-1,1,0,""}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,3,{{-22}}}},{{7,3,0,1,100}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,0,{count},{extra}5,{{"B",0}},6,{{"N",60}},7,{{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{{0,00010101000000,00010101000000}}}},8,{{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}},9,{{"B",0}},10,{{"U"}},11,{{"B",1}},12,{{"B",0}},14,{{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0}},15,{{"U"}},16,{{"N",141}},19,{{"S",""}},20,{{"B",1}},{{0}},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}}"##,
+        count = 13 + pairs,
+    );
+    parse_form_child_item_with_attrs(
+        &field,
+        None,
+        None,
+        &attribute_names_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn settings_table_view_mode_and_named_item_detailed_representation_come_from_the_counted_bag() {
+    for (ordinal, expected) in [("0", "All"), ("1", "QuickAccess")] {
+        let item = strict_wrapper55_table_with_bag_records_for_test(
+            2,
+            &format!(r##"3,{{"#",c04ead79-749a-4981-915e-6fcb144f44e4,{ordinal}}},4,{{"B",0}},"##),
+        );
+        assert_eq!(item.table_settings_view_mode, Some(expected));
+        assert_eq!(
+            item.settings_named_item_detailed_representation,
+            Some(false)
+        );
+        let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+        let view_mode = format!("<ViewMode>{expected}</ViewMode>\r\n");
+        let detailed = "<SettingsNamedItemDetailedRepresentation>false</SettingsNamedItemDetailedRepresentation>\r\n";
+        let at_view_mode = xml.find(&view_mode).unwrap_or_else(|| panic!("{xml}"));
+        let at_detailed = xml.find(detailed).unwrap_or_else(|| panic!("{xml}"));
+        // `ViewMode` before `SettingsNamedItemDetailedRepresentation`, and both
+        // after the scalar properties they share the element with.
+        assert!(at_view_mode < at_detailed, "{xml}");
+        assert!(
+            xml.find("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>")
+                .unwrap()
+                < at_view_mode,
+            "{xml}"
+        );
+    }
+}
+
+#[test]
+fn settings_table_bag_records_the_tree_never_carries_are_not_read() {
+    // The same layout without the two keys writes neither element.
+    let item = strict_wrapper55_table_with_bag_records_for_test(0, "");
+    assert_eq!(item.table_settings_view_mode, None);
+    assert_eq!(item.settings_named_item_detailed_representation, None);
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    assert!(!xml.contains("<ViewMode>"), "{xml}");
+    assert!(
+        !xml.contains("<SettingsNamedItemDetailedRepresentation>"),
+        "{xml}"
+    );
+
+    // An ordinal of the same enum the tree does not carry is refused rather
+    // than named, and so is a reference to another enum.
+    for value in [
+        r##"{"#",c04ead79-749a-4981-915e-6fcb144f44e4,2}"##,
+        r##"{"#",00000000-0000-0000-0000-000000000000,0}"##,
+    ] {
+        let item = strict_wrapper55_table_with_bag_records_for_test(1, &format!("3,{value},"));
+        assert_eq!(item.table_settings_view_mode, None, "{value}");
+    }
+}
+
+#[test]
+fn group_selected_setting_view_mode_names_only_the_two_evidenced_ordinals() {
+    assert_eq!(
+        form_body::parse_form_group_selected_setting_view_mode(r#"{"N",0}"#),
+        Some("Normal")
+    );
+    assert_eq!(
+        form_body::parse_form_group_selected_setting_view_mode(r#"{"N",1}"#),
+        None
+    );
+    assert_eq!(
+        form_body::parse_form_group_selected_setting_view_mode(r#"{"N",2}"#),
+        None
+    );
+    assert_eq!(
+        form_body::parse_form_group_selected_setting_view_mode(r#"{"S","Normal"}"#),
+        None
+    );
+}
+
+#[test]
+fn group_items_storage_document_becomes_the_nested_structure_item_group_chain() {
+    // Both sides are platform bytes: the storage document is the `Group`
+    // property of `Catalogs/КлассификаторПолномочийМЧД003/Forms/ФормаСписка`,
+    // and the expected fragment is that form's own native `<ListSettings>`
+    // content.
+    let storage = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<GroupItems xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"",
+        " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
+        " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+        "\t<item xsi:type=\"GroupItemField\">\r\n",
+        "\t\t<field>Родитель</field>\r\n",
+        "\t\t<groupType>Items</groupType>\r\n",
+        "\t\t<periodAdditionType>None</periodAdditionType>\r\n",
+        "\t\t<periodAdditionBegin xsi:type=\"xs:dateTime\">0001-01-01T00:00:00</periodAdditionBegin>\r\n",
+        "\t\t<periodAdditionEnd xsi:type=\"xs:dateTime\">0001-01-01T00:00:00</periodAdditionEnd>\r\n",
+        "\t</item>\r\n",
+        "</GroupItems>",
+    );
+    let expected = concat!(
+        "\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:StructureItemGroup\">\r\n",
+        "\t\t\t\t\t\t<dcsset:groupItems>\r\n",
+        "\t\t\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:GroupItemField\">\r\n",
+        "\t\t\t\t\t\t\t\t<dcsset:field>Родитель</dcsset:field>\r\n",
+        "\t\t\t\t\t\t\t\t<dcsset:groupType>Items</dcsset:groupType>\r\n",
+        "\t\t\t\t\t\t\t\t<dcsset:periodAdditionType>None</dcsset:periodAdditionType>\r\n",
+        "\t\t\t\t\t\t\t\t<dcsset:periodAdditionBegin xsi:type=\"xs:dateTime\">0001-01-01T00:00:00</dcsset:periodAdditionBegin>\r\n",
+        "\t\t\t\t\t\t\t\t<dcsset:periodAdditionEnd xsi:type=\"xs:dateTime\">0001-01-01T00:00:00</dcsset:periodAdditionEnd>\r\n",
+        "\t\t\t\t\t\t\t</dcsset:item>\r\n",
+        "\t\t\t\t\t\t</dcsset:groupItems>\r\n",
+        "\t\t\t\t\t</dcsset:item>\r\n",
+    );
+    assert_eq!(
+        dcs::transliterate_form_list_settings_group_items_document(
+            storage.as_bytes(),
+            &BTreeMap::new(),
+            form_body::FORM_LIST_SETTINGS_CHILD_INDENT,
+        ),
+        Some(dcs::FormListSettingsChildTransliteration::Fragment(
+            expected.to_string()
+        ))
+    );
+}
+
+#[test]
+fn empty_group_items_storage_document_renders_no_grouping_chain() {
+    let storage = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<GroupItems xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"",
+        " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
+        " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>",
+    );
+    assert_eq!(
+        dcs::transliterate_form_list_settings_group_items_document(
+            storage.as_bytes(),
+            &BTreeMap::new(),
+            form_body::FORM_LIST_SETTINGS_CHILD_INDENT,
+        ),
+        Some(dcs::FormListSettingsChildTransliteration::Empty)
+    );
 }
