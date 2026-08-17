@@ -28232,6 +28232,18 @@ fn parse_common_command_picture_value(
                 load_transparent,
             ));
         }
+        // `-15` and `-16` continue the same ordinal run as the codes above and
+        // were the only two negative codes the reference tree observes that this
+        // table did not carry: over all 5 200 forms `-15` reads
+        // `StdPicture.ZoomOut` on all 8 of its occurrences and `-16`
+        // `StdPicture.ZoomIn` on all 7, with no counter-example and no other
+        // table in the crate mapping either code in a picture context.
+        if ref_fields.first()?.trim() == "-15" {
+            return Some((Some("StdPicture.ZoomOut".to_string()), load_transparent));
+        }
+        if ref_fields.first()?.trim() == "-16" {
+            return Some((Some("StdPicture.ZoomIn".to_string()), load_transparent));
+        }
         if ref_fields.first()?.trim() == "0" {
             let uuid = ref_fields.get(1)?.trim();
             if let Some(reference) = common_command_standard_picture_name(uuid) {
@@ -28428,6 +28440,59 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "85cc7dd0-44fc-41aa-967f-f52f202ee2e6" => Some("StdPicture.GoToBegin"),
         "928075d1-b90b-416c-b0b2-c3104cf084aa" => Some("StdPicture.Notifications"),
         "fc34a694-e99b-4d1c-a526-63f5571bdb09" => Some("StdPicture.Form"),
+        // The 41 further platform picture identities managed-form controls name.
+        // Each was traced from the reference tuple of a `<Picture>`-valued slot
+        // to the `<xr:Ref>` the platform writes at that exact owner, over all
+        // 5 200 forms of the reference tree: every one of them is a total
+        // function of the uuid with a single native spelling and no
+        // counter-example, and none of the 41 uuids nor any of their names
+        // occurs anywhere else in this crate, so no sibling table disagreed.
+        // Counts are the observations behind each row.
+        "85998f14-805b-4e2b-ba19-9d79b0464042" => Some("StdPicture.AppearanceCheckIcon"), // 60
+        "c283cd1c-3187-451d-8ef2-7df55daeef06" => Some("StdPicture.History"),             // 18
+        "c1a61df2-f280-49d0-a8b3-7e5fc6f56ff7" => Some("StdPicture.AppearanceCircleRed"), // 17
+        "b2202798-23e0-4165-9982-24878f432488" => Some("StdPicture.AppearanceCross"),     // 17
+        "71cbcb5c-f3f0-4ffd-a4d0-19b802b5ed6b" => Some("StdPicture.AppearanceCircleGreen"), // 15
+        "e51185a4-d915-45b8-b201-1c46cc2d8104" => Some("StdPicture.DocumentJournal"),     // 12
+        "a6cbfd77-fcf0-40f4-a8de-ee0d3e580fe6" => Some("StdPicture.DataProcessor"),       // 11
+        "fada8a16-8b14-4151-87a9-775099f37832" => Some("StdPicture.Calculator"),          // 10
+        "8d7e5026-9c1c-4542-bec0-2b729c84e139" => Some("StdPicture.AppearanceCircleYellow"), // 9
+        "c7f70aa3-b944-4efe-97e3-0fa3bda3cd88" => Some("StdPicture.RotateClockwise"),     // 8
+        "a43fcd1b-ad8d-4318-9d55-fd1ba086e65b" => Some("StdPicture.RotateCounterclockwise"), // 8
+        "f874b0cc-db1d-4577-8c77-d4ba206eb05d" => Some("StdPicture.Forward"),             // 6
+        "2721abfb-fbff-4a3a-98ac-b7c9eb29cd85" => Some("StdPicture.AppearanceCircleEmpty"), // 6
+        "da9ac044-0ff7-4bcf-a441-3187bd1d951f" => Some("StdPicture.ListViewModeTree"),    // 5
+        "ed067d76-b144-4d00-bb36-d1833dd1350c" => Some("StdPicture.DebitCredit"),         // 5
+        "fad46a2b-2e56-47cc-b90c-3c2d4b061937" => Some("StdPicture.ExternalDataSourceCube"), // 4
+        "05612131-3e11-49c0-9592-07e6d9318ef7" => Some("StdPicture.FindNext"),            // 3
+        "87d032df-0956-47e9-bead-4e15330f1983" => Some("StdPicture.AppearanceUpArrowGreen"), // 3
+        "78da2c47-172f-4d57-ab52-a06e40548136" => Some("StdPicture.Message"),             // 2
+        "251aaa98-0127-44c3-a163-6f5ab4367ee2" => {
+            Some("StdPicture.DataCompositionStandardSettings")
+        } // 2
+        "70f51581-87b6-41cb-a21b-c9dcdcc7fa93" => Some("StdPicture.AccumulationRegister"), // 2
+        "f6e88116-03d8-4400-9d88-791895d7031a" => Some("StdPicture.Attach"),              // 2
+        "9cf611dc-2370-4357-910d-a2b49c7a1ec6" => Some("StdPicture.Next"),                // 2
+        "55bc1099-a7df-4d0a-b332-a45f0473b368" => Some("StdPicture.Credit"),              // 2
+        "196622f7-0941-435b-992b-722f3082adf4" => Some("StdPicture.Debit"),               // 2
+        "2a7e58e2-a6c5-4387-a459-5249c441947a" => Some("StdPicture.GroupConversation"),   // 2
+        "788667db-61c9-45f3-9c4f-5f660ecdf3e1" => Some("StdPicture.AppearanceCircleFilled"), // 2
+        "e3b38083-0191-4a10-8f5b-51571f2419b4" => Some("StdPicture.FindPrevious"),        // 1
+        "e3b29b1d-4694-4f56-8d55-922f83afed7a" => Some("StdPicture.AppearanceDownArrowGray"), // 1
+        "fc058833-e57f-4f93-ba7a-803992a65c3e" => {
+            Some("StdPicture.AppearanceCircleOneFourthFilled") // 1
+        }
+        "a722bc14-4edb-4eed-84b9-5d9b2b443e04" => Some("StdPicture.CollaborationSystemUser"), // 1
+        "2954e819-f3fc-40de-9769-292efce9a355" => Some("StdPicture.ExternalDataSourceFunction"), // 1
+        "f62488ee-f90c-47f7-929d-f42ec11a1e63" => Some("StdPicture.WriteChanges"), // 1
+        "cb34c423-3d6a-4202-a809-3b3f45fb14ab" => Some("StdPicture.LevelUp"),      // 1
+        "c38cc4cf-111d-4bc8-8dcb-4464e2ddfb25" => Some("StdPicture.Favorites"),    // 1
+        "35bc8caa-f7ce-4158-87da-d9bf785afa39" => Some("StdPicture.DataSearch"),   // 1
+        "d35bd799-1cc3-44d1-8ae3-09755a09d44b" => Some("StdPicture.DataCompositionFilterDisabled"), // 1
+        "a9152be7-62cf-4523-be34-a23f018f497e" => Some("StdPicture.GeographicalSchema"), // 1
+        "fe740df0-d828-4241-a12f-7414e12302e8" => Some("StdPicture.QueryWizardTableParameters"), // 1
+        "01743054-d102-4e7c-bf15-5ed7fd84441b" => Some("StdPicture.LevelDown"), // 1
+        "0bac63da-5b4e-48af-b593-7c5d29663e83" => Some("StdPicture.FilterByType"), // 1
         _ => None,
     }
 }

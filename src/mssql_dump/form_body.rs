@@ -28,7 +28,7 @@ use crate::form_schema::{
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
-    FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
+    FormPictureValueSchema, FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
     FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
     FormRootCustomizableSchema, FormRootGroupSchema, FormRootGroupingSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema, FormRootVerticalAlign,
@@ -1273,7 +1273,7 @@ pub(super) struct FormChildItem {
     pub(super) header_picture_load_transparent: bool,
     pub(super) picture_size: Option<&'static str>,
     pub(super) nonselected_picture_text: Vec<(String, String)>,
-    pub(super) picture_file_name: Option<&'static str>,
+    pub(super) picture_file_name: Option<String>,
     pub(super) title: Vec<(String, String)>,
     pub(super) usual_group_shortcut: Option<String>,
     pub(super) title_formatted: Option<bool>,
@@ -7610,7 +7610,8 @@ fn parse_form_child_item_with_metadata_owners(
         &fields,
         input_field_top_level_offset,
         object_refs,
-    );
+    )
+    .or_else(|| parse_form_column_group_header_picture(wrapper, tag, fields, object_refs));
     let choice_button_picture = field_schema_and_options
         .as_ref()
         .and_then(|(schema, options)| {
@@ -7623,6 +7624,23 @@ fn parse_form_child_item_with_metadata_owners(
     });
     let rows_picture =
         table_schema.and_then(|schema| parse_form_table_rows_picture(schema, &fields, object_refs));
+    // A `Button` and a `PictureField` read the very slot that already feeds
+    // their picture reference; when that slot holds an inline payload instead of
+    // a reference there is nothing for the reference resolver to return, and the
+    // element went unwritten.  The two owners spell the property differently, so
+    // each passes its own name.
+    let embedded_picture = if tag == "Button" && form_button_layout_is_extended(fields) {
+        fields
+            .get(25 + button_top_level_offset)
+            .and_then(|field| parse_form_embedded_picture_file_name(field, "Picture"))
+    } else if tag == "PictureField" {
+        picture_field_options
+            .as_deref()
+            .and_then(|options| options.get(5))
+            .and_then(|field| parse_form_embedded_picture_file_name(field, "ValuesPicture"))
+    } else {
+        None
+    };
     let mut item = FormChildItem {
         tag,
         id: id.to_string(),
@@ -9139,10 +9157,12 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(25 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
                 .map(|(_, load_transparent)| load_transparent)
+                .or_else(|| embedded_picture.as_ref().map(|(_, flag)| *flag))
                 .unwrap_or(false)
         } else if tag == "PictureField" {
             parse_form_picture_field_value(picture_field_options.as_deref(), object_refs)
                 .map(|(_, load_transparent)| load_transparent)
+                .or_else(|| embedded_picture.as_ref().map(|(_, flag)| *flag))
                 .unwrap_or(false)
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_value(&fields, object_refs)
@@ -9197,9 +9217,11 @@ fn parse_form_child_item_with_metadata_owners(
             Vec::new()
         },
         picture_file_name: if tag == "PictureDecoration" {
-            parse_form_picture_decoration_file_name(&fields)
+            parse_form_picture_decoration_file_name(&fields).map(str::to_string)
         } else {
-            None
+            embedded_picture
+                .as_ref()
+                .map(|(file_name, _)| file_name.clone())
         },
         title,
         usual_group_shortcut: extended_group_options
@@ -13452,6 +13474,44 @@ pub(super) fn parse_form_picture_decoration_file_name(fields: &[&str]) -> Option
     })
 }
 
+/// The `<xr:Abs>` file name and transparency of a picture the control carries
+/// inline, read from that control's own picture slot.
+///
+/// A picture record is a reference or an embedded payload, never both, and the
+/// layout schema is the authority on which: only its `Embedded` kind carries the
+/// payload, in slot 7.  The name is the owning property's own spelling plus the
+/// extension the payload dictates, produced by the same helper that names the
+/// `Ext/Form/Items/<item>/<property>.<ext>` file the asset writer extracts - one
+/// authority for both sides, so the reference and the file cannot drift apart.
+///
+/// Over the reference tree the platform writes 27 such references that we did
+/// not: `Picture.png` on 21 `Button` items and `ValuesPicture.png` on 5 plus
+/// `ValuesPicture.bmp` on 1 `PictureField` item.  The payload alone does not
+/// determine the spelling - the same `.png` content is named `Picture.png` under
+/// one owner and `ValuesPicture.png` under the other - so the property name is
+/// passed in rather than derived.
+fn parse_form_embedded_picture_file_name(
+    field: &str,
+    property_name: &str,
+) -> Option<(String, bool)> {
+    let value = split_1c_braced_fields(field.trim(), 0)?;
+    let schema = FormPictureValueSchema::from_raw_layout(&value)?;
+    if schema.kind() != FormPictureValueKind::Embedded {
+        return None;
+    }
+    let payload = value
+        .get(7)
+        .and_then(|field| extract_base64_payload(field))?;
+    let content = decode_base64_mime(payload)?;
+    if !is_form_item_picture_content(&content) {
+        return None;
+    }
+    Some((
+        form_item_picture_file_name(property_name, &content),
+        schema.load_transparent(),
+    ))
+}
+
 pub(super) fn parse_form_picture_decoration_picture_value(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
@@ -13577,6 +13637,40 @@ fn parse_form_field_header_picture(
         &value,
     )?;
     if schema.picture_slot() != picture_slot {
+        return None;
+    }
+    parse_form_owned_picture(
+        raw,
+        &value,
+        schema.kind(),
+        schema.load_transparent(),
+        "HeaderPicture",
+        object_refs,
+    )
+}
+
+/// `HeaderPicture` of a `ColumnGroup`, read one level down from the header
+/// container the group keeps its header properties in.
+fn parse_form_column_group_header_picture(
+    wrapper: &str,
+    item_tag: &str,
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormOwnedPicture> {
+    let container = split_1c_braced_fields(
+        fields
+            .get(FormFieldHeaderPictureSchema::COLUMN_GROUP_CONTAINER_SLOT)?
+            .trim(),
+        0,
+    )?;
+    let raw = container
+        .get(FormFieldHeaderPictureSchema::COLUMN_GROUP_PICTURE_SLOT)?
+        .trim();
+    let value = split_1c_braced_fields(raw, 0)?;
+    let schema = FormFieldHeaderPictureSchema::from_column_group_layout(
+        wrapper, item_tag, &container, &value,
+    )?;
+    if schema.picture_slot() != FormFieldHeaderPictureSchema::COLUMN_GROUP_PICTURE_SLOT {
         return None;
     }
     parse_form_owned_picture(
@@ -18885,7 +18979,9 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
     }
-    xml.push_str(&format_form_field_header_picture_xml(item, indent + 1));
+    if item.tag != "ColumnGroup" {
+        xml.push_str(&format_form_field_header_picture_xml(item, indent + 1));
+    }
     // Native writes `HeaderHorizontalAlign` after `ShowInHeader`/`HeaderPicture`
     // and before `ShowInFooter`, `FooterHorizontalAlign`, `CheckBoxType`,
     // `ValuesPicture` and the geometry tail, on all 185 native occurrences.
@@ -19157,6 +19253,22 @@ pub(super) fn format_form_child_item_xml(
             xml_bool(item.picture_load_transparent)
         ));
     }
+    // The inline payload occupies the same slot and the same position as the
+    // reference, so it is written as the same element with `<xr:Abs>` in place of
+    // `<xr:Ref>`; a record is one or the other and never both.
+    if item.tag == "Button"
+        && item.picture_ref.is_none()
+        && let Some(file_name) = &item.picture_file_name
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Picture>\r\n\
+{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</Picture>\r\n",
+            escape_xml_text(file_name),
+            xml_bool(item.picture_load_transparent)
+        ));
+    }
     // `LabelField` keeps `Hiperlink` behind its stretch pair: the native tree
     // writes `HorizontalStretch`<`Hiperlink` 98 times, `VerticalStretch`<
     // `Hiperlink` 5, `AutoMaxHeight`<`Hiperlink` 3 and `MaxHeight`<`Hiperlink` 2,
@@ -19301,6 +19413,15 @@ pub(super) fn format_form_child_item_xml(
 {tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
 {tab}\t</ValuesPicture>\r\n",
                 escape_xml_text(reference),
+                xml_bool(item.picture_load_transparent)
+            ));
+        } else if let Some(file_name) = &item.picture_file_name {
+            xml.push_str(&format!(
+                "{tab}\t<ValuesPicture>\r\n\
+{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</ValuesPicture>\r\n",
+                escape_xml_text(file_name),
                 xml_bool(item.picture_load_transparent)
             ));
         }
@@ -19588,6 +19709,18 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "ColumnGroup" && item.show_in_header == Some(true) {
         xml.push_str(&format!("{tab}\t<ShowInHeader>true</ShowInHeader>\r\n"));
     }
+    // A `ColumnGroup` writes its `HeaderPicture` far behind the position the four
+    // field kinds use, at the close of the scalar run: over the 19 native groups
+    // that carry one it follows `Title` (19), `ShowInHeader` (18), `Group` (14),
+    // `HorizontalStretch` (2), `ToolTip` (2), `ShowTitle` (2), `ReadOnly` (1),
+    // `EnableContentChange` (1), `Width` (1) and `TitleFont` (1), and precedes
+    // `ExtendedTooltip` (19) and `ChildItems` (17), with none of those pairs
+    // counted both ways.  It never co-occurs with `HeaderHorizontalAlign` or
+    // `FixingInTable` on this owner, so that pair is unobserved and it is placed
+    // ahead of both, as it is on the field kinds where 185 observations pin it.
+    if item.tag == "ColumnGroup" {
+        xml.push_str(&format_form_field_header_picture_xml(item, indent + 1));
+    }
     // On a `ColumnGroup` the property is the last one before `ExtendedTooltip`,
     // directly behind `ShowInHeader` (85 native occurrences) or behind `Group`
     // when the group is not shown in the header (5), with no counter-example.
@@ -19741,7 +19874,7 @@ pub(super) fn format_form_child_item_xml(
                     xml_bool(item.picture_load_transparent)
                 ));
             }
-            if let Some(file_name) = item.picture_file_name {
+            if let Some(file_name) = &item.picture_file_name {
                 xml.push_str(&format!(
                     "{tab}\t<Picture>\r\n\
 {tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\

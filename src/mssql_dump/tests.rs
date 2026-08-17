@@ -21304,7 +21304,7 @@ fn extracts_picture_decoration_from_wrapper_12() {
 
     assert_eq!(item.tag, "PictureDecoration");
     assert_eq!(item.name, "СостояниеКартинка");
-    assert_eq!(item.picture_file_name, Some("Picture.gif"));
+    assert_eq!(item.picture_file_name.as_deref(), Some("Picture.gif"));
     assert_eq!(item.extended_tooltip, None);
 
     let xml = format_form_child_items_xml(&[item], 1);
@@ -65394,4 +65394,238 @@ fn a_column_group_writes_fixing_in_table_last_in_its_scalar_run() {
             .count(),
         1
     );
+}
+
+/// The uuid and the two negative codes of the standard picture identities added
+/// for managed-form controls, on the observed command layout.
+#[test]
+fn a_form_command_names_the_standard_pictures_added_for_managed_forms() {
+    const BASE: &str = r#"{9,{4,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"УстановитОтбор",{1,1,{"ru","Настроить список"}},{1,1,{"ru","Установит отбор"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,PICTURE,"",-1,-1,1,0,""},"",3,0,0,{0,0},1,0,1,0,0,1}"#;
+    for (reference, expected) in [
+        (
+            "{0,85998f14-805b-4e2b-ba19-9d79b0464042}",
+            "StdPicture.AppearanceCheckIcon",
+        ),
+        (
+            "{0,c283cd1c-3187-451d-8ef2-7df55daeef06}",
+            "StdPicture.History",
+        ),
+        ("{-15}", "StdPicture.ZoomOut"),
+        ("{-16}", "StdPicture.ZoomIn"),
+    ] {
+        let command = parse_form_command(&BASE.replace("PICTURE", reference), &BTreeMap::new())
+            .expect("the observed command layout parses");
+        assert_eq!(
+            command.picture_ref.as_deref(),
+            Some(expected),
+            "{reference}"
+        );
+        assert!(command.picture_load_transparent, "{reference}");
+    }
+    // A negative code past the mapped run is declined rather than guessed at.
+    let command = parse_form_command(&BASE.replace("PICTURE", "{-17}"), &BTreeMap::new())
+        .expect("the observed command layout parses");
+    assert_eq!(command.picture_ref, None);
+}
+
+/// A `Button` whose own picture slot holds the payload inline writes the picture
+/// as `<xr:Abs>`, named after the property and the payload's own format.
+#[test]
+fn a_button_writes_its_inline_picture_as_an_absolute_reference() {
+    const BASE: &str = r#"{34,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Save",{1,0},1,{0},{0},3,0,0,0,2,2,0,0,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,PICTURE,1,{"Pattern"},"",0,0,1,{12,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"SaveExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0}"#;
+    let parse = |picture: &str| {
+        parse_form_child_item(
+            &BASE.replace("PICTURE", picture),
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .expect("the observed button layout parses")
+    };
+
+    // The empty record the same slot carries on a button without a picture.
+    let empty = parse(r#"{4,0,{0},"",-1,-1,1,0,""}"#);
+    assert_eq!(empty.tag, "Button");
+    assert_eq!(empty.picture_ref, None);
+    assert_eq!(empty.picture_file_name, None);
+    assert!(
+        !format_form_child_items_xml(&[empty], 1).contains("<Picture>"),
+        "an empty record writes no picture"
+    );
+
+    let embedded = parse(r#"{4,3,{0},"",-1,-1,0,{#base64:iVBORw0KGgo=},0,""}"#);
+    assert_eq!(embedded.picture_ref, None);
+    assert_eq!(embedded.picture_file_name.as_deref(), Some("Picture.png"));
+    let xml = format_form_child_items_xml(&[embedded], 1);
+    assert!(xml.contains("<xr:Abs>Picture.png</xr:Abs>"), "got {xml}");
+    assert!(
+        xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"),
+        "got {xml}"
+    );
+    assert!(!xml.contains("<xr:Ref>"), "got {xml}");
+    assert_eq!(xml.matches("<Picture>").count(), 1, "got {xml}");
+
+    // A reference in the same slot still writes `<xr:Ref>` and no `<xr:Abs>`.
+    let referenced = parse(r#"{4,1,{-16},"",-1,-1,1,0,""}"#);
+    let xml = format_form_child_items_xml(&[referenced], 1);
+    assert!(
+        xml.contains("<xr:Ref>StdPicture.ZoomIn</xr:Ref>"),
+        "got {xml}"
+    );
+    assert!(!xml.contains("<xr:Abs>"), "got {xml}");
+
+    // A payload that is not a picture is declined rather than named `.bin`.
+    let not_a_picture = parse(r#"{4,3,{0},"",-1,-1,0,{#base64:bm90IGEgcGljdHVyZQ==},0,""}"#);
+    assert_eq!(not_a_picture.picture_file_name, None);
+}
+
+/// A `PictureField` spells the same inline payload `ValuesPicture`, not
+/// `Picture`, and takes the extension from the payload.
+#[test]
+fn a_picture_field_names_its_inline_values_picture_after_the_property() {
+    const LIVE: &str = r#"{37,{145,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"СписокЗарегистрированКартинка",0,0,{1,1,{"ru","Зарегистрирован"}},{1,0},{2,{1},{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{10,0,0,1,1,PICTURE,0,0,0,{1,0},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,0,0,1,0,0,100},{0,1,0},1,{22,{146,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЗарегистрированКартинкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{147,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗарегистрированКартинкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+    let parse = |picture: &str| {
+        parse_form_child_item_with_attrs(
+            &LIVE.replace("PICTURE", picture),
+            None,
+            Some("Список"),
+            &BTreeMap::from([("1".to_string(), "Список".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "1".to_string(),
+                BTreeMap::from([("3".to_string(), "Зарегистрирован".to_string())]),
+            )]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .expect("the observed picture field layout parses")
+    };
+
+    let png = parse(r#"{4,3,{0},"",-1,-1,0,{#base64:iVBORw0KGgo=},0,""}"#);
+    assert_eq!(png.tag, "PictureField");
+    assert_eq!(png.picture_ref, None);
+    assert_eq!(
+        png.picture_file_name.as_deref(),
+        Some("ValuesPicture.png"),
+        "the property, not the payload, names the file"
+    );
+    let xml = format_form_child_items_xml(&[png], 1);
+    assert!(xml.contains("<ValuesPicture>"), "got {xml}");
+    assert!(
+        xml.contains("<xr:Abs>ValuesPicture.png</xr:Abs>"),
+        "got {xml}"
+    );
+    assert!(!xml.contains("<Picture>"), "got {xml}");
+
+    // The extension follows the payload; transparency follows the record.
+    let bmp = parse(r#"{4,3,{0},"",-1,-1,1,{#base64:Qk1fZmFrZV9ibXBfYm9keQ==},0,""}"#);
+    assert_eq!(bmp.picture_file_name.as_deref(), Some("ValuesPicture.bmp"));
+    let xml = format_form_child_items_xml(&[bmp], 1);
+    assert!(
+        xml.contains("<xr:Abs>ValuesPicture.bmp</xr:Abs>"),
+        "got {xml}"
+    );
+    assert!(
+        xml.contains("<xr:LoadTransparent>true</xr:LoadTransparent>"),
+        "got {xml}"
+    );
+}
+
+/// A `ColumnGroup` keeps its header picture one level down, inside the header
+/// container, and writes it at the close of its scalar run.
+#[test]
+fn a_column_group_reads_its_header_picture_from_the_header_container() {
+    const BASE: &str = r#"{22,{140,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Доставка",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,2,60,{-31},700,0,0,0,1,100},{0,0,0},1,{2,2,1,1,3,PICTURE,{3,4,{0}},{0},{"Pattern"},"",{1,0},0},0}"#;
+    let parse_with = |picture: &str, refs: &BTreeMap<String, String>| {
+        parse_form_child_item(
+            &BASE.replace("PICTURE", picture),
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            refs,
+        )
+        .expect("the observed column group layout parses")
+    };
+    let parse = |picture: &str| parse_with(picture, &BTreeMap::new());
+
+    // The empty record 2 989 of the 3 008 native column groups carry.
+    let empty = parse(r#"{4,0,{0},"",-1,-1,1,0,""}"#);
+    assert_eq!(empty.tag, "ColumnGroup");
+    assert_eq!(empty.header_picture_ref, None);
+    assert!(
+        !format_form_child_items_xml(&[empty], 1).contains("<HeaderPicture>"),
+        "an empty record writes no header picture"
+    );
+
+    for (reference, expected) in [
+        (
+            r#"{4,1,{0,97b2cc97-d5c6-45fb-9824-9d6d73db21fe},"",-1,-1,1,0,""}"#,
+            "StdPicture.Change",
+        ),
+        (r#"{4,1,{-7},"",-1,-1,1,0,""}"#, "StdPicture.InputFieldOpen"),
+    ] {
+        let group = parse(reference);
+        assert_eq!(
+            group.header_picture_ref.as_deref(),
+            Some(expected),
+            "{reference}"
+        );
+        assert!(group.header_picture_load_transparent, "{reference}");
+        let xml = format_form_child_items_xml(&[group], 1);
+        let at = |needle: &str| {
+            xml.find(needle)
+                .unwrap_or_else(|| panic!("{needle} is missing from {xml}"))
+        };
+        assert!(at("<ShowInHeader>") < at("<HeaderPicture>"), "got {xml}");
+        assert!(at("<Group>") < at("<HeaderPicture>"), "got {xml}");
+        assert!(at("<HeaderPicture>") < at("</ColumnGroup>"), "got {xml}");
+        assert_eq!(xml.matches("<HeaderPicture>").count(), 1, "got {xml}");
+        assert!(
+            xml.contains(&format!("<xr:Ref>{expected}</xr:Ref>")),
+            "got {xml}"
+        );
+    }
+
+    // A common picture resolves through the configuration's own reference index.
+    const COMMON: &str = r#"{4,1,{0,9f600542-06a7-4fbb-abc0-e9961b2d454f},"",-1,-1,0,0,""}"#;
+    assert_eq!(
+        parse(COMMON).header_picture_ref,
+        None,
+        "without the index there is no name"
+    );
+    let group = parse_with(
+        COMMON,
+        &BTreeMap::from([(
+            "9f600542-06a7-4fbb-abc0-e9961b2d454f".to_string(),
+            "CommonPicture.Значок".to_string(),
+        )]),
+    );
+    assert_eq!(
+        group.header_picture_ref.as_deref(),
+        Some("CommonPicture.Значок")
+    );
+    assert!(!group.header_picture_load_transparent);
+
+    // The header container of the other observed shape is not this one: a
+    // sixteen-field record led by `5` keeps different properties at slot 5, so it
+    // is declined rather than read as a picture.
+    let other = parse_form_child_item(
+        r#"{22,{140,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"DebitAccountGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,2,60,{-31},700,0,0,0,1,100},{0,0,0},1,{5,2,1,1,3,{4,1,{-7},"",-1,-1,1,0,""},{4,4,{0},4},{0},{"Pattern"},"",{1,0},0,1,2,2,2},0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("the observed column group layout parses");
+    assert_eq!(other.tag, "ColumnGroup");
+    assert_eq!(other.header_picture_ref, None);
 }

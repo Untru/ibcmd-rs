@@ -1175,7 +1175,7 @@ pub(crate) struct FormPictureValueSchema {
 }
 
 impl FormPictureValueSchema {
-    fn from_raw_layout(value: &[&str]) -> Option<Self> {
+    pub(crate) fn from_raw_layout(value: &[&str]) -> Option<Self> {
         if value.first().map(|field| field.trim()) != Some("4")
             || value.get(3).map(|field| field.trim()) != Some("\"\"")
             || value.get(4).map(|field| field.trim()) != Some("-1")
@@ -1345,6 +1345,41 @@ impl FormFieldHeaderPictureSchema {
         let value = FormPictureValueSchema::from_raw_layout(value)?;
         Some(Self {
             picture_slot: 29 + top_level_offset,
+            value,
+        })
+    }
+
+    /// Slot of the header container a `ColumnGroup` keeps its header properties
+    /// in, and the slot of the picture record inside that container.
+    ///
+    /// A `ColumnGroup` does not carry the header picture at the flat index the
+    /// four field kinds use - it has no such slot - so the record was never
+    /// reached and the element was never written.  Over all 3 008 native
+    /// `ColumnGroup` items the container at slot 20 is invariably a
+    /// twelve-field record led by `2`, and slot 5 of it is a total function of
+    /// the platform's answer: the empty picture record on exactly the 2 989 that
+    /// carry no `<HeaderPicture>`, and a reference record on exactly the 19 that
+    /// do, with no observation on an ambiguous key.
+    pub(crate) const COLUMN_GROUP_CONTAINER_SLOT: usize = 20;
+    pub(crate) const COLUMN_GROUP_CONTAINER_FIELDS: usize = 12;
+    pub(crate) const COLUMN_GROUP_PICTURE_SLOT: usize = 5;
+
+    pub(crate) fn from_column_group_layout(
+        wrapper: &str,
+        item_tag: &str,
+        container: &[&str],
+        value: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "22"
+            || item_tag != "ColumnGroup"
+            || container.len() != Self::COLUMN_GROUP_CONTAINER_FIELDS
+            || container.first().map(|field| field.trim()) != Some("2")
+        {
+            return None;
+        }
+        let value = FormPictureValueSchema::from_raw_layout(value)?;
+        Some(Self {
+            picture_slot: Self::COLUMN_GROUP_PICTURE_SLOT,
             value,
         })
     }
