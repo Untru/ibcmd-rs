@@ -23681,6 +23681,169 @@ fn parses_common_command_parameter_type_pattern() {
     assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
 }
 
+/// Every pattern below is a byte layout the platform actually wrote into
+/// 1C:Trade Management 11.5.27.75 - `{"L"}` sits beside `{"S"}`, `{"B"}`,
+/// `{"N",…}` and `{"#",<ValueListType>}`, and it also occurs alone. It keeps its
+/// pattern position in the emitted `<Type>` block, and it no longer takes its
+/// siblings down with it.
+#[test]
+fn parses_the_null_type_pattern_element_without_discarding_its_siblings() {
+    let value_list_uuid = "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3";
+
+    for (pattern, expected) in [
+        (r#"{"Pattern",{"S"},{"L"}}"#, vec!["xs:string", "v8:Null"]),
+        (r#"{"Pattern",{"B"},{"L"}}"#, vec!["xs:boolean", "v8:Null"]),
+        (
+            r#"{"Pattern",{"L"},{"N",10,0,1}}"#,
+            vec!["v8:Null", "xs:decimal"],
+        ),
+        (r#"{"Pattern",{"L"}}"#, vec!["v8:Null"]),
+        (
+            &format!(r##"{{"Pattern",{{"#",{value_list_uuid}}},{{"L"}}}}"##),
+            vec!["v8:ValueListType", "v8:Null"],
+        ),
+    ] {
+        let value_types = parse_form_metadata_type_pattern(pattern, &BTreeMap::new())
+            .unwrap_or_else(|| panic!("pattern {pattern} must parse"));
+        assert_eq!(
+            value_types
+                .iter()
+                .map(metadata_type_xml_name)
+                .collect::<Vec<_>>(),
+            expected,
+            "{pattern}"
+        );
+        assert_eq!(
+            parse_metadata_type_pattern(pattern, &BTreeMap::new())
+                .unwrap_or_else(|| panic!("pattern {pattern} must parse"))
+                .iter()
+                .map(metadata_type_xml_name)
+                .collect::<Vec<_>>(),
+            expected,
+            "{pattern}"
+        );
+    }
+
+    // `v8:Null` is an ordinary `<v8:Type>` leaf, and the qualifiers of the
+    // sibling it travels with are still written after it.
+    let xml = format_form_metadata_types_xml(
+        &parse_form_metadata_type_pattern(r#"{"Pattern",{"S"},{"L"}}"#, &BTreeMap::new()).unwrap(),
+    );
+    assert!(xml.contains("<v8:Type>xs:string</v8:Type>"), "{xml}");
+    assert!(xml.contains("<v8:Type>v8:Null</v8:Type>"), "{xml}");
+    assert!(
+        xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"),
+        "{xml}"
+    );
+}
+
+/// Every one of these identifiers is a platform type serialized by a Form
+/// attribute pattern of 1C:Trade Management 11.5.27.75, with the namespace the
+/// platform declares inline on the emitted element.
+#[test]
+fn resolves_the_platform_type_identifiers_serialized_by_form_patterns() {
+    for (pattern, expected_xml) in [
+        (
+            r##"{"Pattern",{"#",48510817-200c-48c2-9973-06cf90840514}}"##,
+            "<v8:Type xmlns:pdfdoc=\"http://v8.1c.ru/8.3/data/pdf\">pdfdoc:PDFDocument</v8:Type>",
+        ),
+        (
+            r##"{"Pattern",{"#",95de81b0-81c3-4936-9dbb-6400e5c90378}}"##,
+            "<v8:Type xmlns:d5p1=\"http://v8.1c.ru/8.2/data/geo\">d5p1:GeographicalSchema</v8:Type>",
+        ),
+        (
+            r##"{"Pattern",{"#",0387f3a2-7df5-4804-948b-4580a51e4a15}}"##,
+            "<v8:Type>v8:StandardBeginningDate</v8:Type>",
+        ),
+        (
+            r##"{"Pattern",{"#",474c3bf6-08b5-4ddc-a2ad-989cedf11583}}"##,
+            "<v8:TypeSet>cfg:EnumRef</v8:TypeSet>",
+        ),
+    ] {
+        let value_types = normalize_form_type_pattern(
+            parse_form_metadata_type_pattern(pattern, &BTreeMap::new())
+                .unwrap_or_else(|| panic!("pattern {pattern} must parse")),
+        );
+        let xml = format_form_metadata_types_xml(&value_types);
+        assert!(xml.contains(expected_xml), "{pattern}: {xml}");
+    }
+
+    // The register reader resolved `cfg:EnumRef` on its own before; it now
+    // reaches the same answer through the one shared table.
+    assert_eq!(
+        builtin_type_reference("474c3bf6-08b5-4ddc-a2ad-989cedf11583"),
+        Some("cfg:EnumRef")
+    );
+    assert_eq!(
+        information_register_builtin_reference("474c3bf6-08b5-4ddc-a2ad-989cedf11583"),
+        None
+    );
+    assert_eq!(
+        parse_information_register_type_pattern(
+            r##"{"Pattern",{"#",474c3bf6-08b5-4ddc-a2ad-989cedf11583}}"##,
+            &BTreeMap::new(),
+        )
+        .as_deref(),
+        Some(
+            [ConstantValueType::ReferenceTypeSet {
+                reference: "cfg:EnumRef".to_string(),
+            }]
+            .as_slice()
+        )
+    );
+}
+
+/// `Documents/ПоручениеЭкспедитору` writes `{"Pattern",{"#",<DocumentRef>},
+/// {"S",500,1}}` for its `Основание` attribute and
+/// `Documents/ТранспортныйКонтейнерЭДО` writes
+/// `{"Pattern",{"#",<DocumentRef>},{"#",<CatalogRef.…>}}` for `ОбъектВладелец`.
+/// Both are the platform's own bytes, and in both the platform's XML puts the
+/// ordinary type before the type set - the same layout every Catalog,
+/// BusinessProcess and DataProcessor attribute already used.
+#[test]
+fn a_document_attribute_orders_its_type_sets_last_like_every_other_root_object() {
+    let catalog_type_uuid = "c000410b-b593-4ef1-8c9c-d464abe8dd86";
+    let type_index = BTreeMap::from([(
+        catalog_type_uuid.to_string(),
+        "cfg:CatalogRef.УдалитьСоглашенияОбИспользованииЭД".to_string(),
+    )]);
+
+    for (pattern, expected) in [
+        (
+            r##"{"Pattern",{"#",38bfd075-3e63-4aaa-a93e-94521380d579},{"S",500,1}}"##,
+            vec!["xs:string", "cfg:DocumentRef"],
+        ),
+        (
+            &format!(
+                r##"{{"Pattern",{{"#",38bfd075-3e63-4aaa-a93e-94521380d579}},{{"#",{catalog_type_uuid}}}}}"##
+            ),
+            vec![
+                "cfg:CatalogRef.УдалитьСоглашенияОбИспользованииЭД",
+                "cfg:DocumentRef",
+            ],
+        ),
+    ] {
+        let value_types = stable_partition_metadata_types(classify_metadata_reference_type_sets(
+            parse_metadata_type_pattern(pattern, &type_index)
+                .unwrap_or_else(|| panic!("pattern {pattern} must parse")),
+        ));
+        assert_eq!(
+            value_types
+                .iter()
+                .map(metadata_type_xml_name)
+                .collect::<Vec<_>>(),
+            expected,
+            "{pattern}"
+        );
+        let xml = format_metadata_types_xml_with_indent(&value_types, "\t");
+        let type_set_at = xml
+            .find("<v8:TypeSet>cfg:DocumentRef</v8:TypeSet>")
+            .unwrap();
+        let last_type_at = xml.rfind("<v8:Type>").unwrap();
+        assert!(last_type_at < type_set_at, "{pattern}: {xml}");
+    }
+}
+
 #[test]
 fn parses_common_command_load_report_settings_picture() {
     let (reference, load_transparent) = parse_common_command_picture_value(

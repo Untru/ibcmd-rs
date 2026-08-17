@@ -1014,7 +1014,19 @@ const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
         "4af83795-fc2a-48cd-9bea-ce665789a62c",
         "d5p1:FlowchartContextType",
     ),
+    (
+        "48510817-200c-48c2-9973-06cf90840514",
+        PDF_DOCUMENT_TYPE_REFERENCE,
+    ),
+    (
+        "95de81b0-81c3-4936-9dbb-6400e5c90378",
+        GEOGRAPHICAL_SCHEMA_TYPE_REFERENCE,
+    ),
 ];
+// Both carry their namespace inline on the emitted `<v8:Type>` element; see
+// `form_metadata_type_xml_namespace_attr`.
+const PDF_DOCUMENT_TYPE_REFERENCE: &str = "pdfdoc:PDFDocument";
+const GEOGRAPHICAL_SCHEMA_TYPE_REFERENCE: &str = "d5p1:GeographicalSchema";
 // Platform types serialized in DataProcessor Attribute patterns. SettingsComposer
 // stays on its stricter owner-wide admission path below.
 const DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
@@ -1072,6 +1084,9 @@ const XDTO_XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const XDTO_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
 const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
+
+// Platform `Null` type, serialized in type patterns as the bare element `{"L"}`.
+const NULL_TYPE_REFERENCE: &str = "v8:Null";
 
 const FORM_APPLICATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
 // Platform picture descriptor code for StdPicture.Print.
@@ -14887,20 +14902,22 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
         } else {
             Vec::new()
         };
-        if owner_kind == "Document" {
-            value_types = value_types
-                .into_iter()
-                .map(|value_type| match value_type {
-                    ConstantValueType::Reference { reference }
-                        if metadata_reference_is_type_set(&reference) =>
-                    {
-                        ConstantValueType::ReferenceTypeSet { reference }
-                    }
-                    other => other,
-                })
-                .collect();
-        } else if matches!(owner_kind, "BusinessProcess" | "Catalog" | "DataProcessor") {
-            attribute_first_order = owner_kind != OWNER_KIND_BUSINESS_PROCESS;
+        // A Document orders its attribute types exactly like a Catalog, a
+        // BusinessProcess or a DataProcessor: ordinary types first, type sets
+        // last. Documents used to keep the raw pattern order instead, which was
+        // indistinguishable for every Document whose pattern already listed its
+        // type sets last, and wrong for the two that do not - the `Основание`
+        // attribute of `Documents/ПоручениеЭкспедитору` (pattern
+        // `cfg:DocumentRef` before `xs:string`) and the `ОбъектВладелец`
+        // attribute of `Documents/ТранспортныйКонтейнерЭДО` (pattern
+        // `cfg:DocumentRef` before `cfg:CatalogRef.…`). Applying the shared
+        // partition to Documents makes both match and moves no other file of
+        // the 50 898 in the native tree of 1C:Trade Management 11.5.27.75.
+        if matches!(
+            owner_kind,
+            OWNER_KIND_BUSINESS_PROCESS | "Catalog" | "DataProcessor" | "Document"
+        ) {
+            attribute_first_order = matches!(owner_kind, "Catalog" | "DataProcessor");
             value_types =
                 stable_partition_metadata_types(classify_metadata_reference_type_sets(value_types));
         }
@@ -16433,9 +16450,6 @@ fn parse_information_register_type_pattern_element(
 }
 
 fn information_register_builtin_reference(type_id: &str) -> Option<&'static str> {
-    if type_id == "474c3bf6-08b5-4ddc-a2ad-989cedf11583" {
-        return Some("cfg:EnumRef");
-    }
     DCS_BUILTIN_REFERENCE_TYPE_SETS
         .iter()
         .find_map(|(candidate, reference)| (*candidate == type_id).then_some(*reference))
@@ -16464,6 +16478,15 @@ fn classify_metadata_reference_type_sets(
         .collect()
 }
 
+/// Moves every `TypeSet` leaf behind every ordinary `Type` leaf, keeping the
+/// relative order inside each group.
+///
+/// This is the platform's own layout for a root metadata object's `<Type>`
+/// block, not a form's. Forms have their own reader
+/// (`form_body::normalize_form_type_pattern`); dropping this partition changes
+/// exactly 15 of the 50 898 native files of 1C:Trade Management 11.5.27.75 -
+/// six Catalogs, one ChartOfCharacteristicTypes and eight InformationRegisters
+/// - and not one Form among them, so the two roles never shared this procedure.
 fn stable_partition_metadata_types(value_types: Vec<ConstantValueType>) -> Vec<ConstantValueType> {
     let (mut ordinary, type_sets): (Vec<_>, Vec<_>) = value_types
         .into_iter()
@@ -29130,6 +29153,15 @@ fn parse_metadata_type_pattern_element_with_builtin(
                 _ => "DateTime",
             },
         }),
+        // `{"L"}` is the serialized form of the platform `Null` type. Every one
+        // of the 15 `v8:Null` type entries the platform writes across the 12
+        // carrying files of 1C:Trade Management 11.5.27.75 is a bare
+        // `<v8:Type>v8:Null</v8:Type>` with no qualifier of its own and with
+        // its pattern position preserved, so it parses as an ordinary
+        // reference-shaped leaf.
+        r#""L""# if element.len() == 1 => Some(ConstantValueType::Reference {
+            reference: NULL_TYPE_REFERENCE.to_string(),
+        }),
         r##""#""## if element.len() >= 2 => {
             let type_id = parse_uuid_field(element.get(1)?.trim())?;
             let reference = type_index
@@ -29199,6 +29231,7 @@ fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "4500381b-db30-4a10-9db4-990038032acf" => Some("v8:FixedArray"),
         "220455ea-6c85-4513-996f-bbe79ed07774" => Some("v8:FixedMap"),
         "2fdc88ec-7c9b-43cd-8ba5-873f043bdd88" => Some("v8:StandardPeriod"),
+        "0387f3a2-7df5-4804-948b-4580a51e4a15" => Some("v8:StandardBeginningDate"),
         "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3" => Some("v8:ValueListType"),
         "e603103e-a318-4edc-a014-b1c6cf94d49f" => Some("mxl:SpreadsheetDocument"),
         "0a52f9de-73ea-4507-81e8-66217bead73a" => Some("cfg:ExchangePlanRef"),
@@ -29232,6 +29265,12 @@ fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "82faabf3-7f9b-4b2e-b499-98876415f270" => Some("cfg:CatalogManager"),
         "92e7f73f-bd66-4d9e-bc43-bae2acfadfd5" => Some("cfg:DocumentJournalManager"),
         "e61ef7b8-f3e1-4f4b-8ac7-676e90524997" => Some("cfg:CatalogRef"),
+        // Same reference family as `cfg:CatalogRef` above.
+        // `information_register_builtin_reference` (mod.rs:~16452) already
+        // resolved this identifier for register children only; keeping the
+        // mapping here instead makes the one table serve every pattern reader,
+        // which is what the register reader itself falls back to.
+        "474c3bf6-08b5-4ddc-a2ad-989cedf11583" => Some("cfg:EnumRef"),
         _ => None,
     }
 }
@@ -36132,6 +36171,18 @@ fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'st
             if reference == "d5p1:FlowchartContextType" =>
         {
             r#" xmlns:d5p1="http://v8.1c.ru/8.2/data/graphscheme""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == PDF_DOCUMENT_TYPE_REFERENCE =>
+        {
+            r#" xmlns:pdfdoc="http://v8.1c.ru/8.3/data/pdf""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == GEOGRAPHICAL_SCHEMA_TYPE_REFERENCE =>
+        {
+            r#" xmlns:d5p1="http://v8.1c.ru/8.2/data/geo""#
         }
         _ => metadata_type_xml_namespace_attr(value_type),
     }
