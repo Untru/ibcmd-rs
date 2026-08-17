@@ -14705,7 +14705,11 @@ fn resolves_document_form_paths_from_the_typed_metadata_owner() {
         Some("Object.Lines")
     );
 
-    assert!(
+    // The marker alone must not prove a *document* standard attribute: the same
+    // `-2` under a catalog owner is that family's own `Code`, never `Number`.
+    // UT 11.5.27.75 spells out 77 catalog-owner `-2` slots and every one of them
+    // is written `Code`.
+    assert_eq!(
         resolve_form_strict_field_model_data_path(
             r#"{2,{1},{-2}}"#,
             &BTreeMap::from([(
@@ -14719,8 +14723,8 @@ fn resolves_document_form_paths_from_the_typed_metadata_owner() {
             )]),
             &BTreeMap::new(),
         )
-        .is_none(),
-        "the marker alone must not prove a document standard attribute"
+        .as_deref(),
+        Some("Object.Code")
     );
     assert!(
         resolve_form_owner_scoped_metadata_data_path(
@@ -61464,6 +61468,257 @@ fn resolves_business_process_object_standard_attribute_markers() {
         None,
         "`Posted` is a document marker and is not evidenced for business processes"
     );
+}
+
+/// Builds a `FormAttribute` whose single value type is `reference`.
+fn data_path_typed_form_attribute(id: &str, name: &str, reference: &str) -> FormAttribute {
+    let mut attribute = data_path_form_attribute(id, name, None);
+    attribute.value_types = vec![ConstantValueType::Reference {
+        reference: reference.to_string(),
+    }];
+    attribute
+}
+
+/// The standard-attribute marker is read against the attribute's own generated
+/// owner type, never against the marker alone.
+///
+/// Evidence: UT 11.5.27.75 spells out 1 395 `{2,{attribute},{marker}}` slots and
+/// `(owner type, marker)` fixes the name the platform writes with no exception,
+/// while the marker alone does not: `-2` is `Code` under `cfg:CatalogObject`
+/// (77 slots, e.g. `Catalogs/БанковскиеСчетаКонтрагентов/Forms/ФормаЭлемента`),
+/// `Number` under `cfg:DocumentObject` (316) and `Period` under
+/// `cfg:InformationRegisterRecordManager` (23, e.g.
+/// `InformationRegisters/КурсыВалют/Forms/ЗаписьРегистра`).
+#[test]
+fn resolves_standard_attribute_markers_against_the_owner_family() {
+    for (reference, marker, expected) in [
+        (
+            "cfg:CatalogObject.БанковскиеСчетаКонтрагентов",
+            "-2",
+            "Code",
+        ),
+        (
+            "cfg:CatalogObject.БанковскиеСчетаКонтрагентов",
+            "-3",
+            "Description",
+        ),
+        ("cfg:CatalogObject.ВидыНоменклатуры", "-4", "Parent"),
+        (
+            "cfg:CatalogObject.БанковскиеСчетаОрганизаций",
+            "-5",
+            "Owner",
+        ),
+        ("cfg:CatalogObject.ВариантыОтчетов", "-8", "Ref"),
+        ("cfg:CatalogRef.Валюты", "-3", "Description"),
+        ("cfg:TaskObject.ЗадачаИсполнителя", "-9", "Description"),
+        ("cfg:TaskObject.ЗадачаИсполнителя", "-10", "Executed"),
+        ("cfg:TaskObject.ЗадачаИсполнителя", "-7", "BusinessProcess"),
+        ("cfg:TaskObject.ЗадачаИсполнителя", "-8", "RoutePoint"),
+        (
+            "cfg:ChartOfCharacteristicTypesObject.СтатьиАктивовПассивов",
+            "-6",
+            "Parent",
+        ),
+        (
+            "cfg:ChartOfCharacteristicTypesObject.СтатьиАктивовПассивов",
+            "-9",
+            "Description",
+        ),
+        (
+            "cfg:ChartOfCharacteristicTypesObject.СтатьиАктивовПассивов",
+            "-11",
+            "ValueType",
+        ),
+        ("cfg:ExchangePlanObject.СОтборами", "-9", "SentNo"),
+        ("cfg:ExchangePlanObject.СОтборами", "-10", "ReceivedNo"),
+        (
+            "cfg:ExchangePlanObject.ОбменУправлениеТорговлейРозница",
+            "-14",
+            "ExchangeDate",
+        ),
+        (
+            "cfg:InformationRegisterRecordManager.КурсыВалют",
+            "-2",
+            "Period",
+        ),
+        (
+            "cfg:InformationRegisterRecordSet.ФИОФизическихЛиц",
+            "-2",
+            "Period",
+        ),
+    ] {
+        let attribute = data_path_typed_form_attribute("1", "Объект", reference);
+        let owner = form_attribute_metadata_owner(&attribute);
+        assert_eq!(
+            resolve_form_owner_scoped_standard_attribute_data_path(&owner, marker).as_deref(),
+            Some(format!("Объект.{expected}").as_str()),
+            "{reference} marker {marker}"
+        );
+    }
+
+    // A marker no slot of that family carries stays unresolved rather than
+    // borrowing another family's table: `-4` is `Parent` for a catalog and
+    // `DeletionMark` for a document, and no catalog-reference slot spells it.
+    let catalog_ref = data_path_typed_form_attribute("1", "Объект", "cfg:CatalogRef.Валюты");
+    assert_eq!(
+        resolve_form_owner_scoped_standard_attribute_data_path(
+            &form_attribute_metadata_owner(&catalog_ref),
+            "-4"
+        ),
+        None
+    );
+    let register = data_path_typed_form_attribute(
+        "1",
+        "Запись",
+        "cfg:InformationRegisterRecordManager.КурсыВалют",
+    );
+    assert_eq!(
+        resolve_form_owner_scoped_standard_attribute_data_path(
+            &form_attribute_metadata_owner(&register),
+            "-3"
+        ),
+        None
+    );
+}
+
+/// A task's addressing attributes are members of the task and are written by
+/// their own name; the shared metadata-path grammar has no such role, so the
+/// route is recognised for that one family and rejected everywhere else.
+///
+/// Evidence: UT 11.5.27.75
+/// `BusinessProcesses/СогласованиеЗакупки/Forms/ФормаЗадачиРецензента`,
+/// LabelField `Исполнитель` carries `{2,{1},{0,88f44c9b-216d-4d7e-bc88-1e6b253ed01e}}`
+/// against the `Объект` attribute of type `cfg:TaskObject.ЗадачаИсполнителя`;
+/// the uuid resolves to
+/// `Task.ЗадачаИсполнителя.AddressingAttribute.Исполнитель` and the platform
+/// writes `<DataPath>Объект.Исполнитель</DataPath>`.
+#[test]
+fn routes_task_addressing_attributes_by_their_own_name() {
+    assert_eq!(
+        form_metadata_data_path_route("Task.ЗадачаИсполнителя.AddressingAttribute.Исполнитель"),
+        Some((
+            "Task.ЗадачаИсполнителя".to_string(),
+            "Исполнитель".to_string()
+        ))
+    );
+    for hostile in [
+        "Catalog.Номенклатура.AddressingAttribute.Исполнитель",
+        "Task.ЗадачаИсполнителя.AddressingAttribute.",
+        "Task.ЗадачаИсполнителя.AddressingAttribute.Исполнитель.Больше",
+        "Task..AddressingAttribute.Исполнитель",
+    ] {
+        assert_eq!(form_metadata_data_path_route(hostile), None, "{hostile}");
+    }
+    // The ordinary roles keep their existing routes.
+    assert_eq!(
+        form_metadata_data_path_route("Catalog.Номенклатура.Attribute.Артикул"),
+        Some(("Catalog.Номенклатура".to_string(), "Артикул".to_string()))
+    );
+}
+
+/// An item-scoped binding may address its column by the metadata uuid of the
+/// member it shows; the member names itself, so the column name is read off the
+/// reference.
+///
+/// Evidence: UT 11.5.27.75
+/// `Documents/СправкаОПодтверждающихДокументах/Forms/ФормаДокумента`, InputField
+/// `ПодтверждающиеДокументыБезРазбиенияВалюта` carries
+/// `{2,{62,02023637-…},{0,b305196a-…}}` against form item 62
+/// `ПодтверждающиеДокументы`, and the platform writes
+/// `<DataPath>Items.ПодтверждающиеДокументы.CurrentData.ВалютаДокумента</DataPath>`.
+#[test]
+fn reads_item_scoped_current_data_from_a_metadata_uuid_terminal() {
+    let table_name_by_id =
+        BTreeMap::from([("62".to_string(), "ПодтверждающиеДокументы".to_string())]);
+    let object_refs = BTreeMap::from([(
+        "b305196a-94f6-4728-b956-abc371a979c6".to_string(),
+        "Document.СправкаОПодтверждающихДокументах.TabularSection.\
+ПодтверждающиеДокументы.Attribute.ВалютаДокумента"
+            .to_string(),
+    )]);
+
+    let item = parse_form_child_item_with_attrs(
+        r#"{37,{113,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"ПодтверждающиеДокументыБезРазбиенияВалюта",1,0,{1,0},{1,0},{2,{62,02023637-7868-4a5f-8576-835a76e0c9ba},{0,b305196a-94f6-4728-b956-abc371a979c6}},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &table_name_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+
+    assert_eq!(item.tag, "InputField");
+    assert_eq!(
+        item.data_path.as_deref(),
+        Some("Items.ПодтверждающиеДокументы.CurrentData.ВалютаДокумента")
+    );
+
+    // A uuid that names no metadata member leaves the slot unresolved rather
+    // than inventing a column.
+    let unresolved = parse_form_child_item_with_attrs(
+        r#"{37,{113,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"ПодтверждающиеДокументыБезРазбиенияВалюта",1,0,{1,0},{1,0},{2,{62,02023637-7868-4a5f-8576-835a76e0c9ba},{0,b305196a-94f6-4728-b956-abc371a979c6}},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &table_name_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(unresolved.data_path, None);
+}
+
+/// Both bound slots spelling the empty binding `{0}` is the platform's own
+/// statement that the item shows no data, and it writes no `DataPath` at all.
+///
+/// Evidence: UT 11.5.27.75 carries 280 such items and none of them has the
+/// element -- among them InputField `ВалютаДоговора` of
+/// `Catalogs/ВариантыГрафиковКредитовИДепозитов/Forms/ФормаСписка` and
+/// CheckBoxField `ВидимостьПоУмолчанию` of
+/// `Catalogs/ВариантыОтчетов/Forms/ФормаСписка`, both inside the `Список` table.
+#[test]
+fn omits_the_data_path_when_both_bound_slots_are_empty() {
+    let unbound = parse_form_child_item_with_attrs(
+        r#"{37,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"ВалютаДоговора",1,0,{1,0},{1,0},{0},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0}"#,
+        None,
+        Some("Список"),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(unbound.tag, "InputField");
+    assert_eq!(
+        unbound.data_path, None,
+        "an unbound field names no data path, not the parent path plus its own name"
+    );
+
+    // A slot that does spell a binding still resolves through the parent.
+    let bound = parse_form_child_item_with_attrs(
+        r#"{37,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"ВалютаДоговора",1,0,{1,0},{1,0},{1,{3}},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0}"#,
+        None,
+        Some("Список"),
+        &BTreeMap::from([("3".to_string(), "ВалютаДоговора".to_string())]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(bound.data_path.as_deref(), Some("ВалютаДоговора"));
 }
 
 /// The third slot of a form font tuple is a member bitmask: every attribute

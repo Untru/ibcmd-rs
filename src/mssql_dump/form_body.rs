@@ -331,10 +331,21 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     }
 
     let started = Instant::now();
+    // The command bar's own buttons address the form's attributes exactly as
+    // any other item does, so they are read against the same name index rather
+    // than against an empty one: UT 11.5.27.75
+    // `Catalogs/ВариантыОтчетов/Forms/ФормаЭлемента`, Button `ФормаОткрыть`
+    // carries `{2,{1},{-8}}` against attribute 1 `Объект` and the platform
+    // writes `<DataPath>Объект.Ref</DataPath>`.
+    let auto_command_bar_attribute_names = attributes
+        .iter()
+        .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
+        .collect::<BTreeMap<_, _>>();
     let auto_command_bar = extract_form_auto_command_bar(
         &form_fields,
         &commands,
         context.object_refs,
+        &auto_command_bar_attribute_names,
         &child_item_indexes.table_name_by_id,
         &child_item_indexes.standard_command_owner_name_by_id,
         &child_item_indexes.command_source_owner_name_by_id,
@@ -2395,6 +2406,7 @@ pub(super) fn extract_form_auto_command_bar(
     fields: &[&str],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
@@ -2403,6 +2415,7 @@ pub(super) fn extract_form_auto_command_bar(
         fields,
         commands,
         object_refs,
+        attribute_names_by_id,
         table_name_by_id,
         standard_command_owner_name_by_id,
         command_source_owner_name_by_id,
@@ -2413,6 +2426,7 @@ pub(super) fn find_form_auto_command_bar(
     fields: &[&str],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
@@ -2429,6 +2443,7 @@ pub(super) fn find_form_auto_command_bar(
             &nested,
             commands,
             object_refs,
+            attribute_names_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             command_source_owner_name_by_id,
@@ -2439,6 +2454,7 @@ pub(super) fn find_form_auto_command_bar(
             &nested,
             commands,
             object_refs,
+            attribute_names_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             command_source_owner_name_by_id,
@@ -2453,6 +2469,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
     fields: &[&str],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
@@ -2476,7 +2493,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
             None,
             None,
             None,
-            &BTreeMap::new(),
+            attribute_names_by_id,
             &BTreeMap::new(),
             table_name_by_id,
             standard_command_owner_name_by_id,
@@ -13043,6 +13060,7 @@ pub(super) fn parse_form_child_item_data_path(
                     table_name_by_id,
                     table_column_names_by_id,
                     type_link_data_path_by_table_column,
+                    object_refs,
                 ))
             })
             .or_else(|| {
@@ -13136,6 +13154,20 @@ pub(super) fn parse_form_child_item_data_path(
     .flatten()
     .unwrap_or(0);
     let input_slots = [11 + input_field_offset, 12 + input_field_offset];
+    // Both bound slots spelling the empty binding `{0}` is the platform's own
+    // statement that the item shows no data, and it then writes no `DataPath`
+    // at all -- 280 such items across UT 11.5.27.75, every one of them without
+    // the element. Naming the parent path plus the item's own name instead is a
+    // guess, and it is wrong for all 77 of those the guess reached.
+    let unbound_slots = button_data_path_slot.is_none()
+        && fields.get(input_slots[0]).map(|field| field.trim()) == Some("{0}")
+        && matches!(
+            fields.get(input_slots[1]).map(|field| field.trim()),
+            None | Some("{0}")
+        );
+    if unbound_slots {
+        return None;
+    }
     let data_path = match tag {
         "Table" => fields
             .get(11)
@@ -13670,6 +13702,12 @@ fn resolve_form_owner_scoped_metadata_data_path_status(
     let Some(owner) = split_1c_braced_fields(owner_field.trim(), 0) else {
         return FormMetadataDataPathResolution::Invalid;
     };
+    // A `{id,02023637-…}` owner names a *form item*, not a form attribute, so
+    // the binding is not owner-scoped metadata at all and must be left for the
+    // item-scoped resolver rather than condemned as a broken attribute route.
+    if owner.len() == 2 && owner.get(1).map(|field| field.trim()) == Some(FORM_ITEM_TYPE_UUID) {
+        return FormMetadataDataPathResolution::NotMetadata;
+    }
     if owner.len() != 1 {
         return FormMetadataDataPathResolution::Invalid;
     }
@@ -13768,10 +13806,88 @@ pub(super) fn resolve_form_owner_scoped_standard_attribute_data_path(
                 .iter()
                 .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
         }
+        (GeneratedMetadataOwnerFamily::Catalog, GeneratedMetadataOwnerRole::Object) => {
+            lookup_form_standard_attribute(CATALOG_OBJECT_STANDARD_ATTRIBUTES, marker)
+        }
+        (GeneratedMetadataOwnerFamily::Catalog, GeneratedMetadataOwnerRole::Ref) => {
+            lookup_form_standard_attribute(CATALOG_REF_STANDARD_ATTRIBUTES, marker)
+        }
+        (GeneratedMetadataOwnerFamily::Task, GeneratedMetadataOwnerRole::Object) => {
+            lookup_form_standard_attribute(TASK_OBJECT_STANDARD_ATTRIBUTES, marker)
+        }
+        (
+            GeneratedMetadataOwnerFamily::ChartOfCharacteristicTypes,
+            GeneratedMetadataOwnerRole::Object,
+        ) => lookup_form_standard_attribute(
+            CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES,
+            marker,
+        ),
+        (GeneratedMetadataOwnerFamily::ExchangePlan, GeneratedMetadataOwnerRole::Object) => {
+            lookup_form_standard_attribute(EXCHANGE_PLAN_OBJECT_STANDARD_ATTRIBUTES, marker)
+        }
+        (
+            GeneratedMetadataOwnerFamily::InformationRegister,
+            GeneratedMetadataOwnerRole::RecordManager | GeneratedMetadataOwnerRole::RecordSet,
+        ) => lookup_form_standard_attribute(INFORMATION_REGISTER_STANDARD_ATTRIBUTES, marker),
         _ => None,
     }?;
     Some(format!("{}.{}", attribute.name, attribute_name))
 }
+
+fn lookup_form_standard_attribute(
+    table: &[(&str, &'static str)],
+    marker: &str,
+) -> Option<&'static str> {
+    table
+        .iter()
+        .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+}
+
+/// Standard attributes a bound field slot reaches through a
+/// `{2,{attribute},{marker}}` binding, one table per generated owner type.
+///
+/// Evidence: UT 11.5.27.75. Over the 1 395 such slots the whole configuration
+/// spells out, `(generated owner type, marker)` determines the name the
+/// platform writes with no exception -- 317 `cfg:CatalogObject`/`-3` all
+/// `Description`, 316 `cfg:DocumentObject`/`-2` all `Number`, 89
+/// `cfg:CatalogObject`/`-4` all `Parent`, 43 `cfg:CatalogObject`/`-5` all
+/// `Owner`, and so on down to the singletons. The marker alone does not
+/// determine it -- `-2` is `Number` under `cfg:DocumentObject`, `Code` under
+/// `cfg:CatalogObject` and `Period` under `cfg:InformationRegisterRecordManager`
+/// -- so a family-blind table would be a guess, and each table below lists only
+/// the markers its own family was observed to carry.
+const CATALOG_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-2", "Code"),
+    ("-3", "Description"),
+    ("-4", "Parent"),
+    ("-5", "Owner"),
+    ("-8", "Ref"),
+];
+const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Code"), ("-3", "Description")];
+const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-2", "Number"),
+    ("-3", "Date"),
+    ("-5", "Ref"),
+    ("-7", "BusinessProcess"),
+    ("-8", "RoutePoint"),
+    ("-9", "Description"),
+    ("-10", "Executed"),
+];
+const CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-6", "Parent"),
+    ("-8", "Code"),
+    ("-9", "Description"),
+    ("-11", "ValueType"),
+];
+const EXCHANGE_PLAN_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-2", "Code"),
+    ("-3", "Description"),
+    ("-6", "Ref"),
+    ("-9", "SentNo"),
+    ("-10", "ReceivedNo"),
+    ("-14", "ExchangeDate"),
+];
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Period")];
 
 /// Business-process standard attributes reachable through a bound field slot,
 /// limited to the markers the platform bytes actually spell out.
@@ -13839,7 +13955,34 @@ fn resolve_form_table_current_data_metadata_uuid_path(
     ))
 }
 
+/// A task's addressing attributes are members of the task exactly as its
+/// ordinary attributes are, and the platform writes them by their own name.
+/// The shared metadata-path grammar has no `AddressingAttribute` role, so the
+/// reference is recognised here, restricted to the one family that owns such
+/// members. Evidence: UT 11.5.27.75
+/// `BusinessProcesses/СогласованиеЗакупки/Forms/ФормаЗадачиРецензента`,
+/// LabelField `Исполнитель` carries `{2,{1},{0,88f44c9b-…}}` against attribute
+/// `Объект` of type `cfg:TaskObject.ЗадачаИсполнителя`, the uuid resolves to
+/// `Task.ЗадачаИсполнителя.AddressingAttribute.Исполнитель`, and the platform
+/// writes `<DataPath>Объект.Исполнитель</DataPath>`.
+fn form_task_addressing_attribute_route(reference: &str) -> Option<(String, String)> {
+    let parts = reference.split('.').collect::<Vec<_>>();
+    let [family, owner, role, member] = parts.as_slice() else {
+        return None;
+    };
+    if *family != "Task" || *role != "AddressingAttribute" {
+        return None;
+    }
+    if owner.is_empty() || member.is_empty() {
+        return None;
+    }
+    Some((format!("{family}.{owner}"), (*member).to_string()))
+}
+
 pub(super) fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
+    if let Some(route) = form_task_addressing_attribute_route(reference) {
+        return Some(route);
+    }
     let path = parse_metadata_data_path(reference)?;
     let relative_path = match path.role() {
         MetadataDataPathRole::Attribute
@@ -14765,11 +14908,25 @@ pub(super) fn parse_form_button_data_path(
 /// Global binding-key routes are deliberately not consulted here: the
 /// column key of an item-scoped binding is only unique within its own table, so
 /// a form-wide index would cross-wire sibling tables that reuse a key.
+///
+/// The terminal addresses the column either by its form binding id or by the
+/// metadata uuid of the member it shows. The uuid form names the member
+/// outright, so it is read straight off the metadata reference and never
+/// through the type-link route table: that table records where a *choice link*
+/// points, which is a different column whenever the two disagree. Evidence: UT
+/// 11.5.27.75 `Documents/СправкаОПодтверждающихДокументах/Forms/ФормаДокумента`,
+/// InputField `ПодтверждающиеДокументыБезРазбиенияВалюта` carries
+/// `{2,{62,02023637-…},{0,b305196a-…}}`, whose uuid is
+/// `Document.СправкаОПодтверждающихДокументах.TabularSection.
+/// ПодтверждающиеДокументы.Attribute.ВалютаДокумента`, and the platform writes
+/// `Items.ПодтверждающиеДокументы.CurrentData.ВалютаДокумента` while the route
+/// table holds `…CurrentData.Валюта`.
 fn resolve_form_item_scoped_current_data_path(
     field: &str,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let [kind, owner, terminal] = fields.as_slice() else {
@@ -14780,10 +14937,24 @@ fn resolve_form_item_scoped_current_data_path(
     }
     let owner = split_1c_braced_fields(owner.trim(), 0)?;
     let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-    if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID || terminal.len() != 1 {
+    if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID {
         return None;
     }
     let table_id = owner.first()?.trim();
+    if let [marker, uuid] = terminal.as_slice() {
+        if marker.trim() != "0" {
+            return None;
+        }
+        return resolve_form_table_current_data_metadata_uuid_path(
+            table_id,
+            uuid.trim(),
+            table_name_by_id,
+            object_refs,
+        );
+    }
+    if terminal.len() != 1 {
+        return None;
+    }
     let column_id = terminal.first()?.trim();
     if let Some(data_path) =
         type_link_data_path_by_table_column.get(&(table_id.to_string(), column_id.to_string()))
