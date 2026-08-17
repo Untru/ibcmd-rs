@@ -8870,10 +8870,10 @@ fn parse_form_child_item_with_metadata_owners(
             &fields,
             conditional_group_schema.is_some(),
             attribute_names_by_id,
-            attribute_metadata_owners_by_id,
             table_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
+            owner_scoped_bindings,
             object_refs,
         ),
         command_name,
@@ -13833,6 +13833,51 @@ const FORM_VALUE_TABLE_INDEX_BINDING_UUID: &str = "e67e2953-cebe-4d97-bb93-12b17
 /// total of the member the uuid names rather than the member itself.
 const FORM_AGGREGATE_MEMBER_MARKER: &str = "101000000";
 
+/// The row-count marker: a bare `{100000000}` segment addresses the row count
+/// of the collection the chain has reached rather than any of its members.
+///
+/// Evidence: UT 11.5.27.75 writes it only as a chain terminal, on both a
+/// two-segment chain over a form collection attribute
+/// (`СкидкиНаценки.RowsCount`) and a three-segment chain whose middle segment
+/// is a tabular-section reference (`Объект.Товары.RowsCount`). No slot in the
+/// configuration uses `100000000` as a declared column id.
+const FORM_ROWS_COUNT_MEMBER_MARKER: &str = "100000000";
+
+/// A root metadata reference that is a configuration-wide common attribute
+/// contributes its own name and nothing else -- the reference has no owner to
+/// route through, so `form_metadata_data_path_route` cannot spell it.
+///
+/// Evidence: UT 11.5.27.75, all 6 chain segments whose reference is a
+/// `CommonAttribute` (`Запись.ОбластьДанныхВспомогательныеДанные`,
+/// `Объект.ОбластьДанныхОсновныеДанные`). Every other reference this route
+/// refuses is a `Constant`, which the constants-set resolver owns and which
+/// must keep falling through.
+fn form_common_attribute_member(reference: &str) -> Option<&str> {
+    let member = reference.strip_prefix("CommonAttribute.")?;
+    (!member.is_empty() && !member.contains('.') && member.trim() == member).then_some(member)
+}
+
+/// The standard attributes a chain reaches by dereferencing a tabular section
+/// itself, as opposed to dereferencing a value the section holds.
+///
+/// Evidence: UT 11.5.27.75. On every one of the 320 chains whose next-to-last
+/// segment is a tabular-section reference and whose last segment is a negative
+/// marker, the marker is `-2` and the platform writes `LineNumber`. The marker
+/// alone decides nothing -- `-2` is `Number` under a document object, `Code`
+/// under a catalog reference and `Period` under an information-register record
+/// manager -- so this table is reached only through the tabular-section role
+/// and lists only the marker that role was observed to carry.
+const TABULAR_SECTION_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "LineNumber")];
+
+fn form_tabular_section_standard_attribute_name(
+    reference: &str,
+    marker: &str,
+) -> Option<&'static str> {
+    let path = parse_metadata_data_path(reference)?;
+    (path.role() == MetadataDataPathRole::TabularSection)
+        .then(|| lookup_form_standard_attribute(TABULAR_SECTION_STANDARD_ATTRIBUTES, marker))?
+}
+
 /// Walks a bound slot as the chain it is.
 ///
 /// A bound slot is `{K,s1,…,sK}`: segment 1 names the form attribute the chain
@@ -13877,8 +13922,13 @@ pub(super) fn resolve_form_bound_chain_member_path(
     // The only segment kind that states a type is a declared column, so a
     // dereferencing marker is answered only when it follows one directly.
     let mut reached_type: Option<&str> = None;
+    // A metadata reference states which member a chain has reached, and the
+    // reference's own role decides which standard attributes the next
+    // dereferencing marker may address.
+    let mut reached_metadata_reference: Option<&str> = None;
     for segment in members {
         let previous_type = reached_type.take();
+        let previous_metadata_reference = reached_metadata_reference.take();
         match segment.as_slice() {
             [index, uuid]
                 if uuid
@@ -13907,10 +13957,20 @@ pub(super) fn resolve_form_bound_chain_member_path(
                 path.push('.');
                 path.push_str(name);
             }
+            [marker] if marker.trim() == FORM_ROWS_COUNT_MEMBER_MARKER => {
+                path.push('.');
+                path.push_str("RowsCount");
+            }
             [marker] if marker.trim().starts_with('-') => {
-                let reference = previous_type?;
-                let name =
-                    form_standard_attribute_name_for_type_reference(reference, marker.trim())?;
+                let name = match previous_type {
+                    Some(reference) => {
+                        form_standard_attribute_name_for_type_reference(reference, marker.trim())?
+                    }
+                    None => form_tabular_section_standard_attribute_name(
+                        previous_metadata_reference?,
+                        marker.trim(),
+                    )?,
+                };
                 path.push('.');
                 path.push_str(name);
             }
@@ -13933,7 +13993,12 @@ pub(super) fn resolve_form_bound_chain_member_path(
                 marker.parse::<i64>().ok()?;
                 let uuid = parse_non_zero_uuid(uuid.trim())?;
                 let reference = object_refs.get(&uuid)?;
-                let (_, relative_path) = form_metadata_data_path_route(reference)?;
+                let Some((_, relative_path)) = form_metadata_data_path_route(reference) else {
+                    let member = form_common_attribute_member(reference)?;
+                    path.push('.');
+                    path.push_str(member);
+                    continue;
+                };
                 let member = relative_path.rsplit('.').next()?;
                 if member.is_empty() {
                     return None;
@@ -13943,6 +14008,7 @@ pub(super) fn resolve_form_bound_chain_member_path(
                     path.push_str("Total");
                 }
                 path.push_str(member);
+                reached_metadata_reference = Some(reference.as_str());
             }
             _ => return None,
         }
@@ -14634,18 +14700,23 @@ pub(super) fn parse_form_title_data_path(
     fields: &[&str],
     conditional_layout: bool,
     attribute_names_by_id: &BTreeMap<String, String>,
-    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     if wrapper != "22" || conditional_layout {
         return None;
     }
+    // The bound slot is the same chain grammar every other bound slot uses, so
+    // the title reads it with the same walker. What identifies the slot is the
+    // options bag's own shape -- kind and length -- and not the item's raw
+    // field count, which varies from 30 to 42 across the 427 title-bound items
+    // the configuration spells out without changing where the binding sits.
     let (options_kind, options_len, binding_slot) = match tag {
-        "Page" if matches!(fields.len(), 32 | 34 | 40) => ("18", 20, 4),
-        "UsualGroup" if matches!(fields.len(), 32 | 34) => ("29", 29, 5),
+        "Page" => ("18", 20, 4),
+        "UsualGroup" => ("29", 29, 5),
         _ => return None,
     };
     let options = fields
@@ -14656,38 +14727,19 @@ pub(super) fn parse_form_title_data_path(
     {
         return None;
     }
-    let binding = options
-        .get(binding_slot)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let binding = options.get(binding_slot)?.trim();
+    if let Some(path) = resolve_form_bound_chain_member_path(
+        binding,
+        attribute_names_by_id,
+        owner_scoped_bindings,
+        object_refs,
+        false,
+    ) {
+        return Some(path);
+    }
+    let binding = split_1c_braced_fields(binding, 0)?;
     match binding.as_slice() {
-        [kind, owner] if kind.trim() == "1" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            if owner.len() != 1 {
-                return None;
-            }
-            attribute_names_by_id.get(owner.first()?.trim()).cloned()
-        }
-        [kind, owner, metadata, terminal] if tag == "Page" && kind.trim() == "3" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            let metadata = split_1c_braced_fields(metadata.trim(), 0)?;
-            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-            if owner.len() != 1
-                || metadata.len() != 2
-                || metadata.first()?.trim() != "0"
-                || terminal.len() != 1
-                || terminal.first()?.trim() != "100000000"
-            {
-                return None;
-            }
-            let uuid = parse_non_zero_uuid(metadata.get(1)?.trim())?;
-            resolve_form_title_rows_count_path(
-                owner.first()?.trim(),
-                &uuid,
-                attribute_metadata_owners_by_id,
-                object_refs,
-            )
-        }
-        [kind, owner, terminal] if tag == "UsualGroup" && kind.trim() == "2" => {
+        [kind, owner, terminal] if kind.trim() == "2" => {
             let owner = split_1c_braced_fields(owner.trim(), 0)?;
             let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
             if owner.len() != 2
@@ -14706,27 +14758,6 @@ pub(super) fn parse_form_title_data_path(
         }
         _ => None,
     }
-}
-
-fn resolve_form_title_rows_count_path(
-    attribute_id: &str,
-    uuid: &str,
-    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let attribute = attribute_metadata_owners_by_id.get(attribute_id)?;
-    let reference = object_refs.get(uuid)?;
-    let path = parse_metadata_data_path(reference)?;
-    if path.role() != MetadataDataPathRole::TabularSection
-        || !form_attribute_matches_metadata_owner(attribute, &path.owner_reference())
-    {
-        return None;
-    }
-    Some(format!(
-        "{}.{}.RowsCount",
-        attribute.name,
-        path.table_name()?
-    ))
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
@@ -14787,6 +14818,28 @@ pub(super) fn parse_form_bound_data_path(
     }
 }
 
+/// Whether a dynamic list's `DefaultPicture` sits outside the table the list
+/// declares, which the platform marks by prefixing the whole path with `~`.
+///
+/// Evidence: UT 11.5.27.75 spells out 1 587 `…DefaultPicture` row-picture
+/// paths. All 55 whose list declares no main table carry `~`, and so do all 6
+/// whose declared main table is an `Enum` -- an enumeration has no default
+/// picture of its own, so the field cannot come from that table. Every one of
+/// the remaining 1 526, over nine other main-table families, carries no `~`.
+pub(super) fn form_dynamic_list_default_picture_is_out_of_main_table(
+    attribute: &FormAttributeMetadataOwner,
+) -> bool {
+    if !attribute.has_dynamic_list_settings {
+        return false;
+    }
+    match attribute.main_table.as_deref() {
+        None => true,
+        Some(main_table) => main_table
+            .split_once('.')
+            .is_some_and(|(family, _)| family == "Enum"),
+    }
+}
+
 pub(super) fn parse_form_table_row_picture_data_path(
     schema: FormTableSchema,
     fields: &[&str],
@@ -14808,9 +14861,7 @@ pub(super) fn parse_form_table_row_picture_data_path(
             let hidden =
                 parse_exact_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())
                     .and_then(|attribute_id| attribute_metadata_owners_by_id.get(&attribute_id))
-                    .is_some_and(|attribute| {
-                        attribute.has_dynamic_list_settings && attribute.main_table.is_none()
-                    });
+                    .is_some_and(form_dynamic_list_default_picture_is_out_of_main_table);
             let prefix = if hidden && !table_name.starts_with('~') {
                 "~"
             } else {

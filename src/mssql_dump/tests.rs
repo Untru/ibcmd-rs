@@ -62497,3 +62497,216 @@ fn dereferences_a_declared_column_through_its_own_type_family() {
         None
     );
 }
+
+/// A chain can dereference the tabular section itself, and then the section's
+/// role -- not the marker -- decides which standard attribute is meant.
+///
+/// Evidence: UT 11.5.27.75. On all 320 chains whose next-to-last segment is a
+/// tabular-section reference and whose last segment is a negative marker, the
+/// marker is `-2` and the platform writes `LineNumber`; for example
+/// `Documents/ОтгрузкаТоваровКлиенту/Forms/ФормаДокумента` carries
+/// `{3,{1},{0,b5bacd25-…},{-2}}` and the platform writes
+/// `<DataPath>Объект.Товары.LineNumber</DataPath>`. The same `-2` after a
+/// column declared as a catalog reference writes `Code`, so the marker alone
+/// establishes nothing.
+#[test]
+fn dereferences_a_tabular_section_through_its_own_standard_attributes() {
+    let table_uuid = "b5bacd25-7506-4f4a-8f26-d62040de083f";
+    let attributes = vec![data_path_form_attribute("1", "Объект", None)];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let mut object_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.ОтгрузкаТоваровКлиенту.TabularSection.Товары".to_string(),
+    )]);
+
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{3,{{1}},{{0,{table_uuid}}},{{-2}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("Объект.Товары.LineNumber")
+    );
+
+    // Only the marker the tabular-section role was observed to carry resolves;
+    // every other negative marker stays fail-closed instead of borrowing a
+    // table that belongs to some other family.
+    for marker in ["-3", "-4", "-5", "-8"] {
+        assert_eq!(
+            resolve_form_bound_chain_member_path(
+                &format!("{{3,{{1}},{{0,{table_uuid}}},{{{marker}}}}}"),
+                &names,
+                indexes.owner_scoped_bindings_for_test(),
+                &object_refs,
+                false,
+            ),
+            None,
+            "marker {marker}"
+        );
+    }
+
+    // A tabular *attribute* reference states no type of its own here, so the
+    // marker after it stays unresolved rather than reading the section's table.
+    let attribute_uuid = "1a11f9a3-2ca6-4a1e-9a2f-8fbc2e2f2f11";
+    object_refs.insert(
+        attribute_uuid.to_string(),
+        "Document.ОтгрузкаТоваровКлиенту.TabularSection.Товары.Attribute.Номенклатура".to_string(),
+    );
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{4,{{1}},{{0,{table_uuid}}},{{0,{attribute_uuid}}},{{-2}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        ),
+        None
+    );
+}
+
+/// The bare `{100000000}` terminal addresses the row count of whatever
+/// collection the chain has reached, at any chain length.
+///
+/// Evidence: UT 11.5.27.75. `Catalogs/СкидкиНаценки/Forms/ФормаПодбора` carries
+/// `{2,{2},{100000000}}` on a title-bound group and the platform writes
+/// `<TitleDataPath>СкидкиНаценки.RowsCount</TitleDataPath>`;
+/// `Documents/ЗаявкаНаОбеспечение/Forms/ФормаДокумента` carries
+/// `{3,{1},{0,c13b9535-…},{100000000}}` and the platform writes
+/// `<TitleDataPath>Объект.Товары.RowsCount</TitleDataPath>`.
+#[test]
+fn reads_the_row_count_marker_as_a_chain_terminal() {
+    let table_uuid = "c13b9535-8d1f-4d78-ab8f-e79f4bc551e3";
+    let attributes = vec![
+        data_path_form_attribute("1", "Объект", None),
+        data_path_form_attribute("2", "СкидкиНаценки", None),
+    ];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = BTreeMap::from([
+        ("1".to_string(), "Объект".to_string()),
+        ("2".to_string(), "СкидкиНаценки".to_string()),
+    ]);
+    let object_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.ЗаявкаНаОбеспечение.TabularSection.Товары".to_string(),
+    )]);
+
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            "{2,{2},{100000000}}",
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("СкидкиНаценки.RowsCount")
+    );
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{3,{{1}},{{0,{table_uuid}}},{{100000000}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("Объект.Товары.RowsCount")
+    );
+}
+
+/// A chain segment whose reference is a configuration-wide common attribute
+/// contributes that attribute's own name; a `Constant` reference, which the
+/// same route also refuses to spell, must keep falling through to the
+/// constants-set resolver instead.
+///
+/// Evidence: UT 11.5.27.75. `ExchangePlans/МиграцияПриложений/Forms/ФормаУзла`
+/// carries `{2,{1},{0,6df2bb92-…}}` and the platform writes
+/// `<DataPath>Объект.ОбластьДанныхОсновныеДанные</DataPath>`; all 6 chain
+/// segments in the configuration whose reference is a `CommonAttribute` behave
+/// this way, and the 597 whose reference is a `Constant` do not.
+#[test]
+fn walks_a_chain_segment_through_a_common_attribute_reference() {
+    let common_attribute_uuid = "6df2bb92-558c-4453-9de4-e4176e8f93dc";
+    let constant_uuid = "f5417147-4d2a-4e49-911b-2bb5eccb8441";
+    let attributes = vec![data_path_form_attribute("1", "Объект", None)];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let object_refs = BTreeMap::from([
+        (
+            common_attribute_uuid.to_string(),
+            "CommonAttribute.ОбластьДанныхОсновныеДанные".to_string(),
+        ),
+        (
+            constant_uuid.to_string(),
+            "Constant.ИспользоватьСинхронизациюДанных".to_string(),
+        ),
+    ]);
+
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{2,{{1}},{{0,{common_attribute_uuid}}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("Объект.ОбластьДанныхОсновныеДанные")
+    );
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{2,{{1}},{{0,{constant_uuid}}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        ),
+        None
+    );
+}
+
+/// A dynamic list's `DefaultPicture` carries the `~` marker exactly when the
+/// declared main table cannot hold it.
+///
+/// Evidence: UT 11.5.27.75 spells out 1 587 row-picture `…DefaultPicture`
+/// paths. All 55 lists that declare no main table carry `~`, and so do all 6
+/// whose declared main table is an `Enum` -- for example
+/// `Enums/СтатусыПриглашений/Forms/ФормаВыбора`, whose `Список` declares
+/// `<MainTable>Enum.СтатусыПриглашений</MainTable>` and for which the platform
+/// writes `<RowPictureDataPath>~Список.DefaultPicture</RowPictureDataPath>`.
+/// The remaining 1 526, across nine other main-table families, carry none.
+#[test]
+fn marks_a_default_picture_the_declared_main_table_cannot_hold() {
+    let owner_for = |main_table: Option<&str>, dynamic_list: bool| {
+        let mut attribute = data_path_form_attribute("1", "Список", None);
+        if dynamic_list {
+            let mut settings = data_path_dynamic_list_settings(Vec::new());
+            settings.main_table = main_table.map(ToOwned::to_owned);
+            attribute.settings = Some(settings);
+        }
+        form_attribute_metadata_owner(&attribute)
+    };
+
+    for (main_table, expected) in [
+        (None, true),
+        (Some("Enum.СтатусыПриглашений"), true),
+        (Some("Catalog.Пользователи"), false),
+        (Some("Document.ЗаявкаНаОбеспечение"), false),
+        (Some("InformationRegister.ЦеныНоменклатуры"), false),
+    ] {
+        assert_eq!(
+            form_dynamic_list_default_picture_is_out_of_main_table(&owner_for(main_table, true)),
+            expected,
+            "{main_table:?}"
+        );
+    }
+
+    // An attribute that is not a dynamic list has no such field at all.
+    assert!(!form_dynamic_list_default_picture_is_out_of_main_table(
+        &owner_for(None, false)
+    ));
+}
