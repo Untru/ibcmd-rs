@@ -199,6 +199,13 @@ pub(crate) struct FormPopupSchema {
 impl FormPopupSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
 
+    /// A `Popup` keeps its background colour in its own option tuple, in the
+    /// slot right behind the three reserved members the layout guard pins.
+    /// On all 3 809 popups of the native UT 11.5.27.75 form dumps the slot
+    /// holds the unset colour on every popup without a `<BackColor>` and a
+    /// readable colour on all five that carry one.
+    pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 7;
+
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -2648,8 +2655,13 @@ impl FormFieldSchema {
             "LabelField" => ("1", 20, "11", Some(8), Some(9), None),
             "InputField" => ("2", 66, "36", Some(37), Some(38), Some(39)),
             "CheckBoxField" => ("3", 13, "11", None, None, None),
-            "PictureField" => ("4", 24, "10", None, None, None),
-            "RadioButtonField" => ("5", 12, "8", None, None, None),
+            // Option slot 10 holds the text colour on all 2 212 native
+            // `PictureField` items: unset on the 2 195 without a `<TextColor>`,
+            // readable on all 17 that carry one.
+            "PictureField" => ("4", 24, "10", Some(10), None, None),
+            // Likewise option slot 3 on all 1 381 native `RadioButtonField`
+            // items.
+            "RadioButtonField" => ("5", 12, "8", Some(3), None, None),
             "SpreadSheetDocumentField" => ("6", 32, "13", None, None, Some(15)),
             "TextDocumentField" => ("7", 16, "5", None, None, None),
             "CalendarField" => ("8", 24, "6", None, None, None),
@@ -5590,6 +5602,7 @@ impl FormInputFieldExtendedOptionSlot {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormFieldTopLevelSlot {
     DefaultItem,
+    TitleTextColor,
     TitleFont,
 }
 
@@ -5597,6 +5610,13 @@ impl FormFieldTopLevelSlot {
     pub(crate) const fn index(self, top_level_offset: usize) -> usize {
         match self {
             Self::DefaultItem => 16 + top_level_offset,
+            // The title colour is the slot immediately ahead of the title font,
+            // exactly as it is for the grouping controls (16 before 17) and for
+            // `Table` (49 before 50). On the 90 000-odd field items of the
+            // native UT 11.5.27.75 form dumps this slot holds the unset colour
+            // on every item without a `<TitleTextColor>` and a readable colour
+            // on every one of the 180 that carry it.
+            Self::TitleTextColor => 31 + top_level_offset,
             Self::TitleFont => 32 + top_level_offset,
         }
     }

@@ -487,7 +487,6 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_format_cpu_ms += elapsed_ms(started);
     }
-
     Some(DetailedFormBodyExtraction::Emitted { xml, diagnostics })
 }
 
@@ -7863,11 +7862,10 @@ fn parse_form_child_item_with_metadata_owners(
             fields
                 .get(schema.text_color_slot())
                 .and_then(|field| parse_form_control_color(field, object_refs))
-        } else if tag == "LabelField"
-            && let Some(value) = field_schema_and_options
-                .as_ref()
-                .and_then(|(schema, options)| options.get(schema.text_color_option_slot()?))
-                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if let Some(value) = field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| options.get(schema.text_color_option_slot()?))
+            .and_then(|field| parse_form_control_color(field, object_refs))
         {
             Some(value)
         } else if tag == "LabelField" {
@@ -7908,6 +7906,16 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.back_color.clone())
+        } else if let Some(value) = popup_schema
+            .and(fields.get(FormPopupSchema::OPTIONS_SLOT))
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+            .and_then(|options| {
+                options
+                    .get(FormPopupSchema::BACK_COLOR_OPTION_SLOT)
+                    .and_then(|field| parse_form_control_color(field, object_refs))
+            })
+        {
+            Some(value)
         } else if let Some(value) = show_title_schema
             .and_then(|schema| {
                 show_title_options
@@ -7943,9 +7951,21 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         control_border,
-        title_text_color: (tag == "UsualGroup")
-            .then(|| parse_form_usual_group_title_text_color(&fields, object_refs))
-            .flatten(),
+        // The title colour rides one slot ahead of the title font in every
+        // layout family, so it is read exactly where the title font is read.
+        title_text_color: if form_group_layout_tag(tag) {
+            parse_form_usual_group_title_text_color(&fields, object_refs)
+        } else if tag == "Table" {
+            fields
+                .get(FORM_TABLE_TITLE_TEXT_COLOR_SLOT)
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if field_schema_and_options.is_some() {
+            fields
+                .get(FieldSlot::TitleTextColor.index(input_field_top_level_offset))
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else {
+            None
+        },
         mark_required_complete: if tag == "InputField"
             && form_input_field_layout_is_extended(&fields)
         {
@@ -9180,6 +9200,18 @@ pub(super) fn parse_form_label_field_text_color(
     }
 }
 
+/// Every control colour of a form item is one and the same three-member value
+/// `{3, <space>, <payload>}`; the colour space in the middle picks how the
+/// payload reads, and space `4` with payload `{0}` is the platform's "unset"
+/// encoding, which writes no element at all.
+///
+/// Space, payload shape and written value were read off the 6 816 colour
+/// elements the platform writes on the 5 201 native `Form.xml` of
+/// 1С:Управление торговлей 11.5.27.75, joined to the raw layout bytes of the
+/// item that carries them. Every raw tuple observed there maps to exactly one
+/// written value, and the shape alone decides whether an element is written:
+/// across ~250 000 item/slot observations `{3,4,{0}}` never coincides with a
+/// written element and no other shape ever coincides with its absence.
 pub(super) fn parse_form_control_color(
     field: &str,
     object_refs: &BTreeMap<String, String>,
@@ -9188,9 +9220,17 @@ pub(super) fn parse_form_control_color(
     if color.len() != 3 || color.first()?.trim() != "3" {
         return None;
     }
-    let variant = color.get(1)?.trim();
-    let payload = split_1c_braced_fields(color.get(2)?.trim(), 0)?;
-    match variant {
+    parse_form_control_color_space(color.get(1)?.trim(), color.get(2)?.trim(), object_refs)
+}
+
+/// One colour space and its payload, shared by every slot that carries a colour.
+fn parse_form_control_color_space(
+    space: &str,
+    payload: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let payload = split_1c_braced_fields(payload, 0)?;
+    match space {
         "0" if payload.len() == 1 => {
             let value = payload.first()?.trim().parse::<u32>().ok()? & 0x00ff_ffff;
             let red = value & 0xff;
@@ -9198,12 +9238,19 @@ pub(super) fn parse_form_control_color(
             let blue = (value >> 16) & 0xff;
             Some(format!("#{red:02X}{green:02X}{blue:02X}"))
         }
+        "1" if payload.len() == 1 => payload
+            .first()?
+            .trim()
+            .parse::<i32>()
+            .ok()
+            .and_then(form_control_window_color_name)
+            .map(ToOwned::to_owned),
         "2" if payload.len() == 1 => payload
             .first()?
             .trim()
             .parse::<i32>()
             .ok()
-            .and_then(style_web_color_name)
+            .and_then(form_control_web_color_name)
             .map(ToOwned::to_owned),
         "3" if payload.len() == 1 => payload
             .first()?
@@ -9224,21 +9271,81 @@ pub(super) fn parse_form_control_color(
     }
 }
 
+/// Style-palette entries of colour space `3`.
+///
+/// Read off every space-3 colour the platform writes on the native form dumps
+/// of 1С:Управление торговлей 11.5.27.75; the observation count of each code
+/// follows its arm. This is a different palette from the one the style and
+/// spreadsheet decoders read, and the two disagree on six shared codes, so a
+/// form colour never goes through `style_system_color_name`.
 fn form_control_system_color_name(code: i32) -> Option<&'static str> {
     match code {
-        -1 => Some("style:FormBackColor"),
-        -3 => Some("style:FormTextColor"),
-        -7 => Some("style:ButtonBackColor"),
-        -10 => Some("style:FieldBackColor"),
-        -11 => Some("style:FieldTextColor"),
-        -14 => Some("style:FieldSelectionBackColor"),
-        -16 => Some("style:SpecialTextColor"),
-        -21 => Some("style:ButtonTextColor"),
-        -22 => Some("style:BorderColor"),
-        -23 => Some("style:ToolTipBackColor"),
-        -37 => Some("style:TableFooterBackColor"),
-        -46 => Some("style:AccentColor"),
+        -1 => Some("style:FormBackColor"),              // 120
+        -3 => Some("style:FormTextColor"),              // 339
+        -7 => Some("style:ButtonBackColor"),            // 68
+        -10 => Some("style:FieldBackColor"),            // 37
+        -11 => Some("style:FieldTextColor"),            // 14
+        -13 => Some("style:FieldAlternativeBackColor"), // 11
+        -14 => Some("style:FieldSelectionBackColor"),   // 26
+        -15 => Some("style:FieldSelectedTextColor"),    // 86
+        -16 => Some("style:SpecialTextColor"),          // 98
+        -17 => Some("style:NegativeTextColor"),         // 4
+        -21 => Some("style:ButtonTextColor"),           // 951
+        -22 => Some("style:BorderColor"),               // 35
+        -23 => Some("style:ToolTipBackColor"),          // 169
+        -24 => Some("style:ToolTipTextColor"),          // 108
+        -25 => Some("style:ReportHeaderBackColor"),     // 7
+        -26 => Some("style:ReportGroup1BackColor"),     // 3
+        -27 => Some("style:ReportGroup2BackColor"),     // 5
+        -28 => Some("style:ReportLineColor"),           // 1
+        -34 => Some("style:ButtonBorderColor"),         // 23
+        -35 => Some("style:TableHeaderBackColor"),      // 87
+        -36 => Some("style:TableHeaderTextColor"),      // 19
+        -37 => Some("style:TableFooterBackColor"),      // 3
+        -42 => Some("style:NavigationColor"),           // 5
+        -43 => Some("style:AuxiliaryNavigationColor"),  // 2
+        -44 => Some("style:ActivityColor"),             // 3
+        -46 => Some("style:AccentColor"),               // 63
+        -47 => Some("style:ImportantColor"),            // 32
         _ => None,
+    }
+}
+
+/// Window-palette entries of colour space `1`, from the native form dumps.
+fn form_control_window_color_name(code: i32) -> Option<&'static str> {
+    match code {
+        4 => Some("win:MenuBar"),       // 4
+        17 => Some("win:DisabledText"), // 2
+        18 => Some("win:ButtonText"),   // 5
+        _ => None,
+    }
+}
+
+/// Web-palette entries of colour space `2`.
+///
+/// The forms corpus exercises fourteen palette indexes the shared style table
+/// does not carry, and one -- 31 -- where the platform's own form export
+/// contradicts it: the shared table reads 31 as `DarkGreen`, a value it already
+/// gives 27, while the native dump writes `DarkOrange` for it. On the remaining
+/// eight indexes both cover the two agree exactly, so the shared table stays
+/// the fallback and this one carries the form evidence in front of it.
+fn form_control_web_color_name(code: i32) -> Option<&'static str> {
+    match code {
+        1 => Some("web:AliceBlue"),       // 1
+        6 => Some("web:Beige"),           // 7
+        30 => Some("web:DarkOliveGreen"), // 1
+        31 => Some("web:DarkOrange"),     // 1
+        41 => Some("web:DeepSkyBlue"),    // 1
+        42 => Some("web:DimGray"),        // 10
+        43 => Some("web:DodgerBlue"),     // 1
+        57 => Some("web:IndianRed"),      // 1
+        70 => Some("web:LightGreen"),     // 3
+        75 => Some("web:LightSkyBlue"),   // 1
+        100 => Some("web:NavajoWhite"),   // 1
+        109 => Some("web:PaleGreen"),     // 1
+        115 => Some("web:Pink"),          // 1
+        143 => Some("web:White"),         // 1
+        _ => style_web_color_name(code),
     }
 }
 
@@ -9279,32 +9386,42 @@ pub(super) fn parse_form_label_decoration_options(
     })
 }
 
+/// Title colour of the grouping controls -- `UsualGroup` and its `Popup`,
+/// `Page` and `ColumnGroup` siblings -- which all keep it in the same top-level
+/// slot 16, one slot ahead of the title font tuple they also share.
+///
+/// The slot holds an ordinary control colour, so it goes through the one colour
+/// grammar; the only extra shape is the four-member `{4, 3, <payload>, 3}`
+/// spelling of the same space-3 value.
 pub(super) fn parse_form_usual_group_title_text_color(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let color = split_1c_braced_fields(fields.get(16)?.trim(), 0)?;
-    let reference = match color.first()?.trim() {
-        "3" if color.len() == 3 && color.get(1)?.trim() == "3" => color.get(2)?.trim(),
-        "4" if color.len() == 4 && color.get(1)?.trim() == "3" && color.get(3)?.trim() == "3" => {
-            color.get(2)?.trim()
-        }
-        _ => return None,
-    };
-    let reference = split_1c_braced_fields(reference, 0)?;
-    if reference.len() == 1 {
-        let code = reference.first()?.trim().parse::<i32>().ok()?;
-        return style_system_color_name(code).map(ToOwned::to_owned);
+    let field = fields.get(FORM_GROUP_TITLE_TEXT_COLOR_SLOT)?.trim();
+    if let Some(value) = parse_form_control_color(field, object_refs) {
+        return Some(value);
     }
-    if reference.first()?.trim() == "0" {
-        let uuid = parse_uuid_field(reference.get(1)?.trim())?;
-        return object_refs
-            .get(&uuid)
-            .and_then(|reference| reference.strip_prefix("StyleItem."))
-            .map(|name| format!("style:{name}"));
+    let color = split_1c_braced_fields(field, 0)?;
+    if color.len() != 4
+        || color.first()?.trim() != "4"
+        || color.get(1)?.trim() != "3"
+        || color.get(3)?.trim() != "3"
+    {
+        return None;
     }
-    None
+    parse_form_control_color_space("3", color.get(2)?.trim(), object_refs)
 }
+
+/// `UsualGroup`, `Popup`, `Page` and `ColumnGroup` all carry `TitleTextColor`
+/// here: on the 45 225 grouping items of the native UT 11.5.27.75 form dumps
+/// the slot holds the unset colour on every item without the element and a
+/// readable colour on every one of the 335 items that carry it, with no
+/// counter-example in either direction.
+const FORM_GROUP_TITLE_TEXT_COLOR_SLOT: usize = 16;
+
+/// `Table` keeps the same property in slot 49: unset on all 4 489 tables
+/// without the element, a style reference on all 20 that carry it.
+const FORM_TABLE_TITLE_TEXT_COLOR_SLOT: usize = 49;
 
 /// The grouping child items -- `UsualGroup` and its `Popup`/`Pages`/`Page`/
 /// `ColumnGroup` siblings -- all carry their title font in the same top-level
@@ -16413,7 +16530,11 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
-        FormTableXmlProperty::Title => format_form_localized_section("Title", &item.title, indent),
+        FormTableXmlProperty::Title => {
+            let mut xml = format_form_localized_section("Title", &item.title, indent);
+            xml.push_str(&format_form_title_text_color_xml(item, indent));
+            xml
+        }
         FormTableXmlProperty::CommandSet => {
             if item.command_set_excluded_commands.is_empty() {
                 String::new()
@@ -16869,6 +16990,7 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
         xml.push_str(&format_form_title_section(item, indent + 1));
+        xml.push_str(&format_form_title_text_color_xml(item, indent + 1));
         if title_location_follows_title && let Some(title_location) = item.title_location {
             xml.push_str(&format!(
                 "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
@@ -17327,7 +17449,10 @@ pub(super) fn format_form_child_item_xml(
     // `AutoMaxHeight` (23 native co-occurrences), `HorizontalStretch` (108),
     // `Format` (28) and `Border` (1); the remaining control kinds keep it here.
     if item.tag != "PictureDecoration"
-        && !matches!(item.tag, "Button" | "InputField" | "LabelField" | "Table")
+        && !matches!(
+            item.tag,
+            "Button" | "InputField" | "LabelField" | "PictureField" | "RadioButtonField" | "Table"
+        )
         && let Some(text_color) = &item.text_color
     {
         xml.push_str(&format!(
@@ -17732,7 +17857,10 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
     }
-    if item.tag == "LabelField"
+    // `PictureField` and `RadioButtonField` carry `TextColor` here as well:
+    // the native tree writes it behind `NonselectedPictureText` (17) and
+    // `ChoiceList` (1) and ahead of `Font` (4) and `ContextMenu` (12).
+    if matches!(item.tag, "LabelField" | "PictureField" | "RadioButtonField")
         && let Some(text_color) = &item.text_color
     {
         xml.push_str(&format!(
@@ -17786,6 +17914,7 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format_form_decoration_header_xml(item, indent + 1));
         } else {
             xml.push_str(&format_form_title_section(item, indent + 1));
+            xml.push_str(&format_form_title_text_color_xml(item, indent + 1));
             if title_location_follows_title && let Some(title_location) = item.title_location {
                 xml.push_str(&format!(
                     "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
@@ -17932,6 +18061,17 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<Representation>{}</Representation>\r\n",
             escape_xml_text(representation)
+        ));
+    }
+    // A `Popup` closes its own properties with `BackColor`: the native tree
+    // writes it behind `Representation` (4) and `Title` (1) and immediately
+    // ahead of `ExtendedTooltip` on all five occurrences.
+    if item.tag == "Popup"
+        && let Some(back_color) = &item.back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BackColor>{}</BackColor>\r\n",
+            escape_xml_text(back_color)
         ));
     }
     if !matches!(
@@ -18188,6 +18328,7 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
             }
             FormPageXmlProperty::Title => {
                 xml.push_str(&format_form_title_section(item, indent));
+                xml.push_str(&format_form_title_text_color_xml(item, indent));
             }
             FormPageXmlProperty::ToolTip => {
                 xml.push_str(&format_form_localized_section(
@@ -18691,6 +18832,22 @@ fn format_form_usual_group_properties_xml(
         }
     }
     xml
+}
+
+/// `<TitleTextColor>` immediately trails the title block on every control kind
+/// that writes it: on the native UT 11.5.27.75 form dumps it directly follows
+/// `<Title>` on 228 of 231 `UsualGroup`, all 90 `Popup`, all 10 `Page`, both
+/// `ColumnGroup` and `HTMLDocumentField`, 19 of 20 `Table` and the titled
+/// members of the field family, and never precedes it.
+fn format_form_title_text_color_xml(item: &FormChildItem, indent: usize) -> String {
+    match &item.title_text_color {
+        Some(value) => format!(
+            "{}<TitleTextColor>{}</TitleTextColor>\r\n",
+            "\t".repeat(indent),
+            escape_xml_text(value)
+        ),
+        None => String::new(),
+    }
 }
 
 fn format_form_usual_group_header_xml(item: &FormChildItem, indent: usize) -> String {

@@ -19834,9 +19834,15 @@ fn parses_extended_usual_group_properties() {
 fn maps_usual_group_title_color_platform_codes_in_form_context() {
     let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
 
+    // Code -21 is the one the two system palettes disagree on. The platform's
+    // own form export writes `style:ButtonTextColor` for it on 951 of the
+    // 6 816 colour elements of the native UT 11.5.27.75 dumps, and never
+    // `style:FieldSelectionBackColor` -- which it reserves for code -14.
     for (code, expected) in [
         ("-3", "style:FormTextColor"),
-        ("-21", "style:FieldSelectionBackColor"),
+        ("-14", "style:FieldSelectionBackColor"),
+        ("-21", "style:ButtonTextColor"),
+        ("-24", "style:ToolTipTextColor"),
     ] {
         let field = base.replacen("{3,4,{0}}", &format!("{{3,3,{{{code}}}}}"), 1);
         let item = parse_form_child_item(
@@ -19869,6 +19875,166 @@ fn maps_usual_group_title_color_platform_codes_in_form_context() {
     );
     assert!(xml.contains("<TitleTextColor>style:FormTextColor</TitleTextColor>"));
     assert!(!xml.contains("style:ButtonBackColor"));
+}
+
+/// Every control colour is the same `{3, <space>, <payload>}` value, and the
+/// space decides how the payload reads. The cases below are the spaces the
+/// platform actually writes on the native UT 11.5.27.75 form dumps.
+#[test]
+fn reads_every_form_control_colour_space_the_platform_writes() {
+    let style_uuid = "615e8f3b-7b07-4886-9269-3e201f0e3c53";
+    let object_refs = BTreeMap::from([(
+        style_uuid.to_string(),
+        "StyleItem.ЦветФонаЖелтыйБЭД".to_string(),
+    )]);
+
+    for (raw, expected) in [
+        ("{3,0,{16777215}}", Some("#FFFFFF")),
+        ("{3,0,{7939862}}", Some("#162779")),
+        ("{3,1,{4}}", Some("win:MenuBar")),
+        ("{3,1,{17}}", Some("win:DisabledText")),
+        ("{3,1,{18}}", Some("win:ButtonText")),
+        ("{3,2,{42}}", Some("web:DimGray")),
+        // 31 is the index the shared style palette reads as `DarkGreen`, a name
+        // it already gives 27; the platform's form export writes `DarkOrange`.
+        ("{3,2,{31}}", Some("web:DarkOrange")),
+        ("{3,2,{100}}", Some("web:NavajoWhite")),
+        ("{3,2,{119}}", Some("web:Red")),
+        ("{3,3,{-15}}", Some("style:FieldSelectedTextColor")),
+        ("{3,3,{-17}}", Some("style:NegativeTextColor")),
+        ("{3,3,{-24}}", Some("style:ToolTipTextColor")),
+        ("{3,3,{-35}}", Some("style:TableHeaderBackColor")),
+        ("{3,3,{-47}}", Some("style:ImportantColor")),
+        // The unset colour, which writes no element at all.
+        ("{3,4,{0}}", None),
+    ] {
+        assert_eq!(
+            parse_form_control_color(raw, &object_refs).as_deref(),
+            expected,
+            "colour tuple {raw}"
+        );
+    }
+
+    assert_eq!(
+        parse_form_control_color(&format!("{{3,3,{{0,{style_uuid}}}}}"), &object_refs).as_deref(),
+        Some("style:ЦветФонаЖелтыйБЭД")
+    );
+}
+
+/// A field control carries `TitleTextColor` in the top-level slot right ahead
+/// of its title font, the same relation the grouping controls and `Table` keep.
+/// Layout below is the native `CheckBoxField` "FBS" of
+/// `DataProcessors/УправлениеПродажамиНаOzon/Forms/НастройкиПринадлежностиТоваровСхемамРаботы`.
+#[test]
+fn reads_field_title_text_color_from_the_slot_ahead_of_the_title_font() {
+    let field = r#"{37,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"FBS",4,0,{1,0},{1,0},{1,{4}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,3,{-46}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,{3,4,{0}},{3,4,{0}},0,{1,0},{3,4,{0}},{7,3,0,1,100},0,0,0,2,0},{0,1,0},1,{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"FBSКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{11,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"FBSРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+
+    let item = parse_form_child_item(
+        field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "CheckBoxField");
+    assert_eq!(item.title_text_color.as_deref(), Some("style:AccentColor"));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    let color_at = xml
+        .find("<TitleTextColor>style:AccentColor</TitleTextColor>")
+        .unwrap();
+    let title_location_at = xml.find("<TitleLocation>").unwrap();
+    assert!(color_at < title_location_at);
+
+    // The same layout with the slot switched back to the unset colour writes no
+    // element, so the rule is a reading of the slot and not a shape guess.
+    let unset = field.replacen("{3,3,{-46}}", "{3,4,{0}}", 1);
+    let item = parse_form_child_item(
+        &unset,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.title_text_color, None);
+    assert!(!format_form_child_items_xml(&[item], 1).contains("<TitleTextColor>"));
+}
+
+/// A `Popup` carries the title colour in the grouping slot 16 and the
+/// background colour in its own option tuple. Both layouts below are native.
+#[test]
+fn reads_popup_title_and_back_colors_from_their_own_slots() {
+    let title_uuid = "757b547b-b79c-459a-a64a-eef19a09a38f";
+    let back_uuid = "615e8f3b-7b07-4886-9269-3e201f0e3c53";
+    let object_refs = BTreeMap::from([
+        (
+            title_uuid.to_string(),
+            "StyleItem.ГиперссылкаЦвет".to_string(),
+        ),
+        (
+            back_uuid.to_string(),
+            "StyleItem.ЦветФонаЖелтыйБЭД".to_string(),
+        ),
+    ]);
+    let titled = r#"{22,{442,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"ЗагрузитьКак",{1,1,{"ru","Загрузить"}},{1,0},0,1,0,0,0,2,2,{3,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f}},{7,3,0,1,100},{0,0,0},1,{7,{4,0,{0},"",-1,-1,1,0,""},{0},2,3,0,3,{3,4,{0}},{3,4,{0}}},0,1,0,1,{12,{443,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗагрузитьКакРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,3,3,0}"#;
+
+    let item = parse_form_child_item(
+        titled,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(item.tag, "Popup");
+    assert_eq!(
+        item.title_text_color.as_deref(),
+        Some("style:ГиперссылкаЦвет")
+    );
+    assert_eq!(item.back_color, None);
+    let xml = format_form_child_items_xml(&[item], 1);
+    let title_at = xml.find("<Title>").unwrap();
+    let color_at = xml
+        .find("<TitleTextColor>style:ГиперссылкаЦвет</TitleTextColor>")
+        .unwrap();
+    assert!(title_at < color_at);
+
+    let backed = titled
+        .replacen(
+            &format!("{{3,3,{{0,{title_uuid}}}}}"),
+            "{3,4,{0}}",
+            1,
+        )
+        .replacen(
+            "{7,{4,0,{0},\"\",-1,-1,1,0,\"\"},{0},2,3,0,3,{3,4,{0}},{3,4,{0}}}",
+            &format!(
+                "{{7,{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{{0}},2,3,0,0,{{3,3,{{0,{back_uuid}}}}},{{3,4,{{0}}}}}}"
+            ),
+            1,
+        );
+    let item = parse_form_child_item(
+        &backed,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(item.title_text_color, None);
+    assert_eq!(item.back_color.as_deref(), Some("style:ЦветФонаЖелтыйБЭД"));
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<BackColor>style:ЦветФонаЖелтыйБЭД</BackColor>"));
+    assert!(!xml.contains("<TitleTextColor>"));
 }
 
 #[test]
