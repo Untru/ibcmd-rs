@@ -64953,3 +64953,430 @@ fn writes_every_group_alignment_ordinal_for_the_tail_addressed_owners() {
         }
     }
 }
+
+/// The seven form standard commands the shared uuid table did not carry.
+///
+/// Every uuid is read off the platform's own answer: the instrumented export
+/// joined all 27 773 button command records in the UT 11.5.27.75 tree to the
+/// native `<Button>` at the same output path and item id -- 27 683 agreed, 90
+/// were dropped and none was wrong -- and these are the `kind == 0` share of the
+/// drops, carrying the name native writes at that position.
+#[test]
+fn resolves_the_seven_missing_form_standard_command_uuids() {
+    let cases = [
+        // 31 observations, the single largest command drop in the corpus.
+        (
+            "174e58ce-82ad-4787-b956-9367937f7971",
+            "Form.StandardCommand.ChangeHistory",
+        ),
+        (
+            "b5e6da6b-cec4-450c-876a-6a5f0837f6cc",
+            "Form.StandardCommand.Generate",
+        ),
+        (
+            "fb9d7977-258a-440a-9b59-0a650c86f6a2",
+            "Form.StandardCommand.ChangeVariant",
+        ),
+        (
+            "aa042316-63ba-4f10-8d39-3935474562d0",
+            "Form.StandardCommand.LevelDown",
+        ),
+        (
+            "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb",
+            "Form.StandardCommand.LevelUp",
+        ),
+        (
+            "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7",
+            "Form.StandardCommand.Ignore",
+        ),
+        (
+            "74c1abd6-b274-4654-baf0-7b8418b792ea",
+            "Form.StandardCommand.EndEdit",
+        ),
+    ];
+    for (uuid, expected) in cases {
+        assert_eq!(
+            form_standard_command_name(uuid),
+            Some(expected),
+            "{uuid} is not named by the shared standard-command table"
+        );
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{0,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .as_deref(),
+            Some(expected),
+            "{uuid} did not resolve for a kind-0 button"
+        );
+    }
+    // `ChangeHistory` keeps the uuid it already had; two uuids for one name is the
+    // shape `Delete`, `Copy` and `SetDeletionMark` already have in this table.
+    assert_eq!(
+        form_standard_command_name("c9abb6b0-eafd-4505-8312-9a7b6888cbf3"),
+        Some("Form.StandardCommand.ChangeHistory")
+    );
+}
+
+/// `GetURL` and a second `Delete` uuid on a table owner.
+///
+/// `GetURL` is the largest owner-scoped drop in the corpus -- 18 records over
+/// four forms, every owner a `<Table>` in native.  The `Delete` uuid needed no
+/// new evidence at all: `form_table_excluded_command_name` was already reading
+/// that very uuid as `Delete` from the excluded-command list, so two tables in
+/// one file were disagreeing about one uuid.
+#[test]
+fn resolves_table_get_url_and_the_second_table_delete_uuid() {
+    let layout_fields = [r#"{73,{104,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"Список"}"#];
+    let indexes = collect_form_child_item_indexes(&layout_fields, &[]);
+    for (uuid, suffix) in [
+        ("0e36114c-5b59-4005-9426-374a6c067e4a", "GetURL"),
+        ("ec576e13-1e76-4c33-98aa-a33204514227", "Delete"),
+    ] {
+        assert_eq!(form_table_standard_command_suffix(uuid), Some(suffix));
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{104,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            Some(format!("Form.Item.Список.StandardCommand.{suffix}")),
+            "{uuid} did not resolve for its table owner"
+        );
+    }
+}
+
+/// One grammar for the family half of a `{kind, uuid}` command record.
+///
+/// The button reader knew only slot 4 while the command-interface reader knew
+/// slots 1 through 5; both now decode this half through the same function, so
+/// they cannot disagree about the same record again.  Each accepted row is a
+/// total function on its observed set in the corpus-wide join, and an unobserved
+/// combination is refused rather than guessed.
+#[test]
+fn one_family_grammar_serves_both_readers_of_a_command_record() {
+    let catalog = "11111111-1111-4111-8111-111111111111";
+    let document = "22222222-2222-4222-8222-222222222222";
+    let register = "33333333-3333-4333-8333-333333333333";
+    let business_process = "44444444-4444-4444-8444-444444444444";
+    let exchange_plan = "55555555-5555-4555-8555-555555555555";
+    let nested = "66666666-6666-4666-8666-666666666666";
+    let object_refs = BTreeMap::from([
+        (catalog.to_string(), "Catalog.СезонныеГруппы".to_string()),
+        (
+            document.to_string(),
+            "Document.ВозвратПодарочныхСертификатов".to_string(),
+        ),
+        (
+            register.to_string(),
+            "InformationRegister.RegisterProbe".to_string(),
+        ),
+        (
+            business_process.to_string(),
+            "BusinessProcess.Задание".to_string(),
+        ),
+        (
+            exchange_plan.to_string(),
+            "ExchangePlan.ОбменССайтом".to_string(),
+        ),
+        (
+            nested.to_string(),
+            "Catalog.Партнеры.Command.Прочее".to_string(),
+        ),
+    ]);
+    let cases = [
+        // Slot 1: a register names OpenByRecorder for either reader.
+        (
+            "1",
+            register,
+            Some("InformationRegister.RegisterProbe.StandardCommand.OpenByRecorder"),
+        ),
+        ("1", document, None),
+        // Slot 2: CreateBasedOn for every family but an information register,
+        // which names its recorder command instead.
+        (
+            "2",
+            document,
+            Some("Document.ВозвратПодарочныхСертификатов.StandardCommand.CreateBasedOn"),
+        ),
+        (
+            "2",
+            business_process,
+            Some("BusinessProcess.Задание.StandardCommand.CreateBasedOn"),
+        ),
+        (
+            "2",
+            exchange_plan,
+            Some("ExchangePlan.ОбменССайтом.StandardCommand.CreateBasedOn"),
+        ),
+        (
+            "2",
+            register,
+            Some("InformationRegister.RegisterProbe.StandardCommand.OpenByRecorder"),
+        ),
+        // Slot 2 names CreateBasedOn for whatever reference it is handed: the
+        // reader this arm was lifted from placed no top-level restriction here,
+        // and tightening a guard no observation asks for is how this series has
+        // thrown away valid layouts before.
+        (
+            "2",
+            nested,
+            Some("Catalog.Партнеры.Command.Прочее.StandardCommand.CreateBasedOn"),
+        ),
+        // Slots 3 and 4 are the catalog rules the command interface already had.
+        (
+            "3",
+            catalog,
+            Some("Catalog.СезонныеГруппы.StandardCommand.CreateBasedOn"),
+        ),
+        (
+            "4",
+            catalog,
+            Some("Catalog.СезонныеГруппы.StandardCommand.OpenByValue"),
+        ),
+        ("3", document, None),
+        ("4", document, None),
+        // A nested reference is not a top-level object, so the restricted slots
+        // refuse it instead of pasting a suffix onto a command name.  Slot 3 is
+        // asserted per reader below: the command-interface reader has its own
+        // pre-existing passthrough that hands such a reference straight back.
+        ("1", nested, None),
+        ("4", nested, None),
+        // An unobserved slot names nothing rather than guessing.
+        ("6", catalog, None),
+        ("99", document, None),
+    ];
+    for (kind, uuid, expected) in cases {
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{{kind},{uuid}}}"),
+                &[],
+                &object_refs,
+                &BTreeMap::new(),
+            )
+            .as_deref(),
+            expected,
+            "button slot {kind} resolved {uuid} wrongly"
+        );
+        assert_eq!(
+            parse_form_command_interface_command_for_test(
+                &format!("{{{kind},{uuid}}}"),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "Catalog.Партнеры",
+            )
+            .as_deref(),
+            expected,
+            "command-interface slot {kind} resolved {uuid} wrongly"
+        );
+    }
+    // The one row the two readers do not share.  A button names `Create` for a
+    // catalog in slot 1 on its single observation; a command-interface item names
+    // nothing there, a negative an earlier package measured for that reader and
+    // that this corpus offers nothing to overturn.  One datum is not generalised
+    // across readers, and the disagreement lives in one table rather than two.
+    assert_eq!(
+        parse_form_button_command_name(
+            &format!("{{1,{catalog}}}"),
+            &[],
+            &object_refs,
+            &BTreeMap::new(),
+        )
+        .as_deref(),
+        Some("Catalog.СезонныеГруппы.StandardCommand.Create")
+    );
+    assert_eq!(
+        parse_form_command_interface_command_for_test(
+            &format!("{{1,{catalog}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            "Catalog.Партнеры",
+        ),
+        None
+    );
+    // Slot 3's command-reference passthrough belongs to the command-interface
+    // reader alone and is untouched: a reference that already names a command is
+    // handed straight back rather than having a suffix pasted onto it.
+    assert_eq!(
+        parse_form_command_interface_command_for_test(
+            &format!("{{3,{nested}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            "Catalog.Партнеры",
+        )
+        .as_deref(),
+        Some("Catalog.Партнеры.Command.Прочее")
+    );
+    assert_eq!(
+        parse_form_button_command_name(
+            &format!("{{3,{nested}}}"),
+            &[],
+            &object_refs,
+            &BTreeMap::new(),
+        ),
+        None
+    );
+}
+
+/// An item owner claims a `{kind, uuid}` record before any family rule does.
+///
+/// `kind` is an item id far more often than a family selector, and the two are
+/// told apart by whether the uuid resolves as that owner's standard command.  In
+/// the native corpus the very same `kind` of 1 names `Form.Item.Товары.…GetURL`
+/// under a table owner and `Catalog.СезонныеГруппы.…Create` under the family
+/// rule, so a reader that consulted the family first would mis-name the table.
+#[test]
+fn an_item_owner_outranks_the_family_rule_on_the_same_kind() {
+    let layout_fields = [r#"{73,{1,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"Товары"}"#];
+    let indexes = collect_form_child_item_indexes(&layout_fields, &[]);
+    let catalog = "11111111-1111-4111-8111-111111111111";
+    let object_refs = BTreeMap::from([(catalog.to_string(), "Catalog.СезонныеГруппы".to_string())]);
+    assert_eq!(
+        parse_form_button_command_name(
+            "{1,0e36114c-5b59-4005-9426-374a6c067e4a}",
+            &[],
+            &object_refs,
+            &indexes.standard_command_owner_name_by_id,
+        )
+        .as_deref(),
+        Some("Form.Item.Товары.StandardCommand.GetURL")
+    );
+    assert_eq!(
+        parse_form_button_command_name(
+            &format!("{{1,{catalog}}}"),
+            &[],
+            &object_refs,
+            &indexes.standard_command_owner_name_by_id,
+        )
+        .as_deref(),
+        Some("Catalog.СезонныеГруппы.StandardCommand.Create")
+    );
+}
+
+/// A button writes its properties in the order the platform writes them.
+///
+/// Measured over all 4 004 native forms that contain a `<Button>`: 463 ordered
+/// property pairs, not one observed in both directions.  The four runs asserted
+/// here are the ones ibcmd had wrong -- `AutoMaxHeight`/`MaxHeight` sat down in
+/// the shared visual tail instead of beside `Height`, `TitleHeight` led
+/// `Visible`, `UserVisible` trailed `Representation`, and `Picture` led `Font`.
+#[test]
+fn a_button_writes_its_properties_in_the_native_order() {
+    let item = parse_form_child_item(
+        r#"{31,{108,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ТаблицаДокументовВосстановитьЗначения",{1,0},1,{0,239f0103-8de9-4fdf-b485-eb5531da7e51},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("the observed button layout parses");
+    let mut button = item.clone();
+    button.height = Some("40".to_string());
+    button.auto_max_height = Some(false);
+    button.max_height = Some("120".to_string());
+    button.horizontal_stretch = Some(true);
+    button.vertical_stretch = Some(false);
+    button.group_horizontal_align = Some("Right");
+    button.group_vertical_align = Some("Bottom");
+    button.visible = Some(false);
+    button.title_height = Some("3".to_string());
+    button.user_visible_common = Some(false);
+    button.button_representation = Some("Text");
+    button.font_xml = Some("<Font faceName=\"Arial\"/>".to_string());
+    button.picture_ref = Some("StdPicture.Delete".to_string());
+    let xml = format_form_child_items_xml(&[button], 1);
+    let at = |needle: &str| {
+        xml.find(needle)
+            .unwrap_or_else(|| panic!("{needle} is missing from {xml}"))
+    };
+    // Type, Visible, TitleHeight, UserVisible, Representation.
+    assert!(at("<Type>") < at("<Visible>"), "got {xml}");
+    assert!(at("<Visible>") < at("<TitleHeight>"), "got {xml}");
+    assert!(at("<TitleHeight>") < at("<UserVisible>"), "got {xml}");
+    assert!(at("<UserVisible>") < at("<Representation>"), "got {xml}");
+    // The height cap sits beside the height it caps, ahead of the stretch pair,
+    // the group alignments and the command name.
+    assert!(at("<Height>") < at("<AutoMaxHeight>"), "got {xml}");
+    assert!(at("<AutoMaxHeight>") < at("<MaxHeight>"), "got {xml}");
+    assert!(at("<MaxHeight>") < at("<HorizontalStretch>"), "got {xml}");
+    assert!(
+        at("<HorizontalStretch>") < at("<VerticalStretch>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<VerticalStretch>") < at("<GroupHorizontalAlign>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<GroupHorizontalAlign>") < at("<GroupVerticalAlign>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<GroupVerticalAlign>") < at("<CommandName>"),
+        "got {xml}"
+    );
+    // `Font` leads `Picture`, and both trail the command name.
+    assert!(at("<CommandName>") < at("<Font "), "got {xml}");
+    assert!(at("<Font ") < at("<Picture>"), "got {xml}");
+    assert!(at("<Picture>") < at("</Button>"), "got {xml}");
+    // Exactly one of each, so no emitter fires twice after the move.
+    for name in ["<AutoMaxHeight>", "<MaxHeight>", "<UserVisible>", "<Font "] {
+        assert_eq!(xml.matches(name).count(), 1, "{name} repeats in {xml}");
+    }
+}
+
+/// A `ColumnGroup` closes its scalar run with `FixingInTable`, not opens it.
+///
+/// Native writes `Group` before it 26 times, `Title` 27, `HorizontalStretch` 7,
+/// `ShowInHeader` 4, `Width` 4 and `ShowTitle` 3, and writes it before
+/// `ExtendedTooltip` 28 times and `ChildItems` 27 -- none of the 75 ordered pairs
+/// of this element observed in both directions.  It used to be emitted up with
+/// the title block, ahead of every one of those six.
+#[test]
+fn a_column_group_writes_fixing_in_table_last_in_its_scalar_run() {
+    let field = r#"{22,{140,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"DebitAccountGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,2,60,{-31},700,0,0,0,1,100},{0,0,0},1,{5,2,1,1,3,{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{0},{"Pattern"},"",{1,0},0,1,2,2,2},0}"#;
+    let item = parse_form_child_item(
+        field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("the observed column group layout parses");
+    assert_eq!(item.tag, "ColumnGroup");
+    let mut group = item.clone();
+    group.fixing_in_table = Some(crate::form_schema::FormFixingInTable::Left);
+    group.title = vec![("ru".to_string(), "Товары группа".to_string())];
+    group.show_title = Some(false);
+    let xml = format_form_child_items_xml(&[group], 1);
+    let at = |needle: &str| {
+        xml.find(needle)
+            .unwrap_or_else(|| panic!("{needle} is missing from {xml}"))
+    };
+    assert!(at("<Title>") < at("<FixingInTable>"), "got {xml}");
+    assert!(at("<Group>") < at("<FixingInTable>"), "got {xml}");
+    assert!(at("<ShowInHeader>") < at("<FixingInTable>"), "got {xml}");
+    assert!(at("<ShowTitle>") < at("<FixingInTable>"), "got {xml}");
+    assert!(at("<FixingInTable>") < at("</ColumnGroup>"), "got {xml}");
+    assert_eq!(xml.matches("<FixingInTable>").count(), 1, "got {xml}");
+    // A non-column owner is untouched by the move.
+    let mut field_item = item.clone();
+    field_item.tag = "InputField";
+    field_item.fixing_in_table = Some(crate::form_schema::FormFixingInTable::Left);
+    assert_eq!(
+        format_form_child_items_xml(&[field_item], 1)
+            .matches("<FixingInTable>")
+            .count(),
+        1
+    );
+}

@@ -11150,6 +11150,19 @@ pub(super) fn parse_form_label_decoration_group_horizontal_align(
     parse_form_button_group_horizontal_align(field)
 }
 
+/// A button group's `<Representation>`, read from the last member of its option
+/// tuple.
+///
+/// Built from the platform's own answer rather than a guess: the instrumented
+/// export tabulated the raw tuple of all 7 333 native `<ButtonGroup>` elements in
+/// UT 11.5.27.75 against the `<Representation>` native writes for that very
+/// element, and the last member is a total function on the whole set with no
+/// value appearing against two different answers --
+/// `0` -> no element at all (7 048), `1` -> `Usual` (18), `2` -> `Compact` (267).
+/// The middle member is `2` on every one of the 7 333 and so carries nothing;
+/// it stays in the shape check but decides nothing.  `Usual` was the missing
+/// row, and because it is not the element's suppressed default the platform
+/// writes it out in full.
 pub(super) fn parse_form_button_group_representation(field: &str) -> Option<&'static str> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     match (
@@ -11157,6 +11170,7 @@ pub(super) fn parse_form_button_group_representation(field: &str) -> Option<&'st
         fields.get(2).map(|value| value.trim()),
         fields.get(3).map(|value| value.trim()),
     ) {
+        (Some("2"), Some("2"), Some("1")) => Some("Usual"),
         (Some("2"), Some("2"), Some("2")) => Some("Compact"),
         _ => None,
     }
@@ -15983,29 +15997,108 @@ pub(super) fn parse_form_button_command_name(
     {
         return Some(form_object_reference_command_name(reference));
     }
-    if kind == "4"
-        && let Some(reference) = object_refs.get(&uuid)
-        && reference.starts_with("Catalog.")
+    // An item owner claims the record before any family rule does: `kind` is an
+    // item id far more often than a family selector, and the two are told apart
+    // by whether the uuid resolves as that owner's standard command.  A button
+    // record whose `kind` is 1 resolves to `Form.Item.Товары.…GetURL` under a
+    // table owner and to `Catalog.СезонныеГруппы.…Create` under the family rule,
+    // from the very same `kind`.
+    if let Some(owner) = standard_command_owner_name_by_id.get(kind)
+        && let Some(standard) = match owner.kind {
+            FormStandardCommandOwnerKind::FormattedDocument => {
+                form_formatted_document_standard_command_suffix(&uuid)
+            }
+            FormStandardCommandOwnerKind::GraphicalSchema => {
+                form_graphical_schema_standard_command_suffix(&uuid)
+            }
+            FormStandardCommandOwnerKind::SpreadsheetDocument => {
+                form_spreadsheet_document_standard_command_suffix(&uuid)
+            }
+            FormStandardCommandOwnerKind::Table => form_table_standard_command_suffix(&uuid),
+        }
     {
-        return Some(format!("{reference}.StandardCommand.OpenByValue"));
+        return Some(format!(
+            "Form.Item.{}.StandardCommand.{standard}",
+            owner.name
+        ));
     }
-    let owner = standard_command_owner_name_by_id.get(kind)?;
-    let standard = match owner.kind {
-        FormStandardCommandOwnerKind::FormattedDocument => {
-            form_formatted_document_standard_command_suffix(&uuid)
-        }
-        FormStandardCommandOwnerKind::GraphicalSchema => {
-            form_graphical_schema_standard_command_suffix(&uuid)
-        }
-        FormStandardCommandOwnerKind::SpreadsheetDocument => {
-            form_spreadsheet_document_standard_command_suffix(&uuid)
-        }
-        FormStandardCommandOwnerKind::Table => form_table_standard_command_suffix(&uuid),
-    }?;
-    Some(format!(
-        "Form.Item.{}.StandardCommand.{standard}",
-        owner.name
-    ))
+    let reference = object_refs.get(&uuid)?;
+    form_object_family_standard_command_name(kind, reference, FormCommandRecordReader::Button)
+}
+
+/// Which of the two places a `{kind, uuid}` command record was read from.
+///
+/// The two readers agree on every row of the family grammar but one, and that one
+/// is named rather than duplicated, so the tables cannot drift apart again.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FormCommandRecordReader {
+    /// A `<Button>`'s command slot.
+    Button,
+    /// A command-interface item, i.e. a navigation-panel or command-bar entry.
+    CommandInterfaceItem,
+}
+
+/// Standard command a `{kind, uuid}` record names when `kind` selects a family of
+/// the *target metadata object* rather than a form command or a form item owner.
+///
+/// The record carries nothing but the kind and the uuid, so the family of the
+/// object the uuid resolves to is what decides the suffix -- the same shape
+/// `e712d9a` established for the command-interface reader.  Both readers of the
+/// record now decode this half through one function, so the two cannot drift
+/// apart again: they were already disagreeing, the button reader knowing only
+/// slot 4 while the command-interface reader knew slots 1 through 5.
+///
+/// Every arm is a total function on its observed set in the corpus-wide button
+/// join (27 773 records, 0 wrong, 0 unjoinable):
+///   * slot 1, a catalog -- `Create` for a button, on its 1 observation, and
+///     nothing for a command-interface item, which is a negative an earlier
+///     package measured for that reader and this corpus offers nothing to
+///     overturn.  One datum does not generalise across readers, so the row
+///     names the reader instead of being copied into two tables;
+///   * slot 1, a register -- `OpenByRecorder`, the command-interface rule;
+///   * slot 2 -- `CreateBasedOn` on 21 records spanning `Document` (18),
+///     `BusinessProcess` (2) and `ExchangePlan` (1), and `OpenByRecorder` for an
+///     information register, which is the exception `e712d9a` measured;
+///   * slot 3, a catalog -- `CreateBasedOn`;
+///   * slot 4, a catalog -- `OpenByValue`.
+///
+/// An unobserved combination returns `None` rather than a guessed name.
+///
+/// Whether a top-level reference is required is stated per slot, exactly as each
+/// of the two readers already required it before they were joined: slot 2 names
+/// `CreateBasedOn` for any reference it is given, and only the slots that were
+/// already restricted stay restricted.  Tightening a guard that no observation
+/// asks for is how this series has lost 48 native groups before.
+fn form_object_family_standard_command_name(
+    kind: &str,
+    reference: &str,
+    reader: FormCommandRecordReader,
+) -> Option<String> {
+    let top_level = |expected: &str| is_top_level_reference_of_kind(reference, expected);
+    let top_level_register = || {
+        matches!(
+            reference.split_once('.').map(|(head, _)| head),
+            Some(
+                "AccountingRegister"
+                    | "AccumulationRegister"
+                    | "CalculationRegister"
+                    | "InformationRegister"
+            )
+        ) && reference.matches('.').count() == 1
+    };
+    let standard = match kind {
+        "1" if top_level("Catalog") => match reader {
+            FormCommandRecordReader::Button => "Create",
+            FormCommandRecordReader::CommandInterfaceItem => return None,
+        },
+        "1" if top_level_register() => "OpenByRecorder",
+        "2" if top_level("InformationRegister") => "OpenByRecorder",
+        "2" => "CreateBasedOn",
+        "3" if top_level("Catalog") => "CreateBasedOn",
+        "4" if top_level("Catalog") => "OpenByValue",
+        _ => return None,
+    };
+    Some(format!("{reference}.StandardCommand.{standard}"))
 }
 
 pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
@@ -16077,6 +16170,21 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
             Some("Form.StandardCommand.OpenFromStandaloneServer")
         }
         "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Form.StandardCommand.Retry"),
+        // Seven form standard commands the table did not carry.  Each was read
+        // off the platform's own answer: the instrumented export joined all
+        // 27 773 button command records in the UT 11.5.27.75 tree to the native
+        // `<Button>` at the same output path and id -- 27 683 agreed, 90 were
+        // dropped and none was wrong -- and these uuids are the `kind == 0`
+        // share of the drops, with the name native writes at that position.
+        // `ChangeHistory` already has a second uuid above, as `Delete`, `Copy`
+        // and `SetDeletionMark` each already do.
+        "174e58ce-82ad-4787-b956-9367937f7971" => Some("Form.StandardCommand.ChangeHistory"),
+        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Form.StandardCommand.Generate"),
+        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("Form.StandardCommand.ChangeVariant"),
+        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("Form.StandardCommand.LevelDown"),
+        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("Form.StandardCommand.LevelUp"),
+        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Form.StandardCommand.Ignore"),
+        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("Form.StandardCommand.EndEdit"),
         _ => None,
     }
 }
@@ -16315,6 +16423,15 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         "fca750bc-4fb6-40e2-ae0f-e818939a32e7" => Some("AddFilterItem"),
         "fa51b106-eae6-44c7-8054-76cbb3100603" => Some("MoveDown"),
         "ff5c34f8-b172-4ef2-91d3-48283a66a725" => Some("CollapseAllGroups"),
+        // Two table commands the table did not carry.  `GetURL` is the single
+        // largest owner-scoped drop in the corpus-wide button join: 18 records
+        // across four forms, every owner a `<Table>` in native, and native names
+        // `Form.Item.<table>.StandardCommand.GetURL` at each one.  The `Delete`
+        // uuid is corroborated independently -- `form_table_excluded_command_name`
+        // already reads the very same uuid as `Delete` from the excluded-command
+        // list, so the two tables were disagreeing about one uuid.
+        "0e36114c-5b59-4005-9426-374a6c067e4a" => Some("GetURL"),
+        "ec576e13-1e76-4c33-98aa-a33204514227" => Some("Delete"),
         _ => None,
     }
 }
@@ -16838,32 +16955,17 @@ pub(super) fn parse_form_command_interface_command(
                     })
             }
         }
-        "1" => {
+        // Slots 1 and 2 are pure family rules, read through the one shared
+        // grammar so this reader and the button reader cannot disagree about the
+        // same `{kind, uuid}` record again.
+        "1" | "2" => {
             let uuid = parse_non_zero_uuid(target?)?;
             let reference = context.object_refs.get(&uuid)?;
-            let (kind, _) = reference.split_once('.')?;
-            (reference.matches('.').count() == 1
-                && matches!(
-                    kind,
-                    "AccountingRegister"
-                        | "AccumulationRegister"
-                        | "CalculationRegister"
-                        | "InformationRegister"
-                ))
-            .then(|| format!("{reference}.StandardCommand.OpenByRecorder"))
-        }
-        "2" => {
-            let uuid = parse_non_zero_uuid(target?)?;
-            context.object_refs.get(&uuid).map(|reference| {
-                // An information register names its recorder command from this
-                // slot; every other object kind names "create based on".
-                let standard = if is_top_level_reference_of_kind(reference, "InformationRegister") {
-                    "OpenByRecorder"
-                } else {
-                    "CreateBasedOn"
-                };
-                format!("{reference}.StandardCommand.{standard}")
-            })
+            form_object_family_standard_command_name(
+                kind,
+                reference,
+                FormCommandRecordReader::CommandInterfaceItem,
+            )
         }
         "3" => resolve_information_register_open_by_value_command(kind, target?, context).or_else(
             || {
@@ -16871,21 +16973,26 @@ pub(super) fn parse_form_command_interface_command(
                 let reference = context.object_refs.get(&uuid)?;
                 // A catalog names its "create based on" command from slot 3, where a
                 // document or business process names the same command from slot 2.
-                if is_top_level_reference_of_kind(reference, "Catalog") {
-                    return Some(format!("{reference}.StandardCommand.CreateBasedOn"));
-                }
-                (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
-                    .then(|| reference.clone())
+                form_object_family_standard_command_name(
+                    kind,
+                    reference,
+                    FormCommandRecordReader::CommandInterfaceItem,
+                )
+                .or_else(|| {
+                    (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
+                        .then(|| reference.clone())
+                })
             },
         ),
         "4" => {
             let uuid = parse_non_zero_uuid(target?)?;
             let reference = context.object_refs.get(&uuid)?;
-            (reference.starts_with("Catalog.") && reference.matches('.').count() == 1)
-                .then(|| format!("{reference}.StandardCommand.OpenByValue"))
-                .or_else(|| {
-                    resolve_information_register_open_by_value_command(kind, target?, context)
-                })
+            form_object_family_standard_command_name(
+                kind,
+                reference,
+                FormCommandRecordReader::CommandInterfaceItem,
+            )
+            .or_else(|| resolve_information_register_open_by_value_command(kind, target?, context))
         }
         // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
         // theirs with the object commands handled above.
@@ -18416,6 +18523,15 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(item_type)
         ));
     }
+    // A button opens with `Visible`, `TitleHeight`, `UserVisible`, `Representation`
+    // in that order.  Measured over all 4 004 native forms that contain a button:
+    // `Visible` leads `TitleHeight` 4 times and `TitleHeight` leads `Visible`
+    // never; `UserVisible` leads `Representation` once and `SkipOnInput` 4 times,
+    // and `Type` leads `UserVisible` 20 times, with no pair of the 463 ordered
+    // pairs of this element observed in both directions.
+    if item.tag == "Button" && item.visible == Some(false) {
+        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    }
     if item.tag == "Button"
         && let Some(title_height) = &item.title_height
     {
@@ -18424,8 +18540,10 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_height)
         ));
     }
-    if item.tag == "Button" && item.visible == Some(false) {
-        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    if item.tag == "Button" && item.user_visible_common == Some(false) {
+        xml.push_str(&format!(
+            "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
+        ));
     }
     if item.tag == "Button"
         && let Some(representation) = item.button_representation.filter(|value| *value != "None")
@@ -18480,7 +18598,7 @@ pub(super) fn format_form_child_item_xml(
     if !matches!(item.tag, "Button" | "Table") && item.visible == Some(false) {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
-    if item.tag != "Table" && item.user_visible_common == Some(false) {
+    if item.tag != "Table" && item.tag != "Button" && item.user_visible_common == Some(false) {
         xml.push_str(&format!(
             "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
         ));
@@ -18552,14 +18670,6 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
                 escape_xml_text(title_location)
-            ));
-        }
-        if item.tag == "ColumnGroup"
-            && let Some(fixing_in_table) = item.fixing_in_table
-        {
-            xml.push_str(&format!(
-                "{tab}\t<FixingInTable>{}</FixingInTable>\r\n",
-                fixing_in_table.xml_value()
             ));
         }
     }
@@ -18961,6 +19071,27 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(height)
             ));
         }
+        // A button carries its height cap here, in the same place relative to
+        // `Height` that `AutoMaxWidth`/`MaxWidth` occupy relative to `Width`, and
+        // not down in the shared visual tail.  Native puts `Height` before
+        // `AutoMaxHeight` 13 times, `AutoMaxHeight` before `MaxHeight` 42 times,
+        // and the pair ahead of everything the shared tail emits after them:
+        // `HorizontalStretch` (1), `VerticalStretch` (41 for each of the two),
+        // `GroupHorizontalAlign` (8), `GroupVerticalAlign` (2 and 1), `CommandName`
+        // (68 and 44), `TextColor` (1 each), `BackColor` (3 each), `BorderColor`
+        // (11 each), `Picture` (2) and `Font` (31 and 27) -- and never once the
+        // other way round.  `MaxHeight` against `HorizontalStretch` is the one
+        // pair native never puts in the same button, so it is left adjacent to
+        // the `AutoMaxHeight` it caps rather than guessed apart from it.
+        if item.auto_max_height == Some(false) {
+            xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
+        }
+        if let Some(max_height) = &item.max_height {
+            xml.push_str(&format!(
+                "{tab}\t<MaxHeight>{}</MaxHeight>\r\n",
+                escape_xml_text(max_height)
+            ));
+        }
         if let Some(horizontal_stretch) = item.horizontal_stretch {
             xml.push_str(&format!(
                 "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
@@ -19004,6 +19135,15 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
         ));
+    }
+    // A button's `Font` belongs in front of its `Picture`, not behind it: native
+    // writes `Font` before `Picture` on all 13 buttons that carry both and never
+    // the reverse, while `Font` still trails `CommandName` (563) and the colour
+    // triple emitted just above (273/79/35).
+    if item.tag == "Button"
+        && let Some(font_xml) = &item.font_xml
+    {
+        xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
     }
     if item.tag == "Button"
         && let Some(reference) = &item.picture_ref
@@ -19051,14 +19191,17 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(text_color)
         ));
     }
+    // A `Button` has already written both of these next to its `Height`.
     if item.tag != "Table"
+        && item.tag != "Button"
         && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && item.auto_max_height == Some(false)
     {
         xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
     }
-    if item.tag != "LabelDecoration"
+    if item.tag != "Button"
+        && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && let Some(max_height) = &item.max_height
     {
@@ -19456,6 +19599,20 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(header_horizontal_align)
         ));
     }
+    // A `ColumnGroup` closes its scalar run with `FixingInTable`, not opens it:
+    // native writes `Group` before it 26 times, `Title` 27, `HorizontalStretch` 7,
+    // `ShowInHeader` 4, `Width` 4 and `ShowTitle` 3, and it before
+    // `ExtendedTooltip` 28 times and `ChildItems` 27, with none of the 75 ordered
+    // pairs of this element observed in both directions.  It used to be written up
+    // with the title block, ahead of every one of those six.
+    if item.tag == "ColumnGroup"
+        && let Some(fixing_in_table) = item.fixing_in_table
+    {
+        xml.push_str(&format!(
+            "{tab}\t<FixingInTable>{}</FixingInTable>\r\n",
+            fixing_in_table.xml_value()
+        ));
+    }
     if !matches!(item.tag, "UsualGroup" | "InputField") && !item.format.is_empty() {
         xml.push_str(&format_form_localized_section(
             "Format",
@@ -19487,7 +19644,10 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "InputField" {
         xml.push_str(&format_form_control_colors_xml(item, indent + 1));
     }
-    if let Some(font_xml) = &item.font_xml {
+    // A `Button` has already written its `Font` in front of its `Picture`.
+    if item.tag != "Button"
+        && let Some(font_xml) = &item.font_xml
+    {
         xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
     }
     // `InputHint` trails the colour/`Font` block in the native tree
