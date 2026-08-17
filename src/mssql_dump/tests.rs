@@ -24308,15 +24308,17 @@ fn resolves_the_platform_type_identifiers_serialized_by_form_patterns() {
         assert!(xml.contains(expected_xml), "{pattern}: {xml}");
     }
 
-    // The register reader resolved `cfg:EnumRef` on its own before; it now
-    // reaches the same answer through the one shared table.
+    // Both tables now name the enumeration family. They did not before: the
+    // reference-family table was missing the row, so a data-composition
+    // `valueType` naming it failed closed on an identifier the other table had
+    // carried all along, which cost one template its whole export.
     assert_eq!(
         builtin_type_reference("474c3bf6-08b5-4ddc-a2ad-989cedf11583"),
         Some("cfg:EnumRef")
     );
     assert_eq!(
         information_register_builtin_reference("474c3bf6-08b5-4ddc-a2ad-989cedf11583"),
-        None
+        Some("cfg:EnumRef")
     );
     assert_eq!(
         parse_information_register_type_pattern(

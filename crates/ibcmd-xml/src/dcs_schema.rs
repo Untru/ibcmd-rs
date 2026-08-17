@@ -3042,10 +3042,13 @@ struct RewriteState {
     next_declaration: usize,
     /// This element's 1-based depth in the target document.
     depth: usize,
-    /// Whether a data-core `Type` child has already been written under this
-    /// element, and whether a data-core `TypeId` child has.
-    saw_literal_type: bool,
-    saw_type_id: bool,
+    /// The run of direct data-core `Type`/`TypeId` children written so far,
+    /// held until the run ends so it can be put into the source document's
+    /// order, which storage's schema cannot express.
+    type_run: Vec<TypeRunEntry>,
+    /// For a data-core `Type` element, where its own output began, so its
+    /// closing tag can hand the finished element to the parent's run.
+    literal_type_start: Option<usize>,
 }
 
 impl RewriteState {
@@ -3058,10 +3061,245 @@ impl RewriteState {
             declaration_offset: 0,
             next_declaration: 1,
             depth: 0,
-            saw_literal_type: false,
-            saw_type_id: false,
+            type_run: Vec::new(),
+            literal_type_start: None,
         }
     }
+
+    /// End the run of type siblings, writing it in the source document's order.
+    fn flush_type_run(&mut self, out: &mut String) -> Result<(), DcsInnerSchemaError> {
+        if self.type_run.is_empty() {
+            return Ok(());
+        }
+        let run = std::mem::take(&mut self.type_run);
+        let order = evidenced_type_run_order(&run)?;
+        reorder_type_run(out, &run, &order);
+        Ok(())
+    }
+}
+
+/// Where a platform builtin type sorts among configuration reference types.
+///
+/// The platform writes the types of one type list in a single global order,
+/// and a configuration reference's place in it is its own
+/// `GeneratedType/TypeId` uuid: across the reference configuration's 2 691
+/// multi-type lists -- 4 907 metadata objects, 5 201 managed forms and 691
+/// data-composition templates -- every list of two or more reference types
+/// ascends by that uuid, with no exception. A builtin's key is a uuid the
+/// configuration itself never spells, so the evidence pins it only to the open
+/// interval between the nearest reference ever observed before it and the
+/// nearest ever observed after it. Two independent checks say the key really
+/// is a uuid in that same space rather than a rank: for the three builtins
+/// whose platform uuid the storage side already carries, that value falls
+/// inside the interval measured here -- `v8:ValueListType`
+/// 4772b3b4-f4a3-49c0-a1a5-8cb5961511a3 between 2e86fe94 and 55adb97e,
+/// `v8:UUID` fc01b5df above b687901c, `v8:StandardPeriod` 2fdc88ec below
+/// e63fc7d1.
+///
+/// `None` on a side means no reference was ever observed there. A comparison
+/// landing strictly inside the interval is not evidenced and is refused rather
+/// than guessed, so a configuration carrying a type uuid in that gap fails
+/// closed instead of being written in a made-up order.
+const BUILTIN_TYPE_SORT_BOUNDS: &[(&str, Option<&str>, Option<&str>)] = &[
+    (
+        "v8:Null",
+        Some("1eb045d5-0080-4aae-8c01-7562e94c399a"),
+        None,
+    ),
+    (
+        "v8:StandardPeriod",
+        None,
+        Some("e63fc7d1-3d01-4fbb-8cbe-9d4bf8fe2126"),
+    ),
+    (
+        "v8:TypeDescription",
+        Some("5507e9a1-c199-40e0-a820-7436d2faac4b"),
+        None,
+    ),
+    (
+        "v8:UUID",
+        Some("b687901c-87e7-4f68-b440-5cda82ad3676"),
+        None,
+    ),
+    (
+        "v8:ValueListType",
+        Some("2e86fe94-4898-4ea5-988a-42122b917bee"),
+        Some("55adb97e-a84e-453e-8020-7665bb2abdef"),
+    ),
+    (
+        "xs:boolean",
+        Some("56c86461-d1a1-4757-ac34-d36ef2ecf333"),
+        Some("604931cd-d4a8-48d0-bc59-2ac90e044abb"),
+    ),
+    (
+        "xs:dateTime",
+        Some("a8102d85-e4f4-485c-ba59-8068bb30e9ce"),
+        Some("abb75494-7154-4303-b8c6-5840c31ac3ec"),
+    ),
+    (
+        "xs:decimal",
+        Some("abbce35f-664f-492a-b8df-0bbf57fcb9bb"),
+        Some("b165a6f6-2ba4-4b52-96fc-c0a51f367b7f"),
+    ),
+    (
+        "xs:string",
+        Some("9b601b75-6eee-4ccf-9287-877bcbc1645f"),
+        Some("9c5f90e5-c89b-418f-8423-7135b80db1aa"),
+    ),
+];
+
+fn builtin_type_sort_bounds(qname: &str) -> Option<(Option<&'static str>, Option<&'static str>)> {
+    BUILTIN_TYPE_SORT_BOUNDS
+        .iter()
+        .find(|(name, _lower, _upper)| *name == qname)
+        .map(|(_name, lower, upper)| (*lower, *upper))
+}
+
+/// What orders one member of a type list against its siblings.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum TypeSortKey {
+    /// A configuration type: its own storage uuid is the key.
+    Reference(String),
+    /// A platform builtin, whose key is known only within an open interval.
+    Builtin {
+        lower: Option<&'static str>,
+        upper: Option<&'static str>,
+    },
+    /// A reference family. All 326 observed family-beside-ordered-type pairs
+    /// -- 278 against a builtin, 48 against a concrete reference -- write the
+    /// family second, and none writes one first, so families sort as a block
+    /// behind the ordered members. Their own order is storage's, which is
+    /// ascending by the family's protocol uuid in all 35 pairs observed.
+    Family,
+    /// Nothing in the corpus places this member relative to any other: a
+    /// builtin outside the bounds table, or a type id the configuration
+    /// resolves to no name at all and the platform echoes verbatim.
+    Unevidenced,
+}
+
+/// One direct `Type`/`TypeId` child of an element: the output range it was
+/// written into, and the key that orders it.
+#[derive(Clone, Debug)]
+struct TypeRunEntry {
+    start: usize,
+    end: usize,
+    key: TypeSortKey,
+}
+
+/// Whether the builtin is written before the configuration type, or a typed
+/// refusal when the type's uuid falls inside the builtin's evidenced interval
+/// and so decides nothing.
+///
+/// This is the only comparison storage cannot answer for itself, so it is the
+/// only one asked.
+fn type_sorts_before(left: &TypeSortKey, right: &TypeSortKey) -> Result<bool, DcsInnerSchemaError> {
+    let (TypeSortKey::Builtin { lower, upper }, TypeSortKey::Reference(uuid)) = (left, right)
+    else {
+        return unsupported("a valueType member has no evidenced position beside its siblings");
+    };
+    if upper.is_some_and(|upper| uuid.as_str() >= upper) {
+        return Ok(true);
+    }
+    if lower.is_some_and(|lower| uuid.as_str() <= lower) {
+        return Ok(false);
+    }
+    unsupported(format!(
+        "a valueType puts a platform builtin beside configuration type {uuid}, whose uuid falls \
+         inside the builtin's evidenced sort interval, so the source order is not derivable"
+    ))
+}
+
+/// The permutation that writes an already-rendered run of `Type`/`TypeId`
+/// siblings in the source document's order.
+///
+/// Storage loses exactly one thing about that order and nothing else: its
+/// schema puts every literal `Type` before every `TypeId`, so a list mixing
+/// the two arrives grouped while the platform writes it interleaved. Both
+/// groups arrive internally in the platform's own order -- the references
+/// ascending by type uuid, the builtins in the order the platform lists them,
+/// which is why a list of builtins alone already comes out byte-exact. So the
+/// permutation is a stable merge of two ordered runs, and the comparator is
+/// only ever asked the one question storage cannot answer: where one builtin
+/// sits relative to one reference.
+///
+/// A list that mixes no builtin with a `TypeId` loses nothing and is left
+/// exactly as storage had it, which is also what makes this incapable of
+/// changing any list the writer already spelled correctly.
+fn evidenced_type_run_order(run: &[TypeRunEntry]) -> Result<Vec<usize>, DcsInnerSchemaError> {
+    let builtins: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Builtin { .. }));
+    let references: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Reference(_)));
+    let families: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Family));
+    let unevidenced: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Unevidenced));
+    let identity = || Ok((0..run.len()).collect());
+    if builtins.is_empty() {
+        return identity();
+    }
+    if references.is_empty() && families.is_empty() && unevidenced.is_empty() {
+        return identity();
+    }
+    if !unevidenced.is_empty() {
+        return unsupported(
+            "a valueType mixes a platform builtin with a type id the configuration resolves \
+             to no name, and nothing observed places either before the other",
+        );
+    }
+    // Stable merge: a builtin goes ahead of the first reference it is
+    // evidenced to precede, and the relative order inside each group is the
+    // one storage already carries.
+    let mut ordered: Vec<usize> = Vec::with_capacity(run.len());
+    let mut pending = builtins.as_slice();
+    for reference in references {
+        while let Some((builtin, rest)) = pending.split_first() {
+            if !type_sorts_before(&run[*builtin].key, &run[reference].key)? {
+                break;
+            }
+            ordered.push(*builtin);
+            pending = rest;
+        }
+        ordered.push(reference);
+    }
+    ordered.extend_from_slice(pending);
+    ordered.extend(families);
+    Ok(ordered)
+}
+
+fn indices_of(run: &[TypeRunEntry], want: impl Fn(&TypeSortKey) -> bool) -> Vec<usize> {
+    run.iter()
+        .enumerate()
+        .filter(|(_index, entry)| want(&entry.key))
+        .map(|(index, _entry)| index)
+        .collect()
+}
+
+/// Rewrite an already-written run of type siblings into `order`.
+///
+/// Every sibling in the run sits at one depth, so the layout whitespace
+/// between them is interchangeable and stays where it stands while only the
+/// elements move. The rewritten region is therefore exactly as long as the
+/// original, which is what lets offsets recorded elsewhere in the output
+/// survive.
+fn reorder_type_run(out: &mut String, run: &[TypeRunEntry], order: &[usize]) {
+    if order.iter().copied().eq(0..run.len()) {
+        return;
+    }
+    let elements: Vec<&str> = run
+        .iter()
+        .map(|entry| &out[entry.start..entry.end])
+        .collect();
+    let separators: Vec<&str> = run
+        .windows(2)
+        .map(|pair| &out[pair[0].end..pair[1].start])
+        .collect();
+    let mut rewritten = String::new();
+    for (slot, index) in order.iter().enumerate() {
+        rewritten.push_str(elements[*index]);
+        if let Some(separator) = separators.get(slot) {
+            rewritten.push_str(separator);
+        }
+    }
+    let region = run[0].start..run[run.len() - 1].end;
+    debug_assert_eq!(region.len(), rewritten.len());
+    out.replace_range(region, &rewritten);
 }
 
 /// Namespace declarations in scope, innermost last.
@@ -3597,6 +3835,7 @@ fn rewrite_tokens(
                     return unsupported("comments, PI and doctype are outside the cohort");
                 }
                 let closing = tag.starts_with("</");
+                let mut resolved_type_qname: Option<String> = None;
                 if let Some(value) = pending.take() {
                     let Some(state) = frames.last() else {
                         if !value.trim().is_empty() {
@@ -3618,13 +3857,18 @@ fn rewrite_tokens(
                         }
                         RewriteFrame::TypeId | RewriteFrame::AppIndex => {}
                         _ if state.text == RewriteTextKind::TypeQName => {
-                            out.push_str(&rewrite_qname_value(
+                            let resolved = rewrite_qname_value(
                                 policy,
                                 &scopes,
                                 &state.renamed,
                                 "xsi:type",
                                 value,
-                            )?);
+                            )?;
+                            out.push_str(&resolved);
+                            // The source-direction QName is what the builtin
+                            // sort-bounds table is keyed by, so it is kept for
+                            // the closing tag to record.
+                            resolved_type_qname = Some(resolved);
                         }
                         _ if state.text == RewriteTextKind::ColorValue => {
                             let rendered = rewrite_color_value(
@@ -3651,9 +3895,12 @@ fn rewrite_tokens(
                 }
                 if closing {
                     let name = tag[2..tag.len() - 1].trim();
-                    let state = frames.pop().ok_or_else(|| {
+                    let mut state = frames.pop().ok_or_else(|| {
                         DcsInnerSchemaError::Malformed("unexpected closing element".into())
                     })?;
+                    // An element that carried a type run of its own ends it
+                    // here rather than at a following sibling.
+                    state.flush_type_run(&mut out)?;
                     scopes.pop();
                     source_scopes.pop();
                     match state.frame {
@@ -3694,6 +3941,24 @@ fn rewrite_tokens(
                             out.push('>');
                         }
                     }
+                    if let Some(element_start) = state.literal_type_start {
+                        // A builtin the bounds table does not carry places
+                        // itself nowhere, so a run holding one is refused
+                        // rather than ordered on a guess.
+                        let key = resolved_type_qname
+                            .as_deref()
+                            .and_then(builtin_type_sort_bounds)
+                            .map_or(TypeSortKey::Unevidenced, |(lower, upper)| {
+                                TypeSortKey::Builtin { lower, upper }
+                            });
+                        if let Some(parent) = frames.last_mut() {
+                            parent.type_run.push(TypeRunEntry {
+                                start: element_start,
+                                end: out.len(),
+                                key,
+                            });
+                        }
+                    }
                     continue;
                 }
 
@@ -3716,16 +3981,13 @@ fn rewrite_tokens(
                     .to_owned();
                 let depth = frames.len();
                 let literal_type = uri == policy.data_core_namespace_uri() && local == "Type";
+                let storage_type_id = uri == policy.data_core_namespace_uri() && local == "TypeId";
                 if let Some(state) = frames.last_mut() {
                     state.saw_child = true;
-                    if literal_type {
-                        state.saw_literal_type = true;
-                        if state.saw_type_id {
-                            return unsupported(
-                                "a valueType mixing literal Type with TypeId has no \
-                                 storage-derivable source order",
-                            );
-                        }
+                    if !literal_type && !storage_type_id {
+                        // A run of type siblings ends at the first child that
+                        // is not one, and its order can be settled then.
+                        state.flush_type_run(&mut out)?;
                     }
                 }
                 if mode == RewriteMode::PrimaryDocument && depth == 0 {
@@ -3877,25 +4139,16 @@ fn rewrite_tokens(
                     continue;
                 }
 
-                if uri == policy.data_core_namespace_uri() && local == "TypeId" {
+                if storage_type_id {
                     // A `TypeId` becomes a `<v8:Type>` too, so a parent that
                     // carries both spellings ends up with several `v8:Type`
-                    // children whose relative order the source document does
-                    // not take from the storage document: storage sorts its
-                    // `TypeId` list by uuid, while the source keeps the
-                    // configured order, and the literal `Type` lands inside
-                    // that order rather than beside the list. Nothing in the
-                    // stored bytes says where -- fail closed instead of
-                    // guessing a position.
-                    if let Some(parent) = frames.last_mut() {
-                        parent.saw_type_id = true;
-                        if parent.saw_literal_type {
-                            return unsupported(
-                                "a valueType mixing literal Type with TypeId has no \
-                                 storage-derivable source order",
-                            );
-                        }
-                    }
+                    // children. Storage cannot say in which order: its schema
+                    // puts every literal `Type` before every `TypeId`, while
+                    // the platform interleaves them. What it does preserve is
+                    // the reference members' own order -- ascending by type
+                    // uuid, which is the platform's order -- so the run is
+                    // recorded here and put right when it ends.
+                    let element_start = out.len();
                     let content = match tokens.get(index + 1) {
                         Some(RawToken::Text(value)) => (*value).trim(),
                         _ if start.self_closing => "",
@@ -3918,6 +4171,11 @@ fn rewrite_tokens(
                                 .get(&type_id)
                                 .map(|qualified| ("TypeSet", qualified))
                         });
+                    let key = match resolved {
+                        Some(("TypeSet", _)) => TypeSortKey::Family,
+                        Some(_) => TypeSortKey::Reference(type_id.clone()),
+                        None => TypeSortKey::Unevidenced,
+                    };
                     match resolved {
                         Some((element, qualified)) => {
                             out.push_str("<v8:");
@@ -3946,6 +4204,13 @@ fn rewrite_tokens(
                                 "TypeId {type_id} has no configuration type-index resolution"
                             ));
                         }
+                    }
+                    if let Some(parent) = frames.last_mut() {
+                        parent.type_run.push(TypeRunEntry {
+                            start: element_start,
+                            end: out.len(),
+                            key,
+                        });
                     }
                     if start.self_closing {
                         scopes.pop();
@@ -4100,6 +4365,7 @@ fn rewrite_tokens(
                 if let Some(scope) = source_scopes.last_mut() {
                     *scope = declared_source;
                 }
+                let element_start = out.len();
                 out.push('<');
                 out.push_str(&emitted_name);
                 let declaration_offset = out.len();
@@ -4109,6 +4375,17 @@ fn rewrite_tokens(
                     out.push_str("/>");
                     scopes.pop();
                     source_scopes.pop();
+                    if literal_type {
+                        // A `Type` with no content names no type at all, so
+                        // nothing places it among its siblings.
+                        if let Some(parent) = frames.last_mut() {
+                            parent.type_run.push(TypeRunEntry {
+                                start: element_start,
+                                end: out.len(),
+                                key: TypeSortKey::Unevidenced,
+                            });
+                        }
+                    }
                 } else {
                     out.push('>');
                     let mut state = RewriteState::new(RewriteFrame::Element(emitted_name));
@@ -4142,6 +4419,9 @@ fn rewrite_tokens(
                     state.declaration_offset = declaration_offset;
                     state.next_declaration = local_declarations + 1;
                     state.depth = depth;
+                    if literal_type {
+                        state.literal_type_start = Some(element_start);
+                    }
                     frames.push(state);
                 }
             }
@@ -4326,6 +4606,168 @@ fn character_data_runs(xml: &str) -> Vec<(usize, usize)> {
 fn offset_continues_character_data(runs: &[(usize, usize)], offset: usize) -> bool {
     runs.iter()
         .any(|(start, end)| offset > *start && offset < *end)
+}
+
+#[cfg(test)]
+mod type_run_order_tests {
+    use super::{
+        TypeRunEntry, TypeSortKey, builtin_type_sort_bounds, evidenced_type_run_order,
+        reorder_type_run,
+    };
+
+    /// Build a run whose rendered elements are single letters, so the
+    /// permutation is readable straight off the rewritten output.
+    fn run(members: &[(&str, TypeSortKey)]) -> (String, Vec<TypeRunEntry>) {
+        let mut out = String::new();
+        let mut entries = Vec::new();
+        for (index, (rendered, key)) in members.iter().enumerate() {
+            if index > 0 {
+                out.push('.');
+            }
+            let start = out.len();
+            out.push_str(rendered);
+            entries.push(TypeRunEntry {
+                start,
+                end: out.len(),
+                key: key.clone(),
+            });
+        }
+        (out, entries)
+    }
+
+    fn builtin(qname: &str) -> TypeSortKey {
+        let (lower, upper) =
+            builtin_type_sort_bounds(qname).expect("the bounds table carries this builtin");
+        TypeSortKey::Builtin { lower, upper }
+    }
+
+    fn reference(uuid: &str) -> TypeSortKey {
+        TypeSortKey::Reference(uuid.to_owned())
+    }
+
+    fn rewritten(members: &[(&str, TypeSortKey)]) -> Result<String, String> {
+        let (mut out, entries) = run(members);
+        let order = evidenced_type_run_order(&entries).map_err(|error| error.to_string())?;
+        reorder_type_run(&mut out, &entries, &order);
+        Ok(out)
+    }
+
+    /// The reference configuration writes `xs:string` third of five in one
+    /// template: two catalog uuids below the builtin's interval, then the
+    /// builtin, then the two above it. Storage can only offer the builtin
+    /// first, so this is the whole rule in one case.
+    #[test]
+    fn a_builtin_lands_between_the_references_its_interval_separates() {
+        assert_eq!(
+            rewritten(&[
+                ("s", builtin("xs:string")),
+                ("V", reference("3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab")),
+                ("B", reference("7632c6fe-8cac-4d68-a50a-5714e18b1fec")),
+                ("K", reference("c1b798e4-28d2-42ac-b75d-c1521d1d8fff")),
+                ("T", reference("f455b6b4-582e-4024-adba-c408ea60e8c6")),
+            ])
+            .as_deref(),
+            Ok("V.B.s.K.T")
+        );
+    }
+
+    /// A list of builtins alone loses nothing in storage -- the platform's own
+    /// order survives the `Type`-before-`TypeId` grouping -- so it is left
+    /// exactly as it arrived and no comparison is attempted. The reference
+    /// configuration has such lists and they were already byte-exact.
+    #[test]
+    fn a_builtin_only_run_is_left_exactly_as_storage_had_it() {
+        assert_eq!(
+            rewritten(&[
+                ("b", builtin("xs:boolean")),
+                ("d", builtin("xs:dateTime")),
+                ("n", builtin("v8:Null")),
+            ])
+            .as_deref(),
+            Ok("b.d.n")
+        );
+    }
+
+    /// So is a list of references alone, whose storage order is ascending by
+    /// type uuid and therefore already the platform's.
+    #[test]
+    fn a_reference_only_run_is_left_exactly_as_storage_had_it() {
+        assert_eq!(
+            rewritten(&[
+                ("A", reference("c1b798e4-28d2-42ac-b75d-c1521d1d8fff")),
+                ("B", reference("3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab")),
+            ])
+            .as_deref(),
+            Ok("A.B")
+        );
+    }
+
+    /// Reference families sort behind every ordered member, so a family whose
+    /// uuid would have put it first in storage moves to the back.
+    #[test]
+    fn a_reference_family_falls_behind_every_ordered_member() {
+        assert_eq!(
+            rewritten(&[
+                ("s", builtin("xs:string")),
+                ("F", TypeSortKey::Family),
+                ("R", reference("f455b6b4-582e-4024-adba-c408ea60e8c6")),
+            ])
+            .as_deref(),
+            Ok("s.R.F")
+        );
+    }
+
+    /// Fail-closed floor: a type uuid strictly inside the builtin's evidenced
+    /// interval decides nothing, so the run is refused instead of ordered on a
+    /// guess. `9bd43cde...` is a real configuration catalog inside the
+    /// `xs:string` gap.
+    #[test]
+    fn a_type_uuid_inside_the_interval_is_refused() {
+        let error = rewritten(&[
+            ("s", builtin("xs:string")),
+            ("R", reference("9bd43cde-a83d-11e7-7088-f45c898df8f7")),
+        ])
+        .expect_err("a uuid inside the interval has no evidenced position");
+        assert!(
+            error.contains("inside the builtin's evidenced sort interval"),
+            "the refusal must name why the order is not derivable: {error}"
+        );
+    }
+
+    /// Fail-closed floor: a builtin the bounds table does not carry, and a
+    /// type id the configuration resolves to no name, are both unplaced, so a
+    /// run mixing either with anything else is refused.
+    #[test]
+    fn an_unevidenced_member_beside_a_builtin_is_refused() {
+        let error = rewritten(&[("s", builtin("xs:string")), ("O", TypeSortKey::Unevidenced)])
+            .expect_err("an unplaced member cannot be ordered");
+        assert!(
+            error.contains("resolves to no name"),
+            "the refusal must say the member is unplaced: {error}"
+        );
+    }
+
+    /// An unplaced member on its own is still written: it is only its position
+    /// among siblings that is unknown, not its spelling.
+    #[test]
+    fn a_lone_unevidenced_member_is_still_written() {
+        assert_eq!(
+            rewritten(&[("O", TypeSortKey::Unevidenced)]).as_deref(),
+            Ok("O")
+        );
+    }
+
+    /// The bounds table must stay a set of non-empty, ordered intervals: an
+    /// inverted one would silently make every comparison inside it decide both
+    /// ways.
+    #[test]
+    fn every_evidenced_interval_is_non_empty() {
+        for (qname, lower, upper) in super::BUILTIN_TYPE_SORT_BOUNDS {
+            if let (Some(lower), Some(upper)) = (lower, upper) {
+                assert!(lower < upper, "{qname} has an inverted sort interval");
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -7976,6 +7976,14 @@ const DCS_BUILTIN_REFERENCE_TYPE_SETS: &[(&str, &str)] = &[
     ),
     ("38bfd075-3e63-4aaa-a93e-94521380d579", "cfg:DocumentRef"),
     (
+        "474c3bf6-08b5-4ddc-a2ad-989cedf11583",
+        // `builtin_type_reference` below has carried this protocol identifier
+        // all along; this table did not, so a DCS `valueType` naming the
+        // enumeration family failed closed on a name the storage side already
+        // knew. The two tables now agree on it.
+        "cfg:EnumRef",
+    ),
+    (
         "593cd424-0877-470d-91f9-b90a982059b4",
         "cfg:ChartOfCalculationTypesRef",
     ),

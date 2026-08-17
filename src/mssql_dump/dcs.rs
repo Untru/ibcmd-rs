@@ -4080,46 +4080,90 @@ mod tests {
         );
     }
 
-    /// Fail-closed floor: storage sorts a `valueType`'s `TypeId` list by
-    /// uuid, so where a literal `Type` sits inside the source order is not
-    /// recoverable from the stored bytes once both spellings appear together.
+    /// Storage's schema puts every literal `Type` before every `TypeId`, so a
+    /// `valueType` mixing the two arrives grouped while the platform writes it
+    /// interleaved. The interleaving is recovered rather than refused: a
+    /// configuration type whose uuid sits below the builtin's evidenced sort
+    /// interval is written ahead of it.
     #[test]
-    fn transliteration_refuses_a_value_type_mixing_literal_type_with_type_id() {
-        let documents = probe_documents(concat!(
-            "\t\t<calculatedField>\r\n",
-            "\t\t\t<dataPath>Probe</dataPath>\r\n",
-            "\t\t\t<valueType>\r\n",
-            "\t\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>\r\n",
-            "\t\t\t\t<TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">",
-            "3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab</TypeId>\r\n",
-            "\t\t\t</valueType>\r\n",
-            "\t\t</calculatedField>"
-        ));
+    fn transliteration_interleaves_a_mixed_value_type_at_the_evidenced_position() {
+        let documents = mixed_value_type_probe("3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab");
         let borrowed: [&[u8]; 3] = [
             documents[0].as_bytes(),
             documents[1].as_bytes(),
             documents[2].as_bytes(),
         ];
-        let mut type_index = DcsTypeIndex::new();
-        type_index.insert(
-            "3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab".to_owned(),
-            DcsTypeResolution::Type {
-                qname: "cfg:CatalogRef.Probe".to_owned(),
-            },
-        );
-        let rejection = normalize_data_composition_schema_template_documents_with_profiles(
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
             &borrowed,
-            &type_index,
+            &mixed_value_type_index("3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab"),
             &BTreeMap::new(),
             &ProfileId::parse("provider:mssql-legacy").unwrap(),
             &ProfileId::parse("xml-2.20").unwrap(),
         )
-        .expect_err("a mixed valueType has no storage-derivable source order");
+        .expect("a mixed valueType whose order is evidenced must transliterate");
+        let actual = String::from_utf8(actual).expect("source XML is UTF-8");
+        let reference = actual
+            .find("d4p1:CatalogRef.Probe")
+            .expect("the reference type must be spelled: {actual}");
+        let builtin = actual
+            .find("<v8:Type>xs:string</v8:Type>")
+            .expect("the builtin must be spelled: {actual}");
+        assert!(
+            reference < builtin,
+            "a type uuid below the builtin's interval is written ahead of it: {actual}"
+        );
+    }
+
+    /// Fail-closed floor for the same rule: a configuration type whose uuid
+    /// falls strictly inside the builtin's evidenced interval decides nothing,
+    /// so the source order is refused rather than guessed.
+    #[test]
+    fn transliteration_refuses_a_mixed_value_type_inside_the_evidenced_interval() {
+        let documents = mixed_value_type_probe("9bd43cde-a83d-11e7-7088-f45c898df8f7");
+        let borrowed: [&[u8]; 3] = [
+            documents[0].as_bytes(),
+            documents[1].as_bytes(),
+            documents[2].as_bytes(),
+        ];
+        let rejection = normalize_data_composition_schema_template_documents_with_profiles(
+            &borrowed,
+            &mixed_value_type_index("9bd43cde-a83d-11e7-7088-f45c898df8f7"),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .expect_err("a type uuid inside the interval has no evidenced position");
         assert_eq!(
             rejection.code(),
             "dcs.template-normalize.primary-schema-parse",
             "the rejection must name the step that refused the source: {rejection}"
         );
+    }
+
+    fn mixed_value_type_probe(type_id: &str) -> [String; 3] {
+        probe_documents(&format!(
+            concat!(
+                "\t\t<calculatedField>\r\n",
+                "\t\t\t<dataPath>Probe</dataPath>\r\n",
+                "\t\t\t<valueType>\r\n",
+                "\t\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>\r\n",
+                "\t\t\t\t<TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{}</TypeId>\r\n",
+                "\t\t\t</valueType>\r\n",
+                "\t\t</calculatedField>"
+            ),
+            type_id
+        ))
+    }
+
+    fn mixed_value_type_index(type_id: &str) -> DcsTypeIndex {
+        let mut type_index = DcsTypeIndex::new();
+        type_index.insert(
+            type_id.to_owned(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.Probe".to_owned(),
+            },
+        );
+        type_index
     }
 
     /// A primary schema outside BOTH the inner-schema parser's admitted shape
