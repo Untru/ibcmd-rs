@@ -1032,6 +1032,7 @@ pub(super) struct FormExtendedTooltip {
     pub(super) text_color: Option<String>,
     pub(super) font_xml: Option<String>,
     pub(super) title: Option<FormExtendedTooltipTitle>,
+    pub(super) hyperlink: Option<bool>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) vertical_align: Option<&'static str>,
     pub(super) events: Vec<FormBodyEvent>,
@@ -1057,6 +1058,7 @@ impl FormExtendedTooltip {
             || self.text_color.is_some()
             || self.font_xml.is_some()
             || self.title.is_some()
+            || self.hyperlink.is_some()
             || self.group_horizontal_align.is_some()
             || self.vertical_align.is_some()
             || !self.events.is_empty()
@@ -1254,6 +1256,7 @@ pub(super) struct FormChildItem {
     pub(super) header_picture_file_name: Option<String>,
     pub(super) header_picture_load_transparent: bool,
     pub(super) picture_size: Option<&'static str>,
+    pub(super) nonselected_picture_text: Vec<(String, String)>,
     pub(super) picture_file_name: Option<&'static str>,
     pub(super) title: Vec<(String, String)>,
     pub(super) usual_group_shortcut: Option<String>,
@@ -8233,6 +8236,11 @@ fn parse_form_child_item_with_metadata_owners(
                     .zip(picture_decoration_options.as_deref())
                     .and_then(|(schema, options)| schema.hyperlink(options))
                     == Some(true))
+            || (tag == "PictureField"
+                && field_schema_and_options
+                    .as_ref()
+                    .and_then(|(schema, options)| schema.hyperlink(options))
+                    == Some(true))
         {
             Some(true)
         } else {
@@ -9032,9 +9040,28 @@ fn parse_form_child_item_with_metadata_owners(
         picture_size: if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_size(&fields)
         } else if tag == "PictureField" {
-            parse_form_picture_field_picture_size(picture_field_options.as_deref())
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| {
+                    parse_form_picture_field_picture_size(*schema, options)
+                })
         } else {
             None
+        },
+        nonselected_picture_text: if tag == "PictureDecoration" {
+            picture_decoration_options
+                .as_deref()
+                .map(parse_form_picture_decoration_nonselected_picture_text)
+                .unwrap_or_default()
+        } else if tag == "PictureField" {
+            field_schema_and_options
+                .as_ref()
+                .map(|(schema, options)| {
+                    parse_form_picture_field_nonselected_picture_text(*schema, options)
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         },
         picture_file_name: if tag == "PictureDecoration" {
             parse_form_picture_decoration_file_name(&fields)
@@ -13180,6 +13207,13 @@ pub(super) fn parse_form_child_item_extended_tooltip(
                 formatted: title_formatted,
             });
         }
+        tooltip.hyperlink = match options
+            .get(FormExtendedTooltipSchema::HYPERLINK_OPTION_SLOT)
+            .map(|value| value.trim())
+        {
+            Some("1") => Some(true),
+            _ => None,
+        };
         tooltip.group_horizontal_align = nested
             .get(schema.group_horizontal_align_slot())
             .and_then(|field| parse_form_button_group_horizontal_align(field));
@@ -13250,12 +13284,70 @@ pub(super) fn parse_form_picture_decoration_picture_value(
         .find_map(|field| parse_form_popup_picture_value(field.trim(), object_refs))
 }
 
+/// `PictureSize` code table for managed-form controls.
+///
+/// One table, read from two different tuples by two different owners.  Over the
+/// 1 193 native `PictureField` and 3 666 native `PictureDecoration` items the
+/// code is a total function of the native spelling, and every code observed on
+/// both owners maps to the same spelling on both:
+///
+/// | code | spelling | `PictureField` | `PictureDecoration` |
+/// |------|----------|---------------:|--------------------:|
+/// | 0 | `RealSize`, never written | 1 055 | 3 281 |
+/// | 1 | `Stretch` | 1 | 138 |
+/// | 2 | `Proportionally` | 101 | 161 |
+/// | 4 | `AutoSize` | 29 | 58 |
+/// | 5 | `RealSizeIgnoreScale` | - | 1 |
+/// | 6 | `AutoSizeIgnoreScale` | 2 | 2 |
+/// | 7 | `ByFontSize` | 5 | 25 |
+///
+/// Code 3 never occurs on either owner, so it stays unmapped rather than being
+/// guessed into the sequence: the enumeration is a flat ordinal, not a
+/// composition mask, since 5 and 6 are not 4|1 and 4|2 under any reading that
+/// keeps 1 and 2 meaning `Stretch` and `Proportionally`.
+///
+/// The spreadsheet-document table in `moxel` shares the five codes it knows but
+/// is a separate authority measured against a separate corpus, so the two are
+/// deliberately not folded together here.
+pub(super) fn form_picture_size_mode(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("RealSize"),
+        1 => Some("Stretch"),
+        2 => Some("Proportionally"),
+        4 => Some("AutoSize"),
+        5 => Some("RealSizeIgnoreScale"),
+        6 => Some("AutoSizeIgnoreScale"),
+        7 => Some("ByFontSize"),
+        _ => None,
+    }
+}
+
+fn form_picture_decoration_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'a str>> {
+    split_1c_braced_fields(
+        fields
+            .get(FormPictureDecorationSchema::OPTIONS_SLOT)?
+            .trim(),
+        0,
+    )
+}
+
 pub(super) fn parse_form_picture_decoration_picture_size(fields: &[&str]) -> Option<&'static str> {
-    let options = split_1c_braced_fields(fields.get(18)?.trim(), 0)?;
+    let options = form_picture_decoration_options(fields)?;
+    let slot = FormPictureDecorationSchema.picture_size_option_slot(&options)?;
     options
-        .get(3)
+        .get(slot)
         .and_then(|field| field.trim().parse::<usize>().ok())
-        .and_then(moxel_picture_size_mode)
+        .and_then(form_picture_size_mode)
+}
+
+pub(super) fn parse_form_picture_decoration_nonselected_picture_text(
+    options: &[&str],
+) -> Vec<(String, String)> {
+    FormPictureDecorationSchema
+        .nonselected_picture_text_option_slot(options)
+        .and_then(|slot| options.get(slot))
+        .map(|field| parse_form_localized_strings(field.trim()))
+        .unwrap_or_default()
 }
 
 pub(super) fn parse_form_picture_field_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'a str>> {
@@ -13395,13 +13487,30 @@ pub(super) fn parse_form_picture_field_value(
         .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
 }
 
+/// `PictureSize` of a `PictureField`, read from the schema-backed option tuple.
+///
+/// The slot is 6, not the 8 the decoder used to read: slot 8 is the hyperlink
+/// flag, so reading it as a size code turned the 51 hyperlink pictures into
+/// `<PictureSize>Stretch</PictureSize>` and left every real size unwritten.
 pub(super) fn parse_form_picture_field_picture_size(
-    options: Option<&[&str]>,
+    schema: FormFieldSchema,
+    options: &[&str],
 ) -> Option<&'static str> {
     options
-        .and_then(|options| options.get(8))
+        .get(schema.picture_size_option_slot()?)
         .and_then(|field| field.trim().parse::<usize>().ok())
-        .and_then(moxel_picture_size_mode)
+        .and_then(form_picture_size_mode)
+}
+
+pub(super) fn parse_form_picture_field_nonselected_picture_text(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Vec<(String, String)> {
+    schema
+        .nonselected_picture_text_option_slot()
+        .and_then(|slot| options.get(slot))
+        .map(|field| parse_form_localized_strings(field.trim()))
+        .unwrap_or_default()
 }
 
 pub(super) fn parse_form_picture_decoration_file_drag_mode(
@@ -18652,8 +18761,14 @@ pub(super) fn format_form_child_item_xml(
     // `Font` (9), `BackColor` (5) and `PasswordMode` (1). The remaining control
     // kinds have no native observation pairing the two, so they stay here.
     let hiperlink_after_stretch = item.tag == "LabelField";
-    if !matches!(item.tag, "LabelDecoration" | "PictureDecoration")
-        && !hiperlink_after_stretch
+    // A `PictureField` spells the same flag correctly, as `Hyperlink`, and never
+    // as `Hiperlink`: all 51 native `PictureField` items that carry the flag
+    // write `<Hyperlink>true</Hyperlink>` and none writes the misspelling.  It is
+    // therefore emitted further down, in the picture run.
+    if !matches!(
+        item.tag,
+        "LabelDecoration" | "PictureDecoration" | "PictureField"
+    ) && !hiperlink_after_stretch
         && item.hiperlink == Some(true)
     {
         xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
@@ -18748,6 +18863,28 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<PictureSize>{}</PictureSize>\r\n",
             escape_xml_text(picture_size)
+        ));
+    }
+    // On a `PictureField` the run reads `PictureSize`, `Hyperlink`,
+    // `NonselectedPictureText`, then `ValuesPicture`/`TextColor`, then
+    // `Font`/`Border`/`FileDragMode`/`ContextMenu`.  Native pairwise counts over
+    // the 611 forms that carry a `PictureField`, with no counter-example in
+    // either direction: `PictureSize` before `Hyperlink` 31,
+    // `NonselectedPictureText` 26, `ValuesPicture` 77, `TextColor` 17,
+    // `Border` 99, `FileDragMode` 22, `Font` 4, `ContextMenu` 138;
+    // `Hyperlink` before `NonselectedPictureText` 16, `ValuesPicture` 20,
+    // `TextColor` 13, `Border` 22, `FileDragMode` 13, `Font` 3,
+    // `ContextMenu` 51; `NonselectedPictureText` before `ValuesPicture` 1,
+    // `TextColor` 17, `Border` 1, `FileDragMode` 12, `Font` 4,
+    // `ContextMenu` 27.
+    if item.tag == "PictureField" && item.hiperlink == Some(true) {
+        xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
+    }
+    if item.tag == "PictureField" {
+        xml.push_str(&format_form_localized_section(
+            "NonselectedPictureText",
+            &item.nonselected_picture_text,
+            indent + 1,
         ));
     }
     if item.tag == "PictureField" {
@@ -19160,6 +19297,17 @@ pub(super) fn format_form_child_item_xml(
                     escape_xml_text(picture_size)
                 ));
             }
+            // `NonselectedPictureText` sits between `PictureSize` and
+            // `Picture` on a `PictureDecoration`.  Native pairwise counts over
+            // the 1 069 forms that carry one, no counter-example in either
+            // direction: `Hyperlink` before it 6, `PictureSize` before it 1,
+            // `Font` before it 8, `TextColor` before it 8; it before `Picture`
+            // 5, `Border` 9, `ContextMenu` 16, `ExtendedTooltip` 16.
+            xml.push_str(&format_form_localized_section(
+                "NonselectedPictureText",
+                &item.nonselected_picture_text,
+                indent + 1,
+            ));
             if let Some(reference) = &item.picture_ref {
                 xml.push_str(&format!(
                     "{tab}\t<Picture>\r\n\
@@ -20302,6 +20450,11 @@ fn format_form_extended_tooltip_property_xml(
             .title
             .as_ref()
             .map(|title| format_form_extended_tooltip_title_xml(title, indent))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::Hyperlink => tooltip
+            .hyperlink
+            .filter(|value| *value)
+            .map(|_| format!("{tab}<Hyperlink>true</Hyperlink>\r\n"))
             .unwrap_or_default(),
         FormExtendedTooltipXmlProperty::GroupHorizontalAlign => tooltip
             .group_horizontal_align

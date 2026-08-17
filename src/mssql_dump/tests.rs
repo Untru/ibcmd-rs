@@ -19620,6 +19620,7 @@ fn formats_table_search_additions_as_direct_sections() {
         header_picture_file_name: None,
         header_picture_load_transparent: false,
         picture_size: None,
+        nonselected_picture_text: Vec::new(),
         picture_file_name: None,
         title: Vec::new(),
         title_formatted: None,
@@ -19824,6 +19825,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 header_picture_file_name: None,
                 header_picture_load_transparent: false,
                 picture_size: None,
+                nonselected_picture_text: Vec::new(),
                 picture_file_name: None,
                 title: Vec::new(),
                 title_formatted: None,
@@ -20029,6 +20031,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 header_picture_file_name: None,
                 header_picture_load_transparent: false,
                 picture_size: None,
+                nonselected_picture_text: Vec::new(),
                 picture_file_name: None,
                 title: Vec::new(),
                 title_formatted: None,
@@ -21256,6 +21259,136 @@ fn extracts_picture_decoration_picture_size_without_file_drag_mode_from_live_blo
     assert_eq!(real_size_item.picture_size, Some("RealSize"));
     let real_size_xml = format_form_child_items_xml(&[real_size_item], 1);
     assert!(!real_size_xml.contains("<PictureSize>RealSize</PictureSize>"));
+}
+
+#[test]
+fn picture_decoration_carries_the_scale_ignoring_sizes_and_the_unselected_caption() {
+    // Decoration option tuple `{4,<picture>,<hyperlink>,<size>,0,<caption>,...}`:
+    // slot 2 the hyperlink flag, slot 3 the size code, slot 5 the unselected
+    // caption.  The size code table is the same one the `PictureField` tuple
+    // reads; the two scale-ignoring spellings only ever occur on a decoration.
+    let field = r#"{12,{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Картинка",{1,1,{"ru","Картинка"}},{1,0},1,50,7,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{4,{4,0,{0},"",-1,-1,0,0,""},0,2,0,{1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,100},1,{22,{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартинкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Картинка"}},0},0,1,{12,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартинкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,0,0,3,3,0,0}"#;
+    let parse = |raw: &str| {
+        parse_form_child_item(
+            raw,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap()
+    };
+    const OPT_HEAD: &str = r#"{4,{4,0,{0},"",-1,-1,0,0,""},0,2,0,{1,0}"#;
+
+    let base = parse(field);
+    assert_eq!(base.tag, "PictureDecoration");
+    assert_eq!(base.picture_size, Some("Proportionally"));
+    assert!(base.nonselected_picture_text.is_empty());
+
+    for (code, spelling) in [
+        ("0", Some("RealSize")),
+        ("1", Some("Stretch")),
+        ("2", Some("Proportionally")),
+        ("4", Some("AutoSize")),
+        ("5", Some("RealSizeIgnoreScale")),
+        ("6", Some("AutoSizeIgnoreScale")),
+        ("7", Some("ByFontSize")),
+        ("3", None),
+    ] {
+        let item = parse(&field.replace(
+            OPT_HEAD,
+            &format!(r#"{{4,{{4,0,{{0}},"",-1,-1,0,0,""}},0,{code},0,{{1,0}}"#),
+        ));
+        assert_eq!(item.picture_size, spelling, "code {code}");
+        let xml = format_form_child_items_xml(&[item], 1);
+        match spelling {
+            Some("RealSize") | None => assert!(!xml.contains("<PictureSize>"), "code {code}"),
+            Some(value) => assert!(
+                xml.contains(&format!("<PictureSize>{value}</PictureSize>")),
+                "code {code}: {xml}"
+            ),
+        }
+    }
+
+    let caption = parse(&field.replace(
+        OPT_HEAD,
+        r#"{4,{4,0,{0},"",-1,-1,0,0,""},1,5,0,{1,1,{"ru","Категории не найдены"}}"#,
+    ));
+    assert_eq!(caption.picture_size, Some("RealSizeIgnoreScale"));
+    assert_eq!(caption.hiperlink, Some(true));
+    assert_eq!(
+        caption.nonselected_picture_text,
+        vec![("ru".to_string(), "Категории не найдены".to_string())]
+    );
+    let xml = format_form_child_items_xml(&[caption], 1);
+    assert!(
+        xml.contains("<v8:content>Категории не найдены</v8:content>"),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<Hyperlink>true</Hyperlink>").unwrap() < xml.find("<PictureSize>").unwrap(),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<PictureSize>").unwrap() < xml.find("<NonselectedPictureText>").unwrap(),
+        "{xml}"
+    );
+}
+
+#[test]
+fn extended_tooltip_hyperlink_reads_its_option_slot_and_follows_the_title() {
+    // The tooltip option tuple is `{5,<hyperlink>,0,<vertical align>,...}`; slot 1
+    // is the hyperlink flag.  Native writes it after `Title` and before `Events`.
+    let field = r#"{12,{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Картинка",{1,1,{"ru","Картинка"}},{1,0},1,50,7,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{4,{4,0,{0},"",-1,-1,0,0,""},0,2,0,{1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,100},1,{22,{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартинкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Картинка"}},0},0,1,{12,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартинкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,0,0,3,3,0,0}"#;
+    let parse = |raw: &str| {
+        parse_form_child_item(
+            raw,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap()
+    };
+
+    let off = parse(field);
+    let tooltip = off.extended_tooltip.as_ref().unwrap();
+    assert_eq!(tooltip.hyperlink, None);
+    assert!(
+        format_form_child_items_xml(&[off], 1)
+            .contains(r#"<ExtendedTooltip name="КартинкаРасширеннаяПодсказка" id="8"/>"#)
+    );
+
+    let on = parse(&field.replace(r#"{5,0,0,3,0,{0,1,0}"#, r#"{5,1,0,3,0,{0,1,0}"#));
+    let tooltip = on.extended_tooltip.as_ref().unwrap();
+    assert_eq!(tooltip.hyperlink, Some(true));
+    let xml = format_form_child_items_xml(&[on], 1);
+    assert!(
+        xml.contains("<ExtendedTooltip name=\"КартинкаРасширеннаяПодсказка\" id=\"8\">\r\n"),
+        "{xml}"
+    );
+    assert!(xml.contains("<Hyperlink>true</Hyperlink>"), "{xml}");
+
+    // With a title present the hyperlink still trails it, as the one native
+    // observation that carries both does.
+    let titled = parse(
+        &field
+            .replace(r#"{5,0,0,3,0,{0,1,0}"#, r#"{5,1,0,3,0,{0,1,0}"#)
+            .replace(
+                r#"0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0}"#,
+                r#"0,1,2,{1,{1,1,{"ru","Подробнее"}},0},0,0,1,0,0,1,0,3,3,0,0}"#,
+            ),
+    );
+    let xml = format_form_child_items_xml(&[titled], 1);
+    assert!(xml.contains("<v8:content>Подробнее</v8:content>"), "{xml}");
+    assert!(
+        xml.find("<Title formatted=\"false\">").unwrap() < xml.find("<Hyperlink>").unwrap(),
+        "{xml}"
+    );
 }
 
 #[test]
@@ -23471,26 +23604,146 @@ fn extracts_live_picture_field_values_picture_and_file_drag_mode() {
     assert!(!xml.contains("<PictureSize>RealSize</PictureSize>"));
     assert!(!xml.contains("<Picture>"), "{xml}");
 
-    let proportional_field = field.replace(
-        r#"},"",-1,-1,0,0,""},0,0,0,{1,0}"#,
-        r#"},"",-1,-1,0,0,""},0,0,2,{1,0}"#,
-    );
-    let proportional_item = parse_form_child_item_with_attrs(
-        &proportional_field,
-        None,
-        Some("Список"),
-        &attribute_names_by_id,
-        &BTreeMap::new(),
-        &table_column_names_by_id,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &[],
-        &object_refs,
-    )
-    .unwrap();
+    // The option tuple tail this test mutates is
+    // `<picture value>,<size>,0,<hyperlink>,<unselected caption>`: slot 6 the
+    // picture size, slot 8 the hyperlink flag, slot 9 the caption.  The
+    // hand-written variant that used to live here moved the size code into slot 8
+    // instead, a layout the platform never writes, and asserting on it hid the
+    // live defect: every real `<PictureSize>` went unwritten while the 51
+    // hyperlink pictures picked up a spurious `Stretch`.
+    const TAIL: &str = r#"},"",-1,-1,0,0,""},0,0,0,{1,0}"#;
+    let reparse = |replacement: &str| {
+        parse_form_child_item_with_attrs(
+            &field.replace(TAIL, replacement),
+            None,
+            Some("Список"),
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &table_column_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &object_refs,
+        )
+        .unwrap()
+    };
+
+    let proportional_item = reparse(r#"},"",-1,-1,0,0,""},2,0,0,{1,0}"#);
     assert_eq!(proportional_item.picture_size, Some("Proportionally"));
     let proportional_xml = format_form_child_items_xml(&[proportional_item], 1);
     assert!(proportional_xml.contains("<PictureSize>Proportionally</PictureSize>"));
+
+    // Every code the native tree spells out on either picture owner, and the one
+    // code that never occurs and therefore stays a refusal rather than a guess.
+    for (code, spelling) in [
+        ("1", Some("Stretch")),
+        ("2", Some("Proportionally")),
+        ("4", Some("AutoSize")),
+        ("5", Some("RealSizeIgnoreScale")),
+        ("6", Some("AutoSizeIgnoreScale")),
+        ("7", Some("ByFontSize")),
+        ("3", None),
+    ] {
+        let item = reparse(&format!(r#"}},"",-1,-1,0,0,""}},{code},0,0,{{1,0}}"#));
+        assert_eq!(item.picture_size, spelling, "code {code}");
+    }
+
+    // Slot 8 is the hyperlink flag, spelled `Hyperlink` and never `Hiperlink`.
+    let hyperlink_item = reparse(r#"},"",-1,-1,0,0,""},4,0,1,{1,0}"#);
+    assert_eq!(hyperlink_item.picture_size, Some("AutoSize"));
+    assert_eq!(hyperlink_item.hiperlink, Some(true));
+    let hyperlink_xml = format_form_child_items_xml(&[hyperlink_item], 1);
+    assert!(
+        hyperlink_xml.contains("<Hyperlink>true</Hyperlink>"),
+        "{hyperlink_xml}"
+    );
+    assert!(!hyperlink_xml.contains("<Hiperlink>"), "{hyperlink_xml}");
+    assert!(
+        hyperlink_xml.find("<PictureSize>").unwrap() < hyperlink_xml.find("<Hyperlink>").unwrap(),
+        "{hyperlink_xml}"
+    );
+
+    // Slot 9 is the unselected-picture caption, an ordinary localised-string
+    // record; `{1,0}` is the empty one every picture without the property carries.
+    let caption_item = reparse(r#"},"",-1,-1,0,0,""},4,0,1,{1,1,{"ru","Добавить изображение"}}"#);
+    assert_eq!(
+        caption_item.nonselected_picture_text,
+        vec![("ru".to_string(), "Добавить изображение".to_string())]
+    );
+    let caption_xml = format_form_child_items_xml(&[caption_item], 1);
+    assert!(
+        caption_xml.contains(
+            "\t\t\t<NonselectedPictureText>\r\n\
+\t\t\t\t<v8:item>\r\n\
+\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n\
+\t\t\t\t\t<v8:content>Добавить изображение</v8:content>\r\n\
+\t\t\t\t</v8:item>\r\n\
+\t\t\t</NonselectedPictureText>\r\n"
+        ),
+        "{caption_xml}"
+    );
+    assert!(
+        caption_xml.find("<Hyperlink>").unwrap()
+            < caption_xml.find("<NonselectedPictureText>").unwrap(),
+        "{caption_xml}"
+    );
+    assert!(
+        caption_xml.find("<NonselectedPictureText>").unwrap()
+            < caption_xml.find("<ValuesPicture>").unwrap(),
+        "{caption_xml}"
+    );
+
+    // Nothing is written when the record is the empty one.
+    let empty_caption_xml = format_form_child_items_xml(&[reparse(TAIL)], 1);
+    assert!(!empty_caption_xml.contains("<NonselectedPictureText>"));
+}
+
+#[test]
+fn picture_field_cell_hyperlink_reads_the_shared_table_cell_slot() {
+    // `CellHyperlink` lives in field slot 22 for every field kind that can sit in
+    // a table cell.  The decoder used to admit only `InputField` and `LabelField`,
+    // which cost the 47 native `PictureField` and 3 native `CheckBoxField` cells
+    // that carry it.
+    let field = r#"{37,{145,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"СписокЗарегистрированКартинка",0,0,{1,1,{"ru","Зарегистрирован"}},{1,0},{2,{1},{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{10,0,0,1,1,{4,1,{0,d465bd06-1042-4dd5-9967-6a3a020a0a40},"",-1,-1,0,0,""},0,0,0,{1,0},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,0,0,1,0,0,100},{0,1,0},1,{22,{146,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЗарегистрированКартинкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{147,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗарегистрированКартинкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+    let attribute_names_by_id = BTreeMap::from([("1".to_string(), "Список".to_string())]);
+    let table_column_names_by_id = BTreeMap::from([(
+        "1".to_string(),
+        BTreeMap::from([("3".to_string(), "Зарегистрирован".to_string())]),
+    )]);
+    let parse = |raw: &str| {
+        parse_form_child_item_with_attrs(
+            raw,
+            None,
+            Some("Список"),
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &table_column_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap()
+    };
+
+    // Slot 22 is the third value of the `1,1,0,3,0,3,2,3,0` run that follows the
+    // two localised-string records: slot 20 shows-in-header, slot 21
+    // shows-in-footer, slot 22 the cell hyperlink.
+    let off = parse(field);
+    assert_eq!(off.tag, "PictureField");
+    assert_eq!(off.cell_hyperlink, None);
+    assert!(!format_form_child_items_xml(&[off], 1).contains("<CellHyperlink>"));
+
+    let on = parse(&field.replace(
+        r#"{1,0},{1,0},1,1,0,3,0,3,2,3,0,"#,
+        r#"{1,0},{1,0},1,1,1,3,0,3,2,3,0,"#,
+    ));
+    assert_eq!(on.cell_hyperlink, Some(true));
+    let on_xml = format_form_child_items_xml(&[on], 1);
+    assert!(
+        on_xml.contains("<CellHyperlink>true</CellHyperlink>"),
+        "{on_xml}"
+    );
 }
 
 #[test]

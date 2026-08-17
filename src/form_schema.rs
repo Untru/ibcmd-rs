@@ -1312,11 +1312,18 @@ pub(crate) enum FormExtendedTooltipXmlProperty {
     TextColor,
     Font,
     Title,
+    Hyperlink,
     GroupHorizontalAlign,
     VerticalAlign,
     Events,
 }
 
+/// `Hyperlink` follows `Title` and precedes `Events`.  Only two of the 8 native
+/// `ExtendedTooltip` items that carry it carry anything else, and they pin the
+/// property from both sides with no counter-example: one reads `TextColor`,
+/// `Title`, `Hyperlink` and the other `TextColor`, `Hyperlink`, `Events`.  Its
+/// position relative to `GroupHorizontalAlign` and `VerticalAlign` is
+/// unobserved, since it never co-occurs with either.
 pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProperty] = &[
     FormExtendedTooltipXmlProperty::Width,
     FormExtendedTooltipXmlProperty::AutoMaxWidth,
@@ -1328,6 +1335,7 @@ pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProper
     FormExtendedTooltipXmlProperty::TextColor,
     FormExtendedTooltipXmlProperty::Font,
     FormExtendedTooltipXmlProperty::Title,
+    FormExtendedTooltipXmlProperty::Hyperlink,
     FormExtendedTooltipXmlProperty::GroupHorizontalAlign,
     FormExtendedTooltipXmlProperty::VerticalAlign,
     FormExtendedTooltipXmlProperty::Events,
@@ -1354,6 +1362,10 @@ impl FormExtendedTooltipSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
     pub(crate) const TITLE_SLOT: usize = 22;
     pub(crate) const EVENT_OPTION_SLOT: usize = 5;
+    /// `Hyperlink` flag slot of the tooltip option tuple: `1` on exactly the 8
+    /// native `ExtendedTooltip` items that carry `<Hyperlink>true</Hyperlink>`
+    /// and `0` on the other 170 224.
+    pub(crate) const HYPERLINK_OPTION_SLOT: usize = 1;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -1697,10 +1709,35 @@ impl FormPictureDecorationSchema {
     }
 
     pub(crate) fn hyperlink_option_slot(self, options: &[&str]) -> Option<usize> {
-        (options.len() == 13
+        self.option_tuple_is_exact(options).then_some(2)
+    }
+
+    /// Picture-size code slot of the decoration option tuple.  Over all 3 666
+    /// native `PictureDecoration` items the slot is a total function of the
+    /// native spelling: `0` with no `<PictureSize>` (3 281), `2` ->
+    /// `Proportionally` (161), `1` -> `Stretch` (138), `4` -> `AutoSize` (58),
+    /// `7` -> `ByFontSize` (25), `6` -> `AutoSizeIgnoreScale` (2) and `5` ->
+    /// `RealSizeIgnoreScale` (1).  Every code shared with the `PictureField`
+    /// tuple maps to the same spelling in both, so the two owners read one
+    /// table, not two.
+    pub(crate) fn picture_size_option_slot(self, options: &[&str]) -> Option<usize> {
+        self.option_tuple_is_exact(options).then_some(3)
+    }
+
+    /// `NonselectedPictureText` slot of the decoration option tuple: the empty
+    /// localised-string record `{1,0}` on exactly the 3 650 native
+    /// `PictureDecoration` items without the property and a populated record on
+    /// the other 16.
+    pub(crate) fn nonselected_picture_text_option_slot(self, options: &[&str]) -> Option<usize> {
+        self.option_tuple_is_exact(options).then_some(5)
+    }
+
+    /// The option tuple every native `PictureDecoration` carries: 13 slots
+    /// discriminated by a leading `4`, with slot 2 a plain hyperlink flag.
+    fn option_tuple_is_exact(self, options: &[&str]) -> bool {
+        options.len() == 13
             && options.first().map(|field| field.trim()) == Some("4")
-            && matches!(options.get(2).map(|field| field.trim()), Some("0" | "1")))
-        .then_some(2)
+            && matches!(options.get(2).map(|field| field.trim()), Some("0" | "1"))
     }
 
     pub(crate) fn properties(self, fields: &[&str]) -> FormPictureDecorationProperties {
@@ -2470,6 +2507,9 @@ pub(crate) struct FormFieldSchema {
     back_color_option_slot: Option<usize>,
     border_color_option_slot: Option<usize>,
     extended_edit_multiple_values_option_slot: Option<usize>,
+    picture_size_option_slot: Option<usize>,
+    hyperlink_option_slot: Option<usize>,
+    nonselected_picture_text_option_slot: Option<usize>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -2727,8 +2767,19 @@ impl FormFieldSchema {
             .then_some(20 + top_level_offset),
             auto_cell_height_slot: matches!(item_tag, "InputField" | "LabelField" | "PictureField")
                 .then_some(28 + top_level_offset),
-            cell_hyperlink_slot: matches!(item_tag, "InputField" | "LabelField")
-                .then_some(22 + top_level_offset),
+            // Slot `22 + top_level_offset` carries `CellHyperlink` for every
+            // field kind that can sit in a table cell, not only the two the
+            // decoder used to admit: on the 1 181 nested `PictureField` items
+            // the slot reads `1` on exactly the 47 that carry
+            // `<CellHyperlink>true</CellHyperlink>` and `0` on the other 1 134,
+            // and on the 4 687 nested `CheckBoxField` items on exactly the 3
+            // that carry it.  The 12 top-level items of either kind read the
+            // slot at the shifted index and never carry the property.
+            cell_hyperlink_slot: matches!(
+                item_tag,
+                "InputField" | "LabelField" | "PictureField" | "CheckBoxField"
+            )
+            .then_some(22 + top_level_offset),
             show_in_footer_slot: matches!(item_tag, "InputField" | "LabelField" | "PictureField")
                 .then_some(21 + top_level_offset),
             read_only_slot: matches!(
@@ -2766,6 +2817,14 @@ impl FormFieldSchema {
             border_color_option_slot: border,
             extended_edit_multiple_values_option_slot: (item_tag == "InputField")
                 .then_some(FormInputFieldExtendedOptionSlot::ExtendedEditMultipleValues.index()),
+            // The `PictureField` option tuple (kind `10`, 24 slots) carries the
+            // three picture properties in a fixed run: slot 6 the picture size
+            // code, slot 8 the hyperlink flag, slot 9 the unselected-picture
+            // caption.  Each is a total function of the native XML over all
+            // 1 193 native `PictureField` items - see the accessors below.
+            picture_size_option_slot: (item_tag == "PictureField").then_some(6),
+            hyperlink_option_slot: (item_tag == "PictureField").then_some(8),
+            nonselected_picture_text_option_slot: (item_tag == "PictureField").then_some(9),
         })
     }
 
@@ -2799,6 +2858,35 @@ impl FormFieldSchema {
 
     pub(crate) fn auto_cell_height(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.auto_cell_height_slot?)?.trim() == "1").then_some(true)
+    }
+
+    /// Picture-size code slot of the owning field's option tuple.
+    ///
+    /// Read on all 1 193 native `PictureField` items the slot takes six values,
+    /// each mapping to exactly one native spelling and never to two: `0` with no
+    /// `<PictureSize>` at all (1 055), `2` -> `Proportionally` (101), `4` ->
+    /// `AutoSize` (29), `7` -> `ByFontSize` (5), `6` -> `AutoSizeIgnoreScale`
+    /// (2) and `1` -> `Stretch` (1).
+    pub(crate) const fn picture_size_option_slot(self) -> Option<usize> {
+        self.picture_size_option_slot
+    }
+
+    /// `Hyperlink` flag slot of the owning field's option tuple: `1` on exactly
+    /// the 51 native `PictureField` items that carry
+    /// `<Hyperlink>true</Hyperlink>` and `0` on the other 1 142.
+    pub(crate) fn hyperlink(self, options: &[&str]) -> Option<bool> {
+        match options.get(self.hyperlink_option_slot?)?.trim() {
+            "1" => Some(true),
+            _ => None,
+        }
+    }
+
+    /// `NonselectedPictureText` slot of the owning field's option tuple: the
+    /// empty localised-string record `{1,0}` on exactly the 1 166 native
+    /// `PictureField` items without the property and a populated record on the
+    /// other 27.
+    pub(crate) const fn nonselected_picture_text_option_slot(self) -> Option<usize> {
+        self.nonselected_picture_text_option_slot
     }
 
     pub(crate) fn cell_hyperlink(self, fields: &[&str]) -> Option<bool> {
