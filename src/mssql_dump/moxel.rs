@@ -37,8 +37,10 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) fonts: Vec<MoxelFont>,
     pub(super) drawings: Vec<MoxelDrawing>,
     pub(super) pictures: Vec<MoxelPicture>,
-    pub(super) empty_headers_footers: bool,
     pub(super) header_footer_format_index: Option<usize>,
+    /// The six header/footer slots in publication order, present only when the
+    /// document publishes at least one of them.
+    pub(super) header_footer_slots: Option<Vec<Option<MoxelHeaderFooter>>>,
     pub(super) default_format_index: Option<usize>,
     pub(super) source_format_map: Option<MoxelSourceFormatMap>,
     pub(super) height: usize,
@@ -312,6 +314,34 @@ pub(super) struct MoxelNote {
 pub(super) struct MoxelLocalizedValue {
     pub(super) lang: String,
     pub(super) content: String,
+}
+
+/// The text child a published header/footer element carries.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 `Templates/*/Ext/Template.xml`
+/// that decode as spreadsheets): the record's fourth field is a flag, and it is
+/// the only thing that distinguishes the two spellings. `0` closes a four-field
+/// record and publishes `<tl>`; `1` opens a fifth field and publishes `<tfl>`.
+/// A `{0,ref}` record has no text child at all. All 522 records of the 87
+/// publishing documents fall into exactly these three cases.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MoxelHeaderFooterText {
+    /// `{0,ref}`: a bare format reference, published without a text child.
+    Absent,
+    /// `{16,ref,texts,0}`: published as `<tl>`.
+    Plain,
+    /// `{16,ref,texts,1,formatted}`: published as `<tfl>`.
+    Formatted,
+}
+
+/// One published header/footer slot.
+#[derive(Clone)]
+pub(super) struct MoxelHeaderFooter {
+    /// The stored format reference. `0` publishes `<f>0</f>` verbatim; a
+    /// non-zero reference has to be projected onto the output format table.
+    pub(super) source_format_ref: usize,
+    pub(super) text_kind: MoxelHeaderFooterText,
+    pub(super) text: Vec<MoxelLocalizedValue>,
 }
 
 #[derive(Clone)]
@@ -1057,6 +1087,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let mut default_format = parse_moxel_default_format(&fields, object_refs);
     let print_settings = parse_moxel_print_settings(&fields);
     let empty_headers_footers = parse_moxel_empty_headers_footers(&fields);
+    let header_footer_slots = parse_moxel_header_footer_slots(&fields);
     let header_footer_format_ref = parse_moxel_uniform_header_footer_format_ref(&fields);
     let drawings = parse_moxel_drawings(&fields);
     let drawing_format_indices = drawings
@@ -1484,8 +1515,8 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         fonts,
         drawings,
         pictures,
-        empty_headers_footers,
         header_footer_format_index,
+        header_footer_slots,
         default_format_index,
         source_format_map,
         height,
@@ -1795,26 +1826,108 @@ pub(super) fn normalize_moxel_column_set_format_indices(column_sets: &mut [Moxel
     }
 }
 
-pub(super) fn parse_moxel_uniform_header_footer_format_ref(fields: &[&str]) -> Option<usize> {
-    fields.windows(6).find_map(|window| {
-        let refs = window
-            .iter()
-            .map(|field| parse_moxel_header_footer_format_ref(field))
-            .collect::<Option<Vec<_>>>()?;
-        let first = refs.first().copied().flatten()?;
-        refs.iter()
-            .all(|candidate| *candidate == Some(first))
-            .then_some(first)
-    })
+/// First top-level field of the header/footer block.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet documents): fields
+/// 7 through 12 of the document's top-level list are a run of six brace groups
+/// in every single document, and every one of them decodes as a header/footer
+/// record. That makes the block an anchor rather than something to search for:
+/// the two window scans this replaces returned the same verdict as this anchor
+/// on all 683 documents, so nothing that depended on them moves.
+const MOXEL_HEADER_FOOTER_BLOCK_START: usize = 7;
+
+/// Block slot -> publication slot, where publication order is `leftHeader`,
+/// `centerHeader`, `rightHeader`, `leftFooter`, `centerFooter`, `rightFooter`.
+///
+/// The block interleaves the two families: slot 0 is the left header, slot 1
+/// the left footer, and so on. The left pair is pinned by the 24 documents that
+/// publish only slots 0 and 1 (`leftHeader` and `leftFooter`, never a centre or
+/// right element), and the header/footer parity of the remaining slots is pinned
+/// by the 10 documents whose header records differ from their footer records.
+/// The centre/right distinction itself is not observable in this corpus - every
+/// document that publishes those four slots carries four equal records - so the
+/// natural left-to-right reading is used.
+const MOXEL_HEADER_FOOTER_PUBLICATION_ORDER: [usize; 6] = [0, 3, 1, 4, 2, 5];
+
+/// Element names in publication order.
+const MOXEL_HEADER_FOOTER_TAGS: [&str; 6] = [
+    "leftHeader",
+    "centerHeader",
+    "rightHeader",
+    "leftFooter",
+    "centerFooter",
+    "rightFooter",
+];
+
+/// The six header/footer records, in publication order.
+///
+/// A slot is `None` exactly when its record is `{0,0}`, which is also exactly
+/// when the platform omits the element: over all 683 spreadsheet documents the
+/// predicate and the published set agree in every one of the 4098 slots.
+/// `None` for the whole block means either the block decoded as six empty
+/// records or a record refused; either way nothing is published, which is what
+/// the platform does for the 596 documents that carry no header or footer.
+pub(super) fn parse_moxel_header_footer_slots(
+    fields: &[&str],
+) -> Option<Vec<Option<MoxelHeaderFooter>>> {
+    let block = fields.get(MOXEL_HEADER_FOOTER_BLOCK_START..MOXEL_HEADER_FOOTER_BLOCK_START + 6)?;
+    let mut slots = vec![None, None, None, None, None, None];
+    let mut any = false;
+    for (block_slot, field) in block.iter().enumerate() {
+        let record = parse_moxel_header_footer_record(field)?;
+        any |= record.is_some();
+        slots[MOXEL_HEADER_FOOTER_PUBLICATION_ORDER[block_slot]] = record;
+    }
+    any.then_some(slots)
 }
 
-pub(super) fn parse_moxel_header_footer_format_ref(text: &str) -> Option<Option<usize>> {
+/// One header/footer record. `Some(None)` is the empty record `{0,0}`.
+fn parse_moxel_header_footer_record(text: &str) -> Option<Option<MoxelHeaderFooter>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 2 || fields.first().map(|field| field.trim()) != Some("0") {
-        return None;
+    match fields.first()?.trim() {
+        "0" => {
+            if fields.len() != 2 {
+                return None;
+            }
+            let source_format_ref = fields.get(1)?.trim().parse::<usize>().ok()?;
+            if source_format_ref == 0 {
+                return Some(None);
+            }
+            Some(Some(MoxelHeaderFooter {
+                source_format_ref,
+                text_kind: MoxelHeaderFooterText::Absent,
+                text: Vec::new(),
+            }))
+        }
+        "16" => {
+            let source_format_ref = fields.get(1)?.trim().parse::<usize>().ok()?;
+            let text = parse_moxel_localized_values(fields.get(2)?)?;
+            let text_kind = match (fields.len(), fields.get(3)?.trim()) {
+                (4, "0") => MoxelHeaderFooterText::Plain,
+                (5, "1") => MoxelHeaderFooterText::Formatted,
+                _ => return None,
+            };
+            Some(Some(MoxelHeaderFooter {
+                source_format_ref,
+                text_kind,
+                text,
+            }))
+        }
+        _ => None,
     }
-    let format_index = fields.get(1)?.trim().parse::<usize>().ok()?;
-    Some((format_index > 0).then_some(format_index))
+}
+
+/// The single format reference six `{0,ref}` records share, if that is the shape.
+pub(super) fn parse_moxel_uniform_header_footer_format_ref(fields: &[&str]) -> Option<usize> {
+    let slots = parse_moxel_header_footer_slots(fields)?;
+    let mut refs = slots.iter().map(|slot| {
+        slot.as_ref()
+            .filter(|record| record.text_kind == MoxelHeaderFooterText::Absent)
+            .map(|record| record.source_format_ref)
+    });
+    let first = refs.next().flatten()?;
+    refs.all(|candidate| candidate == Some(first))
+        .then_some(first)
 }
 
 pub(super) fn is_sparse_moxel_column_set_default_format(format: &MoxelFormat) -> bool {
@@ -6063,12 +6176,19 @@ pub(super) fn parse_moxel_indexed_style_ref_overrides(
     Some(overrides)
 }
 
+/// Whether the anchored header/footer block is six empty formatted records.
+///
+/// Read at the block anchor rather than by scanning every six-field window; the
+/// two agree on all 683 spreadsheet documents, and only the anchor can be wrong
+/// for a reason the document states.
 pub(super) fn parse_moxel_empty_headers_footers(fields: &[&str]) -> bool {
-    fields.windows(6).any(|window| {
-        window
-            .iter()
-            .all(|field| parse_moxel_empty_header_footer(field))
-    })
+    fields
+        .get(MOXEL_HEADER_FOOTER_BLOCK_START..MOXEL_HEADER_FOOTER_BLOCK_START + 6)
+        .is_some_and(|block| {
+            block
+                .iter()
+                .all(|field| parse_moxel_empty_header_footer(field))
+        })
 }
 
 pub(super) fn parse_moxel_empty_header_footer(text: &str) -> bool {
@@ -6857,14 +6977,24 @@ fn render_moxel_spreadsheet_xml(
     for drawing in &spreadsheet.drawings {
         push_moxel_drawing_xml(&mut xml, drawing, &output_format_index_map);
     }
-    if let Some(header_footer_format_index) = spreadsheet.header_footer_format_index {
-        let header_footer_format_index = output_format_index_map
-            .get(&header_footer_format_index)
-            .copied()
-            .unwrap_or(header_footer_format_index);
-        push_moxel_header_footer_format_refs_xml(&mut xml, header_footer_format_index);
-    } else if spreadsheet.empty_headers_footers {
-        push_moxel_empty_headers_footers_xml(&mut xml);
+    if let Some(slots) = &spreadsheet.header_footer_slots {
+        // A zero reference publishes `<f>0</f>` as stored. A non-zero one is
+        // only published where the resolved shared index says where it lands in
+        // the output table; the projection of an arbitrary stored reference onto
+        // that table is not evidenced (see the refusal note on
+        // `header_footer_format_index`), so those slots stay unpublished.
+        push_moxel_header_footer_slots_xml(&mut xml, slots, |source_format_ref| {
+            if source_format_ref == 0 {
+                return Some(0);
+            }
+            let shared = spreadsheet.header_footer_format_index?;
+            Some(
+                output_format_index_map
+                    .get(&shared)
+                    .copied()
+                    .unwrap_or(shared),
+            )
+        });
     }
     xml.push_str("\t<templateMode>true</templateMode>\r\n");
     if let Some(default_format_index) = spreadsheet.default_format_index {
@@ -7883,34 +8013,57 @@ pub(super) fn moxel_uses_sparse_source_format_refs(
         .any(|source_format_index| source_format_index > column_format_slots)
 }
 
-pub(super) fn push_moxel_empty_headers_footers_xml(xml: &mut String) {
-    for tag in [
-        "leftHeader",
-        "centerHeader",
-        "rightHeader",
-        "leftFooter",
-        "centerFooter",
-        "rightFooter",
-    ] {
-        xml.push_str(&format!(
-            "\t<{tag}>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</{tag}>\r\n"
-        ));
+/// Writes the header/footer slots the document publishes.
+///
+/// `output_format_index` projects a non-zero stored reference onto the published
+/// `<format>` table and returns `None` when that projection is not evidenced, in
+/// which case the slot is left out rather than published with an invented index.
+fn push_moxel_header_footer_slots_xml(
+    xml: &mut String,
+    slots: &[Option<MoxelHeaderFooter>],
+    output_format_index: impl Fn(usize) -> Option<usize>,
+) {
+    for (tag, slot) in MOXEL_HEADER_FOOTER_TAGS.iter().zip(slots) {
+        let Some(record) = slot else {
+            continue;
+        };
+        let Some(format_index) = output_format_index(record.source_format_ref) else {
+            continue;
+        };
+        xml.push_str(&format!("\t<{tag}>\r\n"));
+        xml.push_str(&format!("\t\t<f>{format_index}</f>\r\n"));
+        match record.text_kind {
+            MoxelHeaderFooterText::Absent => {}
+            MoxelHeaderFooterText::Plain => {
+                push_moxel_header_footer_text_xml(xml, "tl", &record.text);
+            }
+            MoxelHeaderFooterText::Formatted => {
+                push_moxel_header_footer_text_xml(xml, "tfl", &record.text);
+            }
+        }
+        xml.push_str(&format!("\t</{tag}>\r\n"));
     }
 }
 
-pub(super) fn push_moxel_header_footer_format_refs_xml(xml: &mut String, format_index: usize) {
-    for tag in [
-        "leftHeader",
-        "centerHeader",
-        "rightHeader",
-        "leftFooter",
-        "centerFooter",
-        "rightFooter",
-    ] {
-        xml.push_str(&format!(
-            "\t<{tag}>\r\n\t\t<f>{format_index}</f>\r\n\t</{tag}>\r\n"
-        ));
+fn push_moxel_header_footer_text_xml(xml: &mut String, tag: &str, values: &[MoxelLocalizedValue]) {
+    if values.is_empty() {
+        xml.push_str(&format!("\t\t<{tag}/>\r\n"));
+        return;
     }
+    xml.push_str(&format!("\t\t<{tag}>\r\n"));
+    for value in values {
+        xml.push_str("\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(&value.lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&value.content)
+        ));
+        xml.push_str("\t\t\t</v8:item>\r\n");
+    }
+    xml.push_str(&format!("\t\t</{tag}>\r\n"));
 }
 
 pub(super) fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPrintSettings) {
@@ -9162,8 +9315,8 @@ mod moxel_exact_parity_tests {
             fonts: Vec::new(),
             drawings: Vec::new(),
             pictures: Vec::new(),
-            empty_headers_footers: false,
             header_footer_format_index: None,
+            header_footer_slots: None,
             default_format_index: None,
             source_format_map: None,
             value_types: Vec::new(),

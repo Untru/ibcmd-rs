@@ -26579,8 +26579,8 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: Some(1),
         source_format_map: None,
         value_types: Vec::new(),
@@ -26955,8 +26955,8 @@ fn spreadsheet_extract_omits_default_print_settings() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: Some(1),
         source_format_map: None,
         value_types: Vec::new(),
@@ -27461,8 +27461,8 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
             },
         }],
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: Some(7),
         source_format_map: None,
         value_types: Vec::new(),
@@ -27526,8 +27526,8 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -27828,8 +27828,8 @@ fn parses_and_formats_moxel_vertical_groups() {
         }],
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -28465,8 +28465,8 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -28557,8 +28557,8 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: Some(2),
         source_format_map: None,
         value_types: Vec::new(),
@@ -28611,8 +28611,8 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: Some(1),
         source_format_map: None,
         value_types: Vec::new(),
@@ -29249,8 +29249,8 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             fonts: Vec::new(),
             drawings: Vec::new(),
             pictures: Vec::new(),
-            empty_headers_footers: false,
             header_footer_format_index: None,
+            header_footer_slots: None,
             default_format_index: None,
             source_format_map: None,
             value_types: Vec::new(),
@@ -29359,8 +29359,8 @@ fn formats_moxel_field_selection_back_color_style() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -29401,8 +29401,8 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -29443,8 +29443,8 @@ fn formats_moxel_field_text_color_style() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -29485,8 +29485,8 @@ fn formats_moxel_button_text_color_style() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -29559,8 +29559,8 @@ fn formats_moxel_report_back_color_styles() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -29806,8 +29806,8 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -29850,8 +29850,8 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
         header_footer_format_index: None,
+        header_footer_slots: None,
         default_format_index: None,
         source_format_map: None,
         value_types: Vec::new(),
@@ -30864,7 +30864,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
+        header_footer_slots: None,
         header_footer_format_index: Some(3),
         default_format_index: Some(5),
         source_format_map: None,
@@ -30960,7 +30960,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
+        header_footer_slots: None,
         header_footer_format_index: Some(5),
         default_format_index: Some(5),
         source_format_map: None,
@@ -31044,7 +31044,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         fonts: Vec::new(),
         drawings: Vec::new(),
         pictures: Vec::new(),
-        empty_headers_footers: false,
+        header_footer_slots: None,
         header_footer_format_index: Some(4),
         default_format_index: Some(5),
         source_format_map: None,
@@ -32190,6 +32190,177 @@ fn moxel_default_format_publishes_the_font_beside_its_width() {
         xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>72</width>\r\n\t</format>"),
         "{xml}"
     );
+}
+
+/// Fixture: `tests/fixtures/moxel_route_sheet_headers_raw.txt`, 11079 bytes,
+/// sha256
+/// `b7a5679694ee3153a8fa78f578596a8f56703ff3795388ec477e46bd0139a285`. It is the
+/// native MOXCEL body of the `ПФ_MXL_МаршрутныйЛист` template of document
+/// `Рейс` in 1С:Управление торговлей 11.5.27.75 (`1cv8.cf`), as produced by this
+/// project's compatible-MXL decoder.
+///
+/// Top-level fields 7 through 12 are the header/footer block. This document
+/// carries `{16,0,{1,0},0}` in all six, and the platform publishes all six
+/// elements as `<f>0</f>` plus an empty `<tl/>`. The fourth field of the record
+/// is the only thing that separates `<tl>` from `<tfl>`: `0` closes a four-field
+/// record and publishes `tl`, `1` opens a fifth field and publishes `tfl`. Over
+/// all 683 spreadsheet documents of this configuration the block decodes for
+/// every document and the grammar reproduces all 522 published records.
+#[test]
+fn moxel_header_footer_block_publishes_the_plain_text_child() {
+    let inflated = include_str!("../../tests/fixtures/moxel_route_sheet_headers_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let body = &inflated[body_start..];
+    let fields = split_1c_braced_fields(body, 0).unwrap();
+    assert_eq!(&fields[7..13], ["{16,0,\r\n{1,0},0}"; 6]);
+
+    let slots = parse_moxel_header_footer_slots(&fields).unwrap();
+    assert_eq!(slots.len(), 6);
+    for slot in &slots {
+        let record = slot.as_ref().expect("all six slots are published");
+        assert_eq!(record.source_format_ref, 0);
+        assert!(record.text_kind == MoxelHeaderFooterText::Plain);
+        assert!(record.text.is_empty());
+    }
+
+    let spreadsheet = parse_moxel_spreadsheet_text(body, &BTreeMap::new()).unwrap();
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    for tag in [
+        "leftHeader",
+        "centerHeader",
+        "rightHeader",
+        "leftFooter",
+        "centerFooter",
+        "rightFooter",
+    ] {
+        assert!(
+            xml.contains(&format!(
+                "\t<{tag}>\r\n\t\t<f>0</f>\r\n\t\t<tl/>\r\n\t</{tag}>\r\n"
+            )),
+            "{tag} -> {xml}"
+        );
+    }
+    // The six elements are published in this order and nowhere else.
+    let published = xml.find("<leftHeader>").unwrap();
+    assert!(published < xml.find("<centerHeader>").unwrap());
+    assert!(xml.find("<rightHeader>").unwrap() < xml.find("<leftFooter>").unwrap());
+    assert!(xml.find("<centerFooter>").unwrap() < xml.find("<rightFooter>").unwrap());
+    assert!(xml.find("<rightFooter>").unwrap() < xml.find("<templateMode>").unwrap());
+    assert!(!xml.contains("<tfl"));
+}
+
+/// Fixture: `tests/fixtures/moxel_torg29_left_only_headers_raw.txt`, 11578
+/// bytes, sha256
+/// `9cc144b892fd63476473920a07b3cb7d73ca4ae3104c5a823f38a4a819bb0a24`. It is the
+/// native MOXCEL body of the `Макет` template of report `ТоварныйОтчетТОРГ29` in
+/// the same configuration.
+///
+/// The block carries a live record in slots 0 and 1 and `{0,0}` in the other
+/// four, and the platform publishes exactly `leftHeader` and `leftFooter`. That
+/// is what pins the block layout: the six slots interleave the two families as
+/// (left header, left footer, centre header, centre footer, right header, right
+/// footer), and an element is published exactly when its record is not `{0,0}`.
+/// Across all 683 spreadsheet documents that predicate agrees with the published
+/// set in every one of the 4098 slots. The 24 documents of this shape all
+/// publish the left pair and never a centre or right element.
+#[test]
+fn moxel_header_footer_block_omits_the_empty_records() {
+    let inflated = include_str!("../../tests/fixtures/moxel_torg29_left_only_headers_raw.txt");
+    let body_start = inflated.find("{8,").unwrap();
+    let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
+    assert_eq!(
+        &fields[7..13],
+        ["{0,1}", "{0,1}", "{0,0}", "{0,0}", "{0,0}", "{0,0}"]
+    );
+
+    let slots = parse_moxel_header_footer_slots(&fields).unwrap();
+    // Publication order is leftHeader, centerHeader, rightHeader, leftFooter,
+    // centerFooter, rightFooter; block slots 0 and 1 land on the first and the
+    // fourth of those.
+    let live = slots
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| slot.as_ref().map(|record| (index, record)))
+        .collect::<Vec<_>>();
+    assert_eq!(live.len(), 2);
+    assert_eq!(live[0].0, 0);
+    assert_eq!(live[1].0, 3);
+    for (_index, record) in &live {
+        assert_eq!(record.source_format_ref, 1);
+        assert!(record.text_kind == MoxelHeaderFooterText::Absent);
+        assert!(record.text.is_empty());
+    }
+    // Six equal `{0,ref}` records, and only those, are the uniform shared shape.
+    assert_eq!(parse_moxel_uniform_header_footer_format_ref(&fields), None);
+    assert_eq!(
+        parse_moxel_uniform_header_footer_format_ref(&[
+            "8", "1", "12", "{0}", "{0}", "{0}", "0", "{0,4}", "{0,4}", "{0,4}", "{0,4}", "{0,4}",
+            "{0,4}",
+        ]),
+        Some(4)
+    );
+}
+
+/// The header/footer record grammar, on the record shapes the platform writes.
+///
+/// Every one of the 522 records published by the 87 header/footer-carrying
+/// documents of 1С:Управление торговлей 11.5.27.75 has one of these shapes, and
+/// every shape below is taken verbatim from that configuration. `{16,...}` with
+/// a flag or an arity the grammar does not account for is refused rather than
+/// read as one of the two known spellings.
+#[test]
+fn moxel_header_footer_records_decode_by_their_own_grammar() {
+    let block = |record: &str| {
+        let mut fields = vec!["8", "1", "12", "{0}", "{0}", "{0}", "0"];
+        for _ in 0..6 {
+            fields.push(record);
+        }
+        parse_moxel_header_footer_slots(&fields)
+    };
+
+    // `{0,0}` publishes nothing at all, so the whole block is absent.
+    assert!(block("{0,0}").is_none());
+
+    // A bare reference has no text child.
+    let refs = block("{0,2}").unwrap();
+    let record = refs[0].as_ref().unwrap();
+    assert_eq!(record.source_format_ref, 2);
+    assert!(record.text_kind == MoxelHeaderFooterText::Absent);
+
+    // Flag 0 with four fields publishes `tl`; flag 1 with five publishes `tfl`.
+    let plain =
+        block("{16,1,\n{1,1,\n{\"ru\",\"[ВерхнийКолонтитул]    Страница #P\"}\n},0}").unwrap();
+    let plain = plain[0].as_ref().unwrap();
+    assert_eq!(plain.source_format_ref, 1);
+    assert!(plain.text_kind == MoxelHeaderFooterText::Plain);
+    assert_eq!(plain.text.len(), 1);
+    assert_eq!(plain.text[0].lang, "ru");
+    assert_eq!(plain.text[0].content, "[ВерхнийКолонтитул]    Страница #P");
+
+    let formatted = block(
+        "{16,2,\n{1,1,\n{\"ru\",\"[НижнийКолонтитул]\"}\n},1,\n{1,\n{1,1,\n{\"ru\",\"[НижнийКолонтитул]\"}\n},1}\n}",
+    )
+    .unwrap();
+    let formatted = formatted[0].as_ref().unwrap();
+    assert!(formatted.text_kind == MoxelHeaderFooterText::Formatted);
+    assert_eq!(formatted.text.len(), 1);
+    assert_eq!(formatted.text[0].content, "[НижнийКолонтитул]");
+
+    // An empty text table keeps the child but publishes it empty.
+    let empty_formatted = block("{16,0,\n{1,0},1,\n{1,\n{1,0},1}\n}").unwrap();
+    assert!(empty_formatted[0].as_ref().unwrap().text_kind == MoxelHeaderFooterText::Formatted);
+
+    // Refusals: an unknown tag, a flag that contradicts the arity, a `{0,...}`
+    // record of the wrong arity, and a text table that is not a localized list.
+    for refused in [
+        "{17,0,\n{1,0},0}",
+        "{16,0,\n{1,0},1}",
+        "{16,0,\n{1,0},0,\n{1,\n{1,0},1}\n}",
+        "{0,1,0}",
+        "{16,0,\n{2,0},0}",
+    ] {
+        assert!(block(refused).is_none(), "{refused}");
+    }
 }
 
 #[test]
