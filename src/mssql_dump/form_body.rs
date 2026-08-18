@@ -29,13 +29,13 @@ use crate::form_schema::{
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
-    FormPictureValueSchema, FormPopupSchema, FormPopupShapeRepresentationSchema,
-    FormRootAutoCommandBarSchema, FormRootAutoUrlSchema, FormRootConversationsRepresentationSchema,
-    FormRootCustomSettingsFolderSchema, FormRootCustomizableSchema, FormRootGroupSchema,
-    FormRootGroupingSchema, FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema,
-    FormRootVerticalAlign, FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
-    FormSearchStringAdditionProperties, FormSearchStringAdditionSchema,
-    FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
+    FormPictureValueSchema, FormPopupColorSchema, FormPopupSchema,
+    FormPopupShapeRepresentationSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
+    FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
+    FormRootCustomizableSchema, FormRootGroupSchema, FormRootGroupingSchema,
+    FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema, FormRootVerticalAlign,
+    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema, FormSearchStringAdditionProperties,
+    FormSearchStringAdditionSchema, FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRootPropertyBagKey as TableRootBagKey,
@@ -1232,6 +1232,7 @@ pub(super) struct FormChildItem {
     pub(super) text_color: Option<String>,
     pub(super) back_color: Option<String>,
     pub(super) border_color: Option<String>,
+    pub(super) button_parameter: Option<String>,
     pub(super) control_border: Option<FormControlBorderStyle>,
     pub(super) title_text_color: Option<String>,
     pub(super) footer_text_color: Option<String>,
@@ -6176,6 +6177,32 @@ pub(super) fn parse_form_main_table_ref(
     })
 }
 
+/// The metadata object a command button hands its command, spelled as the
+/// typed value `{"#", <type>, <value>}` -- the same typed-value grammar the
+/// main-table slot uses -- whose value member dereferences to the reference the
+/// platform writes.
+pub(super) fn parse_form_button_parameter(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 3 || fields.first().map(|value| value.trim()) != Some("\"#\"") {
+        return None;
+    }
+    if !parse_non_zero_uuid(fields.get(1)?.trim())
+        .is_some_and(|uuid| uuid == FORM_METADATA_OBJECT_REFERENCE_TYPE_UUID)
+    {
+        return None;
+    }
+    let uuid = parse_non_zero_uuid(fields.get(2)?.trim())?;
+    object_refs.get(&uuid).cloned()
+}
+
+/// The value type of a button parameter: a metadata object reference. All ten
+/// `<Parameter>` elements the native UT 11.5.27.75 forms write name this type
+/// and the platform spells every one of them `xsi:type="xr:MDObjectRef"`.
+const FORM_METADATA_OBJECT_REFERENCE_TYPE_UUID: &str = "fc01b5df-97fe-449b-83d4-218a090e681e";
+
 pub(super) fn normalize_form_main_table_category(
     main_table: Option<String>,
     category: Option<&str>,
@@ -8468,6 +8495,14 @@ fn parse_form_child_item_with_metadata_owners(
                 &options,
             )
         });
+    let popup_color_schema = (tag == "Popup")
+        .then(|| {
+            fields
+                .get(FormPopupColorSchema::OPTIONS_SLOT)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        })
+        .flatten()
+        .and_then(|options| FormPopupColorSchema::from_raw_layout(wrapper, tag, &options));
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
@@ -9033,8 +9068,10 @@ fn parse_form_child_item_with_metadata_owners(
                             data_path_resolution
                                 .as_ref()
                                 .map(|resolved| resolved.data_path.as_str()),
+                            attribute_names_by_id,
                             table_column_names_by_id,
                             attribute_metadata_owners_by_id,
+                            owner_scoped_bindings,
                             object_refs,
                         )
                     })
@@ -9547,12 +9584,12 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.back_color.clone())
-        } else if let Some(value) = popup_schema
-            .and(fields.get(FormPopupSchema::OPTIONS_SLOT))
+        } else if let Some(value) = popup_color_schema
+            .and(fields.get(FormPopupColorSchema::OPTIONS_SLOT))
             .and_then(|field| split_1c_braced_fields(field.trim(), 0))
             .and_then(|options| {
                 options
-                    .get(FormPopupSchema::BACK_COLOR_OPTION_SLOT)
+                    .get(FormPopupColorSchema::BACK_COLOR_OPTION_SLOT)
                     .and_then(|field| parse_form_control_color(field, object_refs))
             })
         {
@@ -9582,6 +9619,20 @@ fn parse_form_child_item_with_metadata_owners(
             fields
                 .get(schema.border_color_slot())
                 .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.border_color.clone())
+        } else if let Some(value) = popup_color_schema
+            .and(fields.get(FormPopupColorSchema::OPTIONS_SLOT))
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+            .and_then(|options| {
+                options
+                    .get(FormPopupColorSchema::BORDER_COLOR_OPTION_SLOT)
+                    .and_then(|field| parse_form_control_color(field, object_refs))
+            })
+        {
+            Some(value)
         } else if let Some(value) = field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| options.get(schema.border_color_option_slot()?))
@@ -9591,6 +9642,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        button_parameter: button_common_schema
+            .and_then(|schema| fields.get(schema.parameter_slot()))
+            .and_then(|field| parse_form_button_parameter(field, object_refs)),
         control_border,
         // The title colour rides one slot ahead of the title font in every
         // layout family, so it is read exactly where the title font is read.
@@ -10449,7 +10503,6 @@ fn parse_form_child_item_with_metadata_owners(
             tag,
             wrapper,
             &fields,
-            conditional_group_schema.is_some(),
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
@@ -10746,6 +10799,7 @@ pub(super) struct FormLabelDecorationOptions {
     pub(super) font_xml: Option<String>,
     pub(super) text_color: Option<String>,
     pub(super) back_color: Option<String>,
+    pub(super) border_color: Option<String>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) alignment: FormLabelDecorationAlignment,
     pub(super) geometry: FormLabelDecorationGeometry,
@@ -11081,6 +11135,9 @@ pub(super) fn parse_form_label_decoration_options(
             .and_then(|field| parse_form_control_color(field, object_refs)),
         back_color: options
             .get(6)
+            .and_then(|field| parse_form_control_color(field, object_refs)),
+        border_color: options
+            .get(FormLabelDecorationSchema::BORDER_COLOR_OPTION_SLOT)
             .and_then(|field| parse_form_control_color(field, object_refs)),
         group_horizontal_align: fields
             .get(schema.group_horizontal_align_slot())
@@ -16839,11 +16896,19 @@ fn form_attribute_matches_metadata_owner(
     proven_bases.len() == 1 && proven_bases.contains(owner_base)
 }
 
+/// The bound title of a `Page` or a `UsualGroup`.
+///
+/// A conditional prefix does not move the options bag and does not change what
+/// the binding means: over all 33 694 native `Page`/`UsualGroup` items of
+/// UT 11.5.27.75 the walker reproduces the platform's `<TitleDataPath>` on
+/// every one of the 75 items whose layout carries such a prefix -- writing the
+/// element on the 8 that have one and nothing on the other 67 -- as well as on
+/// every item without one. Refusing the whole slot when the prefix is present
+/// is what hid those eight.
 pub(super) fn parse_form_title_data_path(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
-    conditional_layout: bool,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
@@ -16851,7 +16916,7 @@ pub(super) fn parse_form_title_data_path(
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    if wrapper != "22" || conditional_layout {
+    if wrapper != "22" {
         return None;
     }
     // The bound slot is the same chain grammar every other bound slot uses, so
@@ -16985,12 +17050,30 @@ pub(super) fn form_dynamic_list_default_picture_is_out_of_main_table(
     }
 }
 
+/// The row picture of a table, whose slot holds one member of whatever the
+/// table's own bound chain has reached.
+///
+/// Three of the four payload shapes name the member outright and are spelled
+/// against the table's resolved path. The fourth -- `{c,5bdad865-…}` -- is the
+/// additional-column segment of the one bound-chain grammar, and it is spelled
+/// by appending it to the table's own binding and handing the result to the
+/// chain walker, so the row picture reads exactly the grammar every other bound
+/// slot reads instead of a second, private table.
+///
+/// Evidence: UT 11.5.27.75 writes the property on 2 203 of its 4 543 tables.
+/// The additional-column shape accounts for 20 of them, on none of which the
+/// old reader produced anything, and the appended chain reproduces the
+/// platform's path on every one it resolves. The shape never occurs on a table
+/// that carries no row picture.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_table_row_picture_data_path(
     schema: FormTableSchema,
     fields: &[&str],
     data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let table_name = data_path?;
@@ -17002,6 +17085,24 @@ pub(super) fn parse_form_table_row_picture_data_path(
     };
     let payload = split_1c_braced_fields(payload, 0)?;
     let column_name = match payload.as_slice() {
+        [column_id, uuid]
+            if uuid
+                .trim()
+                .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID) =>
+        {
+            let binding = fields.get(schema.data_path_slot())?.trim();
+            let extended = form_bound_chain_with_extra_segment(
+                binding,
+                &format!("{{{},{}}}", column_id.trim(), uuid.trim()),
+            )?;
+            return resolve_form_bound_chain_member_path(
+                &extended,
+                attribute_names_by_id,
+                owner_scoped_bindings,
+                object_refs,
+                false,
+            );
+        }
         [column_id] if column_id.trim() == "10000000" => {
             let hidden =
                 parse_exact_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())
@@ -17031,6 +17132,26 @@ pub(super) fn parse_form_table_row_picture_data_path(
     };
     let column_name = normalize_form_table_column_name(table_name, column_name);
     Some(format!("{table_name}.{column_name}"))
+}
+
+/// A bound chain `{K,s1,…,sK}` with one more segment appended, so that a slot
+/// which names a member of what another slot's chain reached can be spelled by
+/// the one chain walker rather than by a parallel resolver.
+pub(super) fn form_bound_chain_with_extra_segment(chain: &str, segment: &str) -> Option<String> {
+    let members = split_1c_braced_fields(chain.trim(), 0)?;
+    let count = members.first()?.trim().parse::<usize>().ok()?;
+    if members.len() != count + 1 {
+        return None;
+    }
+    let mut out = format!("{{{}", count + 1);
+    for member in &members[1..] {
+        out.push(',');
+        out.push_str(member.trim());
+    }
+    out.push(',');
+    out.push_str(segment);
+    out.push('}');
+    Some(out)
 }
 
 fn form_metadata_attribute_suffix(reference: &str) -> Option<&str> {
@@ -20636,6 +20757,18 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(command_name)
         ));
     }
+    // A command button's `Parameter` sits directly behind the `CommandName` it
+    // parameterises. UT 11.5.27.75 native tree, all 10 buttons that carry one:
+    // `Type` (10), `CommandName` (10) and `Visible` (3) lead it, and it leads
+    // `Title` (5) and `ExtendedTooltip` (10), with no pair counted both ways.
+    if item.tag == "Button"
+        && let Some(parameter) = &item.button_parameter
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Parameter xsi:type=\"xr:MDObjectRef\">{}</Parameter>\r\n",
+            escape_xml_text(parameter)
+        ));
+    }
     if item.tag == "Button" {
         xml.push_str(&format_form_control_colors_xml(item, indent + 1));
     }
@@ -20849,6 +20982,21 @@ pub(super) fn format_form_child_item_xml(
 {tab}\t</ValuesPicture>\r\n",
                 escape_xml_text(file_name),
                 xml_bool(item.picture_load_transparent)
+            ));
+        }
+        // A `PictureField` writes `BorderColor` between its `ValuesPicture` and
+        // its `Border`. UT 11.5.27.75 native tree, all 24 picture fields that
+        // carry one: `ValuesPicture` (24), `DataPath` (24), `TitleLocation`
+        // (22), `HorizontalStretch` (22), `VerticalStretch` (21), `Height`
+        // (21), `Width` (13), `Title` (7), `Hyperlink` (4),
+        // `GroupHorizontalAlign` (4), `GroupVerticalAlign` (2) and `EditMode`
+        // (2) lead it; it leads `Border` (6), `FileDragMode` (1),
+        // `ContextMenu` (24), `ExtendedTooltip` (24) and `Events` (4). No pair
+        // is counted both ways.
+        if let Some(border_color) = &item.border_color {
+            xml.push_str(&format!(
+                "{tab}\t<BorderColor>{}</BorderColor>\r\n",
+                escape_xml_text(border_color)
             ));
         }
         xml.push_str(&format_form_control_border_xml(item, indent + 1));
@@ -21265,6 +21413,21 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(text_color)
         ));
     }
+    // A `FormattedDocumentField` writes `BorderColor` just ahead of its `Font`.
+    // UT 11.5.27.75 native tree, all 7 that carry one: `TitleLocation` (7),
+    // `DataPath` (7), `ReadOnly` (6), `AutoMaxWidth` (5), the stretch pair
+    // (2 each), `Height` (2), `CommandSet` (2), `Width` (1), `Title` (1),
+    // `SkipOnInput` (1) and `AutoMaxHeight` (1) lead it, and it leads `Font`
+    // (1), `ContextMenu` (7) and `ExtendedTooltip` (7), with no pair counted
+    // both ways.
+    if item.tag == "FormattedDocumentField"
+        && let Some(border_color) = &item.border_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BorderColor>{}</BorderColor>\r\n",
+            escape_xml_text(border_color)
+        ));
+    }
     // A `Button` has already written its `Font` in front of its `Picture`; a
     // `Table` writes it inside its own ordered run, ahead of `CommandSet`; a
     // `LabelField` writes it last, behind `BackColor` (see the tail below).
@@ -21553,6 +21716,18 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<BackColor>{}</BackColor>\r\n",
             escape_xml_text(back_color)
+        ));
+    }
+    // and with `BorderColor` behind it: the one popup that carries the colour
+    // writes it behind `Title`, `TitleTextColor` and `ShapeRepresentation` and
+    // immediately ahead of `ExtendedTooltip`, and no popup carries both
+    // colours, so nothing counts the pair the other way.
+    if item.tag == "Popup"
+        && let Some(border_color) = &item.border_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BorderColor>{}</BorderColor>\r\n",
+            escape_xml_text(border_color)
         ));
     }
     if !matches!(

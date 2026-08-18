@@ -42,6 +42,9 @@ pub(super) struct MoxelSpreadsheet {
     /// document publishes at least one of them.
     pub(super) header_footer_slots: Option<Vec<Option<MoxelHeaderFooter>>>,
     pub(super) default_format_index: Option<usize>,
+    /// The document's leading default-format record, the fifth top-level field
+    /// of the MOXCEL body, decoded as a format.
+    pub(super) leading_default_format: Option<MoxelFormat>,
     pub(super) source_format_map: Option<MoxelSourceFormatMap>,
     pub(super) height: usize,
     /// Document-level tables the format members at bits 23, 25 and 34 index
@@ -288,8 +291,16 @@ pub(super) struct MoxelCell {
     pub(super) format_index: usize,
     pub(super) source_format_index: Option<usize>,
     pub(super) text: Option<String>,
+    /// The text list carries a trailing `1`: the platform spells the same
+    /// content `<tfl>` instead of `<tl>`.
+    pub(super) formatted_text: bool,
     pub(super) parameter: Option<String>,
     pub(super) detail_parameter: Option<String>,
+    pub(super) picture_parameter: Option<String>,
+    /// Base64 payload of an embedded control, published as `<control>`.
+    pub(super) control: Option<String>,
+    pub(super) value: Option<MoxelCellValue>,
+    pub(super) detail_value: Option<MoxelCellValue>,
     pub(super) note: Option<MoxelNote>,
     pub(super) empty_text: bool,
 }
@@ -1532,6 +1543,9 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         header_footer_format_index,
         header_footer_slots,
         default_format_index,
+        leading_default_format: fields
+            .get(4)
+            .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs)),
         source_format_map,
         height,
         value_types: parse_moxel_value_types(&fields, object_refs),
@@ -2470,27 +2484,174 @@ pub(super) fn parse_moxel_row_shape(
     ))
 }
 
+/// Member-mask bits of a MOXCEL cell record.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 `Templates/*/Ext/Template.xml`
+/// that decode as spreadsheets): the 2 025 751 cell records use the fifteen
+/// masks 0, 1, 2, 4, 8, 16, 20, 24, 28, 32, 48, 52, 56, 64 and 88 and no other,
+/// and every record's field count is exactly two plus the widths of the members
+/// its mask names. The reader used to key off whole mask values and recognised
+/// only 0, 8, 16, 24, 48 and 56, so a cell carrying any other member was read
+/// against the wrong slots: the mask is a member set, not a shape name.
+const MOXCEL_CELL_CONTROL_BIT: usize = 0;
+const MOXCEL_CELL_VALUE_BIT: usize = 1;
+const MOXCEL_CELL_DETAIL_VALUE_BIT: usize = 2;
+const MOXCEL_CELL_DETAIL_PARAMETER_BIT: usize = 3;
+const MOXCEL_CELL_TEXT_BIT: usize = 4;
+const MOXCEL_CELL_NOTE_BIT: usize = 5;
+const MOXCEL_CELL_PICTURE_PARAMETER_BIT: usize = 6;
+const MOXCEL_CELL_KNOWN_MASK: usize = (1 << MOXCEL_CELL_CONTROL_BIT)
+    | (1 << MOXCEL_CELL_VALUE_BIT)
+    | (1 << MOXCEL_CELL_DETAIL_VALUE_BIT)
+    | (1 << MOXCEL_CELL_DETAIL_PARAMETER_BIT)
+    | (1 << MOXCEL_CELL_TEXT_BIT)
+    | (1 << MOXCEL_CELL_NOTE_BIT)
+    | (1 << MOXCEL_CELL_PICTURE_PARAMETER_BIT);
+
+/// One typed value stored in a cell member.
+///
+/// Evidence: the corpus stores five spellings — `{"U"}`, `{"S",text}`,
+/// `{"N",number}`, `{"D",yyyymmddhhmmss}` and `{"#",type,{index}}` — and the
+/// platform publishes them as `xsi:nil`, `xs:string`, `xs:decimal`,
+/// `xs:dateTime` and a bare `<r>` reference respectively.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum MoxelCellValue {
+    Nil,
+    Text(String),
+    Number(String),
+    DateTime(String),
+    Reference(usize),
+}
+
+pub(super) fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    match (parse_1c_string(fields.first()?)?.as_str(), fields.len()) {
+        ("U", 1) => Some(MoxelCellValue::Nil),
+        ("S", 2) => Some(MoxelCellValue::Text(parse_1c_string(fields.get(1)?)?)),
+        ("N", 2) => {
+            let number = fields.get(1)?.trim();
+            number
+                .chars()
+                .all(|character| character.is_ascii_digit() || character == '-' || character == '.')
+                .then(|| MoxelCellValue::Number(number.to_string()))
+        }
+        ("D", 2) => {
+            let stamp = fields.get(1)?.trim();
+            (stamp.len() == 14 && stamp.chars().all(|character| character.is_ascii_digit()))
+                .then(|| MoxelCellValue::DateTime(stamp.to_string()))
+        }
+        ("#", 3) => split_1c_braced_fields(fields.get(2)?, 0)
+            .filter(|reference| reference.len() == 1)
+            .and_then(|reference| reference.first()?.trim().parse::<usize>().ok())
+            .map(MoxelCellValue::Reference),
+        _ => None,
+    }
+}
+
+/// The base64 payload of an embedded control blob.
+///
+/// Evidence: the stored payload keeps its own line structure, each break
+/// written as a carriage return ahead of the body's own newline; the platform
+/// republishes exactly those lines joined by CRLF, including a trailing break
+/// when the payload stores one. Re-wrapping at a fixed width instead loses the
+/// three documents whose payload ends on a break.
+fn parse_moxel_cell_control(text: &str) -> Option<String> {
+    let inner = text.trim_end().strip_prefix('{')?.strip_suffix('}')?;
+    let payload = inner.strip_prefix("#base64:")?;
+    let mut lines = Vec::new();
+    for line in payload.split('\n') {
+        let line = line.trim_end_matches('\r');
+        if !line.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || character == '+'
+                || character == '/'
+                || character == '='
+        }) {
+            return None;
+        }
+        lines.push(line);
+    }
+    (!lines.is_empty() && !lines[0].is_empty()).then(|| lines.join("\r\n"))
+}
+
+/// Decodes one cell record against its member mask.
+///
+/// Storage order is fixed and is not the publication order: the control blob,
+/// the value, the detail value, the detail parameter and the picture parameter
+/// come first, then the cell's text list, then the note triple, and the text
+/// list's own trailing "formatted" flag closes the record. All 2 025 751
+/// records of the corpus are consumed exactly by this walk.
 pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
     let fields = split_1c_braced_fields(text, 0)?;
-    let cell_kind = fields.first()?.trim();
+    let mask = fields.first()?.trim().parse::<usize>().ok()?;
+    if mask & !MOXCEL_CELL_KNOWN_MASK != 0 {
+        return None;
+    }
+    let has = |bit: usize| mask & (1 << bit) != 0;
     let format_index = fields
         .get(1)
         .and_then(|value| value.trim().parse::<usize>().ok())
         .map(|value| if value == 0 { 0 } else { value + 1 })
         .unwrap_or(0);
-    let detail_parameter_field = match cell_kind {
-        // Native dumps also use these cell kinds for detail-only and note-bearing
-        // spreadsheet cells, with detailParameter kept in slot 2.
-        "8" | "24" | "56" => Some(2),
-        _ => None,
+    let mut cursor = 2usize;
+    let mut take = |width: usize| {
+        let at = cursor;
+        cursor += width;
+        at
     };
-    let detail_parameter = detail_parameter_field
-        .and_then(|index| fields.get(index))
-        .and_then(|value| parse_1c_string(value));
-    let localized_index = detail_parameter_field.map(|index| index + 1).unwrap_or(2);
-    let localized = fields
-        .get(localized_index)
-        .and_then(|value| parse_moxel_localized_cell_value(value));
+    let control_at = has(MOXCEL_CELL_CONTROL_BIT).then(|| take(2));
+    let value_at = has(MOXCEL_CELL_VALUE_BIT).then(|| take(1));
+    let detail_value_at = has(MOXCEL_CELL_DETAIL_VALUE_BIT).then(|| take(1));
+    let detail_parameter_at = has(MOXCEL_CELL_DETAIL_PARAMETER_BIT).then(|| take(1));
+    let picture_parameter_at = has(MOXCEL_CELL_PICTURE_PARAMETER_BIT).then(|| take(1));
+    let text_at = has(MOXCEL_CELL_TEXT_BIT).then(|| take(1));
+    let note_at = has(MOXCEL_CELL_NOTE_BIT).then(|| take(3));
+    let formatted_flag_at = has(MOXCEL_CELL_TEXT_BIT).then(|| take(1));
+    let mut expected = cursor;
+    let formatted = match formatted_flag_at.and_then(|at| fields.get(at)) {
+        None => false,
+        Some(flag) => match flag.trim() {
+            "0" => false,
+            "1" => {
+                expected += 1;
+                true
+            }
+            _ => return None,
+        },
+    };
+    if fields.len() != expected {
+        return None;
+    }
+
+    let control = match control_at {
+        None => None,
+        Some(at) => {
+            if fields.get(at)?.trim() != "1" {
+                return None;
+            }
+            Some(parse_moxel_cell_control(fields.get(at + 1)?)?)
+        }
+    };
+    let value = match value_at {
+        None => None,
+        Some(at) => Some(parse_moxel_cell_value(fields.get(at)?)?),
+    };
+    let detail_value = match detail_value_at {
+        None => None,
+        Some(at) => Some(parse_moxel_cell_value(fields.get(at)?)?),
+    };
+    let detail_parameter = match detail_parameter_at {
+        None => None,
+        Some(at) => Some(parse_1c_string(fields.get(at)?)?),
+    };
+    let picture_parameter = match picture_parameter_at {
+        None => None,
+        Some(at) => Some(parse_1c_string(fields.get(at)?)?),
+    };
+    // The member walk is strict about which slots exist; the contents of the
+    // text list and of the note are read as before, so a member this reader
+    // cannot spell out is dropped rather than costing the cell.
+    let localized = text_at.and_then(|at| parse_moxel_localized_cell_value(fields.get(at)?));
     let empty_text = matches!(localized, Some(None));
     let localized = localized.flatten();
     let text = localized
@@ -2501,7 +2662,7 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
         .as_ref()
         .filter(|value| value.lang.is_empty())
         .map(|value| value.content.clone());
-    let note = parse_moxel_cell_note(&fields, cell_kind);
+    let note = note_at.and_then(|at| parse_moxel_cell_note(&fields, at));
     Some(MoxelCell {
         column_index,
         format_index,
@@ -2511,22 +2672,21 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
             Some(format_index)
         },
         text,
+        formatted_text: formatted,
         parameter,
         detail_parameter,
+        picture_parameter,
+        control,
+        value,
+        detail_value,
         note,
         empty_text,
     })
 }
 
-fn parse_moxel_cell_note(fields: &[&str], cell_kind: &str) -> Option<MoxelNote> {
-    let note_text_index = match cell_kind {
-        "48" if fields.len() == 7 => 3,
-        "56" if fields.len() == 8 => 4,
-        _ => return None,
-    };
-    if fields.get(note_text_index + 1)?.trim() != "1"
-        || fields.get(note_text_index + 3)?.trim() != "0"
-    {
+/// Decodes the note member, whose three fields start at `note_text_index`.
+fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<MoxelNote> {
+    if fields.get(note_text_index + 1)?.trim() != "1" {
         return None;
     }
 
@@ -6536,16 +6696,29 @@ pub(super) fn moxel_embedded_style_ref_for_uuid(
     }
 }
 
+/// The platform's web-colour enumeration, indexed by its stored ordinal.
+///
+/// The ordinals are the enumeration's alphabetical positions. Six of them were
+/// missing, and a missing ordinal is not a missing colour: a palette slot the
+/// reader refuses makes the whole palette unrecognisable, so the thirteen
+/// documents that store one lost every colour they had. Each addition is read
+/// off the platform's own output - `Beige` (2 documents), `DarkGray` (4),
+/// `DimGray` (1), `MediumBlue` (1), `MediumGray` (5) and `SaddleBrown` (1) are
+/// the only published names those documents carry that no other ordinal of
+/// theirs accounts for, and each lands in its alphabetical place.
 pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
     let name = match value.parse::<u32>().ok()? {
+        6 => "Beige",
         8 => "Black",
         10 => "Blue",
         20 => "Cream",
         21 => "Crimson",
         23 => "DarkBlue",
+        26 => "DarkGray",
         27 | 31 => "DarkGreen",
         33 => "DarkRed",
         37 => "DarkSlateGray",
+        42 => "DimGray",
         44 => "FireBrick",
         45 => "FloralWhite",
         46 => "ForestGreen",
@@ -6561,12 +6734,15 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         72 => "LightPink",
         79 => "LightYellow",
         84 => "Maroon",
+        86 => "MediumBlue",
+        87 => "MediumGray",
         97 => "MintCream",
         98 => "MistyRose",
         108 => "PaleGoldenrod",
         119 => "Red",
         120 => "RosyBrown",
         121 => "RoyalBlue",
+        122 => "SaddleBrown",
         128 => "Silver",
         130 => "SlateBlue",
         134 => "SteelBlue",
@@ -6581,11 +6757,7 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
 }
 
 pub(super) fn parse_moxel_style_color(value: &str) -> Option<String> {
-    match value.parse::<u32>().ok()? {
-        12971252 => Some("style:ReportHeaderBackColor".to_string()),
-        8765644 => Some("style:ReportLineColor".to_string()),
-        _ => parse_moxel_direct_color(value),
-    }
+    parse_moxel_direct_color(value)
 }
 
 pub(super) fn parse_moxel_direct_color(value: &str) -> Option<String> {
@@ -7073,6 +7245,32 @@ fn format_moxel_spreadsheet_xml_with_plan(
     ))
 }
 
+/// The published form of a format that carries no members.
+const EMPTY_MOXEL_FORMAT_XML: &str = "\t<format/>\r\n";
+
+/// The pool position the platform names for a format body.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, every `Templates/*/Ext/Template.xml` that
+/// decodes as a spreadsheet): 618 of the 683 documents publish
+/// `<defaultFormatIndex>`, and in 614 of them the value is the position of the
+/// *first* `<format>` element of the document whose published bytes equal the
+/// bytes at the published position. The platform therefore names format
+/// content, not a slot: a duplicate entry later in the pool is never named.
+/// Four documents name a later duplicate and are left to the ordinary path.
+fn first_equal_published_format(published_formats: &[String], position: usize) -> usize {
+    let Some(body) = position
+        .checked_sub(1)
+        .and_then(|at| published_formats.get(at))
+    else {
+        return position;
+    };
+    published_formats
+        .iter()
+        .position(|candidate| candidate == body)
+        .map(|at| at + 1)
+        .unwrap_or(position)
+}
+
 fn render_moxel_spreadsheet_xml(
     spreadsheet: &MoxelSpreadsheet,
     output_format_indices: &[usize],
@@ -7080,6 +7278,23 @@ fn render_moxel_spreadsheet_xml(
 ) -> String {
     let emit_first_row_format_index =
         moxel_column_format_slots(&spreadsheet.column_sets, spreadsheet.column_count) == 0;
+    let font_projection = moxel_font_projection(spreadsheet, output_format_indices);
+    // The published format pool, rendered up front so that a reference into it
+    // can be normalised against the bytes it names rather than against the
+    // internal slot it came from.
+    let published_formats = output_format_indices
+        .iter()
+        .map(|format_index| {
+            let mut body = String::new();
+            push_moxel_format_xml_with_fonts(
+                &mut body,
+                spreadsheet,
+                *format_index,
+                font_projection.as_ref(),
+            );
+            body
+        })
+        .collect::<Vec<_>>();
     let mut xml = String::from(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
@@ -7127,11 +7342,36 @@ fn render_moxel_spreadsheet_xml(
         });
     }
     xml.push_str("\t<templateMode>true</templateMode>\r\n");
-    if let Some(default_format_index) = spreadsheet.default_format_index {
-        let default_format_index = output_format_index_map
-            .get(&default_format_index)
-            .copied()
-            .unwrap_or(default_format_index);
+    // The leading default-format record names format content, not a slot: the
+    // published index is the position of the first pool entry that carries the
+    // record's own bytes.  An empty default format is never materialized, so a
+    // document whose pool holds no empty `<format/>` publishes nothing.
+    let leading_default_format_body = spreadsheet.leading_default_format.as_ref().map(|format| {
+        let mut body = String::new();
+        push_moxel_format_body_xml(&mut body, spreadsheet, format, font_projection.as_ref());
+        body
+    });
+    let mut materialized_default_format = None;
+    let published_default_format_index = match &leading_default_format_body {
+        Some(body) => match published_formats.iter().position(|entry| entry == body) {
+            Some(at) => Some(at + 1),
+            None if body == EMPTY_MOXEL_FORMAT_XML => None,
+            None => {
+                materialized_default_format = Some(body.clone());
+                Some(published_formats.len() + 1)
+            }
+        },
+        None => spreadsheet
+            .default_format_index
+            .map(|default_format_index| {
+                let position = output_format_index_map
+                    .get(&default_format_index)
+                    .copied()
+                    .unwrap_or(default_format_index);
+                first_equal_published_format(&published_formats, position)
+            }),
+    };
+    if let Some(default_format_index) = published_default_format_index {
         xml.push_str(&format!(
             "\t<defaultFormatIndex>{default_format_index}</defaultFormatIndex>\r\n"
         ));
@@ -7180,7 +7420,6 @@ fn render_moxel_spreadsheet_xml(
     for line in &spreadsheet.lines {
         push_moxel_line_xml(&mut xml, line);
     }
-    let font_projection = moxel_font_projection(spreadsheet, output_format_indices);
     match &font_projection {
         Some(projection) => {
             for font in projection
@@ -7197,13 +7436,11 @@ fn render_moxel_spreadsheet_xml(
             }
         }
     }
-    for &format_index in output_format_indices {
-        push_moxel_format_xml_with_fonts(
-            &mut xml,
-            spreadsheet,
-            format_index,
-            font_projection.as_ref(),
-        );
+    for body in published_formats
+        .iter()
+        .chain(materialized_default_format.iter())
+    {
+        xml.push_str(body);
     }
     for picture in &spreadsheet.pictures {
         push_moxel_picture_xml(&mut xml, picture);
@@ -8268,9 +8505,22 @@ fn push_moxel_format_xml_with_fonts(
     format_index: usize,
     font_projection: Option<&MoxelFontProjection>,
 ) {
-    let format = moxel_format_for_index(spreadsheet, format_index);
+    push_moxel_format_body_xml(
+        xml,
+        spreadsheet,
+        &moxel_format_for_index(spreadsheet, format_index),
+        font_projection,
+    );
+}
+
+fn push_moxel_format_body_xml(
+    xml: &mut String,
+    spreadsheet: &MoxelSpreadsheet,
+    format: &MoxelFormat,
+    font_projection: Option<&MoxelFontProjection>,
+) {
     if format.is_empty() {
-        xml.push_str("\t<format/>\r\n");
+        xml.push_str(EMPTY_MOXEL_FORMAT_XML);
         return;
     };
     // Without an admitted projection the decoded slot is written verbatim.
@@ -9279,8 +9529,12 @@ pub(super) fn push_moxel_row_xml(
                 .unwrap_or(cell.format_index)
         };
         xml.push_str(&format!("\t\t\t\t\t<f>{cell_format_index}</f>\r\n"));
+        if let Some(control) = &cell.control {
+            push_moxel_cell_control_xml(xml, control);
+        }
+        let text_element = if cell.formatted_text { "tfl" } else { "tl" };
         if let Some(text) = &cell.text {
-            xml.push_str("\t\t\t\t\t<tl>\r\n");
+            xml.push_str(&format!("\t\t\t\t\t<{text_element}>\r\n"));
             xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
             xml.push_str("\t\t\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n");
             xml.push_str(&format!(
@@ -9288,9 +9542,9 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(text)
             ));
             xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
-            xml.push_str("\t\t\t\t\t</tl>\r\n");
+            xml.push_str(&format!("\t\t\t\t\t</{text_element}>\r\n"));
         } else if cell.empty_text {
-            xml.push_str("\t\t\t\t\t<tl/>\r\n");
+            xml.push_str(&format!("\t\t\t\t\t<{text_element}/>\r\n"));
         }
         if let Some(parameter) = &cell.parameter {
             xml.push_str(&format!(
@@ -9304,6 +9558,18 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(detail_parameter)
             ));
         }
+        if let Some(picture_parameter) = &cell.picture_parameter {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<pictureParameter>{}</pictureParameter>\r\n",
+                escape_xml_element_text(picture_parameter)
+            ));
+        }
+        if let Some(value) = &cell.value {
+            push_moxel_cell_value_xml(xml, "v", value);
+        }
+        if let Some(detail_value) = &cell.detail_value {
+            push_moxel_cell_value_xml(xml, "d", detail_value);
+        }
         if let Some(note) = &cell.note {
             push_moxel_note_xml(xml, note, output_format_index_map);
         }
@@ -9312,6 +9578,56 @@ pub(super) fn push_moxel_row_xml(
         expected_column = cell.column_index + 1;
     }
     xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
+}
+
+/// Publishes one typed cell member.
+///
+/// A stored reference always publishes as `<r>`, whichever member carries it;
+/// every other spelling keeps the member's own element name and carries the
+/// XSD type the platform writes for it.
+fn push_moxel_cell_value_xml(xml: &mut String, element: &str, value: &MoxelCellValue) {
+    match value {
+        MoxelCellValue::Nil => {
+            xml.push_str(&format!("\t\t\t\t\t<{element} xsi:nil=\"true\"/>\r\n"));
+        }
+        MoxelCellValue::Text(text) if text.is_empty() => {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<{element} xsi:type=\"xs:string\"/>\r\n"
+            ));
+        }
+        MoxelCellValue::Text(text) => {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<{element} xsi:type=\"xs:string\">{}</{element}>\r\n",
+                escape_xml_element_text(text)
+            ));
+        }
+        MoxelCellValue::Number(number) => {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<{element} xsi:type=\"xs:decimal\">{number}</{element}>\r\n"
+            ));
+        }
+        MoxelCellValue::DateTime(stamp) => {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<{element} xsi:type=\"xs:dateTime\">{}-{}-{}T{}:{}:{}</{element}>\r\n",
+                &stamp[0..4],
+                &stamp[4..6],
+                &stamp[6..8],
+                &stamp[8..10],
+                &stamp[10..12],
+                &stamp[12..14]
+            ));
+        }
+        MoxelCellValue::Reference(index) => {
+            xml.push_str(&format!("\t\t\t\t\t<r>{index}</r>\r\n"));
+        }
+    }
+}
+
+/// Publishes an embedded control blob verbatim.
+fn push_moxel_cell_control_xml(xml: &mut String, control: &str) {
+    xml.push_str(&format!(
+        "\t\t\t\t\t<control xsi:type=\"xs:base64Binary\">{control}</control>\r\n"
+    ));
 }
 
 fn push_moxel_note_xml(
@@ -9385,6 +9701,162 @@ fn push_moxel_note_xml(
 mod moxel_exact_parity_tests {
     use super::*;
 
+    /// Fixture: `tests/fixtures/moxel_buyer_instruction_picture_parameter_raw.txt`,
+    /// 796 bytes, sha256
+    /// `9346fe2d6d05e3eb826cdddde70a069e73b65385796690314e5082112ae4a00e`. It is
+    /// the native MOXCEL body of common template `ИнструкцияПокупателейMAXБПО`
+    /// in 1С:Управление торговлей 11.5.27.75 (`1cv8.cf`), as produced by this
+    /// project's compatible-MXL decoder. It is the smallest document of the
+    /// corpus that carries a picture-parameter cell member, and its leading
+    /// default-format record names a width the format pool does not already
+    /// hold, so the platform materializes it as the pool's last entry.
+    const BUYER_INSTRUCTION_RAW: &str =
+        include_str!("../../tests/fixtures/moxel_buyer_instruction_picture_parameter_raw.txt");
+
+    #[test]
+    fn picture_parameter_member_is_published_from_its_own_mask_bit() {
+        let spreadsheet =
+            parse_moxel_spreadsheet_text(BUYER_INSTRUCTION_RAW, &BTreeMap::new()).unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(
+            xml.contains("\t\t\t\t\t<pictureParameter>КартинкаИнструкции</pictureParameter>\r\n"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn unmaterialized_default_format_is_appended_and_named() {
+        let spreadsheet =
+            parse_moxel_spreadsheet_text(BUYER_INSTRUCTION_RAW, &BTreeMap::new()).unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(xml.matches("<format").count(), 2, "{xml}");
+        assert!(
+            xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>\r\n"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("\t<defaultFormatIndex>2</defaultFormatIndex>\r\n"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn cell_mask_names_a_member_set_and_not_a_record_shape() {
+        let picture_and_detail = parse_moxel_cell(
+            "{88,3,\"Расшифровка\",\"Поставщик\",{1,1,{\"\",\"ПоставщикПредставление\"}},0}",
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            picture_and_detail.detail_parameter.as_deref(),
+            Some("Расшифровка")
+        );
+        assert_eq!(
+            picture_and_detail.picture_parameter.as_deref(),
+            Some("Поставщик")
+        );
+        assert_eq!(
+            picture_and_detail.parameter.as_deref(),
+            Some("ПоставщикПредставление")
+        );
+
+        let detail_value_and_detail_parameter = parse_moxel_cell(
+            "{28,11,{\"#\",3031edd8-c3df-47b2-98ca-47f628d4ec18,{15}},\"Расшифровка\",{1,1,{\"\",\"Цена\"}},0}",
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            detail_value_and_detail_parameter.detail_value,
+            Some(MoxelCellValue::Reference(15))
+        );
+        assert_eq!(
+            detail_value_and_detail_parameter
+                .detail_parameter
+                .as_deref(),
+            Some("Расшифровка")
+        );
+
+        let value_only = parse_moxel_cell("{2,15,{\"N\",0}}", 0).unwrap();
+        assert_eq!(
+            value_only.value,
+            Some(MoxelCellValue::Number("0".to_string()))
+        );
+        assert!(!value_only.empty_text && value_only.text.is_none());
+
+        let formatted = parse_moxel_cell(
+            "{16,2,{1,1,{\"ru\",\"Код\"}},1,{1,{1,1,{\"ru\",\"Код\"}},1}}",
+            0,
+        )
+        .unwrap();
+        assert!(formatted.formatted_text);
+        assert_eq!(formatted.text.as_deref(), Some("Код"));
+    }
+
+    #[test]
+    fn cell_record_that_does_not_match_its_mask_is_refused() {
+        // A member bit the reader does not know, and a field count that does
+        // not match the mask, are both refusals rather than a shifted read.
+        assert!(parse_moxel_cell("{128,3,\"Расшифровка\"}", 0).is_none());
+        assert!(parse_moxel_cell("{8,3,\"Расшифровка\",\"Поставщик\"}", 0).is_none());
+        assert!(parse_moxel_cell("{16,2,{1,0}}", 0).is_none());
+    }
+
+    #[test]
+    fn typed_cell_members_publish_the_platform_spellings() {
+        let mut xml = String::new();
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Number("0".to_string()));
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text(String::new()));
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text("5".to_string()));
+        push_moxel_cell_value_xml(
+            &mut xml,
+            "v",
+            &MoxelCellValue::DateTime("00010101000000".to_string()),
+        );
+        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Nil);
+        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Reference(15));
+
+        assert_eq!(
+            xml,
+            "\t\t\t\t\t<v xsi:type=\"xs:decimal\">0</v>\r\n\
+\t\t\t\t\t<v xsi:type=\"xs:string\"/>\r\n\
+\t\t\t\t\t<v xsi:type=\"xs:string\">5</v>\r\n\
+\t\t\t\t\t<v xsi:type=\"xs:dateTime\">0001-01-01T00:00:00</v>\r\n\
+\t\t\t\t\t<d xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<r>15</r>\r\n"
+        );
+    }
+
+    #[test]
+    fn every_stored_web_colour_ordinal_resolves() {
+        // The six ordinals the reader used to refuse; a refused palette slot
+        // costs the document its whole palette, not just one colour.
+        for (ordinal, name) in [
+            ("6", "d3p1:Beige"),
+            ("26", "d3p1:DarkGray"),
+            ("42", "d3p1:DimGray"),
+            ("86", "d3p1:MediumBlue"),
+            ("87", "d3p1:MediumGray"),
+            ("122", "d3p1:SaddleBrown"),
+        ] {
+            assert_eq!(parse_moxel_web_color(ordinal).as_deref(), Some(name));
+        }
+    }
+
+    #[test]
+    fn a_literal_palette_colour_is_never_renamed_to_a_style() {
+        // Two stored RGB values used to be rewritten as style references.
+        assert_eq!(
+            parse_moxel_style_color("8765644").as_deref(),
+            Some("#CCC085")
+        );
+        assert_eq!(
+            parse_moxel_style_color("12971252").as_deref(),
+            Some("#F4ECC5")
+        );
+    }
+
     #[test]
     fn typed_extraction_reports_binary_container_as_decoder_failure() {
         let error = try_extract_moxel_spreadsheet_xml(&[0], &BTreeMap::new()).unwrap_err();
@@ -9436,6 +9908,11 @@ mod moxel_exact_parity_tests {
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             }],
         }];
@@ -9483,6 +9960,7 @@ mod moxel_exact_parity_tests {
             header_footer_format_index: None,
             header_footer_slots: None,
             default_format_index: None,
+            leading_default_format: None,
             source_format_map: None,
             value_types: Vec::new(),
             control_types: Vec::new(),
@@ -9705,8 +10183,12 @@ mod moxel_exact_parity_tests {
             vec![
                 Some("style:FormBackColor".to_string()),
                 Some("style:FormTextColor".to_string()),
+                // Slot 2 is what the indexed override names; slot 3 keeps the
+                // literal the palette stores. The reader used to rewrite this
+                // stored RGB as a style name, which is what the platform's own
+                // output contradicts.
                 Some("style:ReportHeaderBackColor".to_string()),
-                Some("style:ReportHeaderBackColor".to_string()),
+                Some("#F4ECC5".to_string()),
             ]
         );
 

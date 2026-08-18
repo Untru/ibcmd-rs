@@ -19924,6 +19924,7 @@ fn formats_table_search_additions_as_direct_sections() {
         text_color: None,
         back_color: None,
         border_color: None,
+        button_parameter: None,
         control_border: None,
         title_text_color: None,
         footer_text_color: None,
@@ -20143,6 +20144,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 text_color: None,
                 back_color: None,
                 border_color: None,
+                button_parameter: None,
                 control_border: None,
                 title_text_color: None,
                 footer_text_color: None,
@@ -20363,6 +20365,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 text_color: None,
                 back_color: None,
                 border_color: None,
+                button_parameter: None,
                 control_border: None,
                 title_text_color: None,
                 footer_text_color: None,
@@ -27699,6 +27702,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: Some(1),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -28075,6 +28079,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: Some(1),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -28546,6 +28551,11 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             }],
         }],
@@ -28582,6 +28592,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: Some(7),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -28647,6 +28658,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -28917,6 +28929,11 @@ fn parses_and_formats_moxel_vertical_groups() {
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             }],
         }],
@@ -28949,6 +28966,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -29468,6 +29486,11 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     parameter: None,
                     detail_parameter: None,
                     note: None,
+                    formatted_text: false,
+                    picture_parameter: None,
+                    control: None,
+                    value: None,
+                    detail_value: None,
                     empty_text: false,
                 },
                 MoxelCell {
@@ -29478,6 +29501,11 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     parameter: None,
                     detail_parameter: None,
                     note: None,
+                    formatted_text: false,
+                    picture_parameter: None,
+                    control: None,
+                    value: None,
+                    detail_value: None,
                     empty_text: false,
                 },
             ],
@@ -29521,6 +29549,11 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             },
             MoxelCell {
@@ -29531,6 +29564,11 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             },
         ],
@@ -29586,6 +29624,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -29660,6 +29699,11 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             }],
         }],
@@ -29678,6 +29722,7 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: Some(2),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -29732,6 +29777,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: Some(1),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -29782,6 +29828,11 @@ fn formats_moxel_non_zero_column_slots_suppress_row_output_index_one() {
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             }],
         },
@@ -29812,6 +29863,11 @@ fn formats_moxel_leading_shared_default_suppresses_shifted_row_output_index_two(
                 parameter: None,
                 detail_parameter: None,
                 note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: None,
                 empty_text: false,
             }],
         },
@@ -30397,6 +30453,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             header_footer_format_index: None,
             header_footer_slots: None,
             default_format_index: None,
+            leading_default_format: None,
             source_format_map: None,
             value_types: Vec::new(),
             control_types: Vec::new(),
@@ -30507,6 +30564,7 @@ fn formats_moxel_field_selection_back_color_style() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -30549,6 +30607,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -30591,6 +30650,7 @@ fn formats_moxel_field_text_color_style() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -30633,6 +30693,7 @@ fn formats_moxel_button_text_color_style() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -30707,6 +30768,7 @@ fn formats_moxel_report_back_color_styles() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -30762,7 +30824,7 @@ fn moxel_style_refs_require_one_canonical_count_prefixed_span() {
     assert_eq!(refs[1], None, "mode 1 is a positional empty slot");
     assert_eq!(refs[2].as_deref(), Some("style:ReportHeaderBackColor"));
     assert_eq!(refs[3].as_deref(), Some("auto"));
-    assert_eq!(refs[4].as_deref(), Some("style:ReportHeaderBackColor"));
+    assert_eq!(refs[4].as_deref(), Some("#F4ECC5"));
 
     let custom = parse_moxel_style_refs(
         &["1", "{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}}"],
@@ -30954,6 +31016,7 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -30998,6 +31061,7 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         header_footer_format_index: None,
         header_footer_slots: None,
         default_format_index: None,
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -31939,6 +32003,11 @@ fn formats_moxel_sparse_body_refs_skip_reserved_source_slots() {
             parameter: None,
             detail_parameter: None,
             note: None,
+            formatted_text: false,
+            picture_parameter: None,
+            control: None,
+            value: None,
+            detail_value: None,
             empty_text: true,
         }],
     }];
@@ -32012,6 +32081,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         header_footer_slots: None,
         header_footer_format_index: Some(3),
         default_format_index: Some(5),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -32108,6 +32178,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
         header_footer_slots: None,
         header_footer_format_index: Some(5),
         default_format_index: Some(5),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -32192,6 +32263,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         header_footer_slots: None,
         header_footer_format_index: Some(4),
         default_format_index: Some(5),
+        leading_default_format: None,
         source_format_map: None,
         value_types: Vec::new(),
         control_types: Vec::new(),
@@ -67370,4 +67442,349 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
             "{marker}"
         );
     }
+}
+
+/// Slot `25 + top_level_offset` is the footer alignment of every field kind the
+/// field schema admits, and it spells three written codes, not one.
+///
+/// Codes below are the ones the native UT 11.5.27.75 tree writes: `0` on the
+/// 241 items that say `Left`, `1` on the 5 that say `Center`, `2` on the 14
+/// that say `Right` and `3` on the 58 861 that carry no element -- the same
+/// table on `InputField` (143/0/9 written), `LabelField` (71/2/0),
+/// `PictureField` (9/3/5) and every other admitted kind.
+#[test]
+fn field_footer_horizontal_align_decodes_every_written_code() {
+    for (item_tag, discriminator, options_len, options_kind) in [
+        ("InputField", "2", 66usize, "36"),
+        ("LabelField", "1", 20, "11"),
+        ("PictureField", "4", 24, "10"),
+        ("CheckBoxField", "3", 13, "11"),
+    ] {
+        let mut options = vec!["0"; options_len];
+        options[0] = options_kind;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            item_tag,
+            0,
+            Some(discriminator),
+            &options,
+        )
+        .unwrap();
+        for (code, expected) in [
+            ("0", Some("Left")),
+            ("1", Some("Center")),
+            ("2", Some("Right")),
+            ("3", None),
+        ] {
+            let mut fields = vec!["0"; 59];
+            fields[25] = code;
+            assert_eq!(
+                schema.footer_horizontal_align(&fields),
+                expected,
+                "{item_tag} footer alignment code {code}"
+            );
+        }
+    }
+}
+
+/// The border colour of the three field kinds whose option slot had no reader.
+///
+/// The tuples below are the bytes the native tree carries in those slots:
+/// option 11 of a `PictureField` on
+/// `Documents/ЭлектронныйДокументВходящийЭДО/Forms/ФормаПросмотраЛегкийИнтерфейс`,
+/// option 13 of a `LabelField` on `InformationRegisters/ОчередьЧековККТ`,
+/// option 8 of a `FormattedDocumentField` on the same document form. The unset
+/// tuple `{3,4,{0}}` must keep writing nothing on all three.
+#[test]
+fn field_border_colour_reads_the_option_slot_of_its_kind() {
+    let object_refs = BTreeMap::new();
+    for (item_tag, discriminator, options_len, options_kind, slot, raw, expected) in [
+        (
+            "PictureField",
+            "4",
+            24usize,
+            "10",
+            11usize,
+            "{3,3,{-1}}",
+            Some("style:FormBackColor"),
+        ),
+        (
+            "LabelField",
+            "1",
+            20,
+            "11",
+            13,
+            "{3,3,{-16}}",
+            Some("style:SpecialTextColor"),
+        ),
+        (
+            "FormattedDocumentField",
+            "17",
+            16,
+            "1",
+            8,
+            "{3,3,{-1}}",
+            Some("style:FormBackColor"),
+        ),
+    ] {
+        let mut options = vec!["{3,4,{0}}"; options_len];
+        options[0] = options_kind;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            item_tag,
+            0,
+            Some(discriminator),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            schema.border_color_option_slot(),
+            Some(slot),
+            "{item_tag} border colour slot"
+        );
+        assert_eq!(
+            parse_form_control_color(options[slot], &object_refs),
+            None,
+            "{item_tag} unset border colour"
+        );
+        options[slot] = raw;
+        assert_eq!(
+            parse_form_control_color(options[slot], &object_refs).as_deref(),
+            expected,
+            "{item_tag} border colour {raw}"
+        );
+    }
+}
+
+/// A `Popup` reads both of its colours through the guard of the tuple that
+/// carries them, not through the narrower one the representation needs.
+///
+/// The options below are the native tuple of the `Popup` `КомандыСканирования`
+/// of `Documents/ТТНИсходящаяЕГАИС/Forms/ФормаДокумента`: member 6 is a shape
+/// representation rather than `0`, which is exactly what made the narrow guard
+/// refuse the only popup in the tree that carries a `<BorderColor>`.
+#[test]
+fn popup_colours_read_their_own_tuple_even_with_a_shape_representation() {
+    let object_refs = BTreeMap::new();
+    let options = vec![
+        "7",
+        "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+        "{0}",
+        "2",
+        "0",
+        "0",
+        "2",
+        "{3,4,{0}}",
+        "{3,0,{16777215}}",
+    ];
+    assert_eq!(
+        crate::form_schema::FormPopupSchema::from_raw_layout(
+            "22",
+            30,
+            "Popup",
+            Some("1"),
+            &options
+        ),
+        None,
+        "the representation schema refuses a popup that states a shape"
+    );
+    let schema =
+        crate::form_schema::FormPopupColorSchema::from_raw_layout("22", "Popup", &options).unwrap();
+    let _ = schema;
+    assert_eq!(
+        parse_form_control_color(
+            options[crate::form_schema::FormPopupColorSchema::BACK_COLOR_OPTION_SLOT],
+            &object_refs
+        ),
+        None
+    );
+    assert_eq!(
+        parse_form_control_color(
+            options[crate::form_schema::FormPopupColorSchema::BORDER_COLOR_OPTION_SLOT],
+            &object_refs
+        )
+        .as_deref(),
+        Some("#FFFFFF")
+    );
+}
+
+/// A command button's parameter is the typed metadata reference in slot
+/// `33 + top_level_offset`, and the slot writes nothing under any other shape.
+///
+/// The typed value below is the native slot of the `Button`
+/// `ФормаПоказатьВСписке` of `Documents/ЗапланированноеВзаимодействие`, and
+/// `{"U"}` is what the 27 766 buttons without a `<Parameter>` all carry.
+#[test]
+fn button_parameter_reads_the_typed_metadata_reference() {
+    let object_refs = BTreeMap::from([(
+        "53c4c3b2-9257-4d02-8df8-6b55fe9abdae".to_string(),
+        "Document.ЗапланированноеВзаимодействие".to_string(),
+    )]);
+    let schema =
+        crate::form_schema::FormButtonCommonSchema::from_raw_layout("31", 52, "Button", 0).unwrap();
+    assert_eq!(schema.parameter_slot(), 33);
+    assert_eq!(
+        crate::form_schema::FormButtonCommonSchema::from_raw_layout("31", 53, "Button", 1)
+            .unwrap()
+            .parameter_slot(),
+        34
+    );
+    assert_eq!(
+        parse_form_button_parameter(
+            r##"{"#",fc01b5df-97fe-449b-83d4-218a090e681e,53c4c3b2-9257-4d02-8df8-6b55fe9abdae}"##,
+            &object_refs
+        )
+        .as_deref(),
+        Some("Document.ЗапланированноеВзаимодействие")
+    );
+    assert_eq!(parse_form_button_parameter(r#"{"U"}"#, &object_refs), None);
+    // Another value type in the same shape is not a metadata object reference.
+    assert_eq!(
+        parse_form_button_parameter(
+            r##"{"#",00000000-0000-0000-0000-000000000001,53c4c3b2-9257-4d02-8df8-6b55fe9abdae}"##,
+            &object_refs
+        ),
+        None
+    );
+}
+
+/// A `Pages` event container is identified by its own shape, not by its two
+/// representation members agreeing.
+///
+/// The container below is the native one of the `Pages` `Страницы` of
+/// `Documents/АктКонтроляКачестваТоваров/Forms/ФормаДокумента`, whose members 1
+/// and 5 read `1` and `6`; 51 of the 2 687 native `Pages` are shaped like this
+/// and ten of them carry an `OnCurrentPageChange` handler.
+#[test]
+fn pages_event_container_admits_disagreeing_representation_members() {
+    let disagreeing = ["4", "1", "{0,1,0}", "2", "0", "6"];
+    let schema = crate::form_schema::FormChildItemEventCollectionSchema::from_pages_layout(
+        "22",
+        34,
+        "Pages",
+        Some("3"),
+        &disagreeing,
+    )
+    .expect("the container shape is what identifies the collection");
+    assert_eq!(schema.collection_slot(), 2);
+    assert_eq!(
+        schema.event_name("526c501f-ed3f-4db4-8731-fd0324707501"),
+        Some("OnCurrentPageChange")
+    );
+    // The shape members themselves still gate the slot.
+    for broken in [
+        ["5", "1", "{0,1,0}", "2", "0", "6"],
+        ["4", "1", "{0,1,0}", "3", "0", "6"],
+        ["4", "1", "{0,1,0}", "2", "1", "6"],
+    ] {
+        assert_eq!(
+            crate::form_schema::FormChildItemEventCollectionSchema::from_pages_layout(
+                "22",
+                34,
+                "Pages",
+                Some("3"),
+                &broken,
+            ),
+            None
+        );
+    }
+}
+
+/// A slot that names one further member of what another slot's chain reached is
+/// spelled by appending its segment to that chain and re-counting the header,
+/// so both slots go through the one chain walker.
+#[test]
+fn bound_chain_takes_one_more_segment_and_recounts() {
+    assert_eq!(
+        form_bound_chain_with_extra_segment(
+            "{2,{1},{0,385ab3ce-dd41-4c25-b89b-974bb478f380}}",
+            "{6,5bdad865-f2c5-434b-8041-ba4aad3b6687}",
+        )
+        .as_deref(),
+        Some(
+            "{3,{1},{0,385ab3ce-dd41-4c25-b89b-974bb478f380},{6,5bdad865-f2c5-434b-8041-ba4aad3b6687}}"
+        )
+    );
+    // A header that does not count its own segments is not a chain.
+    assert_eq!(
+        form_bound_chain_with_extra_segment(
+            "{3,{1},{0,385ab3ce-dd41-4c25-b89b-974bb478f380}}",
+            "{4}"
+        ),
+        None
+    );
+}
+
+/// A `PictureField` writes `BorderColor` between its `ValuesPicture` and its
+/// `Border`, and a `FormattedDocumentField` writes it just ahead of its `Font`.
+#[test]
+fn border_colour_of_picture_and_formatted_document_fields_keeps_its_place() {
+    let mut picture = form_child_item_for_order_test("PictureField");
+    picture.picture_ref = Some("CommonPicture.Тест".to_string());
+    picture.border_color = Some("style:FormBackColor".to_string());
+    picture.control_border = Some(crate::form_schema::FormControlBorderStyle::Single);
+    picture.file_drag_mode = Some("AsFile");
+    let xml = format_form_child_item_xml(&picture, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<ValuesPicture>",
+            "<BorderColor>style:FormBackColor</BorderColor>",
+            "<Border ",
+            "<FileDragMode>AsFile</FileDragMode>",
+        ],
+    );
+
+    let mut formatted = form_child_item_for_order_test("FormattedDocumentField");
+    formatted.read_only = Some(true);
+    formatted.border_color = Some("style:FormBackColor".to_string());
+    formatted.font_xml = Some("<Font ref=\"style:Normal\" kind=\"StyleItem\"/>".to_string());
+    let xml = format_form_child_item_xml(&formatted, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<ReadOnly>true</ReadOnly>",
+            "<BorderColor>style:FormBackColor</BorderColor>",
+            "<Font ref=",
+        ],
+    );
+    assert_eq!(xml.matches("<BorderColor>").count(), 1, "got {xml}");
+}
+
+/// A command button's `Parameter` follows the `CommandName` it parameterises
+/// and precedes the button's `Title`.
+#[test]
+fn button_parameter_follows_the_command_name() {
+    let mut item = form_child_item_for_order_test("Button");
+    item.command_name = Some("Form.StandardCommand.ShowInList".to_string());
+    item.button_parameter = Some("Document.Встреча".to_string());
+    item.title = vec![("ru".to_string(), "Показать в списке".to_string())];
+    let xml = format_form_child_item_xml(&item, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<CommandName>Form.StandardCommand.ShowInList</CommandName>",
+            "<Parameter xsi:type=\"xr:MDObjectRef\">Document.Встреча</Parameter>",
+            "<Title>",
+        ],
+    );
+}
+
+/// A `Popup` closes its own properties with `BackColor` and then `BorderColor`,
+/// both behind the shape representation.
+#[test]
+fn popup_border_colour_closes_the_popup_run() {
+    let mut item = form_child_item_for_order_test("Popup");
+    item.shape_representation = Some("WhenActive");
+    item.border_color = Some("#FFFFFF".to_string());
+    let xml = format_form_child_item_xml(&item, 1, false);
+    assert_xml_order(
+        &xml,
+        &[
+            "<ShapeRepresentation>WhenActive</ShapeRepresentation>",
+            "<BorderColor>#FFFFFF</BorderColor>",
+        ],
+    );
 }

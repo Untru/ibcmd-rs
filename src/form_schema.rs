@@ -359,13 +359,6 @@ pub(crate) struct FormPopupSchema {
 impl FormPopupSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
 
-    /// A `Popup` keeps its background colour in its own option tuple, in the
-    /// slot right behind the three reserved members the layout guard pins.
-    /// On all 3 809 popups of the native UT 11.5.27.75 form dumps the slot
-    /// holds the unset colour on every popup without a `<BackColor>` and a
-    /// readable colour on all five that carry one.
-    pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 7;
-
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -393,6 +386,42 @@ impl FormPopupSchema {
 
     pub(crate) const fn representation(self) -> Option<&'static str> {
         self.representation.xml_value()
+    }
+}
+
+/// The two colours a `Popup` keeps in its own option tuple.
+///
+/// The tuple is the popup's, not the shape's, so the guard is the tuple itself:
+/// wrapper `22`, tag `Popup`, nine members, member 0 spelling the tuple kind.
+/// All 3 911 popups of the native UT 11.5.27.75 form dumps satisfy it, and
+/// under the one colour grammar slot 7 reproduces `<BackColor>` on every one of
+/// them (5 written) and slot 8 reproduces `<BorderColor>` on every one of them
+/// (1 written), with the unset shape coinciding exactly with the absences.
+///
+/// `FormPopupSchema` reaches the same tuple behind three further equalities
+/// that belong to the representation it reads, one of which -- member 6 being
+/// `0` -- is the shape representation another schema reads as a property. That
+/// narrower guard refuses 89 popups, and the single popup that carries a
+/// `<BorderColor>` is one of them, which is why the colours read their tuple
+/// through this guard instead. On the 3 822 popups both guards admit the two
+/// agree exactly, and none of the 89 the narrow guard refuses carries a
+/// `<BackColor>`, so nothing this schema adds contradicts what it replaces.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormPopupColorSchema;
+
+impl FormPopupColorSchema {
+    pub(crate) const OPTIONS_SLOT: usize = FormPopupSchema::OPTIONS_SLOT;
+    const OPTION_COUNT: usize = 9;
+    const OPTION_KIND: &'static str = "7";
+    pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 7;
+    pub(crate) const BORDER_COLOR_OPTION_SLOT: usize = 8;
+
+    pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
+        (wrapper == "22"
+            && item_tag == "Popup"
+            && options.len() == Self::OPTION_COUNT
+            && options.first().map(|field| field.trim()) == Some(Self::OPTION_KIND))
+        .then_some(Self)
     }
 }
 
@@ -2162,6 +2191,15 @@ impl FormLabelDecorationSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
     pub(crate) const TITLE_SLOT: usize = 23;
 
+    /// The decoration keeps its border colour in option slot 7, one slot ahead
+    /// of the back colour it already reads from slot 6.
+    ///
+    /// Read over all 11 550 native `LabelDecoration` items of UT 11.5.27.75
+    /// under the one colour grammar, the slot is a total function of the
+    /// platform's `<BorderColor>`: the unset shape on the 11 545 that carry no
+    /// element and a readable colour on all five that do.
+    pub(crate) const BORDER_COLOR_OPTION_SLOT: usize = 7;
+
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -2832,6 +2870,20 @@ impl FormChildItemEventCollectionSchema {
         })
     }
 
+    /// What identifies a `Pages` event container is the container's own shape,
+    /// and nothing about the two members that are properties in their own
+    /// right.
+    ///
+    /// Census of all 2 687 native `Pages` items of UT 11.5.27.75: every one of
+    /// them has a six-member container whose slot 0 is `4`, slot 3 is `2` and
+    /// slot 4 is `0`. Slots 1 and 5 vary -- 1 999 read `0`/`0`, 631 read
+    /// `1`/`1`, 51 read `1`/`6`, four read `2`/`2`, one `3`/`3` and one `5`/`5`
+    /// -- and under this guard the event record at slot 2 is a total function
+    /// of the platform's `<Events>` on all 2 687: it decodes to no event on the
+    /// 2 487 that carry no element and to exactly the written handler on the
+    /// 200 that do, the 51 items whose two slots disagree included (41 without
+    /// an event, 10 with). Requiring slot 5 to repeat slot 1 is what lost those
+    /// ten `OnCurrentPageChange` handlers.
     pub(crate) fn from_pages_layout(
         wrapper: &str,
         field_count: usize,
@@ -2846,14 +2898,8 @@ impl FormChildItemEventCollectionSchema {
             && direct_discriminator == Some("3")
             && container.len() == 6
             && container.first().map(|field| field.trim()) == Some("4")
-            && matches!(
-                container.get(1).map(|field| field.trim()),
-                Some("0" | "1" | "2" | "3" | "5")
-            )
             && container.get(3).map(|field| field.trim()) == Some("2")
-            && container.get(4).map(|field| field.trim()) == Some("0")
-            && container.get(5).map(|field| field.trim())
-                == container.get(1).map(|field| field.trim()))
+            && container.get(4).map(|field| field.trim()) == Some("0"))
         .then_some(Self {
             owner: FormChildItemEventCollectionOwner::Pages,
             collection_slot: 2,
@@ -2959,14 +3005,23 @@ impl FormFieldSchema {
         direct_discriminator: Option<&str>,
         options: &[&str],
     ) -> Option<Self> {
+        // The border colour rides the option tuple of every field kind that
+        // writes one, and each of the three kinds added here was read off the
+        // whole native UT 11.5.27.75 tree as a total function of the platform's
+        // `<BorderColor>` under the one colour grammar: option slot 13 on all
+        // 16 203 `LabelField` items (4 written), slot 11 on all 1 209
+        // `PictureField` items (24 written), slot 8 on all 41
+        // `FormattedDocumentField` items (7 written). In each case the unset
+        // shape `{3,4,{0}}` coincides exactly with the items that carry no
+        // element and no other shape ever coincides with an absence.
         let (discriminator, options_len, options_kind, text, back, border) = match item_tag {
-            "LabelField" => ("1", 20, "11", Some(8), Some(9), None),
+            "LabelField" => ("1", 20, "11", Some(8), Some(9), Some(13)),
             "InputField" => ("2", 66, "36", Some(37), Some(38), Some(39)),
             "CheckBoxField" => ("3", 13, "11", None, None, None),
             // Option slot 10 holds the text colour on all 2 212 native
             // `PictureField` items: unset on the 2 195 without a `<TextColor>`,
             // readable on all 17 that carry one.
-            "PictureField" => ("4", 24, "10", Some(10), None, None),
+            "PictureField" => ("4", 24, "10", Some(10), None, Some(11)),
             // Likewise option slot 3 on all 1 381 native `RadioButtonField`
             // items.
             "RadioButtonField" => ("5", 12, "8", Some(3), None, None),
@@ -2975,7 +3030,7 @@ impl FormFieldSchema {
             "CalendarField" => ("8", 24, "6", None, None, None),
             "GraphicalSchemaField" => ("14", 14, "3", None, None, None),
             "HTMLDocumentField" => ("15", 13, "3", None, None, Some(3)),
-            "FormattedDocumentField" => ("17", 16, "1", None, None, None),
+            "FormattedDocumentField" => ("17", 16, "1", None, None, Some(8)),
             _ => return None,
         };
         if wrapper != "37"
@@ -3242,8 +3297,28 @@ impl FormFieldSchema {
         18 + self.top_level_offset
     }
 
+    /// Slot `25 + top_level_offset` is the footer alignment of *every* field
+    /// kind this schema admits, and it carries all three written codes, not
+    /// only `Left`.
+    ///
+    /// Read over the whole native UT 11.5.27.75 tree -- 59 121 items across the
+    /// eleven admitted kinds -- the slot is a total function of the platform's
+    /// `<FooterHorizontalAlign>`: `0` on the 241 items that say `Left`, `1` on
+    /// the 5 that say `Center`, `2` on the 14 that say `Right`, and `3` on all
+    /// 58 861 that carry no element at all. No code maps to two answers and no
+    /// kind disagrees with another: `InputField` 143/0/9, `LabelField` 71/2/0,
+    /// `PictureField` 9/3/5, `CheckBoxField` 15/0/0, `RadioButtonField` 1/0/0
+    /// and `SpreadSheetDocumentField` 2/0/0 written, with `CalendarField`,
+    /// `TextDocumentField`, `FormattedDocumentField`, `GraphicalSchemaField`
+    /// and `HTMLDocumentField` reading `3` throughout and writing nothing.
+    /// Reading only code `0` is what hid the nineteen `Center`/`Right` items.
     pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
-        (fields.get(25 + self.top_level_offset)?.trim() == "0").then_some("Left")
+        match fields.get(25 + self.top_level_offset)?.trim() {
+            "0" => Some("Left"),
+            "1" => Some("Center"),
+            "2" => Some("Right"),
+            _ => None,
+        }
     }
 
     pub(crate) fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
@@ -3348,6 +3423,20 @@ impl FormButtonCommonSchema {
         } else {
             None
         }
+    }
+
+    /// The metadata object a command button passes to its command.
+    ///
+    /// Slot `33 + top_level_offset` is a total function of the platform's
+    /// `<Parameter>` over all 27 776 native `Button` items of UT 11.5.27.75:
+    /// it holds the single member `"U"` on the 27 766 that carry no element,
+    /// and the typed value `{"#", <type>, <value>}` on exactly the ten that do,
+    /// the type being the metadata-object-reference type on all ten and the
+    /// value dereferencing to the reference the platform writes, character for
+    /// character. The property had no reader at all, so the writer had nothing
+    /// to emit.
+    pub(crate) const fn parameter_slot(self) -> usize {
+        33 + self.top_level_offset
     }
 
     pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
