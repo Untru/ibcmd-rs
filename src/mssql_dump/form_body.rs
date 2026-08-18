@@ -3290,7 +3290,7 @@ fn parse_form_attribute_with_dcs_type_index(
     );
     if let Some(dynamic_list_use_always) = fields
         .get(14)
-        .map(|field| parse_form_attribute_use_always(&name, field, settings.as_ref()))
+        .map(|field| parse_form_attribute_use_always(&name, field, settings.as_ref(), object_refs))
     {
         let mut seen = use_always.iter().cloned().collect::<BTreeSet<_>>();
         for field_name in dynamic_list_use_always {
@@ -4149,6 +4149,7 @@ pub(super) fn parse_form_attribute_use_always(
     attribute_name: &str,
     settings_field: &str,
     settings: Option<&FormDynamicListSettings>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Vec<String> {
     let Some(settings_fields) = split_1c_braced_fields(settings_field.trim(), 0) else {
         return Vec::new();
@@ -4168,6 +4169,7 @@ pub(super) fn parse_form_attribute_use_always(
         }
     }
     let has_main_table = settings.is_some_and(|settings| settings.main_table.is_some());
+    let universe = form_dynamic_list_use_always_universe(settings, &settings_fields, object_refs);
     let mut parsed = Vec::new();
     let mut seen = BTreeSet::<String>::new();
     for item_id in required_item_ids {
@@ -4176,6 +4178,7 @@ pub(super) fn parse_form_attribute_use_always(
             &item_id,
             &field_name_by_item_id,
             has_main_table,
+            universe.as_ref(),
         ) else {
             continue;
         };
@@ -4289,19 +4292,1024 @@ pub(super) fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]
 /// across the 22 platform observations, all five lists with a nil `MainTable`
 /// wrote `~<attr>.DefaultPicture` and all seventeen with a real main table wrote
 /// `<attr>.DefaultPicture`.
+///
+/// Item id `-3` is the list's grouping pseudo field, written `Group`. The single
+/// platform observation (UT 11.5.27.75,
+/// `DataProcessors/НастройкаПоддержанияЗапасов/Forms/Форма`) carries a real main
+/// table and is written plain; the no-main-table shape is unobserved and is
+/// refused rather than guessed.
+///
+/// A field resolved through the map is prefixed with `~` exactly when its name
+/// is not in the list's resolvable-field universe (see
+/// [`form_dynamic_list_use_always_universe`]); with no universe no marker is
+/// ever added.
 pub(super) fn form_dynamic_list_use_always_field_name(
     attribute_name: &str,
     item_id: &str,
     field_name_by_item_id: &BTreeMap<String, String>,
     has_main_table: bool,
+    universe: Option<&BTreeSet<String>>,
 ) -> Option<String> {
     match item_id {
         "10000000" if has_main_table => Some(format!("{}.DefaultPicture", attribute_name)),
         "10000000" => Some(format!("~{}.DefaultPicture", attribute_name)),
+        "-3" if has_main_table => Some(format!("{}.Group", attribute_name)),
+        "-3" => None,
         _ => field_name_by_item_id
             .get(item_id)
-            .map(|field_name| format!("{}.{}", attribute_name, field_name)),
+            .map(|field_name| match universe {
+                Some(universe) if !universe.contains(field_name) => {
+                    format!("~{}.{}", attribute_name, field_name)
+                }
+                _ => format!("{}.{}", attribute_name, field_name),
+            }),
     }
+}
+
+/// The names a dynamic list can resolve against its data source, or `None` when
+/// the universe cannot be built — in which case no `~` marker is ever written,
+/// which is the pre-existing behavior.
+///
+/// The model is measured against the platform's own `~` markers over the whole
+/// UT 11.5.27.75 tree: 4 356 of 4 357 `<UseAlways>` field observations agree
+/// with "`~` iff the name is not in this universe", and the single disagreement
+/// is the `-3` grouping pseudo field, which has its own rule. The universe is:
+///
+/// * `ManualQuery=0`: the standard attributes of the main table's family
+///   (Russian and English spellings, see
+///   [`form_dynamic_list_std_attribute_pairs`]) plus the declared top-level
+///   children of the main table read off the object-reference index.
+/// * `ManualQuery=1` with `AutoFillAvailableFields` unset or true: the result
+///   column names of the query's final `SELECT` batch, plus the main table's
+///   standard attributes and register dimensions the platform re-adds on its
+///   own — each unless the query already selects that main-table field under a
+///   different alias — plus the English twin of every standard attribute the
+///   query selects from a metadata source under its own Russian name.
+/// * `ManualQuery=1` with `AutoFillAvailableFields=false`: only the names the
+///   query's `{ВЫБРАТЬ ...}` extension lists.
+/// * In every mode: the `dataPath` of each `CalculatedField` the list's
+///   `ServerState` declares.
+///
+/// A query whose final selection carries a `*` resolves every stored name, and
+/// an unparseable input is a refusal — both map to `None`.
+pub(super) fn form_dynamic_list_use_always_universe(
+    settings: Option<&FormDynamicListSettings>,
+    settings_fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<BTreeSet<String>> {
+    let settings = settings?;
+    let mut universe;
+    if settings.manual_query {
+        let query_text = settings.query_text.as_deref()?;
+        let selection = parse_form_dynamic_list_query_selection(query_text)?;
+        if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
+            universe = selection.extension.clone().unwrap_or_default();
+        } else {
+            if selection.has_star {
+                return None;
+            }
+            universe = selection.aliases.clone();
+            universe.extend(form_dynamic_list_selected_standard_twins(
+                &selection,
+                object_refs,
+            ));
+            if let Some(main_table) = settings.main_table.as_deref() {
+                universe.extend(form_dynamic_list_main_table_auto_fields(
+                    main_table,
+                    &selection,
+                    object_refs,
+                )?);
+            }
+        }
+    } else {
+        let main_table = settings.main_table.as_deref()?;
+        let (kind, rest) = main_table.split_once('.')?;
+        if rest.contains('.') {
+            // A virtual-table main table on an auto list is unobserved.
+            return None;
+        }
+        let pairs = form_dynamic_list_std_attribute_pairs(kind)?;
+        if !object_refs
+            .values()
+            .any(|reference| reference == main_table)
+        {
+            return None;
+        }
+        universe = BTreeSet::new();
+        for (ru, en) in pairs {
+            universe.insert((*ru).to_string());
+            universe.insert((*en).to_string());
+        }
+        universe.extend(form_dynamic_list_main_table_children(
+            main_table,
+            object_refs,
+            FORM_DYNAMIC_LIST_MAIN_TABLE_CHILD_KINDS,
+        ));
+    }
+    if let Some(server_state_xml) = &settings.server_state_xml {
+        universe.extend(form_dynamic_list_calculated_field_data_paths(
+            server_state_xml,
+        ));
+    }
+    Some(universe)
+}
+
+/// `AutoFillAvailableFields` as the list-settings bag spells it; absent means
+/// the platform default, which fills the available-field list from the query.
+pub(super) fn parse_form_dynamic_list_auto_fill_available_fields(settings_fields: &[&str]) -> bool {
+    for window in settings_fields.windows(2) {
+        let key = parse_1c_quoted_string_with_len(window[0].trim())
+            .map(|(value, _)| value)
+            .unwrap_or_default();
+        if key == "AutoFillAvailableFields"
+            && let Some(value) = parse_form_setting_bool(window[1])
+        {
+            return value;
+        }
+    }
+    true
+}
+
+/// `dataPath` of every `CalculatedField` a normalized `ServerState` fragment
+/// declares. The fragment is scanned rather than parsed: the writer emits it
+/// verbatim, so the element spelling here is exactly the emitted one.
+fn form_dynamic_list_calculated_field_data_paths(server_state_xml: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = server_state_xml;
+    while let Some(start) = rest.find("<CalculatedField>") {
+        rest = &rest[start + "<CalculatedField>".len()..];
+        let trimmed = rest.trim_start();
+        let Some(path_body) = trimmed.strip_prefix("<dcssch:dataPath>") else {
+            continue;
+        };
+        let Some(end) = path_body.find('<') else {
+            break;
+        };
+        names.push(path_body[..end].to_string());
+    }
+    names
+}
+
+/// Child kinds whose names are addressable as fields of a dynamic list's main
+/// table. Command, Form, Template and nested tabular-section attributes are
+/// not: a required-field name never resolves through them.
+const FORM_DYNAMIC_LIST_MAIN_TABLE_CHILD_KINDS: &[&str] = &[
+    "Attribute",
+    "TabularSection",
+    "Dimension",
+    "Resource",
+    "AddressingAttribute",
+    "AccountingFlag",
+    "ExtDimensionAccountingFlag",
+    "EnumValue",
+];
+
+/// Declared top-level children of a metadata table, read off the same
+/// object-reference index the rest of the form decoder resolves through:
+/// every `{table}.{kind}.{name}` reference contributes `name` when `kind` is
+/// in `kinds`.
+fn form_dynamic_list_main_table_children(
+    table: &str,
+    object_refs: &BTreeMap<String, String>,
+    kinds: &[&str],
+) -> BTreeSet<String> {
+    let prefix = format!("{table}.");
+    let mut names = BTreeSet::new();
+    for reference in object_refs.values() {
+        let Some(rest) = reference.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Some((kind, name)) = rest.split_once('.') else {
+            continue;
+        };
+        if !name.is_empty() && !name.contains('.') && kinds.contains(&kind) {
+            names.insert(name.to_string());
+        }
+    }
+    names
+}
+
+/// Standard attributes of a dynamic list's main table by family, in both the
+/// Russian spelling the query language uses and the English spelling the
+/// use-always list stores. The sets are deliberately property-blind — they do
+/// not condition on hierarchy, owners, periodicity or write mode — and the
+/// whole-tree measurement above holds with them as written.
+pub(super) fn form_dynamic_list_std_attribute_pairs(
+    kind: &str,
+) -> Option<&'static [(&'static str, &'static str)]> {
+    const CATALOG: [(&str, &str); 10] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("Предопределенный", "Predefined"),
+        ("ИмяПредопределенныхДанных", "PredefinedDataName"),
+        ("ВерсияДанных", "DataVersion"),
+        ("Код", "Code"),
+        ("Наименование", "Description"),
+        ("Родитель", "Parent"),
+        ("ЭтоГруппа", "IsFolder"),
+        ("Владелец", "Owner"),
+    ];
+    const DOCUMENT: [(&str, &str); 5] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("Дата", "Date"),
+        ("Номер", "Number"),
+        ("Проведен", "Posted"),
+    ];
+    const ENUM: [(&str, &str); 2] = [("Ссылка", "Ref"), ("Порядок", "Order")];
+    const CHART_OF_CHARACTERISTIC_TYPES: [(&str, &str); 10] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("Предопределенный", "Predefined"),
+        ("ИмяПредопределенныхДанных", "PredefinedDataName"),
+        ("ВерсияДанных", "DataVersion"),
+        ("Код", "Code"),
+        ("Наименование", "Description"),
+        ("ТипЗначения", "ValueType"),
+        ("Родитель", "Parent"),
+        ("ЭтоГруппа", "IsFolder"),
+    ];
+    const CHART_OF_ACCOUNTS: [(&str, &str); 10] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("Предопределенный", "Predefined"),
+        ("ИмяПредопределенныхДанных", "PredefinedDataName"),
+        ("ВерсияДанных", "DataVersion"),
+        ("Код", "Code"),
+        ("Наименование", "Description"),
+        ("Родитель", "Parent"),
+        ("Порядок", "Order"),
+        ("Забалансовый", "OffBalance"),
+    ];
+    const CHART_OF_CALCULATION_TYPES: [(&str, &str); 8] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("Предопределенный", "Predefined"),
+        ("ИмяПредопределенныхДанных", "PredefinedDataName"),
+        ("ВерсияДанных", "DataVersion"),
+        ("Код", "Code"),
+        ("Наименование", "Description"),
+        ("ПериодДействияБазовый", "ActionPeriodIsBasic"),
+    ];
+    const EXCHANGE_PLAN: [(&str, &str); 10] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("Предопределенный", "Predefined"),
+        ("ИмяПредопределенныхДанных", "PredefinedDataName"),
+        ("ВерсияДанных", "DataVersion"),
+        ("Код", "Code"),
+        ("Наименование", "Description"),
+        ("НомерОтправленного", "SentNo"),
+        ("НомерПринятого", "ReceivedNo"),
+        ("ЭтотУзел", "ThisNode"),
+    ];
+    const BUSINESS_PROCESS: [(&str, &str); 8] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("ВерсияДанных", "DataVersion"),
+        ("Дата", "Date"),
+        ("Номер", "Number"),
+        ("Завершен", "Completed"),
+        ("Стартован", "Started"),
+        ("ВедущаяЗадача", "HeadTask"),
+    ];
+    const TASK: [(&str, &str); 9] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("ВерсияДанных", "DataVersion"),
+        ("Дата", "Date"),
+        ("Номер", "Number"),
+        ("Наименование", "Description"),
+        ("БизнесПроцесс", "BusinessProcess"),
+        ("ТочкаМаршрута", "RoutePoint"),
+        ("Выполнена", "Executed"),
+    ];
+    const INFORMATION_REGISTER: [(&str, &str); 4] = [
+        ("Период", "Period"),
+        ("Регистратор", "Recorder"),
+        ("НомерСтроки", "LineNumber"),
+        ("Активность", "Active"),
+    ];
+    const ACCUMULATION_REGISTER: [(&str, &str); 5] = [
+        ("Период", "Period"),
+        ("Регистратор", "Recorder"),
+        ("НомерСтроки", "LineNumber"),
+        ("Активность", "Active"),
+        ("ВидДвижения", "RecordType"),
+    ];
+    const CALCULATION_REGISTER: [(&str, &str); 12] = [
+        ("Период", "Period"),
+        ("Регистратор", "Recorder"),
+        ("НомерСтроки", "LineNumber"),
+        ("Активность", "Active"),
+        ("ПериодРегистрации", "RegistrationPeriod"),
+        ("ПериодДействия", "ActionPeriod"),
+        ("ПериодДействияНачало", "BegOfActionPeriod"),
+        ("ПериодДействияКонец", "EndOfActionPeriod"),
+        ("БазовыйПериодНачало", "BegOfBasePeriod"),
+        ("БазовыйПериодКонец", "EndOfBasePeriod"),
+        ("ВидРасчета", "CalculationType"),
+        ("Сторно", "ReversingEntry"),
+    ];
+    const DOCUMENT_JOURNAL: [(&str, &str); 6] = [
+        ("Ссылка", "Ref"),
+        ("ПометкаУдаления", "DeletionMark"),
+        ("Дата", "Date"),
+        ("Номер", "Number"),
+        ("Проведен", "Posted"),
+        ("Тип", "Type"),
+    ];
+    match kind {
+        "Catalog" => Some(&CATALOG),
+        "Document" => Some(&DOCUMENT),
+        "Enum" => Some(&ENUM),
+        "ChartOfCharacteristicTypes" => Some(&CHART_OF_CHARACTERISTIC_TYPES),
+        "ChartOfAccounts" => Some(&CHART_OF_ACCOUNTS),
+        "ChartOfCalculationTypes" => Some(&CHART_OF_CALCULATION_TYPES),
+        "ExchangePlan" => Some(&EXCHANGE_PLAN),
+        "BusinessProcess" => Some(&BUSINESS_PROCESS),
+        "Task" => Some(&TASK),
+        "InformationRegister" => Some(&INFORMATION_REGISTER),
+        "AccumulationRegister" => Some(&ACCUMULATION_REGISTER),
+        "AccountingRegister" => Some(&INFORMATION_REGISTER),
+        "CalculationRegister" => Some(&CALCULATION_REGISTER),
+        "DocumentJournal" => Some(&DOCUMENT_JOURNAL),
+        _ => None,
+    }
+}
+
+const FORM_DYNAMIC_LIST_REGISTER_KINDS: &[&str] = &[
+    "InformationRegister",
+    "AccumulationRegister",
+    "AccountingRegister",
+    "CalculationRegister",
+];
+
+/// Main-table fields the platform adds to a manual query's available-field
+/// list on its own: the standard attributes of the family, plus dimensions
+/// for a register — each unless the query already selects that very
+/// main-table field under a different alias. `None` when the family is
+/// unknown: an unresolvable main table is a refusal, not a guess.
+fn form_dynamic_list_main_table_auto_fields(
+    main_table: &str,
+    selection: &FormDynamicListQuerySelection,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<BTreeSet<String>> {
+    let kind = main_table.split('.').next()?;
+    let pairs = form_dynamic_list_std_attribute_pairs(kind)?;
+    let base_table = match main_table.splitn(3, '.').collect::<Vec<_>>().as_slice() {
+        [kind, name, _virtual_table] => format!("{kind}.{name}"),
+        _ => main_table.to_string(),
+    };
+    let mut candidates: Vec<(String, Option<&'static str>)> = pairs
+        .iter()
+        .map(|(ru, en)| ((*ru).to_string(), Some(*en)))
+        .collect();
+    if FORM_DYNAMIC_LIST_REGISTER_KINDS.contains(&kind) {
+        for dimension in
+            form_dynamic_list_main_table_children(&base_table, object_refs, &["Dimension"])
+        {
+            candidates.push((dimension, None));
+        }
+    }
+    let main_table_alias = selection.sources.iter().find_map(|(reference, alias)| {
+        (reference.as_deref() == Some(main_table))
+            .then(|| alias.clone())
+            .flatten()
+    });
+    let mut fields = BTreeSet::new();
+    for (name, twin) in candidates {
+        if let Some(alias) = &main_table_alias
+            && let Some(selected_as) = selection.paths.get(&(alias.clone(), name.clone()))
+            && selected_as != &name
+        {
+            continue;
+        }
+        if let Some(twin) = twin {
+            fields.insert(twin.to_string());
+        }
+        fields.insert(name);
+    }
+    Some(fields)
+}
+
+/// English twins of standard attributes the query selects from a metadata
+/// source under their own Russian names: `Алиас.Ссылка` (or `... КАК Ссылка`)
+/// from a catalog source makes `Ref` resolvable too, and so on through the
+/// family's standard-attribute table.
+fn form_dynamic_list_selected_standard_twins(
+    selection: &FormDynamicListQuerySelection,
+    object_refs: &BTreeMap<String, String>,
+) -> BTreeSet<String> {
+    let mut twins = BTreeSet::new();
+    for ((source_alias, field), selected_as) in &selection.paths {
+        if selected_as != field {
+            continue;
+        }
+        let Some(reference) = selection.sources.iter().find_map(|(reference, alias)| {
+            (alias.as_deref() == Some(source_alias.as_str()))
+                .then(|| reference.clone())
+                .flatten()
+        }) else {
+            continue;
+        };
+        let Some((kind, rest)) = reference.split_once('.') else {
+            continue;
+        };
+        if rest.contains('.') {
+            continue;
+        }
+        let Some(pairs) = form_dynamic_list_std_attribute_pairs(kind) else {
+            continue;
+        };
+        if !object_refs
+            .values()
+            .any(|candidate| candidate == &reference)
+        {
+            continue;
+        }
+        if let Some((_, en)) = pairs.iter().find(|(ru, _)| ru == field) {
+            twins.insert((*en).to_string());
+        }
+    }
+    twins
+}
+
+/// What the final `SELECT` of a dynamic-list query names, read with the query
+/// language's own naming rules rather than a text scan.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub(super) struct FormDynamicListQuerySelection {
+    /// Result column names of the top-level selection list.
+    pub(super) aliases: BTreeSet<String>,
+    /// A `*` selection item makes every stored name resolvable.
+    pub(super) has_star: bool,
+    /// Names the `{ВЫБРАТЬ ...}` extension after the selection list declares,
+    /// when the query carries one.
+    pub(super) extension: Option<BTreeSet<String>>,
+    /// FROM sources of the final select: metadata reference (when the source
+    /// names one) and alias (when declared).
+    pub(super) sources: Vec<(Option<String>, Option<String>)>,
+    /// `(source alias, field) -> result column name` for every plain
+    /// two-segment selection path.
+    pub(super) paths: BTreeMap<(String, String), String>,
+}
+
+fn is_1c_query_ident(token: &str) -> bool {
+    let mut chars = token.chars();
+    match chars.next() {
+        Some(first) if first.is_alphabetic() || first == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_alphanumeric() || c == '_')
+}
+
+fn is_1c_query_keyword(token: &str, keywords: &[&str]) -> bool {
+    let upper = token.to_uppercase();
+    keywords.contains(&upper.as_str())
+}
+
+const Q_SELECT: &[&str] = &["ВЫБРАТЬ", "SELECT"];
+const Q_AS: &[&str] = &["КАК", "AS"];
+const Q_FROM: &[&str] = &["ИЗ", "FROM"];
+const Q_INTO: &[&str] = &["ПОМЕСТИТЬ", "INTO"];
+const Q_MODIFIER: &[&str] = &[
+    "РАЗЛИЧНЫЕ",
+    "DISTINCT",
+    "ПЕРВЫЕ",
+    "TOP",
+    "РАЗРЕШЕННЫЕ",
+    "ALLOWED",
+];
+const Q_JOIN: &[&str] = &[
+    "ЛЕВОЕ",
+    "ПРАВОЕ",
+    "ВНУТРЕННЕЕ",
+    "ПОЛНОЕ",
+    "СОЕДИНЕНИЕ",
+    "LEFT",
+    "RIGHT",
+    "INNER",
+    "FULL",
+    "JOIN",
+];
+const Q_CLAUSE_END: &[&str] = &[
+    "ГДЕ",
+    "WHERE",
+    "СГРУППИРОВАТЬ",
+    "GROUP",
+    "УПОРЯДОЧИТЬ",
+    "ORDER",
+    "ИМЕЮЩИЕ",
+    "HAVING",
+    "ОБЪЕДИНИТЬ",
+    "UNION",
+    "ИТОГИ",
+    "TOTALS",
+    "ДЛЯ",
+    "FOR",
+    "АВТОУПОРЯДОЧИВАНИЕ",
+    "AUTOORDER",
+    "ИНДЕКСИРОВАТЬ",
+    "INDEX",
+];
+const Q_ON: &[&str] = &["ПО", "ON"];
+const Q_LITERAL: &[&str] = &[
+    "NULL",
+    "ИСТИНА",
+    "ЛОЖЬ",
+    "TRUE",
+    "FALSE",
+    "НЕОПРЕДЕЛЕНО",
+    "UNDEFINED",
+];
+
+/// Tokenizes 1C query text: string literals (with `""` escapes), `//` comments
+/// dropped, identifiers, numbers, `&Parameter` as one token, and punctuation.
+fn tokenize_1c_query(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c == '"' {
+            let mut j = i + 1;
+            while j < chars.len() {
+                if chars[j] == '"' {
+                    if j + 1 < chars.len() && chars[j + 1] == '"' {
+                        j += 2;
+                        continue;
+                    }
+                    break;
+                }
+                j += 1;
+            }
+            let end = j.min(chars.len().saturating_sub(1));
+            tokens.push(chars[i..=end].iter().collect());
+            i = j + 1;
+            continue;
+        }
+        if c == '/' && chars.get(i + 1) == Some(&'/') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c.is_alphabetic() || c == '_' {
+            let mut j = i + 1;
+            while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                j += 1;
+            }
+            tokens.push(chars[i..j].iter().collect());
+            i = j;
+            continue;
+        }
+        if c.is_ascii_digit() {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+            if chars.get(j) == Some(&'.') && chars.get(j + 1).is_some_and(|c| c.is_ascii_digit()) {
+                j += 1;
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    j += 1;
+                }
+            }
+            tokens.push(chars[i..j].iter().collect());
+            i = j;
+            continue;
+        }
+        if c == '&'
+            && chars
+                .get(i + 1)
+                .is_some_and(|c| c.is_alphabetic() || *c == '_')
+        {
+            let mut j = i + 1;
+            while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                j += 1;
+            }
+            tokens.push(chars[i..j].iter().collect());
+            i = j;
+            continue;
+        }
+        if (c == '<' && matches!(chars.get(i + 1), Some('>') | Some('=')))
+            || (c == '>' && chars.get(i + 1) == Some(&'='))
+        {
+            tokens.push(chars[i..i + 2].iter().collect());
+            i += 2;
+            continue;
+        }
+        tokens.push(c.to_string());
+        i += 1;
+    }
+    tokens
+}
+
+fn split_1c_query_batches(tokens: &[String]) -> Vec<Vec<String>> {
+    let mut batches = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0i64;
+    for token in tokens {
+        match token.as_str() {
+            "(" | "{" => depth += 1,
+            ")" | "}" => depth -= 1,
+            _ => {}
+        }
+        if token == ";" && depth == 0 {
+            batches.push(std::mem::take(&mut current));
+        } else {
+            current.push(token.clone());
+        }
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
+}
+
+fn is_1c_query_temp_batch(tokens: &[String]) -> bool {
+    let mut depth = 0i64;
+    for token in tokens {
+        match token.as_str() {
+            "(" | "{" => depth += 1,
+            ")" | "}" => depth -= 1,
+            _ if depth == 0 && is_1c_query_keyword(token, Q_INTO) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn split_1c_query_items(tokens: &[String]) -> Vec<Vec<String>> {
+    let mut items = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0i64;
+    for token in tokens {
+        match token.as_str() {
+            "(" | "{" => depth += 1,
+            ")" | "}" => depth -= 1,
+            _ => {}
+        }
+        if token == "," && depth == 0 {
+            items.push(std::mem::take(&mut current));
+        } else {
+            current.push(token.clone());
+        }
+    }
+    if !current.is_empty() {
+        items.push(current);
+    }
+    items
+}
+
+/// The result column name of one selection item, per the query language:
+/// explicit `КАК Алиас`, a bare trailing alias, the parameter name for a lone
+/// `&Параметр`, the joined post-source segments of a plain dotted path, or
+/// `*`. `None` when the item names nothing (a literal, an expression with no
+/// alias).
+fn form_query_selection_item_alias(item: &[String]) -> Option<String> {
+    if item.is_empty() {
+        return None;
+    }
+    if item.len() >= 2
+        && is_1c_query_keyword(&item[item.len() - 2], Q_AS)
+        && is_1c_query_ident(&item[item.len() - 1])
+    {
+        return Some(item[item.len() - 1].clone());
+    }
+    if item[item.len() - 1] == "*" {
+        return Some("*".to_string());
+    }
+    if item.len() == 1
+        && let Some(parameter) = item[0].strip_prefix('&')
+    {
+        return Some(parameter.to_string());
+    }
+    if !is_1c_query_ident(&item[item.len() - 1]) {
+        return None;
+    }
+    let is_plain_path = item.iter().enumerate().all(|(index, token)| {
+        if index % 2 == 0 {
+            is_1c_query_ident(token)
+        } else {
+            token == "."
+        }
+    }) && item.len() % 2 == 1;
+    if is_plain_path {
+        let segments: Vec<&String> = item.iter().step_by(2).collect();
+        if segments.len() == 1 {
+            if is_1c_query_keyword(segments[0], Q_LITERAL) {
+                return None;
+            }
+            return Some(segments[0].clone());
+        }
+        return Some(segments[1..].iter().map(|s| s.as_str()).collect::<String>());
+    }
+    if item.len() >= 2 && item[item.len() - 2] == "." {
+        return Some(item[item.len() - 1].clone());
+    }
+    if is_1c_query_keyword(&item[item.len() - 1], Q_LITERAL)
+        || is_1c_query_keyword(&item[item.len() - 1], Q_AS)
+    {
+        return None;
+    }
+    Some(item[item.len() - 1].clone())
+}
+
+/// The field name one `{ВЫБРАТЬ ...}` extension item declares: an explicit
+/// `КАК Алиас`, or the head of a plain path with an optional trailing `.*`.
+fn form_query_extension_item_name(item: &[String]) -> Option<String> {
+    if item.len() >= 2
+        && is_1c_query_keyword(&item[item.len() - 2], Q_AS)
+        && is_1c_query_ident(&item[item.len() - 1])
+    {
+        return Some(item[item.len() - 1].clone());
+    }
+    let body = if item.len() >= 3 && item[item.len() - 1] == "*" && item[item.len() - 2] == "." {
+        &item[..item.len() - 2]
+    } else {
+        item
+    };
+    let is_plain_path = !body.is_empty()
+        && body.len() % 2 == 1
+        && body.iter().enumerate().all(|(index, token)| {
+            if index % 2 == 0 {
+                is_1c_query_ident(token)
+            } else {
+                token == "."
+            }
+        });
+    is_plain_path.then(|| body[0].clone())
+}
+
+const Q_RU_SOURCE_KINDS: &[(&str, &str)] = &[
+    ("СПРАВОЧНИК", "Catalog"),
+    ("ДОКУМЕНТ", "Document"),
+    ("РЕГИСТРСВЕДЕНИЙ", "InformationRegister"),
+    ("РЕГИСТРНАКОПЛЕНИЯ", "AccumulationRegister"),
+    ("РЕГИСТРБУХГАЛТЕРИИ", "AccountingRegister"),
+    ("РЕГИСТРРАСЧЕТА", "CalculationRegister"),
+    ("ПЛАНВИДОВХАРАКТЕРИСТИК", "ChartOfCharacteristicTypes"),
+    ("ПЛАНСЧЕТОВ", "ChartOfAccounts"),
+    ("ПЛАНВИДОВРАСЧЕТА", "ChartOfCalculationTypes"),
+    ("БИЗНЕСПРОЦЕСС", "BusinessProcess"),
+    ("ЗАДАЧА", "Task"),
+    ("ПЛАНОБМЕНА", "ExchangePlan"),
+    ("ПЕРЕЧИСЛЕНИЕ", "Enum"),
+    ("ЖУРНАЛДОКУМЕНТОВ", "DocumentJournal"),
+    ("КРИТЕРИЙОТБОРА", "FilterCriterion"),
+    ("CATALOG", "Catalog"),
+    ("DOCUMENT", "Document"),
+    ("INFORMATIONREGISTER", "InformationRegister"),
+    ("ACCUMULATIONREGISTER", "AccumulationRegister"),
+    ("ACCOUNTINGREGISTER", "AccountingRegister"),
+    ("CALCULATIONREGISTER", "CalculationRegister"),
+    ("CHARTOFCHARACTERISTICTYPES", "ChartOfCharacteristicTypes"),
+    ("CHARTOFACCOUNTS", "ChartOfAccounts"),
+    ("CHARTOFCALCULATIONTYPES", "ChartOfCalculationTypes"),
+    ("BUSINESSPROCESS", "BusinessProcess"),
+    ("TASK", "Task"),
+    ("EXCHANGEPLAN", "ExchangePlan"),
+    ("ENUM", "Enum"),
+    ("DOCUMENTJOURNAL", "DocumentJournal"),
+    ("FILTERCRITERION", "FilterCriterion"),
+];
+
+const Q_RU_VIRTUAL_TABLES: &[(&str, &str)] = &[
+    ("ОБОРОТЫ", "Turnovers"),
+    ("ОСТАТКИ", "Balance"),
+    ("ОСТАТКИИОБОРОТЫ", "BalanceAndTurnovers"),
+    ("СРЕЗПОСЛЕДНИХ", "SliceLast"),
+    ("СРЕЗПЕРВЫХ", "SliceFirst"),
+    ("ЗАДАЧИПОИСПОЛНИТЕЛЮ", "TasksByExecutive"),
+    ("TURNOVERS", "Turnovers"),
+    ("BALANCE", "Balance"),
+    ("BALANCEANDTURNOVERS", "BalanceAndTurnovers"),
+    ("SLICELAST", "SliceLast"),
+    ("SLICEFIRST", "SliceFirst"),
+    ("TASKSBYEXECUTIVE", "TasksByExecutive"),
+];
+
+/// Metadata reference of one FROM source: `Справочник.Х` → `Catalog.Х`,
+/// `РегистрНакопления.Х.Обороты(...)` → `AccumulationRegister.Х.Turnovers`.
+/// `None` for a subquery, a temporary table, or an unrecognized head.
+fn form_query_source_reference(source: &[String]) -> Option<String> {
+    let mut segments = Vec::new();
+    let mut index = 0;
+    while index < source.len() && is_1c_query_ident(&source[index]) {
+        segments.push(source[index].as_str());
+        index += 1;
+        if source.get(index).map(|t| t.as_str()) == Some(".") {
+            index += 1;
+        } else {
+            break;
+        }
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    let kind_upper = segments[0].to_uppercase();
+    let kind = Q_RU_SOURCE_KINDS
+        .iter()
+        .find_map(|(ru, en)| (*ru == kind_upper).then_some(*en))?;
+    match segments.len() {
+        2 => Some(format!("{kind}.{}", segments[1])),
+        3 => {
+            let virtual_upper = segments[2].to_uppercase();
+            let virtual_table = Q_RU_VIRTUAL_TABLES
+                .iter()
+                .find_map(|(ru, en)| (*ru == virtual_upper).then_some(*en))
+                .unwrap_or(segments[2]);
+            Some(format!("{kind}.{}.{virtual_table}", segments[1]))
+        }
+        _ => None,
+    }
+}
+
+/// Parses the final `SELECT` batch of a dynamic-list query: the last batch not
+/// stored into a temporary table. `None` when no such batch exists or it has
+/// no selection list.
+pub(super) fn parse_form_dynamic_list_query_selection(
+    query_text: &str,
+) -> Option<FormDynamicListQuerySelection> {
+    let tokens = tokenize_1c_query(query_text);
+    let batches = split_1c_query_batches(&tokens);
+    let batch = batches
+        .iter()
+        .rfind(|batch| !batch.is_empty() && !is_1c_query_temp_batch(batch))?;
+    let mut index = 0;
+    while index < batch.len() && !is_1c_query_keyword(&batch[index], Q_SELECT) {
+        index += 1;
+    }
+    if index >= batch.len() {
+        return None;
+    }
+    index += 1;
+    while index < batch.len()
+        && (is_1c_query_keyword(&batch[index], Q_MODIFIER)
+            || batch[index].chars().all(|c| c.is_ascii_digit()))
+    {
+        index += 1;
+    }
+    let mut selection_tokens = Vec::new();
+    let mut extension: Option<BTreeSet<String>> = None;
+    let mut depth = 0i64;
+    while index < batch.len() {
+        let token = &batch[index];
+        if depth == 0 && token == "{" {
+            let mut j = index + 1;
+            let mut inner_depth = 1i64;
+            let mut body = Vec::new();
+            while j < batch.len() && inner_depth > 0 {
+                match batch[j].as_str() {
+                    "(" | "{" => inner_depth += 1,
+                    ")" | "}" => inner_depth -= 1,
+                    _ => {}
+                }
+                if inner_depth > 0 {
+                    body.push(batch[j].clone());
+                }
+                j += 1;
+            }
+            if body
+                .first()
+                .is_some_and(|t| is_1c_query_keyword(t, Q_SELECT))
+            {
+                let mut names = BTreeSet::new();
+                for item in split_1c_query_items(&body[1..]) {
+                    if let Some(name) = form_query_extension_item_name(&item) {
+                        names.insert(name);
+                    }
+                }
+                extension = Some(names);
+            }
+            index = j;
+            continue;
+        }
+        match token.as_str() {
+            "(" | "{" => depth += 1,
+            ")" | "}" => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && (is_1c_query_keyword(token, Q_FROM) || is_1c_query_keyword(token, Q_INTO))
+        {
+            break;
+        }
+        selection_tokens.push(token.clone());
+        index += 1;
+    }
+    let mut selection = FormDynamicListQuerySelection {
+        extension,
+        ..FormDynamicListQuerySelection::default()
+    };
+    for item in split_1c_query_items(&selection_tokens) {
+        match form_query_selection_item_alias(&item) {
+            Some(alias) if alias == "*" => selection.has_star = true,
+            Some(alias) => {
+                selection.aliases.insert(alias.clone());
+                let expression =
+                    if item.len() >= 2 && is_1c_query_keyword(&item[item.len() - 2], Q_AS) {
+                        &item[..item.len() - 2]
+                    } else {
+                        &item[..]
+                    };
+                if expression.len() == 3
+                    && expression[1] == "."
+                    && is_1c_query_ident(&expression[0])
+                    && is_1c_query_ident(&expression[2])
+                {
+                    selection
+                        .paths
+                        .insert((expression[0].clone(), expression[2].clone()), alias);
+                }
+            }
+            None => {}
+        }
+    }
+    // FROM sources of this select.
+    while index < batch.len() && !is_1c_query_keyword(&batch[index], Q_FROM) {
+        index += 1;
+    }
+    if index < batch.len() {
+        index += 1;
+        let mut clause = Vec::new();
+        let mut depth = 0i64;
+        while index < batch.len() {
+            let token = &batch[index];
+            match token.as_str() {
+                "(" | "{" => depth += 1,
+                ")" | "}" => depth -= 1,
+                _ => {}
+            }
+            if depth == 0 && is_1c_query_keyword(token, Q_CLAUSE_END) {
+                break;
+            }
+            clause.push(token.clone());
+            index += 1;
+        }
+        let mut parts = Vec::new();
+        let mut current = Vec::new();
+        let mut depth = 0i64;
+        for token in &clause {
+            match token.as_str() {
+                "(" | "{" => depth += 1,
+                ")" | "}" => depth -= 1,
+                _ => {}
+            }
+            if depth == 0 && (is_1c_query_keyword(token, Q_JOIN) || token == ",") {
+                if !current.is_empty() {
+                    parts.push(std::mem::take(&mut current));
+                }
+            } else {
+                current.push(token.clone());
+            }
+        }
+        if !current.is_empty() {
+            parts.push(current);
+        }
+        for part in parts {
+            let mut head = Vec::new();
+            let mut depth = 0i64;
+            for token in &part {
+                match token.as_str() {
+                    "(" | "{" => depth += 1,
+                    ")" | "}" => depth -= 1,
+                    _ => {}
+                }
+                if depth == 0 && is_1c_query_keyword(token, Q_ON) {
+                    break;
+                }
+                head.push(token.clone());
+            }
+            if head.is_empty() {
+                continue;
+            }
+            let last = &head[head.len() - 1];
+            let alias_declared = head.len() >= 2
+                && is_1c_query_ident(last)
+                && (is_1c_query_keyword(&head[head.len() - 2], Q_AS)
+                    || head[head.len() - 2] == ")"
+                    || head[head.len() - 2] == "*"
+                    || is_1c_query_ident(&head[head.len() - 2]));
+            let (alias, body) = if alias_declared {
+                let body_end = if is_1c_query_keyword(&head[head.len() - 2], Q_AS) {
+                    head.len() - 2
+                } else {
+                    head.len() - 1
+                };
+                (Some(last.clone()), &head[..body_end])
+            } else {
+                (None, &head[..])
+            };
+            selection
+                .sources
+                .push((form_query_source_reference(body), alias));
+        }
+    }
+    Some(selection)
 }
 
 pub(super) fn collect_form_dynamic_list_field_map_item(

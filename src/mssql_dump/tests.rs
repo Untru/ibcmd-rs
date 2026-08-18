@@ -11013,6 +11013,7 @@ fn extracts_form_attribute_use_always_from_native_fields_map_without_settings() 
         "СписокРаспоряженияНаОформление",
         r##"{0,16,"FieldsMapItemId0",{"N",6},"FieldsMapItemName0",{"S","Номер"},"FiledsMapItemId0",{"N",6},"FiledsMapItemName0",{"S","Номер"},"FieldsMapItemId1",{"N",8},"FieldsMapItemName1",{"S","Дата"},"FiledsMapItemId1",{"N",8},"FiledsMapItemName1",{"S","Дата"},"FieldsMapItemId2",{"N",32},"FieldsMapItemName2",{"S","Организация"},"FiledsMapItemId2",{"N",32},"FiledsMapItemName2",{"S","Организация"},"FieldsMapItemId3",{"N",88},"FieldsMapItemName3",{"S","Склад"},"FiledsMapItemId3",{"N",88},"FiledsMapItemName3",{"S","Склад"},"FieldsMapItemId4",{"N",113},"FieldsMapItemName4",{"S","Подразделение"},"FiledsMapItemId4",{"N",113},"FiledsMapItemName4",{"S","Подразделение"},"FieldsMapItemId5",{"N",148},"FieldsMapItemName5",{"S","Комментарий"},"FiledsMapItemId5",{"N",148},"FiledsMapItemName5",{"S","Комментарий"},"FieldsMapItemId6",{"N",154},"FieldsMapItemName6",{"S","Менеджер"},"FiledsMapItemId6",{"N",154},"FiledsMapItemName6",{"S","Менеджер"},"ReqMapFieldId0",{"B",1},"ReqMapFieldId1",{"N",6},"ReqMapFieldId2",{"N",8},"ReqMapFieldId3",{"N",32},"ReqMapFieldId4",{"N",88},"ReqMapFieldId5",{"N",113},"ReqMapFieldId6",{"N",148},"ReqMapFieldId7",{"N",154}}"##,
         None,
+        &BTreeMap::new(),
     );
 
     assert_eq!(
@@ -11026,6 +11027,146 @@ fn extracts_form_attribute_use_always_from_native_fields_map_without_settings() 
             "СписокРаспоряженияНаОформление.Комментарий".to_string(),
             "СписокРаспоряженияНаОформление.Менеджер".to_string(),
         ]
+    );
+}
+
+#[test]
+fn marks_use_always_fields_a_manual_query_cannot_resolve() {
+    let attribute = parse_form_attribute(
+            r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,12,"QueryText",{"S","ВЫБРАТЬ Т.Поле КАК Поле ИЗ РегистрСведений.Тест КАК Т"},"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Поле"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Поле"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","Пропало"},"FiledsMapItemId1",{"N",2},"FiledsMapItemName1",{"S","Пропало"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",2}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+                "InformationRegister.Тест".to_string(),
+            )]),
+        )
+        .unwrap();
+
+    // The `~` stays in the sort key, so the marked entry leads the block.
+    assert_eq!(
+        attribute.use_always,
+        vec!["~Список.Пропало".to_string(), "Список.Поле".to_string(),]
+    );
+}
+
+#[test]
+fn marks_use_always_fields_outside_an_auto_list_main_table() {
+    let attribute = parse_form_attribute(
+            r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,14,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Реквизит"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Реквизит"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","Ref"},"FiledsMapItemId1",{"N",2},"FiledsMapItemName1",{"S","Ref"},"FieldsMapItemId2",{"N",3},"FieldsMapItemName2",{"S","Пропавший"},"FiledsMapItemId2",{"N",3},"FiledsMapItemName2",{"S","Пропавший"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",2},"ReqMapFieldId2",{"N",3}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::from([
+                (
+                    "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+                    "Catalog.Тест".to_string(),
+                ),
+                (
+                    "0249bef8-62d9-4f0e-ad44-6ee1998ff21d".to_string(),
+                    "Catalog.Тест.Attribute.Реквизит".to_string(),
+                ),
+            ]),
+        )
+        .unwrap();
+
+    assert_eq!(
+        attribute.use_always,
+        vec![
+            "~Список.Пропавший".to_string(),
+            "Список.Ref".to_string(),
+            "Список.Реквизит".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn restricts_use_always_resolution_to_the_extension_when_autofill_is_off() {
+    let attribute = parse_form_attribute(
+            r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,12,"QueryText",{"S","ВЫБРАТЬ Т.Первое КАК Первое, Т.Второе КАК Второе {ВЫБРАТЬ Первое} ИЗ РегистрСведений.Тест КАК Т"},"AutoFillAvailableFields",{"B",0},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Первое"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Первое"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","Второе"},"FiledsMapItemId1",{"N",2},"FiledsMapItemName1",{"S","Второе"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",2}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    // `Второе` is a result column of the query, but with
+    // `AutoFillAvailableFields=false` only the `{ВЫБРАТЬ ...}` extension names
+    // are resolvable.
+    assert_eq!(
+        attribute.use_always,
+        vec!["~Список.Второе".to_string(), "Список.Первое".to_string(),]
+    );
+}
+
+#[test]
+fn resolves_the_grouping_pseudo_field_only_against_a_main_table() {
+    let with_main_table = parse_form_attribute(
+            r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,4,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"ReqMapFieldId0",{"N",-3}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+                "InformationRegister.Тест".to_string(),
+            )]),
+        )
+        .unwrap();
+    assert_eq!(with_main_table.use_always, vec!["Список.Group".to_string()]);
+
+    // The no-main-table shape is unobserved on the platform and is refused.
+    let without_main_table = parse_form_attribute(
+            r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,4,"ManualQuery",{"B",1},"ReqMapFieldId0",{"N",-3}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    assert_eq!(without_main_table.use_always, Vec::<String>::new());
+}
+
+#[test]
+fn reads_the_final_select_of_a_dynamic_list_query() {
+    let selection = parse_form_dynamic_list_query_selection(
+        "ВЫБРАТЬ РАЗЛИЧНЫЕ\n\tВТТ.Поле КАК Поле\nПОМЕСТИТЬ ВТ\nИЗ\n\tСправочник.Другой КАК ВТТ\n;\n\
+         ВЫБРАТЬ\n\tТ2.Поле2 КАК Итог,\n\tТ2.Ссылка.Наименование,\n\t&Параметр,\n\tNULL КАК Пусто,\n\tИСТИНА\nИЗ\n\
+         \tРегистрНакопления.Рег.Обороты(, ) КАК Т2\nГДЕ\n\tТ2.Поле2 > 0",
+    )
+    .unwrap();
+
+    assert_eq!(
+        selection.aliases,
+        BTreeSet::from([
+            "Итог".to_string(),
+            // A plain dotted path names its post-source segments joined.
+            "СсылкаНаименование".to_string(),
+            "Параметр".to_string(),
+            "Пусто".to_string(),
+        ])
+    );
+    assert!(!selection.has_star);
+    assert_eq!(selection.extension, None);
+    assert_eq!(
+        selection.sources,
+        vec![(
+            Some("AccumulationRegister.Рег.Turnovers".to_string()),
+            Some("Т2".to_string()),
+        )]
+    );
+    assert_eq!(
+        selection.paths,
+        BTreeMap::from([(("Т2".to_string(), "Поле2".to_string()), "Итог".to_string(),)])
+    );
+}
+
+#[test]
+fn reads_a_dynamic_list_query_star_and_extension() {
+    let selection = parse_form_dynamic_list_query_selection(
+        "ВЫБРАТЬ\n\tТ.А КАК А,\n\tТ.*\n{ВЫБРАТЬ\n\tА,\n\tБ.*}\nИЗ\n\tСправочник.Х КАК Т",
+    )
+    .unwrap();
+
+    assert!(selection.has_star);
+    assert_eq!(
+        selection.extension,
+        Some(BTreeSet::from(["А".to_string(), "Б".to_string()]))
+    );
+    assert_eq!(
+        selection.sources,
+        vec![(Some("Catalog.Х".to_string()), Some("Т".to_string()))]
     );
 }
 
