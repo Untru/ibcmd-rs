@@ -968,6 +968,8 @@ pub(crate) enum FormListSettingsChildKind {
     /// root is only an intermediate: the inline position nests it, see
     /// [`transliterate_form_list_settings_group_items_document`].
     GroupItems,
+    /// The data-parameter values, stored under the `DataParameters` property.
+    DataParameters,
 }
 
 impl FormListSettingsChildKind {
@@ -983,6 +985,7 @@ impl FormListSettingsChildKind {
             Self::Order => "order",
             Self::ConditionalAppearance => "conditionalAppearance",
             Self::GroupItems => "groupItems",
+            Self::DataParameters => "dataParameters",
         }
     }
 }
@@ -1864,7 +1867,7 @@ impl<'a> DataCompositionXmlWriter<'a> {
             }
             format!(
                 "dcsset:{}",
-                lower_camel_data_composition_local(std::str::from_utf8(local).ok()?)?
+                form_list_settings_child_source_local(std::str::from_utf8(local).ok()?)?
             )
         } else {
             let rendered_name = self.render_data_composition_node_name(
@@ -2576,6 +2579,23 @@ fn form_root_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'stat
         XS_NS => Some("xs"),
         _ => None,
     }
+}
+
+/// The inline source name of a `ListSettings` child root, given the local name
+/// its storage document uses.
+///
+/// Four of the five children differ from their storage spelling in the initial
+/// character only. `DataParameterValues` is the exception: storage names the
+/// document by the collection it holds, the inline position names the settings
+/// member the collection fills. Evidence: UT 11.5.27.75, the 3 native
+/// `<ListSettings>` blocks carrying a `dcsset:dataParameters` all store a
+/// document rooted `<DataParameterValues>` in the settings namespace, and no
+/// other storage root in the corpus maps across a name change.
+fn form_list_settings_child_source_local(local: &str) -> Option<String> {
+    if local == "DataParameterValues" {
+        return Some("dataParameters".to_string());
+    }
+    lower_camel_data_composition_local(local)
 }
 
 /// Lowercases the first character of a storage-spelled element local name.

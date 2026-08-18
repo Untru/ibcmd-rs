@@ -9366,7 +9366,7 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
             use_always: Vec::new(),
             functional_options: Vec::new(),
             settings: Some(FormDynamicListSettings {
-                auto_save_user_settings: false,
+                auto_save_user_settings: Some(false),
                 manual_query: true,
                 manual_query_explicit: true,
                 dynamic_data_read: true,
@@ -9397,7 +9397,7 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
 #[test]
 fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
     let mut settings = FormDynamicListSettings {
-        auto_save_user_settings: true,
+        auto_save_user_settings: Some(true),
         manual_query: false,
         manual_query_explicit: false,
         dynamic_data_read: false,
@@ -9497,7 +9497,7 @@ fn derives_default_list_settings_from_auto_save_for_renamed_attribute() {
     .expect("renamed dynamic-list attribute");
     let settings = attribute.settings.expect("dynamic-list settings");
 
-    assert!(settings.auto_save_user_settings);
+    assert_eq!(settings.auto_save_user_settings, Some(true));
     assert_eq!(
         settings.main_table.as_deref(),
         Some("Document.СинтетическийДокумент")
@@ -9607,6 +9607,13 @@ fn restores_accumulation_register_balance_main_table_from_raw_category() {
     );
 }
 
+/// Contract change: `AutoSaveUserSettings` is not the switch that decides
+/// whether the platform materializes the three standard user settings of a
+/// dynamic list. This test used to assert that a false value suppressed them;
+/// it does not -- see `apply_implicit_form_dynamic_list_settings` for the
+/// corpus-wide measurement. What the false value does decide is that the
+/// element itself is written, which
+/// `omits_auto_save_user_settings_when_the_bag_stores_it_true` pins.
 #[test]
 fn preserves_custom_order_without_auto_save_for_renamed_attribute() {
     let order_xml = concat!(
@@ -9627,14 +9634,13 @@ fn preserves_custom_order_without_auto_save_for_renamed_attribute() {
         .replace("ORDER_XML", &encode_base64_for_test(order_xml.as_bytes()));
     let attribute = parse_form_attribute(&raw_attribute, &BTreeMap::new(), &object_refs)
         .expect("renamed dynamic-list attribute");
-    let settings = attribute.settings.expect("dynamic-list settings");
+    let settings = attribute.settings.clone().expect("dynamic-list settings");
 
-    assert!(!settings.auto_save_user_settings);
+    assert_eq!(settings.auto_save_user_settings, Some(false));
     assert_eq!(
         settings.main_table.as_deref(),
         Some("Document.СинтетическийДокумент")
     );
-    assert!(settings.list_settings.filter.is_none());
     let order = settings
         .list_settings
         .order
@@ -9647,9 +9653,73 @@ fn preserves_custom_order_without_auto_save_for_renamed_attribute() {
             if field.field().as_str() == "Дата"
                 && field.order_type() == DcsOrderType::Asc
     ));
-    assert!(settings.list_settings.conditional_appearance.is_none());
-    assert!(settings.list_settings.items_view_mode.is_none());
-    assert!(settings.list_settings.items_user_setting_id.is_none());
+    // The absent `Filter` and conditional-appearance properties are
+    // materialized as the standard settings even though the bag switches
+    // automatic saving off.
+    assert_eq!(
+        settings
+            .list_settings
+            .filter
+            .as_ref()
+            .and_then(FormListSettingsFilter::typed)
+            .and_then(|filter| filter.user_setting_id().map(CanonicalText::as_str)),
+        Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb")
+    );
+    assert_eq!(
+        settings
+            .list_settings
+            .conditional_appearance
+            .as_ref()
+            .and_then(FormListSettingsConditionalAppearance::typed)
+            .and_then(|value| value.user_setting_id().map(CanonicalText::as_str)),
+        Some("b75fecce-942b-4aed-abc9-e6a02e460fb3")
+    );
+    assert_eq!(
+        settings.list_settings.items_view_mode.as_deref(),
+        Some("Normal")
+    );
+    assert_eq!(
+        settings.list_settings.items_user_setting_id.as_deref(),
+        Some("911b6018-f537-43e8-a417-da56b22f9aec")
+    );
+
+    let xml = format_form_attributes_xml(&[attribute]);
+    assert!(
+        xml.contains("<AutoSaveUserSettings>false</AutoSaveUserSettings>"),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<MainTable>").unwrap() < xml.find("<AutoSaveUserSettings>").unwrap(),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<AutoSaveUserSettings>").unwrap() < xml.find("<ListSettings>").unwrap(),
+        "{xml}"
+    );
+}
+
+/// The element is written for an explicitly false value only: a true value is
+/// the platform's default and stays unwritten, which is what keeps 1 931 of the
+/// 1 947 UT 11.5.27.75 dynamic-list blocks free of it.
+#[test]
+fn omits_auto_save_user_settings_when_the_bag_stores_it_true() {
+    let object_refs = BTreeMap::from([(
+        "11111111-1111-4111-8111-111111111111".to_string(),
+        "Document.СинтетическийДокумент".to_string(),
+    )]);
+    let raw_attribute = r##"{9,{18},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,2,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,11111111-1111-4111-8111-111111111111},"AutoSaveUserSettings",{"B",1}},{0,0}}"##;
+    let attribute = parse_form_attribute(raw_attribute, &BTreeMap::new(), &object_refs)
+        .expect("dynamic-list attribute");
+    assert_eq!(
+        attribute
+            .settings
+            .as_ref()
+            .expect("dynamic-list settings")
+            .auto_save_user_settings,
+        Some(true)
+    );
+    let xml = format_form_attributes_xml(&[attribute]);
+    assert!(!xml.contains("<AutoSaveUserSettings>"), "{xml}");
 }
 
 /// Contract change: a well-formed storage `Order` the typed cohort refuses is
@@ -9976,7 +10046,7 @@ fn transliterated_appearance_resolves_style_item_font_references() {
 #[test]
 fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
     let mut settings = FormDynamicListSettings {
-        auto_save_user_settings: true,
+        auto_save_user_settings: Some(true),
         manual_query: false,
         manual_query_explicit: false,
         dynamic_data_read: false,
@@ -10010,6 +10080,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
             items_view_mode: None,
             items_user_setting_id: Some("971fd96e-2ae3-41d5-9d7a-bad772efb890".to_string()),
             group_items: None,
+            data_parameters: None,
         },
     };
 
@@ -10419,7 +10490,7 @@ fn formats_explicit_false_dynamic_data_read() {
         use_always: Vec::new(),
         functional_options: Vec::new(),
         settings: Some(FormDynamicListSettings {
-            auto_save_user_settings: false,
+            auto_save_user_settings: Some(false),
             manual_query: false,
             manual_query_explicit: false,
             dynamic_data_read: false,
@@ -11437,7 +11508,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
             settings: dynamic_list.then_some(FormDynamicListSettings {
                 manual_query: false,
                 manual_query_explicit: false,
-                auto_save_user_settings: false,
+                auto_save_user_settings: Some(false),
                 dynamic_data_read: false,
                 dynamic_data_read_explicit: false,
                 query_text: None,
@@ -63130,7 +63201,7 @@ fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>)
 
 fn data_path_dynamic_list_settings(fields: Vec<FormDynamicListField>) -> FormDynamicListSettings {
     FormDynamicListSettings {
-        auto_save_user_settings: false,
+        auto_save_user_settings: Some(false),
         manual_query: false,
         manual_query_explicit: false,
         dynamic_data_read: false,

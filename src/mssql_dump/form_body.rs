@@ -845,7 +845,12 @@ pub(super) struct FormParameter {
 pub(super) struct FormDynamicListSettings {
     pub(super) manual_query: bool,
     pub(super) manual_query_explicit: bool,
-    pub(super) auto_save_user_settings: bool,
+    /// The packed bag's own `AutoSaveUserSettings` value, `None` when the bag
+    /// does not carry the property at all. The distinction is kept because the
+    /// element is written only for an explicitly false value; the absent state
+    /// is unobserved in UT 11.5.27.75 (the property is present in all 1 947
+    /// dynamic-list bags) and is therefore treated as writing nothing.
+    pub(super) auto_save_user_settings: Option<bool>,
     pub(super) dynamic_data_read: bool,
     pub(super) dynamic_data_read_explicit: bool,
     pub(super) query_text: Option<String>,
@@ -920,6 +925,10 @@ pub(super) struct FormListSettings {
     /// children keep a `Transliterated` arm: the content is the platform's own
     /// bytes re-spelled lexically, not a typed representation.
     pub(super) group_items: Option<String>,
+    /// The `dcsset:dataParameters` element the `DataParameters` storage
+    /// document re-spells to, held as the rendered fragment for the same
+    /// reason `group_items` is.
+    pub(super) data_parameters: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3400,51 +3409,72 @@ pub(super) fn normalize_form_dynamic_list_settings(
     settings
 }
 
+/// The three standard user settings of a dynamic list, and the identifier of
+/// its grouping collection, as the platform materializes them.
+///
+/// Each of `Filter`, `Order` and the conditional-appearance property is a
+/// separate storage document with three physical states, and the platform
+/// answers each state the same way wherever it occurs:
+///
+/// * property ABSENT -> the platform materializes the standard setting and
+///   writes it: `<dcsset:viewMode>Normal` plus the fixed identifier the build
+///   assigns to that setting;
+/// * property PRESENT and empty -> the platform writes nothing for it;
+/// * property PRESENT with content -> the content is written.
+///
+/// Evidence: UT 11.5.27.75, all 1 947 native `<Settings xsi:type="DynamicList">`
+/// blocks in the corpus, read as the physical state of the packed bag against
+/// the platform's own bytes -- 5 841 property instances, 5 070 absent, 366
+/// present-with-content the typed cohort refuses, 225 present-with-content it
+/// accepts, and 180 present-and-empty. The standard setting is written for
+/// every one of the 5 070 absences, spread over 1 850 blocks, and for none of
+/// the 180 empties, spread over 68. The two states never mix inside one bag --
+/// of the 19 observed `(Filter, Order, Appearance)` state triples not one pairs
+/// an absent property with an empty one -- so the container stays empty
+/// (`<ListSettings/>`) exactly for the 49 bags whose three properties are all
+/// empty, which is what the previous rule already produced for them.
+///
+/// The identifiers are not per-object values: `dfcece9d-…`, `88619765-…`,
+/// `b75fecce-…` and `911b6018-…` are one build-wide constant per setting,
+/// carried by the packed storage documents themselves (see the base64 bodies in
+/// `module_blob`), and the repetition is what identifies them as the standard
+/// settings rather than saved ones.
+///
+/// `AutoSaveUserSettings` does not gate any of this. It was previously read as
+/// the switch that turns the materialization on, and that is measurably wrong:
+/// 13 of the 16 blocks whose bag stores it as false carry at least one absent
+/// property, and the platform materializes the standard setting in every one of
+/// them; the remaining 3 have nothing to materialize because all three of their
+/// properties are physically present.
 pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynamicListSettings) {
-    if !settings.auto_save_user_settings {
-        return;
-    }
     let list_settings = &mut settings.list_settings;
     let has_any_list_settings = list_settings.filter.is_some()
         || list_settings.order.is_some()
         || list_settings.conditional_appearance.is_some();
-    if !has_any_list_settings
-        && list_settings.items_view_mode.is_none()
-        && list_settings.items_user_setting_id.is_none()
-    {
+    if list_settings.filter.is_none() {
         list_settings.filter = Some(FormListSettingsFilter::Typed(
             default_form_list_settings_filter(),
         ));
+    }
+    if list_settings.order.is_none() {
         list_settings.order = Some(FormListSettingsOrder::Typed(
             default_form_list_settings_order(),
         ));
+    }
+    if list_settings.conditional_appearance.is_none() {
         list_settings.conditional_appearance = Some(FormListSettingsConditionalAppearance::Typed(
             platform_default_form_list_settings_conditional_appearance()
                 .expect("bundled conditional-appearance default is valid"),
         ));
+    }
+    if !has_any_list_settings
+        && list_settings.items_view_mode.is_none()
+        && list_settings.items_user_setting_id.is_none()
+    {
         list_settings.items_view_mode = Some("Normal".to_string());
         list_settings.items_user_setting_id =
             Some("911b6018-f537-43e8-a417-da56b22f9aec".to_string());
         return;
-    }
-    if has_any_list_settings {
-        if list_settings.filter.is_none() {
-            list_settings.filter = Some(FormListSettingsFilter::Typed(
-                default_form_list_settings_filter(),
-            ));
-        }
-        if list_settings.order.is_none() {
-            list_settings.order = Some(FormListSettingsOrder::Typed(
-                default_form_list_settings_order(),
-            ));
-        }
-        if list_settings.conditional_appearance.is_none() {
-            list_settings.conditional_appearance =
-                Some(FormListSettingsConditionalAppearance::Typed(
-                    platform_default_form_list_settings_conditional_appearance()
-                        .expect("bundled conditional-appearance default is valid"),
-                ));
-        }
     }
     if list_settings.items_user_setting_id.is_none() {
         list_settings.items_user_setting_id =
@@ -3956,7 +3986,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
     dcs_type_index: &DcsTypeIndex,
 ) -> Option<FormDynamicListSettings> {
     let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
-    let mut auto_save_user_settings = false;
+    let mut auto_save_user_settings = None;
     let mut manual_query = false;
     let mut manual_query_explicit = false;
     let mut dynamic_data_read = false;
@@ -3986,9 +4016,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
                 explicit_fields.extend(parsed_fields.clone());
                 fields.extend(parsed_fields);
             }
-            "AutoSaveUserSettings" => {
-                auto_save_user_settings = parse_form_setting_bool(window[1]).unwrap_or(false)
-            }
+            "AutoSaveUserSettings" => auto_save_user_settings = parse_form_setting_bool(window[1]),
             "ManualQuery" => {
                 manual_query_explicit = true;
                 manual_query = parse_form_setting_bool(window[1]).unwrap_or(false);
@@ -4015,6 +4043,10 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             "Group" => {
                 list_settings.group_items =
                     parse_form_list_settings_group_items(window[1], object_refs)
+            }
+            "DataParameters" => {
+                list_settings.data_parameters =
+                    parse_form_list_settings_data_parameters(window[1], object_refs)
             }
             // `GroupSelectedSettingViewMode` is the record that decides
             // `dcsset:itemsViewMode` whenever the bag carries the group family;
@@ -5605,6 +5637,38 @@ pub(super) fn parse_form_list_settings_filter(
             Some(refused("present storage Filter parsed as absent"))
         }
         Err(error) => Some(refused(error.reason())),
+    }
+}
+
+/// The `dcsset:dataParameters` element the `DataParameters` property re-spells
+/// to, or nothing.
+///
+/// The stored document is re-spelled exactly as the other `ListSettings`
+/// children are, but this child has no materialized default: an empty stored
+/// document writes nothing, and so does an absent property. That is what
+/// separates it from the three standard user settings, whose absence is
+/// materialized.
+///
+/// Evidence: UT 11.5.27.75. All 1 947 dynamic-list bags carry a
+/// `DataParameters` property; exactly 3 of them re-spell to a document with
+/// content, and those 3 are exactly the 3 native `<ListSettings>` blocks that
+/// carry a `dcsset:dataParameters`. The remaining 1 944 write nothing and no
+/// native block of theirs carries the element. Like `group_items` this property
+/// is only ever additive, so a document the lexical writer cannot account for
+/// writes nothing and leaves the rest of the block as it was.
+pub(super) fn parse_form_list_settings_data_parameters(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let payload = extract_base64_payload(field)?;
+    let bytes = decode_base64_mime(payload)?;
+    match transliterated_form_list_settings_child(
+        &bytes,
+        FormListSettingsChildKind::DataParameters,
+        object_refs,
+    )? {
+        FormListSettingsChildTransliteration::Empty => None,
+        FormListSettingsChildTransliteration::Fragment(fragment) => Some(fragment),
     }
 }
 
@@ -23291,6 +23355,21 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
                     escape_xml_text(main_table)
                 ));
             }
+            // The dynamic list's user-settings switch is written only when the
+            // packed bag stores it as false; a true value is the platform's
+            // default and is left unwritten.
+            //
+            // Evidence: UT 11.5.27.75, equality of sets over all 1 947 native
+            // dynamic-list blocks -- 16 bags hold `{"B",0}` and all 16 native
+            // blocks carry `<AutoSaveUserSettings>false</AutoSaveUserSettings>`,
+            // 1 931 hold `{"B",1}` and none of those blocks carries the element,
+            // with no counter-example either way. Its position is pinned by the
+            // same 16 blocks: it follows `MainTable` (14/14 that have one),
+            // `QueryText` (10/10), `Field`, `Parameter` and `KeyField`, and
+            // precedes `ListSettings` 16/16.
+            if settings.auto_save_user_settings == Some(false) {
+                xml.push_str("\t\t\t\t<AutoSaveUserSettings>false</AutoSaveUserSettings>\r\n");
+            }
             xml.push_str(&format_form_list_settings_xml_with_dcs_profiles(
                 &settings.list_settings,
                 dcs_source_profile,
@@ -23425,6 +23504,7 @@ fn format_form_list_settings_xml_with_dcs_profiles(
             settings.conditional_appearance.as_ref(),
         )
         && settings.group_items.is_none()
+        && settings.data_parameters.is_none()
         && canonical_parts.tail().is_empty()
     {
         // No child renders. Whether the container itself is written is
@@ -23456,6 +23536,14 @@ fn format_form_list_settings_xml_with_dcs_profiles(
                 xml.push_str(filter);
             }
         }
+    }
+    // The data-parameter values sit between the filter and the order.
+    // Evidence: UT 11.5.27.75, the 3 native `<ListSettings>` blocks that carry
+    // a `dcsset:dataParameters` -- it trails `dcsset:filter` 3/3 and precedes
+    // `dcsset:order` 3/3 and `dcsset:conditionalAppearance` 3/3, with no
+    // counter-example.
+    if let Some(data_parameters) = settings.data_parameters.as_deref() {
+        xml.push_str(data_parameters);
     }
     match settings.order.as_ref() {
         Some(FormListSettingsOrder::Transliterated(fragment)) => xml.push_str(fragment),
