@@ -863,6 +863,17 @@ pub(super) struct FormDynamicListSettings {
     /// diagnostic: it never feeds Form.xml emission, which continues to be
     /// governed exclusively by `server_state_xml` above.
     pub(super) server_state_envelope: Option<FormServerStateEnvelope>,
+    /// `AutoFillAvailableFields` as the packed bag stores it, `None` when the
+    /// bag does not carry the property.
+    pub(super) auto_fill_available_fields: Option<bool>,
+    /// `GetInvisibleFieldPresentations` as the packed bag stores it, `None`
+    /// when the bag does not carry the property.
+    pub(super) get_invisible_field_presentations: Option<bool>,
+    /// `KeyType` as the packed bag's numeric code names it, already resolved to
+    /// the element text; `None` for the code that writes nothing.
+    pub(super) key_type: Option<&'static str>,
+    /// The `KeyFields` value list, in storage order.
+    pub(super) key_fields: Vec<String>,
     pub(super) list_settings: FormListSettings,
 }
 
@@ -3987,6 +3998,10 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
 ) -> Option<FormDynamicListSettings> {
     let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
     let mut auto_save_user_settings = None;
+    let mut auto_fill_available_fields = None;
+    let mut get_invisible_field_presentations = None;
+    let mut key_type = None;
+    let mut key_fields = Vec::new();
     let mut manual_query = false;
     let mut manual_query_explicit = false;
     let mut dynamic_data_read = false;
@@ -4017,6 +4032,14 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
                 fields.extend(parsed_fields);
             }
             "AutoSaveUserSettings" => auto_save_user_settings = parse_form_setting_bool(window[1]),
+            "AutoFillAvailableFields" => {
+                auto_fill_available_fields = parse_form_setting_bool(window[1])
+            }
+            "GetInvisibleFieldPresentations" => {
+                get_invisible_field_presentations = parse_form_setting_bool(window[1])
+            }
+            "KeyType" => key_type = parse_form_dynamic_list_key_type(window[1]),
+            "KeyFields" => key_fields = parse_form_dynamic_list_key_fields(window[1]),
             "ManualQuery" => {
                 manual_query_explicit = true;
                 manual_query = parse_form_setting_bool(window[1]).unwrap_or(false);
@@ -4096,6 +4119,10 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
         return None;
     }
     Some(FormDynamicListSettings {
+        auto_fill_available_fields,
+        get_invisible_field_presentations,
+        key_type,
+        key_fields,
         auto_save_user_settings,
         manual_query,
         manual_query_explicit,
@@ -5458,6 +5485,73 @@ pub(super) fn parse_form_setting_number(field: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+/// The dynamic list's row-key discipline, as the element text names it, or
+/// `None` when the stored code is the one the platform writes nothing for.
+///
+/// Evidence: UT 11.5.27.75, equality of sets over all 1 947 native
+/// `<Settings xsi:type="DynamicList">` blocks -- every bag carries `KeyType`,
+/// 1 945 hold `{"N",0}` and none of those blocks writes the element, 1 holds
+/// `{"N",1}` and its block writes `<KeyType>FieldValue</KeyType>`, 1 holds
+/// `{"N",2}` and its block writes `<KeyType>RowKey</KeyType>`. No other code
+/// occurs; an unknown one is refused rather than guessed, which writes nothing
+/// and leaves the rest of the block as it was.
+pub(super) fn parse_form_dynamic_list_key_type(field: &str) -> Option<&'static str> {
+    match parse_form_setting_number(field)?.as_str() {
+        "1" => Some("FieldValue"),
+        "2" => Some("RowKey"),
+        _ => None,
+    }
+}
+
+/// The `KeyFields` value list, in storage order.
+///
+/// The property is stored as a typed reference to the platform's value-list
+/// type `51e7a0d2-530b-11d4-b98a-008048da3034`, whose payload is a counted list
+/// of `{"S",<name>}` entries.
+///
+/// Evidence: UT 11.5.27.75, equality of sets over all 1 947 native dynamic-list
+/// blocks -- every bag carries `KeyFields` under that one type id, 1 938 hold an
+/// empty list `{0}` and none of those blocks writes a `<KeyField>`, and the
+/// remaining 9 hold 1, 2 or 3 entries and write exactly those names, in that
+/// order, as consecutive `<KeyField>` elements: 13 elements against 13 stored
+/// names with no counter-example either way. A payload whose declared count and
+/// entries disagree, or which is not the value-list type, is refused.
+pub(super) fn parse_form_dynamic_list_key_fields(field: &str) -> Vec<String> {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return Vec::new();
+    };
+    if fields.len() != 3 || fields.first().map(|value| value.trim()) != Some("\"#\"") {
+        return Vec::new();
+    }
+    if fields.get(1).map(|value| value.trim()) != Some(FORM_DYNAMIC_LIST_KEY_FIELDS_TYPE_ID) {
+        return Vec::new();
+    }
+    let Some(items) = split_1c_braced_fields(fields[2].trim(), 0) else {
+        return Vec::new();
+    };
+    let Some(count) = items
+        .first()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    if items.len() != count + 1 {
+        return Vec::new();
+    }
+    let mut names = Vec::with_capacity(count);
+    for item in items.iter().skip(1) {
+        let Some(name) = parse_form_setting_string(item) else {
+            return Vec::new();
+        };
+        names.push(name);
+    }
+    names
+}
+
+/// The platform value-list type the `KeyFields` property is stored under. It is
+/// the only type id the property carries across UT 11.5.27.75's 1 947 bags.
+const FORM_DYNAMIC_LIST_KEY_FIELDS_TYPE_ID: &str = "51e7a0d2-530b-11d4-b98a-008048da3034";
+
 pub(super) fn parse_form_spreadsheet_document_settings(
     field: &str,
     value_types: &[ConstantValueType],
@@ -5552,7 +5646,56 @@ pub(super) fn prefix_default_xml_tags(fragment: &str, prefix: &str) -> String {
             output.push_str(name);
         }
         index = name_end;
+        // The attribute span of the same tag, with every unprefixed `xsi:type`
+        // value re-spelled the way the element names around it are.
+        let mut tag_end = index;
+        while tag_end < bytes.len() && bytes[tag_end] != b'>' {
+            tag_end += 1;
+        }
+        let tag_end = bytes.len().min(tag_end + 1);
+        output.push_str(&prefix_default_xsi_type_values(
+            &fragment[index..tag_end],
+            prefix,
+        ));
+        index = tag_end;
     }
+    output
+}
+
+/// Re-spells the value of every `xsi:type` attribute in one tag's attribute
+/// span, when that value carries no prefix of its own.
+///
+/// An `xsi:type` value is a QName, so it resolves against the same in-scope
+/// default namespace the surrounding element names do. Lifting a fragment out
+/// of a document that declared that namespace as the default and into one that
+/// names it by a prefix has to move the attribute value with the element names;
+/// leaving it bare would rebind it to whatever default namespace the host
+/// document happens to declare.
+///
+/// Evidence that the platform agrees: UT 11.5.27.75, the one native embedded
+/// spreadsheet block that carries named items writes all 10 of them as
+/// `<mxl:namedItem xsi:type="mxl:NamedItemCells">`. No embedded block in the
+/// corpus carries any other `xsi:type` value.
+fn prefix_default_xsi_type_values(span: &str, prefix: &str) -> String {
+    const MARKER: &str = "xsi:type=\"";
+    let mut output = String::with_capacity(span.len());
+    let mut rest = span;
+    while let Some(at) = rest.find(MARKER) {
+        let (head, tail) = rest.split_at(at + MARKER.len());
+        output.push_str(head);
+        let Some(end) = tail.find('"') else {
+            rest = tail;
+            break;
+        };
+        let value = &tail[..end];
+        if !value.is_empty() && !value.contains(':') {
+            output.push_str(prefix);
+            output.push(':');
+        }
+        output.push_str(value);
+        rest = &tail[end..];
+    }
+    output.push_str(rest);
     output
 }
 
@@ -6272,31 +6415,48 @@ pub(super) fn normalize_form_main_table_category(
     category: Option<&str>,
 ) -> Option<String> {
     let main_table = main_table?;
-    match (main_table.as_str(), category) {
-        (value, Some("3"))
-            if value.starts_with("AccumulationRegister.") && !value.ends_with(".Balance") =>
-        {
-            Some(format!("{value}.Balance"))
-        }
-        (value, Some("3"))
-            if value.starts_with("AccountingRegister.")
-                && !value.ends_with(".RecordsWithExtDimensions") =>
-        {
-            Some(format!("{value}.RecordsWithExtDimensions"))
-        }
-        (value, Some("3"))
-            if value.starts_with("InformationRegister.") && !value.ends_with(".SliceLast") =>
-        {
-            Some(format!("{value}.SliceLast"))
-        }
-        (value, Some("3"))
-            if value.starts_with("Task.") && !value.ends_with(".TasksByExecutive") =>
-        {
-            Some(format!("{value}.TasksByExecutive"))
-        }
-        _ => Some(main_table),
+    let Some(category) = category else {
+        return Some(main_table);
+    };
+    let Some((kind, _)) = main_table.split_once('.') else {
+        return Some(main_table);
+    };
+    let Some(suffix) = FORM_MAIN_TABLE_CATEGORY_SUFFIXES
+        .iter()
+        .find(|(stored, table_kind, _)| *stored == category && *table_kind == kind)
+        .map(|(_, _, suffix)| *suffix)
+    else {
+        return Some(main_table);
+    };
+    if main_table.ends_with(suffix) && main_table.matches('.').count() > 1 {
+        return Some(main_table);
     }
+    Some(format!("{main_table}.{suffix}"))
 }
+
+/// The virtual table each `MainTableCategory` code names, per metadata kind.
+///
+/// The code is not "this object's default virtual table": it identifies the
+/// virtual table itself, so the same kind reaches different tables under
+/// different codes and one code covers different tables across kinds.
+///
+/// Evidence: UT 11.5.27.75, a total tabulation of the stored code against the
+/// platform's own `<MainTable>` text over all 1 947 native dynamic-list blocks.
+/// `{"N",0}` (118 blocks) writes no `<MainTable>` at all; `{"N",1}` (1 806)
+/// writes the bare `Kind.Name` across all ten kinds that occur; `{"N",2}` (2)
+/// writes `Task.<name>.TasksByExecutive`; `{"N",3}` (17) writes
+/// `AccumulationRegister.<name>.Balance` (11) and
+/// `InformationRegister.<name>.SliceLast` (6); `{"N",4}` (4) writes
+/// `AccumulationRegister.<name>.Turnovers`. No other code occurs and no pair
+/// disagrees. A pair outside the table -- including every accounting-register
+/// code, none of which the corpus carries -- writes the bare main table rather
+/// than a guessed suffix.
+const FORM_MAIN_TABLE_CATEGORY_SUFFIXES: &[(&str, &str, &str)] = &[
+    ("2", "Task", "TasksByExecutive"),
+    ("3", "AccumulationRegister", "Balance"),
+    ("3", "InformationRegister", "SliceLast"),
+    ("4", "AccumulationRegister", "Turnovers"),
+];
 
 pub(super) fn extract_form_body_parameters(
     trailing: &[String],
@@ -23309,6 +23469,22 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
         }
         if let Some(settings) = &attribute.settings {
             xml.push_str("\t\t\t<Settings xsi:type=\"DynamicList\">\r\n");
+            // The available-field autofill switch is written only when the
+            // packed bag stores it as false, and it opens the block.
+            //
+            // Evidence: UT 11.5.27.75, equality of sets over all 1 947 native
+            // dynamic-list blocks -- every bag carries the property, 1 936 hold
+            // `{"B",1}` and none of those blocks writes the element, 11 hold
+            // `{"B",0}` and all 11 blocks write
+            // `<AutoFillAvailableFields>false</AutoFillAvailableFields>`, with
+            // no counter-example either way. Its position is pinned by the same
+            // 11 blocks: in every one it is the first child of `<Settings>`,
+            // ahead of `ManualQuery`.
+            if settings.auto_fill_available_fields == Some(false) {
+                xml.push_str(
+                    "\t\t\t\t<AutoFillAvailableFields>false</AutoFillAvailableFields>\r\n",
+                );
+            }
             if settings.manual_query || settings.manual_query_explicit {
                 xml.push_str(&format!(
                     "\t\t\t\t<ManualQuery>{}</ManualQuery>\r\n",
@@ -23367,8 +23543,46 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
             // same 16 blocks: it follows `MainTable` (14/14 that have one),
             // `QueryText` (10/10), `Field`, `Parameter` and `KeyField`, and
             // precedes `ListSettings` 16/16.
+            // The row-key discipline and the key-field names follow the main
+            // table and precede the user-settings switch.
+            //
+            // Evidence: UT 11.5.27.75. All 9 blocks that write a `<KeyField>`
+            // and both blocks that write a `<KeyType>` place them after the
+            // `ServerState` block's `<Parameter>` elements and before
+            // `<AutoSaveUserSettings>` (1/1 co-occurrence) and `<ListSettings>`
+            // (9/9). None of those 11 blocks also carries a `<MainTable>` --
+            // every one stores `MainTableCategory` `{"N",0}` -- so the relative
+            // order of these two elements against `MainTable` is unobserved and
+            // the placement chosen here is consistent with every observation.
+            if let Some(key_type) = settings.key_type {
+                xml.push_str(&format!("\t\t\t\t<KeyType>{key_type}</KeyType>\r\n"));
+            }
+            for key_field in &settings.key_fields {
+                xml.push_str(&format!(
+                    "\t\t\t\t<KeyField>{}</KeyField>\r\n",
+                    escape_xml_text(key_field)
+                ));
+            }
             if settings.auto_save_user_settings == Some(false) {
                 xml.push_str("\t\t\t\t<AutoSaveUserSettings>false</AutoSaveUserSettings>\r\n");
+            }
+            // The invisible-field-presentation switch is written only when the
+            // packed bag stores it as false, and it closes the block ahead of
+            // `<ListSettings>`.
+            //
+            // Evidence: UT 11.5.27.75, equality of sets over all 1 947 native
+            // dynamic-list blocks -- every bag carries the property, 1 938 hold
+            // `{"B",1}` and none of those blocks writes the element, 9 hold
+            // `{"B",0}` and all 9 blocks write
+            // `<GetInvisibleFieldPresentations>false</...>`, with no
+            // counter-example either way. Its position is pinned by the same 9
+            // blocks: it is the last child before `<ListSettings>` in all 9,
+            // and it follows `<AutoSaveUserSettings>` in the one block that
+            // writes both.
+            if settings.get_invisible_field_presentations == Some(false) {
+                xml.push_str(
+                    "\t\t\t\t<GetInvisibleFieldPresentations>false</GetInvisibleFieldPresentations>\r\n",
+                );
             }
             xml.push_str(&format_form_list_settings_xml_with_dcs_profiles(
                 &settings.list_settings,
@@ -23381,9 +23595,17 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
             xml.push_str(
                 "\t\t\t<Settings xmlns:mxl=\"http://v8.1c.ru/8.2/data/spreadsheet\" xsi:type=\"mxl:SpreadsheetDocument\">\r\n",
             );
+            // The embedded document's children are children of `<Settings>`,
+            // so they start one level deeper than the element that carries
+            // them -- the same base indent every other `<Settings>` child uses.
+            //
+            // Evidence: UT 11.5.27.75, all 22 native embedded
+            // `mxl:SpreadsheetDocument` settings blocks across the 17 forms
+            // that carry one: `<Settings>` sits at three tabs and every
+            // top-level `mxl:` child at four, with no counter-example.
             xml.push_str(&indent_xml_fragment(
                 spreadsheet_document_settings,
-                "\t\t\t",
+                "\t\t\t\t",
             ));
             xml.push_str("\t\t\t</Settings>\r\n");
         } else if let Some(type_description_settings) = &attribute.type_description_settings {

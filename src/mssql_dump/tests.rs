@@ -9380,6 +9380,10 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
                         .to_string(),
                 ),
                 server_state_envelope: None,
+                auto_fill_available_fields: None,
+                get_invisible_field_presentations: None,
+                key_type: None,
+                key_fields: Vec::new(),
                 list_settings: FormListSettings::default(),
             }),
             spreadsheet_document_settings: None,
@@ -9408,6 +9412,10 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
         fields: Vec::new(),
         server_state_xml: None,
         server_state_envelope: None,
+        auto_fill_available_fields: None,
+        get_invisible_field_presentations: None,
+        key_type: None,
+        key_fields: Vec::new(),
         list_settings: FormListSettings::default(),
     };
 
@@ -9562,13 +9570,21 @@ fn restores_accumulation_register_balance_main_table_from_raw_category() {
         ),
         "AccumulationRegister.RegisterA.Balance"
     );
+    // Contract change, and both halves are measured. The category names a
+    // virtual table, not "this object's default virtual table", so it does not
+    // carry across metadata kinds: UT 11.5.27.75 puts all 17 blocks whose
+    // category is `{"N",3}` on `AccumulationRegister…Balance` (11) and
+    // `InformationRegister…SliceLast` (6), and both blocks that reach
+    // `Task…TasksByExecutive` store `{"N",2}`, not `{"N",3}`. No
+    // accounting-register list occurs anywhere in the corpus, so the pair is
+    // unobserved and keeps the bare main table instead of a guessed suffix.
     assert_eq!(
         normalize_form_main_table_category(
             Some("AccountingRegister.RegisterB".to_string()),
             Some("3"),
         )
         .as_deref(),
-        Some("AccountingRegister.RegisterB.RecordsWithExtDimensions")
+        Some("AccountingRegister.RegisterB")
     );
     assert_eq!(
         parse_main_table(
@@ -9580,8 +9596,21 @@ fn restores_accumulation_register_balance_main_table_from_raw_category() {
         "InformationRegister.RegisterC.SliceLast"
     );
     assert_eq!(
-        parse_main_table(MAIN_TABLE_TYPE_ID, REGISTER_ID, "Task.TaskD", "3"),
+        parse_main_table(MAIN_TABLE_TYPE_ID, REGISTER_ID, "Task.TaskD", "2"),
         "Task.TaskD.TasksByExecutive"
+    );
+    assert_eq!(
+        parse_main_table(MAIN_TABLE_TYPE_ID, REGISTER_ID, "Task.TaskD", "3"),
+        "Task.TaskD"
+    );
+    assert_eq!(
+        parse_main_table(
+            MAIN_TABLE_TYPE_ID,
+            REGISTER_ID,
+            "AccumulationRegister.RegisterA",
+            "4",
+        ),
+        "AccumulationRegister.RegisterA.Turnovers"
     );
     assert_eq!(
         parse_main_table(
@@ -10057,6 +10086,10 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
         fields: Vec::new(),
         server_state_xml: None,
         server_state_envelope: None,
+        auto_fill_available_fields: None,
+        get_invisible_field_presentations: None,
+        key_type: None,
+        key_fields: Vec::new(),
         list_settings: FormListSettings {
             filter: None,
             order: Some(FormListSettingsOrder::Typed(
@@ -10501,6 +10534,10 @@ fn formats_explicit_false_dynamic_data_read() {
             fields: Vec::new(),
             server_state_xml: None,
             server_state_envelope: None,
+            auto_fill_available_fields: None,
+            get_invisible_field_presentations: None,
+            key_type: None,
+            key_fields: Vec::new(),
             list_settings: FormListSettings::default(),
         }),
         spreadsheet_document_settings: None,
@@ -11517,6 +11554,10 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
                 fields: Vec::new(),
                 server_state_xml: None,
                 server_state_envelope: None,
+                auto_fill_available_fields: None,
+                get_invisible_field_presentations: None,
+                key_type: None,
+                key_fields: Vec::new(),
                 list_settings: FormListSettings::default(),
             }),
             spreadsheet_document_settings: None,
@@ -63212,6 +63253,10 @@ fn data_path_dynamic_list_settings(fields: Vec<FormDynamicListField>) -> FormDyn
         fields,
         server_state_xml: None,
         server_state_envelope: None,
+        auto_fill_available_fields: None,
+        get_invisible_field_presentations: None,
+        key_type: None,
+        key_fields: Vec::new(),
         list_settings: FormListSettings::default(),
     }
 }
@@ -67857,5 +67902,242 @@ fn popup_border_colour_closes_the_popup_run() {
             "<ShapeRepresentation>WhenActive</ShapeRepresentation>",
             "<BorderColor>#FFFFFF</BorderColor>",
         ],
+    );
+}
+
+/// The available-field autofill switch is written for an explicitly false value
+/// only, and it opens the block.
+///
+/// Evidence: UT 11.5.27.75, equality of sets over all 1 947 native dynamic-list
+/// blocks -- 11 bags store `{"B",0}` and all 11 native blocks open with
+/// `<AutoFillAvailableFields>false</AutoFillAvailableFields>`, 1 936 store
+/// `{"B",1}` and none of those blocks carries the element.
+#[test]
+fn writes_auto_fill_available_fields_only_for_a_stored_false() {
+    let raw_attribute = r##"{9,{18},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,3,"QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"},"ManualQuery",{"B",1},"AutoFillAvailableFields",{"B",0}},{0,0}}"##;
+    let attribute = parse_form_attribute(raw_attribute, &BTreeMap::new(), &BTreeMap::new())
+        .expect("dynamic-list attribute");
+    assert_eq!(
+        attribute
+            .settings
+            .as_ref()
+            .expect("dynamic-list settings")
+            .auto_fill_available_fields,
+        Some(false)
+    );
+    let xml = format_form_attributes_xml(&[attribute]);
+    assert!(
+        xml.contains("<AutoFillAvailableFields>false</AutoFillAvailableFields>"),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<AutoFillAvailableFields>").unwrap() < xml.find("<ManualQuery>").unwrap(),
+        "{xml}"
+    );
+
+    let stored_true = raw_attribute.replace(
+        r#""AutoFillAvailableFields",{"B",0}"#,
+        r#""AutoFillAvailableFields",{"B",1}"#,
+    );
+    let attribute = parse_form_attribute(&stored_true, &BTreeMap::new(), &BTreeMap::new())
+        .expect("dynamic-list attribute");
+    let xml = format_form_attributes_xml(&[attribute]);
+    assert!(!xml.contains("<AutoFillAvailableFields>"), "{xml}");
+}
+
+/// The invisible-field-presentation switch is written for an explicitly false
+/// value only, and it closes the block ahead of `<ListSettings>`.
+///
+/// Evidence: UT 11.5.27.75, equality of sets over all 1 947 native dynamic-list
+/// blocks -- 9 bags store `{"B",0}` and all 9 native blocks write
+/// `<GetInvisibleFieldPresentations>false</...>` as the last child before
+/// `<ListSettings>`, 1 938 store `{"B",1}` and none of those blocks carries it.
+#[test]
+fn writes_get_invisible_field_presentations_only_for_a_stored_false() {
+    let raw_attribute = r##"{9,{18},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,4,"QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"},"ManualQuery",{"B",1},"AutoSaveUserSettings",{"B",0},"GetInvisibleFieldPresentations",{"B",0}},{0,0}}"##;
+    let attribute = parse_form_attribute(raw_attribute, &BTreeMap::new(), &BTreeMap::new())
+        .expect("dynamic-list attribute");
+    assert_eq!(
+        attribute
+            .settings
+            .as_ref()
+            .expect("dynamic-list settings")
+            .get_invisible_field_presentations,
+        Some(false)
+    );
+    let xml = format_form_attributes_xml(&[attribute]);
+    assert!(
+        xml.contains("<GetInvisibleFieldPresentations>false</GetInvisibleFieldPresentations>"),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<AutoSaveUserSettings>").unwrap()
+            < xml.find("<GetInvisibleFieldPresentations>").unwrap(),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<GetInvisibleFieldPresentations>").unwrap() < xml.find("<ListSettings>").unwrap(),
+        "{xml}"
+    );
+
+    let stored_true = raw_attribute.replace(
+        r#""GetInvisibleFieldPresentations",{"B",0}"#,
+        r#""GetInvisibleFieldPresentations",{"B",1}"#,
+    );
+    let attribute = parse_form_attribute(&stored_true, &BTreeMap::new(), &BTreeMap::new())
+        .expect("dynamic-list attribute");
+    let xml = format_form_attributes_xml(&[attribute]);
+    assert!(!xml.contains("<GetInvisibleFieldPresentations>"), "{xml}");
+}
+
+/// The key-field value list is written entry by entry, in storage order, and
+/// the numeric key-type code resolves to the element text the platform writes.
+///
+/// Evidence: UT 11.5.27.75 -- the 9 native blocks that write a `<KeyField>`
+/// write exactly the 13 names their `KeyFields` value list stores, in that
+/// order; the 1 938 blocks whose list is empty write none. `KeyType` `{"N",1}`
+/// writes `FieldValue` and `{"N",2}` writes `RowKey`, one block each, while
+/// `{"N",0}` writes nothing across the remaining 1 945.
+#[test]
+fn writes_key_type_and_key_fields_from_the_stored_value_list() {
+    let raw_attribute = r##"{9,{18},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,4,"QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"},"ManualQuery",{"B",1},"KeyType",{"N",2},"KeyFields",{"#",51e7a0d2-530b-11d4-b98a-008048da3034,{2,{"S","ВидПродукции"},{"S","КодОКПД2"}}}},{0,0}}"##;
+    let attribute = parse_form_attribute(raw_attribute, &BTreeMap::new(), &BTreeMap::new())
+        .expect("dynamic-list attribute");
+    let settings = attribute
+        .settings
+        .as_ref()
+        .expect("dynamic-list settings")
+        .clone();
+    assert_eq!(settings.key_type, Some("RowKey"));
+    assert_eq!(
+        settings.key_fields,
+        vec!["ВидПродукции".to_string(), "КодОКПД2".to_string()]
+    );
+    let xml = format_form_attributes_xml(&[attribute]);
+    assert!(xml.contains("<KeyType>RowKey</KeyType>"), "{xml}");
+    assert!(xml.contains("<KeyField>ВидПродукции</KeyField>"), "{xml}");
+    assert!(xml.contains("<KeyField>КодОКПД2</KeyField>"), "{xml}");
+    assert!(
+        xml.find("<KeyType>").unwrap() < xml.find("<KeyField>").unwrap(),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<KeyField>ВидПродукции</KeyField>").unwrap()
+            < xml.find("<KeyField>КодОКПД2</KeyField>").unwrap(),
+        "{xml}"
+    );
+    assert!(
+        xml.find("<KeyField>").unwrap() < xml.find("<ListSettings>").unwrap(),
+        "{xml}"
+    );
+}
+
+/// The empty value list and the code that names no key type both write nothing,
+/// and so does a payload whose declared count disagrees with its entries.
+#[test]
+fn omits_key_type_and_key_fields_for_the_empty_stored_shapes() {
+    for payload in [
+        r##""KeyType",{"N",0},"KeyFields",{"#",51e7a0d2-530b-11d4-b98a-008048da3034,{0}}"##,
+        r##""KeyType",{"N",7},"KeyFields",{"#",51e7a0d2-530b-11d4-b98a-008048da3034,{2,{"S","Один"}}}"##,
+        r##""KeyType",{"N",0},"KeyFields",{"#",00000000-0000-0000-0000-000000000000,{1,{"S","Один"}}}"##,
+    ] {
+        let raw_attribute = format!(
+            r##"{{9,{{18}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,3,"QueryText",{{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}},"ManualQuery",{{"B",1}},{payload}}},{{0,0}}}}"##
+        );
+        let attribute = parse_form_attribute(&raw_attribute, &BTreeMap::new(), &BTreeMap::new())
+            .expect("dynamic-list attribute");
+        let xml = format_form_attributes_xml(&[attribute]);
+        assert!(!xml.contains("<KeyType>"), "{payload}\n{xml}");
+        assert!(!xml.contains("<KeyField>"), "{payload}\n{xml}");
+    }
+}
+
+/// `MainTableCategory` names a virtual table, and the same code reaches
+/// different tables across metadata kinds.
+///
+/// Evidence: UT 11.5.27.75, a total tabulation of the stored code against the
+/// platform's own `<MainTable>` text over all 1 947 native dynamic-list blocks
+/// -- `{"N",1}` writes the bare name (1 806), `{"N",2}` writes
+/// `Task.<name>.TasksByExecutive` (2), `{"N",3}` writes
+/// `AccumulationRegister.<name>.Balance` (11) and
+/// `InformationRegister.<name>.SliceLast` (6), and `{"N",4}` writes
+/// `AccumulationRegister.<name>.Turnovers` (4).
+#[test]
+fn appends_the_virtual_table_the_main_table_category_names() {
+    for (category, main_table, expected) in [
+        (
+            "1",
+            "AccumulationRegister.Доставка",
+            "AccumulationRegister.Доставка",
+        ),
+        (
+            "2",
+            "Task.ЗадачаИсполнителя",
+            "Task.ЗадачаИсполнителя.TasksByExecutive",
+        ),
+        (
+            "3",
+            "AccumulationRegister.Доставка",
+            "AccumulationRegister.Доставка.Balance",
+        ),
+        (
+            "3",
+            "InformationRegister.Цены",
+            "InformationRegister.Цены.SliceLast",
+        ),
+        (
+            "4",
+            "AccumulationRegister.Доставка",
+            "AccumulationRegister.Доставка.Turnovers",
+        ),
+        // An unobserved pair keeps the bare main table rather than guessing.
+        ("4", "Task.ЗадачаИсполнителя", "Task.ЗадачаИсполнителя"),
+        (
+            "3",
+            "AccumulationRegister.Доставка.Balance",
+            "AccumulationRegister.Доставка.Balance",
+        ),
+    ] {
+        assert_eq!(
+            normalize_form_main_table_category(Some(main_table.to_string()), Some(category)),
+            Some(expected.to_string()),
+            "category {category} on {main_table}"
+        );
+    }
+}
+
+/// An embedded spreadsheet document is a child of its `<Settings>` element, so
+/// its own children start one level deeper, and the `xsi:type` QName inside it
+/// is re-spelled with the same prefix its element names get.
+///
+/// Evidence: UT 11.5.27.75 -- all 22 native embedded `mxl:SpreadsheetDocument`
+/// blocks put `<Settings>` at three tabs and every top-level `mxl:` child at
+/// four; the one block that carries named items writes all 10 of them as
+/// `<mxl:namedItem xsi:type="mxl:NamedItemCells">`.
+#[test]
+fn respells_an_embedded_spreadsheet_documents_qualified_names_and_indent() {
+    let fragment = extract_moxel_document_inner_xml(concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\">\r\n",
+        "\t<columns>\r\n\t\t<size>0</size>\r\n\t</columns>\r\n",
+        "\t<namedItem xsi:type=\"NamedItemCells\">\r\n\t\t<name>Шапка</name>\r\n\t</namedItem>\r\n",
+        "\t<font ref=\"1\"/>\r\n",
+        "</document>",
+    ))
+    .expect("document body");
+    assert!(
+        fragment.contains("<mxl:namedItem xsi:type=\"mxl:NamedItemCells\">"),
+        "{fragment}"
+    );
+    assert!(fragment.contains("<mxl:font ref=\"1\"/>"), "{fragment}");
+    let indented = indent_xml_fragment(&fragment, "\t\t\t\t");
+    assert!(indented.contains("\t\t\t\t<mxl:columns>\r\n"), "{indented}");
+    assert!(
+        indented.contains("\t\t\t\t\t<mxl:size>0</mxl:size>\r\n"),
+        "{indented}"
+    );
+    assert!(
+        indented.contains("\t\t\t\t<mxl:namedItem xsi:type=\"mxl:NamedItemCells\">\r\n"),
+        "{indented}"
     );
 }
