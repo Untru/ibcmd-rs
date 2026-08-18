@@ -2003,6 +2003,24 @@ impl FormPictureDecorationSchema {
         self.option_tuple_is_exact(options).then_some(5)
     }
 
+    /// `Zoomable` flag of the decoration option tuple.  Over all 3 725
+    /// `PictureDecoration` option tuples the export walks, the slot holds `1`
+    /// on exactly the 7 the platform writes `<Zoomable>true</Zoomable>` on and
+    /// `0` on the other 3 718; the platform never writes the element with any
+    /// other value.
+    pub(crate) fn zoomable_option_slot(self, options: &[&str]) -> Option<usize> {
+        self.option_tuple_is_exact(options).then_some(4)
+    }
+
+    /// `ImageScale` percentage of the decoration option tuple.  Over the same
+    /// 3 725 tuples the slot holds `100` on the 3 718 items that carry no
+    /// `<ImageScale>` and, on the 7 that do, exactly the number the platform
+    /// writes -- `200` six times and `108` once.  `100` is therefore the
+    /// unwritten default, not an absence.
+    pub(crate) fn image_scale_option_slot(self, options: &[&str]) -> Option<usize> {
+        self.option_tuple_is_exact(options).then_some(12)
+    }
+
     /// The option tuple every native `PictureDecoration` carries: 13 slots
     /// discriminated by a leading `4`, with slot 2 a plain hyperlink flag.
     fn option_tuple_is_exact(self, options: &[&str]) -> bool {
@@ -2767,7 +2785,9 @@ pub(crate) struct FormFieldSchema {
     top_level_offset: usize,
     input_field_options: bool,
     spreadsheet_document_options: bool,
+    picture_field_options: bool,
     title_slot: usize,
+    footer_text_slot: usize,
     width_option_slot: Option<usize>,
     height_option_slot: Option<usize>,
     horizontal_stretch_option_slot: Option<usize>,
@@ -3051,7 +3071,17 @@ impl FormFieldSchema {
             top_level_offset,
             input_field_options: item_tag == "InputField",
             spreadsheet_document_options: item_tag == "SpreadSheetDocumentField",
+            picture_field_options: item_tag == "PictureField",
             title_slot: 9 + top_level_offset,
+            // The footer's own caption sits ten slots past the title's, in the
+            // slot that holds the localised-string container the platform fills
+            // for `<FooterText>`.  Read off the field items of the native
+            // "1С:Управление торговлей 11.5.27.75" form dumps: the slot holds a
+            // populated container on every one of the 9 items the platform
+            // writes a `<FooterText>` on -- one `LabelField`, seven
+            // `InputField`, one `PictureField` -- and an empty one on every
+            // field item that carries none.
+            footer_text_slot: 19 + top_level_offset,
             width_option_slot: (item_tag == "PictureField").then_some(1),
             height_option_slot: (item_tag == "PictureField").then_some(2),
             horizontal_stretch_option_slot: (item_tag == "PictureField").then_some(3),
@@ -3133,6 +3163,22 @@ impl FormFieldSchema {
 
     pub(crate) const fn title_slot(self) -> usize {
         self.title_slot
+    }
+
+    pub(crate) const fn footer_text_slot(self) -> usize {
+        self.footer_text_slot
+    }
+
+    /// `Zoomable` flag of the `PictureField` option tuple.  Over all 2 220
+    /// `PictureField` option tuples the export walks, the slot holds `1` on
+    /// exactly the 6 items the platform writes `<Zoomable>true</Zoomable>` on
+    /// and `0` on the other 2 214.
+    pub(crate) const fn picture_field_zoomable_option_slot(self) -> Option<usize> {
+        if self.picture_field_options {
+            Some(7)
+        } else {
+            None
+        }
     }
 
     pub(crate) const fn tooltip_slot(self) -> usize {

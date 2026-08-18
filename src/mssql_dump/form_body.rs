@@ -1327,6 +1327,8 @@ pub(super) struct FormChildItem {
     pub(super) header_picture_file_name: Option<String>,
     pub(super) header_picture_load_transparent: bool,
     pub(super) picture_size: Option<&'static str>,
+    pub(super) zoomable: Option<bool>,
+    pub(super) image_scale: Option<String>,
     pub(super) nonselected_picture_text: Vec<(String, String)>,
     pub(super) picture_file_name: Option<String>,
     pub(super) title: Vec<(String, String)>,
@@ -1342,6 +1344,7 @@ pub(super) struct FormChildItem {
     pub(super) data_path: Option<String>,
     pub(super) data_path_provenance: Option<FormChildItemDataPathProvenance>,
     pub(super) footer_data_path: Option<String>,
+    pub(super) footer_text: Vec<(String, String)>,
     pub(super) multiple_value_data_path: Option<String>,
     pub(super) multiple_value_present_data_path: Option<String>,
     pub(super) title_data_path: Option<String>,
@@ -8921,6 +8924,12 @@ fn parse_form_child_item_with_metadata_owners(
         &fields,
         field_schema_and_options.as_ref().map(|(schema, _)| *schema),
     );
+    let footer_text = field_schema_and_options
+        .as_ref()
+        .map(|(schema, _)| schema.footer_text_slot())
+        .and_then(|slot| fields.get(slot))
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default();
     let input_hint = (tag == "InputField")
         .then(|| parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
         .unwrap_or_default();
@@ -10606,6 +10615,30 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        zoomable: if tag == "PictureDecoration" {
+            picture_decoration_options.as_deref().and_then(|options| {
+                let slot = FormPictureDecorationSchema.zoomable_option_slot(options)?;
+                (options.get(slot)?.trim() == "1").then_some(true)
+            })
+        } else if tag == "PictureField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| {
+                    let slot = schema.picture_field_zoomable_option_slot()?;
+                    (options.get(slot)?.trim() == "1").then_some(true)
+                })
+        } else {
+            None
+        },
+        image_scale: if tag == "PictureDecoration" {
+            picture_decoration_options.as_deref().and_then(|options| {
+                let slot = FormPictureDecorationSchema.image_scale_option_slot(options)?;
+                let value = options.get(slot)?.trim();
+                (value != "100" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+            })
+        } else {
+            None
+        },
         nonselected_picture_text: if tag == "PictureDecoration" {
             picture_decoration_options
                 .as_deref()
@@ -10732,6 +10765,7 @@ fn parse_form_child_item_with_metadata_owners(
         data_path: data_path_resolution.map(|resolved| resolved.data_path),
         data_path_provenance,
         footer_data_path,
+        footer_text,
         multiple_value_data_path,
         multiple_value_present_data_path,
         title_data_path: parse_form_title_data_path(
@@ -20758,6 +20792,21 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(footer_data_path)
         ));
     }
+    // `FooterText` trails `DataPath` (9 native items), `EditMode` (5), `Title`
+    // (4), `ToolTip` (2), `ReadOnly`, `Visible`, `TitleLocation`,
+    // `HeaderPicture` and `FooterDataPath` (1 each), and precedes `ContextMenu`
+    // (9), `ExtendedTooltip` (9), `Width` (2), `Events`, `ValuesPicture`,
+    // `FileDragMode`, `Wrap` and `ChooseType` (1 each), with no pair counted
+    // both ways.  It never co-occurs with `FooterTextColor`, `FooterFont` or
+    // `FooterHorizontalAlign`, so its place among those three is unobserved and
+    // this position is pinned only against the pairs above.
+    if !item.footer_text.is_empty() {
+        xml.push_str(&format_form_localized_section(
+            "FooterText",
+            &item.footer_text,
+            indent + 1,
+        ));
+    }
     // `FooterTextColor` precedes `FooterFont` on all 6 native items that carry
     // both, and both trail `FooterDataPath` (26 for the font, 6 for the colour)
     // and precede `Width`, `Wrap`, `Format`, `EditFormat`, `BorderColor`,
@@ -21176,6 +21225,15 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<PictureSize>{}</PictureSize>\r\n",
             escape_xml_text(picture_size)
         ));
+    }
+    // On a `PictureField` the platform writes `Zoomable` after `PictureSize`
+    // (3 native pairs) and ahead of `NonselectedPictureText` (1),
+    // `ValuesPicture` (4), `Border` (4), `FileDragMode` (9), `ContextMenu` and
+    // `ExtendedTooltip` (13 each), with no pair counted both ways.  It never
+    // co-occurs with `Hyperlink`, so its place relative to that one element is
+    // unobserved.
+    if item.tag == "PictureField" && item.zoomable == Some(true) {
+        xml.push_str(&format!("{tab}\t<Zoomable>true</Zoomable>\r\n"));
     }
     // On a `PictureField` the run reads `PictureSize`, `Hyperlink`,
     // `NonselectedPictureText`, then `ValuesPicture`/`TextColor`, then
@@ -21741,6 +21799,24 @@ pub(super) fn format_form_child_item_xml(
                 xml.push_str(&format!(
                     "{tab}\t<PictureSize>{}</PictureSize>\r\n",
                     escape_xml_text(picture_size)
+                ));
+            }
+            // `Zoomable` and `ImageScale` sit between `PictureSize` and
+            // `NonselectedPictureText`.  Native pairwise counts over the whole
+            // UT 11.5.27.75 tree, no counter-example either way: `PictureSize`
+            // leads `Zoomable` 3 and `ImageScale` 2; `Zoomable` leads
+            // `ImageScale` 4, `NonselectedPictureText` 1, `Picture` 7,
+            // `Border` 4, `FileDragMode` 9, `ContextMenu` and `ExtendedTooltip`
+            // 13 each; `ImageScale` leads `NonselectedPictureText` 1,
+            // `Picture` 7, `FileDragMode` 2, `ContextMenu` and
+            // `ExtendedTooltip` 7 each.
+            if item.zoomable == Some(true) {
+                xml.push_str(&format!("{tab}\t<Zoomable>true</Zoomable>\r\n"));
+            }
+            if let Some(image_scale) = &item.image_scale {
+                xml.push_str(&format!(
+                    "{tab}\t<ImageScale>{}</ImageScale>\r\n",
+                    escape_xml_text(image_scale)
                 ));
             }
             // `NonselectedPictureText` sits between `PictureSize` and
