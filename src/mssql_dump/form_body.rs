@@ -17938,6 +17938,14 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
     if properties.edit == Some(true) {
         xml.push_str(&format!("{tab}<Edit>true</Edit>\r\n"));
     }
+    // `Protection` leads `SelectionShowMode` (8) and `Output` (1) and trails
+    // `HorizontalScrollBar` (21), `VerticalScrollBar` (9), `CommandSet` (4)
+    // and `ShowGrid` (1) on the 26 native fields that carry it; it never
+    // shares a field with `Edit`, so it stays behind it.  It used to trail
+    // `Output`.
+    if properties.protection == Some(true) {
+        xml.push_str(&format!("{tab}<Protection>true</Protection>\r\n"));
+    }
     if let Some(value) = properties.selection_show_mode {
         xml.push_str(&format!(
             "{tab}<SelectionShowMode>{}</SelectionShowMode>\r\n",
@@ -17949,9 +17957,6 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
             "{tab}<Output>{}</Output>\r\n",
             escape_xml_text(value)
         ));
-    }
-    if properties.protection == Some(true) {
-        xml.push_str(&format!("{tab}<Protection>true</Protection>\r\n"));
     }
     if properties.enable_start_drag == Some(false) {
         xml.push_str(&format!(
@@ -18105,6 +18110,11 @@ fn format_form_table_property_xml(
             .as_ref()
             .map(|value| format!("{tab}<Width>{}</Width>\r\n", escape_xml_text(value)))
             .unwrap_or_default(),
+        FormTableXmlProperty::MaxWidth => item
+            .max_width
+            .as_ref()
+            .map(|value| format!("{tab}<MaxWidth>{}</MaxWidth>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
         FormTableXmlProperty::Height => item
             .height
             .as_ref()
@@ -18114,6 +18124,29 @@ fn format_form_table_property_xml(
             Some(false) => format!("{tab}<AutoMaxHeight>false</AutoMaxHeight>\r\n"),
             _ => String::new(),
         },
+        FormTableXmlProperty::MaxHeight => item
+            .max_height
+            .as_ref()
+            .map(|value| format!("{tab}<MaxHeight>{}</MaxHeight>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::HorizontalStretch => item
+            .horizontal_stretch
+            .map(|value| {
+                format!(
+                    "{tab}<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::VerticalStretch => item
+            .vertical_stretch
+            .map(|value| {
+                format!(
+                    "{tab}<VerticalStretch>{}</VerticalStretch>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::HeightInTableRows => item
             .height_in_table_rows
             .as_ref()
@@ -18284,6 +18317,16 @@ fn format_form_table_property_xml(
             xml.push_str(&format_form_title_text_color_xml(item, indent));
             xml
         }
+        FormTableXmlProperty::TitleFont => item
+            .title_font_xml
+            .as_ref()
+            .map(|value| format!("{tab}{value}\r\n"))
+            .unwrap_or_default(),
+        FormTableXmlProperty::Font => item
+            .font_xml
+            .as_ref()
+            .map(|value| format!("{tab}{value}\r\n"))
+            .unwrap_or_default(),
         FormTableXmlProperty::CommandSet => {
             if item.command_set_excluded_commands.is_empty() {
                 String::new()
@@ -18510,6 +18553,18 @@ fn format_form_command_bar_properties_xml(item: &FormChildItem, indent: usize) -
             xml_bool(horizontal_stretch)
         ));
     }
+    // `VerticalStretch` sits directly behind `HorizontalStretch` on a command
+    // bar: over the 11 native bars that carry it, it trails `Title` (10),
+    // `EnableContentChange` (5), `ToolTip` (4) and `HorizontalStretch` (3) and
+    // leads `HorizontalLocation` (5) and `GroupVerticalAlign` (1).  It never
+    // shares a bar with `GroupHorizontalAlign`, so it stays beside the stretch
+    // it pairs with.  It used to be written ahead of the title block.
+    if let Some(vertical_stretch) = item.vertical_stretch {
+        xml.push_str(&format!(
+            "{tab}<VerticalStretch>{}</VerticalStretch>\r\n",
+            xml_bool(vertical_stretch)
+        ));
+    }
     if let Some(group_horizontal_align) = item.group_horizontal_align {
         xml.push_str(&format!(
             "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
@@ -18594,6 +18649,18 @@ pub(super) fn format_form_child_item_xml(
         escape_xml_text(&item.name),
         escape_xml_text(&item.id)
     );
+    // The three table additions open with `Enabled`, ahead of
+    // `AdditionSource`: native writes it first on all 9 `ViewStatusAddition`,
+    // 11 `SearchStringAddition` and 13 `SearchControlAddition` that carry it,
+    // ahead of `AdditionSource` (9/11/13), `HorizontalLocation` (2) and
+    // `AutoMaxWidth` (1), and nothing precedes it.
+    if matches!(
+        item.tag,
+        "SearchStringAddition" | "SearchControlAddition" | "ViewStatusAddition"
+    ) && item.enabled == Some(false)
+    {
+        xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
+    }
     if item.tag.ends_with("Addition") {
         if item.addition_source_item.is_some() || item.item_type.is_some() {
             xml.push_str(&format!("{tab}\t<AdditionSource>\r\n"));
@@ -18717,9 +18784,6 @@ pub(super) fn format_form_child_item_xml(
             | "LabelDecoration"
             | "PictureDecoration"
             | "Page"
-            | "SearchStringAddition"
-            | "SearchControlAddition"
-            | "ViewStatusAddition"
     ) && item.enabled == Some(false)
     {
         xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
@@ -18767,8 +18831,14 @@ pub(super) fn format_form_child_item_xml(
             ));
         }
     }
-    if item.tag != "UsualGroup"
-        && let Some(title_font_xml) = &item.title_font_xml
+    // `TitleFont` follows the title block on every owner that writes it (native
+    // `Title` before `TitleFont` on all 11 owners, never the reverse).  The
+    // owners whose title is written further down - `Table`, `Page`, `Popup`,
+    // `Pages` and `UsualGroup` - therefore write it there, next to their title.
+    if !matches!(
+        item.tag,
+        "UsualGroup" | "Table" | "Page" | "Popup" | "Pages"
+    ) && let Some(title_font_xml) = &item.title_font_xml
     {
         xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
     }
@@ -18850,6 +18920,11 @@ pub(super) fn format_form_child_item_xml(
     // native co-occurrences), `RadioButtonType` (148), `ChoiceList` (146),
     // `ColumnsCount` (22), `GroupHorizontalAlign` (2), `VerticalAlign` (1) and
     // `GroupVerticalAlign` (1), with no counter-example.
+    // `TextDocumentField` and `FormattedDocumentField` carry `ToolTip` in the
+    // same slot: native writes it behind `DataPath` (2/2) and `TitleLocation`
+    // (2/2) and ahead of `Height` (2), `Width` (1), `EditMode` (1) and
+    // `AutoMaxHeight` (1), never the reverse; both used to write it behind
+    // their geometry.
     if matches!(
         item.tag,
         "InputField"
@@ -18862,6 +18937,8 @@ pub(super) fn format_form_child_item_xml(
             | "TrackBarField"
             | "ChartField"
             | "ColumnGroup"
+            | "TextDocumentField"
+            | "FormattedDocumentField"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -18900,6 +18977,15 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(shortcut)
         ));
     }
+    // The field family writes its alignment run as `HorizontalAlign`,
+    // `VerticalAlign`, `GroupHorizontalAlign`, `GroupVerticalAlign`.  UT
+    // 11.5.27.75 native tree: `VerticalAlign` leads `GroupHorizontalAlign` on
+    // `LabelField` (2), `InputField` (1) and `RadioButtonField` (1), while
+    // `HorizontalAlign` leads both (`LabelField` 46/62, `InputField` 1/58,
+    // `CheckBoxField` 1/-) and `GroupVerticalAlign` trails all three
+    // (`LabelField` 17/19/3, `InputField` 13/1/13, `CheckBoxField` -/2/2), with
+    // no pair observed in both directions.  The group pair used to split the
+    // plain pair.
     if FormFieldSchema::supports_item_tag(&item.tag) {
         if let Some(horizontal_align) = item
             .horizontal_align
@@ -18910,16 +18996,16 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(horizontal_align)
             ));
         }
-        if let Some(group_horizontal_align) = item.group_horizontal_align {
-            xml.push_str(&format!(
-                "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
-                escape_xml_text(group_horizontal_align)
-            ));
-        }
         if let Some(vertical_align) = item.vertical_align {
             xml.push_str(&format!(
                 "{tab}\t<VerticalAlign>{}</VerticalAlign>\r\n",
                 vertical_align.xml_value()
+            ));
+        }
+        if let Some(group_horizontal_align) = item.group_horizontal_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                escape_xml_text(group_horizontal_align)
             ));
         }
         if let Some(group_vertical_align) = item.group_vertical_align {
@@ -19080,12 +19166,18 @@ pub(super) fn format_form_child_item_xml(
         item,
         indent + 1,
     ));
-    if item.tag != "Table"
-        && item.tag != "Button"
-        && item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
-        && item.tag != "CommandBar"
-        && !pages_geometry_after_title
+    // `Page` and `Popup` write their width behind the title block, with the rest
+    // of their geometry (see the page order table and the popup run below).
+    if !matches!(
+        item.tag,
+        "Table"
+            | "Button"
+            | "LabelDecoration"
+            | "PictureDecoration"
+            | "CommandBar"
+            | "Page"
+            | "Popup"
+    ) && !pages_geometry_after_title
         && let Some(width) = &item.width
     {
         xml.push_str(&format!(
@@ -19104,8 +19196,7 @@ pub(super) fn format_form_child_item_xml(
     // observed in the native tree (`InputField` 6163/54, `LabelField` 408/23,
     // `Button` 119/103, `PictureField` 62/16, `Table` 36/2, … — zero
     // counter-examples in either direction).
-    if item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
+    if !matches!(item.tag, "LabelDecoration" | "PictureDecoration" | "Table")
         && let Some(max_width) = &item.max_width
     {
         xml.push_str(&format!(
@@ -19113,12 +19204,10 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(max_width)
         ));
     }
-    if item.tag != "Table"
-        && item.tag != "Button"
-        && item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
-        && item.tag != "CommandBar"
-        && !pages_geometry_after_title
+    if !matches!(
+        item.tag,
+        "Table" | "Button" | "LabelDecoration" | "PictureDecoration" | "CommandBar" | "Page"
+    ) && !pages_geometry_after_title
         && let Some(height) = &item.height
     {
         xml.push_str(&format!(
@@ -19269,12 +19358,14 @@ pub(super) fn format_form_child_item_xml(
             xml_bool(item.picture_load_transparent)
         ));
     }
-    // `LabelField` keeps `Hiperlink` behind its stretch pair: the native tree
-    // writes `HorizontalStretch`<`Hiperlink` 98 times, `VerticalStretch`<
-    // `Hiperlink` 5, `AutoMaxHeight`<`Hiperlink` 3 and `MaxHeight`<`Hiperlink` 2,
-    // never the reverse, while `Hiperlink` still precedes `TextColor` (28),
-    // `Font` (9), `BackColor` (5) and `PasswordMode` (1). The remaining control
-    // kinds have no native observation pairing the two, so they stay here.
+    // `LabelField` keeps `Hiperlink` behind its stretch pair and behind
+    // `Format`: the native tree writes `HorizontalStretch`<`Hiperlink` 110
+    // times, `VerticalStretch`< `Hiperlink` 6, `AutoMaxHeight`<`Hiperlink` 3,
+    // `MaxHeight`<`Hiperlink` 2 and `Format`<`Hiperlink` 5, never the reverse,
+    // while `Hiperlink` still precedes `TextColor` (39), `Font` (20),
+    // `BackColor` (5) and `PasswordMode` (1).  It is therefore written in the
+    // label's own tail below.  The remaining control kinds have no native
+    // observation pairing the two, so they stay here.
     let hiperlink_after_stretch = item.tag == "LabelField";
     // A `PictureField` spells the same flag correctly, as `Hyperlink`, and never
     // as `Hiperlink`: all 51 native `PictureField` items that carry the flag
@@ -19312,22 +19403,29 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
     }
-    if item.tag != "Button"
-        && item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
-        && let Some(max_height) = &item.max_height
+    if !matches!(
+        item.tag,
+        "Button" | "LabelDecoration" | "PictureDecoration" | "Table"
+    ) && let Some(max_height) = &item.max_height
     {
         xml.push_str(&format!(
             "{tab}\t<MaxHeight>{}</MaxHeight>\r\n",
             escape_xml_text(max_height)
         ));
     }
-    if item.tag != "Button"
-        && item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
-        && item.tag != "Page"
-        && item.tag != "CommandBar"
-        && let Some(horizontal_stretch) = item.horizontal_stretch
+    // `Table` writes its stretch pair inside its own ordered run, `Popup` behind
+    // its title block: on both owners native puts the pair after properties this
+    // shared slot would precede.
+    if !matches!(
+        item.tag,
+        "Button"
+            | "LabelDecoration"
+            | "PictureDecoration"
+            | "Page"
+            | "CommandBar"
+            | "Table"
+            | "Popup"
+    ) && let Some(horizontal_stretch) = item.horizontal_stretch
         && !usual_group_title_first
         && !pages_geometry_after_title
     {
@@ -19344,11 +19442,16 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(choice_folders_and_items)
         ));
     }
-    if item.tag != "Button"
-        && item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
-        && item.tag != "Page"
-        && let Some(vertical_stretch) = item.vertical_stretch
+    if !matches!(
+        item.tag,
+        "Button"
+            | "LabelDecoration"
+            | "PictureDecoration"
+            | "Page"
+            | "CommandBar"
+            | "Table"
+            | "Popup"
+    ) && let Some(vertical_stretch) = item.vertical_stretch
         && !usual_group_title_first
         && !pages_geometry_after_title
     {
@@ -19356,9 +19459,6 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
             if vertical_stretch { "true" } else { "false" }
         ));
-    }
-    if hiperlink_after_stretch && item.hiperlink == Some(true) {
-        xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
     }
     xml.push_str(&format_form_spreadsheet_document_properties_xml(
         item,
@@ -19659,8 +19759,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(group)
         ));
     }
-    if let Some(scroll_on_compress) =
-        form_bool_when_not_native_default(item.scroll_on_compress, false)
+    // A `Page` writes `ScrollOnCompress` as its very last property, behind
+    // `TitleDataPath` (see below); every other owner keeps it here.
+    if item.tag != "Page"
+        && let Some(scroll_on_compress) =
+            form_bool_when_not_native_default(item.scroll_on_compress, false)
     {
         xml.push_str(&format!(
             "{tab}\t<ScrollOnCompress>{}</ScrollOnCompress>\r\n",
@@ -19760,10 +19863,49 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
     }
+    // A `LabelField` closes with `Hiperlink`, `Border`, `BorderColor`,
+    // `TextColor`, `BackColor`, `Font`, in that order.  UT 11.5.27.75 native
+    // tree, 16 203 labels: `Format` leads `Hiperlink` (5), `TextColor` (34),
+    // `Font` (48) and `BorderColor` (1); `Hiperlink` leads `TextColor` (39),
+    // `Font` (20) and `BackColor` (5); `Border` leads `BorderColor` (3),
+    // `BackColor` (2) and `TextColor` (1); `BorderColor` leads `TextColor` (2)
+    // and `BackColor` (1); `TextColor` leads `Font` (177) and `BackColor` (9);
+    // `BackColor` leads `Font` (1); and `Font` leads nothing but
+    // `ContextMenu`, `ExtendedTooltip` and `Events`.  No pair is observed in
+    // both directions.  `Hiperlink` never shares a label with `Border` or
+    // `BorderColor`, so it keeps its place ahead of them.  `Border` used to
+    // trail `TextColor` and `Font`, and `Font` used to lead `BackColor`.
+    if item.tag == "LabelField" {
+        if item.hiperlink == Some(true) {
+            xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
+        }
+        xml.push_str(&format_form_control_border_xml(item, indent + 1));
+        if let Some(border_color) = &item.border_color {
+            xml.push_str(&format!(
+                "{tab}\t<BorderColor>{}</BorderColor>\r\n",
+                escape_xml_text(border_color)
+            ));
+        }
+        if let Some(text_color) = &item.text_color {
+            xml.push_str(&format!(
+                "{tab}\t<TextColor>{}</TextColor>\r\n",
+                escape_xml_text(text_color)
+            ));
+        }
+        if let Some(back_color) = &item.back_color {
+            xml.push_str(&format!(
+                "{tab}\t<BackColor>{}</BackColor>\r\n",
+                escape_xml_text(back_color)
+            ));
+        }
+        if let Some(font_xml) = &item.font_xml {
+            xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
+        }
+    }
     // `PictureField` and `RadioButtonField` carry `TextColor` here as well:
     // the native tree writes it behind `NonselectedPictureText` (17) and
     // `ChoiceList` (1) and ahead of `Font` (4) and `ContextMenu` (12).
-    if matches!(item.tag, "LabelField" | "PictureField" | "RadioButtonField")
+    if matches!(item.tag, "PictureField" | "RadioButtonField")
         && let Some(text_color) = &item.text_color
     {
         xml.push_str(&format!(
@@ -19777,8 +19919,22 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "InputField" {
         xml.push_str(&format_form_control_colors_xml(item, indent + 1));
     }
-    // A `Button` has already written its `Font` in front of its `Picture`.
-    if item.tag != "Button"
+    // A `PictureDecoration` writes `TextColor` ahead of `Font`: on all 9
+    // native decorations that carry both, `TextColor` leads, and both trail
+    // the geometry (`VerticalStretch` 10/6, `HorizontalStretch` 8/8, `Width`
+    // 5/6, `Height` 3/8) and lead `Title` (26/13) and `Picture` (21/8).
+    if item.tag == "PictureDecoration"
+        && let Some(text_color) = &item.text_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TextColor>{}</TextColor>\r\n",
+            escape_xml_text(text_color)
+        ));
+    }
+    // A `Button` has already written its `Font` in front of its `Picture`; a
+    // `Table` writes it inside its own ordered run, ahead of `CommandSet`; a
+    // `LabelField` writes it last, behind `BackColor` (see the tail below).
+    if !matches!(item.tag, "Button" | "Table" | "LabelField")
         && let Some(font_xml) = &item.font_xml
     {
         xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
@@ -19791,14 +19947,6 @@ pub(super) fn format_form_child_item_xml(
             "InputHint",
             &item.input_hint,
             indent + 1,
-        ));
-    }
-    if item.tag == "PictureDecoration"
-        && let Some(text_color) = &item.text_color
-    {
-        xml.push_str(&format!(
-            "{tab}\t<TextColor>{}</TextColor>\r\n",
-            escape_xml_text(text_color)
         ));
     }
     if item.tag == "PictureDecoration"
@@ -19821,6 +19969,16 @@ pub(super) fn format_form_child_item_xml(
         } else {
             xml.push_str(&format_form_title_section(item, indent + 1));
             xml.push_str(&format_form_title_text_color_xml(item, indent + 1));
+            // `Popup` writes `TitleFont` behind `Title` (84) and `TitleTextColor`
+            // (84) and ahead of `ToolTip` (10) and `VerticalStretch` (42);
+            // `Pages` behind `Title` (2) and `EnableContentChange` (1) and ahead
+            // of `PagesRepresentation` (2).  Both used to write it ahead of the
+            // title.
+            if matches!(item.tag, "Popup" | "Pages")
+                && let Some(title_font_xml) = &item.title_font_xml
+            {
+                xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
+            }
             if title_location_follows_title && let Some(title_location) = item.title_location {
                 xml.push_str(&format!(
                     "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
@@ -19952,6 +20110,37 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(command_source)
         ));
     }
+    // A `Popup` writes its geometry behind the title block and ahead of its
+    // picture.  UT 11.5.27.75 native tree, 3 912 popups: `Width` (2) trails
+    // `Title` (2) and `ToolTip` (1) and leads `HorizontalStretch` (1),
+    // `Picture` (1) and `Representation` (1); `HorizontalStretch` (10) trails
+    // `Title` (10) and `Width` (1) and leads `Picture` (5), `Representation`
+    // (3) and `BackColor` (1); `VerticalStretch` (42) trails `Title` (42),
+    // `TitleTextColor` (42), `TitleFont` (42) and `ToolTip` (5) and leads only
+    // `ShapeRepresentation` and `ExtendedTooltip`.  `VerticalStretch` never
+    // shares a popup with `Width`, `HorizontalStretch` or `Picture`, so it
+    // stays beside the stretch it pairs with, as on every owner where the pair
+    // is observed.  All three used to be written ahead of the title.
+    if item.tag == "Popup" {
+        if let Some(width) = &item.width {
+            xml.push_str(&format!(
+                "{tab}\t<Width>{}</Width>\r\n",
+                escape_xml_text(width)
+            ));
+        }
+        if let Some(horizontal_stretch) = item.horizontal_stretch {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                xml_bool(horizontal_stretch)
+            ));
+        }
+        if let Some(vertical_stretch) = item.vertical_stretch {
+            xml.push_str(&format!(
+                "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
+                xml_bool(vertical_stretch)
+            ));
+        }
+    }
     if item.tag == "Popup"
         && let Some(reference) = &item.picture_ref
     {
@@ -20003,6 +20192,8 @@ pub(super) fn format_form_child_item_xml(
             | "TrackBarField"
             | "ChartField"
             | "ColumnGroup"
+            | "TextDocumentField"
+            | "FormattedDocumentField"
             | "Table"
             | "LabelDecoration"
             | "PictureDecoration"
@@ -20035,12 +20226,9 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(file_drag_mode)
         ));
     }
-    if matches!(item.tag, "LabelField" | "LabelDecoration") {
-        xml.push_str(&format_form_control_border_xml(item, indent + 1));
-    }
     if matches!(
         item.tag,
-        "LabelField" | "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField"
+        "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField"
     ) {
         if let Some(back_color) = &item.back_color {
             xml.push_str(&format!(
@@ -20054,6 +20242,13 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(border_color)
             ));
         }
+    }
+    // A `LabelDecoration` writes `Border` behind both colours: native puts
+    // `BackColor` before it 12 times and `BorderColor` 4 times (and `BackColor`
+    // before `BorderColor` once), never the reverse, and nothing but
+    // `ContextMenu`, `ExtendedTooltip` and `Events` follows it.
+    if item.tag == "LabelDecoration" {
+        xml.push_str(&format_form_control_border_xml(item, indent + 1));
     }
     // `AutoShowOpenButtonMode` stands immediately ahead of
     // `ChoiceHistoryOnInput`: on the ten items UT 11.5.27.75 writes it, the five
@@ -20155,6 +20350,23 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<TitleDataPath>{}</TitleDataPath>\r\n",
             escape_xml_text(title_data_path)
+        ));
+    }
+    // A `Page` closes its scalar run with `ScrollOnCompress`.  UT 11.5.27.75
+    // native tree, 104 pages carrying it: it trails `Title` (104), the two
+    // spacings (59/47), the stretch pair (46/40), `ShowTitle` (40), `BackColor`
+    // (35), `Group` (32), `HorizontalAlign` (30), `Height` (30),
+    // `EnableContentChange` (18), `Visible` (8), `Width` (3), `ToolTip` (2),
+    // `Picture` (2), `TitleDataPath` (1) and `ReadOnly` (1), and leads only
+    // `ExtendedTooltip` (104) and `ChildItems` (100).  It used to be written
+    // ahead of the whole title block.
+    if item.tag == "Page"
+        && let Some(scroll_on_compress) =
+            form_bool_when_not_native_default(item.scroll_on_compress, false)
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ScrollOnCompress>{}</ScrollOnCompress>\r\n",
+            if scroll_on_compress { "true" } else { "false" }
         ));
     }
     if item.tag != "Table"
@@ -20285,6 +20497,27 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
             FormPageXmlProperty::Title => {
                 xml.push_str(&format_form_title_section(item, indent));
                 xml.push_str(&format_form_title_text_color_xml(item, indent));
+            }
+            FormPageXmlProperty::TitleFont => {
+                if let Some(title_font_xml) = &item.title_font_xml {
+                    xml.push_str(&format!("{tab}{title_font_xml}\r\n"));
+                }
+            }
+            FormPageXmlProperty::Width => {
+                if let Some(width) = &item.width {
+                    xml.push_str(&format!(
+                        "{tab}<Width>{}</Width>\r\n",
+                        escape_xml_text(width)
+                    ));
+                }
+            }
+            FormPageXmlProperty::Height => {
+                if let Some(height) = &item.height {
+                    xml.push_str(&format!(
+                        "{tab}<Height>{}</Height>\r\n",
+                        escape_xml_text(height)
+                    ));
+                }
             }
             FormPageXmlProperty::ToolTip => {
                 xml.push_str(&format_form_localized_section(

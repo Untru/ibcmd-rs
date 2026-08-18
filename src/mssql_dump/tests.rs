@@ -65657,3 +65657,423 @@ fn a_column_group_reads_its_header_picture_from_the_header_container() {
     assert_eq!(other.tag, "ColumnGroup");
     assert_eq!(other.header_picture_ref, None);
 }
+
+/// Parses one observed layout for the owner-order tests below; the moved
+/// properties are then switched on by hand so one string can pin a whole run.
+fn form_child_item_for_owner_order_test(raw: &str) -> FormChildItem {
+    parse_form_child_item(
+        raw,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("the observed layout parses")
+}
+
+fn owner_order_at(xml: &str) -> impl Fn(&str) -> usize + '_ {
+    move |needle: &str| {
+        xml.find(needle)
+            .unwrap_or_else(|| panic!("{needle} is missing from {xml}"))
+    }
+}
+
+/// A `Table` writes its two caps beside the auto flags they bound, its stretch
+/// pair between the layout run and the drag run, and `TitleFont`/`Font` behind
+/// its title and ahead of `CommandSet` -- all inside its own ordered run, not in
+/// the shared visual tail after `DataPath`.
+///
+/// Counted over all 4 543 native tables (UT 11.5.27.75): `MaxWidth` trails
+/// `AutoMaxWidth` 36 times and leads `Height` 2, `AutoMaxHeight` 3, `DataPath`
+/// 44; `MaxHeight` trails `AutoMaxHeight` 20 and leads `HeightInTableRows` 8,
+/// `Header` 21, `DataPath` 34; `HorizontalStretch` trails `InitialTreeView` 10
+/// and `AutoInsertNewRow` 20 and leads `VerticalStretch` 17 and `EnableStartDrag`
+/// 18; `VerticalStretch` leads `EnableStartDrag` 39 and `DataPath` 53;
+/// `TitleFont` trails `Title` 22 and `TitleTextColor` 11 and leads `CommandSet`
+/// 18; `Font` trails `DataPath` 2 and leads `CommandSet` 2.  None of the 131
+/// pairs this fixes was ever observed the other way round.
+#[test]
+fn a_table_writes_its_caps_stretch_and_fonts_inside_its_own_run() {
+    let mut table = form_child_item_for_owner_order_test(
+        r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,2,13,{"U"},19,{"S",""},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
+    );
+    assert_eq!(table.tag, "Table");
+    table.width = Some("10".to_string());
+    table.auto_max_width = Some(false);
+    table.max_width = Some("40".to_string());
+    table.height = Some("5".to_string());
+    table.auto_max_height = Some(false);
+    table.max_height = Some("20".to_string());
+    table.height_in_table_rows = Some("3".to_string());
+    table.table_header = Some(false);
+    table.auto_insert_new_row = Some(true);
+    table.initial_tree_view = Some("ExpandAllLevels");
+    table.horizontal_stretch = Some(true);
+    table.vertical_stretch = Some(false);
+    table.enable_start_drag = Some(true);
+    table.data_path = Some("Список".to_string());
+    table.title = vec![("ru".to_string(), "Список".to_string())];
+    table.title_text_color = Some("style:ЦветТекстаЗаголовка".to_string());
+    table.title_font_xml = Some("<TitleFont faceName=\"Arial\"/>".to_string());
+    table.font_xml = Some("<Font faceName=\"Arial\"/>".to_string());
+    table.command_set_excluded_commands = vec!["Add"];
+    let xml = format_form_child_items_xml(&[table], 1);
+    let at = owner_order_at(&xml);
+    // Width, AutoMaxWidth, MaxWidth, Height, AutoMaxHeight, MaxHeight,
+    // HeightInTableRows.
+    assert!(at("<Width>") < at("<AutoMaxWidth>"), "got {xml}");
+    assert!(at("<AutoMaxWidth>") < at("<MaxWidth>"), "got {xml}");
+    assert!(at("<MaxWidth>") < at("<Height>"), "got {xml}");
+    assert!(at("<Height>") < at("<AutoMaxHeight>"), "got {xml}");
+    assert!(at("<AutoMaxHeight>") < at("<MaxHeight>"), "got {xml}");
+    assert!(at("<MaxHeight>") < at("<HeightInTableRows>"), "got {xml}");
+    // The stretch pair closes the layout run and opens the drag run.
+    assert!(at("<Header>") < at("<HorizontalStretch>"), "got {xml}");
+    assert!(
+        at("<AutoInsertNewRow>") < at("<HorizontalStretch>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<InitialTreeView>") < at("<HorizontalStretch>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<HorizontalStretch>") < at("<VerticalStretch>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<VerticalStretch>") < at("<EnableStartDrag>"),
+        "got {xml}"
+    );
+    assert!(at("<EnableStartDrag>") < at("<DataPath>"), "got {xml}");
+    // Title, TitleTextColor, TitleFont, Font, CommandSet.
+    assert!(at("<DataPath>") < at("<Title>"), "got {xml}");
+    assert!(at("<Title>") < at("<TitleTextColor>"), "got {xml}");
+    assert!(at("<TitleTextColor>") < at("<TitleFont "), "got {xml}");
+    assert!(at("<TitleFont ") < at("<Font "), "got {xml}");
+    assert!(at("<Font ") < at("<CommandSet>"), "got {xml}");
+    for name in [
+        "<MaxWidth>",
+        "<MaxHeight>",
+        "<HorizontalStretch>",
+        "<VerticalStretch>",
+        "<TitleFont ",
+        "<Font ",
+    ] {
+        assert_eq!(xml.matches(name).count(), 1, "{name} repeats in {xml}");
+    }
+}
+
+/// A `Page` writes its geometry, its picture and its `ScrollOnCompress` behind
+/// the title block, and `TitleFont` directly behind `Title`.
+///
+/// Native (7 016 pages): `Title` leads `Width` 57, `Height` 72, `TitleFont` 1
+/// and `ScrollOnCompress` 104 times; `ToolTip` leads `Width` 6 and `Height` 9;
+/// `Width` leads `HorizontalStretch` 51 and `Height` 4; `Height` leads
+/// `VerticalStretch` 41; the stretch pair leads `Picture` 4/4; `Picture` leads
+/// `Group` 14; `TitleDataPath` leads `ScrollOnCompress` 1 and nothing but
+/// `ExtendedTooltip` and `ChildItems` follows it.  Every one of those pairs used
+/// to be written the other way round.
+#[test]
+fn a_page_writes_its_geometry_and_scroll_on_compress_behind_its_title() {
+    let mut page = form_child_item_for_owner_order_test(
+        r#"{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"Page",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{22,{0},0,0,0,8,"ContextMenu",{1,0},{1,0}},2,11111111-1111-4111-8111-111111111111,{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,99,"UnknownField",{1,0}},22222222-2222-4222-8222-222222222222,{22,{74,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"KnownGroup",{1,0},{1,0},0,1,0}}"#,
+    );
+    assert_eq!(page.tag, "Page");
+    page.child_items.clear();
+    page.title = vec![("ru".to_string(), "Страница".to_string())];
+    page.title_font_xml = Some("<TitleFont faceName=\"Arial\"/>".to_string());
+    page.tooltip = vec![("ru".to_string(), "Подсказка".to_string())];
+    page.width = Some("30".to_string());
+    page.height = Some("10".to_string());
+    page.horizontal_stretch = Some(true);
+    page.vertical_stretch = Some(false);
+    page.picture_ref = Some("StdPicture.Delete".to_string());
+    page.group = Some("Horizontal");
+    page.title_data_path = Some("Объект.Заголовок".to_string());
+    page.scroll_on_compress = Some(true);
+    page.extended_tooltip = Some(FormExtendedTooltip::new(
+        "PageTip".to_string(),
+        "11".to_string(),
+    ));
+    let xml = format_form_child_items_xml(&[page], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<Title>") < at("<TitleFont "), "got {xml}");
+    assert!(at("<TitleFont ") < at("<ToolTip>"), "got {xml}");
+    assert!(at("<ToolTip>") < at("<Width>"), "got {xml}");
+    assert!(at("<Width>") < at("<Height>"), "got {xml}");
+    assert!(at("<Height>") < at("<HorizontalStretch>"), "got {xml}");
+    assert!(
+        at("<HorizontalStretch>") < at("<VerticalStretch>"),
+        "got {xml}"
+    );
+    assert!(at("<VerticalStretch>") < at("<Picture>"), "got {xml}");
+    assert!(at("<Picture>") < at("<Group>"), "got {xml}");
+    assert!(at("<Group>") < at("<TitleDataPath>"), "got {xml}");
+    assert!(
+        at("<TitleDataPath>") < at("<ScrollOnCompress>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<ScrollOnCompress>") < at("<ExtendedTooltip"),
+        "got {xml}"
+    );
+    for name in ["<Width>", "<Height>", "<TitleFont ", "<ScrollOnCompress>"] {
+        assert_eq!(xml.matches(name).count(), 1, "{name} repeats in {xml}");
+    }
+}
+
+/// A `Popup` writes `TitleFont` behind `TitleTextColor` and its geometry behind
+/// `ToolTip`, ahead of `Picture`; a `CommandBar` writes `VerticalStretch` right
+/// behind `HorizontalStretch`, ahead of `HorizontalLocation`.
+///
+/// Native popups: `Title` and `TitleTextColor` lead `TitleFont` 84 times each,
+/// `TitleFont` leads `ToolTip` 10 and `VerticalStretch` 42, `ToolTip` leads
+/// `VerticalStretch` 5 and `Width` 1, `Width` leads `HorizontalStretch` 1,
+/// `HorizontalStretch` leads `Picture` 5.  Native command bars: `Title` leads
+/// `VerticalStretch` 10, `HorizontalStretch` leads it 3, and it leads
+/// `HorizontalLocation` 5.  All of these used to be written ahead of the title.
+#[test]
+fn a_popup_and_a_command_bar_write_their_stretch_behind_the_title() {
+    let mut popup = form_child_item_for_owner_order_test(
+        r#"{22,{442,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"ЗагрузитьКак",{1,1,{"ru","Загрузить"}},{1,0},0,1,0,0,0,2,2,{3,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f}},{7,3,0,1,100},{0,0,0},1,{7,{4,0,{0},"",-1,-1,1,0,""},{0},2,3,0,3,{3,4,{0}},{3,4,{0}}},0,1,0,1,{12,{443,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗагрузитьКакРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,3,3,0}"#,
+    );
+    assert_eq!(popup.tag, "Popup");
+    popup.title_text_color = Some("style:ГиперссылкаЦвет".to_string());
+    popup.title_font_xml = Some("<TitleFont faceName=\"Arial\"/>".to_string());
+    popup.tooltip = vec![("ru".to_string(), "Подсказка".to_string())];
+    popup.width = Some("12".to_string());
+    popup.horizontal_stretch = Some(true);
+    popup.vertical_stretch = Some(false);
+    popup.picture_ref = Some("StdPicture.Delete".to_string());
+    let xml = format_form_child_items_xml(&[popup], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<Title>") < at("<TitleTextColor>"), "got {xml}");
+    assert!(at("<TitleTextColor>") < at("<TitleFont "), "got {xml}");
+    assert!(at("<TitleFont ") < at("<ToolTip>"), "got {xml}");
+    assert!(at("<ToolTip>") < at("<Width>"), "got {xml}");
+    assert!(at("<Width>") < at("<HorizontalStretch>"), "got {xml}");
+    assert!(
+        at("<HorizontalStretch>") < at("<VerticalStretch>"),
+        "got {xml}"
+    );
+    assert!(at("<VerticalStretch>") < at("<Picture>"), "got {xml}");
+    for name in [
+        "<Width>",
+        "<HorizontalStretch>",
+        "<VerticalStretch>",
+        "<TitleFont ",
+    ] {
+        assert_eq!(xml.matches(name).count(), 1, "{name} repeats in {xml}");
+    }
+
+    let mut bar = form_child_item_for_owner_order_test(
+        r#"{22,{14,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаКоманднаяПанель",{1,1,{"ru","Командная панель"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,2,{0}},2,a9f3b1ac-f51b-431e-b102-55a69acdecad,1,0,1,{12,{15,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаКоманднаяПанельРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,3,3,0}"#,
+    );
+    assert_eq!(bar.tag, "CommandBar");
+    assert_eq!(bar.horizontal_location, Some("Right"));
+    bar.horizontal_stretch = Some(true);
+    bar.vertical_stretch = Some(true);
+    let xml = format_form_child_items_xml(&[bar], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<Title>") < at("<HorizontalStretch>"), "got {xml}");
+    assert!(
+        at("<HorizontalStretch>") < at("<VerticalStretch>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<VerticalStretch>") < at("<HorizontalLocation>"),
+        "got {xml}"
+    );
+    assert_eq!(xml.matches("<VerticalStretch>").count(), 1, "got {xml}");
+}
+
+/// A `LabelField` writes its alignment run as `HorizontalAlign`, `VerticalAlign`,
+/// `GroupHorizontalAlign`, `GroupVerticalAlign`, and closes with `Format`,
+/// `Hiperlink`, `Border`, `BorderColor`, `TextColor`, `BackColor`, `Font`.
+///
+/// Native labels: `VerticalAlign` leads `GroupHorizontalAlign` 2 (and 1 each on
+/// `InputField` and `RadioButtonField`); `Format` leads `Hiperlink` 5; `Border`
+/// leads `TextColor` 1, `BackColor` 2 and `BorderColor` 3; `BorderColor` leads
+/// `TextColor` 2; `TextColor` leads `BackColor` 9 and `Font` 177; `BackColor`
+/// leads `Font` 1.  The group pair used to split the plain pair, `Hiperlink` used
+/// to lead `Format`, `Border` used to trail `Font`, and `Font` used to lead
+/// `BackColor`.
+#[test]
+fn a_label_field_writes_its_alignment_run_and_visual_tail_in_native_order() {
+    let mut label =
+        form_child_item_for_owner_order_test(&label_field_column_layout("0", "1", "{0,83,8}", "1"));
+    assert_eq!(label.tag, "LabelField");
+    label.horizontal_align = Some(crate::form_schema::FormChildItemAlignment::Horizontal(
+        "Right",
+    ));
+    label.vertical_align = Some(crate::form_schema::FormFieldVerticalAlign::Center);
+    label.group_horizontal_align = Some("Right");
+    label.group_vertical_align = Some("Bottom");
+    label.format = vec![("ru".to_string(), "ЧДЦ=2".to_string())];
+    label.hiperlink = Some(true);
+    label.control_border = Some(crate::form_schema::FormControlBorderStyle::Single);
+    label.border_color = Some("style:ЦветРамки".to_string());
+    label.text_color = Some("style:ЦветТекста".to_string());
+    label.back_color = Some("style:ЦветФона".to_string());
+    label.font_xml = Some("<Font faceName=\"Arial\"/>".to_string());
+    let xml = format_form_child_items_xml(&[label], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<HorizontalAlign>") < at("<VerticalAlign>"), "got {xml}");
+    assert!(
+        at("<VerticalAlign>") < at("<GroupHorizontalAlign>"),
+        "got {xml}"
+    );
+    assert!(
+        at("<GroupHorizontalAlign>") < at("<GroupVerticalAlign>"),
+        "got {xml}"
+    );
+    assert!(at("<GroupVerticalAlign>") < at("<Format>"), "got {xml}");
+    assert!(at("<Format>") < at("<Hiperlink>"), "got {xml}");
+    assert!(at("<Hiperlink>") < at("<Border "), "got {xml}");
+    assert!(at("<Border ") < at("<BorderColor>"), "got {xml}");
+    assert!(at("<BorderColor>") < at("<TextColor>"), "got {xml}");
+    assert!(at("<TextColor>") < at("<BackColor>"), "got {xml}");
+    assert!(at("<BackColor>") < at("<Font "), "got {xml}");
+    assert!(at("<Font ") < at("<ContextMenu"), "got {xml}");
+    for name in [
+        "<Hiperlink>",
+        "<Border ",
+        "<BorderColor>",
+        "<TextColor>",
+        "<BackColor>",
+        "<Font ",
+    ] {
+        assert_eq!(xml.matches(name).count(), 1, "{name} repeats in {xml}");
+    }
+}
+
+/// The smaller owners the sweep moved, one assertion each: a table addition
+/// opens with `Enabled` (native 9/11/13 times ahead of `AdditionSource`, never
+/// behind); a `LabelDecoration` writes `Border` behind `BackColor` (12) and
+/// `BorderColor` (4); a `PictureDecoration` writes `TextColor` ahead of `Font`
+/// (9); a `SpreadSheetDocumentField` writes `Protection` ahead of
+/// `SelectionShowMode` (8); a `TextDocumentField` writes `ToolTip` ahead of
+/// `Height` (2); a `UsualGroup` writes `Enabled` ahead of `ReadOnly` (3) and
+/// `Shortcut` behind `ToolTipRepresentation` (1).
+#[test]
+fn the_smaller_owners_write_their_moved_properties_in_the_native_order() {
+    let base = form_child_item_for_owner_order_test(
+        r#"{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0}"#,
+    );
+
+    for tag in [
+        "SearchStringAddition",
+        "SearchControlAddition",
+        "ViewStatusAddition",
+    ] {
+        let mut addition = base.clone();
+        addition.tag = tag;
+        addition.auto_command_bar_empty_element = false;
+        addition.enabled = Some(false);
+        addition.addition_source_item = Some("Список".to_string());
+        addition.horizontal_location = Some("Right");
+        let xml = format_form_child_items_xml(&[addition], 1);
+        let at = owner_order_at(&xml);
+        assert!(at("<Enabled>") < at("<AdditionSource>"), "{tag}: got {xml}");
+        assert!(
+            at("<AdditionSource>") < at("<HorizontalLocation>"),
+            "{tag}: got {xml}"
+        );
+        assert_eq!(xml.matches("<Enabled>").count(), 1, "{tag}: got {xml}");
+    }
+
+    let mut decoration = form_child_item_for_owner_order_test(
+        r#"{12,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСек",{1,1,{"ru","(сек)"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ДекорацияСекКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,0,{1,{1,1,{"ru","(сек)"}},0},0,1,{12,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСекРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,0,0,0,0,0,0}"#,
+    );
+    assert_eq!(decoration.tag, "LabelDecoration");
+    decoration.back_color = Some("style:ЦветФона".to_string());
+    decoration.border_color = Some("style:ЦветРамки".to_string());
+    decoration.control_border = Some(crate::form_schema::FormControlBorderStyle::Single);
+    let xml = format_form_child_items_xml(&[decoration], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<BackColor>") < at("<BorderColor>"), "got {xml}");
+    assert!(at("<BorderColor>") < at("<Border "), "got {xml}");
+    assert!(at("<Border ") < at("<ContextMenu"), "got {xml}");
+    assert_eq!(xml.matches("<Border ").count(), 1, "got {xml}");
+
+    let mut picture = base.clone();
+    picture.tag = "PictureDecoration";
+    picture.auto_command_bar_empty_element = false;
+    picture.text_color = Some("style:ЦветТекста".to_string());
+    picture.font_xml = Some("<Font faceName=\"Arial\"/>".to_string());
+    picture.title = vec![("ru".to_string(), "Картинка".to_string())];
+    let xml = format_form_child_items_xml(&[picture], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<TextColor>") < at("<Font "), "got {xml}");
+    assert!(at("<Font ") < at("<Title formatted="), "got {xml}");
+    assert_eq!(xml.matches("<TextColor>").count(), 1, "got {xml}");
+
+    let mut spreadsheet = base.clone();
+    spreadsheet.tag = "SpreadSheetDocumentField";
+    spreadsheet.auto_command_bar_empty_element = false;
+    spreadsheet.spreadsheet_document_properties =
+        Some(crate::form_schema::FormSpreadsheetDocumentFieldProperties {
+            default_item: None,
+            width: None,
+            height: None,
+            auto_max_width: None,
+            auto_max_height: None,
+            vertical_stretch: None,
+            show_grid: None,
+            show_headers: None,
+            show_cell_names: None,
+            show_row_and_column_names: None,
+            vertical_scroll_bar: None,
+            horizontal_scroll_bar: Some(true),
+            edit: Some(true),
+            selection_show_mode: Some("Selection"),
+            output: Some("Enable"),
+            protection: Some(true),
+            enable_start_drag: Some(false),
+            enable_drag: None,
+        });
+    let xml = format_form_child_items_xml(&[spreadsheet], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<Edit>") < at("<Protection>"), "got {xml}");
+    assert!(at("<Protection>") < at("<SelectionShowMode>"), "got {xml}");
+    assert!(at("<SelectionShowMode>") < at("<Output>"), "got {xml}");
+    assert!(at("<Output>") < at("<EnableStartDrag>"), "got {xml}");
+    assert_eq!(xml.matches("<Protection>").count(), 1, "got {xml}");
+
+    let mut text = base.clone();
+    text.tag = "TextDocumentField";
+    text.auto_command_bar_empty_element = false;
+    text.title_location = Some("None");
+    text.tooltip = vec![("ru".to_string(), "Подсказка".to_string())];
+    text.height = Some("3".to_string());
+    let xml = format_form_child_items_xml(&[text], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<TitleLocation>") < at("<ToolTip>"), "got {xml}");
+    assert!(at("<ToolTip>") < at("<Height>"), "got {xml}");
+    assert_eq!(xml.matches("<ToolTip>").count(), 1, "got {xml}");
+
+    let mut group = base.clone();
+    group.tag = "UsualGroup";
+    group.auto_command_bar_empty_element = false;
+    group.usual_group_enabled = Some(false);
+    group.read_only = Some(true);
+    group.title = vec![("ru".to_string(), "Группа".to_string())];
+    group.tooltip = vec![("ru".to_string(), "Подсказка".to_string())];
+    group.tooltip_representation = Some("Balloon");
+    group.usual_group_shortcut = Some("Ctrl+G".to_string());
+    group.horizontal_stretch = Some(true);
+    let xml = format_form_child_items_xml(&[group], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<Enabled>") < at("<ReadOnly>"), "got {xml}");
+    assert!(at("<ReadOnly>") < at("<Title>"), "got {xml}");
+    assert!(at("<Title>") < at("<ToolTip>"), "got {xml}");
+    assert!(
+        at("<ToolTipRepresentation>") < at("<Shortcut>"),
+        "got {xml}"
+    );
+    assert!(at("<Shortcut>") < at("<HorizontalStretch>"), "got {xml}");
+    assert_eq!(xml.matches("<Shortcut>").count(), 1, "got {xml}");
+}

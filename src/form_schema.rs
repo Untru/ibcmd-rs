@@ -258,11 +258,14 @@ pub(crate) fn form_group_vertical_align_xml(raw: &str) -> Option<&'static str> {
 pub(crate) enum FormPageXmlProperty {
     EnableContentChange,
     Title,
+    TitleFont,
     ToolTip,
     ToolTipRepresentation,
-    Picture,
+    Width,
+    Height,
     HorizontalStretch,
     VerticalStretch,
+    Picture,
     Group,
     HorizontalSpacing,
     VerticalSpacing,
@@ -276,11 +279,30 @@ pub(crate) enum FormPageXmlProperty {
 pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::EnableContentChange,
     FormPageXmlProperty::Title,
+    // `TitleFont` trails `Title` and leads `ToolTip` and `Group` on the one
+    // native page that carries it; it used to be written ahead of the title.
+    FormPageXmlProperty::TitleFont,
     FormPageXmlProperty::ToolTip,
     FormPageXmlProperty::ToolTipRepresentation,
-    FormPageXmlProperty::Picture,
+    // A page's geometry sits behind its title block, not in front of it.  UT
+    // 11.5.27.75 native tree, 7 016 `Page` instances: `Width` (57) trails
+    // `Title` (57), `ToolTip` (6), `EnableContentChange` (4) and
+    // `ToolTipRepresentation` (1) and leads `HorizontalStretch` (51),
+    // `VerticalStretch` (7), `Height` (4), `Picture` (4), `Group` (12),
+    // `HorizontalAlign` (4), `ShowTitle` (4) and `ChildItemsWidth` (4);
+    // `Height` (74) trails `Title` (72), `ToolTip` (9), `Width` (4),
+    // `EnableContentChange` (4), `Visible` (1) and `Enabled` (1) and leads
+    // `VerticalStretch` (41), `HorizontalStretch` (39), `ShowTitle` (38),
+    // `BackColor` (34), `HorizontalAlign` (32), the two spacings (24 each),
+    // `Group` (17) and `VerticalAlign` (9).  `Picture` (95) trails `Width`,
+    // `HorizontalStretch` and `VerticalStretch` (4 each) and leads `Group`
+    // (14), `TitleDataPath` (11) and `ChildItemsWidth` (5), so it moves behind
+    // the stretch pair.  No pair is observed in both directions.
+    FormPageXmlProperty::Width,
+    FormPageXmlProperty::Height,
     FormPageXmlProperty::HorizontalStretch,
     FormPageXmlProperty::VerticalStretch,
+    FormPageXmlProperty::Picture,
     FormPageXmlProperty::Group,
     // `HorizontalSpacing` then `VerticalSpacing` sit between `Group` and the
     // `*Align` pair on `Page`, which is where `UsualGroup` already puts them.
@@ -829,11 +851,18 @@ pub(crate) enum FormUsualGroupHeaderXmlProperty {
 
 pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlProperty] = &[
     FormUsualGroupHeaderXmlProperty::Title,
-    FormUsualGroupHeaderXmlProperty::Shortcut,
     FormUsualGroupHeaderXmlProperty::TitleTextColor,
     FormUsualGroupHeaderXmlProperty::TitleFont,
     FormUsualGroupHeaderXmlProperty::ToolTip,
     FormUsualGroupHeaderXmlProperty::ToolTipRepresentation,
+    // `Shortcut` closes the header: on the 10 native groups that carry it, it
+    // trails `Title` (10), `ToolTipRepresentation` (1), `ReadOnly` (1) and
+    // `EnableContentChange` (1) and leads `ShowTitle` (9), `Behavior` (9),
+    // `Representation` (8), `Group` (4), `ChildItemsWidth` (2), `ThroughAlign`
+    // (1) and `HorizontalStretch` (1).  It never shares a group with
+    // `TitleTextColor`, `TitleFont` or `ToolTip`, so the end of the header is
+    // the nearest position that satisfies every observed pair.
+    FormUsualGroupHeaderXmlProperty::Shortcut,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -870,8 +899,10 @@ pub(crate) enum FormUsualGroupXmlProperty {
 }
 
 pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
-    FormUsualGroupXmlProperty::ReadOnly,
+    // `Enabled` leads `ReadOnly` on all 3 native groups that carry both, and
+    // both lead `EnableContentChange` (4 each); never the other way round.
     FormUsualGroupXmlProperty::Enabled,
+    FormUsualGroupXmlProperty::ReadOnly,
     FormUsualGroupXmlProperty::EnableContentChange,
     FormUsualGroupXmlProperty::GroupHorizontalAlign,
     FormUsualGroupXmlProperty::GroupVerticalAlign,
@@ -4806,8 +4837,10 @@ pub(crate) enum FormTableXmlProperty {
     ChangeRowOrder,
     Width,
     AutoMaxWidth,
+    MaxWidth,
     Height,
     AutoMaxHeight,
+    MaxHeight,
     HeightInTableRows,
     ChoiceMode,
     MultipleChoice,
@@ -4826,6 +4859,8 @@ pub(crate) enum FormTableXmlProperty {
     SearchOnInput,
     InitialListView,
     InitialTreeView,
+    HorizontalStretch,
+    VerticalStretch,
     EnableStartDrag,
     EnableDrag,
     FileDragMode,
@@ -4836,6 +4871,8 @@ pub(crate) enum FormTableXmlProperty {
     TextColor,
     BorderColor,
     Title,
+    TitleFont,
+    Font,
     CommandSet,
     CurrentRowUse,
     ToolTip,
@@ -4888,10 +4925,25 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::DefaultItem,
     FormTableXmlProperty::ChangeRowSet,
     FormTableXmlProperty::ChangeRowOrder,
+    // The two caps sit inside the table's own geometry run, each directly
+    // behind the auto flag it bounds, and not down in the shared visual tail
+    // where every other table property had already been written.  UT
+    // 11.5.27.75 native tree, 4 543 `Table` instances: `MaxWidth` (44) trails
+    // `AutoMaxWidth` (36), `Width` (19), `ReadOnly` (19), `ChangeRowSet` (16),
+    // `ChangeRowOrder` (16) and `CommandBarLocation` (14) and leads `Height`
+    // (2), `AutoMaxHeight` (3), `MaxHeight` (3), `HeightInTableRows` (6),
+    // `Header` (23), `AutoInsertNewRow` (27), `EnableStartDrag` (28),
+    // `DataPath` (44), `Title` (18) and `CommandSet` (19); `MaxHeight` (34)
+    // trails `AutoMaxHeight` (20), `Height` (7), `AutoMaxWidth` (6) and
+    // `MaxWidth` (3) and leads `HeightInTableRows` (8), `Header` (21),
+    // `AutoInsertNewRow` (21), `EnableStartDrag` (24), `DataPath` (34) and
+    // `Title` (12).  No pair is observed in both directions.
     FormTableXmlProperty::Width,
     FormTableXmlProperty::AutoMaxWidth,
+    FormTableXmlProperty::MaxWidth,
     FormTableXmlProperty::Height,
     FormTableXmlProperty::AutoMaxHeight,
+    FormTableXmlProperty::MaxHeight,
     FormTableXmlProperty::HeightInTableRows,
     FormTableXmlProperty::ChoiceMode,
     FormTableXmlProperty::MultipleChoice,
@@ -4932,6 +4984,23 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::SearchOnInput,
     FormTableXmlProperty::InitialListView,
     FormTableXmlProperty::InitialTreeView,
+    // The stretch pair closes the layout run and opens the drag run.  Same
+    // native tree: `HorizontalStretch` (35) trails `Header` (25),
+    // `AutoInsertNewRow` (20), `HorizontalLines` (18), `VerticalLines` (16),
+    // `AutoMaxHeight` (13), `MaxHeight` (10), `InitialTreeView` (10),
+    // `MaxWidth` (5), `AutoAddIncomplete` (4), `UseAlternationRowColor` (3),
+    // `InitialListView` (2) and `AutoMarkIncomplete` (2) and leads
+    // `VerticalStretch` (17), `EnableStartDrag` (18), `EnableDrag` (18),
+    // `FileDragMode` (18), `DataPath` (35), `RowPictureDataPath` (9), `Title`
+    // (16) and `CommandSet` (13); `VerticalStretch` (53) trails
+    // `AutoInsertNewRow` (32), `Header` (25), `HorizontalStretch` (17),
+    // `AutoMaxHeight` (11), `MaxHeight` (8), `InitialTreeView` (3),
+    // `AutoAddIncomplete` (2) and `InitialListView` (1) and leads
+    // `EnableStartDrag` (39), `EnableDrag` (41), `FileDragMode` (26),
+    // `DataPath` (53), `Title` (27) and `CommandSet` (20).  `SearchOnInput`
+    // never shares a table with either, so it keeps its place ahead of them.
+    FormTableXmlProperty::HorizontalStretch,
+    FormTableXmlProperty::VerticalStretch,
     FormTableXmlProperty::EnableStartDrag,
     FormTableXmlProperty::EnableDrag,
     FormTableXmlProperty::FileDragMode,
@@ -4942,6 +5011,17 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::TextColor,
     FormTableXmlProperty::BorderColor,
     FormTableXmlProperty::Title,
+    // A table's `TitleFont` follows its title block and precedes the command
+    // set, like every other titled owner: it trails `Title` (22) and
+    // `TitleTextColor` (11) and leads `CommandSet` (18), `RowFilter` (20),
+    // `SearchStringLocation`, `ViewStatusLocation` and `SearchControlLocation`
+    // (12 each) and `ToolTip` (1) on all 27 native occurrences.  `Font` (2)
+    // trails `DataPath` and `FileDragMode` and leads `CommandSet`, `RowFilter`
+    // and the three locations; it never shares a table with `Title`,
+    // `TitleFont` or the colour triple, so it stays beside `TitleFont`, the
+    // nearest position that satisfies every observed pair.
+    FormTableXmlProperty::TitleFont,
+    FormTableXmlProperty::Font,
     FormTableXmlProperty::CommandSet,
     FormTableXmlProperty::ToolTip,
     FormTableXmlProperty::ToolTipRepresentation,
