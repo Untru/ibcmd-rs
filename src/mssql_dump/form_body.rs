@@ -6086,6 +6086,17 @@ fn extract_form_server_state_inner_xml_with_indexes(
             inner = canonical;
         }
     }
+    // The blob declares its namespaces itself, under prefixes numbered by its
+    // own depth; the inline position is a document whose root already declares
+    // them. `respell_form_server_state_namespaces` re-spells the whole blob on
+    // that one rule and leaves it untouched for anything it cannot account
+    // for, so the literal rewrites below stay in place and simply find nothing
+    // left to do wherever it succeeded.
+    if let Some(respelled) =
+        respell_form_server_state_namespaces(&xml[root_start..root_open_end], &inner)
+    {
+        inner = respelled;
+    }
     let inner = inner.trim().replace(
         r#" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema""#,
         "",

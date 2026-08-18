@@ -35,6 +35,9 @@ const WEB_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/web";
 const WIN_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/windows";
 const XSI_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema-instance";
 const XS_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema";
+const MANAGED_APPLICATION_CORE_NS: &[u8] = b"http://v8.1c.ru/8.2/managed-application/core";
+const MANAGED_APPLICATION_LOGFORM_NS: &[u8] = b"http://v8.1c.ru/8.2/managed-application/logform";
+const XCF_READABLE_NS: &[u8] = b"http://v8.1c.ru/8.3/xcf/readable";
 const DCS_AREA_TEMPLATE_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/area-template";
 const ENTERPRISE_URI: &str = "http://v8.1c.ru/8.1/data/enterprise";
 const CURRENT_CONFIG_URI: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
@@ -2566,19 +2569,496 @@ fn globally_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'stati
 /// carries one, so admitting them would be a guess about a spelling nothing
 /// proves, and the writer refuses instead.
 fn form_root_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'static str> {
+    matches!(
+        namespace,
+        DCS_CORE_NS
+            | DCS_SETTINGS_NS
+            | DATA_CORE_NS
+            | DATA_UI_NS
+            | STYLE_NS
+            | SYS_NS
+            | WEB_NS
+            | WIN_NS
+            | XSI_NS
+            | XS_NS
+    )
+    .then(|| form_root_declared_prefix(namespace))
+    .flatten()
+}
+
+/// The prefix a decompiled `Form.xml` declares on its own root element for
+/// `namespace`, over the whole root declaration set rather than one position's
+/// slice of it.
+///
+/// All 5 201 native UT 11.5.27.75 forms declare exactly the same seventeen
+/// namespaces on `<Form>` -- one distinct declaration set across the corpus,
+/// no variation at all -- so this is the entire table and not a sample. The
+/// seventeenth is the default declaration, the logform namespace, which
+/// carries no prefix and therefore no entry here.
+///
+/// [`form_root_declared_data_composition_prefix`] is this table restricted to
+/// the vocabulary a `ListSettings` child is observed to carry, so the two can
+/// never disagree about a namespace both admit.
+fn form_root_declared_prefix(namespace: &[u8]) -> Option<&'static str> {
     match namespace {
+        MANAGED_APPLICATION_CORE_NS => Some("app"),
+        CURRENT_CONFIG_NS => Some("cfg"),
         DCS_CORE_NS => Some("dcscor"),
+        DCS_SCHEMA_NS => Some("dcssch"),
         DCS_SETTINGS_NS => Some("dcsset"),
-        DATA_CORE_NS => Some("v8"),
-        DATA_UI_NS => Some("v8ui"),
+        ENTERPRISE_NS => Some("ent"),
+        MANAGED_APPLICATION_LOGFORM_NS => Some("lf"),
         STYLE_NS => Some("style"),
         SYS_NS => Some("sys"),
+        DATA_CORE_NS => Some("v8"),
+        DATA_UI_NS => Some("v8ui"),
         WEB_NS => Some("web"),
         WIN_NS => Some("win"),
-        XSI_NS => Some("xsi"),
+        XCF_READABLE_NS => Some("xr"),
         XS_NS => Some("xs"),
+        XSI_NS => Some("xsi"),
         _ => None,
     }
+}
+
+/// Depth of a dynamic list's `<Settings>` element in a decompiled `Form.xml`:
+/// `Form`(1) / `Attributes`(2) / `Attribute`(3) / `Settings`(4).
+///
+/// The `ServerState` blob's own root is spelled at exactly that element, so a
+/// generated prefix minted inside the blob counts its depth from here. This is
+/// the same chain [`FORM_LIST_SETTINGS_CHILD_ROOT_DEPTH`] already measures --
+/// that one continues through `ListSettings`(5) to the child root(6) -- and is
+/// derived from it rather than restated, so the two cannot drift apart.
+const FORM_SERVER_STATE_ROOT_DEPTH: usize = FORM_LIST_SETTINGS_CHILD_ROOT_DEPTH - 2;
+
+/// One namespace declaration in scope while a `ServerState` blob is re-spelled.
+#[derive(Debug, Clone)]
+struct FormServerStateNamespace {
+    /// The prefix the blob spells the namespace with; empty for a default
+    /// declaration.
+    prefix: String,
+    uri: String,
+    /// The prefix the output keeps the declaration under, when it keeps it at
+    /// all. `None` means the `Form` root already declares this namespace, so
+    /// the declaration is dropped and every QName bound to it renders against
+    /// the root's own prefix.
+    minted: Option<String>,
+}
+
+/// One open element while a `ServerState` blob is re-spelled.
+#[derive(Debug)]
+struct FormServerStateFrame {
+    namespaces: Vec<FormServerStateNamespace>,
+    /// Expanded name of the element, which together with its `xsi:type` is
+    /// what says whether its character data is a QName.
+    namespace: String,
+    local: String,
+    xsi_type: Option<(String, String)>,
+    /// The name the blob's own start tag spells, which its end tag must repeat.
+    blob_name: String,
+    /// The name its end tag is written with.
+    close_name: String,
+}
+
+/// Re-spells the generated namespace prefixes of a dynamic list's decoded
+/// `ServerState` blob for the position the blob's content is inlined at.
+///
+/// The blob is a standalone XML document, so the platform serializes it with
+/// its own declarations: every namespace it needs is declared at the element
+/// that first uses it, under a prefix numbered `d<depth>p<index>` by that
+/// element's depth *in the blob*. The inline position is `Form.xml`, whose
+/// root already declares seventeen namespaces (see
+/// [`form_root_declared_prefix`]), so the platform's own export writes the
+/// same content differently: a declaration whose namespace the root already
+/// carries is dropped and its QNames re-spelled with the root's prefix, and
+/// one the root does not carry keeps a generated prefix renumbered by the
+/// element's depth in `Form.xml`.
+///
+/// Both halves are pinned by the corpus. The 657 distinct `ServerState` blobs
+/// of UT 11.5.27.75 carry 32 332 prefixed declarations over seven namespaces --
+/// 26 640 schema, 4 370 core, 657 each of `xs` and `xsi`, 6 settings, one ui,
+/// one `http://v8.1c.ru/8.2/data/types` -- and exactly the last of those is
+/// outside the `Form` root's set. The platform writes that one as `d6p1`, and
+/// the element it declares it on sits at `Form`/`Attributes`/`Attribute`/
+/// `Settings`/`Parameter`/`value`, depth six. Its blob-side neighbour, a core
+/// declaration written before it and dropped here, does not consume the index:
+/// the index counts the declarations actually written, exactly as the storage
+/// side numbers the ones it writes.
+///
+/// Character data is re-spelled on the same rule wherever it is a QName, which
+/// is where the element is `{data/core}Type`/`TypeSet` or carries an
+/// `xsi:type` naming one. All 510 such bodies in the corpus are covered: 508
+/// already spell a root-declared prefix and are returned unchanged, and the
+/// two that spell none resolve through the default declaration their own
+/// element carries.
+///
+/// Default declarations are left exactly as the blob wrote them: they bind
+/// element names this function does not rename, and the caller's own rewrite
+/// owns that spelling.
+///
+/// Returns `None`, changing nothing, for any blob this does not fully account
+/// for -- a prefix declared nowhere in scope, a namespace the root does not
+/// declare appearing where no prefix can be minted, a markup construct outside
+/// elements and character data, or a start tag this cannot re-render
+/// byte-for-byte from its own parse.
+pub(crate) fn respell_form_server_state_namespaces(
+    root_open_tag: &str,
+    inner: &str,
+) -> Option<String> {
+    let root = scan_form_server_state_start_tag(root_open_tag)?;
+    let mut root_namespaces = Vec::new();
+    for (name, value, _quote) in &root.attributes {
+        let Some(prefix) = form_server_state_declared_prefix(name) else {
+            continue;
+        };
+        if !value.is_empty() && form_root_declared_prefix(value.as_bytes()).is_none() {
+            // The blob's root declares a namespace the `Form` root does not,
+            // and the blob root is not written at all in the inline position,
+            // so there is nowhere to mint a replacement for it.
+            return None;
+        }
+        root_namespaces.push(FormServerStateNamespace {
+            prefix: prefix.to_owned(),
+            uri: (*value).to_owned(),
+            minted: None,
+        });
+    }
+    let mut stack = vec![FormServerStateFrame {
+        namespaces: root_namespaces,
+        namespace: String::new(),
+        local: String::new(),
+        xsi_type: None,
+        blob_name: root.name.to_owned(),
+        close_name: String::new(),
+    }];
+    let mut output = String::with_capacity(inner.len());
+    let mut cursor = 0usize;
+    while cursor < inner.len() {
+        let Some(relative) = inner[cursor..].find('<') else {
+            output.push_str(&inner[cursor..]);
+            break;
+        };
+        let start = cursor + relative;
+        output.push_str(&form_server_state_rendered_text(
+            &stack,
+            &inner[cursor..start],
+        )?);
+        let end = form_server_state_tag_end(inner, start)?;
+        let tag = &inner[start..end];
+        if tag.starts_with("</") {
+            if stack.len() < 2 {
+                return None;
+            }
+            let frame = stack.pop()?;
+            if tag.strip_prefix("</")?.strip_suffix('>')?.trim() != frame.blob_name {
+                return None;
+            }
+            output.push_str("</");
+            output.push_str(&frame.close_name);
+            output.push('>');
+        } else if tag.starts_with("<!") || tag.starts_with("<?") {
+            return None;
+        } else {
+            output.push_str(&form_server_state_rendered_start_tag(&mut stack, tag)?);
+        }
+        cursor = end;
+    }
+    (stack.len() == 1).then_some(output)
+}
+
+/// The prefix an `xmlns` attribute declares: the empty string for the default
+/// declaration, the part after the colon for a prefixed one, `None` for an
+/// attribute that declares nothing.
+fn form_server_state_declared_prefix(name: &str) -> Option<&str> {
+    if name == "xmlns" {
+        return Some("");
+    }
+    name.strip_prefix("xmlns:")
+        .filter(|prefix| !prefix.is_empty())
+}
+
+/// The namespace a prefix is bound to at this point of the walk. The empty
+/// prefix falls back to no namespace when nothing declares a default.
+fn form_server_state_namespace_for_prefix(
+    stack: &[FormServerStateFrame],
+    prefix: &str,
+) -> Option<String> {
+    stack
+        .iter()
+        .rev()
+        .flat_map(|frame| frame.namespaces.iter().rev())
+        .find(|namespace| namespace.prefix == prefix)
+        .map(|namespace| namespace.uri.clone())
+        .or_else(|| prefix.is_empty().then(String::new))
+}
+
+/// The prefix the output spells a namespace with: the `Form` root's own where
+/// the root declares it, otherwise the one minted in scope for it.
+fn form_server_state_rendered_prefix(stack: &[FormServerStateFrame], uri: &str) -> Option<String> {
+    if uri.is_empty() {
+        return Some(String::new());
+    }
+    if let Some(prefix) = form_root_declared_prefix(uri.as_bytes()) {
+        return Some(prefix.to_owned());
+    }
+    stack
+        .iter()
+        .rev()
+        .flat_map(|frame| frame.namespaces.iter().rev())
+        .find(|namespace| namespace.uri == uri && namespace.minted.is_some())
+        .and_then(|namespace| namespace.minted.clone())
+}
+
+/// Re-spells one QName -- an element or attribute name, an `xsi:type`, or a
+/// QName-valued body -- from the blob's namespace context into the `Form`
+/// document's.
+fn form_server_state_render_qname(stack: &[FormServerStateFrame], value: &str) -> Option<String> {
+    let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+    if local.is_empty() || local.contains(':') {
+        return None;
+    }
+    let uri = form_server_state_namespace_for_prefix(stack, prefix)?;
+    let rendered = form_server_state_rendered_prefix(stack, &uri)?;
+    Some(if rendered.is_empty() {
+        local.to_owned()
+    } else {
+        format!("{rendered}:{local}")
+    })
+}
+
+/// The expanded name a QName denotes, without re-spelling it.
+fn form_server_state_expand_qname(
+    stack: &[FormServerStateFrame],
+    value: &str,
+) -> Option<(String, String)> {
+    let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+    if local.is_empty() || local.contains(':') {
+        return None;
+    }
+    Some((
+        form_server_state_namespace_for_prefix(stack, prefix)?,
+        local.to_owned(),
+    ))
+}
+
+/// Character data, re-spelled where the enclosing element makes it a QName.
+///
+/// A `{data/core}Type`/`TypeSet` element, and any element whose `xsi:type`
+/// names one, carries a type QName as its body; everything else is copied
+/// exactly as the blob wrote it.
+fn form_server_state_rendered_text(stack: &[FormServerStateFrame], text: &str) -> Option<String> {
+    let is_qname = stack.last().is_some_and(|frame| {
+        let names_a_type = |namespace: &str, local: &str| {
+            namespace.as_bytes() == DATA_CORE_NS && matches!(local, "Type" | "TypeSet")
+        };
+        names_a_type(&frame.namespace, &frame.local)
+            || frame
+                .xsi_type
+                .as_ref()
+                .is_some_and(|(namespace, local)| names_a_type(namespace, local))
+    });
+    let value = text.trim();
+    if !is_qname || value.is_empty() {
+        return Some(text.to_owned());
+    }
+    let rendered = form_server_state_render_qname(stack, value)?;
+    let value_start = text.find(value)?;
+    Some(format!(
+        "{}{rendered}{}",
+        &text[..value_start],
+        &text[value_start + value.len()..]
+    ))
+}
+
+/// Re-spells one start tag and pushes its frame, popping it again when the tag
+/// is self-closing.
+fn form_server_state_rendered_start_tag(
+    stack: &mut Vec<FormServerStateFrame>,
+    tag: &str,
+) -> Option<String> {
+    let parsed = scan_form_server_state_start_tag(tag)?;
+    // The tag is re-rendered from this parse, so a tag the parse cannot
+    // reproduce byte-for-byte is refused rather than silently reformatted.
+    if form_server_state_start_tag_text(
+        parsed.name,
+        parsed
+            .attributes
+            .iter()
+            .map(|(name, value, quote)| ((*name).to_owned(), (*value).to_owned(), *quote)),
+        parsed.empty,
+    ) != tag
+    {
+        return None;
+    }
+    let form_depth = FORM_SERVER_STATE_ROOT_DEPTH.checked_add(stack.len())?;
+    let mut namespaces = Vec::new();
+    let mut minted = 0usize;
+    for (name, value, _quote) in &parsed.attributes {
+        let Some(prefix) = form_server_state_declared_prefix(name) else {
+            continue;
+        };
+        let kept = if prefix.is_empty() || value.is_empty() {
+            // A default declaration binds element names this pass does not
+            // rename, so it is carried through untouched.
+            None
+        } else if form_root_declared_prefix(value.as_bytes()).is_some() {
+            None
+        } else {
+            minted = minted.checked_add(1)?;
+            Some(format!("d{form_depth}p{minted}"))
+        };
+        namespaces.push(FormServerStateNamespace {
+            prefix: prefix.to_owned(),
+            uri: (*value).to_owned(),
+            minted: kept,
+        });
+    }
+    stack.push(FormServerStateFrame {
+        namespaces,
+        namespace: String::new(),
+        local: String::new(),
+        xsi_type: None,
+        blob_name: parsed.name.to_owned(),
+        close_name: String::new(),
+    });
+    let rendered_name = if parsed.name.contains(':') {
+        form_server_state_render_qname(stack, parsed.name)?
+    } else {
+        parsed.name.to_owned()
+    };
+    let (namespace, local) = form_server_state_expand_qname(stack, parsed.name)?;
+    let mut attributes = Vec::new();
+    let mut xsi_type = None;
+    for (name, value, quote) in &parsed.attributes {
+        if let Some(prefix) = form_server_state_declared_prefix(name) {
+            let declaration = stack
+                .last()?
+                .namespaces
+                .iter()
+                .find(|namespace| namespace.prefix == prefix)?;
+            match (&declaration.minted, prefix.is_empty()) {
+                (Some(minted), _) => {
+                    attributes.push((format!("xmlns:{minted}"), (*value).to_owned(), *quote));
+                }
+                (None, true) => {
+                    attributes.push(((*name).to_owned(), (*value).to_owned(), *quote));
+                }
+                (None, false) => {}
+            }
+            continue;
+        }
+        let rendered_attribute = if name.contains(':') {
+            form_server_state_render_qname(stack, name)?
+        } else {
+            (*name).to_owned()
+        };
+        let names_xsi_type = form_server_state_expand_qname(stack, name)
+            .is_some_and(|(namespace, local)| namespace.as_bytes() == XSI_NS && local == "type");
+        let rendered_value = if names_xsi_type {
+            xsi_type = form_server_state_expand_qname(stack, value);
+            form_server_state_render_qname(stack, value)?
+        } else {
+            (*value).to_owned()
+        };
+        attributes.push((rendered_attribute, rendered_value, *quote));
+    }
+    let frame = stack.last_mut()?;
+    frame.namespace = namespace;
+    frame.local = local;
+    frame.xsi_type = xsi_type;
+    frame.close_name = rendered_name.clone();
+    let text = form_server_state_start_tag_text(&rendered_name, attributes, parsed.empty);
+    if parsed.empty {
+        stack.pop();
+    }
+    Some(text)
+}
+
+/// Writes a start tag back out from a name, its attributes and whether it is
+/// self-closing.
+fn form_server_state_start_tag_text(
+    name: &str,
+    attributes: impl IntoIterator<Item = (String, String, char)>,
+    empty: bool,
+) -> String {
+    let mut text = String::from("<");
+    text.push_str(name);
+    for (attribute, value, quote) in attributes {
+        text.push(' ');
+        text.push_str(&attribute);
+        text.push('=');
+        text.push(quote);
+        text.push_str(&value);
+        text.push(quote);
+    }
+    text.push_str(if empty { "/>" } else { ">" });
+    text
+}
+
+/// One parsed start tag of a `ServerState` blob.
+struct FormServerStateStartTag<'a> {
+    name: &'a str,
+    /// Attribute name, raw (still escaped) value and the quote it was written
+    /// with, in document order.
+    attributes: Vec<(&'a str, &'a str, char)>,
+    empty: bool,
+}
+
+fn scan_form_server_state_start_tag(tag: &str) -> Option<FormServerStateStartTag<'_>> {
+    let body = tag.strip_prefix('<')?.strip_suffix('>')?;
+    let (body, empty) = match body.strip_suffix('/') {
+        Some(rest) => (rest, true),
+        None => (body, false),
+    };
+    let name_end = body
+        .find(|character: char| character.is_ascii_whitespace())
+        .unwrap_or(body.len());
+    let name = &body[..name_end];
+    if name.is_empty() || name.starts_with('/') {
+        return None;
+    }
+    let mut rest = &body[name_end..];
+    let mut attributes = Vec::new();
+    loop {
+        let trimmed = rest.trim_start();
+        if trimmed.is_empty() {
+            break;
+        }
+        let equals = trimmed.find('=')?;
+        let attribute = trimmed[..equals].trim_end();
+        if attribute.is_empty() || attribute.contains(char::is_whitespace) {
+            return None;
+        }
+        let after = trimmed[equals + 1..].trim_start();
+        let quote = after.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            return None;
+        }
+        let value_end = after[1..].find(quote)? + 1;
+        attributes.push((attribute, &after[1..value_end], quote));
+        rest = &after[value_end + 1..];
+    }
+    Some(FormServerStateStartTag {
+        name,
+        attributes,
+        empty,
+    })
+}
+
+/// End offset of the tag that starts at `start`, quote-aware so a `>` inside
+/// an attribute value cannot close it early.
+fn form_server_state_tag_end(text: &str, start: usize) -> Option<usize> {
+    let mut quote: Option<u8> = None;
+    for (offset, byte) in text.as_bytes().get(start..)?.iter().copied().enumerate() {
+        match (quote, byte) {
+            (Some(open), byte) if byte == open => quote = None,
+            (Some(_), _) => {}
+            (None, byte @ (b'"' | b'\'')) => quote = Some(byte),
+            (None, b'>') => return Some(start + offset + 1),
+            (None, _) => {}
+        }
+    }
+    None
 }
 
 /// The inline source name of a `ListSettings` child root, given the local name
@@ -4723,5 +5203,168 @@ mod tests {
         .expect("platform-attested root Auto selection must be exportable through the live codec");
 
         assert_eq!(actual, expected);
+    }
+
+    /// The root tag every decoded `ServerState` blob of UT 11.5.27.75 carries;
+    /// all 657 are byte-identical in it.
+    const SERVER_STATE_ROOT: &str = concat!(
+        "<UniversalListServerOnlyState xmlns=\"\" ",
+        "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+    );
+
+    /// A namespace the `Form` root already declares loses its blob-local
+    /// declaration and every QName bound to it takes the root's prefix, at
+    /// whatever depth the blob happened to declare it.
+    ///
+    /// The blob spells the same content at two depths -- `d3p1` on a
+    /// `dcssch:title`, `d4p1` on a `dcssch:presentation` -- and the platform
+    /// writes both with `v8`.
+    #[test]
+    fn a_root_declared_namespace_drops_its_generated_declaration_at_any_depth() {
+        let inner = concat!(
+            "\n\t<Field xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" ",
+            "xsi:type=\"dcssch:DataSetFieldField\">\n",
+            "\t\t<dcssch:title xmlns:d3p1=\"http://v8.1c.ru/8.1/data/core\" ",
+            "xsi:type=\"d3p1:LocalStringType\">\n",
+            "\t\t\t<d3p1:item><d3p1:lang>ru</d3p1:lang></d3p1:item>\n",
+            "\t\t</dcssch:title>\n",
+            "\t\t<dcssch:availableValue>\n",
+            "\t\t\t<dcssch:presentation xmlns:d4p1=\"http://v8.1c.ru/8.1/data/core\" ",
+            "xsi:type=\"d4p1:LocalStringType\">\n",
+            "\t\t\t\t<d4p1:item><d4p1:lang>ru</d4p1:lang></d4p1:item>\n",
+            "\t\t\t</dcssch:presentation>\n",
+            "\t\t</dcssch:availableValue>\n",
+            "\t</Field>\n"
+        );
+        let expected = concat!(
+            "\n\t<Field xsi:type=\"dcssch:DataSetFieldField\">\n",
+            "\t\t<dcssch:title xsi:type=\"v8:LocalStringType\">\n",
+            "\t\t\t<v8:item><v8:lang>ru</v8:lang></v8:item>\n",
+            "\t\t</dcssch:title>\n",
+            "\t\t<dcssch:availableValue>\n",
+            "\t\t\t<dcssch:presentation xsi:type=\"v8:LocalStringType\">\n",
+            "\t\t\t\t<v8:item><v8:lang>ru</v8:lang></v8:item>\n",
+            "\t\t\t</dcssch:presentation>\n",
+            "\t\t</dcssch:availableValue>\n",
+            "\t</Field>\n"
+        );
+        assert_eq!(
+            respell_form_server_state_namespaces(SERVER_STATE_ROOT, inner).as_deref(),
+            Some(expected)
+        );
+    }
+
+    /// The one namespace in the corpus the `Form` root does not declare keeps
+    /// a generated prefix, renumbered from the blob's own depth to the depth
+    /// its element sits at in `Form.xml`, and the QName in the body follows it.
+    ///
+    /// This is `Catalogs/КлючиРеестраДокументов/Forms/ФормаСписка` verbatim:
+    /// the platform writes `d6p1` where the blob wrote `d3p2`, and the sibling
+    /// core declaration -- written first, and dropped -- does not consume the
+    /// index.
+    #[test]
+    fn the_one_namespace_the_form_root_lacks_is_renumbered_by_form_depth() {
+        let inner = concat!(
+            "\n\t<Parameter xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" ",
+            "xsi:type=\"dcssch:Parameter\">\n",
+            "\t\t<dcssch:valueType>\n",
+            "\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">Type</Type>\n",
+            "\t\t</dcssch:valueType>\n",
+            "\t\t<dcssch:value xmlns:d3p1=\"http://v8.1c.ru/8.1/data/core\" ",
+            "xmlns:d3p2=\"http://v8.1c.ru/8.2/data/types\" ",
+            "xsi:type=\"d3p1:Type\">d3p2:Undefined</dcssch:value>\n",
+            "\t</Parameter>\n"
+        );
+        let expected = concat!(
+            "\n\t<Parameter xsi:type=\"dcssch:Parameter\">\n",
+            "\t\t<dcssch:valueType>\n",
+            "\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">v8:Type</Type>\n",
+            "\t\t</dcssch:valueType>\n",
+            "\t\t<dcssch:value xmlns:d6p1=\"http://v8.1c.ru/8.2/data/types\" ",
+            "xsi:type=\"v8:Type\">d6p1:Undefined</dcssch:value>\n",
+            "\t</Parameter>\n"
+        );
+        assert_eq!(
+            respell_form_server_state_namespaces(SERVER_STATE_ROOT, inner).as_deref(),
+            Some(expected)
+        );
+    }
+
+    /// A `valueType` body that already spells a prefix the blob root declares
+    /// and the `Form` root declares too comes back untouched: 508 of the 510
+    /// type bodies in the corpus are of this shape, and a rule that moved them
+    /// would break output that is already exact.
+    #[test]
+    fn a_type_body_already_spelled_with_a_shared_prefix_is_left_alone() {
+        let inner = concat!(
+            "\n\t<Field xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" ",
+            "xsi:type=\"dcssch:DataSetFieldField\">\n",
+            "\t\t<dcssch:valueType>\n",
+            "\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>\n",
+            "\t\t\t<StringQualifiers xmlns=\"http://v8.1c.ru/8.1/data/core\">\n",
+            "\t\t\t\t<Length>50</Length>\n",
+            "\t\t\t</StringQualifiers>\n",
+            "\t\t</dcssch:valueType>\n",
+            "\t</Field>\n"
+        );
+        let expected = inner.replace(
+            " xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\"",
+            "",
+        );
+        assert_eq!(
+            respell_form_server_state_namespaces(SERVER_STATE_ROOT, inner).as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    /// A `dcssch:value` whose `xsi:type` names a type other than
+    /// `{data/core}Type` carries a value, not a QName, and is not re-spelled.
+    #[test]
+    fn a_value_whose_xsi_type_is_not_a_type_keeps_its_character_data() {
+        let inner = concat!(
+            "\n\t<Parameter xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" ",
+            "xsi:type=\"dcssch:Parameter\">\n",
+            "\t\t<dcssch:value xmlns:d3p1=\"http://v8.1c.ru/8.1/data/core\" ",
+            "xsi:type=\"d3p1:UUID\">00000000-0000-0000-0000-000000000000</dcssch:value>\n",
+            "\t</Parameter>\n"
+        );
+        let expected = concat!(
+            "\n\t<Parameter xsi:type=\"dcssch:Parameter\">\n",
+            "\t\t<dcssch:value xsi:type=\"v8:UUID\">",
+            "00000000-0000-0000-0000-000000000000</dcssch:value>\n",
+            "\t</Parameter>\n"
+        );
+        assert_eq!(
+            respell_form_server_state_namespaces(SERVER_STATE_ROOT, inner).as_deref(),
+            Some(expected)
+        );
+    }
+
+    /// Fail-closed floor: a prefix nothing in scope declares has no spelling,
+    /// so the whole blob is left exactly as it was rather than rewritten
+    /// around the hole.
+    #[test]
+    fn an_undeclared_prefix_leaves_the_blob_untouched() {
+        let inner = "\n\t<Field xsi:type=\"nowhere:DataSetFieldField\"/>\n";
+        assert_eq!(
+            respell_form_server_state_namespaces(SERVER_STATE_ROOT, inner),
+            None
+        );
+    }
+
+    /// Fail-closed floor for the other direction: a namespace the `Form` root
+    /// does not declare, declared on the blob's own root, has nowhere to be
+    /// minted, because the inline position writes no root element at all.
+    #[test]
+    fn a_root_declaration_outside_the_form_roots_set_is_refused() {
+        let root = concat!(
+            "<UniversalListServerOnlyState xmlns=\"\" ",
+            "xmlns:d1p1=\"http://v8.1c.ru/8.2/data/types\">"
+        );
+        assert_eq!(
+            respell_form_server_state_namespaces(root, "\n\t<Field/>\n"),
+            None
+        );
     }
 }
