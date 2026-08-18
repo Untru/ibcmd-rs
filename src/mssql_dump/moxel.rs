@@ -14,6 +14,21 @@ struct DecodedMoxelSpreadsheet {
 
 pub(super) struct MoxelSpreadsheet {
     pub(super) column_count: usize,
+    /// The document's own language record, the fourth top-level field.
+    ///
+    /// Evidence (native 1С:УТ 11.5.27.75): all 674 distinct bodies behind the
+    /// 683 standalone spreadsheet templates carry
+    /// `{"ru","ru",0,1,"ru","Русский","Русский",0}` and publish exactly that
+    /// block, so reading the field changes nothing there; the 22 spreadsheet
+    /// blocks embedded in forms carry three forms, and the platform publishes
+    /// a different thing for each. `None` is a record this reader cannot
+    /// spell, which keeps the block it has always written.
+    pub(super) language_settings: Option<MoxelLanguageSettings>,
+    /// The template-mode flag, the fourteenth top-level field. Two embedded
+    /// bodies are byte-equal but for this scalar and the platform's outputs
+    /// differ by exactly the presence of `<templateMode>`; every standalone
+    /// body stores 1.
+    pub(super) template_mode: bool,
     pub(super) column_sets: Vec<MoxelColumnSet>,
     pub(super) column_formats: Vec<MoxelFormat>,
     pub(super) extra_formats: BTreeMap<usize, MoxelFormat>,
@@ -52,6 +67,52 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) value_types: Vec<MoxelValueType>,
     pub(super) control_types: Vec<String>,
     pub(super) mask_refs: Vec<Vec<MoxelLocalizedValue>>,
+}
+
+/// A decoded language record.
+pub(super) enum MoxelLanguageSettings {
+    /// The `#` placeholder: `{"#","",0,1,"#","Язык по умолчанию",…}`, which the
+    /// platform answers with no `<languageSettings>` element at all.
+    Placeholder,
+    /// A named record: the current and default language, then the descriptors.
+    Named {
+        current: String,
+        default: String,
+        infos: Vec<MoxelLanguageInfo>,
+    },
+}
+
+pub(super) struct MoxelLanguageInfo {
+    pub(super) id: String,
+    pub(super) code: String,
+    pub(super) description: String,
+}
+
+/// `{current, default, 0, count, (id, code, description) * count, 0}`.
+pub(super) fn parse_moxel_language_settings(text: &str) -> Option<MoxelLanguageSettings> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let current = parse_1c_string(fields.first()?)?;
+    let default = parse_1c_string(fields.get(1)?)?;
+    let count = fields.get(3)?.trim().parse::<usize>().ok()?;
+    if count > 64 || fields.len() != count * 3 + 5 {
+        return None;
+    }
+    if current == "#" {
+        return Some(MoxelLanguageSettings::Placeholder);
+    }
+    let mut infos = Vec::with_capacity(count);
+    for descriptor in fields[4..4 + count * 3].chunks_exact(3) {
+        infos.push(MoxelLanguageInfo {
+            id: parse_1c_string(descriptor.first()?)?,
+            code: parse_1c_string(descriptor.get(1)?)?,
+            description: parse_1c_string(descriptor.get(2)?)?,
+        });
+    }
+    Some(MoxelLanguageSettings::Named {
+        current,
+        default,
+        infos,
+    })
 }
 
 pub(super) struct MoxelSourceFormatMap {
@@ -767,8 +828,13 @@ pub(super) struct MoxelPrintSettings {
     pub(super) printer_name: Option<String>,
     pub(super) paper: Option<usize>,
     pub(super) paper_source: Option<usize>,
-    pub(super) page_width: Option<usize>,
-    pub(super) page_height: Option<usize>,
+    /// Page geometry is a decimal, not an integer: key 16 stores `60.5` in
+    /// three of the corpus's 56 print-settings records, and reading the whole
+    /// record through `usize` refused all of them - with them the entire
+    /// `<printSettings>` element, twenty members, in every document that
+    /// carries that record. The token is published as stored.
+    pub(super) page_width: Option<String>,
+    pub(super) page_height: Option<String>,
     pub(super) duplex_type: Option<&'static str>,
     pub(super) page_placement_alternation: Option<&'static str>,
 }
@@ -802,6 +868,30 @@ pub(super) struct MoxelFormat {
     pub(super) value_type_index: Option<usize>,
     pub(super) control_type_index: Option<usize>,
     pub(super) drawing_border: Option<usize>,
+    /// Whether the drawing this format decorates is printed. Member 4 of a
+    /// drawing-referenced record, the slot an ordinary record spends on
+    /// `bottomBorder`; the platform publishes it first, before `drawingBorder`.
+    /// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet documents): three
+    /// records publish `<print>`, all three store 1 and all three publish
+    /// `false`, and no drawing-referenced record anywhere in the corpus
+    /// publishes a `bottomBorder`. The inverted spelling is the one
+    /// `protection` (member 16) already carries.
+    pub(super) print: Option<bool>,
+    /// The four `drawingHave*Border` flags, still packed. Member 3 of a
+    /// drawing-referenced record, the slot an ordinary record spends on
+    /// `rightBorder`. Evidence: 17 records publish the four flags, our reader
+    /// published a `rightBorder` of 2, 0 or 15 for exactly those 17, and no
+    /// drawing-referenced record in the corpus publishes a `rightBorder`.
+    /// Mask 2 is the one that separates the members, publishing `top` alone, so
+    /// `top` weighs 2 and the remaining three follow publication order; masks 0
+    /// and 15 cannot separate them and the corpus holds no other value.
+    pub(super) drawing_have_borders: Option<usize>,
+    /// Member 40, published between `width` and `widthWeightFactor`. Evidence:
+    /// nine records publish `<autoWidthCalculation>true</autoWidthCalculation>`
+    /// and each stores member 40 as 1 next to the `width` (member 7) and
+    /// `widthWeightFactor` (member 41) it is published between; the bit was
+    /// the one hole left in the supported-member list between 39 and 41.
+    pub(super) auto_width_calculation: Option<bool>,
     pub(super) by_selected_columns: Option<bool>,
     pub(super) details_use: Option<&'static str>,
     pub(super) mark_negatives: Option<bool>,
@@ -860,6 +950,9 @@ impl MoxelFormat {
             && self.value_type_index.is_none()
             && self.control_type_index.is_none()
             && self.drawing_border.is_none()
+            && self.print.is_none()
+            && self.drawing_have_borders.is_none()
+            && self.auto_width_calculation.is_none()
             && self.by_selected_columns.is_none()
             && self.details_use.is_none()
             && self.mark_negatives.is_none()
@@ -1543,6 +1636,11 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         header_footer_format_index,
         header_footer_slots,
         default_format_index,
+        language_settings: fields
+            .get(3)
+            .and_then(|field| parse_moxel_language_settings(field)),
+        template_mode: !moxel_body_has_fixed_prefix(&fields)
+            || fields.get(13).map(|field| field.trim()) != Some("0"),
         leading_default_format: fields
             .get(4)
             .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs)),
@@ -1886,6 +1984,25 @@ const MOXEL_HEADER_FOOTER_TAGS: [&str; 6] = [
     "centerFooter",
     "rightFooter",
 ];
+
+/// Whether the body still has its fixed leading block, which is what makes the
+/// scalars around it readable by position at all.
+///
+/// The six header/footer records occupy slots 7..=12 of every native body -
+/// all 674 distinct bodies behind the 683 standalone templates and all five
+/// behind the embedded blocks. This project's own packer writes a looser
+/// layout that puts row data there, so a repacked body must keep the element
+/// the writer used to emit unconditionally rather than read a row scalar as
+/// the template-mode flag.
+pub(super) fn moxel_body_has_fixed_prefix(fields: &[&str]) -> bool {
+    fields
+        .get(MOXEL_HEADER_FOOTER_BLOCK_START..MOXEL_HEADER_FOOTER_BLOCK_START + 6)
+        .is_some_and(|block| {
+            block
+                .iter()
+                .all(|field| parse_moxel_header_footer_record(field).is_some())
+        })
+}
 
 /// The six header/footer records, in publication order.
 ///
@@ -5014,24 +5131,28 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
         }
         let value = parse_moxel_print_settings_value(pair.get(1)?)?;
         match key {
-            0 => settings.paper = value.as_usize(),
+            // Every member is strict about its own shape, so a token this
+            // reader cannot spell refuses the record rather than dropping the
+            // member - the strictness the value parser used to get by refusing
+            // any `"N"` that was not an integer.
+            0 => settings.paper = Some(value.as_usize()?),
             1 => settings.page_orientation = value.as_usize().and_then(moxel_page_orientation),
-            2 => settings.scale = value.as_usize(),
-            3 => settings.collate = value.as_bool(),
-            4 => settings.copies = value.as_usize(),
-            5 => settings.per_page = value.as_usize(),
-            6 => settings.top_margin = value.as_usize(),
-            7 => settings.left_margin = value.as_usize(),
-            8 => settings.bottom_margin = value.as_usize(),
-            9 => settings.right_margin = value.as_usize(),
-            10 => settings.header_size = value.as_usize(),
-            11 => settings.footer_size = value.as_usize(),
-            12 => settings.fit_to_page = value.as_bool(),
-            13 => settings.black_and_white = value.as_bool(),
-            14 => settings.printer_name = value.into_string(),
-            15 => settings.paper_source = value.as_usize(),
-            16 => settings.page_width = value.as_usize(),
-            17 => settings.page_height = value.as_usize(),
+            2 => settings.scale = Some(value.as_usize()?),
+            3 => settings.collate = Some(value.as_bool()?),
+            4 => settings.copies = Some(value.as_usize()?),
+            5 => settings.per_page = Some(value.as_usize()?),
+            6 => settings.top_margin = Some(value.as_usize()?),
+            7 => settings.left_margin = Some(value.as_usize()?),
+            8 => settings.bottom_margin = Some(value.as_usize()?),
+            9 => settings.right_margin = Some(value.as_usize()?),
+            10 => settings.header_size = Some(value.as_usize()?),
+            11 => settings.footer_size = Some(value.as_usize()?),
+            12 => settings.fit_to_page = Some(value.as_bool()?),
+            13 => settings.black_and_white = Some(value.as_bool()?),
+            14 => settings.printer_name = Some(value.into_string()?),
+            15 => settings.paper_source = Some(value.as_usize()?),
+            16 => settings.page_width = Some(value.into_number_token()?),
+            17 => settings.page_height = Some(value.into_number_token()?),
             19 => {
                 settings.duplex_type = Some(moxel_duplex_type(value.as_usize()?)?);
             }
@@ -5042,12 +5163,17 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
             _ => return None,
         }
     }
+    // The two extended keys come as a pair, on top of a record that carries
+    // every other key. The printer name (key 14) is the one that can be
+    // absent: one document stores the nineteen keys without it, and demanding
+    // a count of exactly twenty refused the whole record - the twenty-one
+    // published lines that are its entire difference from the platform. The
+    // record's own arity is already checked against its declared count above.
     let has_extended_keys = seen_keys.contains(&19) || seen_keys.contains(&20);
     if has_extended_keys
-        && (count != 20
-            || !seen_keys.contains(&19)
+        && (!seen_keys.contains(&19)
             || !seen_keys.contains(&20)
-            || !(0..=17).all(|key| seen_keys.contains(&key)))
+            || !(0..=17).all(|key| key == 14 || seen_keys.contains(&key)))
     {
         return None;
     }
@@ -5055,16 +5181,30 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
 }
 
 pub(super) enum MoxelPrintSettingsValue {
-    Number(usize),
+    Number(String),
     Text(String),
 }
 
 impl MoxelPrintSettingsValue {
     pub(super) fn as_usize(&self) -> Option<usize> {
         match self {
-            Self::Number(value) => Some(*value),
+            Self::Number(value) => value.parse::<usize>().ok(),
             Self::Text(_) => None,
         }
+    }
+
+    /// The stored numeric token, for the members the platform publishes as a
+    /// decimal. Admits digits with at most one fractional part, which is the
+    /// whole of what the corpus's `"N"` values ever are.
+    pub(super) fn into_number_token(self) -> Option<String> {
+        let Self::Number(value) = self else {
+            return None;
+        };
+        let (whole, fraction) = value.split_once('.').unwrap_or((value.as_str(), ""));
+        (!whole.is_empty()
+            && whole.bytes().all(|byte| byte.is_ascii_digit())
+            && fraction.bytes().all(|byte| byte.is_ascii_digit()))
+        .then_some(value)
     }
 
     pub(super) fn as_bool(&self) -> Option<bool> {
@@ -5085,12 +5225,9 @@ pub(super) fn parse_moxel_print_settings_value(text: &str) -> Option<MoxelPrintS
         return None;
     }
     match fields.first()?.trim().trim_matches('"') {
-        "N" => fields
-            .get(1)?
-            .trim()
-            .parse::<usize>()
-            .ok()
-            .map(MoxelPrintSettingsValue::Number),
+        "N" => Some(MoxelPrintSettingsValue::Number(
+            fields.get(1)?.trim().to_string(),
+        )),
         "S" => Some(MoxelPrintSettingsValue::Text(
             unquote_moxel_string(fields.get(1)?.trim()).unwrap_or_else(|| fields[1].to_string()),
         )),
@@ -5429,8 +5566,15 @@ fn normalize_moxel_drawing_format_with_pattern_color(
     format: &mut MoxelFormat,
     pattern_color: Option<String>,
 ) {
-    format.drawing_border = format.left_border;
-    format.left_border = None;
+    // A drawing-referenced record spends three of the four border slots on
+    // drawing members: member 1 is the drawing's own border, member 3 the four
+    // packed `drawingHave*Border` flags and member 4 the print flag. Members 2
+    // and 5 keep their ordinary meaning; no drawing-referenced record in the
+    // corpus publishes a `leftBorder`, `topBorder`, `rightBorder`,
+    // `bottomBorder` or `border` at all.
+    format.drawing_border = format.left_border.take();
+    format.drawing_have_borders = format.right_border.take();
+    format.print = format.bottom_border.take().and_then(moxel_print_flag);
     if pattern_color.is_some() {
         format.text_orientation = None;
         format.pattern_color = pattern_color;
@@ -6057,7 +6201,6 @@ pub(super) fn parse_moxel_format(
     let fields = split_1c_braced_fields(text, 0)?;
     let flags = fields.first()?.trim().parse::<u64>().ok()?;
     let values = moxel_format_values(flags, &fields)?;
-    let explicit_pattern = values[12].is_some();
     let left_border = parse_moxel_format_usize(&values, 1);
     let top_border = parse_moxel_format_usize(&values, 2);
     let right_border = parse_moxel_format_usize(&values, 3);
@@ -6070,7 +6213,7 @@ pub(super) fn parse_moxel_format(
         }
         _ => None,
     };
-    let mut format = MoxelFormat {
+    let format = MoxelFormat {
         font: parse_moxel_format_usize(&values, 0),
         border,
         left_border: if border.is_some() { None } else { left_border },
@@ -6117,6 +6260,9 @@ pub(super) fn parse_moxel_format(
         value_type_index: parse_moxel_format_usize(&values, 23),
         control_type_index: parse_moxel_format_usize(&values, 25),
         drawing_border: None,
+        print: None,
+        drawing_have_borders: None,
+        auto_width_calculation: parse_moxel_format_usize(&values, 40).and_then(moxel_bool_value),
         by_selected_columns: parse_moxel_format_usize(&values, 20)
             .and_then(moxel_by_selected_columns),
         details_use: parse_moxel_format_usize(&values, 19).and_then(moxel_details_use),
@@ -6143,14 +6289,11 @@ pub(super) fn parse_moxel_format(
         right_margin: parse_moxel_format_usize(&values, 44).and_then(moxel_explicit_zero),
         bottom_margin: parse_moxel_format_usize(&values, 45).and_then(moxel_explicit_zero),
     };
-    if !explicit_pattern
-        && format.pattern.is_none()
-        && format.back_color.is_some()
-        && format.border_color.is_some()
-        && matches!(format.text_placement, Some("Auto"))
-    {
-        format.pattern = Some("Solid");
-    }
+    // `<pattern>` was synthesized for a record that stores no member 12 when
+    // three unrelated members happened to line up. It is a fitted rule: the
+    // platform publishes `<pattern>` only where member 12 is stored, and the
+    // synthesis invents 15 patterns across 7 documents that the platform never
+    // writes - which is the whole difference of those 7 documents.
     Some(format)
 }
 
@@ -6220,6 +6363,7 @@ pub(super) fn moxel_format_bit_is_supported(bit: usize) -> bool {
             | 37
             | 38
             | 39
+            | 40
             | 41
             | 42
             | 43
@@ -6898,6 +7042,16 @@ pub(super) fn moxel_by_selected_columns(value: usize) -> Option<bool> {
     }
 }
 
+/// `<print>` is stored inverted, the spelling `protection` (member 16) carries:
+/// the corpus holds only the value 1, published as `false`.
+pub(super) fn moxel_print_flag(value: usize) -> Option<bool> {
+    match value {
+        0 => Some(true),
+        1 => Some(false),
+        _ => None,
+    }
+}
+
 pub(super) fn moxel_protection(value: usize) -> Option<bool> {
     match value {
         0 => Some(true),
@@ -7245,6 +7399,18 @@ fn format_moxel_spreadsheet_xml_with_plan(
     ))
 }
 
+/// The four packed drawing-border flags, in publication order. Their weights
+/// are 1, 2, 4 and 8: mask 2 is the only corpus value that separates a single
+/// member and it publishes `top` alone, so `top` weighs 2 and the other three
+/// follow the order the platform writes them in. The corpus holds no other
+/// mask than 0, 2 and 15, which cannot separate left from right from bottom.
+const MOXEL_DRAWING_HAVE_BORDER_TAGS: [&str; 4] = [
+    "drawingHaveLeftBorder",
+    "drawingHaveTopBorder",
+    "drawingHaveRightBorder",
+    "drawingHaveBottomBorder",
+];
+
 /// The published form of a format that carries no members.
 const EMPTY_MOXEL_FORMAT_XML: &str = "\t<format/>\r\n";
 
@@ -7297,17 +7463,9 @@ fn render_moxel_spreadsheet_xml(
         .collect::<Vec<_>>();
     let mut xml = String::from(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
-\t<languageSettings>\r\n\
-\t\t<currentLanguage>ru</currentLanguage>\r\n\
-\t\t<defaultLanguage>ru</defaultLanguage>\r\n\
-\t\t<languageInfo>\r\n\
-\t\t\t<id>ru</id>\r\n\
-\t\t\t<code>Русский</code>\r\n\
-\t\t\t<description>Русский</description>\r\n\
-\t\t</languageInfo>\r\n\
-\t</languageSettings>\r\n",
+<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
     );
+    push_moxel_language_settings_xml(&mut xml, spreadsheet.language_settings.as_ref());
     for column_set in &spreadsheet.column_sets {
         push_moxel_columns_xml(&mut xml, column_set, &output_format_index_map);
     }
@@ -7341,7 +7499,9 @@ fn render_moxel_spreadsheet_xml(
             )
         });
     }
-    xml.push_str("\t<templateMode>true</templateMode>\r\n");
+    if spreadsheet.template_mode {
+        xml.push_str("\t<templateMode>true</templateMode>\r\n");
+    }
     // The leading default-format record names format content, not a slot: the
     // published index is the position of the first pool entry that carries the
     // record's own bytes.  An empty default format is never materialized, so a
@@ -8385,6 +8545,57 @@ pub(super) fn moxel_uses_sparse_source_format_refs(
 /// `output_format_index` projects a non-zero stored reference onto the published
 /// `<format>` table and returns `None` when that projection is not evidenced, in
 /// which case the slot is left out rather than published with an invented index.
+/// The language block the record names. A record this reader cannot spell
+/// keeps the single block the writer used to emit unconditionally.
+fn push_moxel_language_settings_xml(xml: &mut String, settings: Option<&MoxelLanguageSettings>) {
+    let (current, default, infos) = match settings {
+        Some(MoxelLanguageSettings::Placeholder) => return,
+        Some(MoxelLanguageSettings::Named {
+            current,
+            default,
+            infos,
+        }) => (current.as_str(), default.as_str(), infos.as_slice()),
+        None => ("ru", "ru", [].as_slice()),
+    };
+    xml.push_str("\t<languageSettings>\r\n");
+    push_moxel_language_text(xml, "currentLanguage", current);
+    push_moxel_language_text(xml, "defaultLanguage", default);
+    if settings.is_none() {
+        xml.push_str(
+            "\t\t<languageInfo>\r\n\
+\t\t\t<id>ru</id>\r\n\
+\t\t\t<code>Русский</code>\r\n\
+\t\t\t<description>Русский</description>\r\n\
+\t\t</languageInfo>\r\n",
+        );
+    }
+    for info in infos {
+        xml.push_str("\t\t<languageInfo>\r\n");
+        xml.push_str(&format!("\t\t\t<id>{}</id>\r\n", escape_xml_text(&info.id)));
+        xml.push_str(&format!(
+            "\t\t\t<code>{}</code>\r\n",
+            escape_xml_text(&info.code)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t<description>{}</description>\r\n",
+            escape_xml_text(&info.description)
+        ));
+        xml.push_str("\t\t</languageInfo>\r\n");
+    }
+    xml.push_str("\t</languageSettings>\r\n");
+}
+
+fn push_moxel_language_text(xml: &mut String, tag: &str, value: &str) {
+    if value.is_empty() {
+        xml.push_str(&format!("\t\t<{tag}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!(
+        "\t\t<{tag}>{}</{tag}>\r\n",
+        escape_xml_text(value)
+    ));
+}
+
 fn push_moxel_header_footer_slots_xml(
     xml: &mut String,
     slots: &[Option<MoxelHeaderFooter>],
@@ -8451,8 +8662,8 @@ pub(super) fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPr
     push_moxel_format_text(xml, "printerName", settings.printer_name.as_deref());
     push_moxel_format_usize(xml, "paper", settings.paper);
     push_moxel_format_usize(xml, "paperSource", settings.paper_source);
-    push_moxel_format_usize(xml, "pageWidth", settings.page_width);
-    push_moxel_format_usize(xml, "pageHeight", settings.page_height);
+    push_moxel_format_text(xml, "pageWidth", settings.page_width.as_deref());
+    push_moxel_format_text(xml, "pageHeight", settings.page_height.as_deref());
     push_moxel_format_text(xml, "duplexType", settings.duplex_type);
     push_moxel_format_text(
         xml,
@@ -8529,6 +8740,17 @@ fn push_moxel_format_body_xml(
         None => format.font,
     };
     xml.push_str("\t<format>\r\n");
+    // The drawing members lead the element, ahead of `font`. Evidence (native
+    // 1С:УТ 11.5.27.75): every record that publishes both `drawingBorder` and
+    // `font` writes `drawingBorder` first - 9 records over 5 documents, none
+    // inverted - and the three that publish `print` write it ahead of that.
+    push_moxel_format_bool(xml, "print", format.print);
+    push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
+    if let Some(mask) = format.drawing_have_borders {
+        for (bit, tag) in MOXEL_DRAWING_HAVE_BORDER_TAGS.iter().enumerate() {
+            push_moxel_format_bool(xml, tag, Some(mask >> bit & 1 == 1));
+        }
+    }
     push_moxel_format_usize(xml, "font", font);
     push_moxel_format_usize(xml, "border", format.border);
     if format.border.is_none() {
@@ -8537,10 +8759,10 @@ fn push_moxel_format_body_xml(
         push_moxel_format_usize(xml, "rightBorder", format.right_border);
         push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
     }
-    push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     push_moxel_format_i32(xml, "height", format.height);
     push_moxel_format_color(xml, "borderColor", format.border_color.as_deref());
     push_moxel_format_usize(xml, "width", format.width);
+    push_moxel_format_bool(xml, "autoWidthCalculation", format.auto_width_calculation);
     push_moxel_format_usize(xml, "widthWeightFactor", format.width_weight_factor);
     push_moxel_format_text(xml, "horizontalAlignment", format.horizontal_alignment);
     push_moxel_format_text(xml, "verticalAlignment", format.vertical_alignment);
@@ -9701,6 +9923,193 @@ fn push_moxel_note_xml(
 mod moxel_exact_parity_tests {
     use super::*;
 
+    /// Fixture: `tests/fixtures/moxel_reconciliation_report_headers_raw.txt`,
+    /// 2005 bytes, sha256
+    /// `c477882a48c0f27dbb8439de942c2ded6ef342c096a39a3aa2811c040f24fef3`. It
+    /// is the native MOXCEL body of the `МакетЗаголовковОтчета` template of
+    /// report `СверкаРасчетовСКонтрагентами` in 1С:Управление торговлей
+    /// 11.5.27.75 (`1cv8.cf`), as produced by this project's compatible-MXL
+    /// decoder.
+    ///
+    /// Its format table stores five records with member 40 set, and the
+    /// platform publishes `<autoWidthCalculation>true</autoWidthCalculation>`
+    /// for exactly those five, between the `width` (member 7) and the
+    /// `widthWeightFactor` (member 41) each is written with.
+    const RECONCILIATION_REPORT_HEADERS_RAW: &str =
+        include_str!("../../tests/fixtures/moxel_reconciliation_report_headers_raw.txt");
+
+    fn reconciliation_report_headers() -> MoxelSpreadsheet {
+        parse_moxel_spreadsheet_text(RECONCILIATION_REPORT_HEADERS_RAW, &BTreeMap::new()).unwrap()
+    }
+
+    #[test]
+    fn member_forty_publishes_the_automatic_width_flag() {
+        let xml = format_moxel_spreadsheet_xml(&reconciliation_report_headers());
+
+        assert_eq!(
+            xml.matches("<autoWidthCalculation>true</autoWidthCalculation>")
+                .count(),
+            5
+        );
+        assert!(xml.contains(
+            "\t\t<width>264</width>\r\n\
+\t\t<autoWidthCalculation>true</autoWidthCalculation>\r\n\
+\t\t<widthWeightFactor>4</widthWeightFactor>\r\n"
+        ));
+        // A record that stores member 40 without a width keeps the flag.
+        assert!(xml.contains(
+            "\t<format>\r\n\
+\t\t<autoWidthCalculation>true</autoWidthCalculation>\r\n\
+\t\t<widthWeightFactor>2</widthWeightFactor>\r\n\
+\t</format>\r\n"
+        ));
+    }
+
+    /// The record is `{67108882,1,1,1}` - members 1, 4 and 26 - the drawing
+    /// format of the `ПФ_MXL_КарточкаТорговогоПредложения` template of data
+    /// processor `ТорговыеПредложения` in 1С:УТ 11.5.27.75. The platform
+    /// publishes `<print>false</print>`, `<drawingBorder>1</drawingBorder>`
+    /// and `<hyperLink>true</hyperLink>` for it, in that order.
+    #[test]
+    fn a_drawing_record_spends_member_four_on_the_print_flag() {
+        let mut format = parse_moxel_format("{67108882,1,1,1}", &[], &[]).unwrap();
+        assert_eq!(format.bottom_border, Some(1));
+        assert_eq!(format.left_border, Some(1));
+
+        normalize_moxel_drawing_format(&mut format);
+
+        assert_eq!(format.print, Some(false));
+        assert_eq!(format.drawing_border, Some(1));
+        assert_eq!(format.hyper_link, Some(true));
+        assert_eq!(format.bottom_border, None);
+        assert_eq!(format.left_border, None);
+
+        let spreadsheet = reconciliation_report_headers();
+        let mut xml = String::new();
+        push_moxel_format_body_xml(&mut xml, &spreadsheet, &format, None);
+        assert_eq!(
+            xml,
+            "\t<format>\r\n\
+\t\t<print>false</print>\r\n\
+\t\t<drawingBorder>1</drawingBorder>\r\n\
+\t\t<hyperLink>true</hyperLink>\r\n\
+\t</format>\r\n"
+        );
+    }
+
+    /// Member 3 of a drawing record is the four packed `drawingHave*Border`
+    /// flags. Mask 2 is the corpus value that separates a single member: the
+    /// platform publishes `top` alone for it.
+    #[test]
+    fn a_drawing_record_unpacks_member_three_into_four_flags() {
+        let mut format = parse_moxel_format("{8,2}", &[], &[]).unwrap();
+        assert_eq!(format.right_border, Some(2));
+
+        normalize_moxel_drawing_format(&mut format);
+
+        assert_eq!(format.drawing_have_borders, Some(2));
+        assert_eq!(format.right_border, None);
+
+        let spreadsheet = reconciliation_report_headers();
+        let mut xml = String::new();
+        push_moxel_format_body_xml(&mut xml, &spreadsheet, &format, None);
+        assert_eq!(
+            xml,
+            "\t<format>\r\n\
+\t\t<drawingHaveLeftBorder>false</drawingHaveLeftBorder>\r\n\
+\t\t<drawingHaveTopBorder>true</drawingHaveTopBorder>\r\n\
+\t\t<drawingHaveRightBorder>false</drawingHaveRightBorder>\r\n\
+\t\t<drawingHaveBottomBorder>false</drawingHaveBottomBorder>\r\n\
+\t</format>\r\n"
+        );
+    }
+
+    /// The print-settings record of the `ШаблонЭтикетки_34х58_ИС` template of
+    /// catalog `ШаблоныЭтикетокИЦенников` in 1С:УТ 11.5.27.75. Key 16 stores a
+    /// decimal, which the whole-record `usize` reading refused - and with it
+    /// all twenty members of `<printSettings>`.
+    #[test]
+    fn page_geometry_is_a_decimal_and_does_not_refuse_the_record() {
+        const RAW: &str = "{\n{0,20,0,\n{\"N\",9},1,\n{\"N\",1},2,\n{\"N\",100},3,\n{\"N\",0},4,\n\
+{\"N\",1},5,\n{\"N\",1},6,\n{\"N\",1000},7,\n{\"N\",1000},8,\n{\"N\",1000},9,\n{\"N\",1000},10,\n\
+{\"N\",1000},11,\n{\"N\",1000},12,\n{\"N\",0},13,\n{\"N\",0},14,\n\
+{\"S\",\"\\\\\\\\mars.solar.local\\\\PRN-D9-4R-PCL6\"},15,\n{\"N\",256},16,\n{\"N\",60.5},17,\n\
+{\"N\",40},19,\n{\"N\",4},20,\n{\"N\",0}\n}\n}";
+
+        let settings = parse_moxel_print_settings_field(RAW).unwrap();
+
+        assert_eq!(settings.page_width.as_deref(), Some("60.5"));
+        assert_eq!(settings.page_height.as_deref(), Some("40"));
+        assert_eq!(settings.paper, Some(9));
+        assert_eq!(settings.duplex_type, Some("UsePrinterSettings"));
+
+        let mut xml = String::new();
+        push_moxel_print_settings_xml(&mut xml, &settings);
+        assert!(xml.contains("\t\t<pageWidth>60.5</pageWidth>\r\n"));
+        assert!(xml.contains("\t\t<pageHeight>40</pageHeight>\r\n"));
+    }
+
+    /// The three language records the corpus stores, and the block the
+    /// platform answers each with.
+    #[test]
+    fn the_language_block_follows_the_stored_record() {
+        let named =
+            parse_moxel_language_settings("{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0}")
+                .unwrap();
+        let empty = parse_moxel_language_settings("{\"\",\"\",0,0,0}").unwrap();
+        let placeholder = parse_moxel_language_settings(
+            "{\"#\",\"\",0,1,\"#\",\"Язык по умолчанию\",\"Язык по умолчанию\",0}",
+        )
+        .unwrap();
+
+        let mut xml = String::new();
+        push_moxel_language_settings_xml(&mut xml, Some(&named));
+        assert_eq!(
+            xml,
+            "\t<languageSettings>\r\n\
+\t\t<currentLanguage>ru</currentLanguage>\r\n\
+\t\t<defaultLanguage>ru</defaultLanguage>\r\n\
+\t\t<languageInfo>\r\n\
+\t\t\t<id>ru</id>\r\n\
+\t\t\t<code>Русский</code>\r\n\
+\t\t\t<description>Русский</description>\r\n\
+\t\t</languageInfo>\r\n\
+\t</languageSettings>\r\n"
+        );
+
+        let mut xml = String::new();
+        push_moxel_language_settings_xml(&mut xml, Some(&empty));
+        assert_eq!(
+            xml,
+            "\t<languageSettings>\r\n\
+\t\t<currentLanguage/>\r\n\
+\t\t<defaultLanguage/>\r\n\
+\t</languageSettings>\r\n"
+        );
+
+        let mut xml = String::new();
+        push_moxel_language_settings_xml(&mut xml, Some(&placeholder));
+        assert_eq!(xml, "");
+    }
+
+    /// Every standalone template stores the template-mode flag as 1, so the
+    /// element stays; an embedded body that stores 0 loses it.
+    #[test]
+    fn the_template_mode_element_follows_its_stored_flag() {
+        let spreadsheet = reconciliation_report_headers();
+        assert!(spreadsheet.template_mode);
+        assert!(
+            format_moxel_spreadsheet_xml(&spreadsheet)
+                .contains("<templateMode>true</templateMode>")
+        );
+
+        let cleared = RECONCILIATION_REPORT_HEADERS_RAW.replacen("},1,2,9,", "},0,2,9,", 1);
+        assert_ne!(cleared, RECONCILIATION_REPORT_HEADERS_RAW);
+        let spreadsheet = parse_moxel_spreadsheet_text(&cleared, &BTreeMap::new()).unwrap();
+        assert!(!spreadsheet.template_mode);
+        assert!(!format_moxel_spreadsheet_xml(&spreadsheet).contains("<templateMode>"));
+    }
+
     /// Fixture: `tests/fixtures/moxel_buyer_instruction_picture_parameter_raw.txt`,
     /// 796 bytes, sha256
     /// `9346fe2d6d05e3eb826cdddde70a069e73b65385796690314e5082112ae4a00e`. It is
@@ -9936,6 +10345,8 @@ mod moxel_exact_parity_tests {
         let pattern_color = parse_moxel_drawing_pattern_color(raw, &style_refs);
         normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
         let spreadsheet = MoxelSpreadsheet {
+            language_settings: None,
+            template_mode: true,
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),
