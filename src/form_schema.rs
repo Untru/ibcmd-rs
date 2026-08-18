@@ -3008,11 +3008,18 @@ impl FormFieldSchema {
                 "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
             )
             .then_some(49 + top_level_offset),
-            enabled_slot: matches!(
-                item_tag,
-                "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
-            )
-            .then_some(13 + top_level_offset),
+            // `Enabled` is not a property of four favoured field kinds: slot
+            // `13 + top_level_offset` carries it on every kind this schema
+            // admits. Read on the whole native UT 11.5.27.75 tree the slot is a
+            // total function on each of them - `0` on exactly the items that
+            // carry `<Enabled>false</Enabled>` and never on one that does not:
+            // `RadioButtonField` 6 of 1 386, `SpreadSheetDocumentField` 1 of
+            // 222, `HTMLDocumentField` 1 of 178, and no `0` at all on the 68
+            // `TextDocumentField`, 41 `FormattedDocumentField`, 7
+            // `CalendarField` and 2 `GraphicalSchemaField` items, which is why
+            // restricting the slot to four kinds hid three writable items
+            // instead of protecting anything.
+            enabled_slot: Some(13 + top_level_offset),
             text_color_option_slot: text,
             back_color_option_slot: back,
             border_color_option_slot: border,
@@ -3395,6 +3402,16 @@ impl FormCheckBoxFieldSchema {
     const GROUP_HORIZONTAL_ALIGN_SLOT: usize = 53;
     const GROUP_VERTICAL_ALIGN_SLOT: usize = 54;
     const THREE_STATE_OPTION_SLOT: usize = 1;
+    /// `EditFormat` slot of the 13-member `11`-discriminated option tuple.
+    ///
+    /// The check box spells its two captions the same way an input field spells
+    /// a picture format, as an ordinary localized-string tuple. Over all 6 286
+    /// `CheckBoxField` option tuples of the native UT 11.5.27.75 form bodies the
+    /// slot holds the empty tuple `{1,0}` on 6 222, none of whose items carries
+    /// an `<EditFormat>`, and a non-empty tuple on exactly the 64 items the
+    /// platform writes one on, with the decoded text equal to the platform's own
+    /// `<v8:content>` on every one of them.
+    const EDIT_FORMAT_OPTION_SLOT: usize = 5;
 
     pub(crate) fn top_level_offset_for_raw_layout(
         wrapper: &str,
@@ -3425,6 +3442,10 @@ impl FormCheckBoxFieldSchema {
 
     pub(crate) const fn options_slot(self) -> usize {
         39 + self.top_level_offset
+    }
+
+    pub(crate) const fn edit_format_option_slot(self) -> usize {
+        Self::EDIT_FORMAT_OPTION_SLOT
     }
 
     pub(crate) const fn tooltip_slot(self) -> usize {
@@ -4829,6 +4850,7 @@ pub(crate) enum FormTableXmlProperty {
     UserVisible,
     Visible,
     CommandBarLocation,
+    Enabled,
     Autofill,
     ReadOnly,
     SkipOnInput,
@@ -4919,6 +4941,13 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::UserVisible,
     FormTableXmlProperty::TitleLocation,
     FormTableXmlProperty::CommandBarLocation,
+    // `Enabled` opens the table's property run behind `Representation` (2) and
+    // `CommandBarLocation` (2) and ahead of `ReadOnly` (1), `SelectionMode` (1),
+    // `AutoInsertNewRow` (3), `FileDragMode` (3), `EnableDrag` (3),
+    // `EnableStartDrag` (3), `RowFilter` (3), `DataPath` (3), `Title` (2) and
+    // the three search/status locations (1 each), on all 3 native tables that
+    // carry it, with no pair counted both ways.
+    FormTableXmlProperty::Enabled,
     FormTableXmlProperty::Autofill,
     FormTableXmlProperty::ReadOnly,
     FormTableXmlProperty::SkipOnInput,
@@ -5387,6 +5416,23 @@ impl FormTableSchema {
     const AUTO_MAX_WIDTH_REVERSE_OFFSET: usize = 15;
     // Fixed tail scalar: 0=false, 1=true, 2=platform default (omitted).
     const AUTO_ADD_INCOMPLETE_REVERSE_OFFSET: usize = 36;
+    /// `AutoMarkIncomplete` is the fixed-tail scalar directly ahead of
+    /// `AutoAddIncomplete`, sharing its tri-state code map.
+    ///
+    /// No forward slot explains it, because the columns and the counted property
+    /// bag between them make the table layout variable-length. Read from the end
+    /// over all 4 528 `Table` items of the native UT 11.5.27.75 form bodies,
+    /// reverse offset 37 is a total function: `2` on the 4 481 tables the
+    /// platform writes nothing on, `1` on exactly the 36 it writes `true` on and
+    /// `0` on exactly the 11 it writes `false` on, with no counter-example and
+    /// no fourth code.
+    const AUTO_MARK_INCOMPLETE_REVERSE_OFFSET: usize = 37;
+    /// `Enabled` sits in the same plain top-level slot the field kinds use.
+    ///
+    /// Over the same 4 528 `Table` items slot 13 reads `1` on the 4 525 tables
+    /// with no `<Enabled>` and `0` on exactly the 3 that carry
+    /// `<Enabled>false</Enabled>`, with no other code.
+    const ENABLED_SLOT: usize = 13;
     /// `RefreshRequest` is a fixed-tail scalar addressed from the end, which is
     /// why no forward slot explains it.  UT 11.5.27.75 native tree, 4 509 traced
     /// tables: reverse offset 16 is a total function - `1` on all 30 tables whose
@@ -5635,6 +5681,25 @@ impl FormTableSchema {
             "2" => None,
             _ => None,
         }
+    }
+
+    pub(crate) fn auto_mark_incomplete_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::AUTO_MARK_INCOMPLETE_REVERSE_OFFSET)?;
+        matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
+    }
+
+    pub(crate) fn auto_mark_incomplete(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(self.auto_mark_incomplete_slot(fields)?)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(Self::ENABLED_SLOT)?.trim() == "0").then_some(false)
     }
 
     pub(crate) fn refresh_request(self, fields: &[&str]) -> Option<&'static str> {
@@ -6007,6 +6072,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     QuickChoice,
     AutoCellHeight,
     ChoiceFoldersAndItems,
+    ChoiceForm,
     ChoiceParameterLinks,
     ChoiceParameters,
     AutoChoiceIncomplete,
@@ -6067,6 +6133,16 @@ impl FormInputFieldExtendedOptionSlot {
             Self::DropListWidth => 22,
             Self::QuickChoice => 23,
             Self::ChoiceFoldersAndItems => 24,
+            // The slot immediately ahead of the mirrored link collections holds
+            // the chosen selection form as a design-time object identifier. Over
+            // all 49 916 `InputField` option tuples of the native UT 11.5.27.75
+            // form bodies it takes 20 values and is a total function of the
+            // platform's `<ChoiceForm>`: the nil identifier on 49 839 tuples,
+            // none of whose items carries the element, and 19 non-nil
+            // identifiers that map one-to-one onto the 19 distinct references
+            // the platform writes, with no item missing on either side and no
+            // identifier ever spelled two ways.
+            Self::ChoiceForm => 25,
             Self::ChoiceParameterLinks => 26,
             Self::ChoiceParameters => 27,
             Self::AutoCellHeight => 28,

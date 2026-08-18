@@ -19931,6 +19931,7 @@ fn formats_table_search_additions_as_direct_sections() {
         choose_type: None,
         auto_choice_incomplete: None,
         auto_mark_incomplete: None,
+        choice_form: None,
         incomplete_choice_mode: None,
         choice_button_representation: None,
         choice_button_picture_ref: None,
@@ -20137,6 +20138,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choose_type: None,
                 auto_choice_incomplete: None,
                 auto_mark_incomplete: None,
+                choice_form: None,
                 incomplete_choice_mode: None,
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
@@ -20344,6 +20346,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choose_type: None,
                 auto_choice_incomplete: None,
                 auto_mark_incomplete: None,
+                choice_form: None,
                 incomplete_choice_mode: None,
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
@@ -66360,4 +66363,271 @@ fn the_smaller_owners_write_their_moved_properties_in_the_native_order() {
     );
     assert!(at("<Shortcut>") < at("<HorizontalStretch>"), "got {xml}");
     assert_eq!(xml.matches("<Shortcut>").count(), 1, "got {xml}");
+}
+
+/// Slot 25 of the `InputField` option tuple names the selection form.
+///
+/// Evidence: UT 11.5.27.75, all 49 916 `InputField` option tuples the form
+/// bodies spell out. 49 839 hold the nil identifier and none of their items
+/// carries a `<ChoiceForm>`; the 19 distinct non-nil identifiers are, item for
+/// item, exactly the 55 items the platform writes the element on. Among them
+/// `НоменклатураОтбор` of `Catalogs/СертификатыНоменклатуры/Forms/ФормаСписка`
+/// holds `3f8f9716-44a3-4857-9930-ce16d377f316`, written
+/// `Catalog.Номенклатура.Form.ФормаВыбора`.
+#[test]
+fn input_field_choice_form_reads_slot_twenty_five() {
+    let slot = crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceForm.index();
+    assert_eq!(slot, 25);
+    for (code, expected) in [
+        ("00000000-0000-0000-0000-000000000000", None),
+        (
+            "3f8f9716-44a3-4857-9930-ce16d377f316",
+            Some("3f8f9716-44a3-4857-9930-ce16d377f316"),
+        ),
+        ("not-a-uuid", None),
+    ] {
+        let mut options = vec!["0"; 66];
+        options[0] = "36";
+        options[slot] = code;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            &options,
+        )
+        .expect("input field schema");
+        assert_eq!(
+            parse_form_input_field_choice_form(schema, &options).as_deref(),
+            expected,
+            "code {code}"
+        );
+    }
+}
+
+/// The slot is only read on an `InputField`; no other field kind carries it.
+#[test]
+fn choice_form_slot_is_not_read_on_other_field_kinds() {
+    let mut options = vec!["0"; 13];
+    options[0] = "11";
+    options[5] = "3f8f9716-44a3-4857-9930-ce16d377f316";
+    let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+        "37",
+        59,
+        "CheckBoxField",
+        0,
+        Some("3"),
+        &options,
+    )
+    .expect("check box field schema");
+    assert_eq!(parse_form_input_field_choice_form(schema, &options), None);
+}
+
+/// Slot 5 of the 13-member `CheckBoxField` option tuple holds `<EditFormat>`.
+///
+/// Evidence: UT 11.5.27.75, all 6 286 `CheckBoxField` option tuples. 6 222 hold
+/// the empty localized tuple `{1,0}` and none of their items carries an
+/// `<EditFormat>`; the 64 that hold a non-empty one are exactly the 64 items the
+/// platform writes it on, with equal text. The bytes below are those of
+/// `ИспользоватьКаталогВыгрузки` in
+/// `Catalogs/БанковскиеСчетаОрганизаций/Forms/ФормаЭлементаСчетЦифровогоРубля`.
+#[test]
+fn check_box_field_edit_format_reads_option_slot_five() {
+    for (raw, expected) in [
+        ("{1,0}", Vec::new()),
+        (
+            r#"{1,1,{"ru","БЛ=Файл; БИ=Каталог"}}"#,
+            vec![("ru".to_string(), "БЛ=Файл; БИ=Каталог".to_string())],
+        ),
+    ] {
+        let mut options = vec!["0"; 13];
+        options[0] = "11";
+        options[5] = raw;
+        let schema = crate::form_schema::FormCheckBoxFieldSchema::from_raw_layout(
+            "37",
+            59,
+            Some("3"),
+            &options,
+        )
+        .expect("check box field schema");
+        assert_eq!(schema.edit_format_option_slot(), 5);
+        assert_eq!(
+            parse_form_check_box_field_edit_format(schema, &options),
+            expected,
+            "raw {raw}"
+        );
+    }
+}
+
+/// `Enabled` is slot `13 + top_level_offset` on every field kind the schema
+/// admits, not only on the four it used to be restricted to.
+///
+/// Evidence: UT 11.5.27.75. `0` marks exactly the items the platform writes
+/// `<Enabled>false</Enabled>` on - `RadioButtonField` 6 of 1 386,
+/// `SpreadSheetDocumentField` 1 of 222, `HTMLDocumentField` 1 of 178 - and no
+/// `0` occurs on the 68 `TextDocumentField`, 41 `FormattedDocumentField`, 7
+/// `CalendarField` or 2 `GraphicalSchemaField` items, none of which carries the
+/// element.
+#[test]
+fn field_schema_enabled_reads_slot_thirteen_on_every_admitted_kind() {
+    for (tag, discriminator, options_len, options_kind) in [
+        ("InputField", "2", 66usize, "36"),
+        ("LabelField", "1", 20, "11"),
+        ("CheckBoxField", "3", 13, "11"),
+        ("PictureField", "4", 24, "10"),
+        ("RadioButtonField", "5", 12, "8"),
+        ("SpreadSheetDocumentField", "6", 32, "13"),
+        ("TextDocumentField", "7", 16, "5"),
+        ("CalendarField", "8", 24, "6"),
+        ("GraphicalSchemaField", "14", 14, "3"),
+        ("HTMLDocumentField", "15", 13, "3"),
+        ("FormattedDocumentField", "17", 16, "1"),
+    ] {
+        let mut options = vec!["0"; options_len];
+        options[0] = options_kind;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            tag,
+            0,
+            Some(discriminator),
+            &options,
+        )
+        .unwrap_or_else(|| panic!("{tag} schema"));
+        let mut fields = vec!["1"; 59];
+        assert_eq!(schema.enabled(&fields), None, "{tag} default");
+        fields[13] = "0";
+        assert_eq!(schema.enabled(&fields), Some(false), "{tag} disabled");
+    }
+}
+
+/// `ColumnGroup` and `Pages` carry `Enabled` in the container slot `Page` uses.
+///
+/// Evidence: UT 11.5.27.75, slot 10 reads `0` on exactly the 4 of 6 016
+/// `ColumnGroup` items and the 1 of 2 684 `Pages` items that carry
+/// `<Enabled>false</Enabled>`, and `1` on every other one.
+#[test]
+fn container_enabled_covers_column_group_and_pages() {
+    for tag in [
+        "Page",
+        "Pages",
+        "ColumnGroup",
+        "SearchStringAddition",
+        "SearchControlAddition",
+        "ViewStatusAddition",
+    ] {
+        let mut fields = vec!["1"; 20];
+        assert_eq!(parse_form_container_enabled(tag, &fields), None, "{tag}");
+        fields[10] = "0";
+        assert_eq!(
+            parse_form_container_enabled(tag, &fields),
+            Some(false),
+            "{tag}"
+        );
+    }
+    let mut fields = vec!["1"; 20];
+    fields[10] = "0";
+    assert_eq!(parse_form_container_enabled("UsualGroup", &fields), None);
+}
+
+/// The real strict wrapper-55 `Table` layout, with the two tail scalars this
+/// package reads parameterised. Every other byte is unchanged from
+/// `extracts_real_wrapper55_table_auto_refresh_properties`.
+fn strict_wrapper55_table_with_tail_codes_for_test(
+    enabled: &str,
+    auto_mark_incomplete: &str,
+) -> FormChildItem {
+    let mut attribute_names_by_id = BTreeMap::new();
+    attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
+    // The 37-member neutral tail of the pinned layout, with its first member -
+    // reverse offset 37 - carrying the `AutoMarkIncomplete` code.
+    let tail = std::iter::once(auto_mark_incomplete)
+        .chain(std::iter::repeat_n("0", 36))
+        .collect::<Vec<_>>()
+        .join(",");
+    let field = format!(
+        r##"{{55,{{1,02023637-7868-4a5f-8576-835a76e0c9ba}},0,1,0,"Rows",0,0,0,{{1,1,{{"en","Rows"}}}},{{1,0}},{{1,{{6}}}},0,{enabled},0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{{1,{{10000000}}}},{{4,0,{{0}},"",-1,-1,1,0,""}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,3,{{-22}}}},{{7,3,0,1,100}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,0,13,5,{{"B",0}},6,{{"N",60}},7,{{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{{0,00010101000000,00010101000000}}}},8,{{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}},9,{{"B",0}},10,{{"U"}},11,{{"B",1}},12,{{"B",0}},14,{{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0}},15,{{"U"}},16,{{"N",141}},19,{{"S",""}},20,{{"B",1}},{{0}},{tail}}}"##,
+    );
+    parse_form_child_item_with_attrs(
+        &field,
+        None,
+        None,
+        &attribute_names_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("the pinned wrapper-55 table layout parses")
+}
+
+/// A `Table` holds `AutoMarkIncomplete` at reverse offset 37, one scalar ahead
+/// of `AutoAddIncomplete`, and writes both codes.
+///
+/// Evidence: UT 11.5.27.75, all 4 528 `Table` items. `2` on the 4 481 the
+/// platform writes nothing on, `1` on exactly the 36 written `true` and `0` on
+/// exactly the 11 written `false`, with no fourth code. Among them
+/// `ТаблицаКорректировки` of
+/// `Documents/КорректировкаПриобретения/Forms/ФормаДокументаДоВводаОстатков`
+/// holds `1`, and `ОбъектыМетаданных` of
+/// `DataProcessors/НастройкаСтандартногоИнтерфейсаOData/Forms/НастройкаИспользованияСтандартногоИнтерфейсаOData`
+/// holds `0`.
+#[test]
+fn table_auto_mark_incomplete_reads_reverse_offset_thirty_seven() {
+    for (code, expected, expected_xml) in [
+        ("2", None, None),
+        (
+            "1",
+            Some(true),
+            Some("<AutoMarkIncomplete>true</AutoMarkIncomplete>"),
+        ),
+        (
+            "0",
+            Some(false),
+            Some("<AutoMarkIncomplete>false</AutoMarkIncomplete>"),
+        ),
+    ] {
+        let table = strict_wrapper55_table_with_tail_codes_for_test("1", code);
+        assert_eq!(table.tag, "Table");
+        assert_eq!(table.auto_mark_incomplete, expected, "code {code}");
+        let xml = format_form_child_items_xml(&[table], 1);
+        match expected_xml {
+            Some(needle) => assert!(xml.contains(needle), "code {code}, got {xml}"),
+            None => assert!(
+                !xml.contains("<AutoMarkIncomplete>"),
+                "code {code}, got {xml}"
+            ),
+        }
+    }
+}
+
+/// A `Table` holds `Enabled` in the same plain slot 13 the field kinds use, and
+/// writes it between `CommandBarLocation` and the rest of its run.
+///
+/// Evidence: UT 11.5.27.75, all 4 528 `Table` items: `0` on exactly the 3 that
+/// carry `<Enabled>false</Enabled>`, `1` on the other 4 525. Those 3 place it
+/// behind `Representation` and `CommandBarLocation` and ahead of `ReadOnly`,
+/// `SelectionMode`, `AutoInsertNewRow`, `DataPath`, `Title`, `FileDragMode` and
+/// `EnableDrag`, with no pair counted both ways.
+#[test]
+fn table_enabled_reads_slot_thirteen_and_opens_the_table_run() {
+    let enabled = strict_wrapper55_table_with_tail_codes_for_test("1", "2");
+    assert_eq!(enabled.enabled, None);
+    assert!(!format_form_child_items_xml(&[enabled], 1).contains("<Enabled>"));
+
+    let mut disabled = strict_wrapper55_table_with_tail_codes_for_test("0", "2");
+    assert_eq!(disabled.enabled, Some(false));
+    disabled.table_command_bar_location = Some("None");
+    disabled.read_only = Some(true);
+    disabled.auto_insert_new_row = Some(true);
+    let xml = format_form_child_items_xml(&[disabled], 1);
+    let at = owner_order_at(&xml);
+    assert!(at("<CommandBarLocation>") < at("<Enabled>"), "got {xml}");
+    assert!(at("<Enabled>") < at("<ReadOnly>"), "got {xml}");
+    assert!(at("<ReadOnly>") < at("<AutoInsertNewRow>"), "got {xml}");
+    assert!(at("<AutoInsertNewRow>") < at("<DataPath>"), "got {xml}");
+    assert_eq!(xml.matches("<Enabled>").count(), 1, "got {xml}");
 }

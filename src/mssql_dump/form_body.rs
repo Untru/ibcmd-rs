@@ -120,6 +120,12 @@ pub(super) struct FormParseContext<'a> {
     /// `field_type_refs`: configuration-wide against a per-form context.
     information_register_master_dimensions: &'a Arc<InformationRegisterMasterDimensionIndex>,
     form_owner_reference: Option<&'a str>,
+    /// Object references overlaid with the form index, for the one property
+    /// that names a form: `<ChoiceForm>`. The plain object reference index the
+    /// rest of the parser uses does not resolve form identifiers to their
+    /// owning object, so a form named through it comes out under the wrong
+    /// owner; the caller passes the index that does.
+    form_reference_index: Option<&'a BTreeMap<String, String>>,
     dcs_source_profile: ProfileId,
     dcs_target_profile: ProfileId,
     trace_sink: Option<&'a dyn FormItemTraceSink>,
@@ -171,11 +177,20 @@ impl<'a> FormParseContext<'a> {
             information_register_field_refs,
             information_register_master_dimensions,
             form_owner_reference,
+            form_reference_index: None,
             dcs_source_profile: ProfileId::parse("provider:mssql-legacy")
                 .expect("static MSSQL provider profile is valid"),
             dcs_target_profile: ProfileId::parse("xml-2.20").expect("static XML profile is valid"),
             trace_sink: None,
         }
+    }
+
+    pub(super) fn with_form_reference_index(
+        mut self,
+        form_reference_index: &'a BTreeMap<String, String>,
+    ) -> Self {
+        self.form_reference_index = Some(form_reference_index);
+        self
     }
 
     pub(super) fn with_dcs_profiles(
@@ -398,7 +413,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &child_item_indexes.data_path_by_binding_key,
         context.object_refs,
     );
-    let child_items = extract_form_child_items(
+    let mut child_items = extract_form_child_items(
         &form_fields,
         &attributes,
         &commands,
@@ -407,6 +422,10 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         context.object_refs,
         &child_item_indexes,
         context.trace_sink,
+    );
+    resolve_form_choice_form_references(
+        &mut child_items,
+        context.form_reference_index.unwrap_or(context.object_refs),
     );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_child_items_cpu_ms +=
@@ -1257,6 +1276,7 @@ pub(super) struct FormChildItem {
     pub(super) choose_type: Option<bool>,
     pub(super) auto_choice_incomplete: Option<bool>,
     pub(super) auto_mark_incomplete: Option<bool>,
+    pub(super) choice_form: Option<String>,
     pub(super) incomplete_choice_mode: Option<&'static str>,
     pub(super) choice_button_representation: Option<&'static str>,
     pub(super) choice_button_picture_ref: Option<String>,
@@ -9208,6 +9228,7 @@ fn parse_form_child_item_with_metadata_owners(
             .and_then(|(schema, _)| schema.enabled(&fields))
             .or_else(|| button_common_schema.and_then(|schema| schema.enabled(&fields)))
             .or_else(|| command_bar_schema.and_then(|schema| schema.enabled(&fields)))
+            .or_else(|| table_schema.and_then(|schema| schema.enabled(fields)))
             .or_else(|| parse_form_container_enabled(tag, fields)),
         read_only: if let Some(schema) = container_read_only_schema {
             schema.read_only(&fields)
@@ -9566,7 +9587,10 @@ fn parse_form_child_item_with_metadata_owners(
         edit_format: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_edit_format(input_field_extended_options.as_deref())
         } else {
-            Vec::new()
+            check_box_field_layout
+                .as_ref()
+                .map(|(schema, options)| parse_form_check_box_field_edit_format(*schema, options))
+                .unwrap_or_default()
         },
         title_font_xml: if form_group_layout_tag(tag) {
             parse_form_usual_group_title_font_xml(&fields, object_refs)
@@ -10079,8 +10103,11 @@ fn parse_form_child_item_with_metadata_owners(
         {
             parse_form_input_field_auto_mark_incomplete(input_field_extended_options.as_deref())
         } else {
-            None
+            table_schema.and_then(|schema| schema.auto_mark_incomplete(fields))
         },
+        choice_form: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| parse_form_input_field_choice_form(*schema, options)),
         incomplete_choice_mode: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| {
@@ -11616,7 +11643,18 @@ pub(super) fn parse_form_column_group_header_horizontal_align(
 pub(super) fn parse_form_container_enabled(tag: &str, fields: &[&str]) -> Option<bool> {
     let slot = match tag {
         "LabelDecoration" | "PictureDecoration" => 9,
-        "Page" | "SearchStringAddition" | "SearchControlAddition" | "ViewStatusAddition" => 10,
+        // `ColumnGroup` and `Pages` carry the flag in the same container slot as
+        // `Page`, and were the only two grouping kinds the table left out: over
+        // the native UT 11.5.27.75 tree slot 10 reads `0` on exactly the 4 of
+        // 6 016 `ColumnGroup` items and the 1 of 2 684 `Pages` items that carry
+        // `<Enabled>false</Enabled>` and `1` on every other one, with no other
+        // code on either kind.
+        "Page"
+        | "Pages"
+        | "ColumnGroup"
+        | "SearchStringAddition"
+        | "SearchControlAddition"
+        | "ViewStatusAddition" => 10,
         _ => return None,
     };
     (fields.get(slot)?.trim() == "0").then_some(false)
@@ -12278,6 +12316,16 @@ pub(super) fn parse_form_input_field_edit_format(
 ) -> Vec<(String, String)> {
     extended_options
         .and_then(|options| options.get(InputFieldSlot::EditFormat.index()))
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default()
+}
+
+pub(super) fn parse_form_check_box_field_edit_format(
+    schema: FormCheckBoxFieldSchema,
+    options: &[&str],
+) -> Vec<(String, String)> {
+    options
+        .get(schema.edit_format_option_slot())
         .map(|field| parse_form_localized_strings(field))
         .unwrap_or_default()
 }
@@ -13021,6 +13069,40 @@ pub(super) fn parse_form_input_field_auto_mark_incomplete(
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
+    }
+}
+
+/// Reads the raw `<ChoiceForm>` identifier out of `InputFieldSlot::ChoiceForm`.
+///
+/// The slot holds a design-time object identifier and a nil one writes nothing.
+/// Resolution is deferred to `resolve_form_choice_form_references`, which is the
+/// only place the form index is in scope.
+pub(super) fn parse_form_input_field_choice_form(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<String> {
+    let raw = schema.input_field_option(options, InputFieldSlot::ChoiceForm)?;
+    parse_non_zero_uuid(raw)
+}
+
+/// Names every `<ChoiceForm>` identifier through the form reference index.
+///
+/// An identifier the index does not know stays as it is, which is the
+/// platform's own spelling: of the 19 non-nil identifiers the native UT
+/// 11.5.27.75 form bodies carry, 18 name a form that still exists and are
+/// written as that form's reference, and the remaining one is written by the
+/// platform as the bare identifier.
+fn resolve_form_choice_form_references(
+    items: &mut [FormChildItem],
+    form_reference_index: &BTreeMap<String, String>,
+) {
+    for item in items {
+        if let Some(choice_form) = &mut item.choice_form
+            && let Some(reference) = form_reference_index.get(choice_form.as_str())
+        {
+            *choice_form = reference.clone();
+        }
+        resolve_form_choice_form_references(&mut item.child_items, form_reference_index);
     }
 }
 
@@ -19079,7 +19161,11 @@ fn format_form_table_property_xml(
             })
             .unwrap_or_default(),
         FormTableXmlProperty::AutoMarkIncomplete => match item.auto_mark_incomplete {
-            Some(true) => format!("{tab}<AutoMarkIncomplete>true</AutoMarkIncomplete>\r\n"),
+            Some(value) => format!("{tab}<AutoMarkIncomplete>{value}</AutoMarkIncomplete>\r\n"),
+            None => String::new(),
+        },
+        FormTableXmlProperty::Enabled => match item.enabled {
+            Some(false) => format!("{tab}<Enabled>false</Enabled>\r\n"),
             _ => String::new(),
         },
         FormTableXmlProperty::SearchOnInput => item
@@ -19781,17 +19867,33 @@ pub(super) fn format_form_child_item_xml(
     }
     // `Enabled` trails `DataPath`, `Visible` and `UserVisible` and precedes every
     // other property on every kind that writes it in the native tree, so all the
-    // kinds share this one position.
+    // kinds share this one position. `RadioButtonField` (6 native items),
+    // `ColumnGroup` (2), `HTMLDocumentField` (1), `SpreadSheetDocumentField` (1)
+    // and `Pages` (1) place it exactly there too - behind `DataPath` and
+    // `Visible` and ahead of `Title`, `TitleLocation`, `ShowInHeader`, `Group`,
+    // `RadioButtonType`, `ColumnsCount`, `ChoiceList`, the geometry run,
+    // `ToolTip`, `ToolTipRepresentation`, `PagesRepresentation`, `ChildItems`,
+    // `ContextMenu`, `ExtendedTooltip` and `Events`, with no pair counted both
+    // ways - so they join the same site rather than a second one.
     if matches!(
         item.tag,
         "InputField"
             | "LabelField"
             | "CheckBoxField"
             | "PictureField"
+            | "RadioButtonField"
+            | "TextDocumentField"
+            | "FormattedDocumentField"
+            | "CalendarField"
+            | "GraphicalSchemaField"
+            | "HTMLDocumentField"
+            | "SpreadSheetDocumentField"
             | "CommandBar"
             | "LabelDecoration"
             | "PictureDecoration"
             | "Page"
+            | "Pages"
+            | "ColumnGroup"
     ) && item.enabled == Some(false)
     {
         xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
@@ -20667,6 +20769,25 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<MaxValue xsi:type=\"xs:decimal\">{}</MaxValue>\r\n",
             escape_xml_text(value)
+        ));
+    }
+    // `ChoiceForm` closes the input field's own run and opens the choice
+    // cluster: over the 55 native `InputField` items that carry it, it trails
+    // `DataPath` (55), `EditMode` (22), `AutoMarkIncomplete` (17), `Title` (17),
+    // `Width` (16), `OpenButton` (15), `HorizontalStretch` (14), `AutoMaxWidth`
+    // (14), `TitleLocation` (14), `MaxWidth` (13), `ClearButton` (9),
+    // `ChoiceButton` (9), `ChoiceFoldersAndItems` (6),
+    // `ChoiceButtonRepresentation` (6), `DropListButton` (5), `ChooseType` (5),
+    // `AutoChoiceIncomplete` (5), `QuickChoice` (4), `Wrap` (3), `TitleHeight`
+    // (3), `CreateButton` (3), `AutoCellHeight` (2), `Height` (2), `ToolTip`
+    // (2), `ToolTipRepresentation` (2) and `UserVisible` (1), and leads
+    // `ChoiceParameterLinks` (24), `ChoiceParameters` (10), `InputHint` (5),
+    // `Events` (34), `ContextMenu` (55) and `ExtendedTooltip` (55). No pair is
+    // observed in both directions.
+    if let Some(choice_form) = &item.choice_form {
+        xml.push_str(&format!(
+            "{tab}\t<ChoiceForm>{}</ChoiceForm>\r\n",
+            escape_xml_text(choice_form)
         ));
     }
     // `ChoiceParameterLinks`/`ChoiceParameters` precede the choice-list block in
