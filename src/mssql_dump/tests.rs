@@ -11565,23 +11565,28 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
     assert_eq!(emitted.emitted_auto_max_width, Some(false));
     assert!(emitted_xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
 
+    // Hierarchical navigation does not change the answer.  On all 4 542 traced
+    // native tables, reverse offset 15 is a total function of the platform
+    // answer -- `0` on all 105 that carry `<AutoMaxWidth>false</AutoMaxWidth>`
+    // and `1` on the other 4 437 -- and 14 of those 105 are hierarchical, so
+    // the old carve-out only lost them.  Nothing is suppressed any more.
     items[0].top_level_parent_nil = Some(true);
-    let suppressed_sink = Sink::default();
+    let hierarchical_sink = Sink::default();
     form_body::record_complete_table_schema_events(
         &items,
         &[attribute(false)],
         &indexes,
-        &suppressed_sink,
+        &hierarchical_sink,
     );
-    let suppressed = suppressed_sink.schema.borrow();
-    let suppressed = suppressed
+    let hierarchical = hierarchical_sink.schema.borrow();
+    let hierarchical = hierarchical
         .iter()
         .find(|event| event.evidence_complete)
         .unwrap();
-    let suppressed_xml = format_form_child_items_xml(&items, 1);
-    assert_eq!(suppressed.hierarchical_suppressed, Some(true));
-    assert_eq!(suppressed.emitted_auto_max_width, None);
-    assert!(!suppressed_xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    let hierarchical_xml = format_form_child_items_xml(&items, 1);
+    assert_eq!(hierarchical.hierarchical_suppressed, None);
+    assert_eq!(hierarchical.emitted_auto_max_width, Some(false));
+    assert!(hierarchical_xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
 }
 
 #[test]
@@ -13016,13 +13021,14 @@ fn extracts_form_pages_and_page_from_layout_codes() {
     // which requires an *exact* multiple-of-2-past-30 field count and a
     // 20-field `{18,...}` options block (`FormPageSchema::OPTIONS_SLOT = 20`).
     // The legacy 12-field Page blob predates that options block entirely.
-    // Padded fields 12..19 (leaving the already-correct `scroll_on_compress`
-    // slots 8/11 untouched) and appended a minimal `{18,...}` options block
+    // Padded fields 12..19 and appended a minimal `{18,...}` options block
     // with `options[2]=1, options[16]=2, options[17]=2` — the tuple
     // `FormPageSchema::properties` maps to `Group=HorizontalIfPossible` —
-    // plus trailing padding to satisfy the length gate.
+    // plus trailing padding to satisfy the length gate.  Option member 12 is
+    // `3` and member 15 `0`, the codes the platform uses when it writes
+    // neither `<HorizontalAlign>` nor `<ScrollOnCompress>`.
     let item = parse_form_child_item(
-            r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,1,{"ru","Pages tip"}},0,1,0,0,14,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,11111111-1111-4111-8111-111111111111,{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,1,{"ru","Main"}},{1,1,{"ru","Page tip"}},3,1,0,0,0,0,0,0,0,0,0,{18,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0},0,0,0,0,0,0,0,0,0}}"#,
+            r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,1,{"ru","Pages tip"}},0,1,0,0,14,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,11111111-1111-4111-8111-111111111111,{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,1,{"ru","Main"}},{1,1,{"ru","Page tip"}},3,1,0,0,0,0,0,0,0,0,0,{18,0,1,0,0,0,0,0,0,0,0,0,3,0,0,0,2,2,0,0},0,0,0,0,0,0,0,0,0}}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -13042,7 +13048,8 @@ fn extracts_form_pages_and_page_from_layout_codes() {
     assert_eq!(item.child_items.len(), 1);
     assert_eq!(item.child_items[0].tag, "Page");
     assert_eq!(item.child_items[0].group, Some("HorizontalIfPossible"));
-    assert_eq!(item.child_items[0].scroll_on_compress, Some(false));
+    assert_eq!(item.child_items[0].scroll_on_compress, None);
+    assert_eq!(item.child_items[0].usual_group_horizontal_align, None);
     assert_eq!(
         item.child_items[0].tooltip,
         vec![("ru".to_string(), "Page tip".to_string())]
@@ -13064,8 +13071,13 @@ fn extracts_form_pages_and_page_from_layout_codes() {
 
 #[test]
 fn extracts_form_page_scroll_on_compress_true() {
+    // A page carries `ScrollOnCompress` in member 15 of its own `{18,...}`
+    // option tuple, not in a top-level slot.  The option block below is an
+    // observed one, transcribed byte for byte off a native page that writes
+    // `<ScrollOnCompress>true</ScrollOnCompress>`; member 12 is `3`, the code
+    // for "no `<HorizontalAlign>`".
     let item = parse_form_child_item(
-        r#"{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,0},{1,0},3,1,1}"#,
+        r#"{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,0},{1,0},3,1,0,0,0,0,0,0,0,0,0,{18,{4,0,{0},"",-1,-1,1,0,""},0,0,{0},{1,0},0,{"Pattern"},"",{3,0,{16777215}},0,0,3,3,0,1,0,0,{3,4,{0}},{7,3,0,1,100}},0,0,0,0,0,0,0,0,0}"#,
         None,
         None,
         &BTreeMap::new(),
@@ -13076,11 +13088,38 @@ fn extracts_form_page_scroll_on_compress_true() {
     .unwrap();
 
     assert_eq!(item.scroll_on_compress, Some(true));
+    assert_eq!(item.usual_group_horizontal_align, None);
 
     let xml = format_form_child_items_xml(&[item], 1);
 
     assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
     assert!(xml.contains("<ScrollOnCompress>true</ScrollOnCompress>"));
+}
+
+#[test]
+fn extracts_form_page_horizontal_align_left_and_right() {
+    // The alignment code of a page runs `0 -> Left`, `1 -> Center`,
+    // `2 -> Right`, `3 -> nothing`; only `Center` used to be decoded.  Same
+    // observed option block, with member 12 swapped through the codes.
+    for (code, expected) in [("0", "Left"), ("1", "Center"), ("2", "Right")] {
+        let blob = format!(
+            r#"{{22,{{9,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,4,"MainPage",{{1,0}},{{1,0}},3,1,0,0,0,0,0,0,0,0,0,{{18,{{4,0,{{0}},"",-1,-1,1,0,""}},0,0,{{0}},{{1,0}},0,{{"Pattern"}},"",{{3,0,{{16777215}}}},0,0,{code},3,0,0,0,0,{{3,4,{{0}}}},{{7,3,0,1,100}}}},0,0,0,0,0,0,0,0,0}}"#
+        );
+        let item = parse_form_child_item(
+            &blob,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(item.usual_group_horizontal_align, Some(expected));
+        assert_eq!(item.scroll_on_compress, None);
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains(&format!("<HorizontalAlign>{expected}</HorizontalAlign>")));
+    }
 }
 
 #[test]
@@ -19835,6 +19874,8 @@ fn formats_table_search_additions_as_direct_sections() {
         allow_getting_current_row_url: None,
         button_representation: None,
         shape_representation: None,
+        shape: None,
+        picture_location: None,
         representation_in_context_menu: None,
         group_horizontal_align: None,
         horizontal_location: None,
@@ -19873,6 +19914,8 @@ fn formats_table_search_additions_as_direct_sections() {
         check_box_type: None,
         three_state: None,
         radio_button_type: None,
+        item_width: None,
+        item_title_height: None,
         columns_count: None,
         cell_hyperlink: None,
         show_in_footer: None,
@@ -19932,6 +19975,14 @@ fn formats_table_search_additions_as_direct_sections() {
         auto_choice_incomplete: None,
         auto_mark_incomplete: None,
         choice_form: None,
+        table_height_control_variant: None,
+        table_auto_max_rows_count: None,
+        table_max_rows_count: None,
+        table_title_height: None,
+        table_footer_height: None,
+        table_output: None,
+        pages_read_only: None,
+        search_string_addition_properties: None,
         incomplete_choice_mode: None,
         choice_button_representation: None,
         choice_button_picture_ref: None,
@@ -20042,6 +20093,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 allow_getting_current_row_url: None,
                 button_representation: None,
                 shape_representation: None,
+                shape: None,
+                picture_location: None,
                 representation_in_context_menu: None,
                 group_horizontal_align: None,
                 horizontal_location: None,
@@ -20080,6 +20133,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 check_box_type: None,
                 three_state: None,
                 radio_button_type: None,
+                item_width: None,
+                item_title_height: None,
                 columns_count: None,
                 cell_hyperlink: None,
                 show_in_footer: None,
@@ -20139,6 +20194,14 @@ fn formats_table_search_additions_as_direct_sections() {
                 auto_choice_incomplete: None,
                 auto_mark_incomplete: None,
                 choice_form: None,
+                table_height_control_variant: None,
+                table_auto_max_rows_count: None,
+                table_max_rows_count: None,
+                table_title_height: None,
+                table_footer_height: None,
+                table_output: None,
+                pages_read_only: None,
+                search_string_addition_properties: None,
                 incomplete_choice_mode: None,
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
@@ -20250,6 +20313,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 allow_getting_current_row_url: None,
                 button_representation: None,
                 shape_representation: None,
+                shape: None,
+                picture_location: None,
                 representation_in_context_menu: None,
                 group_horizontal_align: None,
                 horizontal_location: None,
@@ -20288,6 +20353,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 check_box_type: None,
                 three_state: None,
                 radio_button_type: None,
+                item_width: None,
+                item_title_height: None,
                 columns_count: None,
                 cell_hyperlink: None,
                 show_in_footer: None,
@@ -20347,6 +20414,14 @@ fn formats_table_search_additions_as_direct_sections() {
                 auto_choice_incomplete: None,
                 auto_mark_incomplete: None,
                 choice_form: None,
+                table_height_control_variant: None,
+                table_auto_max_rows_count: None,
+                table_max_rows_count: None,
+                table_title_height: None,
+                table_footer_height: None,
+                table_output: None,
+                pages_read_only: None,
+                search_string_addition_properties: None,
                 incomplete_choice_mode: None,
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
@@ -66321,6 +66396,7 @@ fn the_smaller_owners_write_their_moved_properties_in_the_native_order() {
             protection: Some(true),
             enable_start_drag: Some(false),
             enable_drag: None,
+            view_scaling_mode: None,
         });
     let xml = format_form_child_items_xml(&[spreadsheet], 1);
     let at = owner_order_at(&xml);

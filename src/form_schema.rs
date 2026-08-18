@@ -708,6 +708,7 @@ pub(crate) struct FormPageProperties {
     child_items_width: Option<&'static str>,
     horizontal_spacing: Option<&'static str>,
     vertical_spacing: Option<&'static str>,
+    scroll_on_compress: Option<bool>,
 }
 
 impl FormPageSchema {
@@ -720,6 +721,7 @@ impl FormPageSchema {
     const HORIZONTAL_SPACING_OPTION_SLOT: usize = 10;
     const VERTICAL_SPACING_OPTION_SLOT: usize = 11;
     const CHILD_ITEMS_WIDTH_OPTION_SLOT: usize = 3;
+    const SCROLL_ON_COMPRESS_OPTION_SLOT: usize = 15;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -766,8 +768,17 @@ impl FormPageSchema {
                 _ => None,
             },
             group,
+            // The alignment code runs `0 -> Left`, `1 -> Center`,
+            // `2 -> Right`, `3 -> nothing`, the same table the grouping
+            // controls use; only `Center` used to be decoded, so the 37 left-
+            // and 47 right-aligned pages were dropped.  UT 11.5.27.75, all
+            // 6 983 traced pages: option member 12 is a total function of the
+            // platform answer with those four codes and no other, and no code
+            // maps to two answers.
             horizontal_align: match options.get(12).map(|field| field.trim()) {
+                Some("0") => Some("Left"),
                 Some("1") => Some("Center"),
+                Some("2") => Some("Right"),
                 _ => None,
             },
             vertical_align: match options.get(13).map(|field| field.trim()) {
@@ -784,6 +795,20 @@ impl FormPageSchema {
             vertical_spacing: options
                 .get(Self::VERTICAL_SPACING_OPTION_SLOT)
                 .and_then(|field| form_item_spacing_xml(field)),
+            // `ScrollOnCompress` lives in the page's own option tuple, not in
+            // the top-level slot the reader used to sample: UT 11.5.27.75, all
+            // 6 983 traced pages, option member 15 is `1` on exactly the 104
+            // pages the platform writes `<ScrollOnCompress>true` on and `0` on
+            // the other 6 879, with no counter-example.  The former rule (top
+            // level slot 11, gated on slot 8 opening a brace) missed 103 of the
+            // 104 and invented 15 the platform never writes.
+            scroll_on_compress: match options
+                .get(Self::SCROLL_ON_COMPRESS_OPTION_SLOT)
+                .map(|field| field.trim())
+            {
+                Some("1") => Some(true),
+                _ => None,
+            },
         }
     }
 
@@ -836,6 +861,10 @@ impl FormPageProperties {
 
     pub(crate) const fn vertical_spacing(self) -> Option<&'static str> {
         self.vertical_spacing
+    }
+
+    pub(crate) const fn scroll_on_compress(self) -> Option<bool> {
+        self.scroll_on_compress
     }
 }
 
@@ -1049,10 +1078,20 @@ impl FormUsualGroupSchema {
                 .then_some(true),
             group_horizontal_align: self.group_horizontal_align(fields),
             group_vertical_align: self.group_vertical_align(fields),
+            // The two right-titled codes used to be missing from the table.
+            // UT 11.5.27.75, all 26 672 traced `UsualGroup` items: option
+            // member 20 is a total function of the platform answer -- `0` on
+            // the 26 629 groups without a `<ChildrenAlign>` and `1`..`6` on the
+            // 9/30/7/1/4/2 that say `None`, `ItemsLeftTitlesLeft`,
+            // `ItemsRightTitlesLeft`, `ItemsLeftTitlesRight`,
+            // `ItemsRightTitlesRight` and `TitlesLeftDataAuto`, with no code
+            // mapping to two answers.
             children_align: options.get(20).and_then(|field| match field.trim() {
                 "1" => Some("None"),
                 "2" => Some("ItemsLeftTitlesLeft"),
                 "3" => Some("ItemsRightTitlesLeft"),
+                "4" => Some("ItemsLeftTitlesRight"),
+                "5" => Some("ItemsRightTitlesRight"),
                 "6" => Some("TitlesLeftDataAuto"),
                 _ => None,
             }),
@@ -2733,6 +2772,7 @@ pub(crate) struct FormSpreadsheetDocumentFieldProperties {
     pub(crate) protection: Option<bool>,
     pub(crate) enable_start_drag: Option<bool>,
     pub(crate) enable_drag: Option<bool>,
+    pub(crate) view_scaling_mode: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3397,6 +3437,212 @@ impl FormButtonShapeRepresentationSchema {
     }
 }
 
+/// `Shape` and `PictureLocation` of a `Button`, the two neighbours of the
+/// shape-representation code in the same fixed tail.
+///
+/// UT 11.5.27.75, all 27 774 traced `Button` items (field counts 52 and 53):
+/// reverse offset 8 is `0` on the 27 746 buttons without a `<Shape>` and `1`/`2`
+/// on the 8 that say `Usual` and the 20 that say `Oval`; reverse offset 5 is `0`
+/// on the 27 745 without a `<PictureLocation>` and `1`/`2` on the 17 that say
+/// `Left` and the 12 that say `Right`.  Neither code ever maps to two different
+/// platform answers, and no other code occurs.  The properties were read
+/// nowhere before, so the writer had nothing to emit.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormButtonShapeSchema;
+
+impl FormButtonShapeSchema {
+    const SHAPE_REVERSE_OFFSET: usize = 8;
+    const PICTURE_LOCATION_REVERSE_OFFSET: usize = 5;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+    ) -> Option<Self> {
+        (wrapper == "31" && matches!(field_count, 52 | 53) && item_tag == "Button").then_some(Self)
+    }
+
+    pub(crate) fn shape(self, fields: &[&str]) -> Option<&'static str> {
+        let slot = fields.len().checked_sub(Self::SHAPE_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "1" => Some("Usual"),
+            "2" => Some("Oval"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn picture_location(self, fields: &[&str]) -> Option<&'static str> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::PICTURE_LOCATION_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "1" => Some("Left"),
+            "2" => Some("Right"),
+            _ => None,
+        }
+    }
+}
+
+/// Geometry and alignment of a `SearchStringAddition`.
+///
+/// The addition is a fixed 24-member `5`-wrapped record whose own option tuple
+/// sits in slot 13 and always has 11 members.  UT 11.5.27.75, all 4 772 traced
+/// `SearchStringAddition` items, every position below a total function of the
+/// platform answer with no code mapping to two answers:
+///
+///   * option member 1 is `0` on the 4 755 additions without a `<Width>` and
+///     the written width itself on all 17 that carry one;
+///   * option member 2 is `2` on the 4 753 without a `<HorizontalStretch>` and
+///     `0`/`1` on the 15 that say `false` and the 4 that say `true`;
+///   * option member 8 is `1` on the 4 757 without an `<AutoMaxWidth>` and `0`
+///     on all 15 that say `false`;
+///   * option member 9 is `0` on the 4 765 without a `<MaxWidth>` and the
+///     written width on all 7 that carry one;
+///   * top-level slot 21 is `3` on the 4 765 without a
+///     `<GroupHorizontalAlign>` and `0`/`2` on the 1 that says `Left` and the 6
+///     that say `Right`;
+///   * top-level slot 11 is `0` on the 4 766 without a
+///     `<ToolTipRepresentation>` and `1`/`3` on the 3 that say `None` and the 3
+///     that say `Button`.
+///
+/// None of the six had a reader, so the writer had nothing to emit.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormSearchStringAdditionSchema;
+
+impl FormSearchStringAdditionSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 13;
+    const FIELD_COUNT: usize = 24;
+    const OPTION_COUNT: usize = 11;
+    const WIDTH_OPTION_SLOT: usize = 1;
+    const HORIZONTAL_STRETCH_OPTION_SLOT: usize = 2;
+    const AUTO_MAX_WIDTH_OPTION_SLOT: usize = 8;
+    const MAX_WIDTH_OPTION_SLOT: usize = 9;
+    const GROUP_HORIZONTAL_ALIGN_SLOT: usize = 21;
+    const TOOLTIP_REPRESENTATION_SLOT: usize = 11;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        options: &[&str],
+    ) -> Option<Self> {
+        (wrapper == "5"
+            && field_count == Self::FIELD_COUNT
+            && item_tag == "SearchStringAddition"
+            && options.len() == Self::OPTION_COUNT)
+            .then_some(Self)
+    }
+
+    fn dimension(self, options: &[&str], slot: usize) -> Option<String> {
+        let value = options.get(slot)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+    }
+
+    pub(crate) fn width(self, options: &[&str]) -> Option<String> {
+        self.dimension(options, Self::WIDTH_OPTION_SLOT)
+    }
+
+    pub(crate) fn max_width(self, options: &[&str]) -> Option<String> {
+        self.dimension(options, Self::MAX_WIDTH_OPTION_SLOT)
+    }
+
+    pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
+        match options
+            .get(Self::HORIZONTAL_STRETCH_OPTION_SLOT)
+            .map(|field| field.trim())
+        {
+            Some("0") => Some(false),
+            Some("1") => Some(true),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
+        (options
+            .get(Self::AUTO_MAX_WIDTH_OPTION_SLOT)
+            .map(|field| field.trim())
+            == Some("0"))
+        .then_some(false)
+    }
+
+    pub(crate) fn group_horizontal_align(
+        self,
+        fields: &[&str],
+    ) -> Option<FormFieldGroupHorizontalAlign> {
+        FormFieldGroupHorizontalAlign::from_raw_value(
+            fields.get(Self::GROUP_HORIZONTAL_ALIGN_SLOT)?.trim(),
+        )
+    }
+
+    pub(crate) fn tooltip_representation(self, fields: &[&str]) -> Option<&'static str> {
+        decode_form_tooltip_representation(fields.get(Self::TOOLTIP_REPRESENTATION_SLOT)?.trim())
+    }
+
+    pub(crate) fn properties(
+        self,
+        fields: &[&str],
+        options: &[&str],
+    ) -> FormSearchStringAdditionProperties {
+        FormSearchStringAdditionProperties {
+            width: self.width(options),
+            max_width: self.max_width(options),
+            horizontal_stretch: self.horizontal_stretch(options),
+            auto_max_width: self.auto_max_width(options),
+            group_horizontal_align: self
+                .group_horizontal_align(fields)
+                .map(FormFieldGroupHorizontalAlign::xml_value),
+            tooltip_representation: self.tooltip_representation(fields),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FormSearchStringAdditionProperties {
+    pub(crate) width: Option<String>,
+    pub(crate) max_width: Option<String>,
+    pub(crate) horizontal_stretch: Option<bool>,
+    pub(crate) auto_max_width: Option<bool>,
+    pub(crate) group_horizontal_align: Option<&'static str>,
+    pub(crate) tooltip_representation: Option<&'static str>,
+}
+
+/// `ShapeRepresentation` of a `Popup`.
+///
+/// The code lives in member 6 of the popup's own nine-member option tuple, not
+/// in a top-level slot; the property had no reader at all, so all 89 native
+/// occurrences were lost.  UT 11.5.27.75, all 3 911 traced `Popup` items:
+/// member 6 is `0` on the 3 822 popups that carry nothing, `2` on the 3 that
+/// say `WhenActive` and `3` on the 86 that say `None`, with no code mapping to
+/// two answers -- the same table `Button` uses for the property.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormPopupShapeRepresentationSchema;
+
+impl FormPopupShapeRepresentationSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 20;
+    const OPTION_COUNT: usize = 9;
+    const SHAPE_REPRESENTATION_OPTION_SLOT: usize = 6;
+
+    pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
+        (wrapper == "22"
+            && item_tag == "Popup"
+            && options.len() == Self::OPTION_COUNT
+            && options.first().map(|field| field.trim()) == Some("7"))
+        .then_some(Self)
+    }
+
+    pub(crate) fn shape_representation(self, options: &[&str]) -> Option<&'static str> {
+        match options
+            .get(Self::SHAPE_REPRESENTATION_OPTION_SLOT)
+            .map(|field| field.trim())
+        {
+            Some("1") => Some("Always"),
+            Some("2") => Some("WhenActive"),
+            Some("3") => Some("None"),
+            _ => None,
+        }
+    }
+}
+
 impl FormCheckBoxFieldSchema {
     const SHOW_IN_FOOTER_SLOT: usize = 21;
     const GROUP_HORIZONTAL_ALIGN_SLOT: usize = 53;
@@ -3658,7 +3904,17 @@ impl FormConditionalGroupSchema {
             user_visible_common,
             shifted_discriminator,
         ) {
-            ("22", field_count, Some(false), Some("2" | "3" | "5"))
+            // `Page` (discriminator `4`) carries the same conditional
+            // `UserVisible` prefix as the other grouping controls.  UT
+            // 11.5.27.75: of the wrapper-`22` items the reader used to drop
+            // whole, all 23 carry the prefix tuple `{0,{0,{"B",0},0}}` in slot
+            // 5 and discriminator `4` behind it, at field counts 33, 35 and 37
+            // -- the same `31 + 2k` progression the accepted discriminators
+            // run on.  Each of the 23 is a `Page` the platform writes with
+            // `<UserVisible><xr:Common>false</xr:Common></UserVisible>`, so the
+            // whole page and its subtree were being lost to the discriminator
+            // whitelist alone.
+            ("22", field_count, Some(false), Some("2" | "3" | "4" | "5"))
                 if field_count >= 31 && (field_count - 31) % 2 == 0 =>
             {
                 Some(Self { prefix_slot: 5 })
@@ -4648,6 +4904,18 @@ pub(crate) fn form_tooltip_representation_schema(
                 | (FormTooltipRepresentationItemKind::ColumnGroup, Some("2"))
                 | (FormTooltipRepresentationItemKind::Pages, Some("3"))
                 | (FormTooltipRepresentationItemKind::Page, Some("4"))
+                // `UsualGroup` obeys the same `field_count - 7` rule as its
+                // sibling grouping controls; it used to be admitted through a
+                // whitelist of the four shortest field counts (30, 32, 34, 36
+                // -> 23, 25, 27, 29), which is that very rule spelled out four
+                // times, so every longer group silently lost the property.  UT
+                // 11.5.27.75, all 26 672 traced `UsualGroup` items: reverse
+                // offset 7 is a total function of the platform answer -- `0` on
+                // the 26 260 that carry nothing and `1`..`8` on the 412 that
+                // carry `None`, `Balloon`, `Button`, `ShowAuto`, `ShowTop`,
+                // `ShowLeft`, `ShowBottom` and `ShowRight`, with no code
+                // mapping to two answers.
+                | (FormTooltipRepresentationItemKind::UsualGroup, Some("5"))
                 | (FormTooltipRepresentationItemKind::ButtonGroup, Some("6"))
         );
         if admitted {
@@ -4657,10 +4925,6 @@ pub(crate) fn form_tooltip_representation_schema(
         }
     }
     let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
-        ("22", 30, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 23,
-        ("22", 32, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 25,
-        ("22", 34, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 27,
-        ("22", 36, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 29,
         ("37", 59, FormTooltipRepresentationItemKind::LabelField, Some("1"))
         | ("37", 59, FormTooltipRepresentationItemKind::InputField, Some("2"))
         | ("37", 59, FormTooltipRepresentationItemKind::CheckBoxField, Some("3"))
@@ -4878,6 +5142,12 @@ pub(crate) enum FormTableXmlProperty {
     AutoInsertNewRow,
     AutoAddIncomplete,
     AutoMarkIncomplete,
+    HeightControlVariant,
+    AutoMaxRowsCount,
+    MaxRowsCount,
+    TitleHeight,
+    FooterHeight,
+    Output,
     SearchOnInput,
     InitialListView,
     InitialTreeView,
@@ -4940,6 +5210,14 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Visible,
     FormTableXmlProperty::UserVisible,
     FormTableXmlProperty::TitleLocation,
+    // `TitleHeight` sits at the head of the table body: on all 5 native tables
+    // that carry it, only `Representation` (2) and `TitleLocation` (1) precede
+    // it, and it leads `ChangeRowSet` (2), `ChangeRowOrder` (1), `DefaultItem`
+    // (1), `ReadOnly` (1), `HeaderHeight` (1), `RowSelectionMode` (1),
+    // `UseAlternationRowColor` (5), `AutoInsertNewRow` (1), `EnableStartDrag`
+    // (5), `DataPath` (5), `Title` (3) and `CommandSet` (2), with no pair
+    // counted both ways.
+    FormTableXmlProperty::TitleHeight,
     FormTableXmlProperty::CommandBarLocation,
     // `Enabled` opens the table's property run behind `Representation` (2) and
     // `CommandBarLocation` (2) and ahead of `ReadOnly` (1), `SelectionMode` (1),
@@ -4974,12 +5252,40 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::AutoMaxHeight,
     FormTableXmlProperty::MaxHeight,
     FormTableXmlProperty::HeightInTableRows,
+    // The row-count trio closes the table's own height run.  UT 11.5.27.75
+    // native tree: `HeightControlVariant` (43 owners) trails `HeightInTableRows`
+    // (6), `AutoMaxHeight` (6), `MaxHeight` (4), `Height` (4), `MaxWidth` (12),
+    // `AutoMaxWidth` (16), `Width` (9), `CommandBarLocation` (16), `ReadOnly`
+    // (18), `ChangeRowSet` (18), `ChangeRowOrder` (19), `SkipOnInput` (5),
+    // `TitleLocation` (4), `DefaultItem` (2), `UserVisible` (1), `Autofill` (1)
+    // and `Representation` (40), and leads `AutoMaxRowsCount` (11),
+    // `MaxRowsCount` (8), `Header` (20), `ChoiceMode` (1), `SelectionMode` (2),
+    // `RowSelectionMode` (9), `HorizontalScrollBar` (5), `HorizontalLines` (10),
+    // `VerticalLines` (10), `UseAlternationRowColor` (7), `Footer` (2),
+    // `AutoInsertNewRow` (26) and `DataPath` (43).  `AutoMaxRowsCount` (35)
+    // leads `MaxRowsCount` (17), and `MaxRowsCount` (27) leads `ChoiceMode` (1),
+    // `SelectionMode` (6), `Header` (8) and `DataPath` (27).  No pair is
+    // observed in both directions.
+    FormTableXmlProperty::HeightControlVariant,
+    FormTableXmlProperty::AutoMaxRowsCount,
+    FormTableXmlProperty::MaxRowsCount,
     FormTableXmlProperty::ChoiceMode,
     FormTableXmlProperty::MultipleChoice,
     FormTableXmlProperty::RowInputMode,
     FormTableXmlProperty::SelectionMode,
     FormTableXmlProperty::RowSelectionMode,
     FormTableXmlProperty::Header,
+    // `FooterHeight` follows the header switch and opens the line/scrollbar
+    // run: on all 5 native tables that carry it, it trails `Representation`
+    // (5), `ChangeRowSet` (3), `ChangeRowOrder` (3), `Width` (2),
+    // `CommandBarLocation` (2), `TitleLocation` (1), `SkipOnInput` (1),
+    // `MaxWidth` (1), `HeightInTableRows` (1), `Height` (1), `Header` (1) and
+    // `AutoMaxWidth` (1), and leads `HorizontalScrollBar` (1),
+    // `HorizontalLines` (1), `VerticalLines` (1), `AutoInsertNewRow` (3), the
+    // stretch pair (1 each), `EnableStartDrag` (3), `EnableDrag` (3),
+    // `FileDragMode` (3), `DataPath` (5), `RowPictureDataPath` (1),
+    // `RowsPicture` (1), `Title` (4), `CommandSet` (3) and `RowFilter` (5).
+    FormTableXmlProperty::FooterHeight,
     FormTableXmlProperty::HorizontalScrollBar,
     // `VerticalScrollBar` trails `HorizontalScrollBar` (4), `Header` (13),
     // `ChangeRowOrder` (7), `SkipOnInput` (3), `SelectionMode` (2) and
@@ -5013,6 +5319,21 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::SearchOnInput,
     FormTableXmlProperty::InitialListView,
     FormTableXmlProperty::InitialTreeView,
+    // `Output` closes the behaviour run: on all 6 native tables that carry it,
+    // it trails `Representation` (6), `ReadOnly` (6), `InitialListView` (6),
+    // `ChangeRowSet` (6), `ChangeRowOrder` (6), `SkipOnInput` (5),
+    // `UseAlternationRowColor` (3), `SelectionMode` (3), `HorizontalLines` (2),
+    // `HeightInTableRows` (2), `Header` (2), `CommandBarLocation` (2) and, once
+    // each, `VerticalScrollBar`, `VerticalLines`, `TitleLocation`,
+    // `SearchOnInput`, `MaxWidth`, `MaxRowsCount`, `InitialTreeView`,
+    // `HorizontalScrollBar`, `AutoMaxRowsCount`, `AutoMarkIncomplete`,
+    // `AutoInsertNewRow` and `AutoAddIncomplete`; it leads `VerticalStretch`
+    // (1), `EnableStartDrag` (1), `EnableDrag` (1), `FileDragMode` (5),
+    // `DataPath` (6), `RowPictureDataPath` (4), `RowsPicture` (4), `BackColor`
+    // (1), `BorderColor` (5), `Title` (5), `CommandSet` (5),
+    // `ToolTipRepresentation` (2), the three locations (2 each),
+    // `CurrentRowUse` (1), `RowFilter` (5), `Events` (5) and `ChildItems` (6).
+    FormTableXmlProperty::Output,
     // The stretch pair closes the layout run and opens the drag run.  Same
     // native tree: `HorizontalStretch` (35) trails `Header` (25),
     // `AutoInsertNewRow` (20), `HorizontalLines` (18), `VerticalLines` (16),
@@ -5416,6 +5737,22 @@ impl FormTableSchema {
     const AUTO_MAX_WIDTH_REVERSE_OFFSET: usize = 15;
     // Fixed tail scalar: 0=false, 1=true, 2=platform default (omitted).
     const AUTO_ADD_INCOMPLETE_REVERSE_OFFSET: usize = 36;
+    /// The height/row-count run at the very end of the fixed tail, directly
+    /// behind `CurrentRowUse` (reverse offset 5).  Same corpus, same totality:
+    /// reverse offset 8 is `0` on the 4 485 tables without a
+    /// `<HeightControlVariant>` and `1`/`2`/`3` on the 7/10/26 that say
+    /// `UseHeightInFormRows`, `UseHeightInTableRows` and `UseContentHeight`;
+    /// reverse offset 7 is `1` on the 4 493 without an `<AutoMaxRowsCount>` and
+    /// `0` on all 35 that say `false`; reverse offset 6 is `0` on the 4 501
+    /// without a `<MaxRowsCount>` and the written count itself on all 27 that
+    /// carry one.  No code maps to two different answers in any of the three.
+    const HEIGHT_CONTROL_VARIANT_REVERSE_OFFSET: usize = 8;
+    const AUTO_MAX_ROWS_COUNT_REVERSE_OFFSET: usize = 7;
+    const MAX_ROWS_COUNT_REVERSE_OFFSET: usize = 6;
+    const TITLE_HEIGHT_SLOT: usize = 7;
+    const FOOTER_HEIGHT_SLOT: usize = 29;
+    const OUTPUT_SLOT: usize = 40;
+
     /// `AutoMarkIncomplete` is the fixed-tail scalar directly ahead of
     /// `AutoAddIncomplete`, sharing its tri-state code map.
     ///
@@ -5702,6 +6039,59 @@ impl FormTableSchema {
         (fields.get(Self::ENABLED_SLOT)?.trim() == "0").then_some(false)
     }
 
+    pub(crate) fn height_control_variant(self, fields: &[&str]) -> Option<&'static str> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::HEIGHT_CONTROL_VARIANT_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "1" => Some("UseHeightInFormRows"),
+            "2" => Some("UseHeightInTableRows"),
+            "3" => Some("UseContentHeight"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn auto_max_rows_count(self, fields: &[&str]) -> Option<bool> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::AUTO_MAX_ROWS_COUNT_REVERSE_OFFSET)?;
+        (fields.get(slot)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn max_rows_count(self, fields: &[&str]) -> Option<String> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::MAX_ROWS_COUNT_REVERSE_OFFSET)?;
+        let value = fields.get(slot)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+    }
+
+    /// The three title/footer/output scalars of the table header, each a total
+    /// function of the platform answer over all 4 542 traced `Table` items:
+    /// slot 7 is `0` on the 4 537 tables without a `<TitleHeight>` and the
+    /// written height on all 5 that carry one; slot 29 is `1` on the 4 537
+    /// without a `<FooterHeight>` and the written height - `0`, `2` or `3` - on
+    /// all 5 that carry one; slot 40 is `0` on the 4 536 without an
+    /// `<Output>`, `1` on the 5 that say `Enable` and `2` on the one that says
+    /// `Disable`.
+    pub(crate) fn title_height(self, fields: &[&str]) -> Option<String> {
+        let value = fields.get(Self::TITLE_HEIGHT_SLOT)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+    }
+
+    pub(crate) fn footer_height(self, fields: &[&str]) -> Option<String> {
+        let value = fields.get(Self::FOOTER_HEIGHT_SLOT)?.trim();
+        (value != "1" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+    }
+
+    pub(crate) fn output(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(Self::OUTPUT_SLOT)?.trim() {
+            "1" => Some("Enable"),
+            "2" => Some("Disable"),
+            _ => None,
+        }
+    }
+
     pub(crate) fn refresh_request(self, fields: &[&str]) -> Option<&'static str> {
         let slot = fields
             .len()
@@ -5972,6 +6362,12 @@ impl FormSpreadsheetDocumentFieldProperties {
             protection: explicit_true(10),
             enable_start_drag: explicit_false(16),
             enable_drag: explicit_false(17),
+            // Of the 222 `SpreadSheetDocumentField` option tuples UT
+            // 11.5.27.75 spells out, slot 19 holds `1` on exactly the 40 items
+            // the platform writes `<ViewScalingMode>Normal</ViewScalingMode>`
+            // on and `0` on the other 182, with no miss on either side.  The
+            // slot had no reader, so none of the 40 was ever written.
+            view_scaling_mode: (option(19) == Some("1")).then_some("Normal"),
         })
     }
 }
@@ -6273,5 +6669,297 @@ impl FormLabelFieldOptionSlot {
             Self::AutoMaxHeight => 18,
             Self::MaxHeight => 19,
         }
+    }
+}
+
+#[cfg(test)]
+mod unemitted_property_tests {
+    use super::*;
+
+    /// A `Page` (discriminator `4`) carrying the conditional `UserVisible`
+    /// prefix is a valid grouping layout; the discriminator whitelist used to
+    /// drop it, and with it the whole page and its subtree.
+    #[test]
+    fn conditional_group_prefix_admits_pages() {
+        for count in [31usize, 33, 35, 37] {
+            for discriminator in ["2", "3", "4", "5"] {
+                assert!(
+                    FormConditionalGroupSchema::from_raw_layout(
+                        "22",
+                        count,
+                        Some(false),
+                        Some(discriminator),
+                    )
+                    .is_some(),
+                    "count {count} discriminator {discriminator}"
+                );
+            }
+            // The tags that never carry the prefix stay out.
+            for discriminator in ["0", "1", "6", "8", "9"] {
+                assert!(
+                    FormConditionalGroupSchema::from_raw_layout(
+                        "22",
+                        count,
+                        Some(false),
+                        Some(discriminator),
+                    )
+                    .is_none(),
+                    "count {count} discriminator {discriminator}"
+                );
+            }
+        }
+        // The length progression is unchanged: an even offset past 31 is required.
+        assert!(
+            FormConditionalGroupSchema::from_raw_layout("22", 34, Some(false), Some("4")).is_none()
+        );
+        // A page without the prefix marker is not a conditional layout.
+        assert!(FormConditionalGroupSchema::from_raw_layout("22", 33, None, Some("4")).is_none());
+    }
+
+    /// A `UsualGroup` reads its tooltip representation at `field_count - 7`,
+    /// like every other grouping control.  The old whitelist stopped at 36.
+    #[test]
+    fn usual_group_tooltip_representation_follows_the_length_progression() {
+        for count in [30usize, 32, 34, 36, 38, 40, 52] {
+            let schema = form_tooltip_representation_schema("22", count, "UsualGroup", Some("5"))
+                .unwrap_or_else(|| panic!("field count {count}"));
+            assert_eq!(schema.slot(), count - 7, "field count {count}");
+        }
+        // An odd count is not a member of the progression.
+        assert!(form_tooltip_representation_schema("22", 37, "UsualGroup", Some("5")).is_none());
+        // A discriminator that does not belong to `UsualGroup` still fails.
+        assert!(form_tooltip_representation_schema("22", 38, "UsualGroup", Some("2")).is_none());
+    }
+
+    /// `Shape` (reverse offset 8) and `PictureLocation` (reverse offset 5) of a
+    /// `Button`, at both observed field counts.
+    #[test]
+    fn button_shape_and_picture_location_read_the_fixed_tail() {
+        for count in [52usize, 53] {
+            let schema = FormButtonShapeSchema::from_raw_layout("31", count, "Button")
+                .unwrap_or_else(|| panic!("field count {count}"));
+            let mut fields = vec!["0"; count];
+            assert_eq!(schema.shape(&fields), None);
+            assert_eq!(schema.picture_location(&fields), None);
+            fields[count - 8] = "1";
+            fields[count - 5] = "1";
+            assert_eq!(schema.shape(&fields), Some("Usual"));
+            assert_eq!(schema.picture_location(&fields), Some("Left"));
+            fields[count - 8] = "2";
+            fields[count - 5] = "2";
+            assert_eq!(schema.shape(&fields), Some("Oval"));
+            assert_eq!(schema.picture_location(&fields), Some("Right"));
+        }
+        assert!(FormButtonShapeSchema::from_raw_layout("31", 51, "Button").is_none());
+        assert!(FormButtonShapeSchema::from_raw_layout("22", 52, "Popup").is_none());
+    }
+
+    /// A `Popup` keeps its shape representation in member 6 of its nine-member
+    /// option tuple, with the same code table `Button` uses.
+    #[test]
+    fn popup_shape_representation_reads_the_option_tuple() {
+        let mut options = vec![
+            "7",
+            r#"{4,0,{0},"",-1,-1,1,0,""}"#,
+            "{0}",
+            "2",
+            "3",
+            "0",
+            "0",
+            "{3,4,{0}}",
+            "{3,4,{0}}",
+        ];
+        let schema = FormPopupShapeRepresentationSchema::from_raw_layout("22", "Popup", &options)
+            .expect("observed popup option tuple");
+        assert_eq!(schema.shape_representation(&options), None);
+        for (code, expected) in [("1", "Always"), ("2", "WhenActive"), ("3", "None")] {
+            options[6] = code;
+            assert_eq!(schema.shape_representation(&options), Some(expected));
+        }
+        // A tuple of another shape is not a popup option tuple.
+        assert!(
+            FormPopupShapeRepresentationSchema::from_raw_layout("22", "Popup", &options[..8])
+                .is_none()
+        );
+        assert!(
+            FormPopupShapeRepresentationSchema::from_raw_layout("22", "Pages", &options).is_none()
+        );
+    }
+
+    /// The six `SearchStringAddition` properties, read off the observed
+    /// eleven-member option tuple and the two top-level slots.
+    #[test]
+    fn search_string_addition_reads_its_geometry_and_alignment() {
+        let mut options = vec![
+            "1",
+            "0",
+            "2",
+            "{3,4,{0}}",
+            "{3,4,{0}}",
+            "{3,4,{0}}",
+            "{7,3,0,1,100}",
+            "{0,1,0}",
+            "1",
+            "0",
+            "0",
+        ];
+        let mut fields = vec!["0"; 24];
+        fields[11] = "0";
+        fields[21] = "3";
+        let schema = FormSearchStringAdditionSchema::from_raw_layout(
+            "5",
+            24,
+            "SearchStringAddition",
+            &options,
+        )
+        .expect("observed addition layout");
+        let quiet = schema.properties(&fields, &options);
+        assert_eq!(quiet.width, None);
+        assert_eq!(quiet.max_width, None);
+        assert_eq!(quiet.horizontal_stretch, None);
+        assert_eq!(quiet.auto_max_width, None);
+        assert_eq!(quiet.group_horizontal_align, None);
+        assert_eq!(quiet.tooltip_representation, None);
+
+        options[1] = "40";
+        options[2] = "0";
+        options[8] = "0";
+        options[9] = "26";
+        fields[11] = "3";
+        fields[21] = "2";
+        let loud = schema.properties(&fields, &options);
+        assert_eq!(loud.width.as_deref(), Some("40"));
+        assert_eq!(loud.max_width.as_deref(), Some("26"));
+        assert_eq!(loud.horizontal_stretch, Some(false));
+        assert_eq!(loud.auto_max_width, Some(false));
+        assert_eq!(loud.group_horizontal_align, Some("Right"));
+        assert_eq!(loud.tooltip_representation, Some("Button"));
+
+        assert!(
+            FormSearchStringAdditionSchema::from_raw_layout(
+                "5",
+                24,
+                "ViewStatusAddition",
+                &options
+            )
+            .is_none()
+        );
+        assert!(
+            FormSearchStringAdditionSchema::from_raw_layout(
+                "5",
+                26,
+                "SearchStringAddition",
+                &options
+            )
+            .is_none()
+        );
+    }
+}
+
+#[cfg(test)]
+mod table_tail_property_tests {
+    use super::*;
+
+    /// A minimal `Table` record of the observed shape: wrapper `55`, first
+    /// field `55`, 99 base fields plus an even-sized suffix, every slot the
+    /// layout gate reads holding a code it accepts.
+    fn table_fields(len: usize) -> Vec<&'static str> {
+        assert!(len >= 99 && (len - 99) % 2 == 0);
+        let mut fields = vec!["0"; len];
+        fields[0] = "55";
+        // FormTableSlot codes the gate insists on.
+        for slot in [
+            12usize, 14, 16, 17, 18, 22, 23, 24, 25, 26, 28, 30, 32, 33, 36, 37, 38, 39, 52, 53,
+        ] {
+            fields[slot] = "0";
+        }
+        fields[19] = "10"; // Width
+        fields[20] = "10"; // Height
+        fields[54] = "0"; // empty counted property bag
+        // Fixed-tail scalars the gate parses.
+        fields[len - 2] = "0"; // FileDragMode
+        fields[len - 34] = "0"; // MultipleChoice
+        fields[len - 30] = "0"; // SkipOnInput
+        fields[len - 29] = "0"; // SearchOnInput
+        fields[len - 5] = "0"; // CurrentRowUse
+        fields[len - 15] = "1"; // AutoMaxWidth
+        fields[len - 36] = "2"; // AutoAddIncomplete
+        // The four properties under test, in their "writes nothing" codes.
+        fields[len - 37] = "2"; // AutoMarkIncomplete
+        fields[len - 8] = "0"; // HeightControlVariant
+        fields[len - 7] = "1"; // AutoMaxRowsCount
+        fields[len - 6] = "0"; // MaxRowsCount
+        fields[7] = "0"; // TitleHeight
+        fields[29] = "1"; // FooterHeight
+        fields[40] = "0"; // Output
+        fields
+    }
+
+    #[test]
+    fn table_tail_scalars_are_read_at_their_reverse_offsets() {
+        for len in [99usize, 101, 141] {
+            let mut fields = table_fields(len);
+            let schema = FormTableSchema::from_raw_layout("55", "Table", &fields)
+                .unwrap_or_else(|| panic!("field count {len}"));
+            assert_eq!(schema.auto_mark_incomplete(&fields), None);
+            assert_eq!(schema.height_control_variant(&fields), None);
+            assert_eq!(schema.auto_max_rows_count(&fields), None);
+            assert_eq!(schema.max_rows_count(&fields), None);
+            assert_eq!(schema.title_height(&fields), None);
+            assert_eq!(schema.footer_height(&fields), None);
+            assert_eq!(schema.output(&fields), None);
+
+            fields[len - 37] = "1";
+            fields[len - 8] = "3";
+            fields[len - 7] = "0";
+            fields[len - 6] = "13";
+            fields[7] = "5";
+            fields[29] = "0";
+            fields[40] = "2";
+            let schema = FormTableSchema::from_raw_layout("55", "Table", &fields)
+                .unwrap_or_else(|| panic!("field count {len}"));
+            assert_eq!(schema.auto_mark_incomplete(&fields), Some(true));
+            assert_eq!(
+                schema.height_control_variant(&fields),
+                Some("UseContentHeight")
+            );
+            assert_eq!(schema.auto_max_rows_count(&fields), Some(false));
+            assert_eq!(schema.max_rows_count(&fields).as_deref(), Some("13"));
+            assert_eq!(schema.title_height(&fields).as_deref(), Some("5"));
+            assert_eq!(schema.footer_height(&fields).as_deref(), Some("0"));
+            assert_eq!(schema.output(&fields), Some("Disable"));
+
+            fields[len - 37] = "0";
+            fields[len - 8] = "1";
+            let schema = FormTableSchema::from_raw_layout("55", "Table", &fields).unwrap();
+            assert_eq!(schema.auto_mark_incomplete(&fields), Some(false));
+            assert_eq!(
+                schema.height_control_variant(&fields),
+                Some("UseHeightInFormRows")
+            );
+            fields[len - 8] = "2";
+            let schema = FormTableSchema::from_raw_layout("55", "Table", &fields).unwrap();
+            assert_eq!(
+                schema.height_control_variant(&fields),
+                Some("UseHeightInTableRows")
+            );
+        }
+    }
+
+    /// A code outside the observed table fails closed: the property is dropped,
+    /// never guessed.
+    #[test]
+    fn unknown_tail_codes_write_nothing() {
+        let len = 99usize;
+        let mut fields = table_fields(len);
+        fields[len - 8] = "9";
+        fields[len - 37] = "7";
+        fields[40] = "9";
+        fields[len - 6] = "x";
+        let schema = FormTableSchema::from_raw_layout("55", "Table", &fields).unwrap();
+        assert_eq!(schema.height_control_variant(&fields), None);
+        assert_eq!(schema.auto_mark_incomplete(&fields), None);
+        assert_eq!(schema.output(&fields), None);
+        assert_eq!(schema.max_rows_count(&fields), None);
     }
 }

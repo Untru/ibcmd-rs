@@ -9,18 +9,19 @@ use crate::form_schema::{
     FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER,
     FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
     FormAttributeColumnSchema, FormButtonColorSchema, FormButtonCommonSchema,
-    FormButtonShapeRepresentationSchema, FormCheckBoxFieldSchema, FormChildItemAlignment,
-    FormChildItemDisplayImportanceSchema, FormChildItemEventCollectionSchema,
-    FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema, FormChildItemVisibleSchema,
-    FormColumnGroupSchema, FormCommandBarSchema, FormCommandCurrentRowUse,
-    FormCommandInterfaceContainerOwner, FormCommandInterfaceContainerSchema,
-    FormCommandInterfaceItemSchema, FormCommandInterfaceVisibilitySchema, FormCommandSchema,
-    FormConditionalGroupSchema, FormConditionalTableSchema, FormContainerReadOnlySchema,
-    FormControlBorderSchema, FormControlBorderStyle, FormDecorationHeaderSchema,
-    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
-    FormFieldGroupHorizontalAlign, FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty,
-    FormFieldSchema, FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot,
-    FormFieldVerticalAlign, FormFixingInTable, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormButtonShapeRepresentationSchema, FormButtonShapeSchema, FormCheckBoxFieldSchema,
+    FormChildItemAlignment, FormChildItemDisplayImportanceSchema,
+    FormChildItemEventCollectionSchema, FormChildItemShowTitleSchema,
+    FormChildItemUserVisibleSchema, FormChildItemVisibleSchema, FormColumnGroupSchema,
+    FormCommandBarSchema, FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
+    FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
+    FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
+    FormConditionalTableSchema, FormContainerReadOnlySchema, FormControlBorderSchema,
+    FormControlBorderStyle, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldGroupHorizontalAlign,
+    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
+    FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot, FormFieldVerticalAlign,
+    FormFixingInTable, FormInputFieldExtendedOptionSlot as InputFieldSlot,
     FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
@@ -28,11 +29,12 @@ use crate::form_schema::{
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
-    FormPictureValueSchema, FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
-    FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
-    FormRootCustomizableSchema, FormRootGroupSchema, FormRootGroupingSchema,
-    FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema, FormRootVerticalAlign,
-    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
+    FormPictureValueSchema, FormPopupSchema, FormPopupShapeRepresentationSchema,
+    FormRootAutoCommandBarSchema, FormRootAutoUrlSchema, FormRootConversationsRepresentationSchema,
+    FormRootCustomSettingsFolderSchema, FormRootCustomizableSchema, FormRootGroupSchema,
+    FormRootGroupingSchema, FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema,
+    FormRootVerticalAlign, FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
+    FormSearchStringAdditionProperties, FormSearchStringAdditionSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
@@ -1180,6 +1182,8 @@ pub(super) struct FormChildItem {
     pub(super) allow_getting_current_row_url: Option<bool>,
     pub(super) button_representation: Option<&'static str>,
     pub(super) shape_representation: Option<&'static str>,
+    pub(super) shape: Option<&'static str>,
+    pub(super) picture_location: Option<&'static str>,
     pub(super) representation_in_context_menu: Option<&'static str>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) horizontal_location: Option<&'static str>,
@@ -1218,6 +1222,8 @@ pub(super) struct FormChildItem {
     pub(super) check_box_type: Option<&'static str>,
     pub(super) three_state: Option<bool>,
     pub(super) radio_button_type: Option<&'static str>,
+    pub(super) item_width: Option<String>,
+    pub(super) item_title_height: Option<String>,
     pub(super) columns_count: Option<u32>,
     pub(super) cell_hyperlink: Option<bool>,
     pub(super) show_in_footer: Option<bool>,
@@ -1277,6 +1283,14 @@ pub(super) struct FormChildItem {
     pub(super) auto_choice_incomplete: Option<bool>,
     pub(super) auto_mark_incomplete: Option<bool>,
     pub(super) choice_form: Option<String>,
+    pub(super) table_height_control_variant: Option<&'static str>,
+    pub(super) table_auto_max_rows_count: Option<bool>,
+    pub(super) table_max_rows_count: Option<String>,
+    pub(super) table_title_height: Option<String>,
+    pub(super) table_footer_height: Option<String>,
+    pub(super) table_output: Option<&'static str>,
+    pub(super) pages_read_only: Option<bool>,
+    pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
     pub(super) incomplete_choice_mode: Option<&'static str>,
     pub(super) choice_button_representation: Option<&'static str>,
     pub(super) choice_button_picture_ref: Option<String>,
@@ -6575,22 +6589,35 @@ pub(super) fn unique_table_trace_occurrence(
     (occurrences.len() == 1 && final_count == Some(1)).then(|| occurrences[0])
 }
 
+/// The two trace facts about a table's `AutoMaxWidth`: whether the renderer
+/// suppressed it, and what it wrote.
+///
+/// Nothing suppresses it any more -- the slot alone decides -- so the first
+/// element is always `None`; it stays in the tuple because the provenance
+/// record still carries the fact, and a suppression would have to show up here
+/// if one were ever reintroduced.
 pub(super) fn table_auto_max_width_emission(
     effective_auto_max_width: Option<bool>,
     hierarchical: bool,
 ) -> (Option<bool>, Option<bool>) {
     let emitted = table_emits_auto_max_width_false(effective_auto_max_width, hierarchical);
-    (
-        (effective_auto_max_width == Some(false) && hierarchical).then_some(true),
-        emitted.then_some(false),
-    )
+    (None, emitted.then_some(false))
 }
 
+/// A table writes `<AutoMaxWidth>false</AutoMaxWidth>` exactly when its own
+/// slot says so; hierarchical navigation does not suppress it.
+///
+/// UT 11.5.27.75, all 4 542 traced `Table` items: reverse offset 15 is a total
+/// function of the platform answer -- `0` on all 105 tables that carry
+/// `<AutoMaxWidth>false</AutoMaxWidth>` and `1` on the other 4 437, with no
+/// counter-example.  The former carve-out dropped the property on the 14
+/// hierarchical tables among the 105, and native never writes `true` on any
+/// table, so nothing was gained by it.
 fn table_emits_auto_max_width_false(
     effective_auto_max_width: Option<bool>,
-    hierarchical: bool,
+    _hierarchical: bool,
 ) -> bool {
-    effective_auto_max_width == Some(false) && !hierarchical
+    effective_auto_max_width == Some(false)
 }
 
 pub(super) fn form_attribute_metadata_owners_by_id(
@@ -8280,6 +8307,31 @@ fn parse_form_child_item_with_metadata_owners(
         tag,
         button_top_level_offset,
     );
+    let button_shape_schema = FormButtonShapeSchema::from_raw_layout(wrapper, fields.len(), tag);
+    let search_string_addition = fields
+        .get(FormSearchStringAdditionSchema::OPTIONS_SLOT)
+        .and_then(|field| {
+            let options_text = field.trim();
+            (scan_1c_braced_value(options_text, 0) == Some(options_text.len()))
+                .then(|| split_1c_braced_fields(options_text, 0))
+                .flatten()
+        })
+        .and_then(|options| {
+            FormSearchStringAdditionSchema::from_raw_layout(wrapper, fields.len(), tag, &options)
+                .map(|schema| (schema, options))
+        });
+    let popup_shape_representation = fields
+        .get(FormPopupShapeRepresentationSchema::OPTIONS_SLOT)
+        .and_then(|field| {
+            let options_text = field.trim();
+            (scan_1c_braced_value(options_text, 0) == Some(options_text.len()))
+                .then(|| split_1c_braced_fields(options_text, 0))
+                .flatten()
+        })
+        .and_then(|options| {
+            FormPopupShapeRepresentationSchema::from_raw_layout(wrapper, tag, &options)?
+                .shape_representation(&options)
+        });
     let button_common_schema = FormButtonCommonSchema::from_raw_layout(
         wrapper,
         fields.len(),
@@ -9042,7 +9094,10 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         shape_representation: button_shape_representation_schema
-            .and_then(|schema| schema.shape_representation(&fields)),
+            .and_then(|schema| schema.shape_representation(&fields))
+            .or(popup_shape_representation),
+        shape: button_shape_schema.and_then(|schema| schema.shape(&fields)),
+        picture_location: button_shape_schema.and_then(|schema| schema.picture_location(&fields)),
         representation_in_context_menu: if tag == "Button"
             && form_button_layout_is_extended(&fields)
         {
@@ -9107,7 +9162,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        scroll_on_compress: parse_form_page_scroll_on_compress(tag, &fields),
+        scroll_on_compress: page_properties.and_then(|properties| properties.scroll_on_compress()),
         show_title: show_title_schema.and_then(|schema| {
             show_title_options
                 .as_deref()
@@ -9295,9 +9350,14 @@ fn parse_form_child_item_with_metadata_owners(
         tooltip_representation,
         warning_on_edit_representation,
         warning_on_edit,
+        // `RadioButtonField` reads its `EditMode` out of the same slot as the
+        // other fields: on all 1 386 traced items, slot `26 + offset` is `1` on
+        // the 1 374 without an `<EditMode>` and `2` on all 12 that say
+        // `EnterOnInput`, with no counter-example.  Only the tag whitelist kept
+        // it out.
         edit_mode: if matches!(
             tag,
-            "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+            "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
         ) && form_input_field_layout_is_extended(&fields)
         {
             fields
@@ -9379,6 +9439,10 @@ fn parse_form_child_item_with_metadata_owners(
         three_state: check_box_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.three_state(options)),
+        item_width: parse_form_radio_button_item_width(radio_button_options.as_deref()),
+        item_title_height: parse_form_radio_button_item_title_height(
+            radio_button_options.as_deref(),
+        ),
         radio_button_type: if tag == "RadioButtonField" {
             parse_form_radio_button_type(radio_button_options.as_deref())
         } else {
@@ -10108,6 +10172,23 @@ fn parse_form_child_item_with_metadata_owners(
         choice_form: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| parse_form_input_field_choice_form(*schema, options)),
+        table_height_control_variant: table_schema
+            .and_then(|schema| schema.height_control_variant(&fields)),
+        table_auto_max_rows_count: table_schema
+            .and_then(|schema| schema.auto_max_rows_count(&fields)),
+        table_max_rows_count: table_schema.and_then(|schema| schema.max_rows_count(&fields)),
+        table_title_height: table_schema.and_then(|schema| schema.title_height(&fields)),
+        table_footer_height: table_schema.and_then(|schema| schema.footer_height(&fields)),
+        table_output: table_schema.and_then(|schema| schema.output(&fields)),
+        // A `Pages` group carries its own read-only switch in slot 11: on all
+        // 2 687 traced `Pages` items the slot is `1` on exactly the 7 the
+        // platform writes `<ReadOnly>true</ReadOnly>` on and `0` on the other
+        // 2 680, with no counter-example.  The slot had no reader at all.
+        pages_read_only: (tag == "Pages" && fields.get(11).map(|field| field.trim()) == Some("1"))
+            .then_some(true),
+        search_string_addition_properties: search_string_addition
+            .as_ref()
+            .map(|(schema, options)| schema.properties(&fields, options)),
         incomplete_choice_mode: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| {
@@ -11585,17 +11666,6 @@ pub(super) fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
     }
 }
 
-pub(super) fn parse_form_page_scroll_on_compress(tag: &str, fields: &[&str]) -> Option<bool> {
-    if tag != "Page" {
-        return None;
-    }
-    fields
-        .get(8)
-        .filter(|field| field.trim_start().starts_with('{'))
-        .and_then(|_| fields.get(11))
-        .and_then(|field| parse_form_child_item_show_title(field))
-}
-
 /// `HeaderHorizontalAlign` of a table column control.
 ///
 /// The code sits in its own top-level slot right after `HorizontalAlign`
@@ -13056,6 +13126,27 @@ pub(super) fn parse_form_radio_button_item_height(
     extended_options: Option<&[&str]>,
 ) -> Option<String> {
     let value = extended_options?.get(6)?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+}
+
+/// `ItemWidth` (member 10) and `ItemTitleHeight` (member 9) of the twelve-member
+/// `RadioButtonField` option tuple.
+///
+/// UT 11.5.27.75, all 1 386 traced `RadioButtonField` items: member 10 is `0` on
+/// the 1 366 without an `<ItemWidth>` and the written width on all 20 that carry
+/// one; member 9 is `0` on the 1 374 without an `<ItemTitleHeight>` and `1` or
+/// `2` on the 9 and 3 that carry those.  Neither member had a reader.
+pub(super) fn parse_form_radio_button_item_width(
+    extended_options: Option<&[&str]>,
+) -> Option<String> {
+    let value = extended_options?.get(10)?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+}
+
+pub(super) fn parse_form_radio_button_item_title_height(
+    extended_options: Option<&[&str]>,
+) -> Option<String> {
+    let value = extended_options?.get(9)?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
 }
 
@@ -19056,6 +19147,19 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
     if properties.enable_drag == Some(false) {
         xml.push_str(&format!("{tab}<EnableDrag>false</EnableDrag>\r\n"));
     }
+    // `ViewScalingMode` closes the spreadsheet field's own scalar run: on all
+    // 40 native fields that carry it, it trails `TitleLocation` (40),
+    // `DataPath` (40), `HorizontalScrollBar` (33), `Width` (32),
+    // `HorizontalStretch` (29), `Height` (25), `MaxHeight` (23), `MaxWidth`
+    // (12), `VerticalScrollBar` (11) and `Protection` (11) and leads only
+    // `ExtendedTooltip` (40), `ContextMenu` (40) and `Events` (15); it never
+    // shares a field with `SelectionShowMode`, `Output` or the drag pair.
+    if let Some(value) = properties.view_scaling_mode {
+        xml.push_str(&format!(
+            "{tab}<ViewScalingMode>{}</ViewScalingMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     xml
 }
 
@@ -19168,6 +19272,58 @@ fn format_form_table_property_xml(
             Some(false) => format!("{tab}<Enabled>false</Enabled>\r\n"),
             _ => String::new(),
         },
+        FormTableXmlProperty::HeightControlVariant => item
+            .table_height_control_variant
+            .map(|value| {
+                format!(
+                    "{tab}<HeightControlVariant>{}</HeightControlVariant>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::AutoMaxRowsCount => item
+            .table_auto_max_rows_count
+            .map(|value| {
+                format!(
+                    "{tab}<AutoMaxRowsCount>{}</AutoMaxRowsCount>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::MaxRowsCount => item
+            .table_max_rows_count
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<MaxRowsCount>{}</MaxRowsCount>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::TitleHeight => item
+            .table_title_height
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<TitleHeight>{}</TitleHeight>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::FooterHeight => item
+            .table_footer_height
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<FooterHeight>{}</FooterHeight>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::Output => item
+            .table_output
+            .map(|value| format!("{tab}<Output>{}</Output>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
         FormTableXmlProperty::SearchOnInput => item
             .table_search_on_input
             .map(|value| {
@@ -19755,6 +19911,26 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
     }
+    // A `Pages` group opens with `ReadOnly`: on all 7 native groups that carry
+    // it nothing precedes it, and it leads `Title` (7), `PagesRepresentation`
+    // (7), `EnableContentChange` (1), `VerticalStretch` (1), `ToolTip` (1),
+    // `ExtendedTooltip` (7) and `ChildItems` (3).
+    if item.pages_read_only == Some(true) {
+        xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
+    }
+    // A `SearchStringAddition` opens with `ToolTipRepresentation`: on all 6
+    // native additions that carry it nothing precedes it, and it leads
+    // `AdditionSource` (6), `Title` (2), `Width` (2), `AutoMaxWidth` (3),
+    // `MaxWidth` (1), `HorizontalStretch` (5), `ContextMenu` (6) and
+    // `ExtendedTooltip` (6).
+    if let Some(properties) = item.search_string_addition_properties.as_ref()
+        && let Some(value) = properties.tooltip_representation
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     if item.tag.ends_with("Addition") {
         if item.addition_source_item.is_some() || item.item_type.is_some() {
             xml.push_str(&format!("{tab}\t<AdditionSource>\r\n"));
@@ -20252,6 +20428,27 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<ItemHeight>{}</ItemHeight>\r\n",
             escape_xml_text(item_height)
+        ));
+    }
+    // `ItemWidth` and `ItemTitleHeight` sit between the radio-button type and
+    // the column pair.  UT 11.5.27.75: `ItemWidth` (20 owners) trails
+    // `RadioButtonType` (20), `DataPath` (20), `TitleLocation` (15), `Title`
+    // (9), `TitleHeight` (1) and `TitleFont` (1) and leads `ItemTitleHeight`
+    // (2), `ColumnsCount` (6), `EqualColumnsWidth` (19), `ChoiceList` (16),
+    // `Font` (1), `Events` (20), `ContextMenu` (20) and `ExtendedTooltip` (20);
+    // `ItemTitleHeight` (12) repeats the same relations and leads
+    // `ColumnsCount` (8), `EqualColumnsWidth` (2) and `ChoiceList` (12).  No
+    // pair is observed in both directions.
+    if let Some(item_width) = &item.item_width {
+        xml.push_str(&format!(
+            "{tab}\t<ItemWidth>{}</ItemWidth>\r\n",
+            escape_xml_text(item_width)
+        ));
+    }
+    if let Some(item_title_height) = &item.item_title_height {
+        xml.push_str(&format!(
+            "{tab}\t<ItemTitleHeight>{}</ItemTitleHeight>\r\n",
+            escape_xml_text(item_title_height)
         ));
     }
     if let Some(columns_count) = item.columns_count {
@@ -20888,17 +21085,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(group)
         ));
     }
-    // A `Page` writes `ScrollOnCompress` as its very last property, behind
-    // `TitleDataPath` (see below); every other owner keeps it here.
-    if item.tag != "Page"
-        && let Some(scroll_on_compress) =
-            form_bool_when_not_native_default(item.scroll_on_compress, false)
-    {
-        xml.push_str(&format!(
-            "{tab}\t<ScrollOnCompress>{}</ScrollOnCompress>\r\n",
-            if scroll_on_compress { "true" } else { "false" }
-        ));
-    }
     xml.push_str(&format_form_usual_group_properties_xml(
         item,
         FormUsualGroupXmlAnchor::BeforeBehavior,
@@ -21199,12 +21385,39 @@ pub(super) fn format_form_child_item_xml(
         FormTooltipRepresentationXmlOrder::AfterTitle,
         indent + 1,
     ));
+    // A `Button` writes `Shape` immediately ahead of `ShapeRepresentation` and
+    // `PictureLocation` immediately behind it.  UT 11.5.27.75 native tree:
+    // `Shape` (28) leads `ShapeRepresentation` (5), `PictureLocation` (1),
+    // `LocationInCommandBar` (5) and `ExtendedTooltip` (28) and trails `Type`
+    // (28), `CommandName` (28), `Title` (18), `GroupHorizontalAlign` (14),
+    // `TextColor` (11), `HorizontalStretch` (10), `Font` (10), `BorderColor`
+    // (8), `Representation` (7), `Picture` (5), `BackColor` (5), `Height` (3),
+    // `Width` (2), `DefaultButton` (2) and `MaxWidth` (1); `PictureLocation`
+    // (29) trails `ShapeRepresentation` (5), `Shape` (1), `Representation`
+    // (25), `Picture` (15) and `Title` (18) and leads `LocationInCommandBar`
+    // (3) and `ExtendedTooltip` (29).  No pair is observed in both directions.
+    if item.tag == "Button"
+        && let Some(shape) = item.shape
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Shape>{}</Shape>\r\n",
+            escape_xml_text(shape)
+        ));
+    }
     if item.tag == "Button"
         && let Some(shape_representation) = item.shape_representation
     {
         xml.push_str(&format!(
             "{tab}\t<ShapeRepresentation>{}</ShapeRepresentation>\r\n",
             escape_xml_text(shape_representation)
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(picture_location) = item.picture_location
+    {
+        xml.push_str(&format!(
+            "{tab}\t<PictureLocation>{}</PictureLocation>\r\n",
+            escape_xml_text(picture_location)
         ));
     }
     if item.tag == "Button"
@@ -21296,6 +21509,20 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<Representation>{}</Representation>\r\n",
             escape_xml_text(representation)
+        ));
+    }
+    // A `Popup` writes `ShapeRepresentation` behind its representation and just
+    // ahead of `BackColor`.  UT 11.5.27.75 native tree, all 89 popups carrying
+    // it: it trails `Title` (89), `TitleTextColor` (86), `TitleFont` (84),
+    // `VerticalStretch` (42), `ToolTip` (10) and `Representation` (3), and
+    // leads `ExtendedTooltip` (89), `ChildItems` (3) and `BorderColor` (1),
+    // with no pair counted both ways.
+    if item.tag == "Popup"
+        && let Some(shape_representation) = item.shape_representation
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ShapeRepresentation>{}</ShapeRepresentation>\r\n",
+            escape_xml_text(shape_representation)
         ));
     }
     // A `Popup` closes its own properties with `BackColor`: the native tree
@@ -21408,6 +21635,48 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<HeightControlVariant>{}</HeightControlVariant>\r\n",
             escape_xml_text(height_control_variant)
         ));
+    }
+    // A `SearchStringAddition` closes its scalar run with the alignment and the
+    // width block, between its title and its context menu.  UT 11.5.27.75:
+    // `GroupHorizontalAlign` (7) trails `AdditionSource` (7) and `Title` (3)
+    // and leads `Width` (2), `AutoMaxWidth` (2), `MaxWidth` (2),
+    // `HorizontalStretch` (2), `ContextMenu` (7) and `ExtendedTooltip` (7);
+    // `Width` (17) leads `HorizontalStretch` (15) and `MaxWidth` (1);
+    // `AutoMaxWidth` (15) leads `MaxWidth` (6) and `HorizontalStretch` (3);
+    // `MaxWidth` (7) leads `HorizontalStretch` (1).  No pair is observed in
+    // both directions, and all of them precede `ContextMenu` and
+    // `ExtendedTooltip` on every occurrence.
+    if let Some(properties) = item.search_string_addition_properties.as_ref() {
+        if let Some(value) = properties.group_horizontal_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                escape_xml_text(value)
+            ));
+        }
+        if let Some(value) = &properties.width {
+            xml.push_str(&format!(
+                "{tab}\t<Width>{}</Width>\r\n",
+                escape_xml_text(value)
+            ));
+        }
+        if let Some(value) = properties.auto_max_width {
+            xml.push_str(&format!(
+                "{tab}\t<AutoMaxWidth>{}</AutoMaxWidth>\r\n",
+                xml_bool(value)
+            ));
+        }
+        if let Some(value) = &properties.max_width {
+            xml.push_str(&format!(
+                "{tab}\t<MaxWidth>{}</MaxWidth>\r\n",
+                escape_xml_text(value)
+            ));
+        }
+        if let Some(value) = properties.horizontal_stretch {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                xml_bool(value)
+            ));
+        }
     }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
