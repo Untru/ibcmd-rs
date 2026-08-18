@@ -154,7 +154,12 @@ impl FormChoiceParameter {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormChoiceParameterValue {
+    /// The value field holds the bare `{"U"}` 1C `Undefined` marker instead of a
+    /// `{"#",discriminator,payload}` wrapper, so the parameter carries no typed
+    /// value and no presentation at all.
+    Undefined,
     Boolean(bool),
+    String(String),
     DesignTimeRef(String),
     FixedArray(Vec<FormChoiceParameterArrayItem>),
 }
@@ -170,6 +175,9 @@ pub struct FormChoiceParameterArrayItem {
 pub enum FormChoiceParameterArrayItemValue {
     DesignTimeRef(String),
     String(String),
+    /// A `{"N",…}` number member, kept in the exact canonical spelling the slot
+    /// carries so the writer never has to reformat it.
+    Decimal(String),
 }
 
 /// Canonical EDT Form choice-parameter link. Physical source slots are
@@ -294,20 +302,56 @@ pub enum FormChoiceParameterLinkTableCurrentDataTerminal {
 pub const FORM_CHOICE_PARAMETER_LINK_TABLE_CURRENT_DATA_ITEM_TYPE: &str =
     "02023637-7868-4a5f-8576-835a76e0c9ba";
 
-/// Standard terminal markers carried by mode-2 choice-parameter links.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FormChoiceParameterLinkStandardTerminal {
-    Date,
-    Owner,
-    Ref,
+/// A standard terminal marker carried by a mode-2 choice-parameter link.
+///
+/// The marker is a *position* in the standard attributes of the type the owning
+/// form attribute is declared as, not an identity: `-2` names `Code` under a
+/// catalog object, `Number` under a document object and `Period` under an
+/// information-register record manager. The grammar therefore keeps the marker
+/// itself and leaves naming to the caller, which owns the family tables; a
+/// closed set of member names here would reject links the platform writes
+/// (`ChartsOfCharacteristicTypes/СтатьиРасходов/Forms/ФормаЭлемента` carries
+/// `{-2}` and `{-5}`) purely because their names were not enumerated.
+///
+/// Only strictly negative markers in canonical spelling are admitted -- the
+/// positive space belongs to the binding ids of the other terminal variants.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct FormChoiceParameterLinkStandardTerminal {
+    marker: i64,
 }
 
 impl FormChoiceParameterLinkStandardTerminal {
-    const fn data_path_suffix(self) -> &'static str {
-        match self {
-            Self::Date => "Date",
-            Self::Owner => "Owner",
-            Self::Ref => "Ref",
+    /// Accepts a canonically spelled strictly negative marker.
+    pub fn from_raw_marker(raw: &str) -> Option<Self> {
+        let raw = raw.trim();
+        let marker = raw.parse::<i64>().ok()?;
+        (marker < 0 && raw == marker.to_string()).then_some(Self { marker })
+    }
+
+    pub const fn marker(self) -> i64 {
+        self.marker
+    }
+
+    /// The marker in the exact spelling the native slot carries, which is the
+    /// key every standard-attribute family table is written against.
+    pub fn marker_text(self) -> String {
+        self.marker.to_string()
+    }
+
+    /// The three member names the family-blind compatibility entrypoint was
+    /// committed with.
+    ///
+    /// This is not a grammar restriction: the resolver that entrypoint takes
+    /// receives only an attribute id, so it cannot reach the declared type the
+    /// marker is a position in. Markers outside these three are refused there
+    /// and resolved by family through
+    /// `parse_form_choice_parameter_links_with_reference_resolver`.
+    const fn compatibility_data_path_suffix(self) -> Option<&'static str> {
+        match self.marker {
+            -3 => Some("Date"),
+            -5 => Some("Owner"),
+            -8 => Some("Ref"),
+            _ => None,
         }
     }
 }
@@ -1100,7 +1144,8 @@ impl FormChoiceParameterArrayItem {
     pub fn value_ref(&self) -> &str {
         match &self.value {
             FormChoiceParameterArrayItemValue::DesignTimeRef(value)
-            | FormChoiceParameterArrayItemValue::String(value) => value,
+            | FormChoiceParameterArrayItemValue::String(value)
+            | FormChoiceParameterArrayItemValue::Decimal(value) => value,
         }
     }
     pub fn value(&self) -> &FormChoiceParameterArrayItemValue {
@@ -1111,6 +1156,8 @@ impl FormChoiceParameterArrayItem {
 const FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
 const FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE: &str = "4500381b-db30-4a10-9db4-990038032acf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
+/// The bare 1C `Undefined` value marker as the raw slot spells it.
+const UNDEFINED_VALUE_KIND: &str = r#""U""#;
 const MAX_FORM_CHOICE_PARAMETERS_RAW_BYTES: usize = 64 * 1024;
 const MAX_FORM_CHOICE_PARAMETERS_ITEMS: usize = 512;
 const MAX_FORM_CHOICE_PARAMETERS_PRESENTATION_ITEMS: usize = 128;
@@ -1307,7 +1354,12 @@ where
                     match terminal {
                         FormChoiceParameterLinkTerminal::Absent => attribute_name,
                         FormChoiceParameterLinkTerminal::Standard(terminal) => {
-                            format!("{attribute_name}.{}", terminal.data_path_suffix())
+                            let suffix = terminal.compatibility_data_path_suffix().ok_or(
+                                FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                                    terminal.marker_text(),
+                                ),
+                            )?;
+                            format!("{attribute_name}.{suffix}")
                         }
                         FormChoiceParameterLinkTerminal::MetadataUuid(_) => unreachable!(
                             "UUID terminals are rejected by the compatibility entrypoint"
@@ -1475,18 +1527,9 @@ fn parse_raw_form_choice_parameter_links(
                 let terminal = braced_fields_bounded(fields.get(cursor)?, 2)?;
                 cursor += 1;
                 let terminal = match terminal.as_slice() {
-                    [terminal] => match terminal.trim() {
-                        "-3" => FormChoiceParameterLinkTerminal::Standard(
-                            FormChoiceParameterLinkStandardTerminal::Date,
-                        ),
-                        "-5" => FormChoiceParameterLinkTerminal::Standard(
-                            FormChoiceParameterLinkStandardTerminal::Owner,
-                        ),
-                        "-8" => FormChoiceParameterLinkTerminal::Standard(
-                            FormChoiceParameterLinkStandardTerminal::Ref,
-                        ),
-                        _ => return None,
-                    },
+                    [terminal] => FormChoiceParameterLinkTerminal::Standard(
+                        FormChoiceParameterLinkStandardTerminal::from_raw_marker(terminal)?,
+                    ),
                     [kind, uuid] if kind.trim() == "0" => {
                         let uuid_text = uuid.trim();
                         let uuid = Uuid::parse_str(uuid_text).ok()?;
@@ -1577,6 +1620,14 @@ where
     F: FnMut(&str, &str) -> Option<String>,
 {
     let fields = braced_fields_bounded(raw, 3)?;
+    // The slot holds an ordinary serialized 1C value, and the bare `{"U"}`
+    // `Undefined` marker is one of its shapes: it is the whole value field, not
+    // a payload inside the `{"#",discriminator,…}` object wrapper the typed
+    // shapes use. The platform writes `<app:value xsi:nil="true"/>` for it.
+    if let [kind] = fields.as_slice() {
+        return (kind.trim() == UNDEFINED_VALUE_KIND)
+            .then(|| (Vec::new(), FormChoiceParameterValue::Undefined));
+    }
     if fields.len() != 3
         || exact_1c_string(fields[0]).as_deref() != Some("#")
         || fields[1].trim() != FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR
@@ -1599,7 +1650,18 @@ where
                 _ => return None,
             }
         }
-        [kind] if kind.trim() == r#""U""# && payload[1].trim() == "0" && non_nil_ids(&payload) => {
+        // The same `{"S",…}` member the fixed array already admits, in the same
+        // mode-1 nil-identified envelope, at the top level.
+        [kind, value]
+            if kind.trim() == r#""S""# && payload[1].trim() == "1" && nil_ids(&payload) =>
+        {
+            FormChoiceParameterValue::String(exact_1c_string(value)?)
+        }
+        // A design-time reference identifies its value by a *pair*. The nil
+        // value id is not an absent id: it is the empty reference of the type,
+        // which the resolver names. Requiring both halves non-nil rejected the
+        // shape the platform writes for `Catalog.X.EmptyRef`.
+        [kind] if kind.trim() == r#""U""# && payload[1].trim() == "0" && typed_ids(&payload) => {
             FormChoiceParameterValue::DesignTimeRef(resolve(payload[3].trim(), payload[4].trim())?)
         }
         [kind, array_type, values]
@@ -1651,7 +1713,7 @@ where
             }
             let typed = braced_fields_bounded(typed, 2)?;
             let value = match (mode.trim(), typed.as_slice()) {
-                ("0", [kind]) if kind.trim() == r#""U""# && non_nil_pair(type_id, value_id) => {
+                ("0", [kind]) if kind.trim() == r#""U""# && typed_pair(type_id, value_id) => {
                     FormChoiceParameterArrayItemValue::DesignTimeRef(resolve(
                         type_id.trim(),
                         value_id.trim(),
@@ -1661,6 +1723,11 @@ where
                     if kind.trim() == r#""S""# && exact_nil_pair(type_id, value_id) =>
                 {
                     FormChoiceParameterArrayItemValue::String(exact_1c_string(value)?)
+                }
+                ("1", [kind, value])
+                    if kind.trim() == r#""N""# && exact_nil_pair(type_id, value_id) =>
+                {
+                    FormChoiceParameterArrayItemValue::Decimal(canonical_1c_number(value)?)
                 }
                 _ => return None,
             };
@@ -1681,13 +1748,51 @@ fn nil_ids(payload: &[&str]) -> bool {
             .is_some_and(|id| id.trim().eq_ignore_ascii_case(NIL_UUID))
 }
 
-fn non_nil_ids(payload: &[&str]) -> bool {
-    matches!((payload.get(3), payload.get(4)), (Some(type_id), Some(value_id)) if non_nil_pair(type_id, value_id))
+fn typed_ids(payload: &[&str]) -> bool {
+    matches!((payload.get(3), payload.get(4)), (Some(type_id), Some(value_id)) if typed_pair(type_id, value_id))
 }
 
-fn non_nil_pair(type_id: &str, value_id: &str) -> bool {
+/// A design-time reference is identified by a type id and a value id. The type
+/// id must name a type; the value id may be nil, which selects that type's empty
+/// reference rather than meaning "absent".
+fn typed_pair(type_id: &str, value_id: &str) -> bool {
     Uuid::parse_str(type_id.trim()).is_ok_and(|id| !id.is_nil())
-        && Uuid::parse_str(value_id.trim()).is_ok_and(|id| !id.is_nil())
+        && Uuid::parse_str(value_id.trim()).is_ok()
+}
+
+/// A `{"N",…}` member in the exact canonical spelling, which is the only
+/// spelling that can be written back out verbatim without reformatting.
+///
+/// An optional single leading minus, no leading zeros except the bare `0`
+/// integer part, and a fractional part only when it carries digits and does not
+/// end in a zero. Anything else is refused rather than normalised.
+fn canonical_1c_number(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let digits = raw.strip_prefix('-').unwrap_or(raw);
+    if digits.is_empty() {
+        return None;
+    }
+    let (integer, fraction) = match digits.split_once('.') {
+        Some((integer, fraction)) => (integer, Some(fraction)),
+        None => (digits, None),
+    };
+    if integer.is_empty() || !integer.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if integer.len() > 1 && integer.starts_with('0') {
+        return None;
+    }
+    if let Some(fraction) = fraction
+        && (fraction.is_empty()
+            || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+            || fraction.ends_with('0'))
+    {
+        return None;
+    }
+    if raw.starts_with('-') && integer == "0" && fraction.is_none() {
+        return None;
+    }
+    Some(raw.to_owned())
 }
 
 fn exact_nil_pair(type_id: &str, value_id: &str) -> bool {
@@ -1937,11 +2042,127 @@ mod form_choice_parameters_tests {
             presentation()
         );
         assert!(parse_form_choice_parameters(&envelope(&fixed), resolver).is_none());
+        // A member kind the platform was never observed to write here stays
+        // refused: widening is driven by observed bytes, not by symmetry.
         let unsupported = format!(
-            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"S\",\"opaque\"}},{NIL},{NIL},{}}}}}",
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"D\",\"20240101\"}},{NIL},{NIL},{}}}}}",
             presentation()
         );
         assert!(parse_form_choice_parameters(&envelope(&unsupported), resolver).is_none());
+        // A string still needs the mode and the nil identity pair that carry it.
+        for wrong in [
+            format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,0,{{\"S\",\"text\"}},{NIL},{NIL},{}}}}}",
+                presentation()
+            ),
+            format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"S\",\"text\"}},{OWNER},{NIL},{}}}}}",
+                presentation()
+            ),
+            format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"S\",text}},{NIL},{NIL},{}}}}}",
+                presentation()
+            ),
+        ] {
+            assert!(parse_form_choice_parameters(&envelope(&wrong), resolver).is_none());
+        }
+        // The bare `Undefined` marker is the whole value field or nothing.
+        for wrong in [
+            "{0,1,\"parameter\",{\"X\"}}",
+            "{0,1,\"parameter\",{\"U\",1}}",
+        ] {
+            assert!(parse_form_choice_parameters(wrong, resolver).is_none());
+        }
+    }
+
+    /// The value field carries an ordinary serialized 1C value, and the bare
+    /// `{"U"}` `Undefined` marker is one of its shapes -- it is the field
+    /// itself, not a payload inside the object wrapper. Evidence: UT
+    /// 11.5.27.75, the three `InputField` parameters spelled this way
+    /// (`ПоОстаткам`, `Отбор.Организация`, `Отбор.Владелец`), for each of which
+    /// the platform writes `<app:value xsi:nil="true"/>` and no presentation.
+    #[test]
+    fn form_choice_parameters_decode_the_bare_undefined_value_marker() {
+        let parsed =
+            parse_form_choice_parameters("{0,1,\"ПоОстаткам\",{\"U\"}}", |_, _| {
+                panic!("Undefined must never reach the design-time resolver")
+            })
+            .unwrap();
+        assert_eq!(parsed.items().len(), 1);
+        assert_eq!(parsed.items()[0].name(), "ПоОстаткам");
+        assert!(parsed.items()[0].presentation().is_empty());
+        assert_eq!(
+            parsed.items()[0].value(),
+            &FormChoiceParameterValue::Undefined
+        );
+    }
+
+    /// A scalar string is the same `{"S",…}` member the fixed array already
+    /// admitted, in the same mode-1 nil-identified envelope, one level up.
+    /// Evidence: UT 11.5.27.75, 29 such values over 13 `InputField` parameters
+    /// (`ЗаголовокПоПартнеру` "По клиенту" x10 and "По конечному клиенту" x3,
+    /// `РежимВыбораНазначений` "Расширенный" x12, `ВидУчета` "УУ"/"РУ"/"НУ",
+    /// `Соответствует` "Организации"), each written as
+    /// `<Value xsi:type="xs:string">`.
+    #[test]
+    fn form_choice_parameters_decode_a_scalar_string_value() {
+        let string = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"S\",\"По клиенту\"}},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        let parsed = parse_form_choice_parameters(&envelope(&string), |_, _| {
+            panic!("a string must never reach the design-time resolver")
+        })
+        .unwrap();
+        assert_eq!(
+            parsed.items()[0].value(),
+            &FormChoiceParameterValue::String("По клиенту".to_owned())
+        );
+        assert_eq!(
+            parsed.items()[0].presentation(),
+            [("en".to_owned(), "value".to_owned())]
+        );
+    }
+
+    /// A `{"N",…}` fixed-array member reaches `xs:decimal`. Evidence: UT
+    /// 11.5.27.75 `Documents/ПланПродажПоКатегориям/Forms/ФормаДокумента`,
+    /// parameter `ВариантыВыбора` whose single member is `{"N",4}` and which the
+    /// platform writes as `<Value xsi:type="xs:decimal">4</Value>`.
+    #[test]
+    fn form_choice_parameters_decode_a_decimal_fixed_array_member() {
+        let member = |literal: &str| {
+            let item = format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"N\",{literal}}},{NIL},{NIL},{}}}}}",
+                presentation()
+            );
+            let array = format!("{{\"#\",{FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE},{{1,{item}}}}}");
+            format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{array},{NIL},{NIL},{}}}}}",
+                presentation()
+            )
+        };
+        let parsed = parse_form_choice_parameters(&envelope(&member("4")), resolver).unwrap();
+        let FormChoiceParameterValue::FixedArray(values) = parsed.items()[0].value() else {
+            panic!("expected fixed array");
+        };
+        assert_eq!(
+            values[0].value(),
+            &FormChoiceParameterArrayItemValue::Decimal("4".to_owned())
+        );
+        // Only the canonical spelling survives; anything that would have to be
+        // reformatted on the way out is refused instead.
+        for literal in ["04", "4.", "4.10", "-0", "+4", "", "4e2", "4,5"] {
+            assert!(
+                parse_form_choice_parameters(&envelope(&member(literal)), resolver).is_none(),
+                "{literal}"
+            );
+        }
+        for literal in ["-4", "0", "4.5", "-0.5"] {
+            assert!(
+                parse_form_choice_parameters(&envelope(&member(literal)), resolver).is_some(),
+                "{literal}"
+            );
+        }
     }
 
     #[test]
@@ -1965,9 +2186,30 @@ mod form_choice_parameters_tests {
             parse_form_choice_parameters(&envelope(&reference().replace(OWNER, NIL)), permissive,)
                 .is_none()
         );
+        // A nil *value* id is not a missing id: it selects the empty reference
+        // of the named type, so it is handed to the resolver with both halves
+        // intact instead of being refused before it.
+        let mut seen = Vec::new();
+        let parsed = parse_form_choice_parameters(
+            &envelope(&reference().replace(VALUE, NIL)),
+            |type_id: &str, value_id: &str| {
+                seen.push((type_id.to_owned(), value_id.to_owned()));
+                Some("Catalog.States.EmptyRef".to_owned())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen, [(OWNER.to_owned(), NIL.to_owned())]);
+        assert_eq!(
+            parsed.items()[0].value(),
+            &FormChoiceParameterValue::DesignTimeRef("Catalog.States.EmptyRef".to_owned())
+        );
+        // A resolver that declines still fails the whole value closed.
         assert!(
-            parse_form_choice_parameters(&envelope(&reference().replace(VALUE, NIL)), permissive,)
-                .is_none()
+            parse_form_choice_parameters(
+                &envelope(&reference().replace(VALUE, NIL)),
+                |_: &str, _: &str| { None }
+            )
+            .is_none()
         );
     }
 
@@ -2537,7 +2779,9 @@ mod form_choice_parameters_tests {
             r#"{5006,02,"Filter.Organization",1,{27},0,"Filter.Partner",1,{9},1}"#,
             r#"{5006,1,"Filter.Organization",1,{27},0,"Filter.Partner",1,{9},1}"#,
             r#"{5006,2,"Filter.Organization",1,{27},2,"Filter.Partner",1,{9},1}"#,
-            r#"{5006,2,"Filter.Organization",2,{27},{-7},0,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,2,"Filter.Organization",2,{27},{7},0,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,2,"Filter.Organization",2,{27},{-07},0,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,2,"Filter.Organization",2,{27},{-},0,"Filter.Partner",1,{9},1}"#,
             r#"{5006,2,"Filter.Organization",1,{27,28},0,"Filter.Partner",1,{9},1}"#,
             r#"{5006,2,"Filter.Organization",1,{27},0,"Filter.Partner",1,{9},1}garbage"#,
         ] {

@@ -11808,21 +11808,6 @@ pub(super) fn parse_form_input_field_choice_parameter_links(
     })
 }
 
-/// The physical marker a mode-2 standard choice-parameter-link terminal spells.
-///
-/// The three variants the raw grammar admits are the three markers the platform
-/// writes into this slot; the marker, not the variant name, is what the
-/// standard-attribute tables are keyed by.
-const fn form_choice_parameter_link_standard_terminal_marker(
-    standard: FormChoiceParameterLinkStandardTerminal,
-) -> &'static str {
-    match standard {
-        FormChoiceParameterLinkStandardTerminal::Date => "-3",
-        FormChoiceParameterLinkStandardTerminal::Owner => "-5",
-        FormChoiceParameterLinkStandardTerminal::Ref => "-8",
-    }
-}
-
 /// The member name a standard choice-parameter-link terminal reaches.
 ///
 /// A marker names a *position* in the standard-attribute list of the type the
@@ -11832,33 +11817,40 @@ const fn form_choice_parameter_link_standard_terminal_marker(
 /// and this is the same physical marker in the same role, so it is read against
 /// the same table here instead of a second, family-blind one.
 ///
-/// Evidence: UT 11.5.27.75. The configuration spells out 84 such terminals.
+/// Evidence: UT 11.5.27.75. The configuration spells out 88 such terminals.
 /// Where the attribute declares exactly one type and that type's table names
 /// the marker, the table's name is the one the platform writes -- the six
 /// `cfg:DocumentObject`/`-5` links of `Documents/План*` all write
 /// `Объект.Ref`, which the family-blind reading spelled `Объект.Owner`, and the
 /// six `cfg:CatalogObject`/`-5` links of `Catalogs/*` all write `Объект.Owner`,
-/// as do the `cfg:DocumentObject`/`-3` links with `Объект.Date`. The two
-/// remaining terminals name a marker their own table does not list
+/// as do the `cfg:DocumentObject`/`-3` links with `Объект.Date`. Two terminals
+/// name a marker their own table does not list
 /// (`cfg:CatalogRef.ДоговорыЭквайринга`/`-8`) or sit on an attribute with no
 /// single declared type (`DataProcessor.НастройкиВнутреннегоЭДО`, `-8`); both
-/// write `Ref`, which is what the marker's own variant already spelled, so that
-/// spelling is kept as the reading of last resort rather than turned into a
-/// rejection of two files the export already writes correctly.
+/// write `Ref`, which is what those three markers were historically spelled as,
+/// so that spelling is kept as the reading of last resort rather than turned
+/// into a rejection of two files the export already writes correctly.
+///
+/// Outside those three markers there is no last resort: a marker whose family
+/// table does not name it has no spelling this code is entitled to invent, so
+/// the link is refused and the caller keeps the whole collection opaque. The
+/// four `cfg:ChartOfCharacteristicTypesObject`/`-2` terminals are the only ones
+/// the corpus puts through that door, and the table now names them.
 fn form_choice_parameter_link_standard_terminal_member(
     attribute_id: &str,
     standard: FormChoiceParameterLinkStandardTerminal,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
-) -> &'static str {
-    let marker = form_choice_parameter_link_standard_terminal_marker(standard);
+) -> Option<&'static str> {
+    let marker = standard.marker_text();
     attribute_metadata_owners_by_id
         .get(attribute_id)
         .and_then(|owner| owner.exact_single_type_reference.as_deref())
-        .and_then(|reference| form_standard_attribute_name_for_type_reference(reference, marker))
-        .unwrap_or(match standard {
-            FormChoiceParameterLinkStandardTerminal::Date => "Date",
-            FormChoiceParameterLinkStandardTerminal::Owner => "Owner",
-            FormChoiceParameterLinkStandardTerminal::Ref => "Ref",
+        .and_then(|reference| form_standard_attribute_name_for_type_reference(reference, &marker))
+        .or_else(|| match standard.marker() {
+            -3 => Some("Date"),
+            -5 => Some("Owner"),
+            -8 => Some("Ref"),
+            _ => None,
         })
 }
 
@@ -11889,7 +11881,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         attribute_id,
                         *standard,
                         attribute_metadata_owners_by_id,
-                    );
+                    )?;
                     attribute_names_by_id
                         .get(attribute_id)
                         .map(|attribute| format!("{attribute}.{member}"))
@@ -12155,16 +12147,30 @@ pub(super) fn parse_form_enum_design_time_reference(
 ) -> Option<String> {
     let type_uuid = Uuid::parse_str(type_id.trim()).ok()?;
     let value_uuid = Uuid::parse_str(value_id.trim()).ok()?;
-    if type_uuid.is_nil() || value_uuid.is_nil() {
+    if type_uuid.is_nil() {
         return None;
     }
     let type_reference =
         unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())?;
     let owner = parse_generated_metadata_reference_owner(type_reference)?;
+    let owner_reference = owner.owner_reference();
+    // A nil value id under a named reference type is not a missing id: it is
+    // that type's empty reference, which needs no value index at all because
+    // the whole name comes from the type. Evidence: UT 11.5.27.75, the 13
+    // choice-parameter values the slot spells this way -- 8 under
+    // `cfg:EnumRef.ВариантыРасчетаЦенНаборов` (4 scalar, 4 inside a fixed
+    // array), 4 under `cfg:CatalogRef.СостоянияПроцессов` and 1 under
+    // `cfg:CatalogRef.СегментыПартнеров`; the platform writes
+    // `Enum.ВариантыРасчетаЦенНаборов.EmptyRef`,
+    // `Catalog.СостоянияПроцессов.EmptyRef` and
+    // `Catalog.СегментыПартнеров.EmptyRef` on every one, with no other
+    // spelling and no counter-example.
+    if value_uuid.is_nil() {
+        return Some(format!("{owner_reference}.EmptyRef"));
+    }
     if owner.kind() != GeneratedMetadataReferenceOwnerKind::Enum {
         return None;
     }
-    let owner_reference = owner.owner_reference();
     let value_ref = parse_design_time_reference(value_id.trim(), object_refs)?;
     let enum_value_prefix = format!("{owner_reference}.EnumValue.");
     value_ref
@@ -16674,7 +16680,20 @@ const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-9", "Description"),
     ("-10", "Executed"),
 ];
+/// `-2` and `-5` joined the table when the generalized choice-parameter-link
+/// terminal started reaching them. Evidence: UT 11.5.27.75,
+/// `ChartsOfCharacteristicTypes/СтатьиРасходов/Forms/ФормаЭлемента`, whose two
+/// `ChoiceParameterLinks` collections spell `"Предопределенный",2,{1},{-5}` and
+/// `"Ссылка",2,{1},{-2}` against attribute `Объект` of exact type
+/// `cfg:ChartOfCharacteristicTypesObject.СтатьиРасходов`; the platform writes
+/// `Объект.Predefined` and `Объект.Ref`, four of each. Those eight terminals are
+/// the only `-2`/`-5` this family carries anywhere in the configuration, so the
+/// two rows are exactly as wide as their evidence -- and note `-5` is `Owner`
+/// under a catalog object and `Predefined` here, which is why the marker cannot
+/// be read family-blind.
 const CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-2", "Ref"),
+    ("-5", "Predefined"),
     ("-6", "Parent"),
     ("-8", "Code"),
     ("-9", "Description"),

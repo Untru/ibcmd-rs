@@ -64846,7 +64846,7 @@ fn reads_table_footer_from_the_slot_past_the_header() {
 /// A standard choice-parameter-link terminal is a *position* in the standard
 /// attributes of the type the attribute is declared as, not a fixed member.
 ///
-/// Evidence: UT 11.5.27.75 spells out 84 such terminals. `-5` is `Ref` on the
+/// Evidence: UT 11.5.27.75 spells out 88 such terminals. `-5` is `Ref` on the
 /// six `cfg:DocumentObject` links of `Documents/План*` (`Источник` ->
 /// `Объект.Ref`) and `Owner` on the six `cfg:CatalogObject` links of
 /// `Catalogs/*` (`Отбор.Владелец` -> `Объект.Owner`); reading it as a fixed
@@ -64854,7 +64854,9 @@ fn reads_table_footer_from_the_slot_past_the_header() {
 /// `cfg:DocumentObject`. The two terminals whose own family table does not list
 /// the marker -- `cfg:CatalogRef.ДоговорыЭквайринга`/`-8` in
 /// `Documents/ОперацияПоПлатежнойКарте` and the multi-typed `Организация` of
-/// `DataProcessors/НастройкиВнутреннегоЭДО`/`-8` -- both write `Ref`.
+/// `DataProcessors/НастройкиВнутреннегоЭДО`/`-8` -- both write `Ref`. The four
+/// `cfg:ChartOfCharacteristicTypesObject`/`-2` terminals have no such last
+/// resort and are named by their own family table alone.
 #[test]
 fn choice_parameter_link_standard_terminals_follow_the_attribute_family() {
     let link = |reference: Option<&str>, marker: &str| {
@@ -64911,6 +64913,16 @@ fn choice_parameter_link_standard_terminals_follow_the_attribute_family() {
             "Объект.Ref",
         ),
         (None, "-8", "Объект.Ref"),
+        (
+            Some("cfg:ChartOfCharacteristicTypesObject.СтатьиРасходов"),
+            "-5",
+            "Объект.Predefined",
+        ),
+        (
+            Some("cfg:ChartOfCharacteristicTypesObject.СтатьиРасходов"),
+            "-2",
+            "Объект.Ref",
+        ),
     ] {
         assert_eq!(link(reference, marker), expected, "{reference:?} {marker}");
     }
@@ -66973,4 +66985,389 @@ fn cct_standard_attribute_keeps_its_comment_and_boolean_fill_value() {
         xml.contains("<xr:FillValue xsi:type=\"xs:boolean\">false</xr:FillValue>"),
         "got {xml}"
     );
+}
+
+/// Every value shape the `InputField.choiceParameters` slot actually carries.
+///
+/// The slot holds an ordinary serialized 1C value and the grammar used to admit
+/// only three of its shapes, so a single unhandled element dropped the whole
+/// `<ChoiceParameters>` block of its form. Evidence: UT 11.5.27.75, where the
+/// slot refuses 51 values over 18 distinct spellings, and the four shapes below
+/// account for 46 of them:
+///
+/// * a scalar `{"S",…}` string -- 29 values (`ЗаголовокПоПартнеру`,
+///   `РежимВыбораНазначений`, `ВидУчета`, `Соответствует`), written
+///   `<Value xsi:type="xs:string">`;
+/// * a design-time reference whose value id is nil -- 13 values under three
+///   types, written `<Value xsi:type="xr:DesignTimeRef">…EmptyRef</Value>`,
+///   both scalar and inside a fixed array;
+/// * the bare `{"U"}` `Undefined` marker as the whole value field -- 4 values
+///   (`ПоОстаткам` x2, `Отбор.Организация`, `Отбор.Владелец`), written
+///   `<app:value xsi:nil="true"/>` with no presentation at all;
+/// * a `{"N",…}` fixed-array member -- 2 values (`ВариантыВыбора`), written
+///   `<Value xsi:type="xs:decimal">`.
+///
+/// Each raw slot value below is the platform's own, and each expected fragment
+/// is the exact text the native tree writes for it.
+#[test]
+fn input_field_choice_parameter_values_cover_every_shape_the_slot_carries() {
+    let type_index = BTreeMap::from([
+        (
+            "9827667a-9cec-4fcb-9759-ec774a63fde3".to_string(),
+            "cfg:CatalogRef.СостоянияПроцессов".to_string(),
+        ),
+        (
+            "41aed0b9-4492-44a2-be9b-3ea55e15a8da".to_string(),
+            "cfg:CatalogRef.СегментыПартнеров".to_string(),
+        ),
+        (
+            "f1c340ee-20cf-40bc-9c34-be0d97e23b36".to_string(),
+            "cfg:EnumRef.ВариантыРасчетаЦенНаборов".to_string(),
+        ),
+    ]);
+    let object_refs = BTreeMap::from([
+        (
+            "3397ef23-61b6-4d41-9c81-5d406f66703f".to_string(),
+            "Enum.ВариантыРасчетаЦенНаборов.EnumValue.ЦенаЗадаетсяЗаНаборРаспределяетсяПоЦенам"
+                .to_string(),
+        ),
+        (
+            "299a1f71-e30b-4908-8487-03a62b1c6d26".to_string(),
+            "Enum.ВариантыРасчетаЦенНаборов.EnumValue.ЦенаЗадаетсяЗаНаборРаспределяетсяПоДолям"
+                .to_string(),
+        ),
+    ]);
+    let emit = |raw: &str| {
+        let mut options = vec!["0"; 66];
+        options[0] = "36";
+        options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()] =
+            raw;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            &options,
+        )
+        .unwrap();
+        let canonical = canonical_form_input_field_choice_parameters(
+            schema,
+            &options,
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        );
+        assert!(
+            matches!(canonical, CanonicalFormChoiceParameters::Typed { .. }),
+            "{raw}"
+        );
+        validate_canonical_form_choice_parameters(&canonical).unwrap();
+        format_form_choice_parameters_xml(&canonical, 1).unwrap()
+    };
+
+    // Documents/КорректировкаРеализации/Forms/ФормаДокумента: a scalar string.
+    assert_eq!(
+        emit(concat!(
+            "{0,1,\"ЗаголовокПоПартнеру\",\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,1,\n",
+            "{\"S\",\"По конечному клиенту\"},00000000-0000-0000-0000-000000000000,",
+            "00000000-0000-0000-0000-000000000000,\n",
+            "{1,0}\n",
+            "}\n",
+            "}\n",
+            "}"
+        )),
+        concat!(
+            "\t<ChoiceParameters>\r\n",
+            "\t\t<app:item name=\"ЗаголовокПоПартнеру\">\r\n",
+            "\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t<Value xsi:type=\"xs:string\">По конечному клиенту</Value>\r\n",
+            "\t\t\t</app:value>\r\n",
+            "\t\t</app:item>\r\n",
+            "\t</ChoiceParameters>\r\n",
+        )
+    );
+
+    // Documents/ПланПродажПоКатегориям/Forms/ФормаДокумента: a scalar string and
+    // a fixed array whose only member is a number.
+    assert_eq!(
+        emit(concat!(
+            "{0,2,\"РежимВыбораНазначений\",\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,1,\n",
+            "{\"S\",\"Расширенный\"},00000000-0000-0000-0000-000000000000,",
+            "00000000-0000-0000-0000-000000000000,\n",
+            "{1,0}\n",
+            "}\n",
+            "},\"ВариантыВыбора\",\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,1,\n",
+            "{\"#\",4500381b-db30-4a10-9db4-990038032acf,\n",
+            "{1,\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,1,\n",
+            "{\"N\",4},00000000-0000-0000-0000-000000000000,",
+            "00000000-0000-0000-0000-000000000000,\n",
+            "{1,0}\n",
+            "}\n",
+            "}\n",
+            "}\n",
+            "},00000000-0000-0000-0000-000000000000,",
+            "00000000-0000-0000-0000-000000000000,\n",
+            "{1,0}\n",
+            "}\n",
+            "}\n",
+            "}"
+        )),
+        concat!(
+            "\t<ChoiceParameters>\r\n",
+            "\t\t<app:item name=\"РежимВыбораНазначений\">\r\n",
+            "\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t<Value xsi:type=\"xs:string\">Расширенный</Value>\r\n",
+            "\t\t\t</app:value>\r\n",
+            "\t\t</app:item>\r\n",
+            "\t\t<app:item name=\"ВариантыВыбора\">\r\n",
+            "\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t<Value xsi:type=\"v8:FixedArray\">\r\n",
+            "\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t\t\t<Value xsi:type=\"xs:decimal\">4</Value>\r\n",
+            "\t\t\t\t\t</v8:Value>\r\n",
+            "\t\t\t\t</Value>\r\n",
+            "\t\t\t</app:value>\r\n",
+            "\t\t</app:item>\r\n",
+            "\t</ChoiceParameters>\r\n",
+        )
+    );
+
+    // BusinessProcesses/СогласованиеПродажи/Forms/ФормаСписка: a catalog
+    // reference whose value id is nil is that catalog's empty reference.
+    assert_eq!(
+        emit(concat!(
+            "{0,1,\"Отбор.Родитель\",\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,0,\n",
+            "{\"U\"},9827667a-9cec-4fcb-9759-ec774a63fde3,",
+            "00000000-0000-0000-0000-000000000000,\n",
+            "{1,0}\n",
+            "}\n",
+            "}\n",
+            "}"
+        )),
+        concat!(
+            "\t<ChoiceParameters>\r\n",
+            "\t\t<app:item name=\"Отбор.Родитель\">\r\n",
+            "\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Catalog.СостоянияПроцессов.EmptyRef</Value>\r\n",
+            "\t\t\t</app:value>\r\n",
+            "\t\t</app:item>\r\n",
+            "\t</ChoiceParameters>\r\n",
+        )
+    );
+
+    // Documents/УстановкаЦенНоменклатуры/Forms/ФормаДокумента: the same empty
+    // reference as the first member of a fixed array, beside two named ones.
+    assert_eq!(
+        emit(concat!(
+            "{0,1,\"ВариантыРасчетаЦеныНабора\",\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,1,\n",
+            "{\"#\",4500381b-db30-4a10-9db4-990038032acf,\n",
+            "{3,\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,0,\n",
+            "{\"U\"},f1c340ee-20cf-40bc-9c34-be0d97e23b36,",
+            "00000000-0000-0000-0000-000000000000,\n",
+            "{1,0}\n",
+            "}\n",
+            "},\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,0,\n",
+            "{\"U\"},f1c340ee-20cf-40bc-9c34-be0d97e23b36,",
+            "3397ef23-61b6-4d41-9c81-5d406f66703f,\n",
+            "{1,0}\n",
+            "}\n",
+            "},\n",
+            "{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n",
+            "{0,0,\n",
+            "{\"U\"},f1c340ee-20cf-40bc-9c34-be0d97e23b36,",
+            "299a1f71-e30b-4908-8487-03a62b1c6d26,\n",
+            "{1,0}\n",
+            "}\n",
+            "}\n",
+            "}\n",
+            "},00000000-0000-0000-0000-000000000000,",
+            "00000000-0000-0000-0000-000000000000,\n",
+            "{1,0}\n",
+            "}\n",
+            "}\n",
+            "}"
+        )),
+        concat!(
+            "\t<ChoiceParameters>\r\n",
+            "\t\t<app:item name=\"ВариантыРасчетаЦеныНабора\">\r\n",
+            "\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t<Value xsi:type=\"v8:FixedArray\">\r\n",
+            "\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.ВариантыРасчетаЦенНаборов.EmptyRef</Value>\r\n",
+            "\t\t\t\t\t</v8:Value>\r\n",
+            "\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.ВариантыРасчетаЦенНаборов.EnumValue.ЦенаЗадаетсяЗаНаборРаспределяетсяПоЦенам</Value>\r\n",
+            "\t\t\t\t\t</v8:Value>\r\n",
+            "\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n",
+            "\t\t\t\t\t\t<Presentation/>\r\n",
+            "\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.ВариантыРасчетаЦенНаборов.EnumValue.ЦенаЗадаетсяЗаНаборРаспределяетсяПоДолям</Value>\r\n",
+            "\t\t\t\t\t</v8:Value>\r\n",
+            "\t\t\t\t</Value>\r\n",
+            "\t\t\t</app:value>\r\n",
+            "\t\t</app:item>\r\n",
+            "\t</ChoiceParameters>\r\n",
+        )
+    );
+
+    // CommonForms/ПроверкаЗаполненияДокументов: the bare Undefined marker.
+    assert_eq!(
+        emit("{0,1,\"ПоОстаткам\",\n{\"U\"}\n}"),
+        concat!(
+            "\t<ChoiceParameters>\r\n",
+            "\t\t<app:item name=\"ПоОстаткам\">\r\n",
+            "\t\t\t<app:value xsi:nil=\"true\"/>\r\n",
+            "\t\t</app:item>\r\n",
+            "\t</ChoiceParameters>\r\n",
+        )
+    );
+
+    // A value whose type id names nothing this configuration knows is still a
+    // typed refusal of the whole slot, not a guessed reference.
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()] = concat!(
+        "{0,1,\"Отбор.Родитель\",{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,",
+        "{0,0,{\"U\"},11111111-1111-4111-8111-111111111111,",
+        "00000000-0000-0000-0000-000000000000,{1,0}}}}"
+    );
+    let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+        "37",
+        59,
+        "InputField",
+        0,
+        Some("2"),
+        &options,
+    )
+    .unwrap();
+    assert!(matches!(
+        canonical_form_input_field_choice_parameters(
+            schema,
+            &options,
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        ),
+        CanonicalFormChoiceParameters::OpaqueSameProfile { .. }
+    ));
+}
+
+/// A choice-parameter-link standard terminal is any negative marker, and the
+/// name it reaches comes from the family table of the declared type.
+///
+/// The grammar used to admit exactly three markers, so a form carrying a fourth
+/// was refused whole -- and the marker set is not shared between families, so
+/// there was never a family-blind name to admit it with. Evidence: UT
+/// 11.5.27.75 `ChartsOfCharacteristicTypes/СтатьиРасходов/Forms/ФормаЭлемента`,
+/// the last file the export refused. Its two `ChoiceParameterLinks` collections
+/// are the raw bytes below; attribute `1` is `Объект` of exact type
+/// `cfg:ChartOfCharacteristicTypesObject.СтатьиРасходов`, and the platform
+/// writes `Объект.Predefined` for `{-5}` and `Объект.Ref` for `{-2}` -- the same
+/// `-5` that means `Owner` under a catalog object and `Ref` under a document
+/// one.
+#[test]
+fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
+    let primary = concat!(
+        "{5006,3,\"ТипРасходов\",2, {1}, {0,c03c3a98-b326-4f1e-b993-6298f9503111},0,",
+        "\"Предопределенный\",2, {1}, {-5},0,",
+        "\"Ссылка\",2, {1}, {-2},0}"
+    );
+    let duplicate = concat!(
+        "{5007,3,\"ТипРасходов\",2, {1}, {0,c03c3a98-b326-4f1e-b993-6298f9503111},0,\"\",\"\",",
+        "\"Предопределенный\",2, {1}, {-5},0,\"\",\"\",",
+        "\"Ссылка\",2, {1}, {-2},0,\"\",\"\"}"
+    );
+    let attributes = vec![data_path_typed_form_attribute(
+        "1",
+        "Объект",
+        "cfg:ChartOfCharacteristicTypesObject.СтатьиРасходов",
+    )];
+    let object_refs = BTreeMap::from([(
+        "c03c3a98-b326-4f1e-b993-6298f9503111".to_string(),
+        "ChartOfCharacteristicTypes.СтатьиРасходов.Attribute.ТипРасходов".to_string(),
+    )]);
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        primary,
+        duplicate,
+        &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+        &form_attribute_metadata_owners_by_id(&attributes),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        links
+            .iter()
+            .map(|link| (link.name(), link.data_path()))
+            .collect::<Vec<_>>(),
+        [
+            ("ТипРасходов", "Объект.ТипРасходов"),
+            ("Предопределенный", "Объект.Predefined"),
+            ("Ссылка", "Объект.Ref"),
+        ]
+    );
+
+    // A marker the family table does not name has no spelling to invent, so the
+    // whole collection stays a typed refusal.
+    assert!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            r#"{5006,1,"Ссылка",2,{1},{-4},0}"#,
+            r#"{5007,1,"Ссылка",2,{1},{-4},0,"",""}"#,
+            &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+            &form_attribute_metadata_owners_by_id(&attributes),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_err()
+    );
+
+    // The positive space belongs to the binding ids of the other terminal
+    // shapes, and a non-canonical marker is not a marker.
+    for marker in ["2", "-02", "-", "0"] {
+        assert!(
+            parse_form_input_field_choice_parameter_links_with_metadata(
+                &format!(r#"{{5006,1,"Ссылка",2,{{1}},{{{marker}}},0}}"#),
+                &format!(r#"{{5007,1,"Ссылка",2,{{1}},{{{marker}}},0,"",""}}"#),
+                &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+                &form_attribute_metadata_owners_by_id(&attributes),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_err(),
+            "{marker}"
+        );
+    }
 }

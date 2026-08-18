@@ -14,6 +14,7 @@ const MAX_INDENT: usize = 64;
 const MAX_VALUE_BYTES: usize = 32 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const XML_SCHEMA_STRING_TYPE: &str = "xs:string";
+const XML_SCHEMA_DECIMAL_TYPE: &str = "xs:decimal";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormChoiceParametersEmitError {
@@ -226,7 +227,10 @@ fn preflight(
         validate_value("name", parameter.name())?;
         validate_presentation(parameter.presentation())?;
         match parameter.value() {
-            FormChoiceParameterValue::Boolean(_) => {}
+            FormChoiceParameterValue::Undefined | FormChoiceParameterValue::Boolean(_) => {}
+            FormChoiceParameterValue::String(text) => {
+                validate_value("string", text)?;
+            }
             FormChoiceParameterValue::DesignTimeRef(reference) => {
                 validate_value("design-time reference", reference)?;
             }
@@ -239,6 +243,9 @@ fn preflight(
                         }
                         FormChoiceParameterArrayItemValue::String(value) => {
                             validate_value("string", value)?;
+                        }
+                        FormChoiceParameterArrayItemValue::Decimal(value) => {
+                            validate_value("decimal", value)?;
                         }
                     }
                 }
@@ -312,6 +319,19 @@ fn emit_into(
         sink.push("=\"")?;
         push_escaped(sink, parameter.name(), EscapeMode::Attribute)?;
         sink.push("\">\r\n")?;
+        // `Undefined` is not a typed value inside the wrapper: the platform
+        // writes the wrapper itself as the XML nil element and no presentation.
+        if matches!(parameter.value(), FormChoiceParameterValue::Undefined) {
+            push_indent(sink, indent, 2)?;
+            sink.push("<")?;
+            sink.push(&policy.value)?;
+            sink.push(" xsi:nil=\"true\"/>\r\n")?;
+            push_indent(sink, indent, 1)?;
+            sink.push("</")?;
+            sink.push(&policy.item)?;
+            sink.push(">\r\n")?;
+            continue;
+        }
         push_indent(sink, indent, 2)?;
         sink.push("<")?;
         sink.push(&policy.value)?;
@@ -354,6 +374,17 @@ fn emit_value(
     sink.push(&policy.scalar_value)?;
     sink.push(" xsi:type=\"")?;
     match value {
+        FormChoiceParameterValue::Undefined => Err(FormChoiceParametersEmitError::InvalidValue(
+            "undefined value",
+        )),
+        FormChoiceParameterValue::String(text) => {
+            push_escaped(sink, XML_SCHEMA_STRING_TYPE, EscapeMode::Attribute)?;
+            sink.push("\">")?;
+            push_escaped(sink, text, EscapeMode::Text)?;
+            sink.push("</")?;
+            sink.push(&policy.scalar_value)?;
+            sink.push(">\r\n")
+        }
         FormChoiceParameterValue::Boolean(boolean) => {
             push_escaped(sink, &policy.boolean_xsi_type, EscapeMode::Attribute)?;
             sink.push("\">")?;
@@ -408,6 +439,9 @@ fn emit_value(
                                 }
                                 FormChoiceParameterArrayItemValue::String(value) => {
                                     (XML_SCHEMA_STRING_TYPE, value.as_str())
+                                }
+                                FormChoiceParameterArrayItemValue::Decimal(value) => {
+                                    (XML_SCHEMA_DECIMAL_TYPE, value.as_str())
                                 }
                             };
                             push_escaped(sink, xsi_type, EscapeMode::Attribute)?;
