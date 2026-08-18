@@ -6620,6 +6620,33 @@ fn nested_command_headers_for_owner_from_text(
     .collect()
 }
 
+/// Owned commands carry the same `<Properties>` block whichever family owns
+/// them; the families that read it were simply enumerated one at a time. This
+/// reads the block for every remaining owner through the shared command reader
+/// instead of emitting a header-only `<Command>` and calling it done -- an
+/// owner whose command the reader cannot decode still degrades to the header,
+/// exactly as before.
+fn nested_child_commands_for_owner_from_text(
+    owner_kind: &str,
+    text: &str,
+    owner_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<MetadataChildCommand> {
+    nested_command_headers_for_owner_from_text(owner_kind, text, owner_uuid)
+        .into_iter()
+        .map(|header| {
+            let properties = parse_common_command_properties_from_text(
+                text,
+                &header.uuid,
+                type_index,
+                object_refs,
+            );
+            MetadataChildCommand { header, properties }
+        })
+        .collect()
+}
+
 fn nested_child_commands_from_text(
     text: &str,
     owner_uuid: &str,
@@ -6787,6 +6814,16 @@ fn parse_information_register_command_picture_descriptor(
             && reference.first()?.trim() == STD_PICTURE_PRINT_DESCRIPTOR_CODE =>
         {
             Some((Some("StdPicture.Print".to_string()), load_transparent))
+        }
+        // A set picture whose reference is the bare index `0` and carries no
+        // identifier. The platform has no name for that index, so it writes the
+        // index itself: `<xr:Ref>0</xr:Ref>`. Both readings of the reference
+        // tuple agree here -- `{0}` as the index-only form of `{0,<uuid>}` and
+        // `{0}` as the index form the negative standard-picture codes use --
+        // and neither leaves room for another rendering. The guard is the exact
+        // shape, so no other descriptor can reach it.
+        "1" if reference.len() == 1 && reference.first()?.trim() == "0" => {
+            Some((Some("0".to_string()), load_transparent))
         }
         "1" if reference.len() == 2 && reference.first()?.trim() == "0" => {
             let uuid = parse_non_zero_uuid(reference.get(1)?.trim())?;
@@ -9841,7 +9878,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                 | "ChartOfCharacteristicTypes"
                 | "BusinessProcess"
         ) {
-        nested_command_headers_for_owner_from_text(kind, text, uuid)
+        nested_child_commands_for_owner_from_text(kind, text, uuid, type_index, object_refs)
     } else {
         Vec::new()
     };
@@ -9887,6 +9924,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             type_index,
             type_index_collisions,
             object_refs,
+            metadata_object_refs,
             form_refs,
             template_refs,
         )?;
@@ -10109,7 +10147,12 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
     } else {
-        format_metadata_source_xml(kind, &header, source_version).into_bytes()
+        // The frame every metadata root the platform writes carries: a
+        // byte-order mark, the full seventeen-namespace `MetaDataObject`
+        // header, a self-closed empty `Comment` and no trailing newline. The
+        // families without a writer of their own used to reach a second copy
+        // of this writer that disagreed on all four; that copy is gone.
+        format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
     };
     let additional_tabular_section_child_objects = String::new();
     let owned_form_template_child_objects = if strict_chart_root_formatted
@@ -10151,7 +10194,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             kind,
             &document_journal_child_commands,
         );
-        insert_metadata_child_commands_xml(&mut xml_text, kind, &nested_commands);
+        insert_metadata_child_command_objects_xml(&mut xml_text, kind, &nested_commands);
         xml = xml_text.into_bytes();
     }
 
@@ -11019,7 +11062,7 @@ fn parse_exchange_plan_child_objects(
         None,
         type_index,
         object_refs,
-        &BTreeMap::new(),
+        object_refs,
         form_refs,
     )
     .into_iter()
@@ -13757,7 +13800,10 @@ fn parse_register_properties_from_text(
                     marker_start,
                     &header.uuid,
                     &value_types,
+                    type_index,
                     object_refs,
+                    object_refs,
+                    form_refs,
                 );
                 let properties = properties.map(|properties| {
                     parse_register_child_extra_properties(
@@ -15584,7 +15630,10 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
                 marker_start,
                 &header.uuid,
                 &value_types,
+                type_index,
                 object_refs,
+                metadata_object_refs,
+                form_refs,
             )
         } else {
             None
@@ -16516,7 +16565,10 @@ fn parse_metadata_child_properties(
     marker_start: usize,
     child_uuid: &str,
     value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<MetadataChildProperties> {
     if owner_kind == "AccountingRegister" {
         for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid)
@@ -16534,7 +16586,10 @@ fn parse_metadata_child_properties(
             &fields,
             child_uuid,
             value_types,
+            type_index,
             object_refs,
+            metadata_object_refs,
+            form_refs,
         ) {
             if owner_kind == "DataProcessor"
                 && is_offset_inside_metadata_object_code(text, marker_start, 27)
@@ -19052,7 +19107,10 @@ fn parse_metadata_child_properties_from_fields(
     fields: &[&str],
     child_uuid: &str,
     value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<MetadataChildProperties> {
     if owner_kind == "DataProcessor"
         && let Some(flattened) = flatten_data_processor_wrapped_child_fields(fields)
@@ -19061,7 +19119,10 @@ fn parse_metadata_child_properties_from_fields(
             &flattened,
             header_index,
             value_types,
+            type_index,
             object_refs,
+            metadata_object_refs,
+            form_refs,
         )
     {
         return Some(properties);
@@ -19103,7 +19164,8 @@ fn parse_metadata_child_properties_from_fields(
         ),
         choice_parameters: parse_metadata_child_choice_parameters(
             fields.get(header_index + 16).copied(),
-            object_refs,
+            type_index,
+            metadata_object_refs,
         ),
         self_close_empty_choice_parameter_refs: false,
         quick_choice: fields
@@ -19114,6 +19176,7 @@ fn parse_metadata_child_properties_from_fields(
             .and_then(|field| metadata_create_on_input_xml(field.trim())),
         choice_form: parse_metadata_child_choice_form(
             fields.get(header_index + 19).copied(),
+            form_refs,
             object_refs,
         ),
         link_by_type_empty: metadata_child_collection_is_empty(
@@ -19199,7 +19262,10 @@ fn parse_data_processor_wrapped_child_properties(
     fields: &[&str],
     header_index: usize,
     value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<MetadataChildProperties> {
     if fields.first().map(|field| field.trim()) != Some("2")
         || header_index != 1
@@ -19256,12 +19322,17 @@ fn parse_data_processor_wrapped_child_properties(
         ),
         choice_parameters: parse_metadata_child_choice_parameters(
             fields.get(17).copied(),
-            object_refs,
+            type_index,
+            metadata_object_refs,
         ),
         self_close_empty_choice_parameter_refs: false,
         quick_choice,
         create_on_input,
-        choice_form: parse_metadata_child_choice_form(fields.get(12).copied(), object_refs),
+        choice_form: parse_metadata_child_choice_form(
+            fields.get(12).copied(),
+            form_refs,
+            object_refs,
+        ),
         link_by_type_empty: metadata_child_collection_is_empty(fields.get(16).copied()),
         link_by_type: None,
         choice_history_on_input: fields
@@ -19488,6 +19559,16 @@ fn parse_metadata_child_fill_value(
             Some(r#""S""#) => {
                 return parse_constant_bound_value(Some(value)).map(MetadataChildFillValue::String);
             }
+            // `{"B",<flag>}` is the same boolean atom the choice-parameter
+            // reader already admits; the wrapped data-processor child writes a
+            // boolean fill value in that form while the flat layouts write a
+            // bare flag, and only the bare flag had a branch here.
+            Some(r#""B""#) if fields.len() == 2 => {
+                return fields
+                    .get(1)
+                    .and_then(|field| parse_1c_bool_flag(field.trim()))
+                    .map(MetadataChildFillValue::Boolean);
+            }
             Some(r#""N""#) => {
                 return fields
                     .get(1)
@@ -19530,13 +19611,26 @@ fn metadata_child_collection_is_empty(field: Option<&str>) -> bool {
     )
 }
 
+/// A bare form identifier belongs to the form index, not to the object index.
+/// The object index keys top-level rows by their own identifier and names them
+/// `<kind>.<name>`, so a form row resolves there under whatever family its row
+/// shape was read as -- for one form in the reference tree that is a different
+/// family entirely. The register decoder already resolves this slot through
+/// `form_refs`; this is the same resolution, with the old object-index reading
+/// kept only for the design-time-reference shape it was written for.
 fn parse_metadata_child_choice_form(
     field: Option<&str>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChoiceForm> {
     let field = field?;
     if matches!(field.trim(), "0" | "00000000-0000-0000-0000-000000000000") {
         return Some(MetadataChoiceForm::Empty);
+    }
+    if let Some(uuid) = parse_uuid_field(field.trim())
+        && let Some(reference) = information_register_form_reference(&uuid, form_refs)
+    {
+        return Some(MetadataChoiceForm::Reference(reference));
     }
     parse_design_time_reference(field, object_refs).map(MetadataChoiceForm::Reference)
 }
@@ -22961,7 +23055,7 @@ fn parse_report_properties_from_text(
             None,
             type_index,
             object_refs,
-            &BTreeMap::new(),
+            object_refs,
             form_refs,
         )
     };
@@ -23028,7 +23122,7 @@ fn parse_strict_report_child_objects(
         None,
         type_index,
         object_refs,
-        &BTreeMap::new(),
+        object_refs,
         form_refs,
     )
     .into_iter()
@@ -26449,6 +26543,7 @@ fn parse_data_processor_properties_from_text(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DataProcessorProperties> {
@@ -26475,7 +26570,7 @@ fn parse_data_processor_properties_from_text(
         None,
         type_index,
         object_refs,
-        &BTreeMap::new(),
+        metadata_object_refs,
         form_refs,
     );
     if !apply_data_processor_settings_composer_types(
@@ -27269,8 +27364,13 @@ fn parse_constant_choice_parameters(
     parameters
 }
 
+/// `object_refs` here is the reference index that also carries predefined
+/// items (`metadata_object_refs` at the call site that has one): a choice
+/// parameter is one of the places a design-time reference names a predefined
+/// item, and the plain object index cannot resolve those.
 fn parse_metadata_child_choice_parameters(
     field: Option<&str>,
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<MetadataChoiceParameter>> {
     let field = field?;
@@ -27293,7 +27393,8 @@ fn parse_metadata_child_choice_parameters(
             break;
         };
         if let Some(name) = parse_1c_quoted_string(name.trim())
-            && let Some(value) = parse_metadata_choice_parameter_value(value, object_refs)
+            && let Some(value) =
+                parse_metadata_choice_parameter_value(value, type_index, object_refs)
         {
             parameters.push(MetadataChoiceParameter { name, value });
         }
@@ -27309,6 +27410,7 @@ fn parse_metadata_child_choice_parameters(
 
 fn parse_metadata_choice_parameter_value(
     field: &str,
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChoiceParameterValue> {
     let value = field.trim();
@@ -27333,7 +27435,17 @@ fn parse_metadata_choice_parameter_value(
     }
     let value_refs = parse_design_time_references(value, object_refs);
     match value_refs.len() {
-        0 => None,
+        // The register decoder already carries a complete typed reader for this
+        // atom -- undefined, string, boolean, decimal, date, design-time
+        // reference and fixed array -- and it was simply never wired to the
+        // generic child, which kept a reader that recognises an atom only by
+        // the identifiers inside it. So an undefined value, and a fixed array
+        // whose members are numbers rather than references, both looked like
+        // "no identifiers here" and dropped the whole parameter. Consult the
+        // typed table for exactly those atoms; where the older reader does
+        // resolve identifiers it stays the answer, because it reads them
+        // against the same reference index the rest of this child does.
+        0 => parse_metadata_choice_parameter_typed_value(value, type_index, object_refs, 0),
         1 => Some(MetadataChoiceParameterValue::DesignTimeRef(
             value_refs.into_iter().next().unwrap(),
         )),
@@ -28917,7 +29029,12 @@ fn parse_common_command_picture_value(
             return Some((Some("StdPicture.ZoomIn".to_string()), load_transparent));
         }
         if ref_fields.first()?.trim() == "0" {
-            let uuid = ref_fields.get(1)?.trim();
+            // Same bare-index reference the register table admits; reading past
+            // the end of a one-element reference used to abort the whole
+            // descriptor here, which is a third answer neither table means.
+            let Some(uuid) = ref_fields.get(1).map(|field| field.trim()) else {
+                return Some((Some("0".to_string()), load_transparent));
+            };
             if let Some(reference) = common_command_standard_picture_name(uuid) {
                 return Some((Some(reference.to_string()), load_transparent));
             }
@@ -28997,6 +29114,11 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "785362cb-3756-48ed-87d2-292ded17054a" => Some("StdPicture.OpenFile"),
         "4d2570b5-205f-413c-b4cc-b2097f61684f" => Some("StdPicture.CreateInitialImage"),
         "0ce78048-0196-4f80-a781-9829cdb7f43e" => Some("StdPicture.GenerateReport"),
+        // Read straight off the platform: the subsystem picture slot carries
+        // this identifier and the platform names it `StdPicture.Dendrogram` for
+        // the same object. A standard-picture identifier is a platform
+        // constant, not a per-configuration calibration.
+        "4bf9fbb5-53c5-4b09-bab2-d69bbfab945b" => Some("StdPicture.Dendrogram"),
         "18492a87-2fe4-44af-b218-304897fed020" => Some("StdPicture.MarkToDelete"),
         "20ebc47b-f4d9-439c-acd3-fdc624fbac2a" => Some("StdPicture.Post"),
         "23f940bf-7381-4c2b-85a1-e541ed428042" => Some("StdPicture.SaveValues"),
@@ -30529,49 +30651,6 @@ fn format_default_list_form_metadata_source_xml(
         xml.insert_str(index, &properties_xml);
     }
     xml
-}
-
-fn format_metadata_source_xml(
-    kind: &str,
-    header: &MetadataHeader,
-    source_version: InfobaseConfigSourceVersion,
-) -> String {
-    let mut synonyms = String::new();
-    if header.synonyms.is_empty() {
-        synonyms.push_str("\t\t\t<Synonym/>\r\n");
-    } else {
-        synonyms.push_str("\t\t\t<Synonym>\r\n");
-        for (lang, content) in &header.synonyms {
-            synonyms.push_str("\t\t\t\t<v8:item>\r\n");
-            synonyms.push_str(&format!(
-                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                escape_xml_text(lang)
-            ));
-            synonyms.push_str(&format!(
-                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(content)
-            ));
-            synonyms.push_str("\t\t\t\t</v8:item>\r\n");
-        }
-        synonyms.push_str("\t\t\t</Synonym>\r\n");
-    }
-
-    format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"{source_version}\">\r\n\
-\t<{kind} uuid=\"{uuid}\">\r\n\
-\t\t<Properties>\r\n\
-\t\t\t<Name>{name}</Name>\r\n\
-{synonyms}\
-\t\t\t<Comment>{comment}</Comment>\r\n\
-\t\t</Properties>\r\n\
-\t</{kind}>\r\n\
-</MetaDataObject>\r\n",
-        uuid = escape_xml_text(&header.uuid),
-        name = escape_xml_text(&header.name),
-        comment = escape_xml_text(&header.comment),
-        source_version = source_version.as_str(),
-    )
 }
 
 fn format_configuration_source_xml(
@@ -33982,21 +34061,6 @@ fn format_functional_option_source_xml(
     }
     xml = xml.replace("\t\t</Properties>", &format!("{insert}\t\t</Properties>"));
     xml
-}
-
-fn insert_metadata_child_commands_xml(
-    xml: &mut String,
-    owner_kind: &str,
-    commands: &[MetadataHeader],
-) {
-    if commands.is_empty() {
-        return;
-    }
-    let mut child_objects = String::new();
-    for command in commands {
-        push_metadata_header_child_object_xml(&mut child_objects, "Command", command);
-    }
-    insert_metadata_child_objects_xml(xml, owner_kind, &child_objects);
 }
 
 fn insert_metadata_child_command_objects_xml(

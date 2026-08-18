@@ -26943,6 +26943,7 @@ fn parses_and_formats_metadata_child_choice_parameter_values() {
             Some(
                 r##"{0,2,"Отбор.Клиент",{"B",1},"Отбор.Ссылка",{"#",4500381b-db30-4a10-9db4-990038032acf,{0,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222}}}"##,
             ),
+            &BTreeMap::new(),
             &object_refs,
         )
         .unwrap();
@@ -27085,6 +27086,7 @@ fn parses_string_and_ordered_fixed_array_choice_parameter_values() {
         Some(
             r##"{0,2,"РежимВыбораНазначений",{"S","Все"},"АдресноеХранение",{"#",4500381b-db30-4a10-9db4-990038032acf,{3,{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,09b67064-0478-4ebf-a7a9-1f06d3b62882,aaf17114-0c7a-4709-bc08-5b3eac621a02}},{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,09b67064-0478-4ebf-a7a9-1f06d3b62882,ee67d3ea-8ef0-4319-ad37-83a152d02237}},{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,09b67064-0478-4ebf-a7a9-1f06d3b62882,547ae60a-335d-4529-8a04-c07afb777818}}}}}"##,
         ),
+        &BTreeMap::new(),
         &object_refs,
     )
     .unwrap();
@@ -27157,8 +27159,16 @@ fn wrapped_data_processor_child_reads_the_proven_property_slots() {
         "0",
     ];
 
-    let properties = parse_data_processor_wrapped_child_properties(&fields, 1, &[], &object_refs)
-        .expect("wrapped data-processor child layout");
+    let properties = parse_data_processor_wrapped_child_properties(
+        &fields,
+        1,
+        &[],
+        &BTreeMap::new(),
+        &object_refs,
+        &object_refs,
+        &BTreeMap::new(),
+    )
+    .expect("wrapped data-processor child layout");
 
     assert_eq!(properties.choice_folders_and_items, Some("FoldersAndItems"));
     assert!(
@@ -54043,6 +54053,9 @@ fn parses_data_processor_wrapped_child_edit_format_from_tail_slot() {
         attribute_uuid,
         &[],
         &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
     )
     .unwrap();
 
@@ -54238,6 +54251,9 @@ fn parses_data_processor_tabular_section_child_attribute_property_tail_from_wrap
         raw.find(attribute_uuid).unwrap(),
         attribute_uuid,
         &[],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
         &BTreeMap::new(),
     )
     .unwrap();
