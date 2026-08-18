@@ -28353,6 +28353,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
             end_column_offset: 0,
             auto_size: true,
             z_order: 0,
+            members: MoxelDrawingMembers::default(),
             kind: MoxelDrawingKind::Picture {
                 picture_size: "Auto",
                 picture_index: 0,
@@ -29679,13 +29680,40 @@ fn formats_moxel_decodes_cut_text_placement() {
     assert!(xml.contains("\t<format>\r\n\t\t<textPlacement>Cut</textPlacement>\r\n\t</format>"));
 }
 
+/// `textOrientation` is format member 18, not member 13.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet documents): the
+/// platform publishes 513 orientations and only two distinct values, 0 (503
+/// formats) and 900 (10).  Reading member 18 reproduces that multiset exactly.
+/// Member 13, which this test previously fed the 900 through, is `patternColor`:
+/// reading it as a colour reference reproduces all 16 published `patternColor`
+/// values (7 `#DCDCDC`, 5 `#FFFFFF`, 1 `style:FieldTextColor`, 3
+/// `style:FormBackColor`) with none invented, whereas reading it as an
+/// orientation published 15 orientations - 2, 4 and 5 - that the platform never
+/// writes.  The record below therefore carries width (member 7), text placement
+/// (member 14) and the orientation in member 18.
 #[test]
-fn formats_moxel_decodes_text_orientation_between_width_and_text_placement() {
-    let format = parse_moxel_format("{24704,72,900,3}", &[], &[]).unwrap();
+fn formats_moxel_decodes_text_orientation_from_member_eighteen() {
+    let format = parse_moxel_format("{278656,72,3,900}", &[], &[]).unwrap();
 
     assert_eq!(format.width, Some(72));
-    assert_eq!(format.text_orientation, Some(900));
     assert_eq!(format.text_placement, Some("Wrap"));
+    assert_eq!(format.text_orientation, Some(900));
+    assert_eq!(format.pattern_color, None);
+}
+
+/// Member 13 is `patternColor` for every format, not only for the ones a drawing
+/// references.  The style-reference table resolves slot 1 to a named style, so a
+/// record whose member 13 holds 1 publishes that style as the pattern colour and
+/// publishes no orientation at all.
+#[test]
+fn formats_moxel_decodes_pattern_color_from_member_thirteen() {
+    let style_refs = [None, Some("style:FormBackColor".to_string())];
+    let format = parse_moxel_format("{8320,72,1}", &style_refs, &[]).unwrap();
+
+    assert_eq!(format.width, Some(72));
+    assert_eq!(format.pattern_color.as_deref(), Some("style:FormBackColor"));
+    assert_eq!(format.text_orientation, None);
 }
 
 #[test]
@@ -29763,7 +29791,7 @@ fn formats_moxel_width_table_accepts_extended_129_default_width_entries() {
 #[test]
 fn formats_moxel_table_with_unknown_format_bits_preserves_known_format_indexes() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{24704,72,900,3},{1,0}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{278656,72,3,900},{1,0}}",
             &BTreeMap::new(),
         )
         .unwrap();

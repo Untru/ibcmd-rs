@@ -2152,6 +2152,8 @@ impl Default for SpreadsheetDocumentXmlDrawing {
 
 #[derive(Debug)]
 enum SpreadsheetDocumentXmlDrawingKind {
+    /// `Line`, `Rectangle` or `Text`: the twelve-field, tail-less record.
+    Shape(String),
     Picture {
         picture_size: String,
         picture_index: usize,
@@ -3377,6 +3379,9 @@ fn apply_spreadsheet_text_value(
             if let Some(drawing) = drawing {
                 drawing.kind = match value {
                     "Chart" => SpreadsheetDocumentXmlDrawingKind::Chart(None),
+                    "Line" | "Rectangle" | "Text" => {
+                        SpreadsheetDocumentXmlDrawingKind::Shape(value.to_string())
+                    }
                     _ => SpreadsheetDocumentXmlDrawingKind::Picture {
                         picture_size: String::new(),
                         picture_index: 0,
@@ -4367,18 +4372,19 @@ fn format_spreadsheet_format_for_moxel(
             .as_deref()
             .and_then(spreadsheet_text_placement_code),
     );
-    if drawing_slot {
-        push_spreadsheet_format_value(
-            &mut values,
-            13,
-            format
-                .pattern_color
-                .as_deref()
-                .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
-        );
-    } else {
-        push_spreadsheet_format_value(&mut values, 13, format.text_orientation);
-    }
+    // Mirror of the decoder: member 13 is `patternColor` for every format, not
+    // just for the ones a drawing references, and member 18 is
+    // `textOrientation`.  Writing the orientation into 13 was the packer half of
+    // the same conflation the decoder carried.
+    push_spreadsheet_format_value(
+        &mut values,
+        13,
+        format
+            .pattern_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
+    );
+    push_spreadsheet_format_value(&mut values, 18, format.text_orientation);
     push_spreadsheet_format_value(
         &mut values,
         15,
@@ -4741,28 +4747,59 @@ fn format_spreadsheet_drawing_for_moxel(
     drawing: &SpreadsheetDocumentXmlDrawing,
     format_index: usize,
 ) -> Option<String> {
+    // Geometry is stored column-first and is neither ordered nor non-negative,
+    // so it is written through unchanged; the clamping this replaces silently
+    // rewrote the 9 records that end left of where they begin and the 2 that end
+    // above.
+    let geometry = format!(
+        "{},{},{},{},{},{},{},{}",
+        drawing.begin_column,
+        drawing.begin_row,
+        drawing.begin_column_offset,
+        drawing.begin_row_offset,
+        drawing.end_column,
+        drawing.end_row,
+        drawing.end_column_offset,
+        drawing.end_row_offset
+    );
+    let auto_size = usize::from(drawing.auto_size);
     match &drawing.kind {
+        // `Line`, `Rectangle` and `Text` keep the twelve-field record, whose
+        // last slot is the `autoSize` flag.
+        SpreadsheetDocumentXmlDrawingKind::Shape(shape) => {
+            let kind = match shape.as_str() {
+                "Line" => 1,
+                "Rectangle" => 2,
+                "Text" => 3,
+                _ => return None,
+            };
+            Some(format!(
+                "{{{{0,{format_index}}},{kind},{geometry},{},{auto_size}}}",
+                drawing.id
+            ))
+        }
         SpreadsheetDocumentXmlDrawingKind::Picture {
             picture_size,
             picture_index,
         } => {
-            if picture_size != "Stretch" {
-                return None;
-            }
-            let auto_size = if drawing.auto_size { 0 } else { 1 };
+            // The decoder reads slot 10 as the identifier, 11 as the picture
+            // index, 12 as the picture size and 13 as `autoSize`.  This branch
+            // used to write `autoSize`, a literal 1, the z-order and the picture
+            // index into those four slots, so a packed picture came back with a
+            // different id, a different picture index and an inverted
+            // `autoSize`; no test asserted that a drawing survived the round
+            // trip, so the four-way swap went unnoticed.
+            let picture_size_code = match picture_size.as_str() {
+                "RealSize" => 0,
+                "Stretch" => 1,
+                "Proportionally" => 2,
+                "AutoSize" => 4,
+                "ByFontSize" => 7,
+                _ => return None,
+            };
             Some(format!(
-                "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
-                format_index,
-                drawing.begin_column.max(0),
-                drawing.begin_row.max(0),
-                drawing.begin_column_offset.max(0),
-                drawing.begin_row_offset.max(0),
-                drawing.end_column.max(drawing.begin_column).max(0),
-                drawing.end_row.max(drawing.begin_row).max(0),
-                drawing.end_column_offset.max(0),
-                drawing.end_row_offset.max(0),
-                drawing.z_order,
-                picture_index
+                "{{{{0,{format_index}}},5,{geometry},{},{picture_index},{picture_size_code},{auto_size}}}",
+                drawing.id
             ))
         }
         SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) => {
@@ -28761,7 +28798,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         )
         .expect("extract");
 
-        assert!(text.contains(r#"{2,{24576,900,3},{128,72}}"#));
+        assert!(text.contains(r#"{2,{278528,3,900},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert!(extracted.contains("<textOrientation>900</textOrientation>"));
         assert!(!extracted.contains("<patternColor>"));
@@ -28832,6 +28869,79 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(extracted.contains("<patternColor>style:FormBackColor</patternColor>"));
         assert!(extracted.contains("<pattern>WithoutPattern</pattern>"));
         assert!(!extracted.contains("<textOrientation>"));
+        // The drawing itself has to survive. The packer used to write `autoSize`,
+        // a literal 1, the z-order and the picture index into the four slots the
+        // decoder reads as id, picture index, picture size and `autoSize`, so
+        // this drawing came back as id 0, picture index 1 and `autoSize` false.
+        assert!(text.contains(r#"{{0,2},5,0,0,0,0,1,1,0,0,1,0,1,1}"#));
+        assert!(extracted.contains("<id>1</id>"));
+        assert!(extracted.contains("<pictureIndex>0</pictureIndex>"));
+        assert!(extracted.contains("<autoSize>true</autoSize>"));
+        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
+
+        Ok(())
+    }
+
+    /// A `Text` drawing packs into the twelve-field, tail-less record and comes
+    /// back unchanged. Before the decoder learned kinds 1/2/3 the platform's 12
+    /// `Line`, 3 `Rectangle` and 89 `Text` drawings were all dropped on read, and
+    /// the packer had no shape branch to write them back.
+    #[test]
+    fn packs_text_drawing_round_trip() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<drawing>
+		<drawingType>Text</drawingType>
+		<id>2</id>
+		<formatIndex>2</formatIndex>
+		<beginRow>42</beginRow>
+		<beginRowOffset>0</beginRowOffset>
+		<endRow>43</endRow>
+		<endRowOffset>30</endRowOffset>
+		<beginColumn>25</beginColumn>
+		<beginColumnOffset>51</beginColumnOffset>
+		<endColumn>30</endColumn>
+		<endColumnOffset>3</endColumnOffset>
+		<autoSize>false</autoSize>
+		<pictureSize>Stretch</pictureSize>
+		<zOrder>1</zOrder>
+	</drawing>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<width>72</width>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+
+        // The leading `{0,1}` is the format record: the XML's `formatIndex` 2
+        // projects onto physical slot 1. Everything after it is the drawing.
+        assert!(text.contains(r#"{{0,1},3,25,42,51,0,30,43,3,30,2,0}"#));
+        assert!(extracted.contains("<drawingType>Text</drawingType>"));
+        assert!(extracted.contains("<id>2</id>"));
+        assert!(extracted.contains("<beginColumnOffset>51</beginColumnOffset>"));
+        assert!(extracted.contains("<endColumn>30</endColumn>"));
+        assert!(extracted.contains("<autoSize>false</autoSize>"));
+        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
+        assert!(!extracted.contains("<pictureIndex>"));
 
         Ok(())
     }
@@ -29276,9 +29386,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,0,1,1,0}"));
+        // Slots 10..13 are id, picture index, picture size and `autoSize`.  The
+        // expectation this replaces read `0,1,1,0` there, which is the drawing's
+        // `autoSize`, a literal 1, its z-order and its picture index - the four
+        // values the packer used to write into those slots.  It encoded the
+        // corruption rather than catching it, because nothing here re-extracted
+        // the blob.
+        assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,1,0,1,1}"));
         assert!(text.contains(",1,{4,0},2,{0,1}"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+        assert!(extracted.contains("<id>1</id>"));
+        assert!(extracted.contains("<pictureIndex>0</pictureIndex>"));
+        assert!(extracted.contains("<autoSize>true</autoSize>"));
+        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
+        assert!(extracted.contains("<beginColumnOffset>24</beginColumnOffset>"));
+        assert!(extracted.contains("<endRowOffset>88</endRowOffset>"));
 
         Ok(())
     }

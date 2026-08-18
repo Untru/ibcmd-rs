@@ -620,10 +620,24 @@ pub(super) struct MoxelDrawing {
     pub(super) end_column_offset: i32,
     pub(super) auto_size: bool,
     pub(super) z_order: usize,
+    pub(super) members: MoxelDrawingMembers,
     pub(super) kind: MoxelDrawingKind,
 }
 
+/// The optional members the drawing's leading `{mask, formatIndex, ...}` record
+/// carries, published between `formatIndex` and `beginRow`.
+#[derive(Default)]
+pub(super) struct MoxelDrawingMembers {
+    pub(super) text: Option<MoxelLocalizedValue>,
+    pub(super) parameter: Option<String>,
+    pub(super) value: Option<String>,
+    pub(super) detail_parameter: Option<String>,
+}
+
 pub(super) enum MoxelDrawingKind {
+    /// `Line`, `Rectangle` and `Text`: the tail-less record, which publishes no
+    /// element after `zOrder` and always publishes `pictureSize` `Stretch`.
+    Shape(&'static str),
     Picture {
         picture_size: &'static str,
         picture_index: usize,
@@ -2181,16 +2195,32 @@ pub(super) fn trim_moxel_trailing_empty_rows(
     }
 }
 
+/// `<indexTo>` collapses a run of adjacent cell-less rows that publish the same
+/// `<row>` payload.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet documents, 67 707
+/// published `rowsItem` elements): 361 of them carry an `indexTo`, and their
+/// payloads are `empty` alone (331), `columnsID` + `empty` (14), `columnsID` +
+/// `formatIndex` + `empty` (10) and `formatIndex` + `empty` (6) - never a
+/// payload with a `<c>` in it.  The converse holds as a set: of the 9 573
+/// adjacent pairs whose payloads are byte-equal and which the platform still
+/// published separately, every single one carries cells, so "cell-less and equal
+/// payload" is both necessary and sufficient over the whole corpus.
+///
+/// The predicate this replaces also demanded `formatIndex <= 1` and no
+/// `columnsID`, which refused the 24 runs the platform collapses with one of
+/// those two members present.  `is_moxel_compactable_empty_row` keeps the old
+/// spelling because the structurally-empty-sheet guard is calibrated on it.
 pub(super) fn compact_moxel_empty_row_ranges(rows: &mut Vec<MoxelRow>) {
     let mut compacted = Vec::with_capacity(rows.len());
     let mut index = 0usize;
     while index < rows.len() {
         let mut row = rows[index].clone();
-        if is_moxel_compactable_empty_row(&row) {
+        if row.cells.is_empty() {
             let mut cursor = index + 1;
             while cursor < rows.len()
                 && rows[cursor].index == rows[cursor - 1].index + 1
-                && is_moxel_compactable_empty_row(&rows[cursor])
+                && moxel_rows_publish_equal_empty_payload(&row, &rows[cursor])
             {
                 row.index_to = Some(rows[cursor].index);
                 cursor += 1;
@@ -2203,6 +2233,16 @@ pub(super) fn compact_moxel_empty_row_ranges(rows: &mut Vec<MoxelRow>) {
         }
     }
     *rows = compacted;
+}
+
+/// Do two cell-less rows render the same `<row>` payload? The payload is exactly
+/// `columnsID` plus the projection of the format reference, and the projection
+/// reads both the canonical and the source index, so both are compared.
+fn moxel_rows_publish_equal_empty_payload(left: &MoxelRow, right: &MoxelRow) -> bool {
+    right.cells.is_empty()
+        && left.columns_id == right.columns_id
+        && left.format_index == right.format_index
+        && left.source_format_index == right.source_format_index
 }
 
 pub(super) fn is_moxel_compactable_empty_row(row: &MoxelRow) -> bool {
@@ -3656,17 +3696,89 @@ pub(super) fn parse_moxel_drawings(fields: &[&str]) -> Vec<MoxelDrawing> {
     drawings
 }
 
+/// Members the drawing's leading record may carry, keyed by the mask bit that
+/// selects them.  The record is the same `{mask, index, ...values}` grammar the
+/// cell record uses, so the slots appear in ascending bit order and the mask is
+/// the only thing that says how many there are.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet documents, 695
+/// drawings): the observed masks are 0 (597 records, no member), 8 (15), 16
+/// (65), 24 (9) and 26 (9), and each one accounts for the record's arity
+/// exactly - bit 1 and bit 3 take one slot each, bit 4 takes two.  The old code
+/// required the mask to be literally `0` with arity 2, which refused all 98
+/// records that carry a member.
+const MOXEL_DRAWING_MEMBER_VALUE: usize = 1 << 1;
+const MOXEL_DRAWING_MEMBER_DETAIL_PARAMETER: usize = 1 << 3;
+const MOXEL_DRAWING_MEMBER_LOCALIZED: usize = 1 << 4;
+const MOXEL_DRAWING_MEMBER_MASK: usize = MOXEL_DRAWING_MEMBER_VALUE
+    | MOXEL_DRAWING_MEMBER_DETAIL_PARAMETER
+    | MOXEL_DRAWING_MEMBER_LOCALIZED;
+
+/// The drawing's leading record: `{mask, formatIndex, ...members}`.
+fn parse_moxel_drawing_format_record(text: &str) -> Option<(usize, MoxelDrawingMembers)> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let mask = fields.first()?.trim().parse::<usize>().ok()?;
+    if mask & !MOXEL_DRAWING_MEMBER_MASK != 0 {
+        return None;
+    }
+    let format_index = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut members = MoxelDrawingMembers::default();
+    let mut cursor = 2usize;
+    if mask & MOXEL_DRAWING_MEMBER_VALUE != 0 {
+        // A typed value; only the string tag `S` is observed (9 records).
+        let value = split_1c_braced_fields(fields.get(cursor)?, 0)?;
+        if value.len() != 2 || parse_1c_string(value.first()?)?.as_str() != "S" {
+            return None;
+        }
+        members.value = Some(parse_1c_string(value.get(1)?)?);
+        cursor += 1;
+    }
+    if mask & MOXEL_DRAWING_MEMBER_DETAIL_PARAMETER != 0 {
+        members.detail_parameter = Some(parse_1c_string(fields.get(cursor)?)?);
+        cursor += 1;
+    }
+    if mask & MOXEL_DRAWING_MEMBER_LOCALIZED != 0 {
+        // The same container the cell record uses: an empty language identifier
+        // marks a parameter name, a non-empty one a localized text.
+        if let Some(localized) = parse_moxel_localized_cell_value(fields.get(cursor)?)? {
+            if localized.lang.is_empty() {
+                members.parameter = Some(localized.content);
+            } else {
+                members.text = Some(localized);
+            }
+        }
+        if fields.get(cursor + 1)?.trim() != "0" {
+            return None;
+        }
+        cursor += 2;
+    }
+    (cursor == fields.len()).then_some((format_index, members))
+}
+
+/// One drawing record.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet documents): the
+/// record has twelve fields for the tail-less kinds - 1 `Line` (12 records),
+/// 2 `Rectangle` (3) and 3 `Text` (89) - and fourteen for 5 `Picture` (576) and
+/// 10 the chart family (15).  Reading those five kinds with this grammar pairs
+/// every one of the 695 published drawings with exactly one record and leaves no
+/// record unpaired, and re-rendering the 680 non-chart records reproduces the
+/// platform's block byte for byte.  The previous grammar accepted only arity 14
+/// with a bare `{0,index}` head, which is why 129 drawings were dropped.
+///
+/// The geometry is stored column-first (`beginColumn`, `beginRow`,
+/// `beginColumnOffset`, `beginRowOffset`, then the same four for the end) and is
+/// not ordered or non-negative: 9 records end left of where they begin, 2 end
+/// above, and one publishes `beginColumnOffset` `-1`.  The range guard this
+/// replaces refused those.
 pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
     const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
 
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 14 {
+    if fields.len() != 12 && fields.len() != 14 {
         return None;
     }
-    let format_fields = split_1c_braced_fields(fields.first()?, 0)?;
-    if format_fields.len() != 2 || format_fields.first()?.trim() != "0" {
-        return None;
-    }
+    let (format_index, members) = parse_moxel_drawing_format_record(fields.first()?)?;
     let begin_column = fields.get(2)?.trim().parse::<i32>().ok()?;
     let begin_row = fields.get(3)?.trim().parse::<i32>().ok()?;
     let begin_column_offset = fields.get(4)?.trim().parse::<i32>().ok()?;
@@ -3675,49 +3787,59 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
     let end_row = fields.get(7)?.trim().parse::<i32>().ok()?;
     let end_column_offset = fields.get(8)?.trim().parse::<i32>().ok()?;
     let end_row_offset = fields.get(9)?.trim().parse::<i32>().ok()?;
-    if begin_column < 0
-        || begin_row < 0
-        || end_column < begin_column
-        || end_row < begin_row
-        || begin_column_offset < 0
-        || begin_row_offset < 0
-        || end_column_offset < 0
-        || end_row_offset < 0
-    {
-        return None;
-    }
-    let (kind, auto_size) = match fields.get(1)?.trim() {
-        "5" => {
-            let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
-            let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
-                0 => "RealSize",
-                1 => "Stretch",
-                2 => "Proportionally",
-                4 => "AutoSize",
-                _ => return None,
-            };
-            (
-                MoxelDrawingKind::Picture {
-                    picture_size,
-                    picture_index,
-                },
-                fields.get(13)?.trim() != "0",
-            )
-        }
-        "10" if fields.get(11)?.trim().eq_ignore_ascii_case(CHART_TYPE_UUID)
-            && fields.get(13)?.trim() == "0" =>
-        {
-            (
-                MoxelDrawingKind::Chart(parse_moxel_chart(fields.get(12)?)?),
-                false,
-            )
-        }
-        _ => return None,
-    };
     let id = fields.get(10)?.trim().parse::<usize>().ok()?;
+    let kind_code = fields.get(1)?.trim();
+    let (kind, auto_size) = if fields.len() == 12 {
+        let shape = match kind_code {
+            "1" => "Line",
+            "2" => "Rectangle",
+            "3" => "Text",
+            _ => return None,
+        };
+        // The tail-less record keeps its own `autoSize` in the slot the picture
+        // record spends on `pictureIndex`; all 104 observed records store 0.
+        (
+            MoxelDrawingKind::Shape(shape),
+            fields.get(11)?.trim() != "0",
+        )
+    } else {
+        match kind_code {
+            "5" => {
+                let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
+                let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
+                    0 => "RealSize",
+                    1 => "Stretch",
+                    2 => "Proportionally",
+                    4 => "AutoSize",
+                    7 => "ByFontSize",
+                    _ => return None,
+                };
+                (
+                    MoxelDrawingKind::Picture {
+                        picture_size,
+                        picture_index,
+                    },
+                    fields.get(13)?.trim() != "0",
+                )
+            }
+            // The chart family shares kind 10 and separates on the type uuid.
+            // `GanttChart` (uuid e5fdc112-..., 2 records in 2 documents, each the
+            // document's only drawing) has no decoder for its object payload, so
+            // the record refuses rather than publishing a truncated subtree.
+            "10" if fields.get(11)?.trim().eq_ignore_ascii_case(CHART_TYPE_UUID)
+                && fields.get(13)?.trim() == "0" =>
+            {
+                (
+                    MoxelDrawingKind::Chart(parse_moxel_chart(fields.get(12)?)?),
+                    false,
+                )
+            }
+            _ => return None,
+        }
+    };
     Some(MoxelDrawing {
         id,
-        format_index: format_fields.get(1)?.trim().parse::<usize>().ok()?,
+        format_index,
         begin_row,
         begin_row_offset,
         end_row,
@@ -3729,6 +3851,7 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
         auto_size,
         // Assigned by `parse_moxel_drawings` from the sequence position.
         z_order: 0,
+        members,
         kind,
     })
 }
@@ -5806,12 +5929,19 @@ pub(super) fn parse_moxel_format(
             .and_then(moxel_horizontal_alignment),
         vertical_alignment: parse_moxel_format_usize(&values, 9).and_then(moxel_vertical_alignment),
         back_color: parse_moxel_format_style_ref(&values, 11, style_refs),
-        pattern_color: None,
+        // Member 13 is `patternColor` and member 18 is `textOrientation`; the
+        // two were previously read as one slot, with 13 taken as the orientation
+        // and 18 admitted only when it stored zero.  Evidence (native 1С:УТ
+        // 11.5.27.75, all 683 spreadsheet documents): the platform publishes
+        // exactly two orientations, 0 (503 formats) and 900 (10), and the 10
+        // nine-hundreds are all that member 18 ever holds beside zero, while the
+        // values member 13 holds - 2, 4 and 5 - are never published as an
+        // orientation and always accompany a published `patternColor`.
+        pattern_color: parse_moxel_format_style_ref(&values, 13, style_refs),
         pattern: parse_moxel_format_usize(&values, 12).and_then(moxel_format_pattern),
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
-        text_orientation: parse_moxel_format_usize(&values, 13)
-            .or_else(|| parse_moxel_format_usize(&values, 18).and_then(moxel_explicit_zero)),
+        text_orientation: parse_moxel_format_usize(&values, 18),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
         number_format_present: values[24].is_some(),
         number_format: parse_moxel_format_usize(&values, 24)
@@ -8451,6 +8581,7 @@ pub(super) fn push_moxel_drawing_xml(
 ) {
     xml.push_str("\t<drawing>\r\n");
     let drawing_type = match drawing.kind {
+        MoxelDrawingKind::Shape(shape) => shape,
         MoxelDrawingKind::Picture { .. } => "Picture",
         MoxelDrawingKind::Chart(_) => "Chart",
     };
@@ -8466,6 +8597,39 @@ pub(super) fn push_moxel_drawing_xml(
         "\t\t<formatIndex>{}</formatIndex>\r\n",
         format_index
     ));
+    // Member publication order is `text`/`parameter`, `value`,
+    // `detailParameter`, which is the reverse of their slot order in the record;
+    // the 9 records that carry all three pin it.
+    if let Some(text) = &drawing.members.text {
+        xml.push_str("\t\t<text>\r\n\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(&text.lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&text.content)
+        ));
+        xml.push_str("\t\t\t</v8:item>\r\n\t\t</text>\r\n");
+    }
+    if let Some(parameter) = &drawing.members.parameter {
+        xml.push_str(&format!(
+            "\t\t<parameter>{}</parameter>\r\n",
+            escape_xml_element_text(parameter)
+        ));
+    }
+    if let Some(value) = &drawing.members.value {
+        xml.push_str(&format!(
+            "\t\t<value xsi:type=\"xs:string\">{}</value>\r\n",
+            escape_xml_element_text(value)
+        ));
+    }
+    if let Some(detail_parameter) = &drawing.members.detail_parameter {
+        xml.push_str(&format!(
+            "\t\t<detailParameter>{}</detailParameter>\r\n",
+            escape_xml_element_text(detail_parameter)
+        ));
+    }
     xml.push_str(&format!(
         "\t\t<beginRow>{}</beginRow>\r\n",
         drawing.begin_row
@@ -8501,13 +8665,14 @@ pub(super) fn push_moxel_drawing_xml(
     ));
     let picture_size = match &drawing.kind {
         MoxelDrawingKind::Picture { picture_size, .. } => *picture_size,
-        MoxelDrawingKind::Chart(_) => "Stretch",
+        MoxelDrawingKind::Shape(_) | MoxelDrawingKind::Chart(_) => "Stretch",
     };
     xml.push_str(&format!(
         "\t\t<pictureSize>{picture_size}</pictureSize>\r\n"
     ));
     xml.push_str(&format!("\t\t<zOrder>{}</zOrder>\r\n", drawing.z_order));
     match &drawing.kind {
+        MoxelDrawingKind::Shape(_) => {}
         MoxelDrawingKind::Picture { picture_index, .. } => {
             xml.push_str(&format!(
                 "\t\t<pictureIndex>{picture_index}</pictureIndex>\r\n"
