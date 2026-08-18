@@ -35214,8 +35214,11 @@ fn writes_business_process_flowchart_to_source_layout() {
     let start_head = format!("{{{{4,1,{{1,0}},\"Start\",1}},4,{start_uuid},0}}");
     let completion_head = format!("{{{{4,3,{{1,0}},\"Done\",3}},4,{completion_uuid},0}}");
     let line_head = "{4,2,{1,0},\"Line\",2}";
-    let start_geometry = format!("{{{style},5,10,20,50,60}}");
-    let completion_geometry = format!("{{{style},5,70,80,110,120}}");
+    let picture = "{4,0,{0},\"\",-1,-1,1,0,\"\"}";
+    let start_geometry =
+        format!("{{{style},5,10,20,50,60,4,10,20,49,20,49,59,10,59,4,{picture},{border}}}");
+    let completion_geometry =
+        format!("{{{style},5,70,80,110,120,4,70,80,109,80,109,119,70,119,4,{picture},{border}}}");
     let start_shape = format!("{{{{{start_geometry},1}}}}");
     let completion_shape = format!("{{{{{completion_geometry},1}}}}");
     let line_geometry = format!("{{{line_style},6,2,50,60,70,80,{border},0,4,2,0,0,1}}");
@@ -35226,7 +35229,7 @@ fn writes_business_process_flowchart_to_source_layout() {
         format!("{{{completion_head},2,{completion_shape},{{1,{{0,\"OnDone\"}}}}}}");
     let flowchart = deflate_for_test(
         format!(
-            "{{5,{{{{1,{style},1,20,20}}}},3,2,{start_item},1,{line_item},3,{completion_item},4}}"
+            "{{5,{{{{1,{{3,3,{{-10}}}},1,20,20,3,6,6,{{\"N\",10}},7,{{\"N\",10}},8,{{\"N\",10}},9,{{\"N\",10}},13,{{\"N\",0}},16,{{\"N\",0}}}}}},3,2,{start_item},1,{line_item},3,{completion_item},4}}"
         )
         .as_bytes(),
     );
@@ -35277,6 +35280,139 @@ fn writes_business_process_flowchart_to_source_layout() {
     let _ = fs::remove_dir_all(root);
 }
 
+/// The `ChoiceParameters` slot of a standard attribute, as the platform
+/// stores it on Catalogs/ПрочиеРасходы of 1C:Trade Management 11.5.27.75:
+/// a typed value wrapping the `{0,count,name,value,...}` list. With a
+/// resolution scope the entries decode through the shared reader; without
+/// one only the empty list is admissible, which keeps every family that
+/// cannot resolve references refusing instead of guessing.
+#[test]
+fn standard_attribute_choice_parameters_decode_with_scope_and_refuse_without() {
+    let value = concat!(
+        r##"{"#",f2eaae14-91a7-47b9-9d69-097877f41580,"##,
+        r##"{0,2,"Отбор.ВариантРаспределенияРасходов","##,
+        r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,"##,
+        r##"{0,8815e93c-5119-4e6a-92b1-20bc3bd09cd4,805eda2b-2e89-43f7-a430-445dc577611a}"##,
+        r##"},"Отбор.ПрочиеРасходы",{"B",1}}}"##,
+    );
+    let empty = r##"{"#",f2eaae14-91a7-47b9-9d69-097877f41580,{0,0}}"##;
+    let type_index = BTreeMap::from([(
+        "8815e93c-5119-4e6a-92b1-20bc3bd09cd4".to_string(),
+        "cfg:EnumRef.ВариантыРаспределенияРасходов".to_string(),
+    )]);
+    let object_refs = BTreeMap::from([(
+        "805eda2b-2e89-43f7-a430-445dc577611a".to_string(),
+        "Enum.ВариантыРаспределенияРасходов.EnumValue.НаНаправленияДеятельности".to_string(),
+    )]);
+    let scope = StandardAttributeChoiceParameterScope {
+        type_index: &type_index,
+        object_refs: &object_refs,
+    };
+
+    let parameters =
+        parse_register_standard_attribute_choice_parameters(value, Some(scope)).unwrap();
+    assert_eq!(parameters.len(), 2);
+    assert_eq!(parameters[0].name, "Отбор.ВариантРаспределенияРасходов");
+    assert!(matches!(
+        &parameters[0].value,
+        MetadataChoiceParameterValue::DesignTimeRef(reference)
+            if reference == "Enum.ВариантыРаспределенияРасходов.EnumValue.НаНаправленияДеятельности"
+    ));
+    assert_eq!(parameters[1].name, "Отбор.ПрочиеРасходы");
+    assert!(matches!(
+        &parameters[1].value,
+        MetadataChoiceParameterValue::Boolean(true)
+    ));
+
+    assert!(
+        parse_register_standard_attribute_choice_parameters(empty, Some(scope))
+            .is_some_and(|parameters| parameters.is_empty())
+    );
+    assert!(
+        parse_register_standard_attribute_choice_parameters(empty, None)
+            .is_some_and(|parameters| parameters.is_empty())
+    );
+    assert!(parse_register_standard_attribute_choice_parameters(value, None).is_none());
+}
+
+/// Platform-attested storage element `553dbd65-c1aa-406a-8ccc-ca1538267b13.7`
+/// (BusinessProcesses/СогласованиеЦенНоменклатуры flowchart, packed sha256
+/// `25d6dadb85e615447be742ab46871edbf22646bdbd8fe7564b3fdfb370c42d51`) of
+/// 1C:Trade Management 11.5.27.75's `1cv8.cf`. Its native export (sha256
+/// `960ffec593f87052800302cac35025ee00000e38915cf315e4dd561e4b872673`,
+/// byte-identical to manifest-round2 of the same platform export) is
+/// reproduced byte-for-byte: the byte-order mark, the print parameters, the
+/// automatic font, the addressing-attribute design-time reference to the
+/// predefined executor role, and the absence of a trailing newline.
+#[test]
+fn platform_business_process_flowchart_reencodes_byte_for_byte() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "business-process-flowchart-ut/raw/553dbd65-c1aa-406a-8ccc-ca1538267b13.7.deflate.b64"
+    )))
+    .expect("platform-attested flowchart payload");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "25d6dadb85e615447be742ab46871edbf22646bdbd8fe7564b3fdfb370c42d51"
+    );
+    let inflated =
+        inflate_raw_deflate(&packed).expect("platform-attested flowchart raw-deflate body");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&inflated)),
+        "9dee730eca1cf684bf93a260b2eef514fb3bb62acc3d5cadeb57a397116439e5"
+    );
+    let text = String::from_utf8(inflated).expect("flowchart body is UTF-8");
+
+    // The reference slice the export pipeline resolves this flowchart with:
+    // the four task addressing attributes, the executor-role catalog behind
+    // the design-time value, and its predefined item.
+    let object_refs = BTreeMap::from(
+        [
+            (
+                "0408002c-9255-43a2-8022-82f02ee0e8f4",
+                "Task.ЗадачаИсполнителя.AddressingAttribute.ДополнительныйОбъектАдресации",
+            ),
+            (
+                "1851afd4-5324-45c1-b754-54e65943f945",
+                "Task.ЗадачаИсполнителя.AddressingAttribute.ОсновнойОбъектАдресации",
+            ),
+            (
+                "88f44c9b-216d-4d7e-bc88-1e6b253ed01e",
+                "Task.ЗадачаИсполнителя.AddressingAttribute.Исполнитель",
+            ),
+            (
+                "bc5eca9b-32d8-44e0-a127-8ad1f47d7957",
+                "Task.ЗадачаИсполнителя.AddressingAttribute.РольИсполнителя",
+            ),
+            (
+                "44422b6d-5eb8-49c6-856b-dd9009611933",
+                "Catalog.РолиИсполнителей",
+            ),
+            (
+                "owner-value:Catalog.РолиИсполнителей:15f28b3a-2fbc-42f0-80b9-508b588438b1",
+                "Catalog.РолиИсполнителей.СогласующийУстановкиЦенНоменклатуры",
+            ),
+        ]
+        .map(|(key, value)| (key.to_string(), value.to_string())),
+    );
+
+    let flowchart =
+        parse_business_process_flowchart_text(text.trim_start_matches('\u{feff}'), &object_refs)
+            .expect("the platform flowchart parses whole");
+    let xml = format_business_process_flowchart_xml(&flowchart);
+    let native: &[u8] = include_bytes!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "business-process-flowchart-ut/native/BusinessProcesses/",
+        "СогласованиеЦенНоменклатуры/Ext/Flowchart.xml"
+    ));
+    assert_eq!(
+        format!("{:x}", Sha256::digest(native)),
+        "960ffec593f87052800302cac35025ee00000e38915cf315e4dd561e4b872673",
+        "bundled native evidence must stay byte-identical to the platform export"
+    );
+    assert_eq!(xml.as_bytes(), native);
+}
+
 #[test]
 fn writes_business_process_connection_line_font_from_serialized_style() {
     let default_style =
@@ -35288,7 +35424,10 @@ fn writes_business_process_connection_line_font_from_serialized_style() {
     let line_geometry = format!("{{{line_style},6,2,50,60,70,80,{border},0,4,2,0,0,1}}");
     let line_shape = format!("{{{line_geometry}}}");
     let line_item = format!("{{{line_head},3,-1,0,-1,0,{line_shape}}}");
-    let text = format!("{{5,{{{{1,{default_style},1,20,20}}}},1,1,{line_item}}}");
+    let text = format!(
+        "{{5,{{{{1,{{3,3,{{-10}}}},1,20,20,3,6,6,{{\"N\",10}},7,{{\"N\",10}},8,{{\"N\",10}},9,{{\"N\",10}},13,{{\"N\",0}},16,{{\"N\",0}}}}}},1,1,{line_item},2}}"
+    );
+    let _ = default_style;
 
     let flowchart = parse_business_process_flowchart_text(&text, &BTreeMap::new()).unwrap();
     let xml = format_business_process_flowchart_xml(&flowchart);
@@ -35314,12 +35453,16 @@ fn parses_business_process_flowchart_processing_split_and_join_items() {
     let processing_head = format!("{{{{4,10,{{1,0}},\"Processing\",1}},4,{processing_uuid},0}}");
     let split_head = format!("{{{{4,20,{{1,0}},\"Split\",2}},4,{split_uuid},0}}");
     let join_head = format!("{{{{4,30,{{1,0}},\"Join\",3}},4,{join_uuid},0}}");
-    let shape = format!("{{{{{{{style},5,10,20,50,60}},1}}}}");
+    let picture = "{4,0,{0},\"\",-1,-1,1,0,\"\"}";
+    let border = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
+    let shape = format!(
+        "{{{{{{{style},5,10,20,50,60,4,10,20,49,20,49,59,10,59,4,{picture},{border}}},1}}}}"
+    );
     let processing_item = format!("{{{processing_head},0,{shape},{{1,{{0,\"OnProcess\"}}}}}}");
     let split_item = format!("{{{split_head},1,{shape}}}");
     let join_item = format!("{{{join_head},1,{shape}}}");
     let text = format!(
-        "{{5,{{{{1,{style},1,20,20}}}},3,9,{processing_item},7,{split_item},8,{join_item}}}"
+        "{{5,{{{{1,{{3,3,{{-10}}}},1,20,20,3,6,6,{{\"N\",10}},7,{{\"N\",10}},8,{{\"N\",10}},9,{{\"N\",10}},13,{{\"N\",0}},16,{{\"N\",0}}}}}},3,9,{processing_item},7,{split_item},8,{join_item},31}}"
     );
 
     let flowchart = parse_business_process_flowchart_text(&text, &BTreeMap::new()).unwrap();

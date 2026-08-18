@@ -1794,6 +1794,7 @@ pub(super) fn write_source_asset(
             let flowchart = parse_business_process_flowchart_blob(
                 bytes,
                 context.object_refs,
+                context.metadata_object_refs,
                 context.type_index,
                 context.type_index_collisions,
             )

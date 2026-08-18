@@ -2749,13 +2749,20 @@ fn dump_table_rows_with_options_mode(
         BTreeMap::new()
     };
     let metadata_value_owner_file_names = eager_metadata_value_owner_file_names(&metadata_texts);
-    let metadata_value_owner_ids = selected_metadata_predefined_owner_ids(
+    let mut metadata_value_owner_ids = selected_metadata_predefined_owner_ids(
         &metadata_texts,
         &metadata_value_owner_file_names,
         &type_index,
         &object_refs,
         &body_owners,
     );
+    metadata_value_owner_ids.extend(business_process_flowchart_predefined_owner_ids(
+        &rows,
+        &business_process_flowchart_file_names(&metadata_texts),
+        &type_index,
+        &object_refs,
+        &body_owners,
+    ));
     let metadata_value_body_owners = body_owners
         .iter()
         .filter(|(uuid, _)| metadata_value_owner_ids.contains(*uuid))
@@ -3813,13 +3820,36 @@ fn dump_table_rows_streamed(
     };
     let metadata_value_owner_file_names =
         streamed_metadata_value_owner_file_names(&index_metadata_texts, &selected_file_names);
-    let owner_ids = selected_metadata_predefined_owner_ids(
+    let mut owner_ids = selected_metadata_predefined_owner_ids(
         &index_metadata_texts,
         &metadata_value_owner_file_names,
         &type_index,
         &object_refs,
         &body_owners,
     );
+    let flowchart_file_names = business_process_flowchart_file_names(&index_metadata_texts);
+    if !flowchart_file_names.is_empty() {
+        let flowchart_fetch_started = Instant::now();
+        let flowchart_rows = fetch_config_rows_bcp(
+            sqlcmd,
+            bcp,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &flowchart_file_names,
+        )?;
+        timings.prepare_metadata_fetch_ms += elapsed_ms(flowchart_fetch_started);
+        timings.prepare_metadata_fetch_bcp_ms += elapsed_ms(flowchart_fetch_started);
+        owner_ids.extend(business_process_flowchart_predefined_owner_ids(
+            &flowchart_rows,
+            &flowchart_file_names,
+            &type_index,
+            &object_refs,
+            &body_owners,
+        ));
+    }
     let required_body_owners = body_owners
         .iter()
         .filter(|(uuid, _)| owner_ids.contains(*uuid))
@@ -4422,38 +4452,97 @@ fn selected_metadata_predefined_owner_ids(
         {
             continue;
         }
-        let mut pending = vec![row.text.as_str()];
-        while let Some(value) = pending.pop() {
-            if let Some((owner_uuid, value_uuid)) =
-                parse_information_register_design_time_ref_ids(value)
-                && !information_register_uuid_is_zero(&owner_uuid)
-                && !information_register_uuid_is_zero(&value_uuid)
-                && let Some(owner_reference) = information_register_design_time_owner_reference(
-                    &owner_uuid,
-                    type_index,
-                    object_refs,
-                )
-                && !object_refs.get(&value_uuid).is_some_and(|reference| {
-                    information_register_reference_belongs_to_owner(&owner_reference, reference)
-                })
-            {
-                let mut matches = body_owners
-                    .keys()
-                    .filter(|candidate| object_refs.get(*candidate) == Some(&owner_reference));
-                if let (Some(owner_metadata_uuid), None) = (matches.next().cloned(), matches.next())
-                {
-                    owners.insert(owner_metadata_uuid);
-                }
+        collect_predefined_owner_ids_in_value(
+            &row.text,
+            type_index,
+            object_refs,
+            body_owners,
+            &mut owners,
+        );
+    }
+    owners
+}
+
+fn collect_predefined_owner_ids_in_value(
+    text: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+    owners: &mut BTreeSet<String>,
+) {
+    let mut pending = vec![text];
+    while let Some(value) = pending.pop() {
+        if let Some((owner_uuid, value_uuid)) =
+            parse_information_register_design_time_ref_ids(value)
+            && !information_register_uuid_is_zero(&owner_uuid)
+            && !information_register_uuid_is_zero(&value_uuid)
+            && let Some(owner_reference) = information_register_design_time_owner_reference(
+                &owner_uuid,
+                type_index,
+                object_refs,
+            )
+            && !object_refs.get(&value_uuid).is_some_and(|reference| {
+                information_register_reference_belongs_to_owner(&owner_reference, reference)
+            })
+        {
+            let mut matches = body_owners
+                .keys()
+                .filter(|candidate| object_refs.get(*candidate) == Some(&owner_reference));
+            if let (Some(owner_metadata_uuid), None) = (matches.next().cloned(), matches.next()) {
+                owners.insert(owner_metadata_uuid);
             }
-            let Some(fields) = split_1c_braced_fields(value, 0) else {
-                continue;
-            };
-            pending.extend(
-                fields
-                    .into_iter()
-                    .filter(|field| field.trim_start().starts_with('{')),
-            );
         }
+        let Some(fields) = split_1c_braced_fields(value, 0) else {
+            continue;
+        };
+        pending.extend(
+            fields
+                .into_iter()
+                .filter(|field| field.trim_start().starts_with('{')),
+        );
+    }
+}
+
+/// Business-process flowcharts are the one source asset carrying design-time
+/// references to predefined items (addressing-attribute values); their owners
+/// must join the predefined-item reference index the same way metadata-text
+/// owners do.
+fn business_process_flowchart_file_names(metadata_texts: &[MetadataTextRow]) -> BTreeSet<String> {
+    metadata_texts
+        .iter()
+        .filter(|row| row.kind.as_deref() == Some("BusinessProcess"))
+        .map(|row| format!("{}.7", row.file_name))
+        .collect()
+}
+
+fn business_process_flowchart_predefined_owner_ids(
+    flowchart_rows: &[ConfigRow],
+    flowchart_file_names: &BTreeSet<String>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+) -> BTreeSet<String> {
+    let mut owners = BTreeSet::new();
+    for row in flowchart_rows {
+        if !flowchart_file_names.contains(&row.file_name) {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        collect_predefined_owner_ids_in_value(
+            text.trim_start_matches('\u{feff}'),
+            type_index,
+            object_refs,
+            body_owners,
+            &mut owners,
+        );
     }
     owners
 }
@@ -4812,7 +4901,27 @@ struct ExchangePlanContentItem {
 }
 
 struct BusinessProcessFlowchart {
+    scheme: FlowchartScheme,
     items: Vec<FlowchartItem>,
+}
+
+/// Root properties of the graphical scheme, read off the header record.
+struct FlowchartScheme {
+    back_color: String,
+    grid_enabled: bool,
+    grid_horizontal_step: String,
+    grid_vertical_step: String,
+    draw_grid_mode: &'static str,
+    print_parameters: FlowchartPrintParameters,
+}
+
+struct FlowchartPrintParameters {
+    top_margin: String,
+    left_margin: String,
+    bottom_margin: String,
+    right_margin: String,
+    black_and_white: bool,
+    fit_page_mode: &'static str,
 }
 
 struct FlowchartItem {
@@ -4822,29 +4931,51 @@ struct FlowchartItem {
     name: String,
     title: Vec<(String, String)>,
     tab_order: String,
-    z_order: String,
     properties: FlowchartItemProperties,
     events: Vec<FlowchartEvent>,
 }
 
+/// The style record every item carries: `{7, back, line, text, font,
+/// tooltip, halign, 1, 1, zorder, 0, transparent, 0, 0}`. The three colours
+/// are one and the same control-colour value the form writer reads, in the
+/// order back / line / text; the two constant flag groups are pinned because
+/// no item in the evidence base varies them.
+struct FlowchartItemStyle {
+    back_color: String,
+    line_color: String,
+    text_color: String,
+    font: FlowchartFont,
+    tooltip: Vec<(String, String)>,
+    horizontal_align: &'static str,
+    z_order: String,
+    transparent: bool,
+}
+
 struct FlowchartItemProperties {
+    style: FlowchartItemStyle,
     location: Option<FlowchartLocation>,
     pivot_points: Vec<FlowchartPoint>,
+    manually_moved_segments: Vec<FlowchartSegment>,
     from: Option<FlowchartConnectionEnd>,
     to: Option<FlowchartConnectionEnd>,
-    font: FlowchartFont,
     decorative_line: bool,
     line_style: &'static str,
+    text_location: &'static str,
     begin_arrow: &'static str,
     end_arrow: &'static str,
-    transparent: bool,
-    horizontal_align: &'static str,
     explanation: Option<String>,
     task_description: Option<String>,
+    group: bool,
     addressing_attributes: Vec<FlowchartAddressingAttribute>,
     subprocess: Option<String>,
     true_port_index: Option<String>,
     false_port_index: Option<String>,
+}
+
+struct FlowchartSegment {
+    index: String,
+    start: FlowchartPoint,
+    end: FlowchartPoint,
 }
 
 struct FlowchartAddressingAttribute {
@@ -4968,6 +5099,7 @@ fn parse_exchange_plan_content_blob(
 fn parse_business_process_flowchart_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
 ) -> Option<BusinessProcessFlowchart> {
@@ -4976,6 +5108,7 @@ fn parse_business_process_flowchart_blob(
     parse_business_process_flowchart_text_with_types(
         text.trim_start_matches('\u{feff}'),
         object_refs,
+        metadata_object_refs,
         type_index,
         type_index_collisions,
     )
@@ -4989,6 +5122,7 @@ fn parse_business_process_flowchart_text(
     parse_business_process_flowchart_text_with_types(
         text,
         object_refs,
+        object_refs,
         &BTreeMap::new(),
         &BTreeSet::new(),
     )
@@ -4997,6 +5131,7 @@ fn parse_business_process_flowchart_text(
 fn parse_business_process_flowchart_text_with_types(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
 ) -> Option<BusinessProcessFlowchart> {
@@ -5004,7 +5139,16 @@ fn parse_business_process_flowchart_text_with_types(
     if fields.first()?.trim() != "5" {
         return None;
     }
+    let scheme = parse_flowchart_scheme(fields.get(1)?, object_refs)?;
     let item_count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    // The record closes with one numeric field after the item pairs -- the
+    // scheme's id counter; all seven evidenced flowcharts carry it and it is
+    // not part of the exported XML.
+    let trailer_index = item_count.checked_mul(2)?.checked_add(3)?;
+    if fields.len() != trailer_index.checked_add(1)? {
+        return None;
+    }
+    parse_flowchart_number(fields.get(trailer_index)?)?;
     let mut raw_items = Vec::<(String, String)>::with_capacity(item_count);
     let mut names = BTreeMap::<String, String>::new();
     let mut index = 3usize;
@@ -5018,19 +5162,120 @@ fn parse_business_process_flowchart_text_with_types(
     }
 
     let mut items = Vec::with_capacity(item_count);
-    for (z_order, (code, body)) in raw_items.into_iter().enumerate() {
+    for (code, body) in raw_items {
         items.push(parse_flowchart_item(
             &code,
             &body,
             &names,
             object_refs,
+            metadata_object_refs,
             type_index,
             type_index_collisions,
-            z_order.to_string(),
         )?);
     }
 
-    Some(BusinessProcessFlowchart { items })
+    Some(BusinessProcessFlowchart { scheme, items })
+}
+
+/// Header record: `{1, back, grid_enabled, hstep, vstep, draw_grid_mode,
+/// count, key, {"N",value}, ...}` where the keyed tail carries the print
+/// parameters (6..9 margins, 13 black-and-white, 16 fit-page mode). Read off
+/// all seven flowcharts of the evidence base; any other key, mode or value
+/// refuses the scheme.
+fn parse_flowchart_scheme(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FlowchartScheme> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    if outer.len() != 1 {
+        return None;
+    }
+    let fields = split_1c_braced_fields(outer.first()?, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let back_color = parse_flowchart_color(fields.get(1)?, object_refs)?;
+    let grid_enabled = parse_flowchart_flag(fields.get(2)?)?;
+    let grid_horizontal_step = parse_flowchart_number(fields.get(3)?)?;
+    let grid_vertical_step = parse_flowchart_number(fields.get(4)?)?;
+    let draw_grid_mode = match fields.get(5)?.trim() {
+        "3" => "Lines",
+        _ => return None,
+    };
+    let count = fields.get(6)?.trim().parse::<usize>().ok()?;
+    if fields.len() != count.checked_mul(2)?.checked_add(7)? {
+        return None;
+    }
+    let mut values = BTreeMap::new();
+    for pair in fields[7..].chunks_exact(2) {
+        let key = pair[0].trim().parse::<u32>().ok()?;
+        let value = split_1c_braced_fields(pair[1], 0)?;
+        if value.len() != 2 || value.first()?.trim() != r#""N""# {
+            return None;
+        }
+        if values
+            .insert(key, parse_flowchart_number(value.get(1)?)?)
+            .is_some()
+        {
+            return None;
+        }
+    }
+    if values.len() != 6 {
+        return None;
+    }
+    let print_parameters = FlowchartPrintParameters {
+        top_margin: values.remove(&6)?,
+        left_margin: values.remove(&7)?,
+        bottom_margin: values.remove(&8)?,
+        right_margin: values.remove(&9)?,
+        black_and_white: match values.remove(&13)?.as_str() {
+            "0" => false,
+            "1" => true,
+            _ => return None,
+        },
+        fit_page_mode: match values.remove(&16)?.as_str() {
+            "0" => "Auto",
+            _ => return None,
+        },
+    };
+    Some(FlowchartScheme {
+        back_color,
+        grid_enabled,
+        grid_horizontal_step,
+        grid_vertical_step,
+        draw_grid_mode,
+        print_parameters,
+    })
+}
+
+fn parse_flowchart_number(value: &str) -> Option<String> {
+    let value = value.trim();
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.to_string())
+}
+
+fn parse_flowchart_flag(value: &str) -> Option<bool> {
+    match value.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+/// A flowchart colour is the control-colour value the form reader decodes;
+/// the unset shape `{3,4,{0}}`, which a form writes as no element, is the
+/// scheme's `auto`.
+fn parse_flowchart_color(value: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.len() != 3 || fields.first()?.trim() != "3" {
+        return None;
+    }
+    if fields.get(1)?.trim() == "4" {
+        let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
+        return (payload.len() == 1 && payload.first()?.trim() == "0").then(|| "auto".to_string());
+    }
+    parse_form_control_color(value, object_refs)
 }
 
 fn parse_flowchart_item(
@@ -5038,122 +5283,95 @@ fn parse_flowchart_item(
     body: &str,
     names: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
-    z_order: String,
 ) -> Option<FlowchartItem> {
     let fields = split_1c_braced_fields(body, 0)?;
     let base = parse_flowchart_base(code, body)?;
-    let mut properties = FlowchartItemProperties {
-        location: None,
-        pivot_points: Vec::new(),
-        from: None,
-        to: None,
-        font: FlowchartFont::default(),
-        decorative_line: false,
-        line_style: "Solid",
-        begin_arrow: "None",
-        end_arrow: "None",
-        transparent: false,
-        horizontal_align: "Center",
-        explanation: None,
-        task_description: None,
-        addressing_attributes: Vec::new(),
-        subprocess: None,
-        true_port_index: None,
-        false_port_index: None,
-    };
     let mut events = Vec::new();
-    let tag = match code {
-        "0" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
-            properties.transparent = parse_flowchart_transparent(fields.get(2)?).unwrap_or(false);
-            properties.horizontal_align = if properties.transparent {
-                "Left"
-            } else {
-                "Center"
-            };
-            "Decoration"
-        }
+    let (tag, properties) = match code {
+        "0" => (
+            "Decoration",
+            parse_flowchart_decoration_graphics(fields.get(2)?, object_refs)?,
+        ),
         "1" => {
-            parse_flowchart_line_graphics(fields.get(6)?, &mut properties, names)?;
+            if fields.len() != 7 || fields.get(1)?.trim() != "3" {
+                return None;
+            }
+            let mut properties = parse_flowchart_line_graphics(fields.get(6)?, object_refs)?;
             let from_id = fields.get(2)?.trim();
             let to_id = fields.get(4)?.trim();
             if from_id != "-1"
                 && let Some(from) = &mut properties.from
             {
-                from.item = names.get(from_id).cloned().unwrap_or_default();
+                from.item = names.get(from_id)?.clone();
             }
             if to_id != "-1"
                 && let Some(to) = &mut properties.to
             {
-                to.item = names.get(to_id).cloned().unwrap_or_default();
+                to.item = names.get(to_id)?.clone();
             }
-            properties.decorative_line = fields.get(5).map(|value| value.trim() == "1")?;
-            properties.line_style = if properties.decorative_line {
-                "Dashed"
-            } else {
-                "Solid"
-            };
-            properties.end_arrow = if properties.decorative_line
-                && properties
-                    .to
-                    .as_ref()
-                    .map(|end| end.item.is_empty())
-                    .unwrap_or(true)
-            {
-                "None"
-            } else {
-                "Filled"
-            };
-            "ConnectionLine"
+            properties.decorative_line = parse_flowchart_flag(fields.get(5)?)?;
+            ("ConnectionLine", properties)
         }
         "2" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            let properties = parse_flowchart_shape_graphics(fields.get(2)?, object_refs)?;
             events = parse_flowchart_named_events(fields.get(3)?, &["BeforeStart"])?;
-            "Start"
+            ("Start", properties)
         }
         "3" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            let properties = parse_flowchart_shape_graphics(fields.get(2)?, object_refs)?;
             events = parse_flowchart_named_events(fields.get(3)?, &["OnComplete"])?;
-            "Completion"
+            ("Completion", properties)
         }
         "4" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
-            properties.true_port_index = Some("3".to_string());
-            properties.false_port_index = Some("1".to_string());
+            let (mut properties, tail) =
+                parse_flowchart_shape_graphics_with_tail(fields.get(2)?, object_refs)?;
+            if tail.len() != 3 || tail.first()?.trim() != "3" {
+                return None;
+            }
+            properties.true_port_index = Some(parse_flowchart_number(tail.get(1)?)?);
+            properties.false_port_index = Some(parse_flowchart_number(tail.get(2)?)?);
             events = parse_flowchart_named_events(fields.get(3)?, &["ConditionCheck"])?;
-            "Condition"
+            ("Condition", properties)
         }
         "5" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            let (mut properties, tail) =
+                parse_flowchart_shape_graphics_with_tail(fields.get(2)?, object_refs)?;
+            if tail.len() != 3 || tail.first()?.trim() != "3" || tail.get(1)?.trim() != "2" {
+                return None;
+            }
+            properties.group = parse_flowchart_flag(tail.get(2)?)?;
             properties.explanation = fields.get(3).and_then(|value| parse_1c_string(value));
             properties.task_description = fields.get(7).and_then(|value| parse_1c_string(value));
             properties.addressing_attributes = parse_flowchart_activity_addressing_attributes(
                 &fields,
                 object_refs,
+                metadata_object_refs,
                 type_index,
                 type_index_collisions,
             )
             .unwrap_or_default();
             events = parse_flowchart_activity_events(fields.get(5)?)?;
-            "Activity"
+            ("Activity", properties)
         }
-        "7" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
-            "Split"
-        }
-        "8" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
-            "Join"
-        }
+        "7" => (
+            "Split",
+            parse_flowchart_shape_graphics(fields.get(2)?, object_refs)?,
+        ),
+        "8" => (
+            "Join",
+            parse_flowchart_shape_graphics(fields.get(2)?, object_refs)?,
+        ),
         "9" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            let properties = parse_flowchart_shape_graphics(fields.get(2)?, object_refs)?;
             events = parse_flowchart_named_events(fields.get(3)?, &["Processing"])?;
-            "Processing"
+            ("Processing", properties)
         }
         "10" => {
-            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            let (mut properties, _tail) =
+                parse_flowchart_shape_graphics_with_tail(fields.get(2)?, object_refs)?;
             properties.subprocess = fields
                 .get(4)
                 .and_then(|field| parse_non_zero_uuid(field.trim()))
@@ -5170,7 +5388,7 @@ fn parse_flowchart_item(
                     "BeforeCreateSubBusinessProcesses",
                 ],
             )?;
-            "SubBusinessProcess"
+            ("SubBusinessProcess", properties)
         }
         _ => return None,
     };
@@ -5182,7 +5400,6 @@ fn parse_flowchart_item(
         name: base.name,
         title: base.title,
         tab_order: base.tab_order,
-        z_order,
         properties,
         events,
     })
@@ -5216,69 +5433,207 @@ fn parse_flowchart_base(code: &str, body: &str) -> Option<FlowchartBase> {
     })
 }
 
-fn parse_flowchart_shape_graphics(
-    text: &str,
-    properties: &mut FlowchartItemProperties,
-) -> Option<()> {
-    let outer = split_1c_braced_fields(text, 0)?;
-    let wrapper = split_1c_braced_fields(outer.first()?, 0)?;
-    let geometry = split_1c_braced_fields(wrapper.first()?, 0)?;
-    if let Some(font) = geometry
-        .first()
-        .and_then(|style| parse_flowchart_style_font(style))
-    {
-        properties.font = font;
+fn flowchart_item_properties(style: FlowchartItemStyle) -> FlowchartItemProperties {
+    FlowchartItemProperties {
+        style,
+        location: None,
+        pivot_points: Vec::new(),
+        manually_moved_segments: Vec::new(),
+        from: None,
+        to: None,
+        decorative_line: false,
+        line_style: "Solid",
+        text_location: "FirstSegment",
+        begin_arrow: "None",
+        end_arrow: "None",
+        explanation: None,
+        task_description: None,
+        group: false,
+        addressing_attributes: Vec::new(),
+        subprocess: None,
+        true_port_index: None,
+        false_port_index: None,
     }
-    properties.location = Some(FlowchartLocation {
-        left: geometry.get(2)?.trim().to_string(),
-        top: geometry.get(3)?.trim().to_string(),
-        right: geometry.get(4)?.trim().to_string(),
-        bottom: geometry.get(5)?.trim().to_string(),
-    });
-    Some(())
 }
 
+fn parse_flowchart_item_style(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FlowchartItemStyle> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 14
+        || fields.first()?.trim() != "7"
+        || fields.get(7)?.trim() != "1"
+        || fields.get(8)?.trim() != "1"
+        || fields.get(10)?.trim() != "0"
+        || fields.get(12)?.trim() != "0"
+        || fields.get(13)?.trim() != "0"
+    {
+        return None;
+    }
+    Some(FlowchartItemStyle {
+        back_color: parse_flowchart_color(fields.get(1)?, object_refs)?,
+        line_color: parse_flowchart_color(fields.get(2)?, object_refs)?,
+        text_color: parse_flowchart_color(fields.get(3)?, object_refs)?,
+        font: parse_flowchart_font_tuple(fields.get(4)?)?,
+        tooltip: parse_flowchart_localized(fields.get(5)?)?,
+        horizontal_align: match fields.get(6)?.trim() {
+            "0" => "Left",
+            "1" => "Center",
+            _ => return None,
+        },
+        z_order: parse_flowchart_number(fields.get(9)?)?,
+        transparent: parse_flowchart_flag(fields.get(11)?)?,
+    })
+}
+
+/// Shape geometry: `{style, 5, left, top, right, bottom, n, points..., 4,
+/// picture, border}` wrapped as `{{geometry, tail...}}`; the tail is the
+/// item kind's own record and is handed back to the caller.
+fn parse_flowchart_shape_graphics_with_tail<'a>(
+    text: &'a str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(FlowchartItemProperties, Vec<&'a str>)> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    if outer.len() != 1 {
+        return None;
+    }
+    let wrapper = split_1c_braced_fields(outer.first()?, 0)?;
+    let geometry = split_1c_braced_fields(wrapper.first()?, 0)?;
+    if geometry.get(1)?.trim() != "5" {
+        return None;
+    }
+    let style = parse_flowchart_item_style(geometry.first()?, object_refs)?;
+    let mut properties = flowchart_item_properties(style);
+    properties.location = Some(FlowchartLocation {
+        left: parse_flowchart_number(geometry.get(2)?)?,
+        top: parse_flowchart_number(geometry.get(3)?)?,
+        right: parse_flowchart_number(geometry.get(4)?)?,
+        bottom: parse_flowchart_number(geometry.get(5)?)?,
+    });
+    let point_count = geometry.get(6)?.trim().parse::<usize>().ok()?;
+    let rest = point_count.checked_mul(2)?.checked_add(7)?;
+    if geometry.len() != rest.checked_add(3)? || geometry.get(rest)?.trim() != "4" {
+        return None;
+    }
+    Some((properties, wrapper[1..].to_vec()))
+}
+
+fn parse_flowchart_shape_graphics(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FlowchartItemProperties> {
+    let (properties, tail) = parse_flowchart_shape_graphics_with_tail(text, object_refs)?;
+    (tail.len() == 1 && tail.first()?.trim() == "1").then_some(properties)
+}
+
+/// Decoration geometry: `{{style, 6, left, top, right, bottom, 4, picture,
+/// flag, shape, flip, angle}}`. Only the document shape with no flip and no
+/// rotation is evidenced; anything else refuses.
+fn parse_flowchart_decoration_graphics(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FlowchartItemProperties> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    if outer.len() != 1 {
+        return None;
+    }
+    let geometry = split_1c_braced_fields(outer.first()?, 0)?;
+    if geometry.len() != 12
+        || geometry.get(1)?.trim() != "6"
+        || geometry.get(6)?.trim() != "4"
+        || !matches!(geometry.get(8)?.trim(), "0" | "1")
+        || geometry.get(9)?.trim() != "10"
+        || geometry.get(10)?.trim() != "0"
+        || geometry.get(11)?.trim() != "0"
+    {
+        return None;
+    }
+    let style = parse_flowchart_item_style(geometry.first()?, object_refs)?;
+    let mut properties = flowchart_item_properties(style);
+    properties.location = Some(FlowchartLocation {
+        left: parse_flowchart_number(geometry.get(2)?)?,
+        top: parse_flowchart_number(geometry.get(3)?)?,
+        right: parse_flowchart_number(geometry.get(4)?)?,
+        bottom: parse_flowchart_number(geometry.get(5)?)?,
+    });
+    Some(properties)
+}
+
+/// Line geometry: `{{style, 6, n, points..., line, text_location, from_port,
+/// to_port, m, segments..., begin_arrow, end_arrow}}` where each manually
+/// moved segment is `x1, y1, x2, y2, index`.
 fn parse_flowchart_line_graphics(
     text: &str,
-    properties: &mut FlowchartItemProperties,
-    names: &BTreeMap<String, String>,
-) -> Option<()> {
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FlowchartItemProperties> {
     let outer = split_1c_braced_fields(text, 0)?;
-    let geometry = split_1c_braced_fields(outer.first()?, 0)?;
-    if let Some(font) = geometry
-        .first()
-        .and_then(|style| parse_flowchart_style_font(style))
-    {
-        properties.font = font;
+    if outer.len() != 1 {
+        return None;
     }
+    let geometry = split_1c_braced_fields(outer.first()?, 0)?;
+    if geometry.get(1)?.trim() != "6" {
+        return None;
+    }
+    let style = parse_flowchart_item_style(geometry.first()?, object_refs)?;
+    let mut properties = flowchart_item_properties(style);
     let point_count = geometry.get(2)?.trim().parse::<usize>().ok()?;
     let mut points = Vec::with_capacity(point_count);
     let mut index = 3usize;
     for _ in 0..point_count {
         points.push(FlowchartPoint {
-            x: geometry.get(index)?.trim().to_string(),
-            y: geometry.get(index + 1)?.trim().to_string(),
+            x: parse_flowchart_number(geometry.get(index)?)?,
+            y: parse_flowchart_number(geometry.get(index + 1)?)?,
         });
         index += 2;
     }
     properties.pivot_points = points;
-    properties.line_style = parse_flowchart_line_style(geometry.get(index)?).unwrap_or("Solid");
-    index += 2;
-    let from_port = geometry.get(index)?.trim().to_string();
-    let to_port = geometry.get(index + 1)?.trim().to_string();
+    properties.line_style = parse_flowchart_line_style(geometry.get(index)?)?;
+    properties.text_location = match geometry.get(index + 1)?.trim() {
+        "0" => "FirstSegment",
+        _ => return None,
+    };
     properties.from = Some(FlowchartConnectionEnd {
         item: String::new(),
-        port_index: from_port,
+        port_index: parse_flowchart_number(geometry.get(index + 2)?)?,
     });
     properties.to = Some(FlowchartConnectionEnd {
         item: String::new(),
-        port_index: to_port,
+        port_index: parse_flowchart_number(geometry.get(index + 3)?)?,
     });
-    if geometry.get(index + 2).map(|value| value.trim() == "1") == Some(true) {
-        properties.end_arrow = "Filled";
+    let segment_count = geometry.get(index + 4)?.trim().parse::<usize>().ok()?;
+    index += 5;
+    let mut segments = Vec::with_capacity(segment_count);
+    for _ in 0..segment_count {
+        segments.push(FlowchartSegment {
+            start: FlowchartPoint {
+                x: parse_flowchart_number(geometry.get(index)?)?,
+                y: parse_flowchart_number(geometry.get(index + 1)?)?,
+            },
+            end: FlowchartPoint {
+                x: parse_flowchart_number(geometry.get(index + 2)?)?,
+                y: parse_flowchart_number(geometry.get(index + 3)?)?,
+            },
+            index: parse_flowchart_number(geometry.get(index + 4)?)?,
+        });
+        index += 5;
     }
-    let _ = names;
-    Some(())
+    properties.manually_moved_segments = segments;
+    if geometry.len() != index + 2 {
+        return None;
+    }
+    properties.begin_arrow = parse_flowchart_arrow(geometry.get(index)?)?;
+    properties.end_arrow = parse_flowchart_arrow(geometry.get(index + 1)?)?;
+    Some(properties)
+}
+
+fn parse_flowchart_arrow(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("None"),
+        "1" => Some("Filled"),
+        "2" => Some("Blank"),
+        _ => None,
+    }
 }
 
 impl Default for FlowchartFont {
@@ -5296,14 +5651,9 @@ impl Default for FlowchartFont {
     }
 }
 
-fn parse_flowchart_style_font(style: &str) -> Option<FlowchartFont> {
-    let fields = split_1c_braced_fields(style, 0)?;
-    if fields.first()?.trim() != "7" {
-        return None;
-    }
-    parse_flowchart_font_tuple(fields.get(4)?)
-}
-
+/// Font tuple `{7, kind, ...}`: kind 1 is the system default GUI font, kind
+/// 2 a style item with member fields, kind 3 the automatic font, which is
+/// written with no reference at all.
 fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "7" {
@@ -5324,6 +5674,20 @@ fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
                 .map(|(_, name)| format!("style:{name}"))
                 .unwrap_or_else(|| "style:TextFont".to_string());
             (reference, "StyleItem")
+        }
+        "3" => {
+            if fields.len() != 5
+                || fields.get(2)?.trim() != "0"
+                || fields.get(3)?.trim() != "1"
+                || fields.get(4)?.trim() != "100"
+            {
+                return None;
+            }
+            return Some(FlowchartFont {
+                reference: String::new(),
+                kind: "AutoFont",
+                ..FlowchartFont::default()
+            });
         }
         _ => return None,
     };
@@ -5370,20 +5734,43 @@ fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
     })
 }
 
+/// Line record `{4, 0, {0}, style, 1, 0, uuid, 0}`: style 1 solid, 2 dashed.
 fn parse_flowchart_line_style(text: &str) -> Option<&'static str> {
     let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 8 || fields.first()?.trim() != "4" {
+        return None;
+    }
     match fields.get(3)?.trim() {
+        "1" => Some("Solid"),
         "2" => Some("Dashed"),
-        _ => Some("Solid"),
+        _ => None,
     }
 }
 
-fn parse_flowchart_transparent(text: &str) -> Option<bool> {
-    let outer = split_1c_braced_fields(text, 0)?;
-    let wrapper = split_1c_braced_fields(outer.first()?, 0)?;
-    let style = split_1c_braced_fields(wrapper.first()?, 0)?;
-    let flags = split_1c_braced_fields(style.first()?, 0)?;
-    Some(flags.get(11)?.trim() == "1")
+/// Localized value `{1, count, {lang, content}...}` used by titles and
+/// tooltips alike.
+fn parse_flowchart_localized(text: &str) -> Option<Vec<(String, String)>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    fields[2..]
+        .iter()
+        .map(|field| {
+            let pair = split_1c_braced_fields(field, 0)?;
+            if pair.len() != 2 {
+                return None;
+            }
+            Some((
+                parse_1c_string(pair.first()?)?,
+                parse_1c_string(pair.get(1)?)?,
+            ))
+        })
+        .collect()
 }
 
 fn parse_flowchart_activity_events(text: &str) -> Option<Vec<FlowchartEvent>> {
@@ -5407,7 +5794,7 @@ fn parse_flowchart_activity_events(text: &str) -> Option<Vec<FlowchartEvent>> {
         },
         FlowchartEvent {
             name: "CheckExecutionProcessing",
-            handler: None,
+            handler: handlers.get(&4).cloned(),
         },
         FlowchartEvent {
             name: "BeforeExecute",
@@ -5423,6 +5810,7 @@ fn parse_flowchart_activity_events(text: &str) -> Option<Vec<FlowchartEvent>> {
 fn parse_flowchart_activity_addressing_attributes(
     activity_fields: &[&str],
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
 ) -> Option<Vec<FlowchartAddressingAttribute>> {
@@ -5459,6 +5847,7 @@ fn parse_flowchart_activity_addressing_attributes(
             reference,
             value: parse_flowchart_addressing_attribute_value(
                 member.get(1)?,
+                metadata_object_refs,
                 type_index,
                 type_index_collisions,
             )?,
@@ -5483,12 +5872,22 @@ fn flowchart_task_addressing_attribute_owner(reference: &str) -> Option<&str> {
 
 fn parse_flowchart_addressing_attribute_value(
     value: &str,
+    metadata_object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
 ) -> Option<FlowchartAddressingAttributeValue> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.len() == 1 && fields.first()?.trim() == r#""U""# {
         return Some(FlowchartAddressingAttributeValue::Nil);
+    }
+    if let Some((_, value_uuid)) = parse_information_register_design_time_ref_ids(value)
+        && !information_register_uuid_is_zero(&value_uuid)
+    {
+        // A populated reference resolves through the same owner-qualified
+        // index every design-time fill value uses.
+        return parse_information_register_design_time_ref(value, type_index, metadata_object_refs)
+            .filter(|reference| !reference.is_empty())
+            .map(FlowchartAddressingAttributeValue::DesignTimeRef);
     }
     let owner_type_id = parse_data_processor_empty_ref_fill_owner(value)?;
     let type_reference =
@@ -5584,28 +5983,45 @@ fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String
 }
 
 fn format_business_process_flowchart_xml(flowchart: &BusinessProcessFlowchart) -> String {
+    let scheme = &flowchart.scheme;
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<GraphicalSchema xmlns=\"http://v8.1c.ru/8.3/xcf/scheme\" xmlns:sch=\"http://v8.1c.ru/8.2/data/graphscheme\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
-\t<BackColor>style:FieldBackColor</BackColor>\r\n\
-\t<GridEnabled>true</GridEnabled>\r\n\
-\t<DrawGridMode>Lines</DrawGridMode>\r\n\
-\t<GridHorizontalStep>20</GridHorizontalStep>\r\n\
-\t<GridVerticalStep>20</GridVerticalStep>\r\n\
-\t<PrintParameters>\r\n\
-\t\t<TopMargin>10</TopMargin>\r\n\
-\t\t<LeftMargin>10</LeftMargin>\r\n\
-\t\t<BottomMargin>10</BottomMargin>\r\n\
-\t\t<RightMargin>10</RightMargin>\r\n\
-\t\t<BlackAndWhite>false</BlackAndWhite>\r\n\
-\t\t<FitPageMode>Auto</FitPageMode>\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<GraphicalSchema xmlns=\"http://v8.1c.ru/8.3/xcf/scheme\" xmlns:sch=\"http://v8.1c.ru/8.2/data/graphscheme\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+    );
+    xml.push_str(&format!(
+        "\t<BackColor>{}</BackColor>\r\n\
+\t<GridEnabled>{}</GridEnabled>\r\n\
+\t<DrawGridMode>{}</DrawGridMode>\r\n\
+\t<GridHorizontalStep>{}</GridHorizontalStep>\r\n\
+\t<GridVerticalStep>{}</GridVerticalStep>\r\n",
+        escape_xml_element_text(&scheme.back_color),
+        xml_bool(scheme.grid_enabled),
+        scheme.draw_grid_mode,
+        escape_xml_element_text(&scheme.grid_horizontal_step),
+        escape_xml_element_text(&scheme.grid_vertical_step),
+    ));
+    let print = &scheme.print_parameters;
+    xml.push_str(&format!(
+        "\t<PrintParameters>\r\n\
+\t\t<TopMargin>{}</TopMargin>\r\n\
+\t\t<LeftMargin>{}</LeftMargin>\r\n\
+\t\t<BottomMargin>{}</BottomMargin>\r\n\
+\t\t<RightMargin>{}</RightMargin>\r\n\
+\t\t<BlackAndWhite>{}</BlackAndWhite>\r\n\
+\t\t<FitPageMode>{}</FitPageMode>\r\n\
 \t</PrintParameters>\r\n\
 \t<Items>\r\n",
-    );
+        escape_xml_element_text(&print.top_margin),
+        escape_xml_element_text(&print.left_margin),
+        escape_xml_element_text(&print.bottom_margin),
+        escape_xml_element_text(&print.right_margin),
+        xml_bool(print.black_and_white),
+        print.fit_page_mode,
+    ));
     for item in &flowchart.items {
         push_flowchart_item_xml(&mut xml, item);
     }
-    xml.push_str("\t</Items>\r\n</GraphicalSchema>\r\n");
+    xml.push_str("\t</Items>\r\n</GraphicalSchema>");
     xml
 }
 
@@ -5624,34 +6040,44 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
             escape_xml_text(&item.id)
         ));
     }
+    let style = &item.properties.style;
     xml.push_str("\t\t\t<Properties>\r\n");
     xml.push_str(&format!(
         "\t\t\t\t<Name>{}</Name>\r\n",
-        escape_xml_text(&item.name)
+        escape_xml_element_text(&item.name)
     ));
-    push_flowchart_title_xml(xml, &item.title);
-    xml.push_str("\t\t\t\t<ToolTip/>\r\n");
+    push_flowchart_localized_xml(xml, "Title", &item.title);
+    push_flowchart_localized_xml(xml, "ToolTip", &style.tooltip);
     xml.push_str(&format!(
         "\t\t\t\t<TabOrder>{}</TabOrder>\r\n",
-        escape_xml_text(&item.tab_order)
+        escape_xml_element_text(&item.tab_order)
     ));
-    xml.push_str("\t\t\t\t<BackColor>auto</BackColor>\r\n");
-    xml.push_str("\t\t\t\t<TextColor>style:FormTextColor</TextColor>\r\n");
-    xml.push_str("\t\t\t\t<LineColor>style:BorderColor</LineColor>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<BackColor>{}</BackColor>\r\n",
+        escape_xml_element_text(&style.back_color)
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t<TextColor>{}</TextColor>\r\n",
+        escape_xml_element_text(&style.text_color)
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t<LineColor>{}</LineColor>\r\n",
+        escape_xml_element_text(&style.line_color)
+    ));
     xml.push_str("\t\t\t\t<GroupNumber>0</GroupNumber>\r\n");
     xml.push_str(&format!(
         "\t\t\t\t<ZOrder>{}</ZOrder>\r\n",
-        escape_xml_text(&item.z_order)
+        escape_xml_element_text(&style.z_order)
     ));
     xml.push_str("\t\t\t\t<Hyperlink>false</Hyperlink>\r\n");
     xml.push_str(&format!(
         "\t\t\t\t<Transparent>{}</Transparent>\r\n",
-        xml_bool(item.properties.transparent)
+        xml_bool(style.transparent)
     ));
-    push_flowchart_font_xml(xml, &item.properties.font);
+    push_flowchart_font_xml(xml, &style.font);
     xml.push_str(&format!(
         "\t\t\t\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
-        item.properties.horizontal_align
+        style.horizontal_align
     ));
     xml.push_str("\t\t\t\t<VerticalAlign>Center</VerticalAlign>\r\n");
     xml.push_str("\t\t\t\t<PictureLocation>Left</PictureLocation>\r\n");
@@ -5668,7 +6094,7 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
                 xml.push_str(&format!(
                     "\t\t\t\t<Event name=\"{}\">{}</Event>\r\n",
                     event.name,
-                    escape_xml_text(handler)
+                    escape_xml_element_text(handler)
                 ));
             } else {
                 xml.push_str(&format!("\t\t\t\t<Event name=\"{}\"/>\r\n", event.name));
@@ -5679,28 +6105,32 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
     xml.push_str(&format!("\t\t</{}>\r\n", item.tag));
 }
 
-fn push_flowchart_title_xml(xml: &mut String, title: &[(String, String)]) {
-    if title.is_empty() {
-        xml.push_str("\t\t\t\t<Title/>\r\n");
+fn push_flowchart_localized_xml(xml: &mut String, tag: &str, values: &[(String, String)]) {
+    if values.is_empty() {
+        xml.push_str(&format!("\t\t\t\t<{tag}/>\r\n"));
         return;
     }
-    xml.push_str("\t\t\t\t<Title>\r\n");
-    for (lang, content) in title {
+    xml.push_str(&format!("\t\t\t\t<{tag}>\r\n"));
+    for (lang, content) in values {
         xml.push_str("\t\t\t\t\t<v8:item>\r\n");
         xml.push_str(&format!(
             "\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-            escape_xml_text(lang)
+            escape_xml_element_text(lang)
         ));
         xml.push_str(&format!(
             "\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-            escape_xml_text(content)
+            escape_xml_element_text(content)
         ));
         xml.push_str("\t\t\t\t\t</v8:item>\r\n");
     }
-    xml.push_str("\t\t\t\t</Title>\r\n");
+    xml.push_str(&format!("\t\t\t\t</{tag}>\r\n"));
 }
 
 fn push_flowchart_font_xml(xml: &mut String, font: &FlowchartFont) {
+    if font.kind == "AutoFont" {
+        xml.push_str("\t\t\t\t<Font kind=\"AutoFont\"/>\r\n");
+        return;
+    }
     xml.push_str("\t\t\t\t<Font");
     if font.reference.starts_with("sys:") {
         xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
@@ -5757,25 +6187,28 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
     if item.tag == "Activity" {
         xml.push_str(&format!(
             "\t\t\t\t<TaskDescription>{}</TaskDescription>\r\n",
-            escape_xml_text(item.properties.task_description.as_deref().unwrap_or(""))
+            escape_xml_element_text(item.properties.task_description.as_deref().unwrap_or(""))
         ));
         xml.push_str(&format!(
             "\t\t\t\t<Explanation>{}</Explanation>\r\n",
-            escape_xml_text(item.properties.explanation.as_deref().unwrap_or(""))
+            escape_xml_element_text(item.properties.explanation.as_deref().unwrap_or(""))
         ));
-        xml.push_str("\t\t\t\t<Group>false</Group>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t<Group>{}</Group>\r\n",
+            xml_bool(item.properties.group)
+        ));
         push_flowchart_addressing_attributes_xml(xml, &item.properties.addressing_attributes);
     }
     if item.tag == "SubBusinessProcess" {
         if let Some(subprocess) = &item.properties.subprocess {
             xml.push_str(&format!(
                 "\t\t\t\t<Subprocess>{}</Subprocess>\r\n",
-                escape_xml_text(subprocess)
+                escape_xml_element_text(subprocess)
             ));
         }
         xml.push_str(&format!(
             "\t\t\t\t<TaskDescription>{}</TaskDescription>\r\n",
-            escape_xml_text(item.properties.task_description.as_deref().unwrap_or(""))
+            escape_xml_element_text(item.properties.task_description.as_deref().unwrap_or(""))
         ));
     }
     if item.tag == "Condition" {
@@ -5815,7 +6248,7 @@ fn push_flowchart_addressing_attributes_xml(
             FlowchartAddressingAttributeValue::DesignTimeRef(reference) => {
                 xml.push_str(&format!(
                     "\t\t\t\t\t\t<Value xmlns:d7p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d7p1:DesignTimeRef\">{}</Value>\r\n",
-                    escape_xml_text(reference)
+                    escape_xml_element_text(reference)
                 ));
             }
         }
@@ -5834,6 +6267,27 @@ fn push_flowchart_line_properties_xml(xml: &mut String, properties: &FlowchartIt
         ));
     }
     xml.push_str("\t\t\t\t</PivotPoints>\r\n");
+    if !properties.manually_moved_segments.is_empty() {
+        xml.push_str("\t\t\t\t<ManualyMovedSegments>\r\n");
+        for segment in &properties.manually_moved_segments {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<Segment index=\"{}\">\r\n",
+                escape_xml_text(&segment.index)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t\t<Start x=\"{}\" y=\"{}\"/>\r\n",
+                escape_xml_text(&segment.start.x),
+                escape_xml_text(&segment.start.y)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t\t<End x=\"{}\" y=\"{}\"/>\r\n",
+                escape_xml_text(&segment.end.x),
+                escape_xml_text(&segment.end.y)
+            ));
+            xml.push_str("\t\t\t\t\t</Segment>\r\n");
+        }
+        xml.push_str("\t\t\t\t</ManualyMovedSegments>\r\n");
+    }
     xml.push_str("\t\t\t\t<Connect>\r\n");
     push_flowchart_connection_end_xml(xml, "From", properties.from.as_ref());
     push_flowchart_connection_end_xml(xml, "To", properties.to.as_ref());
@@ -5848,7 +6302,10 @@ fn push_flowchart_line_properties_xml(xml: &mut String, properties: &FlowchartIt
         "\t\t\t\t<DecorativeLine>{}</DecorativeLine>\r\n",
         xml_bool(properties.decorative_line)
     ));
-    xml.push_str("\t\t\t\t<TextLocation>FirstSegment</TextLocation>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<TextLocation>{}</TextLocation>\r\n",
+        properties.text_location
+    ));
     xml.push_str(&format!(
         "\t\t\t\t<BeginArrow>{}</BeginArrow>\r\n",
         properties.begin_arrow
@@ -5867,13 +6324,17 @@ fn push_flowchart_connection_end_xml(
     let item = end.map(|end| end.item.as_str()).unwrap_or("");
     let port_index = end.map(|end| end.port_index.as_str()).unwrap_or("0");
     xml.push_str(&format!("\t\t\t\t\t<{tag}>\r\n"));
-    xml.push_str(&format!(
-        "\t\t\t\t\t\t<Item>{}</Item>\r\n",
-        escape_xml_text(item)
-    ));
+    if item.is_empty() {
+        xml.push_str("\t\t\t\t\t\t<Item/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t<Item>{}</Item>\r\n",
+            escape_xml_element_text(item)
+        ));
+    }
     xml.push_str(&format!(
         "\t\t\t\t\t\t<PortIndex>{}</PortIndex>\r\n",
-        escape_xml_text(port_index)
+        escape_xml_element_text(port_index)
     ));
     xml.push_str(&format!("\t\t\t\t\t</{tag}>\r\n"));
 }
@@ -7092,6 +7553,18 @@ struct RegisterStandardAttribute {
     full_text_search: &'static str,
     fill_value: MetadataChildFillValue,
     link_by_type: Option<RegisterStandardAttributeLinkByType>,
+    mask: String,
+    choice_parameters: Vec<MetadataChoiceParameter>,
+}
+
+/// Reference indexes a standard-attribute reader needs to resolve the
+/// design-time references inside `ChoiceParameters`. Families that never
+/// pass one keep the historical contract: a non-empty parameter list is
+/// not their case and the attribute is refused as a whole.
+#[derive(Clone, Copy)]
+struct StandardAttributeChoiceParameterScope<'r> {
+    type_index: &'r BTreeMap<String, String>,
+    object_refs: &'r BTreeMap<String, String>,
 }
 
 struct RegisterStandardAttributeLinkByType {
@@ -12582,6 +13055,7 @@ fn parse_register_standard_attribute_with_comment<'a>(
             bag,
             fill_value,
             expected_type_reduction_mode,
+            None,
         )?;
     information_register_standard_attribute_nested_values_are(
         choice_parameter_links,
@@ -12596,6 +13070,7 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
     bag: &InformationRegisterStandardAttributeBag<'a>,
     fill_value: MetadataChildFillValue,
     expected_type_reduction_mode: &str,
+    choice_parameter_scope: Option<StandardAttributeChoiceParameterScope<'_>>,
 ) -> Option<(RegisterStandardAttribute, String, &'a str)> {
     let link_by_type =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
@@ -12667,15 +13142,19 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
         || parse_information_register_standard_attribute_bool(password_mode)?
         || parse_information_register_standard_attribute_bool(mark_negatives)?
         || !information_register_standard_attribute_nil_is_valid(min_value)
-        || !parse_information_register_standard_attribute_string(mask)?.is_empty()
-        || !information_register_standard_attribute_nested_values_are(
-            choice_parameters,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
-            &["0", "0"],
-        )
     {
         return None;
     }
+    let mask = parse_information_register_standard_attribute_string(mask)?;
+    // A non-empty mask is evidenced only on the catalog families that pass a
+    // resolution scope; every scopeless family keeps its historical refusal.
+    if choice_parameter_scope.is_none() && !mask.is_empty() {
+        return None;
+    }
+    let choice_parameters = parse_register_standard_attribute_choice_parameters(
+        choice_parameters,
+        choice_parameter_scope,
+    )?;
 
     let fill_checking = match parse_information_register_standard_attribute_direct_enum(
         fill_checking,
@@ -12716,10 +13195,65 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             full_text_search,
             fill_value,
             link_by_type: None,
+            mask,
+            choice_parameters,
         },
         parse_information_register_standard_attribute_string(comment)?,
         choice_parameter_links,
     ))
+}
+
+/// The `ChoiceParameters` slot of a standard attribute is a typed value
+/// wrapping the same `{0,count,name,value,...}` list the platform stores for
+/// dimensions and attributes. Without a resolution scope only the empty list
+/// is admissible; with one, every entry is read through the shared reader
+/// and any unresolvable reference refuses the attribute.
+fn parse_register_standard_attribute_choice_parameters(
+    value: &str,
+    scope: Option<StandardAttributeChoiceParameterScope<'_>>,
+) -> Option<Vec<MetadataChoiceParameter>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(
+            fields.get(1)?,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
+        )
+    {
+        return None;
+    }
+    let Some(scope) = scope else {
+        return information_register_standard_attribute_nested_values_are(
+            value,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
+            &["0", "0"],
+        )
+        .then(Vec::new);
+    };
+    let parameters = parse_information_register_choice_parameters(
+        fields.get(2)?,
+        scope.type_index,
+        scope.object_refs,
+    )?;
+    // Nested empty references are written in two styles by the platform and
+    // no standard attribute in the evidence base carries one; refuse rather
+    // than pick a style.
+    parameters
+        .iter()
+        .all(|parameter| !choice_parameter_value_has_nested_empty_design_time_ref(&parameter.value))
+        .then_some(parameters)
+}
+
+fn choice_parameter_value_has_nested_empty_design_time_ref(
+    value: &MetadataChoiceParameterValue,
+) -> bool {
+    match value {
+        MetadataChoiceParameterValue::FixedArray(values) => values.iter().any(|value| {
+            matches!(value, MetadataChoiceParameterValue::DesignTimeRef(reference) if reference.is_empty())
+                || choice_parameter_value_has_nested_empty_design_time_ref(value)
+        }),
+        _ => false,
+    }
 }
 
 fn parse_register_standard_attribute<'a>(
@@ -13452,6 +13986,8 @@ fn register_standard_attribute(
         full_text_search: "Use",
         fill_value: MetadataChildFillValue::Nil,
         link_by_type,
+        mask: String::new(),
+        choice_parameters: Vec::new(),
     }
 }
 
@@ -16906,20 +17442,34 @@ fn parse_information_register_design_time_ref(
     match (owner_is_zero, value_is_zero) {
         (true, true) => Some(String::new()),
         (false, true) => {
-            let owner = information_register_design_time_owner_reference(
+            let Some(owner) = information_register_design_time_owner_reference(
                 &owner_uuid,
                 type_index,
                 object_refs,
-            )?;
+            ) else {
+                return information_register_dangling_design_time_ref(
+                    &owner_uuid,
+                    &value_uuid,
+                    type_index,
+                    object_refs,
+                );
+            };
             information_register_owner_reference_is_valid(&owner)
                 .then(|| format!("{owner}.EmptyRef"))
         }
         (false, false) => {
-            let owner = information_register_design_time_owner_reference(
+            let Some(owner) = information_register_design_time_owner_reference(
                 &owner_uuid,
                 type_index,
                 object_refs,
-            )?;
+            ) else {
+                return information_register_dangling_design_time_ref(
+                    &owner_uuid,
+                    &value_uuid,
+                    type_index,
+                    object_refs,
+                );
+            };
             let qualified_key = metadata_owner_value_reference_key(&owner, &value_uuid);
             let value = object_refs
                 .get(&qualified_key)
@@ -16929,6 +17479,21 @@ fn parse_information_register_design_time_ref(
         }
         (true, false) => None,
     }
+}
+
+/// A design-time reference whose owner is unknown to every index of the
+/// configuration is written by the platform as the raw `owner.value` pair,
+/// the same way the form choice-list reader already reproduces it. The rule
+/// is deliberately narrow: an owner that any index knows is never
+/// downgraded to a raw pair, so an incomplete resolution still refuses.
+fn information_register_dangling_design_time_ref(
+    owner_uuid: &str,
+    value_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let owner_known = object_refs.contains_key(owner_uuid) || type_index.contains_key(owner_uuid);
+    (!owner_known).then(|| format!("{owner_uuid}.{value_uuid}"))
 }
 
 fn metadata_owner_value_reference_key(owner_reference: &str, value_uuid: &str) -> String {
@@ -22202,6 +22767,10 @@ fn parse_catalog_standard_attributes(
                     &bag,
                     fill_value,
                     expected_raw_reduction,
+                    Some(StandardAttributeChoiceParameterScope {
+                        type_index,
+                        object_refs: metadata_object_refs,
+                    }),
                 )?;
             let choice_parameter_links = parse_catalog_standard_attribute_choice_parameter_links(
                 choice_parameter_links,
@@ -32463,12 +33032,15 @@ fn push_metadata_standard_attributes_xml(
             &parsed_attribute.choice_parameter_links,
         );
         xml.push_str(&format!(
-            "\t\t\t\t\t{}\r\n\
-\t\t\t\t\t<xr:Mask/>\r\n\
-\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
-\t\t\t\t</xr:StandardAttribute>\r\n",
+            "\t\t\t\t\t{}\r\n",
             format_register_standard_attribute_fill_value_xml(&attribute.fill_value),
         ));
+        push_register_standard_attribute_mask_and_choice_parameters_xml(
+            xml,
+            "\t\t\t\t\t",
+            attribute,
+        );
+        xml.push_str("\t\t\t\t</xr:StandardAttribute>\r\n");
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
 }
@@ -33112,12 +33684,13 @@ fn push_register_standard_attributes_xml_with_indent(
         xml.push_str(&format_register_standard_attribute_fill_value_xml(
             &attribute.fill_value,
         ));
-        xml.push_str(&format!(
-            "\r\n\
-{property_indent}<xr:Mask/>\r\n\
-{property_indent}<xr:ChoiceParameters/>\r\n\
-{attribute_indent}</xr:StandardAttribute>\r\n"
-        ));
+        xml.push_str("\r\n");
+        push_register_standard_attribute_mask_and_choice_parameters_xml(
+            xml,
+            &property_indent,
+            attribute,
+        );
+        xml.push_str(&format!("{attribute_indent}</xr:StandardAttribute>\r\n"));
     }
     xml.push_str(&format!("{indent}</{container}>\r\n"));
 }
@@ -33852,12 +34425,52 @@ fn push_metadata_child_choice_parameters_xml_with_style(
     parameters: &[MetadataChoiceParameter],
     self_close_empty_refs: bool,
 ) {
+    push_choice_parameters_xml_with_tag(
+        xml,
+        indent,
+        "ChoiceParameters",
+        parameters,
+        self_close_empty_refs,
+    );
+}
+
+/// The standard-attribute writer prints the same `app:item` list under an
+/// `xr:`-qualified container; the mask precedes it in every family.
+fn push_register_standard_attribute_mask_and_choice_parameters_xml(
+    xml: &mut String,
+    indent: &str,
+    attribute: &RegisterStandardAttribute,
+) {
+    if attribute.mask.is_empty() {
+        xml.push_str(&format!("{indent}<xr:Mask/>\r\n"));
+    } else {
+        xml.push_str(&format!(
+            "{indent}<xr:Mask>{}</xr:Mask>\r\n",
+            escape_xml_element_text(&attribute.mask)
+        ));
+    }
+    push_choice_parameters_xml_with_tag(
+        xml,
+        indent,
+        "xr:ChoiceParameters",
+        &attribute.choice_parameters,
+        false,
+    );
+}
+
+fn push_choice_parameters_xml_with_tag(
+    xml: &mut String,
+    indent: &str,
+    tag: &str,
+    parameters: &[MetadataChoiceParameter],
+    self_close_empty_refs: bool,
+) {
     if parameters.is_empty() {
-        xml.push_str(&format!("{indent}<ChoiceParameters/>\r\n"));
+        xml.push_str(&format!("{indent}<{tag}/>\r\n"));
         return;
     }
 
-    xml.push_str(&format!("{indent}<ChoiceParameters>\r\n"));
+    xml.push_str(&format!("{indent}<{tag}>\r\n"));
     for parameter in parameters {
         xml.push_str(&format!(
             "{indent}\t<app:item name=\"{}\">\r\n",
@@ -33872,7 +34485,7 @@ fn push_metadata_child_choice_parameters_xml_with_style(
         );
         xml.push_str(&format!("{indent}\t</app:item>\r\n"));
     }
-    xml.push_str(&format!("{indent}</ChoiceParameters>\r\n"));
+    xml.push_str(&format!("{indent}</{tag}>\r\n"));
 }
 
 fn push_metadata_choice_parameter_value_xml(
