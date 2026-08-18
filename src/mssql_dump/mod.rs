@@ -70,7 +70,8 @@ mod characteristics {
     use crate::metadata_owner_graph::{
         CHARACTERISTICS_REASON_TOKENS, CHARACTERISTICS_REFERENCE_KIND_TOKENS,
         CHARACTERISTICS_STAGE_TOKENS, CharacteristicsPhysicalSchema, CharacteristicsSentinelKind,
-        CharacteristicsStandardAttributeKind, CharacteristicsTagKind, OwnerGraphFamily,
+        CharacteristicsSourceShape, CharacteristicsStandardAttributeKind, CharacteristicsTagKind,
+        OwnerGraphFamily,
     };
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -737,20 +738,30 @@ mod characteristics {
         marker: i32,
     ) -> Option<String> {
         let shape = CharacteristicsPhysicalSchema::source_shape(source)?;
-        let kind =
-            CharacteristicsPhysicalSchema::standard_attribute(owner_family, role, shape, marker)?;
-        if kind == CharacteristicsStandardAttributeKind::Ref {
-            return Some(CharacteristicsPhysicalSchema::standard_ref_path(source));
-        }
         let attributes = match owner_family {
             OwnerGraphFamily::Catalog => CATALOG_STANDARD_ATTRIBUTES.as_slice(),
             OwnerGraphFamily::ChartOfCharacteristicTypes => CCT_STANDARD_ATTRIBUTES.as_slice(),
-            _ => return None,
+            _ => [].as_slice(),
         };
-        attributes.iter().find_map(|(raw, name)| {
-            (raw.parse::<i32>().ok() == Some(marker))
-                .then(|| CharacteristicsPhysicalSchema::standard_attribute_path(source, name))
-        })
+        let name = attributes
+            .iter()
+            .find_map(|(raw, name)| (raw.parse::<i32>().ok() == Some(marker)).then_some(*name));
+        // A tabular-section source names only the owner's own `Ref`, and which
+        // marker spells `Ref` is declared by the family's standard-attribute
+        // table (`-8` for catalogs, `-2` for characteristic-type plans) rather
+        // than being one number shared by both.
+        if shape == CharacteristicsSourceShape::TabularSection && !attributes.is_empty() {
+            return (name == Some("Ref"))
+                .then(|| CharacteristicsPhysicalSchema::standard_ref_path(source));
+        }
+        match CharacteristicsPhysicalSchema::standard_attribute(owner_family, role, shape, marker)?
+        {
+            CharacteristicsStandardAttributeKind::Ref => {
+                Some(CharacteristicsPhysicalSchema::standard_ref_path(source))
+            }
+            CharacteristicsStandardAttributeKind::FamilyTable => name
+                .map(|name| CharacteristicsPhysicalSchema::standard_attribute_path(source, name)),
+        }
     }
 
     pub(super) fn decode_filter_value(
@@ -2718,7 +2729,7 @@ fn dump_table_rows_with_options_mode(
         if extract_metadata_xml {
             build_standalone_content_references(
                 &metadata_texts,
-                &object_refs,
+                &configuration_root_object_refs,
                 &form_refs,
                 &template_refs,
                 &subsystem_refs,
@@ -2727,7 +2738,10 @@ fn dump_table_rows_with_options_mode(
             build_standalone_content_references_for_uuids(
                 &metadata_texts,
                 &standalone_required_refs,
-                &object_refs,
+                &build_configuration_root_object_reference_index_from_texts(
+                    &metadata_texts,
+                    &object_refs,
+                ),
                 &form_refs,
                 &template_refs,
                 &subsystem_refs,
@@ -3761,7 +3775,7 @@ fn dump_table_rows_streamed(
         if extract_metadata_xml {
             build_standalone_content_references(
                 &index_metadata_texts,
-                &object_refs,
+                &configuration_root_object_refs,
                 &form_refs,
                 &template_refs,
                 &subsystem_refs,
@@ -3770,7 +3784,10 @@ fn dump_table_rows_streamed(
             build_standalone_content_references_for_uuids(
                 &index_metadata_texts,
                 &standalone_required_refs,
-                &object_refs,
+                &build_configuration_root_object_reference_index_from_texts(
+                    &index_metadata_texts,
+                    &object_refs,
+                ),
                 &form_refs,
                 &template_refs,
                 &subsystem_refs,
@@ -7555,6 +7572,9 @@ struct RegisterStandardAttribute {
     link_by_type: Option<RegisterStandardAttributeLinkByType>,
     mask: String,
     choice_parameters: Vec<MetadataChoiceParameter>,
+    /// Design-time comment. Only the families whose reader keeps it can ever
+    /// carry a non-empty value; the rest still refuse an attribute that has one.
+    comment: String,
 }
 
 /// Reference indexes a standard-attribute reader needs to resolve the
@@ -13197,6 +13217,7 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             link_by_type: None,
             mask,
             choice_parameters,
+            comment: String::new(),
         },
         parse_information_register_standard_attribute_string(comment)?,
         choice_parameter_links,
@@ -13988,6 +14009,7 @@ fn register_standard_attribute(
         link_by_type,
         mask: String::new(),
         choice_parameters: Vec::new(),
+        comment: String::new(),
     }
 }
 
@@ -18725,6 +18747,19 @@ fn parse_catalog_choice_parameter_links(
     nested: bool,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
+    parse_owner_choice_parameter_links(value, "Catalog", owner_name, nested, object_refs)
+}
+
+/// One reader for the `5006` choice-parameter-link record. The owner kind only
+/// selects which reference prefix the resolved data paths must sit under and
+/// which negative standard-attribute codes are admitted.
+fn parse_owner_choice_parameter_links(
+    value: &str,
+    owner_kind: &str,
+    owner_name: &str,
+    nested: bool,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     if fields.len() < 2 || fields.first()?.trim() != "5006" {
         return None;
@@ -18752,8 +18787,12 @@ fn parse_catalog_choice_parameter_links(
         if path_end >= fields.len() {
             return None;
         }
-        let data_path =
-            resolve_catalog_data_path(&fields[index..path_end], owner_name, object_refs)?;
+        let data_path = resolve_owner_data_path(
+            &fields[index..path_end],
+            owner_kind,
+            owner_name,
+            object_refs,
+        )?;
         index = path_end;
         let value_change = match fields.get(index)?.trim() {
             "0" => "Clear",
@@ -18829,10 +18868,19 @@ fn resolve_catalog_data_path(
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let owner_prefix = format!("Catalog.{owner_name}.");
+    resolve_owner_data_path(fields, "Catalog", owner_name, object_refs)
+}
+
+fn resolve_owner_data_path(
+    fields: &[&str],
+    owner_kind: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let owner_prefix = format!("{owner_kind}.{owner_name}.");
     let mut resolved = Vec::with_capacity(fields.len());
     for field in fields {
-        let path = resolve_catalog_data_path_segment(field, owner_name, object_refs)?;
+        let path = resolve_owner_data_path_segment(field, owner_kind, owner_name, object_refs)?;
         if !path.starts_with(&owner_prefix) {
             return None;
         }
@@ -18846,23 +18894,34 @@ fn resolve_catalog_data_path(
     resolved.pop()
 }
 
-fn resolve_catalog_data_path_segment(
+/// The negative codes name standard attributes, and the table that maps them is
+/// a property of the owner family. Only the catalog table is evidenced, so any
+/// other family refuses a bare code and admits only resolved child references.
+fn owner_data_path_standard_attribute(owner_kind: &str, code: &str) -> Option<&'static str> {
+    if owner_kind != "Catalog" {
+        return None;
+    }
+    match code {
+        "-3" => Some("Description"),
+        "-4" => Some("Parent"),
+        "-5" => Some("Owner"),
+        "-8" => Some("Ref"),
+        _ => None,
+    }
+}
+
+fn resolve_owner_data_path_segment(
     value: &str,
+    owner_kind: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     match fields.as_slice() {
         [code] => {
-            let standard_attribute = match code.trim() {
-                "-3" => "Description",
-                "-4" => "Parent",
-                "-5" => "Owner",
-                "-8" => "Ref",
-                _ => return None,
-            };
+            let standard_attribute = owner_data_path_standard_attribute(owner_kind, code.trim())?;
             Some(format!(
-                "Catalog.{owner_name}.StandardAttribute.{standard_attribute}"
+                "{owner_kind}.{owner_name}.StandardAttribute.{standard_attribute}"
             ))
         }
         [kind, uuid] if kind.trim() == "0" => {
@@ -21120,7 +21179,16 @@ fn parse_cct_standard_attributes(
             type_index,
             object_refs,
         )?;
-        attributes.push(parse_register_standard_attribute(name, &bag, fill_value)?);
+        // A characteristic-type plan is the one family observed to carry a
+        // design-time comment on a standard attribute
+        // (`КатегорииНовостей.Code`), so this reader keeps it instead of
+        // demanding that it be empty.
+        let (attribute, comment) =
+            parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
+        attributes.push(RegisterStandardAttribute {
+            comment,
+            ..attribute
+        });
     }
     Some(attributes)
 }
@@ -21167,6 +21235,12 @@ fn parse_cct_standard_attribute_fill_value(
                 parse_information_register_design_time_ref(value, type_index, object_refs)?;
             (reference == format!("ChartOfCharacteristicTypes.{owner_name}.EmptyRef"))
                 .then_some(MetadataChildFillValue::DesignTimeRef(reference))
+        }
+        // `DeletionMark` is a boolean standard attribute and its fill value is
+        // written in the same `{"B",flag}` dialect the register readers already
+        // decode (`КаналыРекламныхВоздействий` carries `false`).
+        "-4" if fields.len() == 2 && fields.first()?.trim() == r#""B""# => {
+            information_register_bool(fields.get(1)?).map(MetadataChildFillValue::Boolean)
         }
         _ => None,
     }
@@ -21257,10 +21331,8 @@ fn parse_cct_attribute(
         &wrapper,
         nested,
         true,
-        owner_name,
-        &value_types,
+        Some((owner_name, object_refs)),
         type_index,
-        object_refs,
         metadata_object_refs,
     )?;
     Some(MetadataChildObject {
@@ -21297,32 +21369,45 @@ fn parse_cct_attribute_properties(
     wrapper: &[&str],
     nested: bool,
     direct_use_mode: bool,
-    _owner_name: &str,
-    _value_types: &[ConstantValueType],
+    owner_scope: Option<(&str, &BTreeMap<String, String>)>,
     type_index: &BTreeMap<String, String>,
-    _object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
     if payload.len() != 23 || payload.first()?.trim() != "27" {
         return None;
     }
     let choice_form_uuid = parse_information_register_uuid(payload.get(11)?)?;
-    let choice_parameter_links = split_information_register_braced_fields(payload.get(14)?)?;
     let link_by_type = split_information_register_braced_fields(payload.get(15)?)?;
     let choice_parameters = parse_information_register_choice_parameters(
         payload.get(16)?,
         type_index,
         metadata_object_refs,
     )?;
+    // The links carry data paths, so they can only be resolved inside a named
+    // owner with its reference index. The business-process caller has neither,
+    // and there only the empty record is admitted.
+    let choice_parameter_links = match owner_scope {
+        Some((owner_name, object_refs)) => parse_owner_choice_parameter_links(
+            payload.get(14)?,
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            owner_name,
+            nested,
+            object_refs,
+        )?,
+        None => {
+            let record = split_information_register_braced_fields(payload.get(14)?)?;
+            if record.len() != 2 || record.first()?.trim() != "5006" || record.get(1)?.trim() != "0"
+            {
+                return None;
+            }
+            Vec::new()
+        }
+    };
     if !information_register_uuid_is_zero(&choice_form_uuid)
-        || choice_parameter_links.len() != 2
-        || choice_parameter_links.first()?.trim() != "5006"
-        || choice_parameter_links.get(1)?.trim() != "0"
         || link_by_type.len() != 3
         || link_by_type.first()?.trim() != "3"
         || link_by_type.get(1)?.trim() != "0"
         || link_by_type.get(2)?.trim() != "0"
-        || !choice_parameters.is_empty()
     {
         return None;
     }
@@ -21366,8 +21451,8 @@ fn parse_cct_attribute_properties(
         choice_folders_and_items: Some(catalog_choice_folders_and_items_xml(
             payload.get(10)?.trim(),
         )?),
-        choice_parameter_links: Some(Vec::new()),
-        choice_parameters: Some(Vec::new()),
+        choice_parameter_links: Some(choice_parameter_links),
+        choice_parameters: Some(choice_parameters),
         self_close_empty_choice_parameter_refs: false,
         quick_choice: Some(catalog_quick_choice_xml(payload.get(12)?.trim())?),
         create_on_input: Some(catalog_create_on_input_xml(payload.get(21)?.trim())?),
@@ -21426,10 +21511,8 @@ fn parse_business_process_child_properties(
         &wrapper,
         expected_nested,
         false,
-        "",
-        &[],
+        None,
         type_index,
-        &BTreeMap::new(),
         metadata_object_refs,
     )
 }
@@ -25321,6 +25404,28 @@ fn parse_task_addressing_attributes(
         .collect()
 }
 
+/// A task addressing attribute is written as `[4, payload27, indexing,
+/// dimension, fullTextSearch, dataHistory]`. A direct attribute drops the
+/// dimension slot; all fourteen the platform writes for
+/// `Task.ЗадачаИсполнителя` use code 3 with the same two trailing slots the
+/// characteristic-type plans write on their own code-3 attributes, and the
+/// shorter code-2 form keeps its meaning.
+fn task_child_wrapper_is_exact(wrapper: &[&str], addressing: bool) -> bool {
+    if addressing {
+        return wrapper.len() == 6 && wrapper.first().is_some_and(|value| value.trim() == "4");
+    }
+    match (wrapper.first().map(|value| value.trim()), wrapper.len()) {
+        (Some("2"), 5) => true,
+        (Some("3"), 7) => {
+            wrapper.get(5).is_some_and(|value| value.trim() == "0")
+                && wrapper.get(6).is_some_and(|value| {
+                    cct_pair_is(value, "1", "00000000-0000-0000-0000-000000000000")
+                })
+        }
+        _ => false,
+    }
+}
+
 fn parse_task_wrapped_child(
     value: &str,
     addressing: bool,
@@ -25335,9 +25440,7 @@ fn parse_task_wrapped_child(
         return None;
     }
     let wrapper = split_information_register_braced_fields(item.first()?)?;
-    let expected_code = if addressing { "4" } else { "2" };
-    let expected_len = if addressing { 6 } else { 5 };
-    if wrapper.len() != expected_len || wrapper.first()?.trim() != expected_code {
+    if !task_child_wrapper_is_exact(&wrapper, addressing) {
         return None;
     }
     let (payload, child_uuid) = parse_metadata_code27_payload(wrapper.get(1)?)?;
@@ -33673,9 +33776,16 @@ fn push_register_standard_attributes_xml_with_indent(
             attribute.data_history,
         ));
         push_xr_localized_property_xml(xml, &property_indent, "Synonym", &attribute.synonym);
+        if attribute.comment.is_empty() {
+            xml.push_str(&format!("{property_indent}<xr:Comment/>\r\n"));
+        } else {
+            xml.push_str(&format!(
+                "{property_indent}<xr:Comment>{}</xr:Comment>\r\n",
+                escape_xml_element_text(&attribute.comment)
+            ));
+        }
         xml.push_str(&format!(
-            "{property_indent}<xr:Comment/>\r\n\
-{property_indent}<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n\
+            "{property_indent}<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n\
 {property_indent}<xr:ChoiceParameterLinks/>\r\n\
 ",
             attribute.full_text_search,
@@ -35793,11 +35903,44 @@ fn parse_filter_criterion_type_pattern(
                 None,
             )
         })?;
-        if member.len() != 2
-            || !member.first().is_some_and(|value| {
-                owner_graph::FilterCriterionPhysicalSchema::reference_member(value.trim())
-            })
-        {
+        if !member.first().is_some_and(|value| {
+            owner_graph::FilterCriterionPhysicalSchema::reference_member(value.trim())
+        }) {
+            // A member that is not a design-time reference is a primitive type
+            // written in the pattern dialect every other family already reads;
+            // `СвязанныеДокументы` carries one (`{"S",10,1}`) among 218
+            // reference members. Its qualifiers are printed by the shared type
+            // writer, so only the reference bookkeeping is skipped here.
+            let primitive =
+                parse_metadata_type_pattern_element(value, type_index).filter(|value_type| {
+                    !matches!(
+                        value_type,
+                        ConstantValueType::Reference { .. }
+                            | ConstantValueType::ReferenceTypeSet { .. }
+                    )
+                });
+            let Some(primitive) = primitive else {
+                return Err(FilterCriterionDecodeError::item(
+                    FilterCriterionDecodeStage::Pattern,
+                    FilterCriterionDecodeReason::Shape,
+                    FilterCriterionCollectionRole::Pattern,
+                    item_index,
+                    None,
+                ));
+            };
+            if !references.insert(metadata_type_xml_name(&primitive).to_lowercase()) {
+                return Err(FilterCriterionDecodeError::item(
+                    FilterCriterionDecodeStage::Pattern,
+                    FilterCriterionDecodeReason::DuplicateReference,
+                    FilterCriterionCollectionRole::Pattern,
+                    item_index,
+                    None,
+                ));
+            }
+            value_types.push(primitive);
+            continue;
+        }
+        if member.len() != 2 {
             return Err(FilterCriterionDecodeError::item(
                 FilterCriterionDecodeStage::Pattern,
                 FilterCriterionDecodeReason::Shape,

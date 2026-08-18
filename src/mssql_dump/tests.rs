@@ -66707,3 +66707,270 @@ fn table_enabled_reads_slot_thirteen_and_opens_the_table_run() {
     assert!(at("<AutoInsertNewRow>") < at("<DataPath>"), "got {xml}");
     assert_eq!(xml.matches("<Enabled>").count(), 1, "got {xml}");
 }
+
+/// Every record quoted below is copied verbatim out of the 1C:УТ 11.5.27.75
+/// storage rows for the objects named in the comments, so no layout here is
+/// invented.
+#[test]
+fn characteristics_tabular_section_object_field_takes_the_family_ref_marker() {
+    // `ChartOfCharacteristicTypes.СтатьиАктивовПассивов` writes `{1,{-2},0}` as
+    // the `ObjectField` of a characteristic whose values live in its own
+    // tabular section, and the platform prints
+    // `...ДополнительныеРеквизиты.StandardAttribute.Ref`. `-2` is the
+    // characteristic-type plan's own `Ref` marker; a catalog spells `Ref` `-8`.
+    const SECTION: &str =
+        "ChartOfCharacteristicTypes.СтатьиАктивовПассивов.TabularSection.ДополнительныеРеквизиты";
+    let source = CharacteristicReference::new(SECTION, None).unwrap();
+    let decoded = decode_field(
+        OwnerGraphFamily::ChartOfCharacteristicTypes,
+        0,
+        &field("-2"),
+        CharacteristicRole::ObjectField,
+        &source,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        decoded.reference().map(CharacteristicReference::path),
+        Some(format!("{SECTION}.StandardAttribute.Ref").as_str())
+    );
+
+    // The catalog marker is not admitted for a plan, and no marker other than
+    // the family's own `Ref` is admitted for a tabular-section source.
+    for marker in ["-8", "-9", "-6"] {
+        assert_eq!(
+            decode_field(
+                OwnerGraphFamily::ChartOfCharacteristicTypes,
+                0,
+                &field(marker),
+                CharacteristicRole::ObjectField,
+                &source,
+                &BTreeMap::new(),
+            )
+            .unwrap_err()
+            .reason,
+            CharacteristicsReason::UnsupportedMarker,
+            "marker {marker}"
+        );
+    }
+
+    // An object-shaped source keeps the whole family table.
+    let object =
+        CharacteristicReference::new("ChartOfCharacteristicTypes.СтатьиАктивовПассивов", None)
+            .unwrap();
+    assert_eq!(
+        decode_field(
+            OwnerGraphFamily::ChartOfCharacteristicTypes,
+            0,
+            &field("-9"),
+            CharacteristicRole::ObjectField,
+            &object,
+            &BTreeMap::new(),
+        )
+        .unwrap()
+        .reference()
+        .map(CharacteristicReference::path),
+        Some("ChartOfCharacteristicTypes.СтатьиАктивовПассивов.StandardAttribute.Description")
+    );
+}
+
+#[test]
+fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
+    // `ChartOfCharacteristicTypes.СтатьиАктивовПассивов.TabularSection
+    // .ДополнительныеРеквизиты.Attribute.Значение` slot 14, verbatim.
+    const SECTION_UUID: &str = "2f70fe7d-4868-416d-81ae-f8b56f9c26f6";
+    const ATTRIBUTE_UUID: &str = "1405e9de-de4e-4df4-bcb6-f7a1354c647c";
+    const SECTION: &str =
+        "ChartOfCharacteristicTypes.СтатьиАктивовПассивов.TabularSection.ДополнительныеРеквизиты";
+    let links =
+        format!("{{5006,1,\"Отбор.Владелец\",2,{{0,{SECTION_UUID}}},{{0,{ATTRIBUTE_UUID}}},0}}");
+    let object_refs = BTreeMap::from([
+        (SECTION_UUID.to_owned(), SECTION.to_owned()),
+        (
+            ATTRIBUTE_UUID.to_owned(),
+            format!("{SECTION}.Attribute.Свойство"),
+        ),
+    ]);
+    let parsed = parse_owner_choice_parameter_links(
+        &links,
+        "ChartOfCharacteristicTypes",
+        "СтатьиАктивовПассивов",
+        true,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].name, "Отбор.Владелец");
+    assert_eq!(parsed[0].data_path, format!("{SECTION}.Attribute.Свойство"));
+    assert_eq!(parsed[0].value_change, "Clear");
+
+    // A path that leaves the owner is refused, and so is a bare standard
+    // attribute code, which only the catalog table names.
+    assert!(
+        parse_owner_choice_parameter_links(
+            &links,
+            "ChartOfCharacteristicTypes",
+            "СтатьиДоходов",
+            true,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_owner_choice_parameter_links(
+            "{5006,1,\"Отбор\",1,{-8},0}",
+            "ChartOfCharacteristicTypes",
+            "СтатьиАктивовПассивов",
+            false,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert_eq!(
+        parse_catalog_choice_parameter_links(
+            "{5006,1,\"Отбор\",1,{-8},0}",
+            "Products",
+            false,
+            &BTreeMap::new(),
+        )
+        .unwrap()[0]
+            .data_path,
+        "Catalog.Products.StandardAttribute.Ref"
+    );
+}
+
+#[test]
+fn task_direct_attribute_wrapper_is_the_code_three_form_the_platform_writes() {
+    // All fourteen direct attributes of `Task.ЗадачаИсполнителя` are written
+    // `[3, payload27, indexing, fullTextSearch, dataHistory, 0, {1,<nil uuid>}]`;
+    // the four addressing attributes keep code 4 with the dimension slot.
+    let direct = [
+        "3",
+        "{27}",
+        "1",
+        "1",
+        "1",
+        "0",
+        "{1,00000000-0000-0000-0000-000000000000}",
+    ];
+    assert!(task_child_wrapper_is_exact(&direct, false));
+    assert!(!task_child_wrapper_is_exact(&direct, true));
+
+    let mut wrong_tail = direct;
+    wrong_tail[5] = "1";
+    assert!(!task_child_wrapper_is_exact(&wrong_tail, false));
+    let mut wrong_uuid = direct;
+    wrong_uuid[6] = "{1,11111111-1111-4111-8111-111111111111}";
+    assert!(!task_child_wrapper_is_exact(&wrong_uuid, false));
+
+    assert!(task_child_wrapper_is_exact(
+        &["2", "{27}", "1", "1", "1"],
+        false
+    ));
+    assert!(!task_child_wrapper_is_exact(
+        &["3", "{27}", "1", "1", "1"],
+        false
+    ));
+    assert!(task_child_wrapper_is_exact(
+        &["4", "{27}", "1", "{0,0}", "1", "1"],
+        true
+    ));
+    assert!(!task_child_wrapper_is_exact(
+        &["3", "{27}", "1", "1", "1", "0"],
+        true
+    ));
+}
+
+#[test]
+fn filter_criterion_pattern_reads_the_string_member_the_platform_writes() {
+    // `FilterCriterion.СвязанныеДокументы` carries `{"S",10,1}` at pattern
+    // position 127 among 218 design-time references; the surrounding members
+    // here are two of its own, quoted verbatim.
+    const FIRST: &str = "9ac1b6df-6189-44f5-b711-6e71196dad45";
+    const SECOND: &str = "9b3da6f8-9cab-4c5e-96a0-8cd6f36dc438";
+    let type_index = BTreeMap::from([
+        (FIRST.to_owned(), "cfg:DocumentRef.Рейс".to_owned()),
+        (SECOND.to_owned(), "cfg:DocumentRef.Сторно".to_owned()),
+    ]);
+    let pattern = format!("{{\"Pattern\",{{\"#\",{FIRST}}},{{\"S\",10,1}},{{\"#\",{SECOND}}}}}");
+    let value_types =
+        parse_filter_criterion_type_pattern(&pattern, &type_index, &BTreeSet::new()).unwrap();
+    assert_eq!(value_types.len(), 3);
+    assert!(matches!(
+        value_types[1],
+        ConstantValueType::String {
+            length: Some(10),
+            allowed_length_flag: 1,
+        }
+    ));
+    let xml = format_metadata_types_xml(&value_types);
+    assert!(xml.contains("<v8:Type>xs:string</v8:Type>"), "got {xml}");
+    assert!(xml.contains("<v8:Length>10</v8:Length>"), "got {xml}");
+    assert!(
+        xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"),
+        "got {xml}"
+    );
+
+    // The same primitive twice is a duplicate, and a member in no known dialect
+    // still refuses.
+    let duplicated = format!("{{\"Pattern\",{{\"#\",{FIRST}}},{{\"S\",10,1}},{{\"S\",10,1}}}}");
+    assert!(
+        parse_filter_criterion_type_pattern(&duplicated, &type_index, &BTreeSet::new()).is_err()
+    );
+    let unknown = format!("{{\"Pattern\",{{\"#\",{FIRST}}},{{\"Z\",10,1}}}}");
+    assert!(parse_filter_criterion_type_pattern(&unknown, &type_index, &BTreeSet::new()).is_err());
+}
+
+#[test]
+fn cct_standard_attribute_keeps_its_comment_and_boolean_fill_value() {
+    // `ChartOfCharacteristicTypes.КатегорииНовостей.Code` carries a design-time
+    // comment, and `КаналыРекламныхВоздействий.DeletionMark` a boolean fill
+    // value; an attribute without a comment still prints the empty element.
+    assert!(matches!(
+        parse_cct_standard_attribute_fill_value(
+            r#"{"B",0}"#,
+            "-4",
+            "КаналыРекламныхВоздействий",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Some(MetadataChildFillValue::Boolean(false))
+    ));
+    assert!(
+        parse_cct_standard_attribute_fill_value(
+            r#"{"B",2}"#,
+            "-4",
+            "КаналыРекламныхВоздействий",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_cct_standard_attribute_fill_value(
+            r#"{"B",0}"#,
+            "-7",
+            "КаналыРекламныхВоздействий",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let mut attribute = register_standard_attribute("Code", "ShowError", &BTreeMap::new(), None);
+    let mut xml = String::new();
+    push_register_standard_attributes_xml(&mut xml, std::slice::from_ref(&attribute));
+    assert!(xml.contains("<xr:Comment/>"), "got {xml}");
+    attribute.comment = "Идентификатор для интернета".to_owned();
+    attribute.fill_value = MetadataChildFillValue::Boolean(false);
+    let mut xml = String::new();
+    push_register_standard_attributes_xml(&mut xml, std::slice::from_ref(&attribute));
+    assert!(
+        xml.contains("<xr:Comment>Идентификатор для интернета</xr:Comment>"),
+        "got {xml}"
+    );
+    assert!(
+        xml.contains("<xr:FillValue xsi:type=\"xs:boolean\">false</xr:FillValue>"),
+        "got {xml}"
+    );
+}
