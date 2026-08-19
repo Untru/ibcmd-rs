@@ -1200,13 +1200,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         })
         .collect::<Vec<_>>();
     let print_area = parse_moxel_print_area(&fields);
-    trim_moxel_trailing_empty_rows(
-        &mut rows,
-        &areas,
-        &merges,
-        &horizontal_unmerges,
-        &vertical_unmerges,
-    );
     let (
         column_sets,
         row_column_ids,
@@ -2300,51 +2293,6 @@ pub(super) fn moxel_spreadsheet_height(
         .unwrap_or(0);
     let area_max = areas.iter().map(|area| area.end_row).max().unwrap_or(0);
     row_max.max(merge_max).max(area_max).max(0) as usize + 1
-}
-
-pub(super) fn trim_moxel_trailing_empty_rows(
-    rows: &mut Vec<MoxelRow>,
-    areas: &[MoxelArea],
-    merges: &[MoxelMerge],
-    horizontal_unmerges: &[MoxelMerge],
-    vertical_unmerges: &[MoxelMerge],
-) {
-    let Some(material_limit) = areas
-        .iter()
-        .map(|area| area.end_row.max(0) as usize + 1)
-        .chain(
-            merges
-                .iter()
-                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
-        )
-        .chain(
-            horizontal_unmerges
-                .iter()
-                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
-        )
-        .chain(
-            vertical_unmerges
-                .iter()
-                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
-        )
-        .max()
-    else {
-        return;
-    };
-    let mut last_trimmed_index = None;
-    while rows.last().is_some_and(|row| {
-        row.index > material_limit && row.format_index <= 1 && row.cells.is_empty()
-    }) {
-        if let Some(index) = rows.last().map(|row| row.index) {
-            last_trimmed_index = Some(last_trimmed_index.unwrap_or(index).max(index));
-        }
-        rows.pop();
-    }
-    if let (Some(index_to), Some(row)) = (last_trimmed_index, rows.last_mut()) {
-        if row.index == material_limit && row.format_index <= 1 && row.cells.is_empty() {
-            row.index_to = Some(index_to);
-        }
-    }
 }
 
 /// `<indexTo>` collapses a run of adjacent cell-less rows that publish the same
