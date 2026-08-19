@@ -2420,10 +2420,21 @@ pub(super) fn is_moxel_compactable_empty_row(row: &MoxelRow) -> bool {
 }
 
 pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
+    // The row block sits right behind the header/footer block, and the scalar
+    // this scan reads as its first marker is the template-mode flag, not part
+    // of the block. Evidence (native 1С:УТ 11.5.27.75): field 14 is the literal
+    // `2` in all 683 standalone bodies and in all five distinct blocks embedded
+    // in forms, and field 15 is the stored row count; field 13 is `1` in every
+    // standalone body but `0` in three of the five embedded ones. Requiring `1`
+    // there therefore refused the anchor on exactly the bodies whose
+    // template mode is off, and the scan then anchored somewhere else.
+    let anchored_row_block =
+        moxel_body_has_fixed_prefix(fields).then_some(MOXEL_HEADER_FOOTER_BLOCK_START + 6);
     let mut best_rows = Vec::new();
     for index in 3..fields.len().saturating_sub(3) {
-        if fields.get(index).map(|field| field.trim()) != Some("1")
-            || fields.get(index + 1).map(|field| field.trim()) != Some("2")
+        if fields.get(index + 1).map(|field| field.trim()) != Some("2")
+            || (Some(index) != anchored_row_block
+                && fields.get(index).map(|field| field.trim()) != Some("1"))
         {
             continue;
         }
@@ -7743,7 +7754,12 @@ pub(super) fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize
         .max(max_column_format_index)
         .max(max_row_or_cell_format_index)
         .max(max_drawing_format_index)
-        .max(1)
+    // No floor: a document whose table is empty and whose records all name slot
+    // 0 has no pool at all. Evidence (native 1С:УТ 11.5.27.75): none of the 683
+    // standalone spreadsheet templates publishes an empty pool or a lone
+    // `<format/>` - every one carries at least one populated entry, so the floor
+    // never held a real document up - while two of the five distinct
+    // spreadsheet blocks embedded in forms publish no `<format>` at all.
 }
 
 pub(super) fn moxel_sparse_default_column_set_insertion_point(
