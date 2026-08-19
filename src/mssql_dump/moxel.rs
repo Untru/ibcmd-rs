@@ -1215,7 +1215,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         &horizontal_unmerges,
         &vertical_unmerges,
     );
-    compact_moxel_empty_row_ranges(&mut rows);
     let (
         column_sets,
         row_column_ids,
@@ -1223,6 +1222,15 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         source_column_format_order,
         has_explicit_sparse_column_set_default,
     ) = parse_moxel_column_sets_with_source_format_order(&fields);
+    // A row's column-set identity is part of the payload an empty run folds on,
+    // so it has to be in place before the fold. Folding first let a run swallow
+    // the row that opens a new column set and drop its `<columnsID>` with it.
+    for row in &mut rows {
+        if let Some(columns_id) = row_column_ids.get(&row.index) {
+            row.columns_id = Some(columns_id.clone());
+        }
+    }
+    compact_moxel_empty_row_ranges(&mut rows);
     let fonts = parse_moxel_fonts(&fields, object_refs);
     let pictures = parse_moxel_pictures(&fields, object_refs);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
@@ -1342,9 +1350,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         column_format_slots.saturating_sub(1)
     };
     for row in &mut rows {
-        if let Some(columns_id) = row_column_ids.get(&row.index) {
-            row.columns_id = Some(columns_id.clone());
-        }
         if source_column_format_offset == 0 {
             if row.format_index > 1 {
                 row.format_index += format_offset;
