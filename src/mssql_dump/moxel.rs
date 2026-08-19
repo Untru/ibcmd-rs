@@ -1583,6 +1583,23 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         !default_format.is_empty() || default_format_width.is_some(),
         format_table_fallback.max(max_format_index + 1),
     );
+    // The leading record is what `<defaultFormatIndex>` names, so a table entry
+    // that already carries its bytes is the slot: the pool must not grow a copy
+    // of it beside the original.
+    let leading_default_format = fields
+        .get(MOXEL_LEADING_DEFAULT_FORMAT_FIELD)
+        .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs));
+    if default_format_index.is_some_and(|index| index > column_formats.len() + formats.len())
+        && let Some(leading) = leading_default_format
+            .as_ref()
+            .filter(|format| !format.is_empty())
+        && let Some(existing) = column_formats
+            .iter()
+            .chain(formats.iter())
+            .position(|format| format == leading)
+    {
+        default_format_index = Some(existing + 1);
+    }
     if default_format_index.is_some_and(|index| index > column_formats.len() + formats.len())
         && let Some((existing_index, exact_font_zero_match)) =
             resolve_existing_moxel_default_format_index(
@@ -1660,9 +1677,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             .and_then(|field| parse_moxel_language_settings(field)),
         template_mode: !moxel_body_has_fixed_prefix(&fields)
             || fields.get(13).map(|field| field.trim()) != Some("0"),
-        leading_default_format: fields
-            .get(4)
-            .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs)),
+        leading_default_format,
         source_format_map,
         height,
         value_types: parse_moxel_value_types(&fields, object_refs),
@@ -9149,7 +9164,13 @@ pub(super) fn moxel_format_for_index(
     if let Some(format) = spreadsheet.extra_formats.get(&format_index).cloned() {
         return format;
     }
-    if spreadsheet.default_format_index == Some(format_index) {
+    // A slot inside the table renders from the table. Only the slot past its end
+    // - the one the default format is materialized into - is rendered from the
+    // default format itself.
+    if spreadsheet.default_format_index == Some(format_index)
+        && format_index
+            > column_format_slots.max(spreadsheet.column_formats.len()) + spreadsheet.formats.len()
+    {
         if spreadsheet.column_sets.len() == 1
             && spreadsheet.header_footer_format_index == Some(format_index)
             && format_index > column_format_slots
