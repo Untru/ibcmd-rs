@@ -367,6 +367,17 @@ impl FormPopupRepresentation {
     }
 }
 
+/// A popup's `Representation`, member 4 of its nine-member option tuple.
+///
+/// Member 6 of the same tuple is the popup's `ShapeRepresentation`, a property
+/// in its own right: over the 3 911 native popups of UT 11.5.27.75 it reads `0`
+/// on 3 822, `3` on the 86 that say `None` and `2` on the 3 that say
+/// `WhenActive`.  Requiring it to be `0` here therefore refused to read member 4
+/// on 89 popups, three of which carry `<Representation>Text</Representation>`.
+/// Member 4 alone is a total function of the native spelling on all 3 911
+/// popups (`3` -> nothing 2 300 times, `1` -> `Picture` 1 163, `2` ->
+/// `PictureAndText` 440, `0` -> `Text` 8), so the shape guard keeps only the
+/// members that are constant across the corpus.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormPopupSchema {
     representation: FormPopupRepresentation,
@@ -391,7 +402,6 @@ impl FormPopupSchema {
             || options.first().map(|field| field.trim()) != Some("7")
             || options.get(3).map(|field| field.trim()) != Some("2")
             || options.get(5).map(|field| field.trim()) != Some("0")
-            || options.get(6).map(|field| field.trim()) != Some("0")
         {
             return None;
         }
@@ -997,6 +1007,7 @@ pub(crate) enum FormUsualGroupXmlProperty {
     ChildItemsWidth,
     BackColor,
     ThroughAlign,
+    CurrentRowUse,
 }
 
 pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
@@ -1021,6 +1032,11 @@ pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
     FormUsualGroupXmlProperty::ChildItemsWidth,
     FormUsualGroupXmlProperty::BackColor,
     FormUsualGroupXmlProperty::ThroughAlign,
+    // The one native usual group that carries `CurrentRowUse` writes it
+    // behind `Title`, `HorizontalStretch`, `GroupHorizontalAlign`, `Group`,
+    // `Representation`, `ShowTitle` and `BackColor`, and ahead of
+    // `ExtendedTooltip` and `ChildItems`.
+    FormUsualGroupXmlProperty::CurrentRowUse,
 ];
 
 impl FormUsualGroupXmlProperty {
@@ -1043,7 +1059,9 @@ impl FormUsualGroupXmlProperty {
             Self::Format | Self::ShowLeftMargin | Self::United | Self::ChildItemsWidth => {
                 FormUsualGroupXmlAnchor::AfterRepresentation
             }
-            Self::BackColor | Self::ThroughAlign => FormUsualGroupXmlAnchor::AfterShowTitle,
+            Self::BackColor | Self::ThroughAlign | Self::CurrentRowUse => {
+                FormUsualGroupXmlAnchor::AfterShowTitle
+            }
         }
     }
 }
@@ -2141,6 +2159,21 @@ impl FormPictureDecorationSchema {
         self.option_tuple_is_exact(options).then_some(5)
     }
 
+    /// The drag pair of the decoration option tuple.  Over all 3 725
+    /// `PictureDecoration` option tuples the export walks -- every one of them
+    /// a thirteen-member record opening with `4` -- slot 8 holds `1` on exactly
+    /// the 2 decorations the platform writes `<EnableStartDrag>true</...>` on
+    /// and slot 9 holds `1` on exactly the 4 it writes `<EnableDrag>true</...>`
+    /// on; both slots hold `0` on every other decoration and no other code
+    /// occurs in either.
+    pub(crate) fn enable_start_drag_option_slot(self, options: &[&str]) -> Option<usize> {
+        self.option_tuple_is_exact(options).then_some(8)
+    }
+
+    pub(crate) fn enable_drag_option_slot(self, options: &[&str]) -> Option<usize> {
+        self.option_tuple_is_exact(options).then_some(9)
+    }
+
     /// `Zoomable` flag of the decoration option tuple.  Over all 3 725
     /// `PictureDecoration` option tuples the export walks, the slot holds `1`
     /// on exactly the 7 the platform writes `<Zoomable>true</Zoomable>` on and
@@ -2974,6 +3007,8 @@ pub(crate) struct FormSpreadsheetDocumentFieldProperties {
     pub(crate) enable_start_drag: Option<bool>,
     pub(crate) enable_drag: Option<bool>,
     pub(crate) view_scaling_mode: Option<&'static str>,
+    pub(crate) show_groups: Option<bool>,
+    pub(crate) drawing_selection_show_mode: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -4315,12 +4350,25 @@ impl FormChildItemVisibleSchema {
             {
                 43 + top_level_offset
             }
+            // The five document-shaped field kinds share the wrapper-37 layout
+            // and the same visibility slot as the six kinds already listed.
+            // Over the 518 `SpreadSheetDocumentField`, `TextDocumentField`,
+            // `FormattedDocumentField`, `HTMLDocumentField`, `CalendarField`
+            // and `GraphicalSchemaField` items of the UT 11.5.27.75 native tree
+            // slot 43 reads `0` on exactly the 10 whose native document carries
+            // `<Visible>false</Visible>` and `1` on the other 508, with no
+            // third code -- the same total function the listed kinds show.
             ("37", "LabelField", Some("1"))
             | ("37", "InputField", Some("2"))
             | ("37", "CheckBoxField", Some("3"))
             | ("37", "PictureField", Some("4"))
             | ("37", "RadioButtonField", Some("5"))
             | ("37", "SpreadSheetDocumentField", Some("6"))
+            | ("37", "TextDocumentField", Some("7"))
+            | ("37", "CalendarField", Some("8"))
+            | ("37", "GraphicalSchemaField", Some("14"))
+            | ("37", "HTMLDocumentField", Some("15"))
+            | ("37", "FormattedDocumentField", Some("17"))
                 if matches!((field_count, top_level_offset), (59, 0) | (60, 1)) =>
             {
                 43 + top_level_offset
@@ -4566,6 +4614,11 @@ impl FormContainerReadOnlySchema {
             ("ColumnGroup", Some("2"), 12, Some("2")) | ("Page", Some("4"), 20, Some("18")) => {
                 Some(Self)
             }
+            // A `Popup` keeps the same flag in the same slot: over all 3 911
+            // native popups of UT 11.5.27.75 slot 11 reads `1` on exactly the
+            // one whose document carries `<ReadOnly>true</ReadOnly>` and `0` on
+            // the other 3 910, with no third code.
+            ("Popup", Some("1"), 9, Some("7")) => Some(Self),
             _ => None,
         }
     }
@@ -4690,6 +4743,56 @@ impl FormRootCustomizableSchema {
             "0" => Some(false),
             _ => None,
         }
+    }
+}
+
+/// The form's own `Enabled` sits alone in root field 15 of the `50` layout,
+/// immediately behind the `Customizable` field.
+///
+/// UT 11.5.27.75 native tree, all 5 201 `Form.xml` roots (every one of them a
+/// `50` layout): field 15 reads `0` for exactly the three roots whose native
+/// document carries `<Enabled>false</Enabled>` and `1` for the other 5 198 that
+/// omit it - a total function with no third code and no counter-example.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootEnabledSchema {
+    slot: usize,
+}
+
+impl FormRootEnabledSchema {
+    const SLOT: usize = 15;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        field_count: usize,
+    ) -> Option<Self> {
+        (root_discriminator == Some("50") && field_count > Self::SLOT)
+            .then_some(Self { slot: Self::SLOT })
+    }
+
+    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(self.slot)?.trim() {
+            "0" => Some(false),
+            _ => None,
+        }
+    }
+}
+
+/// `VariantAppearance` is property-bag key 20: the same `{"#", uuid, {1, {id},
+/// ""}}` reference to one of the form's own attributes that `ReportResult`
+/// (key 5) and `DetailsData` (key 6) carry.
+///
+/// UT 11.5.27.75 native tree, all 5 201 roots: reading key 20 through that
+/// shape resolves to exactly the four attribute names the native documents
+/// write in `<VariantAppearance>` and to nothing on the other 5 197, the same
+/// score the two neighbouring keys post (25/25 and 14/14, no false positive).
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootVariantAppearanceSchema;
+
+impl FormRootVariantAppearanceSchema {
+    pub(crate) const PROPERTY_BAG_KEY: &'static str = "20";
+
+    pub(crate) fn from_raw_layout(root_discriminator: Option<&str>) -> Option<Self> {
+        (root_discriminator == Some("50")).then_some(Self)
     }
 }
 
@@ -5449,13 +5552,28 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 pub(crate) enum FormInputFieldTailXmlProperty {
     MultipleValueDataPath,
     MultipleValuePresentDataPath,
+    AllowInputEmptyMultipleValues,
     ListChoiceMode,
+    ShowCheckBoxesInDropList,
     ExtendedEditMultipleValues,
     AutoMarkIncomplete,
 }
 
 pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlProperty] = &[
+    // `AllowInputEmptyMultipleValues` opens the tail: the one native item that
+    // carries it puts it behind `DataPath`, `EditMode`, `Width` and
+    // `HorizontalStretch` and ahead of `ExtendedEditMultipleValues`,
+    // `ChoiceFoldersAndItems`, `ContextMenu` and `ExtendedTooltip`.
+    FormInputFieldTailXmlProperty::AllowInputEmptyMultipleValues,
     FormInputFieldTailXmlProperty::ListChoiceMode,
+    // `ShowCheckBoxesInDropList` trails `ListChoiceMode`, `ExtendedEdit`,
+    // `ClearButton` (2), `ChoiceButton`, `MaxWidth` (2), `AutoMaxWidth`,
+    // `Width`, `HorizontalStretch`, `TitleLocation` (2), `ToolTipRepresentation`
+    // and `DataPath` (2), and leads `ChooseType`, `TextEdit`, `ChoiceList`,
+    // `ContextMenu` (2), `ExtendedTooltip` (2) and `Events` (2), on the two
+    // native items that carry it.  It never shares an item with
+    // `AllowInputEmptyMultipleValues`, so their relative order is unobserved.
+    FormInputFieldTailXmlProperty::ShowCheckBoxesInDropList,
     FormInputFieldTailXmlProperty::ExtendedEditMultipleValues,
     // The two multiple-value bound paths trail `ExtendedEditMultipleValues`,
     // `ChoiceButton` and `DataPath` and precede `ContextMenu`, `ExtendedTooltip`
@@ -6006,6 +6124,8 @@ pub(crate) enum FormTableSearchStringLocation {
     None,
     CommandBar,
     Top,
+    Bottom,
+    PullFromTop,
 }
 
 impl FormTableSearchStringLocation {
@@ -6014,6 +6134,8 @@ impl FormTableSearchStringLocation {
             Self::None => "None",
             Self::CommandBar => "CommandBar",
             Self::Top => "Top",
+            Self::Bottom => "Bottom",
+            Self::PullFromTop => "PullFromTop",
         }
     }
 }
@@ -6080,6 +6202,21 @@ impl FormTableSkipOnInput {
             _ => None,
         }
     }
+}
+
+/// Bounds of a `Table`'s counted property bag, read from the pair count alone.
+///
+/// The bag is a counted record list: slot 54 declares the pair count and the
+/// pairs follow it.  The walk is the same whether or not the item also passes
+/// the strict `FormTableSchema` shape test -- it reads cleanly on all 4 543
+/// native `Table` items of UT 11.5.27.75 -- so the readers that only need one
+/// bag key take this function rather than a schema they do not otherwise use.
+pub(crate) fn form_table_counted_property_bag_bounds(fields: &[&str]) -> Option<(usize, usize)> {
+    const PAIR_COUNT_SLOT: usize = 54;
+    let pair_count = fields.get(PAIR_COUNT_SLOT)?.trim().parse::<usize>().ok()?;
+    let start = PAIR_COUNT_SLOT.checked_add(1)?;
+    let end = pair_count.checked_mul(2)?.checked_add(start)?;
+    (end <= fields.len()).then_some((start, end))
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -6214,14 +6351,7 @@ impl FormTableSchema {
     }
 
     pub(crate) fn counted_property_bag_bounds(self, fields: &[&str]) -> Option<(usize, usize)> {
-        let pair_count = fields
-            .get(Self::COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT)?
-            .trim()
-            .parse::<usize>()
-            .ok()?;
-        let start = Self::COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT.checked_add(1)?;
-        let end = pair_count.checked_mul(2)?.checked_add(start)?;
-        (end <= fields.len()).then_some((start, end))
+        form_table_counted_property_bag_bounds(fields)
     }
 
     pub(crate) fn counted_property_bag_value_slot(
@@ -6312,10 +6442,18 @@ impl FormTableSchema {
         let slot = fields
             .len()
             .checked_sub(Self::SEARCH_STRING_LOCATION_REVERSE_OFFSET)?;
+        // The slot is a total function of the native spelling over all 4 543
+        // `Table` items of UT 11.5.27.75: `0` on the 3 934 that write nothing,
+        // `1` on all 505 that say `None`, `3` on all 56 that say `Top`, `2` on
+        // all 44 that say `CommandBar`, `6` on all 3 that say `PullFromTop`
+        // and `4` on the one that says `Bottom`.  The last two codes had no
+        // spelling, so those four tables lost the element.
         match fields.get(slot)?.trim() {
             "1" => Some(FormTableSearchStringLocation::None),
             "2" => Some(FormTableSearchStringLocation::CommandBar),
             "3" => Some(FormTableSearchStringLocation::Top),
+            "4" => Some(FormTableSearchStringLocation::Bottom),
+            "6" => Some(FormTableSearchStringLocation::PullFromTop),
             _ => None,
         }
     }
@@ -6739,6 +6877,20 @@ impl FormSpreadsheetDocumentFieldProperties {
             // on and `0` on the other 182, with no miss on either side.  The
             // slot had no reader, so none of the 40 was ever written.
             view_scaling_mode: (option(19) == Some("1")).then_some("Normal"),
+            // Slot 14 is the group ruler switch: 218 of the 222 native
+            // `SpreadSheetDocumentField` option tuples hold `1` and carry no
+            // `<ShowGroups>`, and the 4 that hold `0` are exactly the 4 the
+            // platform writes `<ShowGroups>false</ShowGroups>` on.  No other
+            // code occurs.
+            show_groups: explicit_false(14),
+            // The last slot of the tuple: `2` on the 221 items with no
+            // `<DrawingSelectionShowMode>` and `0` on the one that says
+            // `Show`.  No other code occurs, so the two remaining codes are
+            // unobserved and go unread rather than guessed.
+            drawing_selection_show_mode: match option(31) {
+                Some("0") => Some("Show"),
+                _ => None,
+            },
         })
     }
 }
@@ -6787,7 +6939,15 @@ impl FormTablePropertyBagKey {
             Self::Period => "7",
             Self::ChoiceFoldersAndItems => "8",
             Self::UseAlternationRowColor => "9",
-            Self::RowFilter => "10",
+            // `RowFilter` is key 13, not key 10.  Walking the counted bag of
+            // all 4 543 native `Table` items of UT 11.5.27.75 (the walk reads
+            // cleanly on every one of them): key 13 is present, and always as
+            // the undefined marker `{"U"}`, on exactly the 1 986 tables whose
+            // document carries `<RowFilter xsi:nil="true"/>` and absent on the
+            // other 2 557.  Key 10 also holds `{"U"}` -- on 1 947 tables, none
+            // of which writes a `<RowFilter>` -- so reading it as the filter
+            // answered for a different member on every dynamic list.
+            Self::RowFilter => "13",
             Self::DefaultItem => "11",
             Self::RestoreCurrentRow => "12",
             Self::UpdateOnDataChange => "14",
@@ -6866,6 +7026,11 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     ChoiceParameterLinksDuplicate,
     ExtendedEditMultipleValues,
     AutoShowOpenButtonMode,
+    AutoShowClearButtonMode,
+    AutoCorrectionOnTextInput,
+    SpellCheckingOnTextInput,
+    SpecialTextInputMode,
+    MultipleValuesOptions,
 }
 
 impl FormInputFieldExtendedOptionSlot {
@@ -6958,6 +7123,32 @@ impl FormInputFieldExtendedOptionSlot {
             // platform writes `FilledOnly` on and the two it writes `Always`
             // on -- no other code occurs and there is no miss on either side.
             Self::AutoShowOpenButtonMode => 56,
+            // `2 -> FilledOnly`, `0` writes nothing.  Of the 50 065
+            // `InputField` option tuples the UT 11.5.27.75 form bodies spell
+            // out, 50 060 hold `0` here and none of their items carries an
+            // `<AutoShowClearButtonMode>`; the 5 that hold `2` are, item for
+            // item, exactly the 5 the platform writes `FilledOnly` on.  No
+            // other code occurs in the slot.
+            Self::AutoShowClearButtonMode => 55,
+            // `2 -> DontUse`, `0` writes nothing: 50 064 tuples hold `0` and
+            // write nothing, the one that holds `2` is the one item the
+            // platform writes `<AutoCorrectionOnTextInput>DontUse</...>` on,
+            // and no other code occurs.
+            Self::AutoCorrectionOnTextInput => 57,
+            // The same two codes one slot further on, and the same score:
+            // 50 064 zeros with no element, one `2` on the one item that says
+            // `<SpellCheckingOnTextInput>DontUse</...>`.
+            Self::SpellCheckingOnTextInput => 58,
+            // `4 -> Email`, `5 -> PhoneNumber`, `6 -> Digits`, `0` writes
+            // nothing.  50 058 tuples hold `0` and carry no
+            // `<SpecialTextInputMode>`; the 5 fours, the one five and the one
+            // six are, item for item, exactly the 7 items the platform writes
+            // the three spellings on, with no other code in the slot.
+            Self::SpecialTextInputMode => 60,
+            // The multiple-values sub-tuple.  It is the bare `{0}` on 50 058
+            // of the 50 065 tuples, none of whose items carries either of the
+            // two properties below, and a seven-member record on the other 7.
+            Self::MultipleValuesOptions => 62,
         }
     }
 }

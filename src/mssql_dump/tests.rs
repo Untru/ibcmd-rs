@@ -12177,8 +12177,12 @@ fn document_field_option_fields_for_test(discriminator: &str) -> Vec<String> {
     options[1] = "9".to_string();
     options[2] = "8".to_string();
     if discriminator == "8" {
-        options[6] = "1".to_string();
-        options[15] = "0".to_string();
+        // Option 6 is the calendar's `ShowCurrentDate` (`0` writes `false`)
+        // and option 15 its `ShowMonthsPanel` (`1` writes `true`); this
+        // fixture used to carry the two the other way round, which is the
+        // pairing the platform contradicts on all 7 of its calendar fields.
+        options[6] = "0".to_string();
+        options[15] = "1".to_string();
         options[16] = "6".to_string();
         options[17] = "2".to_string();
     }
@@ -13567,7 +13571,13 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     assert_eq!(item.initial_tree_view, None);
     assert_eq!(item.choice_folders_and_items, Some("Items"));
     assert_eq!(item.restore_current_row, Some(false));
-    assert_eq!(item.row_filter_nil, Some(true));
+    // The counted bag of this record carries key 10, not key 13, and key 10 is
+    // not the row filter: over all 4 543 native `Table` items of UT
+    // 11.5.27.75 key 10 holds the undefined marker on 1 947 tables and not one
+    // of them writes a `<RowFilter>`, while key 13 holds it on exactly the
+    // 1 986 that do.  The record therefore has no row filter to read, which is
+    // also what the XML assertion below has always demanded.
+    assert_eq!(item.row_filter_nil, None);
     assert_eq!(
         item.row_picture_data_path.as_deref(),
         Some("Rows.DefaultPicture")
@@ -20071,6 +20081,16 @@ fn formats_table_search_additions_as_direct_sections() {
         max_value: None,
         input_min_value: None,
         input_max_value: None,
+        command_uniqueness: None,
+        usual_group_current_row_use: None,
+        decoration_enable_start_drag: None,
+        decoration_enable_drag: None,
+        special_text_input_mode: None,
+        auto_show_clear_button_mode: None,
+        auto_correction_on_text_input: None,
+        spell_checking_on_text_input: None,
+        allow_input_empty_multiple_values: None,
+        show_check_boxes_in_drop_list: None,
         show_percent: None,
         password_mode: None,
         multi_line: None,
@@ -20296,6 +20316,16 @@ fn formats_table_search_additions_as_direct_sections() {
                 max_value: None,
                 input_min_value: None,
                 input_max_value: None,
+                command_uniqueness: None,
+                usual_group_current_row_use: None,
+                decoration_enable_start_drag: None,
+                decoration_enable_drag: None,
+                special_text_input_mode: None,
+                auto_show_clear_button_mode: None,
+                auto_correction_on_text_input: None,
+                spell_checking_on_text_input: None,
+                allow_input_empty_multiple_values: None,
+                show_check_boxes_in_drop_list: None,
                 show_percent: None,
                 password_mode: None,
                 multi_line: None,
@@ -20522,6 +20552,16 @@ fn formats_table_search_additions_as_direct_sections() {
                 max_value: None,
                 input_min_value: None,
                 input_max_value: None,
+                command_uniqueness: None,
+                usual_group_current_row_use: None,
+                decoration_enable_start_drag: None,
+                decoration_enable_drag: None,
+                special_text_input_mode: None,
+                auto_show_clear_button_mode: None,
+                auto_correction_on_text_input: None,
+                spell_checking_on_text_input: None,
+                allow_input_empty_multiple_values: None,
+                show_check_boxes_in_drop_list: None,
                 show_percent: None,
                 password_mode: None,
                 multi_line: None,
@@ -66668,6 +66708,8 @@ fn the_smaller_owners_write_their_moved_properties_in_the_native_order() {
             auto_max_height: None,
             vertical_stretch: None,
             show_grid: None,
+            show_groups: None,
+            drawing_selection_show_mode: None,
             show_headers: None,
             show_cell_names: None,
             show_row_and_column_names: None,
@@ -67761,9 +67803,13 @@ fn field_border_colour_reads_the_option_slot_of_its_kind() {
 /// carries them, not through the narrower one the representation needs.
 ///
 /// The options below are the native tuple of the `Popup` `КомандыСканирования`
-/// of `Documents/ТТНИсходящаяЕГАИС/Forms/ФормаДокумента`: member 6 is a shape
-/// representation rather than `0`, which is exactly what made the narrow guard
-/// refuse the only popup in the tree that carries a `<BorderColor>`.
+/// of `Documents/ТТНИсходящаяЕГАИС/Forms/ФормаДокумента`, transcribed from the
+/// form body itself: member 6 is a shape representation rather than `0`, which
+/// is exactly what made the narrow guard refuse the only popup in the tree that
+/// carries a `<BorderColor>`.  The tuple this test used to carry read `0` in
+/// member 4 and `2` in member 6; the platform writes `3` in both, which is why
+/// its native document carries `<ShapeRepresentation>None</ShapeRepresentation>`
+/// and no `<Representation>` at all.
 #[test]
 fn popup_colours_read_their_own_tuple_even_with_a_shape_representation() {
     let object_refs = BTreeMap::new();
@@ -67772,12 +67818,16 @@ fn popup_colours_read_their_own_tuple_even_with_a_shape_representation() {
         "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
         "{0}",
         "2",
+        "3",
         "0",
-        "0",
-        "2",
+        "3",
         "{3,4,{0}}",
         "{3,0,{16777215}}",
     ];
+    // The representation schema reads member 4 whatever the shape member says
+    // -- pairing the two refused member 4 on the 89 native popups that state a
+    // shape, three of which carry a `<Representation>` -- and member 4 of this
+    // popup is the default code, so it still writes no element.
     assert_eq!(
         crate::form_schema::FormPopupSchema::from_raw_layout(
             "22",
@@ -67785,9 +67835,10 @@ fn popup_colours_read_their_own_tuple_even_with_a_shape_representation() {
             "Popup",
             Some("1"),
             &options
-        ),
+        )
+        .and_then(crate::form_schema::FormPopupSchema::representation),
         None,
-        "the representation schema refuses a popup that states a shape"
+        "the default representation code writes no element"
     );
     let schema =
         crate::form_schema::FormPopupColorSchema::from_raw_layout("22", "Popup", &options).unwrap();

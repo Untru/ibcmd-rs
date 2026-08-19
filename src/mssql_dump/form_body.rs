@@ -32,9 +32,10 @@ use crate::form_schema::{
     FormPictureValueSchema, FormPopupColorSchema, FormPopupSchema,
     FormPopupShapeRepresentationSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
     FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
-    FormRootCustomizableSchema, FormRootGroupSchema, FormRootGroupingSchema,
-    FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema, FormRootVerticalAlign,
-    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema, FormSearchStringAdditionProperties,
+    FormRootCustomizableSchema, FormRootEnabledSchema, FormRootGroupSchema, FormRootGroupingSchema,
+    FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema,
+    FormRootVariantAppearanceSchema, FormRootVerticalAlign, FormRootVerticalAlignSchema,
+    FormRootVerticalScrollSchema, FormSearchStringAdditionProperties,
     FormSearchStringAdditionSchema, FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
@@ -45,8 +46,9 @@ use crate::form_schema::{
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_extended_button_type_slot, form_text_document_context_menu_child_is_valid,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    form_extended_button_type_slot, form_table_counted_property_bag_bounds,
+    form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 #[cfg(test)]
@@ -326,6 +328,16 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
     properties.details_data = extract_form_report_attribute_ref(&form_fields, "6", &attributes);
+    properties.variant_appearance = FormRootVariantAppearanceSchema::from_raw_layout(
+        form_fields.first().map(|field| field.trim()),
+    )
+    .and_then(|_| {
+        extract_form_report_attribute_ref(
+            &form_fields,
+            FormRootVariantAppearanceSchema::PROPERTY_BAG_KEY,
+            &attributes,
+        )
+    });
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_properties_cpu_ms += elapsed_ms(started);
     }
@@ -723,6 +735,7 @@ pub(super) struct FormBodyProperties {
     pub(super) command_set_excluded_commands: Vec<&'static str>,
     pub(super) use_for_folders_and_items: Option<&'static str>,
     pub(super) customizable: Option<bool>,
+    pub(super) root_enabled: Option<bool>,
     pub(super) vertical_align: Option<FormRootVerticalAlign>,
     pub(super) children_align: Option<&'static str>,
     pub(super) command_bar_location: Option<&'static str>,
@@ -735,6 +748,7 @@ pub(super) struct FormBodyProperties {
     pub(super) report_result: Option<String>,
     pub(super) details_data: Option<String>,
     pub(super) report_form_type: Option<&'static str>,
+    pub(super) variant_appearance: Option<String>,
     pub(super) auto_show_state: Option<&'static str>,
     pub(super) custom_settings_folder: Option<String>,
     pub(super) report_result_view_mode: Option<&'static str>,
@@ -1292,8 +1306,18 @@ pub(super) struct FormChildItem {
     pub(super) vertical_stretch: Option<bool>,
     pub(super) spreadsheet_document_properties: Option<FormSpreadsheetDocumentFieldProperties>,
     pub(super) max_value: Option<String>,
-    pub(super) input_min_value: Option<String>,
-    pub(super) input_max_value: Option<String>,
+    pub(super) input_min_value: Option<FormInputBoundValue>,
+    pub(super) input_max_value: Option<FormInputBoundValue>,
+    pub(super) command_uniqueness: Option<bool>,
+    pub(super) usual_group_current_row_use: Option<&'static str>,
+    pub(super) decoration_enable_start_drag: Option<bool>,
+    pub(super) decoration_enable_drag: Option<bool>,
+    pub(super) special_text_input_mode: Option<&'static str>,
+    pub(super) auto_show_clear_button_mode: Option<&'static str>,
+    pub(super) auto_correction_on_text_input: Option<&'static str>,
+    pub(super) spell_checking_on_text_input: Option<&'static str>,
+    pub(super) allow_input_empty_multiple_values: Option<bool>,
+    pub(super) show_check_boxes_in_drop_list: Option<bool>,
     pub(super) show_percent: Option<bool>,
     pub(super) password_mode: Option<bool>,
     pub(super) multi_line: Option<bool>,
@@ -1925,6 +1949,7 @@ pub(super) fn extract_form_body_properties(
         ),
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
+        root_enabled: extract_form_root_enabled(fields),
         vertical_align: extract_form_vertical_align(fields),
         children_align: extract_form_children_align(fields),
         command_bar_location: extract_form_command_bar_location(fields),
@@ -1937,6 +1962,7 @@ pub(super) fn extract_form_body_properties(
         report_result: None,
         details_data: None,
         report_form_type,
+        variant_appearance: None,
         auto_show_state: extract_form_auto_show_state(fields),
         custom_settings_folder: None,
         report_result_view_mode: extract_form_report_result_view_mode(fields),
@@ -2300,6 +2326,11 @@ pub(super) fn extract_form_customizable(fields: &[&str]) -> Option<bool> {
         ("0", "0") => Some(false),
         _ => None,
     }
+}
+
+pub(super) fn extract_form_root_enabled(fields: &[&str]) -> Option<bool> {
+    FormRootEnabledSchema::from_raw_layout(fields.first().map(|field| field.trim()), fields.len())?
+        .enabled(fields)
 }
 
 pub(super) fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'static str> {
@@ -8052,6 +8083,14 @@ fn collect_form_child_item_indexes_from_field_traced(
             .command_source_owner_name_by_id
             .insert(id.to_string(), name);
     }
+    // An item's extended tooltip is an item in its own right and can be the
+    // target of a command's `AssociatedTableElementId`: over the whole UT
+    // 11.5.27.75 native tree the property resolves to 161 of its 163
+    // occurrences from the top-level items alone and to all 163 once the
+    // extended tooltips are in the same id index.
+    if let Some((tooltip_id, tooltip_name)) = form_child_item_extended_tooltip_identity(&fields) {
+        indexes.item_name_by_id.insert(tooltip_id, tooltip_name);
+    }
     if let Some((_, tag, id, name)) = structural_identity.as_ref() {
         let tag = *tag;
         let id = *id;
@@ -8850,7 +8889,7 @@ fn parse_form_child_item_with_metadata_owners(
             options,
         )
     });
-    let container_read_only_schema = matches!(tag, "ColumnGroup" | "Page")
+    let container_read_only_schema = matches!(tag, "ColumnGroup" | "Page" | "Popup")
         .then(|| {
             let options_text = fields
                 .get(FormChildItemShowTitleSchema::OPTIONS_SLOT)?
@@ -9402,6 +9441,16 @@ fn parse_form_child_item_with_metadata_owners(
                     | "PictureField"
                     | "RadioButtonField"
                     | "TextDocumentField"
+                    // The remaining document-shaped kinds read the same slot:
+                    // over the 296 `TextDocumentField`, `FormattedDocumentField`,
+                    // `HTMLDocumentField`, `CalendarField` and
+                    // `GraphicalSchemaField` items of the native tree the slot
+                    // is `1` on exactly the 4 that carry `<DefaultItem>true</...>`
+                    // and `0` on the other 292.
+                    | "FormattedDocumentField"
+                    | "HTMLDocumentField"
+                    | "CalendarField"
+                    | "GraphicalSchemaField"
                     | "ProgressBarField"
                     | "TrackBarField"
                     | "ChartField"
@@ -9462,14 +9511,14 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        // One read for both table layouts: the counted bag walk finds key 13 at
+        // slot 55 on the ordinary tables -- the very slot the layout-specific
+        // branch used to read directly -- and finds no key 13 on the dynamic
+        // lists, where the unbounded key scan used to land on a different
+        // member.  Over all 4 543 native tables the walk reproduces
+        // `<RowFilter xsi:nil="true"/>` on exactly the 1 986 that carry it.
         row_filter_nil: if tag == "Table" {
-            if ordinary_table_layout {
-                fields
-                    .get(56)
-                    .and_then(|field| parse_form_standalone_undefined_marker(field))
-            } else {
-                parse_form_table_property_bag_undefined(&fields, TableBagKey::RowFilter)
-            }
+            form_table_counted_bag_undefined(&fields, TableBagKey::RowFilter)
         } else {
             None
         },
@@ -9751,6 +9800,14 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|(schema, _)| schema.read_only(&fields))
                 .or_else(|| {
+                    // A `RadioButtonField` reads the flag out of the same
+                    // offset-corrected slot: over all 1 397 native radio
+                    // buttons of UT 11.5.27.75 slot `14 + offset` is `1` on
+                    // exactly the 3 whose document carries
+                    // `<ReadOnly>true</ReadOnly>` and `0` on the other 1 394.
+                    // Reading slot 14 without the offset answers `1` on a
+                    // fourth button whose layout carries a different member
+                    // there, which is what the tag whitelist was hiding.
                     (matches!(
                         tag,
                         "InputField"
@@ -9758,6 +9815,7 @@ fn parse_form_child_item_with_metadata_owners(
                             | "LabelField"
                             | "GraphicalSchemaField"
                             | "HTMLDocumentField"
+                            | "RadioButtonField"
                     ) && form_input_field_layout_is_extended(&fields))
                     .then(|| {
                         fields
@@ -9808,9 +9866,25 @@ fn parse_form_child_item_with_metadata_owners(
         // the 1 374 without an `<EditMode>` and `2` on all 12 that say
         // `EnterOnInput`, with no counter-example.  Only the tag whitelist kept
         // it out.
+        // The five document-shaped kinds read it out of that same slot: over
+        // the 518 `SpreadSheetDocumentField`, `TextDocumentField`,
+        // `FormattedDocumentField`, `HTMLDocumentField`, `CalendarField` and
+        // `GraphicalSchemaField` items of the native tree slot 26 is `1` on the
+        // 513 without an `<EditMode>` and `2` on all 5 that say `EnterOnInput`,
+        // with no third code.
         edit_mode: if matches!(
             tag,
-            "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
+            "InputField"
+                | "LabelField"
+                | "CheckBoxField"
+                | "PictureField"
+                | "RadioButtonField"
+                | "TextDocumentField"
+                | "FormattedDocumentField"
+                | "HTMLDocumentField"
+                | "SpreadSheetDocumentField"
+                | "CalendarField"
+                | "GraphicalSchemaField"
         ) && form_input_field_layout_is_extended(&fields)
         {
             fields
@@ -10145,6 +10219,19 @@ fn parse_form_child_item_with_metadata_owners(
                     | "PictureField"
                     | "RadioButtonField"
                     | "TextDocumentField"
+                    // The remaining wrapper-37 kinds keep the title font in
+                    // the same slot: over the 518 `SpreadSheetDocumentField`,
+                    // `TextDocumentField`, `FormattedDocumentField`,
+                    // `HTMLDocumentField`, `CalendarField` and
+                    // `GraphicalSchemaField` items of the native tree the slot
+                    // holds the empty auto-font tuple on the 516 that carry no
+                    // `<TitleFont>` and a style-item font reference on the 2
+                    // that do.
+                    | "FormattedDocumentField"
+                    | "HTMLDocumentField"
+                    | "CalendarField"
+                    | "GraphicalSchemaField"
+                    | "SpreadSheetDocumentField"
                     | "ProgressBarField"
                     | "TrackBarField"
                     | "ChartField"
@@ -10295,10 +10382,18 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             parse_form_group_extent(tag, fields, FORM_GROUP_HEIGHT_SLOT)
         },
+        // The two calendar switches were read out of each other's slot.  Over
+        // all 7 native `CalendarField` items of UT 11.5.27.75, option 6 reads
+        // `0` on exactly the 3 whose document carries
+        // `<ShowCurrentDate>false</ShowCurrentDate>` and `1` on the other 4,
+        // while option 15 reads `1` on exactly the 3 that carry
+        // `<ShowMonthsPanel>true</ShowMonthsPanel>` and `0` on the other 4.
+        // Read the other way round the pair agreed on 6 of the 7 and wrote
+        // both elements on the seventh, which carries neither.
         show_current_date: if tag == "CalendarField" {
             document_field_options
                 .as_deref()
-                .and_then(|options| options.get(15))
+                .and_then(|options| options.get(6))
                 .and_then(|field| parse_form_child_item_show_title(field))
                 .filter(|value| !*value)
         } else {
@@ -10307,7 +10402,7 @@ fn parse_form_child_item_with_metadata_owners(
         show_months_panel: if tag == "CalendarField" {
             document_field_options
                 .as_deref()
-                .and_then(|options| options.get(6))
+                .and_then(|options| options.get(15))
                 .and_then(|field| parse_form_child_item_show_title(field))
                 .filter(|value| *value)
         } else {
@@ -10333,16 +10428,23 @@ fn parse_form_child_item_with_metadata_owners(
         },
         auto_max_width: if let Some(properties) = spreadsheet_document_properties.as_ref() {
             properties.auto_max_width
+        // A `TextDocumentField` has no `36`/`38` extended option tuple, so the
+        // input-field read answers `None` for it and the arm swallowed the
+        // document-field geometry table below -- which already carries the
+        // right slot for the kind (option 10, `1` on the 65 native text
+        // document fields without an `<AutoMaxWidth>` and `0` on all 3 that
+        // say `false`).  Falling through on `None` lets that table answer.
         } else if matches!(tag, "InputField" | "TextDocumentField")
             && form_input_field_layout_is_extended(&fields)
+            && let Some(value) =
+                parse_form_input_field_auto_max_width(input_field_extended_options.as_deref())
+                    .or_else(|| {
+                        field_schema_and_options
+                            .as_ref()
+                            .and_then(|(schema, options)| schema.auto_max_width(options))
+                    })
         {
-            parse_form_input_field_auto_max_width(input_field_extended_options.as_deref()).or_else(
-                || {
-                    field_schema_and_options
-                        .as_ref()
-                        .and_then(|(schema, options)| schema.auto_max_width(options))
-                },
-            )
+            Some(value)
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             parse_form_button_auto_max_width(fields.get(34 + button_top_level_offset).copied())
         } else if tag == "LabelField" {
@@ -10540,6 +10642,86 @@ fn parse_form_child_item_with_metadata_owners(
             .as_ref()
             .and_then(|(schema, options)| {
                 parse_form_input_field_decimal_option(*schema, options, InputFieldSlot::MaxValue)
+            }),
+        // A `Button`'s `Check` is the plain top-level slot `24 + offset`: over
+        // all 27 778 native buttons of UT 11.5.27.75 it reads `1` on exactly
+        // the 47 whose document carries `<Check>true</Check>` and `0` on the
+        // other 27 731, with no third code in either layout.
+        // The button tuple ends with its `CommandUniqueness` flag two slots
+        // from the end: over all 27 778 native buttons the slot reads `1` on
+        // 27 777 that carry no `<CommandUniqueness>` and `0` on the one that
+        // says `false`, in both button layouts, with no other code.
+        command_uniqueness: (tag == "Button" && form_button_layout_is_extended(&fields))
+            .then(|| fields.len().checked_sub(2))
+            .flatten()
+            .and_then(|slot| fields.get(slot))
+            .and_then(|field| (field.trim() == "0").then_some(false)),
+        // A `UsualGroup` keeps `CurrentRowUse` in member 25 of its extended
+        // option tuple: over all 26 720 native usual groups the member reads
+        // `2` on the 26 719 that carry no `<CurrentRowUse>` and `0` on the one
+        // that says `Use`, with no other code.
+        usual_group_current_row_use: (tag == "UsualGroup")
+            .then(|| fields.get(20))
+            .flatten()
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+            .and_then(|members| (members.get(25)?.trim() == "0").then_some("Use")),
+        decoration_enable_start_drag: picture_decoration_options.as_deref().and_then(|options| {
+            let slot = FormPictureDecorationSchema.enable_start_drag_option_slot(options)?;
+            (options.get(slot)?.trim() == "1").then_some(true)
+        }),
+        decoration_enable_drag: picture_decoration_options.as_deref().and_then(|options| {
+            let slot = FormPictureDecorationSchema.enable_drag_option_slot(options)?;
+            (options.get(slot)?.trim() == "1").then_some(true)
+        }),
+        special_text_input_mode: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                parse_form_input_field_special_text_input_mode(*schema, options)
+            }),
+        auto_show_clear_button_mode: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                parse_form_input_field_auto_show_clear_button_mode(*schema, options)
+            }),
+        auto_correction_on_text_input: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                parse_form_input_field_text_input_assist(
+                    *schema,
+                    options,
+                    InputFieldSlot::AutoCorrectionOnTextInput,
+                )
+            }),
+        spell_checking_on_text_input: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                parse_form_input_field_text_input_assist(
+                    *schema,
+                    options,
+                    InputFieldSlot::SpellCheckingOnTextInput,
+                )
+            }),
+        allow_input_empty_multiple_values: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                (members.get(2)?.trim() == "1").then_some(true)
+            }),
+        show_check_boxes_in_drop_list: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                match members.get(4)?.trim() {
+                    "0" => Some(false),
+                    "1" => Some(true),
+                    _ => None,
+                }
             }),
         show_percent: special_field_layout
             .as_ref()
@@ -13202,11 +13384,28 @@ pub(super) fn parse_form_input_field_skip_on_input(field: &str) -> Option<bool> 
     }
 }
 
+/// A `MinValue`/`MaxValue` bound: the platform spells the element's `xsi:type`
+/// from the kind marker of the stored value, so the two travel together.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormInputBoundValue {
+    pub(super) xsi_type: &'static str,
+    pub(super) text: String,
+}
+
+/// `MinValue`/`MaxValue` of an `InputField`, with the type the platform writes.
+///
+/// UT 11.5.27.75, all `InputField` option tuples: slot 16 holds the undefined
+/// marker on 34 752 items that carry no `<MinValue>`, an `{"N", n}` number on
+/// 151 that carry `xsi:type="xs:decimal"` with exactly that number, and an
+/// `{"S", s}` string on 4 that carry `xsi:type="xs:string"` with exactly that
+/// string.  Slot 17 posts the same three shapes and the same score for
+/// `<MaxValue>` (34 826 / 80 / 1).  No other kind marker occurs in either slot,
+/// so the string form was not an unreadable value but an unread one.
 fn parse_form_input_field_decimal_option(
     schema: FormFieldSchema,
     options: &[&str],
     slot: InputFieldSlot,
-) -> Option<String> {
+) -> Option<FormInputBoundValue> {
     let raw = schema.input_field_option(options, slot)?.trim();
     if scan_1c_braced_value(raw, 0) != Some(raw.len()) {
         return None;
@@ -13216,11 +13415,88 @@ fn parse_form_input_field_decimal_option(
         [kind, decimal]
             if kind.trim() == r#""N""# && information_register_decimal_is_valid(decimal.trim()) =>
         {
-            Some(decimal.trim().to_string())
+            Some(FormInputBoundValue {
+                xsi_type: "xs:decimal",
+                text: decimal.trim().to_string(),
+            })
+        }
+        [kind, text] if kind.trim() == r#""S""# => {
+            parse_exact_1c_quoted_string(text.trim()).map(|text| FormInputBoundValue {
+                xsi_type: "xs:string",
+                text,
+            })
         }
         [kind] if kind.trim() == r#""U""# => None,
         _ => None,
     }
+}
+
+/// `SpecialTextInputMode` of an `InputField`.
+fn parse_form_input_field_special_text_input_mode(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<&'static str> {
+    match schema
+        .input_field_option(options, InputFieldSlot::SpecialTextInputMode)?
+        .trim()
+    {
+        "4" => Some("Email"),
+        "5" => Some("PhoneNumber"),
+        "6" => Some("Digits"),
+        _ => None,
+    }
+}
+
+/// `AutoShowClearButtonMode` of an `InputField`.
+fn parse_form_input_field_auto_show_clear_button_mode(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<&'static str> {
+    match schema
+        .input_field_option(options, InputFieldSlot::AutoShowClearButtonMode)?
+        .trim()
+    {
+        "2" => Some("FilledOnly"),
+        _ => None,
+    }
+}
+
+/// The `DontUse` switch shared by `AutoCorrectionOnTextInput` and
+/// `SpellCheckingOnTextInput`: one table, two slots.
+fn parse_form_input_field_text_input_assist(
+    schema: FormFieldSchema,
+    options: &[&str],
+    slot: InputFieldSlot,
+) -> Option<&'static str> {
+    match schema.input_field_option(options, slot)?.trim() {
+        "2" => Some("DontUse"),
+        _ => None,
+    }
+}
+
+/// The two members of an `InputField`'s multiple-values sub-tuple.
+///
+/// The tuple is the one-member `{0}` on 50 058 of the 50 065 native
+/// `InputField` option tuples, and none of those items carries either element.
+/// On the other 7 it is a twenty-member record opening with `1`, whose member 2
+/// reads `1` on exactly the 2 items that say
+/// `<AllowInputEmptyMultipleValues>true</...>` and `0` on the other 5, and
+/// whose member 4 reads `1` on the one item that says
+/// `<ShowCheckBoxesInDropList>true</...>`, `0` on the one that says `false` and
+/// `2` on the remaining 5 that say nothing.
+fn parse_form_input_field_multiple_values_options<'a>(
+    schema: FormFieldSchema,
+    options: &'a [&'a str],
+) -> Option<Vec<&'a str>> {
+    let raw = schema
+        .input_field_option(options, InputFieldSlot::MultipleValuesOptions)?
+        .trim();
+    if scan_1c_braced_value(raw, 0) != Some(raw.len()) {
+        return None;
+    }
+    let members = split_1c_braced_fields(raw, 0)?;
+    (members.len() == 20 && members.first().map(|field| field.trim()) == Some("1"))
+        .then_some(members)
 }
 
 fn parse_form_input_field_mask(schema: FormFieldSchema, options: &[&str]) -> Option<String> {
@@ -14133,16 +14409,23 @@ pub(super) fn parse_form_button_group_command_source_with_items(
     if form_ref.len() != 2 {
         return None;
     }
+    // The fourth member is the group's own `Representation` code, not a part of
+    // the command source: over all 7 333 native `ButtonGroup` items of UT
+    // 11.5.27.75 it reads `0` on 6 269, `2` on 1 046 and `1` on 18, and it moves
+    // independently of the source reference -- the sourceless `{2, {0},2,X}`
+    // shape occurs with all three codes.  Requiring `0` here therefore swallowed
+    // the two groups that carry both a source and a non-default representation;
+    // ignoring it reproduces the platform's answer on all 1 189 sourced groups
+    // with no false positive among the remaining 6 144.
     match (
         source.first().map(|field| field.trim()),
         form_ref.get(1).map(|field| field.trim()),
         source.get(2).map(|field| field.trim()),
-        source.get(3).map(|field| field.trim()),
     ) {
-        (Some("2"), Some(FORM_ITEM_TYPE_UUID), Some("2"), Some("0")) => {
+        (Some("2"), Some(FORM_ITEM_TYPE_UUID), Some("2")) => {
             form_command_source_name(form_ref.first()?.trim(), item_name_by_id)
         }
-        (Some("2"), Some(FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID), Some("2"), Some("0"))
+        (Some("2"), Some(FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID), Some("2"))
             if form_ref.first().map(|field| field.trim()) == Some("0") =>
         {
             Some("FormCommandPanelGlobalCommands".to_string())
@@ -14163,12 +14446,22 @@ pub(super) fn parse_form_command_bar_source_with_items(
     if form_ref.len() != 2 {
         return None;
     }
+    // A command bar names the global command panel with the same type UUID a
+    // button group and a popup use for it, and the two command bars of UT
+    // 11.5.27.75 that carry it are the only ones whose reference is not an item
+    // reference.  Reading it here reproduces the platform's answer on all 430
+    // sourced command bars with no false positive among the other 1 412.
     match (
         source.first().map(|field| field.trim()),
         form_ref.get(1).map(|field| field.trim()),
     ) {
         (Some("1"), Some(FORM_ITEM_TYPE_UUID)) => {
             form_command_source_name(form_ref.first()?.trim(), item_name_by_id)
+        }
+        (Some("1"), Some(FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID))
+            if form_ref.first().map(|field| field.trim()) == Some("0") =>
+        {
+            Some("FormCommandPanelGlobalCommands".to_string())
         }
         _ => None,
     }
@@ -14334,6 +14627,23 @@ pub(super) fn parse_form_table_property_bag_string(
         return None;
     }
     fields.get(1).and_then(|field| parse_1c_string(field))
+}
+
+/// One key of a `Table`'s counted property bag, read as the undefined marker.
+pub(super) fn form_table_counted_bag_undefined(fields: &[&str], key: TableBagKey) -> Option<bool> {
+    let (start, end) = form_table_counted_property_bag_bounds(fields)?;
+    let key = key.key();
+    let mut value = None;
+    for key_slot in (start..end).step_by(2) {
+        let raw_key = fields.get(key_slot)?.trim();
+        if raw_key.parse::<usize>().is_err() {
+            return None;
+        }
+        if raw_key == key {
+            value = Some(*fields.get(key_slot + 1)?);
+        }
+    }
+    parse_form_standalone_undefined_marker(value?)
 }
 
 pub(super) fn parse_form_table_property_bag_undefined(
@@ -15043,6 +15353,27 @@ fn parse_form_extended_tooltip_option_events(fields: &[&str]) -> Option<Vec<Form
     }
     let events = parse_form_child_item_event_record(fields);
     (events.len() == 1 && events.first()?.name == "URLProcessing").then_some(events)
+}
+
+/// Identity of the extended tooltip nested in a child-item record, read with
+/// the same shape test the tooltip reader itself uses.
+fn form_child_item_extended_tooltip_identity(fields: &[&str]) -> Option<(String, String)> {
+    fields.iter().find_map(|field| {
+        let nested = split_1c_braced_fields(field.trim(), 0)?;
+        if nested.first().map(|value| value.trim()) != Some("12") {
+            return None;
+        }
+        if nested.get(5).map(|value| value.trim()) == Some("1") {
+            return None;
+        }
+        let identity = split_1c_braced_fields(nested.get(1)?.trim(), 0)?;
+        let id = identity.first()?.trim();
+        if id == "0" {
+            return None;
+        }
+        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
+        is_form_extended_tooltip_name(&name).then(|| (id.to_string(), name))
+    })
 }
 
 pub(super) fn parse_form_child_item_extended_tooltip(
@@ -19361,6 +19692,12 @@ fn format_form_body_xml_with_dcs_profiles(
     if properties.customizable == Some(false) {
         xml.push_str("\t<Customizable>false</Customizable>\r\n");
     }
+    // The form's own `Enabled` trails `Customizable` (2) and `AutoTitle` (1)
+    // and leads `AutoCommandBar` (2) and `CommandBarLocation` (1) on the three
+    // native roots that carry it, with no pair counted the other way.
+    if properties.root_enabled == Some(false) {
+        xml.push_str("\t<Enabled>false</Enabled>\r\n");
+    }
     if let Some(command_bar_location) = properties.command_bar_location {
         xml.push_str(&format!(
             "\t<CommandBarLocation>{}</CommandBarLocation>\r\n",
@@ -19450,6 +19787,14 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(value) = properties.report_form_type {
         xml.push_str(&format!(
             "\t<ReportFormType>{}</ReportFormType>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // `VariantAppearance` trails `ReportFormType` and leads `AutoShowState` on
+    // all four native roots that carry it, with no counter-example.
+    if let Some(value) = &properties.variant_appearance {
+        xml.push_str(&format!(
+            "\t<VariantAppearance>{}</VariantAppearance>\r\n",
             escape_xml_text(value)
         ));
     }
@@ -19718,10 +20063,25 @@ fn format_form_input_field_tail_xml(
     let mut xml = String::new();
     for property in FORM_INPUT_FIELD_TAIL_XML_ORDER {
         match property {
+            FormInputFieldTailXmlProperty::AllowInputEmptyMultipleValues
+                if item.allow_input_empty_multiple_values == Some(true) =>
+            {
+                xml.push_str(&format!(
+                    "{tab}<AllowInputEmptyMultipleValues>true</AllowInputEmptyMultipleValues>\r\n"
+                ));
+            }
             FormInputFieldTailXmlProperty::ListChoiceMode
                 if item.list_choice_mode == Some(true) =>
             {
                 xml.push_str(&format!("{tab}<ListChoiceMode>true</ListChoiceMode>\r\n"));
+            }
+            FormInputFieldTailXmlProperty::ShowCheckBoxesInDropList => {
+                if let Some(value) = item.show_check_boxes_in_drop_list {
+                    xml.push_str(&format!(
+                        "{tab}<ShowCheckBoxesInDropList>{}</ShowCheckBoxesInDropList>\r\n",
+                        xml_bool(value)
+                    ));
+                }
             }
             FormInputFieldTailXmlProperty::ExtendedEditMultipleValues
                 if item.extended_edit_multiple_values == Some(true) =>
@@ -19867,6 +20227,26 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
     if let Some(value) = properties.view_scaling_mode {
         xml.push_str(&format!(
             "{tab}<ViewScalingMode>{}</ViewScalingMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // `ShowGroups` trails everything it is ever seen with -- `DataPath` (4),
+    // `TitleLocation` (4), `HorizontalScrollBar` (4), `Protection` (4),
+    // `Height` (3), `VerticalStretch` (3), `VerticalScrollBar` (3),
+    // `SelectionShowMode` (3), `AutoMaxWidth` (2), `MaxWidth` (2),
+    // `AutoMaxHeight` (2), `MaxHeight` (2), `ReadOnly` (2), `SkipOnInput` (2),
+    // `Width`, `HorizontalStretch`, `ShowGrid` and `Enabled` -- and leads only
+    // `ContextMenu` (4) on the four native fields that carry it.
+    if properties.show_groups == Some(false) {
+        xml.push_str(&format!("{tab}<ShowGroups>false</ShowGroups>\r\n"));
+    }
+    // `DrawingSelectionShowMode` closes the same run: the one native field
+    // that carries it puts it behind `DataPath` and `TitleLocation` and ahead
+    // of `ContextMenu`, `ExtendedTooltip` and `Events`.  It never shares a
+    // field with `ShowGroups`, so their relative order is unobserved.
+    if let Some(value) = properties.drawing_selection_show_mode {
+        xml.push_str(&format!(
+            "{tab}<DrawingSelectionShowMode>{}</DrawingSelectionShowMode>\r\n",
             escape_xml_text(value)
         ));
     }
@@ -20816,8 +21196,17 @@ pub(super) fn format_form_child_item_xml(
                 | "HTMLDocumentField"
                 | "SpreadSheetDocumentField"
                 | "FormattedDocumentField"
+                // All 3 native radio buttons that carry `ReadOnly` write it
+                // immediately behind `DataPath` and ahead of `TitleLocation`,
+                // `RadioButtonType`, `ChoiceList`, `ToolTip`, `Title`,
+                // `ContextMenu`, `ExtendedTooltip` and `Events`.
+                | "RadioButtonField"
                 | "ColumnGroup"
                 | "Page"
+                // The one native popup that carries `<ReadOnly>true</ReadOnly>`
+                // writes it ahead of `EnableContentChange` and `Title`, i.e. at
+                // the same early site the field kinds use.
+                | "Popup"
         );
     if read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
@@ -20857,10 +21246,13 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
     }
-    if item.tag == "Table"
-        && !form_table_has_hierarchical_navigation(item)
-        && item.row_filter_nil == Some(true)
-    {
+    // `RowFilter` is decided by its own bag key alone: over the 4 543 native
+    // `Table` items of UT 11.5.27.75 the undefined marker in table bag key 13
+    // is present on exactly the 1 986 that carry `<RowFilter xsi:nil="true"/>`
+    // and on none of the other 2 557.  Pairing the read with the hierarchical
+    // navigation flags only suppressed 4 of those 1 986 and prevented no false
+    // positive, so the pairing is dropped rather than the read weakened.
+    if item.tag == "Table" && item.row_filter_nil == Some(true) {
         xml.push_str(&format!("{tab}\t<RowFilter xsi:nil=\"true\"/>\r\n"));
     }
     if item.default_button == Some(true) {
@@ -21760,14 +22152,16 @@ pub(super) fn format_form_child_item_xml(
     }
     if let Some(value) = &item.input_min_value {
         xml.push_str(&format!(
-            "{tab}\t<MinValue xsi:type=\"xs:decimal\">{}</MinValue>\r\n",
-            escape_xml_text(value)
+            "{tab}\t<MinValue xsi:type=\"{}\">{}</MinValue>\r\n",
+            value.xsi_type,
+            escape_xml_text(&value.text)
         ));
     }
     if let Some(value) = &item.input_max_value {
         xml.push_str(&format!(
-            "{tab}\t<MaxValue xsi:type=\"xs:decimal\">{}</MaxValue>\r\n",
-            escape_xml_text(value)
+            "{tab}\t<MaxValue xsi:type=\"{}\">{}</MaxValue>\r\n",
+            value.xsi_type,
+            escape_xml_text(&value.text)
         ));
     }
     // `ChoiceForm` closes the input field's own run and opens the choice
@@ -21960,6 +22354,22 @@ pub(super) fn format_form_child_item_xml(
         FormUsualGroupXmlAnchor::AfterBehavior,
         indent + 1,
     ));
+    // A `ButtonGroup` writes `CommandSource` immediately ahead of its
+    // `Representation`: over all 1 189 native button groups that carry a source
+    // it trails `Title` (1 169), `ToolTip` (270), `Visible` (15),
+    // `ToolTipRepresentation` (4), `HorizontalStretch` (3),
+    // `EnableContentChange` (2) and `GroupHorizontalAlign` (1), and leads
+    // `Representation` (2), `ExtendedTooltip` (1 189) and `ChildItems` (184),
+    // with no pair counted both ways.  It used to be written behind the
+    // representation, which showed on the two groups that carry both.
+    if item.tag == "ButtonGroup"
+        && let Some(command_source) = &item.command_source
+    {
+        xml.push_str(&format!(
+            "{tab}\t<CommandSource>{}</CommandSource>\r\n",
+            escape_xml_text(command_source)
+        ));
+    }
     if !matches!(item.tag, "Pages" | "Popup")
         && let Some(representation) = item.representation.filter(|representation| {
             !form_child_item_representation_is_default(item.tag, representation)
@@ -22138,6 +22548,46 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
     }
+    // `SpecialTextInputMode` closes the scalar run ahead of `InputHint`: on the
+    // 7 native `InputField` items that carry it, it trails `DataPath` (7),
+    // `ToolTip` (4), `AutoMaxWidth` (3), `MaxWidth` (3) and one each of
+    // `Title`, `TitleLocation`, `HorizontalStretch`, `ChoiceButton`,
+    // `ExtendedEditMultipleValues`, `DefaultItem`, `EditTextUpdate`,
+    // `BackColor`, `Font`, `ReadOnly` and `ToolTipRepresentation`, and leads
+    // `InputHint` (4), `ContextMenu` (7), `ExtendedTooltip` (7) and `Events`
+    // (7), with no pair counted both ways.
+    if let Some(value) = item.special_text_input_mode {
+        xml.push_str(&format!(
+            "{tab}\t<SpecialTextInputMode>{}</SpecialTextInputMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // `AutoShowClearButtonMode` sits in the same run: on the 4 native items
+    // that carry it, it trails `DataPath` (4), `ClearButton` (4), `Title` (2)
+    // and one each of `TitleLocation`, `ToolTip`, `ToolTipRepresentation`,
+    // `HorizontalAlign`, `EditMode`, `CellHyperlink`, `ShowInHeader`,
+    // `HeaderHorizontalAlign`, `ShowInFooter`, `Width`, `AutoMaxWidth`,
+    // `HorizontalStretch` and `SpinButton`, and leads `ChoiceHistoryOnInput`
+    // (2), `InputHint` (1), `ContextMenu` (4), `ExtendedTooltip` (4) and
+    // `Events` (3), with no pair counted both ways.
+    if let Some(value) = item.auto_show_clear_button_mode {
+        xml.push_str(&format!(
+            "{tab}\t<AutoShowClearButtonMode>{}</AutoShowClearButtonMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // `AutoCorrectionOnTextInput` sits in the same place: the one native item
+    // that carries it puts it behind `DataPath`, `DropListButton`, `ChooseType`
+    // and `ChoiceList` and ahead of `InputHint`, `ContextMenu`,
+    // `ExtendedTooltip` and `Events`.  It never shares an item with
+    // `SpecialTextInputMode`, so their order relative to each other is
+    // unobserved and they stay adjacent.
+    if let Some(value) = item.auto_correction_on_text_input {
+        xml.push_str(&format!(
+            "{tab}\t<AutoCorrectionOnTextInput>{}</AutoCorrectionOnTextInput>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     // `InputHint` trails the colour/`Font` block in the native tree
     // (`Font`<`InputHint` 15, `TextColor`<`InputHint` 12, `BackColor` 10,
     // `BorderColor` 7), never precedes it.
@@ -22258,6 +22708,22 @@ pub(super) fn format_form_child_item_xml(
                     escape_xml_text(file_name)
                 ));
             }
+            // The drag pair closes the decoration's scalar run: on the 4
+            // native decorations that carry `EnableDrag` it trails
+            // `HorizontalStretch` (4), `Font` (4), `Title` (4), `Hyperlink`
+            // (4), `NonselectedPictureText` (4), `Height` (2), `AutoMaxWidth`
+            // (2), `VerticalStretch` (2), `TextColor` (2) and
+            // `EnableStartDrag` (2), and leads `Border` (4), `ContextMenu`
+            // (4), `ExtendedTooltip` (4) and `Events` (4); the 2 that carry
+            // `EnableStartDrag` put it directly ahead of `EnableDrag`.
+            if item.decoration_enable_start_drag == Some(true) {
+                xml.push_str(&format!(
+                    "{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"
+                ));
+            }
+            if item.decoration_enable_drag == Some(true) {
+                xml.push_str(&format!("{tab}\t<EnableDrag>true</EnableDrag>\r\n"));
+            }
             xml.push_str(&format_form_control_border_xml(item, indent + 1));
             if let Some(file_drag_mode) = item.file_drag_mode {
                 xml.push_str(&format!(
@@ -22346,12 +22812,12 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(location)
         ));
     }
-    if item.tag == "ButtonGroup"
-        && let Some(command_source) = &item.command_source
-    {
+    // The one native button that carries `CommandUniqueness` writes it behind
+    // `Type`, `CommandName` and `LocationInCommandBar` and ahead of
+    // `ExtendedTooltip`.
+    if item.tag == "Button" && item.command_uniqueness == Some(false) {
         xml.push_str(&format!(
-            "{tab}\t<CommandSource>{}</CommandSource>\r\n",
-            escape_xml_text(command_source)
+            "{tab}\t<CommandUniqueness>false</CommandUniqueness>\r\n"
         ));
     }
     // A `Popup` writes its geometry behind the title block and ahead of its
@@ -22532,6 +22998,18 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<AutoShowOpenButtonMode>{}</AutoShowOpenButtonMode>\r\n",
             escape_xml_text(auto_show_open_button_mode)
+        ));
+    }
+    // `SpellCheckingOnTextInput` stands immediately behind
+    // `AutoShowOpenButtonMode`: the one native item that carries it lists that
+    // property among its predecessors (with `DataPath`, `Title`,
+    // `TitleLocation`, `ToolTip`, `Width`, `ChoiceButton`, `QuickChoice` and
+    // `ChooseType`) and is followed only by `ContextMenu`, `ExtendedTooltip`
+    // and `Events`.
+    if let Some(value) = item.spell_checking_on_text_input {
+        xml.push_str(&format!(
+            "{tab}\t<SpellCheckingOnTextInput>{}</SpellCheckingOnTextInput>\r\n",
+            escape_xml_text(value)
         ));
     }
     if let Some(choice_history_on_input) = item.choice_history_on_input {
@@ -23250,6 +23728,14 @@ fn format_form_usual_group_properties_xml(
                 if item.enable_content_change == Some(true) {
                     xml.push_str(&format!(
                         "{tab}<EnableContentChange>true</EnableContentChange>\r\n"
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::CurrentRowUse => {
+                if let Some(value) = item.usual_group_current_row_use {
+                    xml.push_str(&format!(
+                        "{tab}<CurrentRowUse>{}</CurrentRowUse>\r\n",
+                        escape_xml_text(value)
                     ));
                 }
             }

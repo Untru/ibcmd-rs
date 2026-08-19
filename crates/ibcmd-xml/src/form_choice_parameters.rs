@@ -445,11 +445,21 @@ fn emit_value(
                                 }
                             };
                             push_escaped(sink, xsi_type, EscapeMode::Attribute)?;
-                            sink.push("\">")?;
-                            push_escaped(sink, value, EscapeMode::Text)?;
-                            sink.push("</")?;
-                            sink.push(&policy.scalar_value)?;
-                            sink.push(">\r\n")?;
+                            // An empty string value is written as an empty
+                            // element: over the whole UT 11.5.27.75 native
+                            // tree a `<Value xsi:type="xs:string">` with no
+                            // text occurs 49 times and always self-closed,
+                            // and the open/close spelling with empty text
+                            // never occurs.
+                            if xsi_type == XML_SCHEMA_STRING_TYPE && value.is_empty() {
+                                sink.push("\"/>\r\n")?;
+                            } else {
+                                sink.push("\">")?;
+                                push_escaped(sink, value, EscapeMode::Text)?;
+                                sink.push("</")?;
+                                sink.push(&policy.scalar_value)?;
+                                sink.push(">\r\n")?;
+                            }
                         }
                     }
                 }
