@@ -27800,6 +27800,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -28191,6 +28192,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -28674,6 +28676,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
                 ..MoxelFormat::default()
             },
         ],
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -28781,6 +28784,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -29056,6 +29060,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -29744,6 +29749,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
             height: Some(165),
             ..MoxelFormat::default()
         }],
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -29830,6 +29836,7 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -29897,6 +29904,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
             width: Some(72),
             ..MoxelFormat::default()
         }],
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -30586,6 +30594,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             default_format_font: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
+            source_formats: Vec::new(),
             rows: Vec::new(),
             vertical_groups: Vec::new(),
             merges: Vec::new(),
@@ -30699,6 +30708,7 @@ fn formats_moxel_field_selection_back_color_style() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30744,6 +30754,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30789,6 +30800,7 @@ fn formats_moxel_field_text_color_style() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30834,6 +30846,7 @@ fn formats_moxel_button_text_color_style() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30911,6 +30924,7 @@ fn formats_moxel_report_back_color_styles() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -31161,6 +31175,7 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -31208,6 +31223,7 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -32230,6 +32246,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat::default(), MoxelFormat::default()],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -32329,6 +32346,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
                 ..MoxelFormat::default()
             },
         ],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -32416,6 +32434,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat::default(), MoxelFormat::default()],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),

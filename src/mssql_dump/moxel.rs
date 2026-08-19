@@ -38,6 +38,14 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) default_format_font: Option<usize>,
     pub(super) default_format: MoxelFormat,
     pub(super) formats: Vec<MoxelFormat>,
+    /// The document's format table in the order the body stores it, before the
+    /// column/pool split reorders it.
+    ///
+    /// A header/footer record names a position in *this* table, not in the
+    /// published pool, so the published reference can only be recovered from
+    /// the record's own bytes. Empty when the body carries no format table the
+    /// reader can spell, which leaves the reference on its previous path.
+    pub(super) source_formats: Vec<MoxelFormat>,
     pub(super) rows: Vec<MoxelRow>,
     pub(super) vertical_groups: Vec<MoxelVerticalGroup>,
     pub(super) merges: Vec<MoxelMerge>,
@@ -1385,6 +1393,17 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             &drawing_format_indices,
             &number_format_refs,
         );
+    // The same table the split above consumed, kept in the order the body
+    // stores it: a header/footer record indexes this order, and nothing else in
+    // the IR preserves it once the column formats are lifted out.
+    let source_formats = parse_moxel_format_table(
+        &fields,
+        column_format_slots,
+        &style_refs,
+        &drawing_format_indices,
+        &number_format_refs,
+    )
+    .unwrap_or_default();
     let (column_formats, mut formats) = (column_formats, formats);
     let source_format_map = source_format_map.filter(|source_format_map| {
         moxel_source_format_refs_are_complete(
@@ -1620,6 +1639,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         default_format_font,
         default_format,
         formats,
+        source_formats,
         rows,
         vertical_groups,
         merges,
@@ -5276,6 +5296,14 @@ fn remap_moxel_source_fonts(
     else {
         return;
     };
+    // The source-ordered table carries the same font slots as the split ones,
+    // so it has to move with them or a reference resolved through it would name
+    // a font the output no longer numbers that way.
+    let output_source_format_fonts = spreadsheet
+        .source_formats
+        .iter()
+        .map(|format| source_font_map.output_format_font(format))
+        .collect::<Option<Vec<_>>>();
 
     spreadsheet.fonts = output_fonts;
     spreadsheet.default_format.font = output_default_font;
@@ -5295,6 +5323,20 @@ fn remap_moxel_source_fonts(
         .zip(output_extra_format_fonts)
     {
         format.font = output_font;
+    }
+    match output_source_format_fonts {
+        Some(output_source_format_fonts) => {
+            for (format, output_font) in spreadsheet
+                .source_formats
+                .iter_mut()
+                .zip(output_source_format_fonts)
+            {
+                format.font = output_font;
+            }
+        }
+        // A slot this map cannot project would leave the table half-renumbered,
+        // which is worse than having no table at all.
+        None => spreadsheet.source_formats.clear(),
     }
 }
 
@@ -7481,14 +7523,35 @@ fn render_moxel_spreadsheet_xml(
         push_moxel_drawing_xml(&mut xml, drawing, &output_format_index_map);
     }
     if let Some(slots) = &spreadsheet.header_footer_slots {
-        // A zero reference publishes `<f>0</f>` as stored. A non-zero one is
-        // only published where the resolved shared index says where it lands in
-        // the output table; the projection of an arbitrary stored reference onto
-        // that table is not evidenced (see the refusal note on
-        // `header_footer_format_index`), so those slots stay unpublished.
+        // A zero reference publishes `<f>0</f>` as stored. A non-zero one names
+        // a position in the body's own format table, and the platform answers
+        // with the pool position that carries that entry's bytes.
+        //
+        // Evidence (native 1С:УТ 11.5.27.75, every `Templates/*/Ext/
+        // Template.xml` that decodes as a spreadsheet): 87 documents publish a
+        // header or footer, between them 96 distinct non-zero references, and
+        // every one of the 96 names the *first* pool position holding its
+        // bytes - no reference names a later duplicate and none points past the
+        // pool. Where the bytes are absent from the pool the reference is not
+        // this reader's case and keeps the shared-index path below.
         push_moxel_header_footer_slots_xml(&mut xml, slots, |source_format_ref| {
             if source_format_ref == 0 {
                 return Some(0);
+            }
+            if let Some(format) = source_format_ref
+                .checked_sub(1)
+                .and_then(|at| spreadsheet.source_formats.get(at))
+            {
+                let mut body = String::new();
+                push_moxel_format_body_xml(
+                    &mut body,
+                    spreadsheet,
+                    format,
+                    font_projection.as_ref(),
+                );
+                if let Some(at) = published_formats.iter().position(|entry| *entry == body) {
+                    return Some(at + 1);
+                }
             }
             let shared = spreadsheet.header_footer_format_index?;
             Some(
@@ -10355,6 +10418,7 @@ mod moxel_exact_parity_tests {
             default_format_font: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
+            source_formats: Vec::new(),
             rows: Vec::new(),
             vertical_groups: Vec::new(),
             merges: Vec::new(),
