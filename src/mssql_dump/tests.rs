@@ -27592,7 +27592,9 @@ fn formats_moxel_simple_template_empty_row_range_and_style_formats() {
 
 #[test]
 fn formats_moxel_standard_print_picture_ref() {
-    let picture = parse_moxel_picture("{4,0,{-13}}", &BTreeMap::new()).unwrap();
+    // The record layout is the one the platform writes: every picture record in
+    // the native corpus carries the trailing `"",-1,-1,<transparency>,0,""`.
+    let picture = parse_moxel_picture("{4,0,{-13},\"\",-1,-1,0,0,\"\"}", &BTreeMap::new()).unwrap();
 
     assert_eq!(picture.index, 0);
     assert_eq!(picture.ref_name.as_deref(), Some("v8ui:Print"));
@@ -27602,14 +27604,17 @@ fn formats_moxel_standard_print_picture_ref() {
 #[test]
 fn formats_moxel_standard_picture_refs() {
     let cases = [
-        ("{4,0,{-13}}", "v8ui:Print"),
-        ("{4,1,{-6}}", "v8ui:InputFieldCalculator"),
+        ("{4,0,{-13},\"\",-1,-1,0,0,\"\"}", "v8ui:Print"),
         (
-            "{4,2,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9}}",
+            "{4,1,{-6},\"\",-1,-1,0,0,\"\"}",
+            "v8ui:InputFieldCalculator",
+        ),
+        (
+            "{4,2,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,0,0,\"\"}",
             "v8ui:Information",
         ),
         (
-            "{4,3,{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1}}",
+            "{4,3,{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1},\"\",-1,-1,0,0,\"\"}",
             "v8ui:SaveFile",
         ),
     ];
@@ -27841,7 +27846,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }],
@@ -27851,6 +27856,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -27877,7 +27883,9 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -28232,7 +28240,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }],
@@ -28242,6 +28250,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -28256,7 +28265,9 @@ fn spreadsheet_extract_omits_default_print_settings() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: Some(print_settings),
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -28675,7 +28686,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 2,
             columns: vec![
                 MoxelColumn {
@@ -28725,6 +28736,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
                 ..MoxelFormat::default()
             },
         ],
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -28753,7 +28765,9 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -28818,7 +28832,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -28832,6 +28846,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -28839,7 +28854,9 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -29107,6 +29124,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -29135,7 +29153,9 @@ fn parses_and_formats_moxel_vertical_groups() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: vec![MoxelLine {
             style: "Solid",
@@ -29243,14 +29263,14 @@ fn formats_moxel_row_column_ids_accept_pair_mapping() {
         MoxelColumnSet {
             id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
         MoxelColumnSet {
             id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
@@ -29274,14 +29294,14 @@ fn formats_moxel_row_column_ids_accept_row_zero_pair_mapping() {
         MoxelColumnSet {
             id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
         MoxelColumnSet {
             id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
@@ -29492,8 +29512,8 @@ fn formats_moxel_column_sets_capture_explicit_source_default_format_indices() {
     assert_eq!(declared_sheet_height, Some(62));
     assert_eq!(column_sets[0].default_format_index, None);
     assert_eq!(column_sets[1].default_format_index, None);
-    assert_eq!(column_sets[0].source_default_format_index, Some(29));
-    assert_eq!(column_sets[1].source_default_format_index, Some(29));
+    assert_eq!(column_sets[0].source_default_format_index(), Some(29));
+    assert_eq!(column_sets[1].source_default_format_index(), Some(29));
     assert_eq!(column_sets[0].columns[0].format_index, 1);
     assert_eq!(column_sets[1].columns[0].format_index, 1);
     assert_eq!(source_refs.first().copied(), Some(29));
@@ -29782,7 +29802,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: Vec::new(),
         }],
@@ -29795,6 +29815,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
             height: Some(165),
             ..MoxelFormat::default()
         }],
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -29809,7 +29830,9 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -29881,6 +29904,7 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: Vec::new(),
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -29909,7 +29933,9 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -29948,6 +29974,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
             width: Some(72),
             ..MoxelFormat::default()
         }],
+        source_formats: Vec::new(),
         rows: vec![MoxelRow {
             index: 0,
             index_to: None,
@@ -29960,13 +29987,16 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
             begin_row: 0,
             end_row: 0,
             level: 0,
+            open: true,
         }],
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -30637,6 +30667,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             default_format_font: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
+            source_formats: Vec::new(),
             rows: Vec::new(),
             vertical_groups: Vec::new(),
             merges: Vec::new(),
@@ -30644,7 +30675,9 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             vertical_unmerges: Vec::new(),
             named_items: Vec::new(),
             areas: Vec::new(),
+            internal_sources: Vec::new(),
             print_area: None,
+            group_header_colors: [None, None, None, None],
             print_settings: None,
             lines: Vec::new(),
             fonts: Vec::new(),
@@ -30736,7 +30769,7 @@ fn formats_moxel_plain_style_item_font_omits_false_flags() {
 }
 
 #[test]
-fn formats_moxel_field_selection_back_color_style() {
+fn formats_moxel_minus21_slot_uses_button_text_color() {
     let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-21}}"], &BTreeMap::new());
     let format = parse_moxel_format("{2048,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
@@ -30750,6 +30783,7 @@ fn formats_moxel_field_selection_back_color_style() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30757,7 +30791,9 @@ fn formats_moxel_field_selection_back_color_style() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -30777,7 +30813,7 @@ fn formats_moxel_field_selection_back_color_style() {
 
     push_moxel_format_xml(&mut xml, &spreadsheet, 1);
 
-    assert!(xml.contains("<backColor>style:FieldSelectionBackColor</backColor>"));
+    assert!(xml.contains("<backColor>style:ButtonTextColor</backColor>"));
 }
 
 #[test]
@@ -30795,6 +30831,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30802,7 +30839,9 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -30826,7 +30865,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
 }
 
 #[test]
-fn formats_moxel_field_text_color_style() {
+fn formats_moxel_minus13_slot_uses_field_alternative_back_color() {
     let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-13}}"], &BTreeMap::new());
     let format = parse_moxel_format("{1024,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
@@ -30840,6 +30879,7 @@ fn formats_moxel_field_text_color_style() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30847,7 +30887,9 @@ fn formats_moxel_field_text_color_style() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -30867,7 +30909,7 @@ fn formats_moxel_field_text_color_style() {
 
     push_moxel_format_xml(&mut xml, &spreadsheet, 1);
 
-    assert!(xml.contains("<textColor>style:FieldTextColor</textColor>"));
+    assert!(xml.contains("<textColor>style:FieldAlternativeBackColor</textColor>"));
 }
 
 #[test]
@@ -30885,6 +30927,7 @@ fn formats_moxel_button_text_color_style() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30892,7 +30935,9 @@ fn formats_moxel_button_text_color_style() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -30962,6 +31007,7 @@ fn formats_moxel_report_back_color_styles() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -30969,7 +31015,9 @@ fn formats_moxel_report_back_color_styles() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -31212,6 +31260,7 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -31219,7 +31268,9 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -31259,6 +31310,7 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![format],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -31266,7 +31318,9 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -31476,7 +31530,7 @@ fn formats_moxel_multiple_column_sets_do_not_synthesize_default_format_index() {
         MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -31487,7 +31541,7 @@ fn formats_moxel_multiple_column_sets_do_not_synthesize_default_format_index() {
         MoxelColumnSet {
             id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 4,
             columns: vec![
                 MoxelColumn {
@@ -32028,7 +32082,10 @@ fn formats_moxel_invoice_1096_sparse_column_sets_promote_shared_default_without_
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert_eq!(spreadsheet.column_sets.len(), 4);
-    assert_eq!(spreadsheet.column_formats.len(), 35);
+    // 36, not 35: the slot the column sets' own default reference names is part
+    // of the split too. The published bytes of this document are unchanged -
+    // every assertion below on the XML still holds.
+    assert_eq!(spreadsheet.column_formats.len(), 36);
     assert!(spreadsheet.header_footer_format_index.is_some());
     assert_eq!(spreadsheet.default_format_index, None);
     assert_eq!(declared_sheet_height, Some(38));
@@ -32074,7 +32131,7 @@ fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source
         MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -32085,7 +32142,7 @@ fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source
         MoxelColumnSet {
             id: Some("alt".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -32145,7 +32202,7 @@ fn formats_moxel_single_column_set_prefers_explicit_header_footer_source_ref() {
     let mut column_sets = vec![MoxelColumnSet {
         id: None,
         default_format_index: None,
-        source_default_format_index: None,
+        raw_default_format_index: 0,
         size: 1,
         columns: vec![MoxelColumn {
             index: 0,
@@ -32183,7 +32240,7 @@ fn formats_moxel_sparse_header_footer_ref_uses_non_identity_source_map() {
     let mut column_sets = vec![MoxelColumnSet {
         id: None,
         default_format_index: None,
-        source_default_format_index: None,
+        raw_default_format_index: 0,
         size: 1,
         columns: Vec::new(),
     }];
@@ -32260,7 +32317,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: Some(3),
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 2,
             columns: vec![
                 MoxelColumn {
@@ -32281,6 +32338,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat::default(), MoxelFormat::default()],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -32288,7 +32346,9 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -32325,7 +32385,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
             MoxelColumnSet {
                 id: None,
                 default_format_index: None,
-                source_default_format_index: None,
+                raw_default_format_index: 0,
                 size: 2,
                 columns: vec![
                     MoxelColumn {
@@ -32343,7 +32403,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
             MoxelColumnSet {
                 id: Some("alt".to_string()),
                 default_format_index: Some(5),
-                source_default_format_index: Some(5),
+                raw_default_format_index: 5,
                 size: 1,
                 columns: vec![MoxelColumn {
                     index: 0,
@@ -32380,6 +32440,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
                 ..MoxelFormat::default()
             },
         ],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -32387,7 +32448,9 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),
@@ -32421,7 +32484,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
             MoxelColumnSet {
                 id: None,
                 default_format_index: Some(4),
-                source_default_format_index: None,
+                raw_default_format_index: 0,
                 size: 2,
                 columns: vec![
                     MoxelColumn {
@@ -32439,7 +32502,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
             MoxelColumnSet {
                 id: Some("alt".to_string()),
                 default_format_index: Some(4),
-                source_default_format_index: None,
+                raw_default_format_index: 0,
                 size: 1,
                 columns: vec![MoxelColumn {
                     index: 0,
@@ -32467,6 +32530,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         default_format_font: None,
         default_format: MoxelFormat::default(),
         formats: vec![MoxelFormat::default(), MoxelFormat::default()],
+        source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
         merges: Vec::new(),
@@ -32474,7 +32538,9 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         vertical_unmerges: Vec::new(),
         named_items: Vec::new(),
         areas: Vec::new(),
+        internal_sources: Vec::new(),
         print_area: None,
+        group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: Vec::new(),
         fonts: Vec::new(),

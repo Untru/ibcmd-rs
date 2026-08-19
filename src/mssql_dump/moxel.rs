@@ -38,6 +38,14 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) default_format_font: Option<usize>,
     pub(super) default_format: MoxelFormat,
     pub(super) formats: Vec<MoxelFormat>,
+    /// The document's format table in the order the body stores it, before the
+    /// column/pool split reorders it.
+    ///
+    /// A header/footer record names a position in *this* table, not in the
+    /// published pool, so the published reference can only be recovered from
+    /// the record's own bytes. Empty when the body carries no format table the
+    /// reader can spell, which leaves the reference on its previous path.
+    pub(super) source_formats: Vec<MoxelFormat>,
     pub(super) rows: Vec<MoxelRow>,
     pub(super) vertical_groups: Vec<MoxelVerticalGroup>,
     pub(super) merges: Vec<MoxelMerge>,
@@ -46,7 +54,15 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) named_items: Vec<MoxelNamedItem>,
     #[allow(dead_code)]
     pub(super) areas: Vec<MoxelArea>,
+    /// The source position each internal format slot came from, in internal
+    /// order. The column/pool split is position-only, so this is that same
+    /// split run over `1..=n`; empty when there is no table to split.
+    pub(super) internal_sources: Vec<usize>,
     pub(super) print_area: Option<MoxelArea>,
+    /// `groupsBackColor`, `groupsColor`, `headersBackColor`, `headersColor`, in
+    /// publication order, each `None` where the document leaves the role at its
+    /// default.
+    pub(super) group_header_colors: [Option<String>; 4],
     pub(super) print_settings: Option<MoxelPrintSettings>,
     pub(super) lines: Vec<MoxelLine>,
     pub(super) fonts: Vec<MoxelFont>,
@@ -335,9 +351,24 @@ pub(super) struct MoxelRow {
 pub(super) struct MoxelColumnSet {
     pub(super) id: Option<String>,
     pub(super) default_format_index: Option<usize>,
-    pub(super) source_default_format_index: Option<usize>,
+    /// The set's default-format reference exactly as the body stores it: a
+    /// position in the document's source format table, or 0 for none.
+    ///
+    /// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet templates): of
+    /// the 1810 column sets, the 1734 that store 0 publish no `<formatIndex>`
+    /// and the 76 that store anything else all publish one - no exception in
+    /// either direction.
+    pub(super) raw_default_format_index: usize,
     pub(super) size: usize,
     pub(super) columns: Vec<MoxelColumn>,
+}
+
+impl MoxelColumnSet {
+    /// The stored reference as an option: `None` is the stored 0, which is the
+    /// body's own way of saying the set names no format.
+    pub(super) fn source_default_format_index(&self) -> Option<usize> {
+        (self.raw_default_format_index > 0).then_some(self.raw_default_format_index)
+    }
 }
 
 pub(super) struct MoxelColumn {
@@ -437,6 +468,14 @@ pub(super) struct MoxelVerticalGroup {
     pub(super) begin_row: usize,
     pub(super) end_row: usize,
     pub(super) level: usize,
+    /// Whether the group is expanded. The record stores the collapsed state, so
+    /// this is its complement.
+    ///
+    /// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet templates): the
+    /// 1703 group records split 1693 storing 0 and 10 storing 1, and exactly
+    /// the 10 publish `<o>false</o>` - the other 1693 publish no `<o>` at all
+    /// and no record in the corpus publishes `<o>true</o>`.
+    pub(super) open: bool,
 }
 
 #[derive(Clone)]
@@ -808,6 +847,9 @@ pub(super) struct MoxelPicture {
     pub(super) index: usize,
     pub(super) ref_name: Option<String>,
     pub(super) payload: Option<String>,
+    /// The record's seventh member, which decides whether the published element
+    /// carries `t="false"` at all.
+    pub(super) transparency: usize,
 }
 
 #[derive(Clone, Default)]
@@ -977,13 +1019,6 @@ impl MoxelFormat {
     }
 }
 
-pub(super) fn normalize_moxel_default_match_format(mut format: MoxelFormat) -> MoxelFormat {
-    if format.font == Some(0) {
-        format.font = None;
-    }
-    format
-}
-
 pub(super) fn resolve_existing_moxel_default_format_index(
     column_formats: &[MoxelFormat],
     formats: &[MoxelFormat],
@@ -1011,8 +1046,7 @@ pub(super) fn resolve_existing_moxel_default_format_index(
     } else {
         None
     };
-    let target_exact = target.clone();
-    let target_normalized = normalize_moxel_default_match_format(target);
+    let target_exact = target;
     let last_exact_match = |target: &MoxelFormat| {
         all_formats
             .iter()
@@ -1024,16 +1058,6 @@ pub(super) fn resolve_existing_moxel_default_format_index(
         .as_ref()
         .and_then(|target| last_exact_match(target).map(|index| (index, true)))
         .or_else(|| last_exact_match(&target_exact).map(|index| (index, false)))
-        .or_else(|| {
-            all_formats
-                .iter()
-                .enumerate()
-                .filter_map(|(index, format)| {
-                    (normalize_moxel_default_match_format(format.clone()) == target_normalized)
-                        .then_some((index + 1, false))
-                })
-                .last()
-        })
 }
 
 pub(crate) fn extract_moxel_spreadsheet_xml(
@@ -1184,14 +1208,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         })
         .collect::<Vec<_>>();
     let print_area = parse_moxel_print_area(&fields);
-    trim_moxel_trailing_empty_rows(
-        &mut rows,
-        &areas,
-        &merges,
-        &horizontal_unmerges,
-        &vertical_unmerges,
-    );
-    compact_moxel_empty_row_ranges(&mut rows);
     let (
         column_sets,
         row_column_ids,
@@ -1199,6 +1215,15 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         source_column_format_order,
         has_explicit_sparse_column_set_default,
     ) = parse_moxel_column_sets_with_source_format_order(&fields);
+    // A row's column-set identity is part of the payload an empty run folds on,
+    // so it has to be in place before the fold. Folding first let a run swallow
+    // the row that opens a new column set and drop its `<columnsID>` with it.
+    for row in &mut rows {
+        if let Some(columns_id) = row_column_ids.get(&row.index) {
+            row.columns_id = Some(columns_id.clone());
+        }
+    }
+    compact_moxel_empty_row_ranges(&mut rows);
     let fonts = parse_moxel_fonts(&fields, object_refs);
     let pictures = parse_moxel_pictures(&fields, object_refs);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
@@ -1318,9 +1343,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         column_format_slots.saturating_sub(1)
     };
     for row in &mut rows {
-        if let Some(columns_id) = row_column_ids.get(&row.index) {
-            row.columns_id = Some(columns_id.clone());
-        }
         if source_column_format_offset == 0 {
             if row.format_index > 1 {
                 row.format_index += format_offset;
@@ -1374,17 +1396,33 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             default_format = leading_default_format;
         }
     }
-    let (column_formats, formats, source_format_map, leading_source_column_formats) =
-        parse_moxel_formats_with_source_map(
-            &fields,
-            column_format_slots,
-            sparse_source_format_refs,
-            &source_column_format_refs,
-            &source_column_format_order,
-            &style_refs,
-            &drawing_format_indices,
-            &number_format_refs,
-        );
+    let (
+        column_formats,
+        formats,
+        internal_sources,
+        source_format_map,
+        leading_source_column_formats,
+    ) = parse_moxel_formats_with_source_map(
+        &fields,
+        column_format_slots,
+        sparse_source_format_refs,
+        &source_column_format_refs,
+        &source_column_format_order,
+        &style_refs,
+        &drawing_format_indices,
+        &number_format_refs,
+    );
+    // The same table the split above consumed, kept in the order the body
+    // stores it: a header/footer record indexes this order, and nothing else in
+    // the IR preserves it once the column formats are lifted out.
+    let source_formats = parse_moxel_format_table(
+        &fields,
+        column_format_slots,
+        &style_refs,
+        &drawing_format_indices,
+        &number_format_refs,
+    )
+    .unwrap_or_default();
     let (column_formats, mut formats) = (column_formats, formats);
     let source_format_map = source_format_map.filter(|source_format_map| {
         moxel_source_format_refs_are_complete(
@@ -1528,8 +1566,12 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .map(|drawing| drawing.format_index)
         .max()
         .unwrap_or(0);
+    // The highest slot any record actually names. The floor this used to carry
+    // named slot 1 even where no column, row, cell, note or drawing names
+    // anything, which pushed the materialized default format one slot along and
+    // left the slot it skipped in the pool as an unreferenced `<format/>`.
     let row_cell_max_format_index = rows.iter().fold(
-        moxel_column_format_slots(&column_sets, column_count).max(1),
+        moxel_column_format_slots(&column_sets, column_count),
         |max_index, row| {
             let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
                 cell_max.max(cell.format_index).max(
@@ -1550,6 +1592,23 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         !default_format.is_empty() || default_format_width.is_some(),
         format_table_fallback.max(max_format_index + 1),
     );
+    // The leading record is what `<defaultFormatIndex>` names, so a table entry
+    // that already carries its bytes is the slot: the pool must not grow a copy
+    // of it beside the original.
+    let leading_default_format = fields
+        .get(MOXEL_LEADING_DEFAULT_FORMAT_FIELD)
+        .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs));
+    if default_format_index.is_some_and(|index| index > column_formats.len() + formats.len())
+        && let Some(leading) = leading_default_format
+            .as_ref()
+            .filter(|format| !format.is_empty())
+        && let Some(existing) = column_formats
+            .iter()
+            .chain(formats.iter())
+            .position(|format| format == leading)
+    {
+        default_format_index = Some(existing + 1);
+    }
     if default_format_index.is_some_and(|index| index > column_formats.len() + formats.len())
         && let Some((existing_index, exact_font_zero_match)) =
             resolve_existing_moxel_default_format_index(
@@ -1563,22 +1622,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         if exact_font_zero_match && default_format.is_empty() {
             default_format.font = Some(0);
         }
-    }
-    if source_column_format_offset > 0
-        && default_format.is_empty()
-        && default_format_width.is_none()
-        && column_formats.len() == source_column_format_refs.len()
-        && source_column_format_refs
-            .iter()
-            .copied()
-            .max()
-            .is_some_and(|max_source_format_index| {
-                max_source_format_index < column_formats.len() + formats.len()
-            })
-        && let Some(min_source_format_index) = source_column_format_refs.iter().copied().min()
-        && min_source_format_index > 1
-    {
-        default_format_index = Some(column_formats.len() + min_source_format_index);
     }
     if header_footer_format_index.is_some()
         && default_format.is_empty()
@@ -1620,6 +1663,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         default_format_font,
         default_format,
         formats,
+        source_formats,
         rows,
         vertical_groups,
         merges,
@@ -1627,7 +1671,9 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         vertical_unmerges,
         named_items,
         areas,
+        internal_sources,
         print_area,
+        group_header_colors: parse_moxel_group_header_colors(&fields, &style_refs),
         print_settings,
         lines,
         fonts,
@@ -1641,9 +1687,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             .and_then(|field| parse_moxel_language_settings(field)),
         template_mode: !moxel_body_has_fixed_prefix(&fields)
             || fields.get(13).map(|field| field.trim()) != Some("0"),
-        leading_default_format: fields
-            .get(4)
-            .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs)),
+        leading_default_format,
         source_format_map,
         height,
         value_types: parse_moxel_value_types(&fields, object_refs),
@@ -1698,7 +1742,7 @@ pub(super) fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnS
     vec![MoxelColumnSet {
         id: None,
         default_format_index: None,
-        source_default_format_index: None,
+        raw_default_format_index: 0,
         size: column_count,
         columns: (0..column_count)
             .map(|index| MoxelColumn {
@@ -1889,6 +1933,7 @@ pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGrou
         begin_row: fields.first()?.trim().parse::<usize>().ok()?,
         end_row: fields.get(1)?.trim().parse::<usize>().ok()?,
         level: fields.get(2)?.trim().parse::<usize>().ok()?,
+        open: fields.get(4)?.trim().parse::<usize>().ok()? == 0,
     })
 }
 
@@ -1930,8 +1975,7 @@ pub(super) fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
     Some(MoxelColumnSet {
         id,
         default_format_index: None,
-        source_default_format_index: (raw_default_format_index > 1)
-            .then_some(raw_default_format_index),
+        raw_default_format_index,
         size: declared_count,
         columns,
     })
@@ -2281,51 +2325,6 @@ pub(super) fn moxel_spreadsheet_height(
     row_max.max(merge_max).max(area_max).max(0) as usize + 1
 }
 
-pub(super) fn trim_moxel_trailing_empty_rows(
-    rows: &mut Vec<MoxelRow>,
-    areas: &[MoxelArea],
-    merges: &[MoxelMerge],
-    horizontal_unmerges: &[MoxelMerge],
-    vertical_unmerges: &[MoxelMerge],
-) {
-    let Some(material_limit) = areas
-        .iter()
-        .map(|area| area.end_row.max(0) as usize + 1)
-        .chain(
-            merges
-                .iter()
-                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
-        )
-        .chain(
-            horizontal_unmerges
-                .iter()
-                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
-        )
-        .chain(
-            vertical_unmerges
-                .iter()
-                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
-        )
-        .max()
-    else {
-        return;
-    };
-    let mut last_trimmed_index = None;
-    while rows.last().is_some_and(|row| {
-        row.index > material_limit && row.format_index <= 1 && row.cells.is_empty()
-    }) {
-        if let Some(index) = rows.last().map(|row| row.index) {
-            last_trimmed_index = Some(last_trimmed_index.unwrap_or(index).max(index));
-        }
-        rows.pop();
-    }
-    if let (Some(index_to), Some(row)) = (last_trimmed_index, rows.last_mut()) {
-        if row.index == material_limit && row.format_index <= 1 && row.cells.is_empty() {
-            row.index_to = Some(index_to);
-        }
-    }
-}
-
 /// `<indexTo>` collapses a run of adjacent cell-less rows that publish the same
 /// `<row>` payload.
 ///
@@ -2381,10 +2380,21 @@ pub(super) fn is_moxel_compactable_empty_row(row: &MoxelRow) -> bool {
 }
 
 pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
+    // The row block sits right behind the header/footer block, and the scalar
+    // this scan reads as its first marker is the template-mode flag, not part
+    // of the block. Evidence (native 1С:УТ 11.5.27.75): field 14 is the literal
+    // `2` in all 683 standalone bodies and in all five distinct blocks embedded
+    // in forms, and field 15 is the stored row count; field 13 is `1` in every
+    // standalone body but `0` in three of the five embedded ones. Requiring `1`
+    // there therefore refused the anchor on exactly the bodies whose
+    // template mode is off, and the scan then anchored somewhere else.
+    let anchored_row_block =
+        moxel_body_has_fixed_prefix(fields).then_some(MOXEL_HEADER_FOOTER_BLOCK_START + 6);
     let mut best_rows = Vec::new();
     for index in 3..fields.len().saturating_sub(3) {
-        if fields.get(index).map(|field| field.trim()) != Some("1")
-            || fields.get(index + 1).map(|field| field.trim()) != Some("2")
+        if fields.get(index + 1).map(|field| field.trim()) != Some("2")
+            || (Some(index) != anchored_row_block
+                && fields.get(index).map(|field| field.trim()) != Some("1"))
         {
             continue;
         }
@@ -2725,17 +2735,21 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     let note_at = has(MOXCEL_CELL_NOTE_BIT).then(|| take(3));
     let formatted_flag_at = has(MOXCEL_CELL_TEXT_BIT).then(|| take(1));
     let mut expected = cursor;
-    let formatted = match formatted_flag_at.and_then(|at| fields.get(at)) {
-        None => false,
+    // The flag opens one more field, which carries the record's own formatted
+    // rendering of the same text.
+    let formatted_at = match formatted_flag_at.and_then(|at| fields.get(at)) {
+        None => None,
         Some(flag) => match flag.trim() {
-            "0" => false,
+            "0" => None,
             "1" => {
+                let at = expected;
                 expected += 1;
-                true
+                Some(at)
             }
             _ => return None,
         },
     };
+    let formatted = formatted_at.is_some();
     if fields.len() != expected {
         return None;
     }
@@ -2779,6 +2793,15 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
         .as_ref()
         .filter(|value| value.lang.is_empty())
         .map(|value| value.content.clone());
+    // Where the record carries a formatted tail, that tail is the text the
+    // platform publishes; the plain copy beside it is the same content with its
+    // markup stripped. Evidence (native 1С:УТ 11.5.27.75): 16 cells in the
+    // corpus carry the tail, 14 of them spell both copies identically, and in
+    // the two that do not - both in `ПроверкаКонтрагента/.../Налоги` - the
+    // published `<tfl>` is the tail's `<b>…</>` form and never the plain one.
+    let text = formatted_at
+        .and_then(|at| parse_moxel_formatted_cell_text(fields.get(at)?))
+        .or(text);
     let note = note_at.and_then(|at| parse_moxel_cell_note(&fields, at));
     Some(MoxelCell {
         column_index,
@@ -2873,6 +2896,17 @@ fn parse_moxel_single_localized_value(text: &str) -> Option<MoxelLocalizedValue>
     })
 }
 
+/// The formatted tail `{1, <text list>, 1}` of a cell record.
+fn parse_moxel_formatted_cell_text(text: &str) -> Option<String> {
+    let group = split_1c_braced_fields(text, 0)?;
+    if group.len() != 3 || group.first()?.trim() != "1" || group.get(2)?.trim() != "1" {
+        return None;
+    }
+    parse_moxel_localized_cell_value(group.get(1)?)?
+        .filter(|value| !value.lang.is_empty())
+        .map(|value| value.content)
+}
+
 pub(super) fn parse_moxel_localized_cell_value(text: &str) -> Option<Option<MoxelLocalizedValue>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -2912,6 +2946,65 @@ pub(super) fn parse_moxel_print_area(fields: &[&str]) -> Option<MoxelArea> {
         }
         parse_moxel_bounds_area(&bounds, String::new())
     })
+}
+
+/// The four palette slots the group and header colours name, counted from the
+/// print-area record: the record is followed by ten scalars and these are the
+/// last four of them.
+const MOXEL_GROUP_HEADER_COLOR_SLOT_OFFSET: usize = 7;
+
+/// The four colours in publication order, each with the role default it is
+/// measured against. A slot resolving to its role's default is not published.
+///
+/// Evidence (native 1С:УТ 11.5.27.75): 611 of the 683 spreadsheet templates
+/// carry the print-area record this reads from, and for all 611 the four slots
+/// resolved this way reproduce the published set exactly - which four elements
+/// appear and what each one says - with no counterexample. Five documents
+/// publish anything at all: four publish all four elements and
+/// `СообщениеОбменСБанками/.../ЭД_ИзвещениеОСостоянииДепозита_ru` publishes
+/// `groupsColor` alone, because only its slot differs from the role default.
+const MOXEL_GROUP_HEADER_COLOR_ROLES: [(&str, &str); 4] = [
+    ("groupsBackColor", "style:FormBackColor"),
+    ("groupsColor", "style:FormTextColor"),
+    ("headersBackColor", "style:FormBackColor"),
+    ("headersColor", "style:FormTextColor"),
+];
+
+/// The empty print-area record `{0,-1,-1,-1,-1,<uuid>}`, taken as the anchor.
+fn moxel_print_area_anchor(fields: &[&str]) -> Option<usize> {
+    fields.iter().enumerate().rev().find_map(|(index, field)| {
+        let record = split_1c_braced_fields(field, 0)?;
+        (record.len() == 6
+            && record.first()?.trim() == "0"
+            && record[1..5].iter().all(|value| value.trim() == "-1")
+            && parse_uuid_field(record.get(5)?.trim()).is_some())
+        .then_some(index)
+    })
+}
+
+pub(super) fn parse_moxel_group_header_colors(
+    fields: &[&str],
+    style_refs: &[Option<String>],
+) -> [Option<String>; 4] {
+    let mut colors: [Option<String>; 4] = [None, None, None, None];
+    let Some(anchor) = moxel_print_area_anchor(fields) else {
+        return colors;
+    };
+    for (role, (_, default)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
+        let Some(slot) = fields
+            .get(anchor + MOXEL_GROUP_HEADER_COLOR_SLOT_OFFSET + role)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        let Some(Some(color)) = style_refs.get(slot) else {
+            continue;
+        };
+        if color != default {
+            colors[role] = Some(color.clone());
+        }
+    }
+    colors
 }
 
 pub(super) fn parse_moxel_fonts(
@@ -3898,12 +3991,22 @@ pub(super) fn parse_moxel_pictures(
     Vec::new()
 }
 
+/// Position of the transparency member inside a picture record.
+const MOXEL_PICTURE_TRANSPARENCY_FIELD: usize = 6;
+
 pub(super) fn parse_moxel_picture(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MoxelPicture> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "4" {
+        return None;
+    }
+    // A picture record always reaches its transparency member, so a shorter
+    // `{4,...}` is some other record wearing the same leading token - which is
+    // how `СверткаИнформационнойБазы/.../МакетОграниченияСвертки` published a
+    // `<picture/>` for a `{4,35,{"U"}}` the platform does not publish at all.
+    if fields.len() <= MOXEL_PICTURE_TRANSPARENCY_FIELD {
         return None;
     }
     let ref_name = fields
@@ -3937,6 +4040,10 @@ pub(super) fn parse_moxel_picture(
         index: fields.get(1)?.trim().parse::<usize>().ok()?,
         ref_name,
         payload,
+        transparency: fields
+            .get(MOXEL_PICTURE_TRANSPARENCY_FIELD)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .unwrap_or(0),
     })
 }
 
@@ -5070,17 +5177,28 @@ pub(super) fn parse_moxel_default_format(
         .unwrap_or_default()
 }
 
+/// The document's leading default-format record.
+///
+/// It is the body's fifth top-level field and nothing else: the writer already
+/// reads that position when it publishes `<defaultFormatIndex>`. Sweeping the
+/// first eight fields for anything that happens to decode as a non-empty format
+/// let the sixth field - the column-set block - stand in for a document whose
+/// own record is the empty `{0}`, which manufactured a default format, a
+/// `<defaultFormatIndex>` the platform does not write, and an empty entry in
+/// the pool slot that reference landed on.
 pub(super) fn parse_moxel_leading_default_format(
     fields: &[&str],
     style_refs: &[Option<String>],
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> Option<MoxelFormat> {
     fields
-        .iter()
-        .take(8)
-        .filter_map(|field| parse_moxel_format(field, style_refs, number_format_refs))
-        .find(|format| !format.is_empty())
+        .get(MOXEL_LEADING_DEFAULT_FORMAT_FIELD)
+        .and_then(|field| parse_moxel_format(field, style_refs, number_format_refs))
+        .filter(|format| !format.is_empty())
 }
+
+/// Position of the leading default-format record among the top-level fields.
+pub(super) const MOXEL_LEADING_DEFAULT_FORMAT_FIELD: usize = 4;
 
 pub(super) fn parse_moxel_default_format_field(
     text: &str,
@@ -5276,9 +5394,52 @@ fn remap_moxel_source_fonts(
     else {
         return;
     };
+    // The leading default-format record carries a font slot from the same run,
+    // so it moves with the rest. Evidence (native 1С:УТ 11.5.27.75):
+    // `СписаниеБезналичныхДенежныхСредств/.../ПФ_MXL_ПлатежноеПоручение_ru`
+    // stores `{129,0,72}` and publishes its materialized entry as
+    // `<font>6</font><width>72</width>`.
+    let output_leading_default_font = spreadsheet
+        .leading_default_format
+        .as_ref()
+        .map(|format| source_font_map.output_format_font(format));
+    if output_leading_default_font
+        .as_ref()
+        .is_some_and(Option::is_none)
+    {
+        return;
+    }
+    // The width-and-font pair the same record contributes to a materialized
+    // default carries a slot from that run too.
+    let output_default_format_font = spreadsheet
+        .default_format_font
+        .map(|source_font_index| source_font_map.output_for_source(source_font_index));
+    if output_default_format_font
+        .as_ref()
+        .is_some_and(Option::is_none)
+    {
+        return;
+    }
+    // The source-ordered table carries the same font slots as the split ones,
+    // so it has to move with them or a reference resolved through it would name
+    // a font the output no longer numbers that way.
+    let output_source_format_fonts = spreadsheet
+        .source_formats
+        .iter()
+        .map(|format| source_font_map.output_format_font(format))
+        .collect::<Option<Vec<_>>>();
 
     spreadsheet.fonts = output_fonts;
     spreadsheet.default_format.font = output_default_font;
+    if let (Some(format), Some(Some(output_font))) = (
+        spreadsheet.leading_default_format.as_mut(),
+        output_leading_default_font,
+    ) {
+        format.font = output_font;
+    }
+    if let Some(output_font) = output_default_format_font {
+        spreadsheet.default_format_font = output_font;
+    }
     for (format, output_font) in spreadsheet
         .column_formats
         .iter_mut()
@@ -5296,6 +5457,20 @@ fn remap_moxel_source_fonts(
     {
         format.font = output_font;
     }
+    match output_source_format_fonts {
+        Some(output_source_format_fonts) => {
+            for (format, output_font) in spreadsheet
+                .source_formats
+                .iter_mut()
+                .zip(output_source_format_fonts)
+            {
+                format.font = output_font;
+            }
+        }
+        // A slot this map cannot project would leave the table half-renumbered,
+        // which is worse than having no table at all.
+        None => spreadsheet.source_formats.clear(),
+    }
 }
 
 fn parse_moxel_formats_with_source_map(
@@ -5310,6 +5485,7 @@ fn parse_moxel_formats_with_source_map(
 ) -> (
     Vec<MoxelFormat>,
     Vec<MoxelFormat>,
+    Vec<usize>,
     Option<MoxelSourceFormatMap>,
     bool,
 ) {
@@ -5329,21 +5505,36 @@ fn parse_moxel_formats_with_source_map(
             source_column_format_refs,
             source_column_format_order,
         );
+        let sources = (1..=formats.len()).collect::<Vec<_>>();
         let (column_formats, formats) =
             split_moxel_formats_by_source_refs(formats, source_column_format_refs);
-        return (column_formats, formats, source_format_map, false);
+        let sources = split_moxel_formats_by_source_refs(sources, source_column_format_refs);
+        return (
+            column_formats,
+            formats,
+            moxel_internal_sources(sources),
+            source_format_map,
+            false,
+        );
     }
 
-    let (column_formats, formats, leading_source_column_formats) = parse_moxel_formats_with_layout(
-        fields,
-        column_count,
-        sparse_source_format_refs,
-        source_column_format_refs,
-        style_refs,
-        drawing_format_indices,
-        number_format_refs,
-    );
-    (column_formats, formats, None, leading_source_column_formats)
+    let (column_formats, formats, internal_sources, leading_source_column_formats) =
+        parse_moxel_formats_with_layout(
+            fields,
+            column_count,
+            sparse_source_format_refs,
+            source_column_format_refs,
+            style_refs,
+            drawing_format_indices,
+            number_format_refs,
+        );
+    (
+        column_formats,
+        formats,
+        internal_sources,
+        None,
+        leading_source_column_formats,
+    )
 }
 
 #[cfg(test)]
@@ -5356,7 +5547,7 @@ pub(super) fn parse_moxel_formats(
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
-    let (column_formats, formats, _) = parse_moxel_formats_with_layout(
+    let (column_formats, formats, _, _) = parse_moxel_formats_with_layout(
         fields,
         column_count,
         sparse_source_format_refs,
@@ -5376,7 +5567,7 @@ fn parse_moxel_formats_with_layout(
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
-) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, bool) {
+) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, Vec<usize>, bool) {
     let all_formats = parse_moxel_format_table(
         fields,
         column_count,
@@ -5385,15 +5576,28 @@ fn parse_moxel_formats_with_layout(
         number_format_refs,
     );
     if let Some(formats) = all_formats {
+        let sources = (1..=formats.len()).collect::<Vec<_>>();
         if sparse_source_format_refs && !source_column_format_refs.is_empty() {
             let (column_formats, formats) =
                 split_moxel_formats_by_source_refs(formats, source_column_format_refs);
-            return (column_formats, formats, false);
+            let sources = split_moxel_formats_by_source_refs(sources, source_column_format_refs);
+            return (
+                column_formats,
+                formats,
+                moxel_internal_sources(sources),
+                false,
+            );
         }
         if prefers_moxel_leading_source_column_formats(&formats, source_column_format_refs) {
             let (column_formats, formats) =
                 split_moxel_formats_by_source_refs(formats, source_column_format_refs);
-            return (column_formats, formats, true);
+            let sources = split_moxel_formats_by_source_refs(sources, source_column_format_refs);
+            return (
+                column_formats,
+                formats,
+                moxel_internal_sources(sources),
+                true,
+            );
         }
         let (column_formats, formats) = split_moxel_formats_for_output(
             formats,
@@ -5401,9 +5605,21 @@ fn parse_moxel_formats_with_layout(
             sparse_source_format_refs,
             drawing_format_indices,
         );
-        return (column_formats, formats, false);
+        let sources = split_moxel_formats_for_output(
+            sources,
+            column_count,
+            sparse_source_format_refs,
+            drawing_format_indices,
+        );
+        return (
+            column_formats,
+            formats,
+            moxel_internal_sources(sources),
+            false,
+        );
     }
     if let Some((_, slots)) = parse_moxel_equal_width_only_format_table(fields, column_count) {
+        let sources = (1..=slots.len()).collect::<Vec<_>>();
         let formats = slots
             .into_iter()
             .map(|width| MoxelFormat {
@@ -5417,9 +5633,25 @@ fn parse_moxel_formats_with_layout(
             sparse_source_format_refs,
             drawing_format_indices,
         );
-        return (column_formats, formats, false);
+        let sources = split_moxel_formats_for_output(
+            sources,
+            column_count,
+            sparse_source_format_refs,
+            drawing_format_indices,
+        );
+        return (
+            column_formats,
+            formats,
+            moxel_internal_sources(sources),
+            false,
+        );
     }
-    (Vec::new(), Vec::new(), false)
+    (Vec::new(), Vec::new(), Vec::new(), false)
+}
+
+/// The two halves of a split, concatenated the way the internal table is.
+fn moxel_internal_sources((column_sources, sources): (Vec<usize>, Vec<usize>)) -> Vec<usize> {
+    column_sources.into_iter().chain(sources).collect()
 }
 
 pub(super) fn parse_moxel_format_table(
@@ -5686,10 +5918,13 @@ pub(super) fn normalize_moxel_single_set_report_header_tail(
     apply_moxel_report_header_tail_back_color(formats, tail_start);
 }
 
-pub(super) fn split_moxel_formats_by_source_refs(
-    formats: Vec<MoxelFormat>,
+/// Splits a source-ordered table into the entries the column sets name and the
+/// rest. It is position-only, so the same call over `1..=n` yields the source
+/// position each internal slot came from.
+pub(super) fn split_moxel_formats_by_source_refs<T: Clone>(
+    formats: Vec<T>,
     source_column_format_refs: &[usize],
-) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+) -> (Vec<T>, Vec<T>) {
     let mut selected_refs = BTreeSet::new();
     let mut column_formats = Vec::new();
     for source_format_index in source_column_format_refs {
@@ -5790,12 +6025,14 @@ pub(super) fn is_moxel_width_only_format(format: &MoxelFormat) -> bool {
         && format.bottom_margin.is_none()
 }
 
-pub(super) fn split_moxel_formats_for_output(
-    mut formats: Vec<MoxelFormat>,
+/// Position-only, like the split above: the same call over `1..=n` yields the
+/// source position each internal slot came from.
+pub(super) fn split_moxel_formats_for_output<T>(
+    mut formats: Vec<T>,
     column_count: usize,
     sparse_source_format_refs: bool,
     drawing_format_indices: &BTreeSet<usize>,
-) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+) -> (Vec<T>, Vec<T>) {
     if sparse_source_format_refs {
         let trailing_drawing_count = (1..=formats.len())
             .rev()
@@ -6680,9 +6917,9 @@ pub(super) fn parse_moxel_style_ref_slot(
             .filter(|value| value.trim().parse::<u32>().is_ok())
             .and_then(|value| parse_moxel_style_color(value.trim()))
             .map(Some),
-        "1" => {
-            (payload.len() == 1 && payload.first()?.trim().parse::<u32>().is_ok()).then_some(None)
-        }
+        // Kind 1 is a Windows system colour, named by its ordinal.
+        "1" => (payload.len() == 1 && payload.first()?.trim().parse::<u32>().is_ok())
+            .then(|| parse_moxel_windows_color(payload.first().map_or("", |v| v.trim()))),
         "2" if payload.len() == 1 => payload
             .first()
             .filter(|value| value.trim().parse::<u32>().is_ok())
@@ -6693,11 +6930,22 @@ pub(super) fn parse_moxel_style_ref_slot(
             "-3" => Some(Some("style:FormTextColor".to_string())),
             "-10" => Some(Some("style:FieldBackColor".to_string())),
             "-11" => Some(Some("style:FieldTextColor".to_string())),
-            "-13" => Some(Some("style:FieldTextColor".to_string())),
+            // Evidence (native 1С:УТ 11.5.27.75): `-13` occurs in exactly one
+            // document, `ПечатьСтатусовТоваровФСС/.../ДанныеПроверкиТоваровФСС`,
+            // whose palette is `-1, -3, -13` and whose only published style name
+            // is `FieldAlternativeBackColor` - `-1` and `-3` publish nothing
+            // there, so no other slot can account for it.
+            "-13" => Some(Some("style:FieldAlternativeBackColor".to_string())),
             "-14" => Some(Some("style:FieldSelectionBackColor".to_string())),
             "-16" => Some(Some("style:SpecialTextColor".to_string())),
             "-17" => Some(Some("style:NegativeTextColor".to_string())),
-            "-21" => Some(Some("style:FieldSelectionBackColor".to_string())),
+            // Likewise `-21` occurs once, in
+            // `ПечатьПодарочныхСертификатов/.../ПодарочныйСертификат`, whose
+            // palette is `-1, -3, -21, -16` and which publishes exactly
+            // `ButtonTextColor` and `SpecialTextColor`. `-16` is
+            // `SpecialTextColor` in all 13 documents that carry it, which
+            // leaves `ButtonTextColor` for `-21`.
+            "-21" => Some(Some("style:ButtonTextColor".to_string())),
             "-23" => Some(Some("style:ToolTipBackColor".to_string())),
             "-24" => Some(Some("style:ToolTipTextColor".to_string())),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),
@@ -6850,6 +7098,20 @@ pub(super) fn moxel_embedded_style_ref_for_uuid(
 /// `DimGray` (1), `MediumBlue` (1), `MediumGray` (5) and `SaddleBrown` (1) are
 /// the only published names those documents carry that no other ordinal of
 /// theirs accounts for, and each lands in its alphabetical place.
+/// A Windows system colour, by ordinal.
+///
+/// Evidence (native 1С:УТ 11.5.27.75): exactly one palette slot in the whole
+/// corpus is a Windows colour - ordinal 16 in
+/// `СервисShare/.../ТранспортныйКонтейнер` - and the fourteen formats that name
+/// it publish `d3p1:ButtonShadow` in the Windows colour namespace. No other
+/// ordinal appears, so no other ordinal is spelled.
+fn parse_moxel_windows_color(value: &str) -> Option<String> {
+    match value.parse::<u32>().ok()? {
+        16 => Some("windows:ButtonShadow".to_string()),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
     let name = match value.parse::<u32>().ok()? {
         6 => "Beige",
@@ -7461,13 +7723,38 @@ fn render_moxel_spreadsheet_xml(
             body
         })
         .collect::<Vec<_>>();
+    // A stored reference names a position in the body's own format table, and
+    // the platform answers it with the pool position that carries that entry's
+    // published bytes - the same convention `<defaultFormatIndex>` follows.
+    //
+    // Evidence (native 1С:УТ 11.5.27.75, every `Templates/*/Ext/Template.xml`
+    // that decodes as a spreadsheet): 96 header/footer references over 87
+    // documents and 76 column-set references over 1810 column sets, and all
+    // 172 name the *first* pool position holding their bytes - none names a
+    // later duplicate and none points past the pool.
+    let published_source_format = |source_format_ref: usize| -> Option<usize> {
+        let format = source_format_ref
+            .checked_sub(1)
+            .and_then(|at| spreadsheet.source_formats.get(at))?;
+        let mut body = String::new();
+        push_moxel_format_body_xml(&mut body, spreadsheet, format, font_projection.as_ref());
+        published_formats
+            .iter()
+            .position(|entry| *entry == body)
+            .map(|at| at + 1)
+    };
     let mut xml = String::from(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
     );
     push_moxel_language_settings_xml(&mut xml, spreadsheet.language_settings.as_ref());
     for column_set in &spreadsheet.column_sets {
-        push_moxel_columns_xml(&mut xml, column_set, &output_format_index_map);
+        push_moxel_columns_xml(
+            &mut xml,
+            column_set,
+            &output_format_index_map,
+            &published_source_format,
+        );
     }
     for row in &spreadsheet.rows {
         push_moxel_row_xml(
@@ -7481,14 +7768,23 @@ fn render_moxel_spreadsheet_xml(
         push_moxel_drawing_xml(&mut xml, drawing, &output_format_index_map);
     }
     if let Some(slots) = &spreadsheet.header_footer_slots {
-        // A zero reference publishes `<f>0</f>` as stored. A non-zero one is
-        // only published where the resolved shared index says where it lands in
-        // the output table; the projection of an arbitrary stored reference onto
-        // that table is not evidenced (see the refusal note on
-        // `header_footer_format_index`), so those slots stay unpublished.
+        // A zero reference publishes `<f>0</f>` as stored. A non-zero one names
+        // a position in the body's own format table, and the platform answers
+        // with the pool position that carries that entry's bytes.
+        //
+        // Evidence (native 1С:УТ 11.5.27.75, every `Templates/*/Ext/
+        // Template.xml` that decodes as a spreadsheet): 87 documents publish a
+        // header or footer, between them 96 distinct non-zero references, and
+        // every one of the 96 names the *first* pool position holding its
+        // bytes - no reference names a later duplicate and none points past the
+        // pool. Where the bytes are absent from the pool the reference is not
+        // this reader's case and keeps the shared-index path below.
         push_moxel_header_footer_slots_xml(&mut xml, slots, |source_format_ref| {
             if source_format_ref == 0 {
                 return Some(0);
+            }
+            if let Some(published) = published_source_format(source_format_ref) {
+                return Some(published);
             }
             let shared = spreadsheet.header_footer_format_index?;
             Some(
@@ -7503,18 +7799,52 @@ fn render_moxel_spreadsheet_xml(
         xml.push_str("\t<templateMode>true</templateMode>\r\n");
     }
     // The leading default-format record names format content, not a slot: the
-    // published index is the position of the first pool entry that carries the
-    // record's own bytes.  An empty default format is never materialized, so a
-    // document whose pool holds no empty `<format/>` publishes nothing.
+    // published index is the pool position that carries the record's own bytes.
+    // An empty default format is never materialized, so a document whose pool
+    // holds no empty `<format/>` publishes nothing.
+    //
+    // Where several pool positions carry those bytes the platform names the one
+    // whose *table* entry comes last. Evidence (native 1С:УТ 11.5.27.75, all 618
+    // documents that publish `<defaultFormatIndex>`): 603 name a body that is
+    // unique in the pool, where every reading agrees. In each of the remaining
+    // 15 the named position is the one whose source-table entry is the last of
+    // the equal ones - 11 of those happen to be the first pool position and 4
+    // the second, so neither pool order alone accounts for them.
     let leading_default_format_body = spreadsheet.leading_default_format.as_ref().map(|format| {
         let mut body = String::new();
         push_moxel_format_body_xml(&mut body, spreadsheet, format, font_projection.as_ref());
         body
     });
+    let last_source_published_format = |body: &String| -> Option<usize> {
+        let equal = published_formats
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| *entry == body)
+            .map(|(at, _)| at + 1)
+            .collect::<Vec<_>>();
+        let first = equal.first().copied()?;
+        if equal.len() == 1 || spreadsheet.internal_sources.is_empty() {
+            return Some(first);
+        }
+        // Fall back to the first position wherever a candidate has no source of
+        // its own: a partial ordering would be a guess.
+        equal
+            .iter()
+            .map(|position| {
+                output_format_indices
+                    .get(position - 1)
+                    .and_then(|internal| spreadsheet.internal_sources.get(internal - 1))
+                    .map(|source| (*source, *position))
+            })
+            .collect::<Option<Vec<_>>>()
+            .and_then(|sourced| sourced.into_iter().max())
+            .map(|(_, position)| position)
+            .or(Some(first))
+    };
     let mut materialized_default_format = None;
     let published_default_format_index = match &leading_default_format_body {
-        Some(body) => match published_formats.iter().position(|entry| entry == body) {
-            Some(at) => Some(at + 1),
+        Some(body) => match last_source_published_format(body) {
+            Some(at) => Some(at),
             None if body == EMPTY_MOXEL_FORMAT_XML => None,
             None => {
                 materialized_default_format = Some(body.clone());
@@ -7576,6 +7906,11 @@ fn render_moxel_spreadsheet_xml(
     }
     if let Some(print_area) = &spreadsheet.print_area {
         push_moxel_print_area_xml(&mut xml, print_area);
+    }
+    for (role, (tag, _)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
+        if let Some(color) = &spreadsheet.group_header_colors[role] {
+            xml.push_str(&format!("\t<{tag}>{}</{tag}>\r\n", escape_xml_text(color)));
+        }
     }
     for line in &spreadsheet.lines {
         push_moxel_line_xml(&mut xml, line);
@@ -7648,7 +7983,12 @@ pub(super) fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize
         .max(max_column_format_index)
         .max(max_row_or_cell_format_index)
         .max(max_drawing_format_index)
-        .max(1)
+    // No floor: a document whose table is empty and whose records all name slot
+    // 0 has no pool at all. Evidence (native 1С:УТ 11.5.27.75): none of the 683
+    // standalone spreadsheet templates publishes an empty pool or a lone
+    // `<format/>` - every one carries at least one populated entry, so the floor
+    // never held a real document up - while two of the five distinct
+    // spreadsheet blocks embedded in forms publish no `<format>` at all.
 }
 
 pub(super) fn moxel_sparse_default_column_set_insertion_point(
@@ -7884,16 +8224,28 @@ pub(super) fn push_moxel_columns_xml(
     xml: &mut String,
     column_set: &MoxelColumnSet,
     output_format_index_map: &BTreeMap<usize, usize>,
+    published_source_format: &dyn Fn(usize) -> Option<usize>,
 ) {
     xml.push_str("\t<columns>\r\n");
     if let Some(id) = &column_set.id {
         xml.push_str(&format!("\t\t<id>{}</id>\r\n", escape_xml_text(id)));
     }
-    if let Some(default_format_index) = column_set.default_format_index {
-        let default_format_index = output_format_index_map
-            .get(&default_format_index)
-            .copied()
-            .unwrap_or(default_format_index);
+    // The stored reference decides whether the element exists at all: over all
+    // 1810 column sets of the native corpus the 1734 that store 0 publish
+    // nothing and the 76 that store anything else always publish. Its value is
+    // the pool position carrying the referenced entry's bytes; a reference this
+    // reader cannot place falls back to the internal slot it resolved to.
+    if column_set.raw_default_format_index > 0
+        && let Some(default_format_index) =
+            published_source_format(column_set.raw_default_format_index).or_else(|| {
+                column_set.default_format_index.map(|default_format_index| {
+                    output_format_index_map
+                        .get(&default_format_index)
+                        .copied()
+                        .unwrap_or(default_format_index)
+                })
+            })
+    {
         xml.push_str(&format!(
             "\t\t<formatIndex>{default_format_index}</formatIndex>\r\n"
         ));
@@ -7935,7 +8287,7 @@ pub(super) fn moxel_source_column_format_refs(column_sets: &[MoxelColumnSet]) ->
     let mut ordered = Vec::new();
     for source_format_index in column_sets
         .iter()
-        .filter_map(|column_set| column_set.source_default_format_index)
+        .filter_map(|column_set| column_set.source_default_format_index())
     {
         if source_format_index > 0 && seen.insert(source_format_index) {
             ordered.push(source_format_index);
@@ -7961,7 +8313,7 @@ pub(super) fn remap_moxel_column_set_output_format_indices(
         return;
     }
     for column_set in column_sets.iter_mut() {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(position) = source_column_format_refs
                 .iter()
                 .position(|candidate| *candidate == source_format_index)
@@ -8105,7 +8457,7 @@ pub(super) fn remap_moxel_column_set_internal_format_indices(
     format_len: usize,
 ) {
     for column_set in column_sets.iter_mut() {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(format_index) = moxel_internal_format_index_for_source_index(
                 source_format_index,
                 column_format_len,
@@ -8139,7 +8491,7 @@ pub(super) fn remap_moxel_column_set_sparse_internal_format_indices(
     format_len: usize,
 ) {
     for column_set in column_sets.iter_mut() {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(format_index) = moxel_internal_format_index_for_sparse_source_index(
                 source_format_index,
                 source_column_format_refs,
@@ -8197,7 +8549,7 @@ fn moxel_source_format_refs_are_complete(
 
     column_sets.iter().all(|column_set| {
         column_set
-            .source_default_format_index
+            .source_default_format_index()
             .is_none_or(direct_ref_is_valid)
             && column_set
                 .columns
@@ -8224,7 +8576,7 @@ fn remap_moxel_column_set_source_format_indices(
     source_format_map: &MoxelSourceFormatMap,
 ) {
     for column_set in column_sets {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(format_index) = source_format_map.internal_for_source(source_format_index)
         {
             column_set.default_format_index = Some(format_index);
@@ -8953,7 +9305,13 @@ pub(super) fn moxel_format_for_index(
     if let Some(format) = spreadsheet.extra_formats.get(&format_index).cloned() {
         return format;
     }
-    if spreadsheet.default_format_index == Some(format_index) {
+    // A slot inside the table renders from the table. Only the slot past its end
+    // - the one the default format is materialized into - is rendered from the
+    // default format itself.
+    if spreadsheet.default_format_index == Some(format_index)
+        && format_index
+            > column_format_slots.max(spreadsheet.column_formats.len()) + spreadsheet.formats.len()
+    {
         if spreadsheet.column_sets.len() == 1
             && spreadsheet.header_footer_format_index == Some(format_index)
             && format_index > column_format_slots
@@ -9017,7 +9375,12 @@ pub(super) fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<
 }
 
 pub(super) fn push_moxel_format_color(xml: &mut String, tag: &str, value: Option<&str>) {
-    if let Some(value) = value.filter(|value| value.starts_with("d3p1:")) {
+    if let Some(name) = value.and_then(|value| value.strip_prefix("windows:")) {
+        xml.push_str(&format!(
+            "\t\t<{tag} xmlns:d3p1=\"http://v8.1c.ru/8.1/data/ui/colors/windows\">d3p1:{}</{tag}>\r\n",
+            escape_xml_element_text(name)
+        ));
+    } else if let Some(value) = value.filter(|value| value.starts_with("d3p1:")) {
         xml.push_str(&format!(
             "\t\t<{tag} xmlns:d3p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\">{}</{tag}>\r\n",
             escape_xml_element_text(value)
@@ -9030,14 +9393,25 @@ pub(super) fn push_moxel_format_color(xml: &mut String, tag: &str, value: Option
 pub(super) fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
     xml.push_str("\t<picture>\r\n");
     xml.push_str(&format!("\t\t<index>{}</index>\r\n", picture.index));
+    // The record's seventh member decides the attribute: 0 writes `t="false"`,
+    // anything else writes no `t` at all. Evidence (native 1С:УТ 11.5.27.75):
+    // of the 363 picture elements in the tree that carry a body or a reference,
+    // 362 write `t="false"` and one - `ПроверкаКонтрагента/.../ФакторыРиска` -
+    // writes none, and that one is the only record whose seventh member is not
+    // 0.
+    let transparency = if picture.transparency == 0 {
+        " t=\"false\""
+    } else {
+        ""
+    };
     if let Some(payload) = &picture.payload {
         xml.push_str(&format!(
-            "\t\t<picture t=\"false\">{}</picture>\r\n",
+            "\t\t<picture{transparency}>{}</picture>\r\n",
             escape_xml_text(payload)
         ));
     } else if let Some(ref_name) = &picture.ref_name {
         xml.push_str(&format!(
-            "\t\t<picture t=\"false\" ref=\"{}\"/>\r\n",
+            "\t\t<picture{transparency} ref=\"{}\"/>\r\n",
             escape_xml_text(ref_name)
         ));
     } else {
@@ -9547,6 +9921,9 @@ pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerti
     xml.push_str(&format!("\t\t<b>{}</b>\r\n", group.begin_row));
     if group.end_row != group.begin_row {
         xml.push_str(&format!("\t\t<e>{}</e>\r\n", group.end_row));
+    }
+    if !group.open {
+        xml.push_str("\t\t<o>false</o>\r\n");
     }
     xml.push_str("\t</vg>\r\n");
 }
@@ -10355,6 +10732,7 @@ mod moxel_exact_parity_tests {
             default_format_font: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
+            source_formats: Vec::new(),
             rows: Vec::new(),
             vertical_groups: Vec::new(),
             merges: Vec::new(),
@@ -10362,7 +10740,9 @@ mod moxel_exact_parity_tests {
             vertical_unmerges: Vec::new(),
             named_items: Vec::new(),
             areas: Vec::new(),
+            internal_sources: Vec::new(),
             print_area: None,
+            group_header_colors: [None, None, None, None],
             print_settings: None,
             lines: Vec::new(),
             fonts: Vec::new(),
@@ -10480,7 +10860,7 @@ mod moxel_exact_parity_tests {
         let column_sets = vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }];
@@ -10606,7 +10986,7 @@ mod moxel_exact_parity_tests {
         let column_sets = vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }];
