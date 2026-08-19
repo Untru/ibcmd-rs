@@ -3948,12 +3948,22 @@ pub(super) fn parse_moxel_pictures(
     Vec::new()
 }
 
+/// Position of the transparency member inside a picture record.
+const MOXEL_PICTURE_TRANSPARENCY_FIELD: usize = 6;
+
 pub(super) fn parse_moxel_picture(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MoxelPicture> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "4" {
+        return None;
+    }
+    // A picture record always reaches its transparency member, so a shorter
+    // `{4,...}` is some other record wearing the same leading token - which is
+    // how `СверткаИнформационнойБазы/.../МакетОграниченияСвертки` published a
+    // `<picture/>` for a `{4,35,{"U"}}` the platform does not publish at all.
+    if fields.len() <= MOXEL_PICTURE_TRANSPARENCY_FIELD {
         return None;
     }
     let ref_name = fields
@@ -3988,7 +3998,7 @@ pub(super) fn parse_moxel_picture(
         ref_name,
         payload,
         transparency: fields
-            .get(6)
+            .get(MOXEL_PICTURE_TRANSPARENCY_FIELD)
             .and_then(|field| field.trim().parse::<usize>().ok())
             .unwrap_or(0),
     })

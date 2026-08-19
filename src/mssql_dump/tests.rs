@@ -27541,7 +27541,9 @@ fn formats_moxel_simple_template_empty_row_range_and_style_formats() {
 
 #[test]
 fn formats_moxel_standard_print_picture_ref() {
-    let picture = parse_moxel_picture("{4,0,{-13}}", &BTreeMap::new()).unwrap();
+    // The record layout is the one the platform writes: every picture record in
+    // the native corpus carries the trailing `"",-1,-1,<transparency>,0,""`.
+    let picture = parse_moxel_picture("{4,0,{-13},\"\",-1,-1,0,0,\"\"}", &BTreeMap::new()).unwrap();
 
     assert_eq!(picture.index, 0);
     assert_eq!(picture.ref_name.as_deref(), Some("v8ui:Print"));
@@ -27551,14 +27553,17 @@ fn formats_moxel_standard_print_picture_ref() {
 #[test]
 fn formats_moxel_standard_picture_refs() {
     let cases = [
-        ("{4,0,{-13}}", "v8ui:Print"),
-        ("{4,1,{-6}}", "v8ui:InputFieldCalculator"),
+        ("{4,0,{-13},\"\",-1,-1,0,0,\"\"}", "v8ui:Print"),
         (
-            "{4,2,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9}}",
+            "{4,1,{-6},\"\",-1,-1,0,0,\"\"}",
+            "v8ui:InputFieldCalculator",
+        ),
+        (
+            "{4,2,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,0,0,\"\"}",
             "v8ui:Information",
         ),
         (
-            "{4,3,{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1}}",
+            "{4,3,{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1},\"\",-1,-1,0,0,\"\"}",
             "v8ui:SaveFile",
         ),
     ];
