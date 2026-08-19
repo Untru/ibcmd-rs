@@ -389,6 +389,14 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &commands,
         context.object_refs,
         &auto_command_bar_attribute_names,
+        // Same reason the names are shared: the command bar's buttons address
+        // the form's attributes exactly as any other item does, and a button
+        // whose slot names a standard attribute of the attribute's own type
+        // cannot be spelled without the attribute's type. Evidence: UT
+        // 11.5.27.75 `ExchangePlans/ОбменССайтом/Forms/ФормаУзла`, whose three
+        // command-bar buttons carry `{2,{1},{-6}}` and are written
+        // `<DataPath>Объект.Ref</DataPath>`.
+        &form_attribute_metadata_owners_by_id(&attributes),
         &child_item_indexes.table_name_by_id,
         &child_item_indexes.standard_command_owner_name_by_id,
         &child_item_indexes.command_source_owner_name_by_id,
@@ -421,6 +429,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &attributes,
         Arc::clone(context.field_type_refs),
     );
+    collect_form_item_rooted_chain_roots(&mut child_item_indexes, &attributes, context.object_refs);
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
@@ -2647,6 +2656,7 @@ pub(super) fn extract_form_auto_command_bar(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
@@ -2658,6 +2668,7 @@ pub(super) fn extract_form_auto_command_bar(
         commands,
         object_refs,
         attribute_names_by_id,
+        attribute_metadata_owners_by_id,
         table_name_by_id,
         standard_command_owner_name_by_id,
         command_source_owner_name_by_id,
@@ -2671,6 +2682,7 @@ pub(super) fn find_form_auto_command_bar(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
@@ -2690,6 +2702,7 @@ pub(super) fn find_form_auto_command_bar(
             commands,
             object_refs,
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             command_source_owner_name_by_id,
@@ -2703,6 +2716,7 @@ pub(super) fn find_form_auto_command_bar(
             commands,
             object_refs,
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             command_source_owner_name_by_id,
@@ -2720,6 +2734,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
@@ -2746,7 +2761,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
             None,
             None,
             attribute_names_by_id,
-            &BTreeMap::new(),
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             command_source_owner_name_by_id,
@@ -7288,6 +7303,9 @@ pub(super) struct FormChildItemIndexes {
     pub(super) user_settings_group_id_by_table_id: BTreeMap<String, String>,
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
     bound_attribute_id_by_table_id: BTreeMap<String, String>,
+    /// The raw bound slot each table item carries, kept so a chain that starts
+    /// from a form item can resolve that item's own binding first.
+    table_binding_by_id: BTreeMap<String, String>,
     pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
     table_id_by_binding_key: BTreeMap<String, Option<String>>,
     table_current_data_name_by_binding_key: BTreeMap<(String, String), Option<String>>,
@@ -7401,6 +7419,27 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// Additional columns reachable through a *form item* rather than through
     /// the attribute, keyed by the table item id and the column id.
     table_additional_columns: BTreeMap<(String, String), Option<String>>,
+    /// What a table item is bound to, spelled the way the *attribute* names it
+    /// and paired with the attribute the chain is rooted at. A chain that
+    /// starts from a form item continues in the attribute's own namespace, so
+    /// the indexes it reads on the way have to be keyed by that namespace and
+    /// not by the `Items.<table>.CurrentData` prefix the platform writes.
+    table_root: BTreeMap<String, FormTableChainRoot>,
+    /// The settings-composer type a table item's own binding walks to, for the
+    /// tables that are bound into a composer at all. The member codes a chain
+    /// reads past `CurrentData` are only meaningful against the row type of
+    /// that collection.
+    table_settings_composer_type: BTreeMap<String, FormSettingsComposerType>,
+}
+
+/// The attribute-namespace root a chain rooted at a form item continues from.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FormTableChainRoot {
+    attribute_id: String,
+    /// The table's own data path as the attribute spells it, e.g.
+    /// `Объект.ПрочиеДоходы` — the path the additional-column declarations are
+    /// keyed by.
+    attribute_path: String,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -7539,6 +7578,67 @@ pub(super) fn collect_form_chain_walk_member_indexes(
             }
         }
     }
+}
+
+/// Resolves every table item's *own* binding, so a chain that starts from one
+/// can continue in the namespace that table stands in.
+///
+/// Two answers are recorded per table: the attribute the table is rooted at
+/// together with the path that attribute spells for it, and — when the binding
+/// is a settings-composer chain — the composer type it walks to. Both are
+/// properties of the table's binding alone, so they are read once here rather
+/// than re-derived at every item that addresses the table.
+pub(super) fn collect_form_item_rooted_chain_roots(
+    indexes: &mut FormChildItemIndexes,
+    attributes: &[FormAttribute],
+    object_refs: &BTreeMap<String, String>,
+) {
+    let attribute_names_by_id = attributes
+        .iter()
+        .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
+    let mut table_root = BTreeMap::new();
+    let mut table_settings_composer_type = BTreeMap::new();
+    for (table_id, binding) in &indexes.table_binding_by_id {
+        if let Some((_, Some(kind))) =
+            resolve_form_settings_composer_chain(binding, &attribute_metadata_owners_by_id)
+        {
+            table_settings_composer_type.insert(table_id.clone(), kind);
+        }
+        let Some(segments) = parse_form_bound_chain_segments(binding) else {
+            continue;
+        };
+        let Some((root, members)) = segments.split_first() else {
+            continue;
+        };
+        let [attribute_id] = root.as_slice() else {
+            continue;
+        };
+        let attribute_id = attribute_id.trim();
+        let Some(name) = attribute_names_by_id.get(attribute_id) else {
+            continue;
+        };
+        if let Some((_, attribute_path)) = walk_form_bound_chain_members(
+            members,
+            attribute_id,
+            name.clone(),
+            name.clone(),
+            &indexes.owner_scoped_bindings,
+            object_refs,
+            false,
+        ) {
+            table_root.insert(
+                table_id.clone(),
+                FormTableChainRoot {
+                    attribute_id: attribute_id.to_string(),
+                    attribute_path,
+                },
+            );
+        }
+    }
+    indexes.owner_scoped_bindings.table_root = table_root;
+    indexes.owner_scoped_bindings.table_settings_composer_type = table_settings_composer_type;
 }
 
 fn insert_unambiguous_form_binding<K: Ord>(
@@ -8106,6 +8206,11 @@ fn collect_form_child_item_indexes_from_field_traced(
             indexes
                 .table_name_by_id
                 .insert(id.to_string(), name.clone());
+            if let Some(binding) = fields.get(11) {
+                indexes
+                    .table_binding_by_id
+                    .insert(id.to_string(), binding.trim().to_string());
+            }
             if let Some(attribute_id) = fields.get(11).and_then(|field| {
                 parse_form_table_binding(field)
                     .map(|(attribute_id, _)| attribute_id)
@@ -8602,6 +8707,36 @@ fn parse_form_control_border(
     schema.non_default_tuple_border(&tuple)
 }
 
+// TEMPORARY INSTRUMENTATION -- remove before gates.
+fn f1_dump_slot(tag: &str, name: &str, id: &str, fields: &[&str]) {
+    use std::io::Write as _;
+    use std::sync::OnceLock;
+    static FILTER: OnceLock<Option<Vec<String>>> = OnceLock::new();
+    let filter = FILTER.get_or_init(|| {
+        std::env::var("IBCMD_F1_ITEMS")
+            .ok()
+            .map(|value| value.split(',').map(|part| part.trim().to_string()).collect())
+    });
+    let Some(filter) = filter.as_ref() else {
+        return;
+    };
+    if !filter.iter().any(|want| want == name) {
+        return;
+    }
+    let joined = fields
+        .iter()
+        .map(|field| field.trim())
+        .collect::<Vec<_>>()
+        .join("\u{1}");
+    let joined = joined
+        .replace('\\', "\\\\")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t");
+    let line = format!("F1SLOT\t{tag}\t{name}\t{id}\t{joined}\n");
+    let _ = std::io::stderr().write_all(line.as_bytes());
+}
+
 fn parse_form_child_item_with_metadata_owners(
     field: &str,
     main_data_path: Option<&str>,
@@ -8648,6 +8783,7 @@ fn parse_form_child_item_with_metadata_owners(
     }
     let tag = form_child_item_tag(wrapper, fields)?;
     let name = parse_form_child_item_name(wrapper, fields)?;
+    f1_dump_slot(tag, &name, id, fields);
     let button_top_level_offset = (tag == "Button")
         .then(|| form_button_top_level_offset(&fields))
         .unwrap_or(0);
@@ -16266,6 +16402,27 @@ pub(super) fn parse_form_child_item_data_path(
                     owner_scoped_bindings,
                 ))
             })
+            // A slot whose owner is a form item is a chain like any other; the
+            // two-segment route above answers the shapes it knows, and the
+            // chain walker answers the rest against the namespace the table
+            // stands in.
+            .or_else(|| {
+                FormOwnerScopedDataPath::from_option(
+                    resolve_form_item_rooted_settings_composer_path(
+                        field,
+                        table_name_by_id,
+                        owner_scoped_bindings,
+                    )
+                    .or_else(|| {
+                        resolve_form_item_rooted_chain_data_path(
+                            field,
+                            table_name_by_id,
+                            owner_scoped_bindings,
+                            object_refs,
+                        )
+                    }),
+                )
+            })
             .or_else(|| {
                 let data_path = if owner_scoped_metadata {
                     parse_form_bound_data_path_with_metadata_owner(
@@ -16421,6 +16578,13 @@ pub(super) fn parse_form_child_item_data_path(
         })
         .unwrap_or((None, None));
     let data_path = match tag {
+        // The empty binding `{0}` is the platform's own statement that the
+        // table shows no data, exactly as it is on a field, and the platform
+        // then writes no `<DataPath>` at all. Falling back to the form's main
+        // attribute puts a path on a table the platform leaves bare.
+        "Table" if fields.get(11).map(|field| field.trim()) == Some("{0}") => {
+            FormChildItemDataPathResolution::Unknown
+        }
         "Table" => fields
             .get(11)
             .map(parse_bound)
@@ -16459,9 +16623,12 @@ pub(super) fn parse_form_child_item_data_path(
                 resolve_form_owner_scoped_button_data_path(
                     field,
                     attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
                     table_name_by_id,
                     table_column_names_by_id,
                     type_link_data_path_by_table_column,
+                    owner_scoped_bindings,
+                    object_refs,
                 )
                 .with_provenance(FormChildItemDataPathProvenance::DirectRawSlot)
             })
@@ -16471,12 +16638,85 @@ pub(super) fn parse_form_child_item_data_path(
             FormChildItemDataPathProvenance::InferredFallback,
         ),
     };
-    FormChildItemDataPaths {
+    let paths = FormChildItemDataPaths {
         primary: data_path.into_option(),
         footer: footer_data_path,
         multiple_value: multiple_value_paths.0,
         multiple_value_present: multiple_value_paths.1,
+    };
+    f1_dump_path(
+        tag,
+        name,
+        id,
+        fields,
+        &input_slots,
+        button_data_path_slot,
+        &paths,
+        parent_data_path,
+        main_data_path,
+    );
+    paths
+}
+
+// TEMPORARY INSTRUMENTATION -- remove before gates.
+#[allow(clippy::too_many_arguments)]
+fn f1_dump_path(
+    tag: &str,
+    name: &str,
+    id: &str,
+    fields: &[&str],
+    input_slots: &[usize],
+    button_data_path_slot: Option<usize>,
+    paths: &FormChildItemDataPaths,
+    parent_data_path: Option<&str>,
+    main_data_path: Option<&str>,
+) {
+    use std::io::Write as _;
+    use std::sync::OnceLock;
+    static FILTER: OnceLock<Option<Vec<String>>> = OnceLock::new();
+    let filter = FILTER.get_or_init(|| {
+        std::env::var("IBCMD_F1_ITEMS")
+            .ok()
+            .map(|value| value.split(',').map(|part| part.trim().to_string()).collect())
+    });
+    let Some(filter) = filter.as_ref() else {
+        return;
+    };
+    if !filter.iter().any(|want| want == name) {
+        return;
     }
+    let escape = |text: &str| {
+        text.replace('\\', "\\\\")
+            .replace('\r', "\\r")
+            .replace('\n', "\\n")
+            .replace('\t', "\\t")
+    };
+    let mut slots = Vec::new();
+    if tag == "Table" {
+        slots.push(11usize);
+    } else if let Some(slot) = button_data_path_slot {
+        slots.push(slot);
+    } else {
+        slots.extend_from_slice(input_slots);
+    }
+    let rendered = slots
+        .iter()
+        .map(|slot| {
+            format!(
+                "[{slot}]={}",
+                escape(fields.get(*slot).map(|f| f.trim()).unwrap_or("<none>"))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let line = format!(
+        "F1PATH\t{tag}\t{name}\t{id}\tprimary={:?}\tfooter={:?}\tparent={:?}\tmain={:?}\t{rendered}\n",
+        paths.primary.as_ref().map(|p| p.data_path.as_str()),
+        paths.footer,
+        parent_data_path,
+        main_data_path
+    );
+    let _ = std::io::stderr().write_all(line.as_bytes());
 }
 
 /// The id a one-segment bound chain `{1,{<id>}}` names, and nothing else.
@@ -16597,22 +16837,85 @@ impl FormOwnerScopedDataPath {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_form_owner_scoped_button_data_path(
     field: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
 ) -> FormOwnerScopedDataPath {
     let no_global_binding_paths = BTreeMap::new();
-    FormOwnerScopedDataPath::from_option(parse_form_button_data_path(
-        field,
-        attribute_names_by_id,
-        table_name_by_id,
-        table_column_names_by_id,
-        type_link_data_path_by_table_column,
-        &no_global_binding_paths,
-    ))
+    FormOwnerScopedDataPath::from_option(
+        parse_form_button_data_path(
+            field,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            type_link_data_path_by_table_column,
+            &no_global_binding_paths,
+        )
+        // A button addresses its data in the same chain grammar every other
+        // item uses, so a slot the button-only route cannot spell is read as
+        // the chain it is rather than dropped. Evidence: UT 11.5.27.75
+        // `Catalogs/СделкиСКлиентами/Forms/ФормаЭлемента`, Button `Кнопка`
+        // carries `{2,{1},{0,2a0c92dc-…}}` against the `Объект` attribute and
+        // the platform writes `<DataPath>Объект.ВидСделки</DataPath>`.
+        .or_else(|| {
+            resolve_form_bound_chain_member_path(
+                field,
+                attribute_names_by_id,
+                owner_scoped_bindings,
+                object_refs,
+                false,
+            )
+        })
+        // A negative marker on the root attribute names one of the standard
+        // attributes that attribute's own type declares, read from the same
+        // per-owner tables the field routes use. Evidence: UT 11.5.27.75
+        // `ExchangePlans/ОбменССайтом/Forms/ФормаУзла`, Button
+        // `ФормаПланОбменаОбменССайтомВыполнитьОбменДанными` carries
+        // `{2,{1},{-6}}` against the `Объект` attribute of type
+        // `cfg:ExchangePlanObject.ОбменССайтом`, and the platform writes
+        // `<DataPath>Объект.Ref</DataPath>`.
+        .or_else(|| {
+            resolve_form_root_attribute_standard_attribute_path(
+                field,
+                attribute_metadata_owners_by_id,
+            )
+        }),
+    )
+}
+
+/// `{2,{<attribute>},{<marker>}}` where the marker is a standard attribute of
+/// the attribute's own exact type.
+fn resolve_form_root_attribute_standard_attribute_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let [kind, owner, terminal] = fields.as_slice() else {
+        return None;
+    };
+    if kind.trim() != "2" {
+        return None;
+    }
+    let owner = split_1c_braced_fields(owner.trim(), 0)?;
+    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+    let ([attribute_id], [marker]) = (owner.as_slice(), terminal.as_slice()) else {
+        return None;
+    };
+    let marker = marker.trim();
+    if !marker.starts_with('-') {
+        return None;
+    }
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
+    let reference = attribute.exact_single_type_reference.as_deref()?;
+    let name = form_standard_attribute_name_for_type_reference(reference, marker)?;
+    Some(format!("{}.{name}", attribute.name))
 }
 
 /// Resolves a multi-segment binding against a dynamic-list attribute.
@@ -16953,7 +17256,38 @@ pub(super) fn resolve_form_bound_chain_member_path(
         return None;
     };
     let attribute_id = attribute_id.trim();
-    let mut path = attribute_names_by_id.get(attribute_id)?.clone();
+    let name = attribute_names_by_id.get(attribute_id)?;
+    walk_form_bound_chain_members(
+        members,
+        attribute_id,
+        name.clone(),
+        name.clone(),
+        owner_scoped_bindings,
+        object_refs,
+        aggregate,
+    )
+    .map(|(path, _)| path)
+}
+
+/// Walks the member segments of a bound chain whose root has already been read.
+///
+/// Two paths are carried, because the two are not always the same string. The
+/// first is what the platform writes; the second is the same walk spelled in
+/// the *attribute's* own namespace, which is what the additional-column
+/// declarations are keyed by. They coincide for a chain rooted at an attribute
+/// and diverge for one rooted at a form item, whose output prefix is
+/// `Items.<table>.CurrentData` while its declarations are still keyed by the
+/// table's attribute path.
+#[allow(clippy::too_many_arguments)]
+fn walk_form_bound_chain_members(
+    members: &[Vec<&str>],
+    attribute_id: &str,
+    mut path: String,
+    mut key: String,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+    aggregate: bool,
+) -> Option<(String, String)> {
     // The only segment kind that states a type is a declared column, so a
     // dereferencing marker is answered only when it follows one directly.
     let mut reached_type: Option<&str> = None;
@@ -16971,30 +17305,36 @@ pub(super) fn resolve_form_bound_chain_member_path(
                     .eq_ignore_ascii_case(FORM_VALUE_TABLE_INDEX_BINDING_UUID) =>
             {
                 let index = parse_form_chain_numeric_id(index)?;
-                path.push('[');
-                path.push_str(index);
-                path.push(']');
+                for target in [&mut path, &mut key] {
+                    target.push('[');
+                    target.push_str(index);
+                    target.push(']');
+                }
             }
             [column_id, uuid]
                 if uuid
                     .trim()
                     .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID) =>
             {
-                let key = FormAttributeAdditionalColumnKey {
+                let lookup = FormAttributeAdditionalColumnKey {
                     attribute_id: attribute_id.to_string(),
-                    table_path: form_bound_chain_collection_path(&path),
+                    table_path: form_bound_chain_collection_path(&key),
                     column_id: column_id.trim().to_string(),
                 };
                 let name = owner_scoped_bindings
                     .additional_columns
-                    .get(&key)?
+                    .get(&lookup)?
                     .as_ref()?;
-                path.push('.');
-                path.push_str(name);
+                for target in [&mut path, &mut key] {
+                    target.push('.');
+                    target.push_str(name);
+                }
             }
             [marker] if marker.trim() == FORM_ROWS_COUNT_MEMBER_MARKER => {
-                path.push('.');
-                path.push_str("RowsCount");
+                for target in [&mut path, &mut key] {
+                    target.push('.');
+                    target.push_str("RowsCount");
+                }
             }
             [marker] if marker.trim().starts_with('-') => {
                 let name = match previous_type {
@@ -17006,21 +17346,47 @@ pub(super) fn resolve_form_bound_chain_member_path(
                         marker.trim(),
                     )?,
                 };
-                path.push('.');
-                path.push_str(name);
+                for target in [&mut path, &mut key] {
+                    target.push('.');
+                    target.push_str(name);
+                }
+            }
+            [column_id]
+                if previous_type
+                    .is_some_and(|reference| form_type_reference_is_standard_period(reference)) =>
+            {
+                // The built-in standard period the chain has just reached
+                // numbers its own three members; they are declared by the type,
+                // not by the attribute, so the declared-column index cannot
+                // spell them. Evidence: UT 11.5.27.75
+                // `DataProcessors/ФормированиеЗаказовНаДоставку/Forms/Форма`,
+                // InputField `ПериодОтгрузкиДатаОкончания` carries
+                // `{3,{1},{0,e13dd70b-...},{2}}` whose middle segment is the
+                // `ПериодОтгрузки` attribute of type `v8:StandardPeriod`, and
+                // the platform writes `Объект.ПериодОтгрузки.EndDate`.
+                let name = form_standard_period_member_name(column_id.trim())?;
+                for target in [&mut path, &mut key] {
+                    target.push('.');
+                    target.push_str(name);
+                }
             }
             [column_id] => {
                 let column_id = parse_form_chain_numeric_id(column_id)?;
-                let key = FormAttributeColumnKey {
+                let lookup = FormAttributeColumnKey {
                     attribute_id: attribute_id.to_string(),
                     column_id: column_id.to_string(),
                 };
-                let name = owner_scoped_bindings.declared_columns.get(&key)?.as_ref()?;
-                path.push('.');
-                path.push_str(name);
+                let name = owner_scoped_bindings
+                    .declared_columns
+                    .get(&lookup)?
+                    .as_ref()?;
+                for target in [&mut path, &mut key] {
+                    target.push('.');
+                    target.push_str(name);
+                }
                 reached_type = owner_scoped_bindings
                     .declared_column_types
-                    .get(&key)
+                    .get(&lookup)
                     .and_then(|reference| reference.as_deref());
             }
             [marker, uuid] => {
@@ -17030,8 +17396,10 @@ pub(super) fn resolve_form_bound_chain_member_path(
                 let reference = object_refs.get(&uuid)?;
                 let Some((_, relative_path)) = form_metadata_data_path_route(reference) else {
                     let member = form_common_attribute_member(reference)?;
-                    path.push('.');
-                    path.push_str(member);
+                    for target in [&mut path, &mut key] {
+                        target.push('.');
+                        target.push_str(member);
+                    }
                     continue;
                 };
                 let member = relative_path.rsplit('.').next()?;
@@ -17043,6 +17411,8 @@ pub(super) fn resolve_form_bound_chain_member_path(
                     path.push_str("Total");
                 }
                 path.push_str(member);
+                key.push('.');
+                key.push_str(member);
                 reached_metadata_reference = Some(reference.as_str());
                 reached_type = owner_scoped_bindings
                     .metadata_field_types
@@ -17052,7 +17422,110 @@ pub(super) fn resolve_form_bound_chain_member_path(
             _ => return None,
         }
     }
+    Some((path, key))
+}
+
+/// Walks a bound chain whose root is a *form item* rather than a form
+/// attribute.
+///
+/// `{K,{<item>,02023637-…},…}` starts from what the table item shows, which the
+/// platform writes `Items.<table>.CurrentData`; every following segment is read
+/// exactly as it is on an attribute-rooted chain, because the value the chain
+/// stands on is the same value the attribute holds. The two namespaces are kept
+/// apart by [`walk_form_bound_chain_members`]: the output carries the
+/// `Items.…CurrentData` prefix while the index lookups keep the attribute's own
+/// path, which is what the additional-column declarations are keyed by.
+///
+/// Evidence: UT 11.5.27.75
+/// `InformationRegisters/ЗаказыТорговыхПлощадок/Forms/ПросмотрИЗагрузкаЗаказов`,
+/// InputField `ТаблицаДанныхЗаказаЦена` carries
+/// `{3,{17,02023637-…},{14},{4,5bdad865-…}}` against table item 17
+/// (`ТаблицаЗаказов`, bound to attribute 3 of the same name); column 14 is
+/// `СписокТоваровВОтправлении` and additional column 4 of the declaration for
+/// `ТаблицаЗаказов.СписокТоваровВОтправлении` is `Цена`, and the platform
+/// writes `Items.ТаблицаЗаказов.CurrentData.СписокТоваровВОтправлении.Цена`.
+/// Keying the additional column by the table item alone cannot tell that
+/// declaration from a sibling group that numbers a different column the same,
+/// which is what left 12 of those slots unspelled.
+fn resolve_form_item_rooted_chain_data_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let (item_id, members) = parse_form_item_rooted_chain(field)?;
+    let table_name = table_name_by_id.get(item_id)?;
+    let root = owner_scoped_bindings.table_root.get(item_id)?;
+    walk_form_bound_chain_members(
+        &members,
+        &root.attribute_id,
+        format!("Items.{table_name}.CurrentData"),
+        root.attribute_path.clone(),
+        owner_scoped_bindings,
+        object_refs,
+        false,
+    )
+    .map(|(path, _)| path)
+}
+
+/// The settings-composer members a chain reads past a table item's
+/// `CurrentData`.
+///
+/// The codes are meaningless on their own: `10008` is `ItemFilter` on one
+/// collection's row and `Order` on another's. The row type is decided by the
+/// table item's *own* binding, so the table's chain is walked first and its
+/// terminal collection type names the row table to read; a table whose binding
+/// is not a composer chain, or a collection with no row table of its own, is
+/// not this route's case and falls through untouched.
+fn resolve_form_item_rooted_settings_composer_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> Option<String> {
+    let (item_id, members) = parse_form_item_rooted_chain(field)?;
+    let table_name = table_name_by_id.get(item_id)?;
+    let collection = *owner_scoped_bindings
+        .table_settings_composer_type
+        .get(item_id)?;
+    let mut owner = Some(form_settings_composer_row_type(collection)?);
+    let mut path = format!("Items.{table_name}.CurrentData");
+    for segment in &members {
+        match segment.as_slice() {
+            [index, uuid]
+                if uuid
+                    .trim()
+                    .eq_ignore_ascii_case(FORM_VALUE_TABLE_INDEX_BINDING_UUID) =>
+            {
+                let index = parse_form_chain_numeric_id(index)?;
+                path.push('[');
+                path.push_str(index);
+                path.push(']');
+            }
+            [member_id] => {
+                let (name, next) = form_settings_composer_member(owner?, member_id.trim())?;
+                path.push('.');
+                path.push_str(name);
+                owner = next;
+            }
+            _ => return None,
+        }
+    }
     Some(path)
+}
+
+/// Splits `{K,{<item>,02023637-…},…}` into the item id and the members that
+/// follow it. A chain with no member past the item addresses the row itself,
+/// which no route here spells, so it is not accepted.
+fn parse_form_item_rooted_chain(field: &str) -> Option<(&str, Vec<Vec<&str>>)> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let (root, members) = segments.split_first()?;
+    let [item_id, uuid] = root.as_slice() else {
+        return None;
+    };
+    if uuid.trim() != FORM_ITEM_TYPE_UUID || members.is_empty() {
+        return None;
+    }
+    Some((item_id.trim(), members.to_vec()))
 }
 
 fn parse_form_chain_numeric_id(field: &str) -> Option<&str> {
@@ -17103,6 +17576,26 @@ enum FormSettingsComposerType {
     AvailableFields,
     Appearance,
     Fields,
+    GroupFields,
+    /// One row of a `Settings` collection shown as a tree: the settings
+    /// structure item the table's `CurrentData` stands on.
+    SettingsItem,
+    /// One row of a `UserSettings` collection shown as a tree.
+    UserSettingsItem,
+}
+
+/// The row type a table's `CurrentData` stands on, for the collections whose
+/// rows a chain walks into. Only the two collections UT 11.5.27.75 shows as a
+/// tree are listed; every other composer member refuses rather than guessing a
+/// row type.
+fn form_settings_composer_row_type(
+    collection: FormSettingsComposerType,
+) -> Option<FormSettingsComposerType> {
+    match collection {
+        FormSettingsComposerType::Settings => Some(FormSettingsComposerType::SettingsItem),
+        FormSettingsComposerType::UserSettings => Some(FormSettingsComposerType::UserSettingsItem),
+        _ => None,
+    }
 }
 
 /// Evidence: UT 11.5.27.75, all 143 slots rooted at a `dcsset:SettingsComposer`
@@ -17167,6 +17660,34 @@ fn form_settings_composer_member(
             ("10006", "EditInReportForm", None),
             ("10007", "Filter", Some(Filter)),
         ],
+        GroupFields => &[("0", "GroupFieldsAvailableFields", Some(AvailableFields))],
+        // Evidence: UT 11.5.27.75, all 13 slots whose owner is a table bound to
+        // a `Settings` collection -- `CommonForms/ФормаВариантаОтчета` (12) and
+        // `CommonForms/ФормаВыбораДоступногоПоля` (1). The `Item` prefix is the
+        // platform's own: the row is one settings item, and its members are
+        // named apart from the collection's own like-named members.
+        SettingsItem => &[
+            ("10007", "ItemDataParameters", None),
+            ("10008", "ItemFilter", Some(Filter)),
+            ("10009", "ItemGroupFields", Some(GroupFields)),
+            ("10010", "ItemSelection", Some(Selection)),
+            ("10011", "ItemOrder", Some(Order)),
+            ("10012", "ItemConditionalAppearance", Some(ConditionalAppearance)),
+            ("10013", "ItemOutputParameters", None),
+            ("10014", "ItemUserFields", None),
+        ],
+        // Evidence: UT 11.5.27.75, all 6 slots whose owner is a table bound to
+        // a `UserSettings` collection --
+        // `DataProcessors/НастройкаПоддержанияЗапасов/Forms/НастройкаСписка`.
+        // The codes are *not* the `Settings` row's codes: `10008` is `ItemFilter`
+        // there and `Order` here, so the two tables stay apart and the owner
+        // decides which one is read.
+        UserSettingsItem => &[
+            ("10007", "Filter", Some(Filter)),
+            ("10008", "Order", Some(Order)),
+            ("10010", "ConditionalAppearance", Some(ConditionalAppearance)),
+            ("10011", "Structure", None),
+        ],
         AvailableFields => &[("10000", "FieldPicture", None), ("10001", "Title", None)],
         Appearance => &[
             ("10000", "Use", None),
@@ -17185,6 +17706,16 @@ pub(super) fn resolve_form_settings_composer_chain_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
 ) -> Option<String> {
+    resolve_form_settings_composer_chain(field, attribute_metadata_owners_by_id)
+        .map(|(path, _)| path)
+}
+
+/// The composer chain plus the type it walked to, for the callers that need to
+/// read further members against that type.
+fn resolve_form_settings_composer_chain(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+) -> Option<(String, Option<FormSettingsComposerType>)> {
     let segments = parse_form_bound_chain_segments(field)?;
     let (root, members) = segments.split_first()?;
     let [attribute_id] = root.as_slice() else {
@@ -17238,7 +17769,22 @@ pub(super) fn resolve_form_settings_composer_chain_data_path(
             _ => return None,
         }
     }
-    Some(path)
+    Some((path, owner))
+}
+
+fn form_type_reference_is_standard_period(reference: &str) -> bool {
+    matches!(reference, "v8:StandardPeriod" | "StandardPeriod")
+}
+
+/// The three members the built-in standard period declares, by the id a bound
+/// chain numbers them with. Same table the attribute-rooted route reads.
+fn form_standard_period_member_name(column_id: &str) -> Option<&'static str> {
+    match column_id {
+        "0" => Some("Variant"),
+        "1" => Some("StartDate"),
+        "2" => Some("EndDate"),
+        _ => None,
+    }
 }
 
 /// The built-in standard period's own columns. `1` and `2` are already reached
