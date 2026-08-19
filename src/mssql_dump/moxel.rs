@@ -1608,22 +1608,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             default_format.font = Some(0);
         }
     }
-    if source_column_format_offset > 0
-        && default_format.is_empty()
-        && default_format_width.is_none()
-        && column_formats.len() == source_column_format_refs.len()
-        && source_column_format_refs
-            .iter()
-            .copied()
-            .max()
-            .is_some_and(|max_source_format_index| {
-                max_source_format_index < column_formats.len() + formats.len()
-            })
-        && let Some(min_source_format_index) = source_column_format_refs.iter().copied().min()
-        && min_source_format_index > 1
-    {
-        default_format_index = Some(column_formats.len() + min_source_format_index);
-    }
     if header_footer_format_index.is_some()
         && default_format.is_empty()
         && default_format_width.is_none()
@@ -5125,17 +5109,28 @@ pub(super) fn parse_moxel_default_format(
         .unwrap_or_default()
 }
 
+/// The document's leading default-format record.
+///
+/// It is the body's fifth top-level field and nothing else: the writer already
+/// reads that position when it publishes `<defaultFormatIndex>`. Sweeping the
+/// first eight fields for anything that happens to decode as a non-empty format
+/// let the sixth field - the column-set block - stand in for a document whose
+/// own record is the empty `{0}`, which manufactured a default format, a
+/// `<defaultFormatIndex>` the platform does not write, and an empty entry in
+/// the pool slot that reference landed on.
 pub(super) fn parse_moxel_leading_default_format(
     fields: &[&str],
     style_refs: &[Option<String>],
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> Option<MoxelFormat> {
     fields
-        .iter()
-        .take(8)
-        .filter_map(|field| parse_moxel_format(field, style_refs, number_format_refs))
-        .find(|format| !format.is_empty())
+        .get(MOXEL_LEADING_DEFAULT_FORMAT_FIELD)
+        .and_then(|field| parse_moxel_format(field, style_refs, number_format_refs))
+        .filter(|format| !format.is_empty())
 }
+
+/// Position of the leading default-format record among the top-level fields.
+pub(super) const MOXEL_LEADING_DEFAULT_FORMAT_FIELD: usize = 4;
 
 pub(super) fn parse_moxel_default_format_field(
     text: &str,
