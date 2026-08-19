@@ -5384,6 +5384,32 @@ fn remap_moxel_source_fonts(
     else {
         return;
     };
+    // The leading default-format record carries a font slot from the same run,
+    // so it moves with the rest. Evidence (native 1С:УТ 11.5.27.75):
+    // `СписаниеБезналичныхДенежныхСредств/.../ПФ_MXL_ПлатежноеПоручение_ru`
+    // stores `{129,0,72}` and publishes its materialized entry as
+    // `<font>6</font><width>72</width>`.
+    let output_leading_default_font = spreadsheet
+        .leading_default_format
+        .as_ref()
+        .map(|format| source_font_map.output_format_font(format));
+    if output_leading_default_font
+        .as_ref()
+        .is_some_and(Option::is_none)
+    {
+        return;
+    }
+    // The width-and-font pair the same record contributes to a materialized
+    // default carries a slot from that run too.
+    let output_default_format_font = spreadsheet
+        .default_format_font
+        .map(|source_font_index| source_font_map.output_for_source(source_font_index));
+    if output_default_format_font
+        .as_ref()
+        .is_some_and(Option::is_none)
+    {
+        return;
+    }
     // The source-ordered table carries the same font slots as the split ones,
     // so it has to move with them or a reference resolved through it would name
     // a font the output no longer numbers that way.
@@ -5395,6 +5421,15 @@ fn remap_moxel_source_fonts(
 
     spreadsheet.fonts = output_fonts;
     spreadsheet.default_format.font = output_default_font;
+    if let (Some(format), Some(Some(output_font))) = (
+        spreadsheet.leading_default_format.as_mut(),
+        output_leading_default_font,
+    ) {
+        format.font = output_font;
+    }
+    if let Some(output_font) = output_default_format_font {
+        spreadsheet.default_format_font = output_font;
+    }
     for (format, output_font) in spreadsheet
         .column_formats
         .iter_mut()
