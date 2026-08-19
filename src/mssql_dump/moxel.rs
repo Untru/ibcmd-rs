@@ -6773,11 +6773,22 @@ pub(super) fn parse_moxel_style_ref_slot(
             "-3" => Some(Some("style:FormTextColor".to_string())),
             "-10" => Some(Some("style:FieldBackColor".to_string())),
             "-11" => Some(Some("style:FieldTextColor".to_string())),
-            "-13" => Some(Some("style:FieldTextColor".to_string())),
+            // Evidence (native 1С:УТ 11.5.27.75): `-13` occurs in exactly one
+            // document, `ПечатьСтатусовТоваровФСС/.../ДанныеПроверкиТоваровФСС`,
+            // whose palette is `-1, -3, -13` and whose only published style name
+            // is `FieldAlternativeBackColor` - `-1` and `-3` publish nothing
+            // there, so no other slot can account for it.
+            "-13" => Some(Some("style:FieldAlternativeBackColor".to_string())),
             "-14" => Some(Some("style:FieldSelectionBackColor".to_string())),
             "-16" => Some(Some("style:SpecialTextColor".to_string())),
             "-17" => Some(Some("style:NegativeTextColor".to_string())),
-            "-21" => Some(Some("style:FieldSelectionBackColor".to_string())),
+            // Likewise `-21` occurs once, in
+            // `ПечатьПодарочныхСертификатов/.../ПодарочныйСертификат`, whose
+            // palette is `-1, -3, -21, -16` and which publishes exactly
+            // `ButtonTextColor` and `SpecialTextColor`. `-16` is
+            // `SpecialTextColor` in all 13 documents that carry it, which
+            // leaves `ButtonTextColor` for `-21`.
+            "-21" => Some(Some("style:ButtonTextColor".to_string())),
             "-23" => Some(Some("style:ToolTipBackColor".to_string())),
             "-24" => Some(Some("style:ToolTipTextColor".to_string())),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),

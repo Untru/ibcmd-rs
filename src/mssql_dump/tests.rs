@@ -30695,7 +30695,7 @@ fn formats_moxel_plain_style_item_font_omits_false_flags() {
 }
 
 #[test]
-fn formats_moxel_field_selection_back_color_style() {
+fn formats_moxel_minus21_slot_uses_button_text_color() {
     let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-21}}"], &BTreeMap::new());
     let format = parse_moxel_format("{2048,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
@@ -30737,7 +30737,7 @@ fn formats_moxel_field_selection_back_color_style() {
 
     push_moxel_format_xml(&mut xml, &spreadsheet, 1);
 
-    assert!(xml.contains("<backColor>style:FieldSelectionBackColor</backColor>"));
+    assert!(xml.contains("<backColor>style:ButtonTextColor</backColor>"));
 }
 
 #[test]
@@ -30787,7 +30787,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
 }
 
 #[test]
-fn formats_moxel_field_text_color_style() {
+fn formats_moxel_minus13_slot_uses_field_alternative_back_color() {
     let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-13}}"], &BTreeMap::new());
     let format = parse_moxel_format("{1024,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
@@ -30829,7 +30829,7 @@ fn formats_moxel_field_text_color_style() {
 
     push_moxel_format_xml(&mut xml, &spreadsheet, 1);
 
-    assert!(xml.contains("<textColor>style:FieldTextColor</textColor>"));
+    assert!(xml.contains("<textColor>style:FieldAlternativeBackColor</textColor>"));
 }
 
 #[test]
