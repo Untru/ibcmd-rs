@@ -27790,7 +27790,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }],
@@ -28182,7 +28182,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }],
@@ -28626,7 +28626,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 2,
             columns: vec![
                 MoxelColumn {
@@ -28770,7 +28770,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -29197,14 +29197,14 @@ fn formats_moxel_row_column_ids_accept_pair_mapping() {
         MoxelColumnSet {
             id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
         MoxelColumnSet {
             id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
@@ -29228,14 +29228,14 @@ fn formats_moxel_row_column_ids_accept_row_zero_pair_mapping() {
         MoxelColumnSet {
             id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
         MoxelColumnSet {
             id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![],
         },
@@ -29446,8 +29446,8 @@ fn formats_moxel_column_sets_capture_explicit_source_default_format_indices() {
     assert_eq!(declared_sheet_height, Some(62));
     assert_eq!(column_sets[0].default_format_index, None);
     assert_eq!(column_sets[1].default_format_index, None);
-    assert_eq!(column_sets[0].source_default_format_index, Some(29));
-    assert_eq!(column_sets[1].source_default_format_index, Some(29));
+    assert_eq!(column_sets[0].source_default_format_index(), Some(29));
+    assert_eq!(column_sets[1].source_default_format_index(), Some(29));
     assert_eq!(column_sets[0].columns[0].format_index, 1);
     assert_eq!(column_sets[1].columns[0].format_index, 1);
     assert_eq!(source_refs.first().copied(), Some(29));
@@ -29736,7 +29736,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: Vec::new(),
         }],
@@ -31441,7 +31441,7 @@ fn formats_moxel_multiple_column_sets_do_not_synthesize_default_format_index() {
         MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -31452,7 +31452,7 @@ fn formats_moxel_multiple_column_sets_do_not_synthesize_default_format_index() {
         MoxelColumnSet {
             id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 4,
             columns: vec![
                 MoxelColumn {
@@ -32039,7 +32039,7 @@ fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source
         MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -32050,7 +32050,7 @@ fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source
         MoxelColumnSet {
             id: Some("alt".to_string()),
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 1,
             columns: vec![MoxelColumn {
                 index: 0,
@@ -32110,7 +32110,7 @@ fn formats_moxel_single_column_set_prefers_explicit_header_footer_source_ref() {
     let mut column_sets = vec![MoxelColumnSet {
         id: None,
         default_format_index: None,
-        source_default_format_index: None,
+        raw_default_format_index: 0,
         size: 1,
         columns: vec![MoxelColumn {
             index: 0,
@@ -32148,7 +32148,7 @@ fn formats_moxel_sparse_header_footer_ref_uses_non_identity_source_map() {
     let mut column_sets = vec![MoxelColumnSet {
         id: None,
         default_format_index: None,
-        source_default_format_index: None,
+        raw_default_format_index: 0,
         size: 1,
         columns: Vec::new(),
     }];
@@ -32225,7 +32225,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         column_sets: vec![MoxelColumnSet {
             id: None,
             default_format_index: Some(3),
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 2,
             columns: vec![
                 MoxelColumn {
@@ -32291,7 +32291,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
             MoxelColumnSet {
                 id: None,
                 default_format_index: None,
-                source_default_format_index: None,
+                raw_default_format_index: 0,
                 size: 2,
                 columns: vec![
                     MoxelColumn {
@@ -32309,7 +32309,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
             MoxelColumnSet {
                 id: Some("alt".to_string()),
                 default_format_index: Some(5),
-                source_default_format_index: Some(5),
+                raw_default_format_index: 5,
                 size: 1,
                 columns: vec![MoxelColumn {
                     index: 0,
@@ -32388,7 +32388,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
             MoxelColumnSet {
                 id: None,
                 default_format_index: Some(4),
-                source_default_format_index: None,
+                raw_default_format_index: 0,
                 size: 2,
                 columns: vec![
                     MoxelColumn {
@@ -32406,7 +32406,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
             MoxelColumnSet {
                 id: Some("alt".to_string()),
                 default_format_index: Some(4),
-                source_default_format_index: None,
+                raw_default_format_index: 0,
                 size: 1,
                 columns: vec![MoxelColumn {
                     index: 0,

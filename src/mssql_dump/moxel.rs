@@ -343,9 +343,25 @@ pub(super) struct MoxelRow {
 pub(super) struct MoxelColumnSet {
     pub(super) id: Option<String>,
     pub(super) default_format_index: Option<usize>,
-    pub(super) source_default_format_index: Option<usize>,
+    /// The set's default-format reference exactly as the body stores it: a
+    /// position in the document's source format table, or 0 for none.
+    ///
+    /// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet templates): of
+    /// the 1810 column sets, the 1734 that store 0 publish no `<formatIndex>`
+    /// and the 76 that store anything else all publish one - no exception in
+    /// either direction.
+    pub(super) raw_default_format_index: usize,
     pub(super) size: usize,
     pub(super) columns: Vec<MoxelColumn>,
+}
+
+impl MoxelColumnSet {
+    /// The stored reference where it also drives the column/format split. Slot
+    /// 1 is left out of that split: it is the table's leading entry and is
+    /// reached through the ordinary format path.
+    pub(super) fn source_default_format_index(&self) -> Option<usize> {
+        (self.raw_default_format_index > 1).then_some(self.raw_default_format_index)
+    }
 }
 
 pub(super) struct MoxelColumn {
@@ -1718,7 +1734,7 @@ pub(super) fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnS
     vec![MoxelColumnSet {
         id: None,
         default_format_index: None,
-        source_default_format_index: None,
+        raw_default_format_index: 0,
         size: column_count,
         columns: (0..column_count)
             .map(|index| MoxelColumn {
@@ -1950,8 +1966,7 @@ pub(super) fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
     Some(MoxelColumnSet {
         id,
         default_format_index: None,
-        source_default_format_index: (raw_default_format_index > 1)
-            .then_some(raw_default_format_index),
+        raw_default_format_index,
         size: declared_count,
         columns,
     })
@@ -7503,13 +7518,38 @@ fn render_moxel_spreadsheet_xml(
             body
         })
         .collect::<Vec<_>>();
+    // A stored reference names a position in the body's own format table, and
+    // the platform answers it with the pool position that carries that entry's
+    // published bytes - the same convention `<defaultFormatIndex>` follows.
+    //
+    // Evidence (native 1С:УТ 11.5.27.75, every `Templates/*/Ext/Template.xml`
+    // that decodes as a spreadsheet): 96 header/footer references over 87
+    // documents and 76 column-set references over 1810 column sets, and all
+    // 172 name the *first* pool position holding their bytes - none names a
+    // later duplicate and none points past the pool.
+    let published_source_format = |source_format_ref: usize| -> Option<usize> {
+        let format = source_format_ref
+            .checked_sub(1)
+            .and_then(|at| spreadsheet.source_formats.get(at))?;
+        let mut body = String::new();
+        push_moxel_format_body_xml(&mut body, spreadsheet, format, font_projection.as_ref());
+        published_formats
+            .iter()
+            .position(|entry| *entry == body)
+            .map(|at| at + 1)
+    };
     let mut xml = String::from(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
     );
     push_moxel_language_settings_xml(&mut xml, spreadsheet.language_settings.as_ref());
     for column_set in &spreadsheet.column_sets {
-        push_moxel_columns_xml(&mut xml, column_set, &output_format_index_map);
+        push_moxel_columns_xml(
+            &mut xml,
+            column_set,
+            &output_format_index_map,
+            &published_source_format,
+        );
     }
     for row in &spreadsheet.rows {
         push_moxel_row_xml(
@@ -7538,20 +7578,8 @@ fn render_moxel_spreadsheet_xml(
             if source_format_ref == 0 {
                 return Some(0);
             }
-            if let Some(format) = source_format_ref
-                .checked_sub(1)
-                .and_then(|at| spreadsheet.source_formats.get(at))
-            {
-                let mut body = String::new();
-                push_moxel_format_body_xml(
-                    &mut body,
-                    spreadsheet,
-                    format,
-                    font_projection.as_ref(),
-                );
-                if let Some(at) = published_formats.iter().position(|entry| *entry == body) {
-                    return Some(at + 1);
-                }
+            if let Some(published) = published_source_format(source_format_ref) {
+                return Some(published);
             }
             let shared = spreadsheet.header_footer_format_index?;
             Some(
@@ -7947,16 +7975,28 @@ pub(super) fn push_moxel_columns_xml(
     xml: &mut String,
     column_set: &MoxelColumnSet,
     output_format_index_map: &BTreeMap<usize, usize>,
+    published_source_format: &dyn Fn(usize) -> Option<usize>,
 ) {
     xml.push_str("\t<columns>\r\n");
     if let Some(id) = &column_set.id {
         xml.push_str(&format!("\t\t<id>{}</id>\r\n", escape_xml_text(id)));
     }
-    if let Some(default_format_index) = column_set.default_format_index {
-        let default_format_index = output_format_index_map
-            .get(&default_format_index)
-            .copied()
-            .unwrap_or(default_format_index);
+    // The stored reference decides whether the element exists at all: over all
+    // 1810 column sets of the native corpus the 1734 that store 0 publish
+    // nothing and the 76 that store anything else always publish. Its value is
+    // the pool position carrying the referenced entry's bytes; a reference this
+    // reader cannot place falls back to the internal slot it resolved to.
+    if column_set.raw_default_format_index > 0
+        && let Some(default_format_index) =
+            published_source_format(column_set.raw_default_format_index).or_else(|| {
+                column_set.default_format_index.map(|default_format_index| {
+                    output_format_index_map
+                        .get(&default_format_index)
+                        .copied()
+                        .unwrap_or(default_format_index)
+                })
+            })
+    {
         xml.push_str(&format!(
             "\t\t<formatIndex>{default_format_index}</formatIndex>\r\n"
         ));
@@ -7998,7 +8038,7 @@ pub(super) fn moxel_source_column_format_refs(column_sets: &[MoxelColumnSet]) ->
     let mut ordered = Vec::new();
     for source_format_index in column_sets
         .iter()
-        .filter_map(|column_set| column_set.source_default_format_index)
+        .filter_map(|column_set| column_set.source_default_format_index())
     {
         if source_format_index > 0 && seen.insert(source_format_index) {
             ordered.push(source_format_index);
@@ -8024,7 +8064,7 @@ pub(super) fn remap_moxel_column_set_output_format_indices(
         return;
     }
     for column_set in column_sets.iter_mut() {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(position) = source_column_format_refs
                 .iter()
                 .position(|candidate| *candidate == source_format_index)
@@ -8168,7 +8208,7 @@ pub(super) fn remap_moxel_column_set_internal_format_indices(
     format_len: usize,
 ) {
     for column_set in column_sets.iter_mut() {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(format_index) = moxel_internal_format_index_for_source_index(
                 source_format_index,
                 column_format_len,
@@ -8202,7 +8242,7 @@ pub(super) fn remap_moxel_column_set_sparse_internal_format_indices(
     format_len: usize,
 ) {
     for column_set in column_sets.iter_mut() {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(format_index) = moxel_internal_format_index_for_sparse_source_index(
                 source_format_index,
                 source_column_format_refs,
@@ -8260,7 +8300,7 @@ fn moxel_source_format_refs_are_complete(
 
     column_sets.iter().all(|column_set| {
         column_set
-            .source_default_format_index
+            .source_default_format_index()
             .is_none_or(direct_ref_is_valid)
             && column_set
                 .columns
@@ -8287,7 +8327,7 @@ fn remap_moxel_column_set_source_format_indices(
     source_format_map: &MoxelSourceFormatMap,
 ) {
     for column_set in column_sets {
-        if let Some(source_format_index) = column_set.source_default_format_index
+        if let Some(source_format_index) = column_set.source_default_format_index()
             && let Some(format_index) = source_format_map.internal_for_source(source_format_index)
         {
             column_set.default_format_index = Some(format_index);
@@ -10544,7 +10584,7 @@ mod moxel_exact_parity_tests {
         let column_sets = vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }];
@@ -10670,7 +10710,7 @@ mod moxel_exact_parity_tests {
         let column_sets = vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
-            source_default_format_index: None,
+            raw_default_format_index: 0,
             size: 0,
             columns: Vec::new(),
         }];
