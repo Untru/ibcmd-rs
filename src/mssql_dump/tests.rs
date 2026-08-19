@@ -31994,7 +31994,10 @@ fn formats_moxel_invoice_1096_sparse_column_sets_promote_shared_default_without_
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert_eq!(spreadsheet.column_sets.len(), 4);
-    assert_eq!(spreadsheet.column_formats.len(), 35);
+    // 36, not 35: the slot the column sets' own default reference names is part
+    // of the split too. The published bytes of this document are unchanged -
+    // every assertion below on the XML still holds.
+    assert_eq!(spreadsheet.column_formats.len(), 36);
     assert!(spreadsheet.header_footer_format_index.is_some());
     assert_eq!(spreadsheet.default_format_index, None);
     assert_eq!(declared_sheet_height, Some(38));

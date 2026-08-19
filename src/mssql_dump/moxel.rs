@@ -356,11 +356,10 @@ pub(super) struct MoxelColumnSet {
 }
 
 impl MoxelColumnSet {
-    /// The stored reference where it also drives the column/format split. Slot
-    /// 1 is left out of that split: it is the table's leading entry and is
-    /// reached through the ordinary format path.
+    /// The stored reference as an option: `None` is the stored 0, which is the
+    /// body's own way of saying the set names no format.
     pub(super) fn source_default_format_index(&self) -> Option<usize> {
-        (self.raw_default_format_index > 1).then_some(self.raw_default_format_index)
+        (self.raw_default_format_index > 0).then_some(self.raw_default_format_index)
     }
 }
 
