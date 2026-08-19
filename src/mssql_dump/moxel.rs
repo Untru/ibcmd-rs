@@ -2710,17 +2710,21 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     let note_at = has(MOXCEL_CELL_NOTE_BIT).then(|| take(3));
     let formatted_flag_at = has(MOXCEL_CELL_TEXT_BIT).then(|| take(1));
     let mut expected = cursor;
-    let formatted = match formatted_flag_at.and_then(|at| fields.get(at)) {
-        None => false,
+    // The flag opens one more field, which carries the record's own formatted
+    // rendering of the same text.
+    let formatted_at = match formatted_flag_at.and_then(|at| fields.get(at)) {
+        None => None,
         Some(flag) => match flag.trim() {
-            "0" => false,
+            "0" => None,
             "1" => {
+                let at = expected;
                 expected += 1;
-                true
+                Some(at)
             }
             _ => return None,
         },
     };
+    let formatted = formatted_at.is_some();
     if fields.len() != expected {
         return None;
     }
@@ -2764,6 +2768,15 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
         .as_ref()
         .filter(|value| value.lang.is_empty())
         .map(|value| value.content.clone());
+    // Where the record carries a formatted tail, that tail is the text the
+    // platform publishes; the plain copy beside it is the same content with its
+    // markup stripped. Evidence (native 1С:УТ 11.5.27.75): 16 cells in the
+    // corpus carry the tail, 14 of them spell both copies identically, and in
+    // the two that do not - both in `ПроверкаКонтрагента/.../Налоги` - the
+    // published `<tfl>` is the tail's `<b>…</>` form and never the plain one.
+    let text = formatted_at
+        .and_then(|at| parse_moxel_formatted_cell_text(fields.get(at)?))
+        .or(text);
     let note = note_at.and_then(|at| parse_moxel_cell_note(&fields, at));
     Some(MoxelCell {
         column_index,
@@ -2856,6 +2869,17 @@ fn parse_moxel_single_localized_value(text: &str) -> Option<MoxelLocalizedValue>
         lang: parse_1c_string(pair.first()?)?,
         content: parse_1c_string(pair.get(1)?)?,
     })
+}
+
+/// The formatted tail `{1, <text list>, 1}` of a cell record.
+fn parse_moxel_formatted_cell_text(text: &str) -> Option<String> {
+    let group = split_1c_braced_fields(text, 0)?;
+    if group.len() != 3 || group.first()?.trim() != "1" || group.get(2)?.trim() != "1" {
+        return None;
+    }
+    parse_moxel_localized_cell_value(group.get(1)?)?
+        .filter(|value| !value.lang.is_empty())
+        .map(|value| value.content)
 }
 
 pub(super) fn parse_moxel_localized_cell_value(text: &str) -> Option<Option<MoxelLocalizedValue>> {
