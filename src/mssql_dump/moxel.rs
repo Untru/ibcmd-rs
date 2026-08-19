@@ -54,6 +54,10 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) named_items: Vec<MoxelNamedItem>,
     #[allow(dead_code)]
     pub(super) areas: Vec<MoxelArea>,
+    /// The source position each internal format slot came from, in internal
+    /// order. The column/pool split is position-only, so this is that same
+    /// split run over `1..=n`; empty when there is no table to split.
+    pub(super) internal_sources: Vec<usize>,
     pub(super) print_area: Option<MoxelArea>,
     /// `groupsBackColor`, `groupsColor`, `headersBackColor`, `headersColor`, in
     /// publication order, each `None` where the document leaves the role at its
@@ -1392,17 +1396,22 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             default_format = leading_default_format;
         }
     }
-    let (column_formats, formats, source_format_map, leading_source_column_formats) =
-        parse_moxel_formats_with_source_map(
-            &fields,
-            column_format_slots,
-            sparse_source_format_refs,
-            &source_column_format_refs,
-            &source_column_format_order,
-            &style_refs,
-            &drawing_format_indices,
-            &number_format_refs,
-        );
+    let (
+        column_formats,
+        formats,
+        internal_sources,
+        source_format_map,
+        leading_source_column_formats,
+    ) = parse_moxel_formats_with_source_map(
+        &fields,
+        column_format_slots,
+        sparse_source_format_refs,
+        &source_column_format_refs,
+        &source_column_format_order,
+        &style_refs,
+        &drawing_format_indices,
+        &number_format_refs,
+    );
     // The same table the split above consumed, kept in the order the body
     // stores it: a header/footer record indexes this order, and nothing else in
     // the IR preserves it once the column formats are lifted out.
@@ -1662,6 +1671,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         vertical_unmerges,
         named_items,
         areas,
+        internal_sources,
         print_area,
         group_header_colors: parse_moxel_group_header_colors(&fields, &style_refs),
         print_settings,
@@ -5475,6 +5485,7 @@ fn parse_moxel_formats_with_source_map(
 ) -> (
     Vec<MoxelFormat>,
     Vec<MoxelFormat>,
+    Vec<usize>,
     Option<MoxelSourceFormatMap>,
     bool,
 ) {
@@ -5494,21 +5505,36 @@ fn parse_moxel_formats_with_source_map(
             source_column_format_refs,
             source_column_format_order,
         );
+        let sources = (1..=formats.len()).collect::<Vec<_>>();
         let (column_formats, formats) =
             split_moxel_formats_by_source_refs(formats, source_column_format_refs);
-        return (column_formats, formats, source_format_map, false);
+        let sources = split_moxel_formats_by_source_refs(sources, source_column_format_refs);
+        return (
+            column_formats,
+            formats,
+            moxel_internal_sources(sources),
+            source_format_map,
+            false,
+        );
     }
 
-    let (column_formats, formats, leading_source_column_formats) = parse_moxel_formats_with_layout(
-        fields,
-        column_count,
-        sparse_source_format_refs,
-        source_column_format_refs,
-        style_refs,
-        drawing_format_indices,
-        number_format_refs,
-    );
-    (column_formats, formats, None, leading_source_column_formats)
+    let (column_formats, formats, internal_sources, leading_source_column_formats) =
+        parse_moxel_formats_with_layout(
+            fields,
+            column_count,
+            sparse_source_format_refs,
+            source_column_format_refs,
+            style_refs,
+            drawing_format_indices,
+            number_format_refs,
+        );
+    (
+        column_formats,
+        formats,
+        internal_sources,
+        None,
+        leading_source_column_formats,
+    )
 }
 
 #[cfg(test)]
@@ -5521,7 +5547,7 @@ pub(super) fn parse_moxel_formats(
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
-    let (column_formats, formats, _) = parse_moxel_formats_with_layout(
+    let (column_formats, formats, _, _) = parse_moxel_formats_with_layout(
         fields,
         column_count,
         sparse_source_format_refs,
@@ -5541,7 +5567,7 @@ fn parse_moxel_formats_with_layout(
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
-) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, bool) {
+) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, Vec<usize>, bool) {
     let all_formats = parse_moxel_format_table(
         fields,
         column_count,
@@ -5550,15 +5576,28 @@ fn parse_moxel_formats_with_layout(
         number_format_refs,
     );
     if let Some(formats) = all_formats {
+        let sources = (1..=formats.len()).collect::<Vec<_>>();
         if sparse_source_format_refs && !source_column_format_refs.is_empty() {
             let (column_formats, formats) =
                 split_moxel_formats_by_source_refs(formats, source_column_format_refs);
-            return (column_formats, formats, false);
+            let sources = split_moxel_formats_by_source_refs(sources, source_column_format_refs);
+            return (
+                column_formats,
+                formats,
+                moxel_internal_sources(sources),
+                false,
+            );
         }
         if prefers_moxel_leading_source_column_formats(&formats, source_column_format_refs) {
             let (column_formats, formats) =
                 split_moxel_formats_by_source_refs(formats, source_column_format_refs);
-            return (column_formats, formats, true);
+            let sources = split_moxel_formats_by_source_refs(sources, source_column_format_refs);
+            return (
+                column_formats,
+                formats,
+                moxel_internal_sources(sources),
+                true,
+            );
         }
         let (column_formats, formats) = split_moxel_formats_for_output(
             formats,
@@ -5566,9 +5605,21 @@ fn parse_moxel_formats_with_layout(
             sparse_source_format_refs,
             drawing_format_indices,
         );
-        return (column_formats, formats, false);
+        let sources = split_moxel_formats_for_output(
+            sources,
+            column_count,
+            sparse_source_format_refs,
+            drawing_format_indices,
+        );
+        return (
+            column_formats,
+            formats,
+            moxel_internal_sources(sources),
+            false,
+        );
     }
     if let Some((_, slots)) = parse_moxel_equal_width_only_format_table(fields, column_count) {
+        let sources = (1..=slots.len()).collect::<Vec<_>>();
         let formats = slots
             .into_iter()
             .map(|width| MoxelFormat {
@@ -5582,9 +5633,25 @@ fn parse_moxel_formats_with_layout(
             sparse_source_format_refs,
             drawing_format_indices,
         );
-        return (column_formats, formats, false);
+        let sources = split_moxel_formats_for_output(
+            sources,
+            column_count,
+            sparse_source_format_refs,
+            drawing_format_indices,
+        );
+        return (
+            column_formats,
+            formats,
+            moxel_internal_sources(sources),
+            false,
+        );
     }
-    (Vec::new(), Vec::new(), false)
+    (Vec::new(), Vec::new(), Vec::new(), false)
+}
+
+/// The two halves of a split, concatenated the way the internal table is.
+fn moxel_internal_sources((column_sources, sources): (Vec<usize>, Vec<usize>)) -> Vec<usize> {
+    column_sources.into_iter().chain(sources).collect()
 }
 
 pub(super) fn parse_moxel_format_table(
@@ -5851,10 +5918,13 @@ pub(super) fn normalize_moxel_single_set_report_header_tail(
     apply_moxel_report_header_tail_back_color(formats, tail_start);
 }
 
-pub(super) fn split_moxel_formats_by_source_refs(
-    formats: Vec<MoxelFormat>,
+/// Splits a source-ordered table into the entries the column sets name and the
+/// rest. It is position-only, so the same call over `1..=n` yields the source
+/// position each internal slot came from.
+pub(super) fn split_moxel_formats_by_source_refs<T: Clone>(
+    formats: Vec<T>,
     source_column_format_refs: &[usize],
-) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+) -> (Vec<T>, Vec<T>) {
     let mut selected_refs = BTreeSet::new();
     let mut column_formats = Vec::new();
     for source_format_index in source_column_format_refs {
@@ -5955,12 +6025,14 @@ pub(super) fn is_moxel_width_only_format(format: &MoxelFormat) -> bool {
         && format.bottom_margin.is_none()
 }
 
-pub(super) fn split_moxel_formats_for_output(
-    mut formats: Vec<MoxelFormat>,
+/// Position-only, like the split above: the same call over `1..=n` yields the
+/// source position each internal slot came from.
+pub(super) fn split_moxel_formats_for_output<T>(
+    mut formats: Vec<T>,
     column_count: usize,
     sparse_source_format_refs: bool,
     drawing_format_indices: &BTreeSet<usize>,
-) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+) -> (Vec<T>, Vec<T>) {
     if sparse_source_format_refs {
         let trailing_drawing_count = (1..=formats.len())
             .rev()
@@ -7727,18 +7799,52 @@ fn render_moxel_spreadsheet_xml(
         xml.push_str("\t<templateMode>true</templateMode>\r\n");
     }
     // The leading default-format record names format content, not a slot: the
-    // published index is the position of the first pool entry that carries the
-    // record's own bytes.  An empty default format is never materialized, so a
-    // document whose pool holds no empty `<format/>` publishes nothing.
+    // published index is the pool position that carries the record's own bytes.
+    // An empty default format is never materialized, so a document whose pool
+    // holds no empty `<format/>` publishes nothing.
+    //
+    // Where several pool positions carry those bytes the platform names the one
+    // whose *table* entry comes last. Evidence (native 1С:УТ 11.5.27.75, all 618
+    // documents that publish `<defaultFormatIndex>`): 603 name a body that is
+    // unique in the pool, where every reading agrees. In each of the remaining
+    // 15 the named position is the one whose source-table entry is the last of
+    // the equal ones - 11 of those happen to be the first pool position and 4
+    // the second, so neither pool order alone accounts for them.
     let leading_default_format_body = spreadsheet.leading_default_format.as_ref().map(|format| {
         let mut body = String::new();
         push_moxel_format_body_xml(&mut body, spreadsheet, format, font_projection.as_ref());
         body
     });
+    let last_source_published_format = |body: &String| -> Option<usize> {
+        let equal = published_formats
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| *entry == body)
+            .map(|(at, _)| at + 1)
+            .collect::<Vec<_>>();
+        let first = equal.first().copied()?;
+        if equal.len() == 1 || spreadsheet.internal_sources.is_empty() {
+            return Some(first);
+        }
+        // Fall back to the first position wherever a candidate has no source of
+        // its own: a partial ordering would be a guess.
+        equal
+            .iter()
+            .map(|position| {
+                output_format_indices
+                    .get(position - 1)
+                    .and_then(|internal| spreadsheet.internal_sources.get(internal - 1))
+                    .map(|source| (*source, *position))
+            })
+            .collect::<Option<Vec<_>>>()
+            .and_then(|sourced| sourced.into_iter().max())
+            .map(|(_, position)| position)
+            .or(Some(first))
+    };
     let mut materialized_default_format = None;
     let published_default_format_index = match &leading_default_format_body {
-        Some(body) => match published_formats.iter().position(|entry| entry == body) {
-            Some(at) => Some(at + 1),
+        Some(body) => match last_source_published_format(body) {
+            Some(at) => Some(at),
             None if body == EMPTY_MOXEL_FORMAT_XML => None,
             None => {
                 materialized_default_format = Some(body.clone());
@@ -10634,6 +10740,7 @@ mod moxel_exact_parity_tests {
             vertical_unmerges: Vec::new(),
             named_items: Vec::new(),
             areas: Vec::new(),
+            internal_sources: Vec::new(),
             print_area: None,
             group_header_colors: [None, None, None, None],
             print_settings: None,
