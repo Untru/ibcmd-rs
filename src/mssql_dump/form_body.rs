@@ -16,8 +16,8 @@ use crate::form_schema::{
     FormCommandBarSchema, FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
-    FormConditionalTableSchema, FormContainerReadOnlySchema, FormControlBorderSchema,
-    FormControlBorderStyle, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormConditionalTableSchema, FormContainerReadOnlySchema, FormControlBorder,
+    FormControlBorderSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
     FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldGroupHorizontalAlign,
     FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
     FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot, FormFieldVerticalAlign,
@@ -724,6 +724,7 @@ pub(super) struct FormBodyProperties {
     pub(super) use_for_folders_and_items: Option<&'static str>,
     pub(super) customizable: Option<bool>,
     pub(super) vertical_align: Option<FormRootVerticalAlign>,
+    pub(super) children_align: Option<&'static str>,
     pub(super) command_bar_location: Option<&'static str>,
     pub(super) vertical_scroll: Option<&'static str>,
     pub(super) horizontal_align: Option<&'static str>,
@@ -1088,8 +1089,11 @@ pub(super) struct FormExtendedTooltip {
     pub(super) text_color: Option<String>,
     pub(super) font_xml: Option<String>,
     pub(super) title: Option<FormExtendedTooltipTitle>,
+    pub(super) title_height: Option<String>,
     pub(super) hyperlink: Option<bool>,
     pub(super) group_horizontal_align: Option<&'static str>,
+    pub(super) group_vertical_align: Option<&'static str>,
+    pub(super) horizontal_align: Option<&'static str>,
     pub(super) vertical_align: Option<&'static str>,
     pub(super) events: Vec<FormBodyEvent>,
 }
@@ -1114,8 +1118,11 @@ impl FormExtendedTooltip {
             || self.text_color.is_some()
             || self.font_xml.is_some()
             || self.title.is_some()
+            || self.title_height.is_some()
             || self.hyperlink.is_some()
             || self.group_horizontal_align.is_some()
+            || self.group_vertical_align.is_some()
+            || self.horizontal_align.is_some()
             || self.vertical_align.is_some()
             || !self.events.is_empty()
     }
@@ -1240,6 +1247,7 @@ pub(super) struct FormChildItem {
     pub(super) group_vertical_align: Option<&'static str>,
     pub(super) label_decoration_visual_tail: Option<FormLabelDecorationVisualTail>,
     pub(super) check_box_type: Option<&'static str>,
+    pub(super) equal_items_width: Option<bool>,
     pub(super) three_state: Option<bool>,
     pub(super) radio_button_type: Option<&'static str>,
     pub(super) item_width: Option<String>,
@@ -1253,7 +1261,7 @@ pub(super) struct FormChildItem {
     pub(super) back_color: Option<String>,
     pub(super) border_color: Option<String>,
     pub(super) button_parameter: Option<String>,
-    pub(super) control_border: Option<FormControlBorderStyle>,
+    pub(super) control_border: Option<FormControlBorder>,
     pub(super) title_text_color: Option<String>,
     pub(super) footer_text_color: Option<String>,
     pub(super) footer_font_xml: Option<String>,
@@ -1913,6 +1921,7 @@ pub(super) fn extract_form_body_properties(
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
         vertical_align: extract_form_vertical_align(fields),
+        children_align: extract_form_children_align(fields),
         command_bar_location: extract_form_command_bar_location(fields),
         vertical_scroll: extract_form_vertical_scroll(fields),
         horizontal_align: extract_form_horizontal_align(fields),
@@ -2305,6 +2314,16 @@ pub(super) fn extract_form_vertical_align(fields: &[&str]) -> Option<FormRootVer
         trailer.len(),
     )?
     .vertical_align(trailer)
+}
+
+pub(super) fn extract_form_children_align(fields: &[&str]) -> Option<&'static str> {
+    let tail_start = form_root_child_items_tail_start(fields)?;
+    let trailer = fields.get(tail_start..)?;
+    FormRootVerticalAlignSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+    )?
+    .children_align(trailer)
 }
 
 pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
@@ -8374,7 +8393,7 @@ fn parse_form_control_border(
     item_tag: &str,
     top_level_offset: usize,
     direct_discriminator: Option<&str>,
-) -> Option<FormControlBorderStyle> {
+) -> Option<FormControlBorder> {
     let options_slot = FormControlBorderSchema::options_slot(item_tag, top_level_offset)?;
     let options_text = fields.get(options_slot)?.trim();
     if scan_1c_braced_value(options_text, 0) != Some(options_text.len()) {
@@ -8394,7 +8413,7 @@ fn parse_form_control_border(
         return None;
     }
     let tuple = split_1c_braced_fields(tuple_text, 0)?;
-    schema.non_default_tuple_style(&tuple)
+    schema.non_default_tuple_border(&tuple)
 }
 
 fn parse_form_child_item_with_metadata_owners(
@@ -9086,9 +9105,15 @@ fn parse_form_child_item_with_metadata_owners(
             .as_ref()
             .map(|options| options.collapsed_representation_title.clone())
             .unwrap_or_default(),
-        usual_group_children_align: extended_group_options
-            .as_ref()
-            .and_then(|options| options.children_align),
+        // A `Page` carries the same `ChildrenAlign` as a `UsualGroup`, one
+        // option member earlier in its own tuple, so it feeds the same field.
+        usual_group_children_align: page_properties
+            .and_then(|properties| properties.children_align())
+            .or_else(|| {
+                extended_group_options
+                    .as_ref()
+                    .and_then(|options| options.children_align)
+            }),
         // A `Page` carries the same spacing pair as a `UsualGroup`, in its own
         // option slots, so it feeds the same two fields.
         usual_group_horizontal_spacing: page_properties
@@ -9717,6 +9742,9 @@ fn parse_form_child_item_with_metadata_owners(
         check_box_type: check_box_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.check_box_type(options)),
+        equal_items_width: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| schema.equal_items_width(options)),
         three_state: check_box_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.three_state(options)),
@@ -10160,7 +10188,13 @@ fn parse_form_child_item_with_metadata_owners(
         } else if matches!(tag, "InputField" | "TextDocumentField")
             && form_input_field_layout_is_extended(&fields)
         {
-            parse_form_input_field_auto_max_width(input_field_extended_options.as_deref())
+            parse_form_input_field_auto_max_width(input_field_extended_options.as_deref()).or_else(
+                || {
+                    field_schema_and_options
+                        .as_ref()
+                        .and_then(|(schema, options)| schema.auto_max_width(options))
+                },
+            )
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             parse_form_button_auto_max_width(fields.get(34 + button_top_level_offset).copied())
         } else if tag == "LabelField" {
@@ -10175,6 +10209,8 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.auto_max_width())
+        } else if tag == "ViewStatusAddition" {
+            parse_form_view_status_addition_auto_max_width(&fields)
         } else if let Some((schema, options)) = special_field_layout.as_ref() {
             schema.auto_max_width(options)
         } else if let Some(value) = table_schema.and_then(|schema| schema.auto_max_width(&fields)) {
@@ -10808,9 +10844,13 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
         }
         item.type_link = None;
         item.title_data_path = None;
-        if item.tag == "LabelField" {
-            item.width = None;
-        }
+        // A label field under a conditional group keeps the `<Width>` its own
+        // option tuple declares: over the 4 636 unambiguously attributed forms
+        // of the native UT 11.5.27.75 tree, option member 1 of the label field
+        // tuple is a total function of the platform's `<Width>` -- `0` on every
+        // label without the element and the written number on every one of the
+        // 4 083 that carry it, with no counter-example.  Blanking it here was
+        // dropping 27 widths the platform does write.
         sanitize_form_conditional_group_descendants(&mut item.child_items);
     }
 }
@@ -11472,16 +11512,36 @@ pub(super) const FORM_GROUP_LAYOUT_TAGS: [&str; 7] = [
     "ButtonGroup",
 ];
 
-/// A `Pages` group closes its tuple with its alignment pair, counted back from
+/// A grouping item closes its tuple with its alignment pair, counted back from
 /// the end so the inline child items in the middle cannot move it: `len - 3`
 /// holds the group horizontal alignment and `len - 2` the vertical one. Both
 /// use `0`/`1`/`2` for the near end, the centre and the far end, and `3` for
-/// the platform default the XML omits. Measured across all 2 373 `Pages`
-/// elements of the native "1С:Управление торговлей" 11.5.27.75 tree: every
-/// `Left`/`Center`/`Right` and `Top`/`Center`/`Bottom` observation matches, and
-/// every element without the property carries `3`, with no counter-example.
+/// the platform default the XML omits.
+///
+/// The window is a property of the record tail, not of the tag, so it is read
+/// by layout rather than by name. Measured against the native
+/// "1С:Управление торговлей" 11.5.27.75 tree over every record the export
+/// walks, the pair is a total function of the platform answer on each owner
+/// with no counter-example in either direction: `Pages` 2 373 records, `Page`
+/// 7 016 records (4 `GroupVerticalAlign`), `ColumnGroup` 3 008 records (1
+/// `GroupHorizontalAlign`, 4 `GroupVerticalAlign`) and `ButtonGroup` 7 333
+/// records (8 and 2). Every record without the element reads `3`.
 const FORM_PAGES_GROUP_HORIZONTAL_ALIGN_FROM_END: usize = 3;
 const FORM_PAGES_GROUP_VERTICAL_ALIGN_FROM_END: usize = 2;
+
+/// A `Table` closes its tuple with the same pair seven slots further in, which
+/// is what keeps it in place across the several `Table` layout lengths: over
+/// all 4 543 `Table` records the export walks, `len - 10` reads `3` on the
+/// 4 540 tables without a `<GroupHorizontalAlign>` and `0`/`1` on exactly the
+/// 2 `Left` and 1 `Center`, and `len - 9` reads `3` on the 4 542 without a
+/// `<GroupVerticalAlign>` and `2` on the one `Bottom`.
+const FORM_TABLE_GROUP_HORIZONTAL_ALIGN_FROM_END: usize = 10;
+const FORM_TABLE_GROUP_VERTICAL_ALIGN_FROM_END: usize = 9;
+
+/// The grouping items whose alignment pair rides the shared record tail.
+pub(super) fn form_group_tail_align_tag(tag: &str) -> bool {
+    matches!(tag, "Pages" | "Page" | "ColumnGroup" | "ButtonGroup")
+}
 
 fn parse_form_pages_group_align(
     tag: &str,
@@ -11489,9 +11549,19 @@ fn parse_form_pages_group_align(
     from_end: usize,
     values: [&'static str; 3],
 ) -> Option<&'static str> {
-    if tag != "Pages" {
+    let from_end = if form_group_tail_align_tag(tag) {
+        from_end
+    } else if tag == "Table" {
+        match from_end {
+            FORM_PAGES_GROUP_HORIZONTAL_ALIGN_FROM_END => {
+                FORM_TABLE_GROUP_HORIZONTAL_ALIGN_FROM_END
+            }
+            FORM_PAGES_GROUP_VERTICAL_ALIGN_FROM_END => FORM_TABLE_GROUP_VERTICAL_ALIGN_FROM_END,
+            _ => return None,
+        }
+    } else {
         return None;
-    }
+    };
     let slot = fields.len().checked_sub(from_end)?;
     match fields.get(slot)?.trim() {
         "0" => Some(values[0]),
@@ -12683,6 +12753,16 @@ pub(super) fn parse_form_view_status_addition_horizontal_location(
 ) -> Option<&'static str> {
     let options = split_1c_braced_fields(fields.get(13)?.trim(), 0)?;
     (options.get(11).map(|field| field.trim()) == Some("0")).then_some("Left")
+}
+
+/// A `ViewStatusAddition` keeps its width cap in member 13 of the same option
+/// tuple its horizontal location rides. Over all 4 543 addition records the
+/// export walks the member is `1` on the 4 542 additions the platform writes
+/// no `<AutoMaxWidth>` on and `0` on the one that carries
+/// `<AutoMaxWidth>false</AutoMaxWidth>`, with no counter-example.
+pub(super) fn parse_form_view_status_addition_auto_max_width(fields: &[&str]) -> Option<bool> {
+    let options = split_1c_braced_fields(fields.get(13)?.trim(), 0)?;
+    (options.get(13).map(|field| field.trim()) == Some("0")).then_some(false)
 }
 
 pub(super) fn parse_form_command_bar_horizontal_location(field: &str) -> Option<&'static str> {
@@ -14838,7 +14918,6 @@ pub(super) fn parse_form_child_item_extended_tooltip(
         if !is_form_extended_tooltip_name(&name) {
             return None;
         }
-
         let mut tooltip = FormExtendedTooltip::new(name, id.to_string());
         let Some(options) = nested
             .get(FormExtendedTooltipSchema::OPTIONS_SLOT)
@@ -14929,6 +15008,29 @@ pub(super) fn parse_form_child_item_extended_tooltip(
         tooltip.group_horizontal_align = nested
             .get(schema.group_horizontal_align_slot())
             .and_then(|field| parse_form_button_group_horizontal_align(field));
+        tooltip.group_vertical_align = match nested
+            .get(schema.group_vertical_align_slot())
+            .map(|value| value.trim())
+        {
+            Some("0") => Some("Top"),
+            Some("1") => Some("Center"),
+            Some("2") => Some("Bottom"),
+            _ => None,
+        };
+        tooltip.horizontal_align = match options
+            .get(schema.horizontal_align_option_slot())
+            .map(|value| value.trim())
+        {
+            Some("1") => Some("Center"),
+            Some("2") => Some("Right"),
+            Some("3") => Some("Auto"),
+            _ => None,
+        };
+        tooltip.title_height = options
+            .get(schema.title_height_option_slot())
+            .map(|value| value.trim())
+            .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+            .map(str::to_string);
         tooltip.vertical_align = match options
             .get(schema.vertical_align_option_slot())
             .map(|value| value.trim())
@@ -19028,6 +19130,19 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(value)
         ));
     }
+    // `ChildrenAlign` shares the run the `*Align` pair opens: on the 5 native
+    // forms that carry it, `AutoTitle` (4), `AutoURL` (3), `Title` (4),
+    // `SaveWindowSettings` (1) and `AutoSaveDataInSettings` (1) lead it and
+    // `CommandBarLocation` (4), `CommandSet` (3), `ShowTitle` (3),
+    // `ShowCloseButton` (3), `AutoCommandBar` (5) and `ChildItems` (5) trail
+    // it.  It never shares a form with `HorizontalAlign` or `VerticalAlign`,
+    // so it takes the place `UsualGroup` gives it -- ahead of the pair.
+    if let Some(children_align) = properties.children_align {
+        xml.push_str(&format!(
+            "\t<ChildrenAlign>{}</ChildrenAlign>\r\n",
+            escape_xml_text(children_align)
+        ));
+    }
     // `HorizontalAlign` precedes `VerticalAlign`, `Customizable`,
     // `CommandBarLocation`, `VerticalScroll`, `ConversationsRepresentation`,
     // `CommandSet` and `UseForFoldersAndItems` in the native tree (2/3/4/2/1/3/2
@@ -20049,6 +20164,24 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::GroupHorizontalAlign => item
+            .group_horizontal_align
+            .map(|value| {
+                format!(
+                    "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::GroupVerticalAlign => item
+            .group_vertical_align
+            .map(|value| {
+                format!(
+                    "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::RefreshRequest => item
             .table_refresh_request
             .map(|value| {
@@ -20175,15 +20308,16 @@ fn format_form_control_colors_xml(item: &FormChildItem, indent: usize) -> String
 }
 
 fn format_form_control_border_xml(item: &FormChildItem, indent: usize) -> String {
-    let Some(style) = item.control_border else {
+    let Some(border) = item.control_border else {
         return String::new();
     };
     let tab = "\t".repeat(indent);
     format!(
-        "{tab}<Border width=\"1\">\r\n\
+        "{tab}<Border width=\"{}\">\r\n\
 {tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{}</v8ui:style>\r\n\
 {tab}</Border>\r\n",
-        style.xml_value()
+        border.width,
+        border.style.xml_value()
     )
 }
 
@@ -20710,10 +20844,16 @@ pub(super) fn format_form_child_item_xml(
             ));
         }
     } else {
+        // The grouping items that read their alignment pair off the record
+        // tail write it where the platform does -- behind the title block --
+        // so they are not served by this early slot.  `Page` writes it from
+        // its own order table, `Table` from its own property block, and
+        // `ColumnGroup`/`ButtonGroup` from the two runs further down.
         if item.tag != "Button"
             && item.tag != "PictureDecoration"
             && item.tag != "CommandBar"
-            && !pages_geometry_after_title
+            && item.tag != "Table"
+            && !form_group_tail_align_tag(item.tag)
             && let Some(group_vertical_align) = item.group_vertical_align
         {
             xml.push_str(&format!(
@@ -20945,6 +21085,13 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<Height>{}</Height>\r\n",
             escape_xml_text(height)
         ));
+    }
+    // A calendar field writes its border behind the title block and ahead of
+    // the calendar run: on the one native calendar that carries one,
+    // `DataPath` and `TitleLocation` lead it and `ShowMonthsPanel`,
+    // `ContextMenu`, `ExtendedTooltip` and `Events` trail it.
+    if item.tag == "CalendarField" {
+        xml.push_str(&format_form_control_border_xml(item, indent + 1));
     }
     if item.tag == "CalendarField" {
         if let Some(show_current_date) = item.show_current_date {
@@ -21526,10 +21673,47 @@ pub(super) fn format_form_child_item_xml(
                     if vertical_stretch { "true" } else { "false" }
                 ));
             }
-        } else if item.horizontal_stretch == Some(true) {
-            xml.push_str(&format!(
-                "{tab}\t<HorizontalStretch>true</HorizontalStretch>\r\n"
-            ));
+        } else {
+            // A button group writes both states of its stretch pair, not only
+            // the raised one: slot 14 reads `0` on exactly the 8 native button
+            // groups that carry `<HorizontalStretch>false</HorizontalStretch>`
+            // and `1` on the 3 that carry `true`, and slot 15 reads `0` on the
+            // one that carries `<VerticalStretch>false</VerticalStretch>`, with
+            // `2` -- the unwritten state -- on every other one of the 7 333.
+            // The `true`-only gate was dropping the eight `false` writes.
+            if let Some(horizontal_stretch) = item.horizontal_stretch {
+                xml.push_str(&format!(
+                    "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                    xml_bool(horizontal_stretch)
+                ));
+            }
+            if let Some(vertical_stretch) = item.vertical_stretch {
+                xml.push_str(&format!(
+                    "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
+                    xml_bool(vertical_stretch)
+                ));
+            }
+        }
+        // A button group's alignment pair trails its title block and its
+        // stretch pair and leads `Representation` and `CommandSource`: UT
+        // 11.5.27.75 native tree, the 10 button groups that carry one --
+        // `Title` leads `GroupHorizontalAlign` (6) and `GroupVerticalAlign`
+        // (2), `HorizontalStretch` leads `GroupHorizontalAlign` (2), and both
+        // lead `Representation` (2) and `CommandSource` (1) -- with no pair
+        // counted the other way.
+        if item.tag == "ButtonGroup" {
+            if let Some(group_horizontal_align) = item.group_horizontal_align {
+                xml.push_str(&format!(
+                    "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                    escape_xml_text(group_horizontal_align)
+                ));
+            }
+            if let Some(group_vertical_align) = item.group_vertical_align {
+                xml.push_str(&format!(
+                    "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                    escape_xml_text(group_vertical_align)
+                ));
+            }
         }
     }
     xml.push_str(&format_form_usual_group_properties_xml(
@@ -21537,6 +21721,26 @@ pub(super) fn format_form_child_item_xml(
         FormUsualGroupXmlAnchor::BeforeGroup,
         indent + 1,
     ));
+    // A column group's alignment pair sits between its title/width block and
+    // its `Group`, exactly where `UsualGroup` puts its own: UT 11.5.27.75
+    // native tree, the 5 column groups that carry one -- `Title` leads
+    // `GroupVerticalAlign` (4) and `Width` leads `GroupHorizontalAlign` (1),
+    // and both lead `Group` (5), `ShowInHeader` (4) and `HeaderHorizontalAlign`
+    // (4) -- with no pair counted the other way.
+    if item.tag == "ColumnGroup" {
+        if let Some(group_horizontal_align) = item.group_horizontal_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                escape_xml_text(group_horizontal_align)
+            ));
+        }
+        if let Some(group_vertical_align) = item.group_vertical_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                escape_xml_text(group_vertical_align)
+            ));
+        }
+    }
     if item.tag != "Page"
         && let Some(group) = item.group
     {
@@ -21636,6 +21840,16 @@ pub(super) fn format_form_child_item_xml(
             "EditFormat",
             &item.edit_format,
             indent + 1,
+        ));
+    }
+    // `EqualItemsWidth` closes the check box body, behind `CheckBoxType` (3 of
+    // the 3 native check boxes that carry it) and `EditFormat` (2), and ahead
+    // of `ContextMenu`, `ExtendedTooltip` and `Events`; nothing else shares a
+    // check box with it.
+    if let Some(equal_items_width) = item.equal_items_width {
+        xml.push_str(&format!(
+            "{tab}\t<EqualItemsWidth>{}</EqualItemsWidth>\r\n",
+            xml_bool(equal_items_width)
         ));
     }
     // A `LabelField` closes with `Hiperlink`, `Border`, `BorderColor`,
@@ -22465,11 +22679,35 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
                     ));
                 }
             }
+            FormPageXmlProperty::GroupHorizontalAlign => {
+                if let Some(value) = item.group_horizontal_align {
+                    xml.push_str(&format!(
+                        "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormPageXmlProperty::GroupVerticalAlign => {
+                if let Some(value) = item.group_vertical_align {
+                    xml.push_str(&format!(
+                        "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
             FormPageXmlProperty::Group => {
                 if let Some(group) = item.group {
                     xml.push_str(&format!(
                         "{tab}<Group>{}</Group>\r\n",
                         escape_xml_text(group)
+                    ));
+                }
+            }
+            FormPageXmlProperty::ChildrenAlign => {
+                if let Some(value) = item.usual_group_children_align {
+                    xml.push_str(&format!(
+                        "{tab}<ChildrenAlign>{}</ChildrenAlign>\r\n",
+                        escape_xml_text(value)
                     ));
                 }
             }
@@ -23159,6 +23397,16 @@ fn format_form_extended_tooltip_property_xml(
             .as_ref()
             .map(|title| format_form_extended_tooltip_title_xml(title, indent))
             .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::TitleHeight => tooltip
+            .title_height
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<TitleHeight>{}</TitleHeight>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
         FormExtendedTooltipXmlProperty::Hyperlink => tooltip
             .hyperlink
             .filter(|value| *value)
@@ -23169,6 +23417,24 @@ fn format_form_extended_tooltip_property_xml(
             .map(|value| {
                 format!(
                     "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::GroupVerticalAlign => tooltip
+            .group_vertical_align
+            .map(|value| {
+                format!(
+                    "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::HorizontalAlign => tooltip
+            .horizontal_align
+            .map(|value| {
+                format!(
+                    "{tab}<HorizontalAlign>{}</HorizontalAlign>\r\n",
                     escape_xml_text(value)
                 )
             })

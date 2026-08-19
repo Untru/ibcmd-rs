@@ -14633,7 +14633,12 @@ fn form_layout_control_border_style_range(
         .iter()
         .map(|range| &text[range.clone()])
         .collect::<Vec<_>>();
-    schema.tuple_style(&tuple)?;
+    // The packer only rewrites the style of a border the XML side accepts,
+    // and that side accepts only `width="1"`, so the same restriction stays
+    // here now that the reader admits the other widths.
+    schema
+        .tuple_border(&tuple)
+        .filter(|border| border.width == 1)?;
     tuple_ranges.get(3).cloned()
 }
 

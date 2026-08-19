@@ -20024,6 +20024,7 @@ fn formats_table_search_additions_as_direct_sections() {
         group_vertical_align: None,
         label_decoration_visual_tail: None,
         check_box_type: None,
+        equal_items_width: None,
         three_state: None,
         radio_button_type: None,
         item_width: None,
@@ -20247,6 +20248,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 group_vertical_align: None,
                 label_decoration_visual_tail: None,
                 check_box_type: None,
+                equal_items_width: None,
                 three_state: None,
                 radio_button_type: None,
                 item_width: None,
@@ -20471,6 +20473,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 group_vertical_align: None,
                 label_decoration_visual_tail: None,
                 check_box_type: None,
+                equal_items_width: None,
                 three_state: None,
                 radio_button_type: None,
                 item_width: None,
@@ -66539,7 +66542,10 @@ fn a_label_field_writes_its_alignment_run_and_visual_tail_in_native_order() {
     label.group_vertical_align = Some("Bottom");
     label.format = vec![("ru".to_string(), "ЧДЦ=2".to_string())];
     label.hiperlink = Some(true);
-    label.control_border = Some(crate::form_schema::FormControlBorderStyle::Single);
+    label.control_border = Some(crate::form_schema::FormControlBorder {
+        style: crate::form_schema::FormControlBorderStyle::Single,
+        width: 1,
+    });
     label.border_color = Some("style:ЦветРамки".to_string());
     label.text_color = Some("style:ЦветТекста".to_string());
     label.back_color = Some("style:ЦветФона".to_string());
@@ -66616,7 +66622,10 @@ fn the_smaller_owners_write_their_moved_properties_in_the_native_order() {
     assert_eq!(decoration.tag, "LabelDecoration");
     decoration.back_color = Some("style:ЦветФона".to_string());
     decoration.border_color = Some("style:ЦветРамки".to_string());
-    decoration.control_border = Some(crate::form_schema::FormControlBorderStyle::Single);
+    decoration.control_border = Some(crate::form_schema::FormControlBorder {
+        style: crate::form_schema::FormControlBorderStyle::Single,
+        width: 1,
+    });
     let xml = format_form_child_items_xml(&[decoration], 1);
     let at = owner_order_at(&xml);
     assert!(at("<BackColor>") < at("<BorderColor>"), "got {xml}");
@@ -67903,7 +67912,10 @@ fn border_colour_of_picture_and_formatted_document_fields_keeps_its_place() {
     let mut picture = form_child_item_for_order_test("PictureField");
     picture.picture_ref = Some("CommonPicture.Тест".to_string());
     picture.border_color = Some("style:FormBackColor".to_string());
-    picture.control_border = Some(crate::form_schema::FormControlBorderStyle::Single);
+    picture.control_border = Some(crate::form_schema::FormControlBorder {
+        style: crate::form_schema::FormControlBorderStyle::Single,
+        width: 1,
+    });
     picture.file_drag_mode = Some("AsFile");
     let xml = format_form_child_item_xml(&picture, 1, false);
     assert_xml_order(
