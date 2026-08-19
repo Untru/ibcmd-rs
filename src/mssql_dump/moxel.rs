@@ -6795,9 +6795,9 @@ pub(super) fn parse_moxel_style_ref_slot(
             .filter(|value| value.trim().parse::<u32>().is_ok())
             .and_then(|value| parse_moxel_style_color(value.trim()))
             .map(Some),
-        "1" => {
-            (payload.len() == 1 && payload.first()?.trim().parse::<u32>().is_ok()).then_some(None)
-        }
+        // Kind 1 is a Windows system colour, named by its ordinal.
+        "1" => (payload.len() == 1 && payload.first()?.trim().parse::<u32>().is_ok())
+            .then(|| parse_moxel_windows_color(payload.first().map_or("", |v| v.trim()))),
         "2" if payload.len() == 1 => payload
             .first()
             .filter(|value| value.trim().parse::<u32>().is_ok())
@@ -6976,6 +6976,20 @@ pub(super) fn moxel_embedded_style_ref_for_uuid(
 /// `DimGray` (1), `MediumBlue` (1), `MediumGray` (5) and `SaddleBrown` (1) are
 /// the only published names those documents carry that no other ordinal of
 /// theirs accounts for, and each lands in its alphabetical place.
+/// A Windows system colour, by ordinal.
+///
+/// Evidence (native 1С:УТ 11.5.27.75): exactly one palette slot in the whole
+/// corpus is a Windows colour - ordinal 16 in
+/// `СервисShare/.../ТранспортныйКонтейнер` - and the fourteen formats that name
+/// it publish `d3p1:ButtonShadow` in the Windows colour namespace. No other
+/// ordinal appears, so no other ordinal is spelled.
+fn parse_moxel_windows_color(value: &str) -> Option<String> {
+    match value.parse::<u32>().ok()? {
+        16 => Some("windows:ButtonShadow".to_string()),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
     let name = match value.parse::<u32>().ok()? {
         6 => "Beige",
@@ -9199,7 +9213,12 @@ pub(super) fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<
 }
 
 pub(super) fn push_moxel_format_color(xml: &mut String, tag: &str, value: Option<&str>) {
-    if let Some(value) = value.filter(|value| value.starts_with("d3p1:")) {
+    if let Some(name) = value.and_then(|value| value.strip_prefix("windows:")) {
+        xml.push_str(&format!(
+            "\t\t<{tag} xmlns:d3p1=\"http://v8.1c.ru/8.1/data/ui/colors/windows\">d3p1:{}</{tag}>\r\n",
+            escape_xml_element_text(name)
+        ));
+    } else if let Some(value) = value.filter(|value| value.starts_with("d3p1:")) {
         xml.push_str(&format!(
             "\t\t<{tag} xmlns:d3p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\">{}</{tag}>\r\n",
             escape_xml_element_text(value)
