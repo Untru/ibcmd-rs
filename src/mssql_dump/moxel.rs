@@ -1011,13 +1011,6 @@ impl MoxelFormat {
     }
 }
 
-pub(super) fn normalize_moxel_default_match_format(mut format: MoxelFormat) -> MoxelFormat {
-    if format.font == Some(0) {
-        format.font = None;
-    }
-    format
-}
-
 pub(super) fn resolve_existing_moxel_default_format_index(
     column_formats: &[MoxelFormat],
     formats: &[MoxelFormat],
@@ -1045,8 +1038,7 @@ pub(super) fn resolve_existing_moxel_default_format_index(
     } else {
         None
     };
-    let target_exact = target.clone();
-    let target_normalized = normalize_moxel_default_match_format(target);
+    let target_exact = target;
     let last_exact_match = |target: &MoxelFormat| {
         all_formats
             .iter()
@@ -1058,16 +1050,6 @@ pub(super) fn resolve_existing_moxel_default_format_index(
         .as_ref()
         .and_then(|target| last_exact_match(target).map(|index| (index, true)))
         .or_else(|| last_exact_match(&target_exact).map(|index| (index, false)))
-        .or_else(|| {
-            all_formats
-                .iter()
-                .enumerate()
-                .filter_map(|(index, format)| {
-                    (normalize_moxel_default_match_format(format.clone()) == target_normalized)
-                        .then_some((index + 1, false))
-                })
-                .last()
-        })
 }
 
 pub(crate) fn extract_moxel_spreadsheet_xml(
