@@ -3485,6 +3485,22 @@ impl FormButtonCommonSchema {
         33 + self.top_level_offset
     }
 
+    /// The check-mark state a command-bar button shows next to its title.
+    ///
+    /// Slot `24 + top_level_offset` is a total function of the platform's
+    /// `<Check>` over all 27 779 native `Button` items of UT 11.5.27.75: it
+    /// holds `1` on exactly the 47 items that carry `<Check>true</Check>` and
+    /// `0` on every other item of the 52-slot layout, with no item holding `1`
+    /// and no element, and none holding the element without the `1`. The
+    /// 53-slot layout shifts the whole record one slot behind its
+    /// conditional-appearance prefix, which is what `top_level_offset` already
+    /// carries for every other member of this schema.
+    ///
+    /// The property had no reader at all, so the writer had nothing to emit.
+    pub(crate) fn check(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(24 + self.top_level_offset)?.trim() == "1").then_some(true)
+    }
+
     pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
         self.non_zero_dimension(fields, 17)
     }

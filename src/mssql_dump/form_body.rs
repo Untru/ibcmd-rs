@@ -811,9 +811,12 @@ pub(super) struct FormAttributeSaveFieldBinding {
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum FormAttributeSaveEntry {
     SelfValue,
-    /// `{1,{<index>}}`: the saved field is the `index`-th property of the
-    /// attribute's own value type, not a binding into the form item tree.
-    ValueTypeProperty(usize),
+    /// `{<n>,{<index>},...}`: the saved field is reached by walking `n`
+    /// property indexes from the attribute's own value type, not by binding
+    /// into the form item tree. The platform spells a one-step walk `{1,{0}}`
+    /// and a two-step walk `{2,{0},{1}}`; both are the same grammar with a
+    /// different declared component count.
+    ValueTypeProperty(Vec<i64>),
     Binding(FormAttributeSaveFieldBinding),
 }
 
@@ -825,6 +828,7 @@ pub(super) struct FormAttributeColumn {
     pub(super) value_types: Vec<ConstantValueType>,
     pub(super) explicit_empty_type: bool,
     pub(super) functional_options: Vec<String>,
+    pub(super) fill_check: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1253,6 +1257,7 @@ pub(super) struct FormChildItem {
     pub(super) back_color: Option<String>,
     pub(super) border_color: Option<String>,
     pub(super) button_parameter: Option<String>,
+    pub(super) button_check: Option<bool>,
     pub(super) control_border: Option<FormControlBorderStyle>,
     pub(super) title_text_color: Option<String>,
     pub(super) footer_text_color: Option<String>,
@@ -3329,8 +3334,30 @@ fn parse_form_attribute_with_dcs_type_index(
         &name,
         exact_single_type_uuid.as_deref(),
     );
+    // The attribute record declares its column count in slot 13 and stores the
+    // columns themselves in the `count` slots that follow, so everything behind
+    // the columns sits at a moving offset - the functional-option list is the
+    // second slot after the last column, not a fixed slot 15.
+    //
+    // Reading slot 15 unconditionally only happens to be right for the
+    // column-less attributes, where `count` is 0. For an attribute that does
+    // declare columns, slot 15 is a *column* record, which carries no top-level
+    // UUID, so the list came back empty and the platform's
+    // `<FunctionalOptions>` block was simply never written.
+    //
+    // Evidence: UT 11.5.27.75, equality of sets over every attribute record the
+    // export walks against every `Attributes/Attribute/FunctionalOptions` block
+    // in the native tree - 905 native blocks, 888 of them column-less and
+    // already emitted from slot 15, and the 17 remaining ones (plus 2 more
+    // under embedded item-owned `Attributes`) all declare columns and hold
+    // their list at `15 + count`. Every dumped record satisfies
+    // `nfields == 16 + count`, so the slot is the record's last one.
+    let column_count = fields
+        .get(13)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(0);
     let functional_options = fields
-        .get(15)
+        .get(15 + column_count)
         .map(|field| parse_form_reference_list(field, object_refs))
         .unwrap_or_default();
     let settings = fields.get(14).and_then(|field| {
@@ -3345,6 +3372,11 @@ fn parse_form_attribute_with_dcs_type_index(
         fields.get(8).copied(),
         &columns,
         object_refs,
+        exact_single_type_uuid
+            .as_deref()
+            .and_then(|uuid| type_index.get(uuid))
+            .map(String::as_str),
+        exact_single_type_uuid.as_deref(),
     );
     if let Some(dynamic_list_use_always) = fields
         .get(14)
@@ -3521,9 +3553,9 @@ pub(super) fn parse_form_attribute_save_fields(
     for entry in &entries {
         match entry {
             FormAttributeSaveEntry::SelfValue => parsed.push(attribute_name.to_string()),
-            FormAttributeSaveEntry::ValueTypeProperty(index) => {
+            FormAttributeSaveEntry::ValueTypeProperty(path) => {
                 if let Some(property) =
-                    value_type_uuid.and_then(|uuid| form_value_type_property_name(uuid, *index))
+                    value_type_uuid.and_then(|uuid| form_value_type_property_name(uuid, path))
                 {
                     parsed.push(format!("{attribute_name}.{property}"));
                 }
@@ -3535,21 +3567,73 @@ pub(super) fn parse_form_attribute_save_fields(
 }
 
 /// Properties of the platform value types that a saved-field entry addresses by
-/// index. Every pair below is read off platform output: `v8:StandardPeriod`
-/// index 0 alone yields `Variant`, and indexes 0/1/2 together yield
-/// `EndDate`/`StartDate`/`Variant`; `v8:StandardBeginningDate` index 0 yields
-/// `Variant`; `dcsset:SettingsComposer` index 0 yields `Settings`. Indexes with
-/// no observation stay unresolved rather than being guessed.
-pub(super) fn form_value_type_property_name(uuid: &str, index: usize) -> Option<&'static str> {
-    match (uuid, index) {
+/// a walk of indexes. Every row below is read off platform output:
+/// `v8:StandardPeriod` index 0 alone yields `Variant`, and indexes 0/1/2
+/// together yield `EndDate`/`StartDate`/`Variant`; `v8:StandardBeginningDate`
+/// index 0 yields `Variant`; `dcsset:SettingsComposer` index 0 yields
+/// `Settings` and the two-step walk 0/1 yields `Settings.Filter`. Walks with no
+/// observation stay unresolved rather than being guessed.
+///
+/// The two-step walk is what the ten native `<Field>...Settings.Filter</Field>`
+/// entries of UT 11.5.27.75 spell, and it is the only multi-step walk the
+/// configuration contains; reading only the first step used to drop the entry,
+/// which dropped the whole `<Save>` block with it.
+pub(super) fn form_value_type_property_name(uuid: &str, path: &[i64]) -> Option<&'static str> {
+    match (uuid, path) {
         // v8:StandardPeriod
-        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", 0) => Some("Variant"),
-        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", 1) => Some("StartDate"),
-        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", 2) => Some("EndDate"),
+        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", [0]) => Some("Variant"),
+        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", [1]) => Some("StartDate"),
+        ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", [2]) => Some("EndDate"),
         // v8:StandardBeginningDate
-        ("0387f3a2-7df5-4804-948b-4580a51e4a15", 0) => Some("Variant"),
-        // dcsset:SettingsComposer
-        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", 0) => Some("Settings"),
+        ("0387f3a2-7df5-4804-948b-4580a51e4a15", [0]) => Some("Variant"),
+        // dcsset:SettingsComposer. Indexes 1 and 2 are named by the one
+        // composer attribute of UT 11.5.27.75 whose use-always list spells
+        // them, `CommonForms/ФормаВыбораДоступногоПоля`: it holds `{1}` and
+        // `{2}` and the platform writes `FixedSettings` and `UserSettings`.
+        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [0]) => Some("Settings"),
+        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [0, 1]) => Some("Settings.Filter"),
+        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [1]) => Some("FixedSettings"),
+        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [2]) => Some("UserSettings"),
+        // v8:ValueListType. Solved from the platform's own answer over the 11
+        // value-list attributes of UT 11.5.27.75 whose use-always list is a
+        // pure index list: `{3}` alone yields `Picture`, `{-1,3}` yields
+        // `Picture`+`ValueType`, `{-1,1,3}` adds `Presentation` and
+        // `{-1,1,2,3}` adds `Check`, which fixes all four indexes with no
+        // freedom left. The four rows account for every native `Picture` (11),
+        // `Presentation` (8), `ValueType` (10) and `Check` (1) field in the
+        // configuration, so no other value type reaches these codes.
+        //
+        // The type-blind table this replaces had `-1` and `3` the other way
+        // round; the swap stayed invisible because a list that carries both
+        // writes the same sorted pair either way.
+        ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [-1]) => Some("ValueType"),
+        ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [1]) => Some("Presentation"),
+        ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [2]) => Some("Check"),
+        ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [3]) => Some("Picture"),
+        _ => None,
+    }
+}
+
+/// The standard property a use-always code names on an attribute typed as a
+/// whole metadata object.
+///
+/// Code `-8` is the only such code UT 11.5.27.75 spells, and it reaches exactly
+/// two value-type kinds: `cfg:DocumentObject` on 330 attributes, every one of
+/// which the platform writes `RegisterRecords` for, and `cfg:CatalogObject` on
+/// one, which the platform writes `Ref` for. A catalogue has no register
+/// records, so the same code cannot mean the same property on both.
+pub(super) fn form_object_standard_property_name(
+    value_type: &str,
+    code: i64,
+) -> Option<&'static str> {
+    let kind = value_type
+        .strip_prefix("cfg:")
+        .unwrap_or(value_type)
+        .split_once('.')?
+        .0;
+    match (kind, code) {
+        ("CatalogObject", -8) => Some("Ref"),
+        ("DocumentObject", -8) => Some("RegisterRecords"),
         _ => None,
     }
 }
@@ -3568,31 +3652,50 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
         .skip(2)
         .map(|field| {
             let entry = split_1c_braced_fields(field.trim(), 0)?;
-            match entry.as_slice() {
-                [kind] if kind.trim() == "0" => Some(FormAttributeSaveEntry::SelfValue),
-                [kind, payload] if kind.trim() == "1" => {
-                    let payload_fields = split_1c_braced_fields(payload.trim(), 0)?;
-                    // A single bare index is a property of the attribute's own value
-                    // type; a `{0,<uuid>}` pair is a binding into the form item tree.
-                    // Both used to collapse into the same string binding key, which is
-                    // why value-type properties were resolved against unrelated form
-                    // items.
-                    if let [index] = payload_fields.as_slice()
-                        && let Ok(index) = index.trim().parse::<usize>()
-                    {
-                        return Some(FormAttributeSaveEntry::ValueTypeProperty(index));
-                    }
-                    let key = parse_form_binding_key(payload.trim())?;
-                    let metadata_uuid = match payload_fields.as_slice() {
-                        [kind, uuid] if kind.trim() == "0" => parse_non_zero_uuid(uuid.trim()),
-                        _ => None,
-                    };
-                    Some(FormAttributeSaveEntry::Binding(
-                        FormAttributeSaveFieldBinding { key, metadata_uuid },
-                    ))
-                }
-                _ => None,
+            // An entry declares how many components its walk has and then spells
+            // that many of them; matching arity 1 alone refused the two-component
+            // walks the platform writes, and refusing one entry threw the whole
+            // list away.
+            let components = entry.first()?.trim().parse::<usize>().ok()?;
+            if entry.len() != 1 + components {
+                return None;
             }
+            if components == 0 {
+                return Some(FormAttributeSaveEntry::SelfValue);
+            }
+            // A bare index is a property of the attribute's own value type; a
+            // `{0,<uuid>}` pair is a binding into the form item tree. Both used
+            // to collapse into the same string binding key, which is why
+            // value-type properties were resolved against unrelated form items.
+            let indexes = entry[1..]
+                .iter()
+                .map(|component| {
+                    let fields = split_1c_braced_fields(component.trim(), 0)?;
+                    let [index] = fields.as_slice() else {
+                        return None;
+                    };
+                    // Only an unsigned index is a value-type property walk; a
+                    // negative code is a form-item binding and must stay one.
+                    index.trim().parse::<usize>().ok().map(|index| index as i64)
+                })
+                .collect::<Option<Vec<_>>>();
+            if let Some(indexes) = indexes {
+                return Some(FormAttributeSaveEntry::ValueTypeProperty(indexes));
+            }
+            // Only a one-component walk is ever a form-item binding; a longer one
+            // that is not a pure index walk has no observed reading.
+            let [_, payload] = entry.as_slice() else {
+                return None;
+            };
+            let payload_fields = split_1c_braced_fields(payload.trim(), 0)?;
+            let key = parse_form_binding_key(payload.trim())?;
+            let metadata_uuid = match payload_fields.as_slice() {
+                [kind, uuid] if kind.trim() == "0" => parse_non_zero_uuid(uuid.trim()),
+                _ => None,
+            };
+            Some(FormAttributeSaveEntry::Binding(
+                FormAttributeSaveFieldBinding { key, metadata_uuid },
+            ))
         })
         .collect()
 }
@@ -3927,6 +4030,16 @@ pub(super) fn parse_form_attribute_column(
             .get(8)
             .map(|field| parse_form_reference_list(field, object_refs))
             .unwrap_or_default(),
+        // Slot 9 is a total function of the platform's column-level
+        // `<FillCheck>` over all 53 251 column records the export walks in
+        // UT 11.5.27.75: it holds `1` on exactly the records of the 9 native
+        // columns that write `<FillCheck>ShowError</FillCheck>` and `0` on
+        // every other record, with no record holding `1` without the element
+        // and none writing the element without the `1`. Every column record has
+        // exactly 10 slots, so this is its last one. `ShowError` is the only
+        // value observed; any other encoding stays unread rather than guessed.
+        fill_check: matches!(fields.get(9).map(|value| value.trim()), Some("1"))
+            .then_some("ShowError"),
     })
 }
 
@@ -4300,6 +4413,8 @@ pub(super) fn parse_form_attribute_direct_use_always(
     field: Option<&str>,
     columns: &[FormAttributeColumn],
     object_refs: &BTreeMap<String, String>,
+    value_type: Option<&str>,
+    value_type_uuid: Option<&str>,
 ) -> Vec<String> {
     let Some(fields) = field.and_then(|value| split_1c_braced_fields(value.trim(), 0)) else {
         return Vec::new();
@@ -4319,23 +4434,37 @@ pub(super) fn parse_form_attribute_direct_use_always(
         let Some(entry_fields) = split_1c_braced_fields(entry.trim(), 0) else {
             continue;
         };
-        if entry_fields.first().map(|value| value.trim()) != Some("1") {
-            continue;
-        }
-        let Some(value_fields) = entry_fields
-            .get(1)
-            .and_then(|value| split_1c_braced_fields(value.trim(), 0))
+        // An entry declares how many components its path has and then spells
+        // that many of them. Demanding exactly one refused every path that
+        // steps through a tabular section - `{2,{0,<section>},{0,<column>}}` -
+        // and the platform writes 42 of those in UT 11.5.27.75, every one of
+        // them silently dropped here.
+        let Some(components) = entry_fields
+            .first()
+            .and_then(|value| value.trim().parse::<usize>().ok())
         else {
             continue;
         };
-        let Some(field_name) = form_attribute_direct_use_always_field_name(
-            attribute_name,
-            &value_fields,
-            columns,
-            object_refs,
-        ) else {
+        if components == 0 || entry_fields.len() != 1 + components {
+            continue;
+        }
+        let segments = entry_fields[1..]
+            .iter()
+            .map(|component| {
+                let value_fields = split_1c_braced_fields(component.trim(), 0)?;
+                form_attribute_use_always_segment_name(
+                    &value_fields,
+                    columns,
+                    object_refs,
+                    value_type,
+                    value_type_uuid,
+                )
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(segments) = segments else {
             continue;
         };
+        let field_name = format!("{attribute_name}.{}", segments.join("."));
         if seen.insert(field_name.clone()) {
             parsed.push(field_name);
         }
@@ -4343,28 +4472,46 @@ pub(super) fn parse_form_attribute_direct_use_always(
     parsed
 }
 
-pub(super) fn form_attribute_direct_use_always_field_name(
-    attribute_name: &str,
+/// One step of a use-always path: either a metadata object the configuration
+/// names - a tabular section, an attribute, a column - or a code that stands
+/// for a property the metadata does not carry a reference for.
+pub(super) fn form_attribute_use_always_segment_name(
     value_fields: &[&str],
     columns: &[FormAttributeColumn],
     object_refs: &BTreeMap<String, String>,
+    value_type: Option<&str>,
+    value_type_uuid: Option<&str>,
 ) -> Option<String> {
     if value_fields.first().map(|value| value.trim()) == Some("0") {
         let uuid = parse_uuid_field(value_fields.get(1)?.trim())?;
         let reference = object_refs.get(&uuid)?;
-        let field_name = reference.rsplit_once('.')?.1;
-        return Some(format!("{attribute_name}.{field_name}"));
+        return Some(reference.rsplit_once('.')?.1.to_string());
     }
     let code = value_fields.first()?.trim();
     if let Some(column) = columns.iter().find(|column| column.id == code) {
-        return Some(format!("{attribute_name}.{}", column.name));
+        return Some(column.name.clone());
+    }
+    // A code names a property of the attribute's own value type, so the type
+    // answers it where the configuration has spelled the answer out; the
+    // type-blind table below is what is left for the types it has not.
+    if let Ok(index) = code.parse::<i64>() {
+        if let Some(property) =
+            value_type_uuid.and_then(|uuid| form_value_type_property_name(uuid, &[index]))
+        {
+            return Some(property.to_string());
+        }
+        if let Some(property) =
+            value_type.and_then(|value_type| form_object_standard_property_name(value_type, index))
+        {
+            return Some(property.to_string());
+        }
     }
     match code {
-        "-10" => Some(format!("{attribute_name}.Predefined")),
-        "-8" => Some(format!("{attribute_name}.RegisterRecords")),
-        "-1" => Some(format!("{attribute_name}.Picture")),
-        "1" => Some(format!("{attribute_name}.Presentation")),
-        "3" => Some(format!("{attribute_name}.ValueType")),
+        "-10" => Some("Predefined".to_string()),
+        "-8" => Some("RegisterRecords".to_string()),
+        "-1" => Some("Picture".to_string()),
+        "1" => Some("Presentation".to_string()),
+        "3" => Some("ValueType".to_string()),
         _ => None,
     }
 }
@@ -9889,6 +10036,7 @@ fn parse_form_child_item_with_metadata_owners(
         button_parameter: button_common_schema
             .and_then(|schema| fields.get(schema.parameter_slot()))
             .and_then(|field| parse_form_button_parameter(field, object_refs)),
+        button_check: button_common_schema.and_then(|schema| schema.check(&fields)),
         control_border,
         // The title colour rides one slot ahead of the title font in every
         // layout family, so it is read exactly where the title font is read.
@@ -16272,6 +16420,17 @@ fn resolve_form_owner_scoped_bound_data_path(
 /// and the platform writes `СвУпПред[0].Пред[0].СведИП[0].ИННФЛ`.
 const FORM_VALUE_TABLE_INDEX_BINDING_UUID: &str = "e67e2953-cebe-4d97-bb93-12b17e6384f8";
 
+/// The `SettingsComposer` member an object carries in its own right, opening the
+/// settings-composer chain from an attribute that is not itself a composer.
+///
+/// Every one of the 62 chains of UT 11.5.27.75 whose second segment is
+/// `{0,b9754f01-…}` is written by the platform with `SettingsComposer` as the
+/// path's second component, and no chain writes that component any other way.
+/// Without this the whole chain went unresolved and the item fell back to the
+/// attribute name alone - `Отчет` - or to the attribute name with the item's own
+/// name glued on.
+const FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID: &str = "b9754f01-29e9-11d6-a3c7-0050bae0a776";
+
 /// The aggregate marker: a `{101000000,<uuid>}` segment addresses the column
 /// total of the member the uuid names rather than the member itself.
 const FORM_AGGREGATE_MEMBER_MARKER: &str = "101000000";
@@ -16552,12 +16711,18 @@ fn form_settings_composer_member(
             ("10010", "Presentation", None),
         ],
         Selection => &[("0", "SelectionAvailableFields", Some(AvailableFields))],
-        Order => &[("0", "OrderAvailableFields", Some(AvailableFields))],
+        Order => &[
+            ("0", "OrderAvailableFields", Some(AvailableFields)),
+            ("10000", "Use", None),
+            ("10002", "Field", None),
+            ("10003", "OrderType", None),
+        ],
         ConditionalAppearance => &[
             ("10000", "Use", None),
             ("10001", "Appearance", Some(Appearance)),
             ("10002", "Filter", Some(Filter)),
             ("10003", "Fields", Some(Fields)),
+            ("10004", "Presentation", None),
         ],
         UserSettings => &[
             ("10000", "Use", None),
@@ -16593,10 +16758,31 @@ pub(super) fn resolve_form_settings_composer_chain_data_path(
         return None;
     };
     let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
-    if attribute.exact_single_type_reference.as_deref() != Some("dcsset:SettingsComposer") {
-        return None;
-    }
     let mut path = attribute.name.clone();
+    let members =
+        if attribute.exact_single_type_reference.as_deref() == Some("dcsset:SettingsComposer") {
+            members
+        } else {
+            // The attribute is the object that owns a composer, not the composer
+            // itself; the chain names the composer member first and walks on from
+            // there.
+            let (entry, rest) = members.split_first()?;
+            match entry.as_slice() {
+                [index, uuid]
+                    if index.trim() == "0"
+                        && uuid
+                            .trim()
+                            .eq_ignore_ascii_case(FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID) => {}
+                // A dynamic list names its own composer by code rather than by the
+                // member uuid an object uses. The code is not free: `-6` reads
+                // `Parent` on the object attributes that carry one, so it opens the
+                // composer only where the attribute really is a dynamic list.
+                [code] if code.trim() == "-6" && attribute.has_dynamic_list_settings => {}
+                _ => return None,
+            }
+            path.push_str(".SettingsComposer");
+            rest
+        };
     let mut owner = Some(FormSettingsComposerType::SettingsComposer);
     for segment in members {
         match segment.as_slice() {
@@ -21033,6 +21219,15 @@ pub(super) fn format_form_child_item_xml(
             ));
         }
     }
+    // A button's `Check` sits directly ahead of the `CommandName` of the command
+    // whose state it shows. UT 11.5.27.75 native tree, all 47 buttons that carry
+    // one: `CommandName` follows it 47 times out of 47 and never precedes it,
+    // and it is preceded by `Type` (41), `Representation` (3), `SkipOnInput`
+    // (1), `GroupHorizontalAlign` (1) and `DefaultButton` (1) - every one of
+    // those already written ahead of `CommandName` here.
+    if item.tag == "Button" && item.button_check == Some(true) {
+        xml.push_str(&format!("{tab}\t<Check>true</Check>\r\n"));
+    }
     if item.tag == "Button"
         && let Some(command_name) = &item.command_name
     {
@@ -23734,6 +23929,18 @@ pub(super) fn format_form_attribute_column_xml(
         ));
     } else if column.explicit_empty_type {
         xml.push_str(&format!("{indent}\t<Type/>\r\n"));
+    }
+    // A column's fill check follows its `Type`, exactly as an attribute's does.
+    // UT 11.5.27.75 native tree, all 9 columns that carry one: `Type` precedes
+    // it 9 times out of 9 and `</Column>` follows it 9 times out of 9; none of
+    // the nine also carries `FunctionalOptions`, so the two are never ordered
+    // against each other by observation and it takes the attribute's slot ahead
+    // of them.
+    if let Some(fill_check) = column.fill_check {
+        xml.push_str(&format!(
+            "{indent}\t<FillCheck>{}</FillCheck>\r\n",
+            escape_xml_text(fill_check)
+        ));
     }
     if !column.functional_options.is_empty() {
         xml.push_str(&format!("{indent}\t<FunctionalOptions>\r\n"));
