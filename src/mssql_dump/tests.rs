@@ -10669,6 +10669,7 @@ fn form_attribute_column_type_pattern_resolves_platform_references() {
         // is declared on the Form root, so no namespace attribute is added.
         let xml = format_form_attribute_column_xml(
             &FormAttributeColumn {
+                fill_check: None,
                 id: "6".to_owned(),
                 name: "ВидСравнения".to_owned(),
                 title: Vec::new(),
@@ -11821,6 +11822,7 @@ fn rejects_malformed_nested_value_table_additional_columns_routes() {
         .push(FormAttributeAdditionalColumns {
             table: "СвУпПред.Пред".to_string(),
             columns: vec![FormAttributeColumn {
+                fill_check: None,
                 id: "1".to_string(),
                 name: "СведОрг".to_string(),
                 title: Vec::new(),
@@ -11858,6 +11860,7 @@ fn rejects_malformed_nested_value_table_additional_columns_routes() {
         .push(FormAttributeAdditionalColumns {
             table: "СвУпПред.Пред".to_string(),
             columns: vec![FormAttributeColumn {
+                fill_check: None,
                 id: "1".to_string(),
                 name: "ДругаяКолонка".to_string(),
                 title: Vec::new(),
@@ -15898,6 +15901,7 @@ fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_u
         exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: vec![FormAttributeColumn {
+            fill_check: None,
             id: "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
             name: "ДополнительнаяРегистрация".to_string(),
             title: Vec::new(),
@@ -19912,6 +19916,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
 #[test]
 fn formats_table_search_additions_as_direct_sections() {
     let table = FormChildItem {
+        button_check: None,
         tag: "Table",
         id: "25".to_string(),
         name: "Rows".to_string(),
@@ -20135,6 +20140,7 @@ fn formats_table_search_additions_as_direct_sections() {
         command_source: None,
         child_items: vec![
             FormChildItem {
+                button_check: None,
                 tag: "SearchStringAddition",
                 id: "26".to_string(),
                 name: "RowsSearch".to_string(),
@@ -20359,6 +20365,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 child_items: Vec::new(),
             },
             FormChildItem {
+                button_check: None,
                 tag: "InputField",
                 id: "40".to_string(),
                 name: "Name".to_string(),
@@ -23634,6 +23641,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
         "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения".to_string(),
     );
     let additional_column = |id: &str, name: &str| FormAttributeColumn {
+        fill_check: None,
         id: id.to_string(),
         name: name.to_string(),
         title: Vec::new(),
@@ -63499,6 +63507,7 @@ fn resolves_metadata_attribute_leaves_against_the_shorter_binding() {
     );
     let mut attribute = data_path_form_attribute("1", "ТаблицаОстатков", None);
     attribute.columns = vec![FormAttributeColumn {
+        fill_check: None,
         id: "3".to_string(),
         name: "Номенклатура".to_string(),
         title: Vec::new(),
@@ -64092,6 +64101,7 @@ fn chain_walk_indexes_with_metadata_field_types(
 
 fn chain_walk_column(id: &str, name: &str, reference: Option<&str>) -> FormAttributeColumn {
     FormAttributeColumn {
+        fill_check: None,
         id: id.to_string(),
         name: name.to_string(),
         title: Vec::new(),
@@ -64845,6 +64855,7 @@ fn footer_family_child_items_xml(
 
 fn footer_family_column(id: &str, name: &str) -> FormAttributeColumn {
     FormAttributeColumn {
+        fill_check: None,
         id: id.to_string(),
         name: name.to_string(),
         title: Vec::new(),
