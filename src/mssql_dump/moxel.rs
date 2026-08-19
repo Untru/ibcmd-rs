@@ -55,6 +55,10 @@ pub(super) struct MoxelSpreadsheet {
     #[allow(dead_code)]
     pub(super) areas: Vec<MoxelArea>,
     pub(super) print_area: Option<MoxelArea>,
+    /// `groupsBackColor`, `groupsColor`, `headersBackColor`, `headersColor`, in
+    /// publication order, each `None` where the document leaves the role at its
+    /// default.
+    pub(super) group_header_colors: [Option<String>; 4],
     pub(super) print_settings: Option<MoxelPrintSettings>,
     pub(super) lines: Vec<MoxelLine>,
     pub(super) fonts: Vec<MoxelFont>,
@@ -1642,6 +1646,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         named_items,
         areas,
         print_area,
+        group_header_colors: parse_moxel_group_header_colors(&fields, &style_refs),
         print_settings,
         lines,
         fonts,
@@ -2892,6 +2897,65 @@ pub(super) fn parse_moxel_print_area(fields: &[&str]) -> Option<MoxelArea> {
         }
         parse_moxel_bounds_area(&bounds, String::new())
     })
+}
+
+/// The four palette slots the group and header colours name, counted from the
+/// print-area record: the record is followed by ten scalars and these are the
+/// last four of them.
+const MOXEL_GROUP_HEADER_COLOR_SLOT_OFFSET: usize = 7;
+
+/// The four colours in publication order, each with the role default it is
+/// measured against. A slot resolving to its role's default is not published.
+///
+/// Evidence (native 1С:УТ 11.5.27.75): 611 of the 683 spreadsheet templates
+/// carry the print-area record this reads from, and for all 611 the four slots
+/// resolved this way reproduce the published set exactly - which four elements
+/// appear and what each one says - with no counterexample. Five documents
+/// publish anything at all: four publish all four elements and
+/// `СообщениеОбменСБанками/.../ЭД_ИзвещениеОСостоянииДепозита_ru` publishes
+/// `groupsColor` alone, because only its slot differs from the role default.
+const MOXEL_GROUP_HEADER_COLOR_ROLES: [(&str, &str); 4] = [
+    ("groupsBackColor", "style:FormBackColor"),
+    ("groupsColor", "style:FormTextColor"),
+    ("headersBackColor", "style:FormBackColor"),
+    ("headersColor", "style:FormTextColor"),
+];
+
+/// The empty print-area record `{0,-1,-1,-1,-1,<uuid>}`, taken as the anchor.
+fn moxel_print_area_anchor(fields: &[&str]) -> Option<usize> {
+    fields.iter().enumerate().rev().find_map(|(index, field)| {
+        let record = split_1c_braced_fields(field, 0)?;
+        (record.len() == 6
+            && record.first()?.trim() == "0"
+            && record[1..5].iter().all(|value| value.trim() == "-1")
+            && parse_uuid_field(record.get(5)?.trim()).is_some())
+        .then_some(index)
+    })
+}
+
+pub(super) fn parse_moxel_group_header_colors(
+    fields: &[&str],
+    style_refs: &[Option<String>],
+) -> [Option<String>; 4] {
+    let mut colors: [Option<String>; 4] = [None, None, None, None];
+    let Some(anchor) = moxel_print_area_anchor(fields) else {
+        return colors;
+    };
+    for (role, (_, default)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
+        let Some(slot) = fields
+            .get(anchor + MOXEL_GROUP_HEADER_COLOR_SLOT_OFFSET + role)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        let Some(Some(color)) = style_refs.get(slot) else {
+            continue;
+        };
+        if color != default {
+            colors[role] = Some(color.clone());
+        }
+    }
+    colors
 }
 
 pub(super) fn parse_moxel_fonts(
@@ -7649,6 +7713,11 @@ fn render_moxel_spreadsheet_xml(
     if let Some(print_area) = &spreadsheet.print_area {
         push_moxel_print_area_xml(&mut xml, print_area);
     }
+    for (role, (tag, _)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
+        if let Some(color) = &spreadsheet.group_header_colors[role] {
+            xml.push_str(&format!("\t<{tag}>{}</{tag}>\r\n", escape_xml_text(color)));
+        }
+    }
     for line in &spreadsheet.lines {
         push_moxel_line_xml(&mut xml, line);
     }
@@ -10467,6 +10536,7 @@ mod moxel_exact_parity_tests {
             named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
+            group_header_colors: [None, None, None, None],
             print_settings: None,
             lines: Vec::new(),
             fonts: Vec::new(),
