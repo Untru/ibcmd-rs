@@ -461,6 +461,14 @@ pub(super) struct MoxelVerticalGroup {
     pub(super) begin_row: usize,
     pub(super) end_row: usize,
     pub(super) level: usize,
+    /// Whether the group is expanded. The record stores the collapsed state, so
+    /// this is its complement.
+    ///
+    /// Evidence (native 1С:УТ 11.5.27.75, all 683 spreadsheet templates): the
+    /// 1703 group records split 1693 storing 0 and 10 storing 1, and exactly
+    /// the 10 publish `<o>false</o>` - the other 1693 publish no `<o>` at all
+    /// and no record in the corpus publishes `<o>true</o>`.
+    pub(super) open: bool,
 }
 
 #[derive(Clone)]
@@ -1918,6 +1926,7 @@ pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGrou
         begin_row: fields.first()?.trim().parse::<usize>().ok()?,
         end_row: fields.get(1)?.trim().parse::<usize>().ok()?,
         level: fields.get(2)?.trim().parse::<usize>().ok()?,
+        open: fields.get(4)?.trim().parse::<usize>().ok()? == 0,
     })
 }
 
@@ -9670,6 +9679,9 @@ pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerti
     xml.push_str(&format!("\t\t<b>{}</b>\r\n", group.begin_row));
     if group.end_row != group.begin_row {
         xml.push_str(&format!("\t\t<e>{}</e>\r\n", group.end_row));
+    }
+    if !group.open {
+        xml.push_str("\t\t<o>false</o>\r\n");
     }
     xml.push_str("\t</vg>\r\n");
 }

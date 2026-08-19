@@ -29917,6 +29917,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
             begin_row: 0,
             end_row: 0,
             level: 0,
+            open: true,
         }],
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
