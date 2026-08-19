@@ -1563,8 +1563,12 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .map(|drawing| drawing.format_index)
         .max()
         .unwrap_or(0);
+    // The highest slot any record actually names. The floor this used to carry
+    // named slot 1 even where no column, row, cell, note or drawing names
+    // anything, which pushed the materialized default format one slot along and
+    // left the slot it skipped in the pool as an unreferenced `<format/>`.
     let row_cell_max_format_index = rows.iter().fold(
-        moxel_column_format_slots(&column_sets, column_count).max(1),
+        moxel_column_format_slots(&column_sets, column_count),
         |max_index, row| {
             let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
                 cell_max.max(cell.format_index).max(
