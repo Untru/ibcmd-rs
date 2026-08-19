@@ -266,7 +266,10 @@ pub(crate) enum FormPageXmlProperty {
     HorizontalStretch,
     VerticalStretch,
     Picture,
+    GroupHorizontalAlign,
+    GroupVerticalAlign,
     Group,
+    ChildrenAlign,
     HorizontalSpacing,
     VerticalSpacing,
     HorizontalAlign,
@@ -303,7 +306,20 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::HorizontalStretch,
     FormPageXmlProperty::VerticalStretch,
     FormPageXmlProperty::Picture,
+    // A page's group alignment pair sits between its geometry block and its
+    // `Group`, exactly where `UsualGroup` puts its own.  UT 11.5.27.75 native
+    // tree, the 4 pages that carry `GroupVerticalAlign`: `Title` leads it (4)
+    // and it leads `Group` (1), `HorizontalSpacing` (1), `ExtendedTooltip` (4)
+    // and `ChildItems` (4), with no pair counted the other way.
+    FormPageXmlProperty::GroupHorizontalAlign,
+    FormPageXmlProperty::GroupVerticalAlign,
     FormPageXmlProperty::Group,
+    // `ChildrenAlign` sits behind `Group` and ahead of the spacing pair, the
+    // slot `UsualGroup` gives it.  The two native pages that carry it show only
+    // `Title` and `VerticalStretch` in front and `ExtendedTooltip` behind, so
+    // its place inside that run is fixed by the sibling table rather than
+    // guessed; every position between them writes the same bytes here.
+    FormPageXmlProperty::ChildrenAlign,
     // `HorizontalSpacing` then `VerticalSpacing` sit between `Group` and the
     // `*Align` pair on `Page`, which is where `UsualGroup` already puts them.
     // UT 11.5.27.75 native tree, 7 016 `Page` instances: HorizontalSpacing
@@ -734,6 +750,7 @@ pub(crate) struct FormPageProperties {
     group: Option<&'static str>,
     horizontal_align: Option<&'static str>,
     vertical_align: Option<&'static str>,
+    children_align: Option<&'static str>,
     child_items_width: Option<&'static str>,
     horizontal_spacing: Option<&'static str>,
     vertical_spacing: Option<&'static str>,
@@ -810,9 +827,31 @@ impl FormPageSchema {
                 Some("2") => Some("Right"),
                 _ => None,
             },
+            // The vertical code runs `0 -> Top`, `1 -> Center`, `2 -> Bottom`,
+            // `3 -> nothing`, the same four-code table the horizontal one uses;
+            // `Top` used to be missing, which dropped the three top-aligned
+            // pages.  UT 11.5.27.75, all 7 016 traced pages: option member 13
+            // is a total function of the platform answer -- `3` on the 6 779
+            // pages without the element and `0`/`1`/`2` on exactly the
+            // 3/223/11 that say `Top`, `Center` and `Bottom`.
             vertical_align: match options.get(13).map(|field| field.trim()) {
+                Some("0") => Some("Top"),
                 Some("1") => Some("Center"),
                 Some("2") => Some("Bottom"),
+                _ => None,
+            },
+            // `ChildrenAlign` rides option member 14 under the same six-code
+            // table the `UsualGroup` tuple uses one member further along: over
+            // all 7 016 traced pages the member is `0` on the 7 014 without the
+            // element and `1`/`6` on exactly the two that say `None` and
+            // `TitlesLeftDataAuto`, with no code mapping to two answers.
+            children_align: match options.get(14).map(|field| field.trim()) {
+                Some("1") => Some("None"),
+                Some("2") => Some("ItemsLeftTitlesLeft"),
+                Some("3") => Some("ItemsRightTitlesLeft"),
+                Some("4") => Some("ItemsLeftTitlesRight"),
+                Some("5") => Some("ItemsRightTitlesRight"),
+                Some("6") => Some("TitlesLeftDataAuto"),
                 _ => None,
             },
             child_items_width: options
@@ -878,6 +917,10 @@ impl FormPageProperties {
 
     pub(crate) const fn vertical_align(self) -> Option<&'static str> {
         self.vertical_align
+    }
+
+    pub(crate) const fn children_align(self) -> Option<&'static str> {
+        self.children_align
     }
 
     pub(crate) const fn child_items_width(self) -> Option<&'static str> {
@@ -1583,8 +1626,11 @@ pub(crate) enum FormExtendedTooltipXmlProperty {
     TextColor,
     Font,
     Title,
+    TitleHeight,
     Hyperlink,
     GroupHorizontalAlign,
+    GroupVerticalAlign,
+    HorizontalAlign,
     VerticalAlign,
     Events,
 }
@@ -1606,8 +1652,19 @@ pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProper
     FormExtendedTooltipXmlProperty::TextColor,
     FormExtendedTooltipXmlProperty::Font,
     FormExtendedTooltipXmlProperty::Title,
+    // `TitleHeight` trails `Title` (2 of the 3 native tooltips that carry it)
+    // and `AutoMaxWidth` (1); nothing else shares a tooltip with it.
+    FormExtendedTooltipXmlProperty::TitleHeight,
     FormExtendedTooltipXmlProperty::Hyperlink,
     FormExtendedTooltipXmlProperty::GroupHorizontalAlign,
+    // The alignment run of a tooltip is `GroupHorizontalAlign`,
+    // `GroupVerticalAlign`, `HorizontalAlign`, `VerticalAlign`.  UT 11.5.27.75
+    // native tree: `GroupHorizontalAlign` leads `GroupVerticalAlign` (3
+    // co-occurrences) and `HorizontalAlign` (1), with no counter-example; the
+    // three remaining pairs never share a tooltip, so their order is fixed by
+    // the two that do rather than by the field family's opposite run.
+    FormExtendedTooltipXmlProperty::GroupVerticalAlign,
+    FormExtendedTooltipXmlProperty::HorizontalAlign,
     FormExtendedTooltipXmlProperty::VerticalAlign,
     FormExtendedTooltipXmlProperty::Events,
 ];
@@ -1624,6 +1681,9 @@ pub(crate) struct FormExtendedTooltipSchema {
     max_width_slot: usize,
     auto_max_height_slot: usize,
     group_horizontal_align_slot: usize,
+    group_vertical_align_slot: usize,
+    horizontal_align_option_slot: usize,
+    title_height_option_slot: usize,
     vertical_align_option_slot: usize,
     title_values_slot: usize,
     title_formatted_slot: usize,
@@ -1682,6 +1742,24 @@ impl FormExtendedTooltipSchema {
             max_width_slot: 26,
             auto_max_height_slot: 28,
             group_horizontal_align_slot: 30,
+            // The tooltip's group alignment pair sits in adjacent top-level
+            // slots, the vertical one directly behind the horizontal one.
+            // Measured on all 206 891 `ExtendedTooltip` records the export
+            // walks in UT 11.5.27.75: slot 31 reads `3` on every one of the
+            // 206 879 tooltips the platform writes no `<GroupVerticalAlign>`
+            // on, and `0`/`1`/`2` on exactly the 1/9/2 it writes `Top`,
+            // `Center` and `Bottom` on, with no counter-example.
+            group_vertical_align_slot: 31,
+            // Option member 2 carries `<HorizontalAlign>`: `0` on all 206 881
+            // tooltips without the element and `1`/`2`/`3` on exactly the
+            // 2/3/5 that say `Center`, `Right` and `Auto`.  `Left` is the
+            // suppressed default and is never written, which is why `0` maps
+            // to no element rather than to a spelling.
+            horizontal_align_option_slot: 2,
+            // Option member 4 carries `<TitleHeight>` as its own value: `0` on
+            // all 206 888 tooltips without the element and `2`/`3` on exactly
+            // the 2/1 that write those heights.
+            title_height_option_slot: 4,
             vertical_align_option_slot: 3,
             title_values_slot: 1,
             title_formatted_slot: 2,
@@ -1741,6 +1819,18 @@ impl FormExtendedTooltipSchema {
 
     pub(crate) const fn group_horizontal_align_slot(self) -> usize {
         self.group_horizontal_align_slot
+    }
+
+    pub(crate) const fn group_vertical_align_slot(self) -> usize {
+        self.group_vertical_align_slot
+    }
+
+    pub(crate) const fn horizontal_align_option_slot(self) -> usize {
+        self.horizontal_align_option_slot
+    }
+
+    pub(crate) const fn title_height_option_slot(self) -> usize {
+        self.title_height_option_slot
     }
 
     pub(crate) const fn vertical_align_option_slot(self) -> usize {
@@ -1816,17 +1906,29 @@ pub(crate) const FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER:
 pub(crate) enum FormControlBorderStyle {
     WithoutBorder,
     Single,
+    Embossed,
     Underline,
     Overline,
+    Double,
 }
 
 impl FormControlBorderStyle {
+    /// Style codes of the seven-member control-border tuple, read off the whole
+    /// native UT 11.5.27.75 tree against the platform's own
+    /// `<v8ui:style xsi:type="v8ui:ControlBorderType">`: member 3 is a total
+    /// function of the spelling on every owner that carries one -- `0`
+    /// `WithoutBorder` (468), `1` `Single` (18), `2` `Embossed` (3), `4`
+    /// `Underline` (10), `7` `Overline` (3) and `200` `Double` (4) -- and no
+    /// code maps to two spellings.  `Embossed` and `Double` used to be missing,
+    /// which dropped seven borders outright.
     pub(crate) fn from_raw_code(value: &str) -> Option<Self> {
         match value.trim() {
             "0" => Some(Self::WithoutBorder),
             "1" => Some(Self::Single),
+            "2" => Some(Self::Embossed),
             "4" => Some(Self::Underline),
             "7" => Some(Self::Overline),
+            "200" => Some(Self::Double),
             _ => None,
         }
     }
@@ -1835,8 +1937,10 @@ impl FormControlBorderStyle {
         match self {
             Self::WithoutBorder => "0",
             Self::Single => "1",
+            Self::Embossed => "2",
             Self::Underline => "4",
             Self::Overline => "7",
+            Self::Double => "200",
         }
     }
 
@@ -1844,8 +1948,10 @@ impl FormControlBorderStyle {
         match value.trim() {
             "WithoutBorder" => Some(Self::WithoutBorder),
             "Single" => Some(Self::Single),
+            "Embossed" => Some(Self::Embossed),
             "Underline" => Some(Self::Underline),
             "Overline" => Some(Self::Overline),
+            "Double" => Some(Self::Double),
             _ => None,
         }
     }
@@ -1854,10 +1960,20 @@ impl FormControlBorderStyle {
         match self {
             Self::WithoutBorder => "WithoutBorder",
             Self::Single => "Single",
+            Self::Embossed => "Embossed",
             Self::Underline => "Underline",
             Self::Overline => "Overline",
+            Self::Double => "Double",
         }
     }
+}
+
+/// A control border as the platform writes it: the style spelling and the
+/// `width` attribute that rides member 4 of the same tuple.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormControlBorder {
+    pub(crate) style: FormControlBorderStyle,
+    pub(crate) width: u32,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -1872,6 +1988,7 @@ impl FormControlBorderSchema {
             "LabelField" | "PictureField" if top_level_offset <= 1 => {
                 Some(FormFieldSchema::OPTIONS_BASE_SLOT + top_level_offset)
             }
+            "CalendarField" if top_level_offset == 0 => Some(FormFieldSchema::OPTIONS_BASE_SLOT),
             "LabelDecoration" | "PictureDecoration" if top_level_offset == 0 => Some(18),
             _ => None,
         }
@@ -1908,6 +2025,15 @@ impl FormControlBorderSchema {
             ("12", 36, "PictureDecoration", 0, Some("1"), 13, Some("4")) => {
                 (7, FormControlBorderStyle::WithoutBorder)
             }
+            // A calendar field carries the same tuple in member 18 of its own
+            // option tuple: over the 5 native `CalendarField` records the
+            // export walks, member 3 of that tuple is `1` on the 4 that carry
+            // no `<Border>` and `0` on the one that writes `WithoutBorder`,
+            // which is the same `Single`-is-the-default shape a picture field
+            // has.
+            ("37", 59, "CalendarField", 0, Some("8"), 24, Some("6")) => {
+                (18, FormControlBorderStyle::Single)
+            }
             _ => return None,
         };
         Some(Self {
@@ -1920,23 +2046,35 @@ impl FormControlBorderSchema {
         self.border_option_slot
     }
 
-    pub(crate) fn tuple_style(self, tuple: &[&str]) -> Option<FormControlBorderStyle> {
+    /// Member 4 of the tuple is the `width` attribute the platform writes on
+    /// the element, not a shape constant: over the whole native UT 11.5.27.75
+    /// tree it reads `1` on every border written as `width="1"` and `5`, `3`
+    /// and `0` on exactly the three `width="5"`, the one `width="3"` and the
+    /// one `width="0"` label decorations.  Pinning it to `1` had made the
+    /// reader refuse those five borders and had hard-coded the attribute.
+    pub(crate) fn tuple_border(self, tuple: &[&str]) -> Option<FormControlBorder> {
         if tuple.len() != 7
             || tuple.first().map(|field| field.trim()) != Some("3")
             || tuple.get(1).map(|field| field.trim()) != Some("0")
             || tuple.get(2).map(|field| field.trim()) != Some("{0}")
-            || tuple.get(4).map(|field| field.trim()) != Some("1")
             || tuple.get(5).map(|field| field.trim()) != Some("0")
             || uuid::Uuid::parse_str(tuple.get(6)?.trim()).is_err()
         {
             return None;
         }
-        FormControlBorderStyle::from_raw_code(tuple.get(3)?)
+        Some(FormControlBorder {
+            style: FormControlBorderStyle::from_raw_code(tuple.get(3)?)?,
+            width: tuple.get(4)?.trim().parse::<u32>().ok()?,
+        })
     }
 
-    pub(crate) fn non_default_tuple_style(self, tuple: &[&str]) -> Option<FormControlBorderStyle> {
-        self.tuple_style(tuple)
-            .filter(|style| *style != self.default_style)
+    /// The platform writes the element when the style is not the owner's
+    /// default *or* the width is not `1`: on the whole native tree every
+    /// `<Border>` satisfies one of the two and every record satisfying neither
+    /// carries none, with no counter-example on any of the five owners.
+    pub(crate) fn non_default_tuple_border(self, tuple: &[&str]) -> Option<FormControlBorder> {
+        self.tuple_border(tuple)
+            .filter(|border| border.style != self.default_style || border.width != 1)
     }
 }
 
@@ -2716,24 +2854,27 @@ impl FormColumnGroupSchema {
                 options
                     .get(Self::FIXING_IN_TABLE_OPTION_SLOT)
                     .map(|field| field.trim()),
-                Some("0" | "1")
+                Some("0" | "1" | "2")
             ))
         .then_some(Self)
     }
 
+    /// The column group's `FixingInTable` runs the same three codes the field
+    /// family does -- `0` nothing, `1` `Left`, `2` `Right`.  UT 11.5.27.75, all
+    /// 3 008 `ColumnGroup` records the export walks: option member 11 is `0` on
+    /// the 2 980 groups without the element and `1`/`2` on exactly the 26
+    /// `Left` and 2 `Right`, with no counter-example.  `2` used to be rejected
+    /// by the layout gate itself, which threw away the whole schema -- and with
+    /// it every other property -- on those two groups.
     pub(crate) fn fixing_in_table(self, options: &[&str]) -> Option<FormFixingInTable> {
-        (options.get(Self::FIXING_IN_TABLE_OPTION_SLOT)?.trim() == "1")
-            .then_some(FormFixingInTable::Left)
+        FormFixingInTable::from_field_raw_value(options.get(Self::FIXING_IN_TABLE_OPTION_SLOT)?)
     }
 
     pub(crate) const fn fixing_in_table_raw_code(
         self,
         value: FormFixingInTable,
     ) -> Option<&'static str> {
-        match value {
-            FormFixingInTable::Left => Some("1"),
-            FormFixingInTable::Right => None,
-        }
+        Some(value.field_raw_code())
     }
 }
 
@@ -2808,6 +2949,8 @@ pub(crate) struct FormFieldSchema {
     picture_size_option_slot: Option<usize>,
     hyperlink_option_slot: Option<usize>,
     nonselected_picture_text_option_slot: Option<usize>,
+    auto_max_width_option_slot: Option<usize>,
+    equal_items_width_option_slot: Option<usize>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3158,6 +3301,18 @@ impl FormFieldSchema {
             picture_size_option_slot: (item_tag == "PictureField").then_some(6),
             hyperlink_option_slot: (item_tag == "PictureField").then_some(8),
             nonselected_picture_text_option_slot: (item_tag == "PictureField").then_some(9),
+            // The text document field keeps its width cap in its own option
+            // tuple, not in the extended input-field tuple the shared reader
+            // samples: over all 68 `TextDocumentField` records the export
+            // walks, member 10 is `1` on the 65 without an `<AutoMaxWidth>`
+            // and `0` on exactly the 3 that carry
+            // `<AutoMaxWidth>false</AutoMaxWidth>`.
+            auto_max_width_option_slot: (item_tag == "TextDocumentField").then_some(10),
+            // `EqualItemsWidth` rides member 11 of the check box option tuple:
+            // over all 5 954 `CheckBoxField` records with that tuple the member
+            // is `2` on the 5 951 without the element and `1`/`0` on exactly
+            // the 2 `true` and 1 `false` the platform writes.
+            equal_items_width_option_slot: (item_tag == "CheckBoxField").then_some(11),
         })
     }
 
@@ -3195,6 +3350,18 @@ impl FormFieldSchema {
 
     pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
         (options.get(self.horizontal_stretch_option_slot?)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
+        (options.get(self.auto_max_width_option_slot?)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn equal_items_width(self, options: &[&str]) -> Option<bool> {
+        match options.get(self.equal_items_width_option_slot?)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
     }
 
     pub(crate) fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
@@ -4690,12 +4857,22 @@ impl FormRootVerticalScrollSchema {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormRootVerticalAlign {
+    Top,
+    Center,
     Bottom,
 }
 
 impl FormRootVerticalAlign {
+    /// The form root runs the same four-code alignment table its grouping
+    /// controls do -- `0` `Top`, `1` `Center`, `2` `Bottom`, `3` nothing.
+    /// Measured over all 5 139 form roots the export walks in UT 11.5.27.75:
+    /// the trailer member is `3` on the 5 132 forms without a `<VerticalAlign>`
+    /// and `0`/`1`/`2` on exactly the 2/2/3 that say `Top`, `Center` and
+    /// `Bottom`, with no counter-example.  Only `Bottom` used to be decoded.
     pub(crate) fn from_raw_value(value: &str) -> Option<Self> {
         match value.trim() {
+            "0" => Some(Self::Top),
+            "1" => Some(Self::Center),
             "2" => Some(Self::Bottom),
             _ => None,
         }
@@ -4703,6 +4880,8 @@ impl FormRootVerticalAlign {
 
     pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
         match value {
+            "Top" => Some(Self::Top),
+            "Center" => Some(Self::Center),
             "Bottom" => Some(Self::Bottom),
             _ => None,
         }
@@ -4710,12 +4889,16 @@ impl FormRootVerticalAlign {
 
     pub(crate) const fn raw_value(self) -> &'static str {
         match self {
+            Self::Top => "0",
+            Self::Center => "1",
             Self::Bottom => "2",
         }
     }
 
     pub(crate) const fn xml_value(self) -> &'static str {
         match self {
+            Self::Top => "Top",
+            Self::Center => "Center",
             Self::Bottom => "Bottom",
         }
     }
@@ -4738,8 +4921,28 @@ impl FormRootVerticalAlignSchema {
         })
     }
 
+    /// `ChildrenAlign` sits one member behind the vertical alignment in the
+    /// same trailer, under the six-code table the grouping controls use.  Over
+    /// all 5 139 form roots the export walks the member is `0` on the 5 134
+    /// forms without the element and `1` on exactly the 5 that say `None`; the
+    /// remaining five codes are the ones `UsualGroup` and `Page` already read
+    /// off their own tuples, so the roots share one table rather than a second.
+    const CHILDREN_ALIGN_TRAILER_SLOT: usize = 13;
+
     pub(crate) fn vertical_align(self, trailer: &[&str]) -> Option<FormRootVerticalAlign> {
         FormRootVerticalAlign::from_raw_value(trailer.get(self.trailer_slot)?.trim())
+    }
+
+    pub(crate) fn children_align(self, trailer: &[&str]) -> Option<&'static str> {
+        match trailer.get(Self::CHILDREN_ALIGN_TRAILER_SLOT)?.trim() {
+            "1" => Some("None"),
+            "2" => Some("ItemsLeftTitlesLeft"),
+            "3" => Some("ItemsRightTitlesLeft"),
+            "4" => Some("ItemsLeftTitlesRight"),
+            "5" => Some("ItemsRightTitlesRight"),
+            "6" => Some("TitlesLeftDataAuto"),
+            _ => None,
+        }
     }
 
     pub(crate) const fn trailer_slot(self) -> usize {
@@ -4747,7 +4950,7 @@ impl FormRootVerticalAlignSchema {
     }
 
     pub(crate) fn accepts_raw_value(self, value: &str) -> bool {
-        matches!(value.trim(), "2" | "3")
+        matches!(value.trim(), "0" | "1" | "2" | "3")
     }
 }
 
@@ -4920,9 +5123,16 @@ impl FormSpecialFieldSchema {
         }
     }
 
+    /// The progress bar keeps `HorizontalStretch` in the same option member the
+    /// track bar does.  Over all 42 `ProgressBarField` records the export walks,
+    /// member 3 is `1` on the 39 bars the platform writes no
+    /// `<HorizontalStretch>` on and `0` on exactly the 3 that carry
+    /// `<HorizontalStretch>false</HorizontalStretch>`; the member never carries
+    /// any other value on this owner, so the raised state stays unread rather
+    /// than guessed.
     pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
         match self.kind {
-            FormSpecialFieldKind::TrackBar
+            FormSpecialFieldKind::TrackBar | FormSpecialFieldKind::ProgressBar
                 if options.get(3).map(|field| field.trim()) == Some("0") =>
             {
                 Some(false)
@@ -5323,6 +5533,8 @@ pub(crate) enum FormTableXmlProperty {
     SearchStringLocation,
     ViewStatusLocation,
     SearchControlLocation,
+    GroupHorizontalAlign,
+    GroupVerticalAlign,
     RefreshRequest,
     AutoRefresh,
     AutoRefreshPeriod,
@@ -5529,6 +5741,14 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::SearchStringLocation,
     FormTableXmlProperty::ViewStatusLocation,
     FormTableXmlProperty::SearchControlLocation,
+    // A table's group alignment pair trails everything its property block
+    // writes and leads `RowFilter`.  UT 11.5.27.75 native tree, the 4 tables
+    // that carry one: `DataPath` leads it (4), and so do `Title` (3),
+    // `CommandSet` (2), `ToolTipRepresentation` (1), `SearchStringLocation`,
+    // `ViewStatusLocation` and `SearchControlLocation` (1 each); nothing this
+    // block writes ever follows it.
+    FormTableXmlProperty::GroupHorizontalAlign,
+    FormTableXmlProperty::GroupVerticalAlign,
     FormTableXmlProperty::CurrentRowUse,
     // `RefreshRequest` closes the table's own scalar block, immediately ahead of
     // the `AutoRefresh` group.  UT 11.5.27.75 native tree, 4 543 `Table`
