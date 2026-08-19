@@ -839,6 +839,9 @@ pub(super) struct MoxelPicture {
     pub(super) index: usize,
     pub(super) ref_name: Option<String>,
     pub(super) payload: Option<String>,
+    /// The record's seventh member, which decides whether the published element
+    /// carries `t="false"` at all.
+    pub(super) transparency: usize,
 }
 
 #[derive(Clone, Default)]
@@ -3984,6 +3987,10 @@ pub(super) fn parse_moxel_picture(
         index: fields.get(1)?.trim().parse::<usize>().ok()?,
         ref_name,
         payload,
+        transparency: fields
+            .get(6)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .unwrap_or(0),
     })
 }
 
@@ -9172,14 +9179,25 @@ pub(super) fn push_moxel_format_color(xml: &mut String, tag: &str, value: Option
 pub(super) fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
     xml.push_str("\t<picture>\r\n");
     xml.push_str(&format!("\t\t<index>{}</index>\r\n", picture.index));
+    // The record's seventh member decides the attribute: 0 writes `t="false"`,
+    // anything else writes no `t` at all. Evidence (native 1С:УТ 11.5.27.75):
+    // of the 363 picture elements in the tree that carry a body or a reference,
+    // 362 write `t="false"` and one - `ПроверкаКонтрагента/.../ФакторыРиска` -
+    // writes none, and that one is the only record whose seventh member is not
+    // 0.
+    let transparency = if picture.transparency == 0 {
+        " t=\"false\""
+    } else {
+        ""
+    };
     if let Some(payload) = &picture.payload {
         xml.push_str(&format!(
-            "\t\t<picture t=\"false\">{}</picture>\r\n",
+            "\t\t<picture{transparency}>{}</picture>\r\n",
             escape_xml_text(payload)
         ));
     } else if let Some(ref_name) = &picture.ref_name {
         xml.push_str(&format!(
-            "\t\t<picture t=\"false\" ref=\"{}\"/>\r\n",
+            "\t\t<picture{transparency} ref=\"{}\"/>\r\n",
             escape_xml_text(ref_name)
         ));
     } else {
