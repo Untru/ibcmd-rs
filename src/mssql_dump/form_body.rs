@@ -74,11 +74,11 @@ use ibcmd_schema::{
     parse_generated_metadata_owner, parse_metadata_data_path,
 };
 use ibcmd_xml::{
-    DcsChildParseOutcome, DcsSettingsChildrenError, FormChoiceParametersEmitError,
+    DcsChildParseOutcome, DcsSettingsChildrenError, FormChoiceParametersEmitError, TypeRunMember,
     emit_form_attributes_conditional_appearance_fragment, emit_form_choice_parameter_links,
-    emit_form_choice_parameters, parse_dcs_conditional_appearance_storage_document,
-    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
-    platform_default_form_list_settings_conditional_appearance,
+    emit_form_choice_parameters, evidenced_type_run_permutation,
+    parse_dcs_conditional_appearance_storage_document, parse_dcs_filter_storage_document,
+    parse_dcs_order_storage_document, platform_default_form_list_settings_conditional_appearance,
     platform_default_form_list_settings_filter, platform_default_form_list_settings_order,
 };
 use sha2::{Digest, Sha256};
@@ -3373,6 +3373,46 @@ pub(super) fn apply_form_body_attribute_additional_columns(
     );
 }
 
+// TEMPORARY PROBE -- removed before the gates.
+fn probe_needles() -> &'static [String] {
+    static NEEDLES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    NEEDLES.get_or_init(|| {
+        std::env::var("IBCMD_PROBE")
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .filter(|part| !part.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+fn probe_dump(kind: &str, field: &str, fields: &[&str]) {
+    let needles = probe_needles();
+    if needles.is_empty() {
+        return;
+    }
+    let Some(hit) = needles
+        .iter()
+        .find(|needle| field.contains(needle.as_str()))
+    else {
+        return;
+    };
+    eprintln!("PROBE {kind} {hit} nfields={}", fields.len());
+    for (index, slot) in fields.iter().enumerate() {
+        let text = slot.trim();
+        let cut = text
+            .char_indices()
+            .nth(40000)
+            .map_or(text.len(), |(offset, _)| offset);
+        eprintln!("PROBE {kind} {hit} slot[{index}]={}", &text[..cut]);
+    }
+    eprintln!("PROBE {kind} {hit} END");
+}
+
 pub(super) fn parse_form_attribute(
     field: &str,
     type_index: &BTreeMap<String, String>,
@@ -3400,6 +3440,7 @@ fn parse_form_attribute_with_dcs_type_index(
     if name.is_empty() {
         return None;
     }
+    probe_dump("ATTR", field, &fields);
     let title = fields
         .get(4)
         .map(|field| parse_form_localized_strings(field))
@@ -3443,6 +3484,17 @@ fn parse_form_attribute_with_dcs_type_index(
         &name,
         exact_single_type_uuid.as_deref(),
     );
+    // TEMPORARY PROBE -- removed before the gates.
+    if std::env::var_os("IBCMD_PROBE_SAVE").is_some() {
+        let slot9 = fields.get(9).copied().unwrap_or("");
+        let count = split_1c_braced_fields(slot9.trim(), 0)
+            .and_then(|parts| parts.get(1)?.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        if count >= 20 {
+            eprintln!("PROBE SAVE name={name} count={count} fields={save_fields:?}");
+            eprintln!("PROBE SAVE name={name} slot9={slot9}");
+        }
+    }
     // The attribute record declares its column count in slot 13 and stores the
     // columns themselves in the `count` slots that follow, so everything behind
     // the columns sits at a moving offset - the functional-option list is the
@@ -6684,33 +6736,149 @@ fn replace_form_server_state_fragments(
     Some(())
 }
 
-fn rewrite_form_server_state_type_ids(xml: &mut String, dcs_type_index: &DcsTypeIndex) {
-    const OPEN: &str = "<v8:TypeId>";
-    const CLOSE: &str = "</v8:TypeId>";
+/// One `Type`/`TypeId` sibling of a dynamic list's embedded schema: where it
+/// stands in the blob, how it is written out, and what orders it.
+struct FormServerStateTypeMember {
+    start: usize,
+    end: usize,
+    rendered: String,
+    kind: FormServerStateTypeKind,
+}
 
-    let mut rewritten = String::with_capacity(xml.len());
+enum FormServerStateTypeKind {
+    Builtin(String),
+    Reference(String),
+    Family,
+    Unevidenced,
+}
+
+impl FormServerStateTypeKind {
+    fn as_run_member(&self) -> TypeRunMember<'_> {
+        match self {
+            Self::Builtin(qname) => TypeRunMember::Builtin(qname.as_str()),
+            Self::Reference(uuid) => TypeRunMember::Reference(uuid.as_str()),
+            Self::Family => TypeRunMember::Family,
+            Self::Unevidenced => TypeRunMember::Unevidenced,
+        }
+    }
+}
+
+/// Reads every `Type`/`TypeId` sibling out of the blob, in document order,
+/// with the text each one is written as.
+fn collect_form_server_state_type_members(
+    xml: &str,
+    dcs_type_index: &DcsTypeIndex,
+) -> Vec<FormServerStateTypeMember> {
+    const TYPE_OPEN: &str = "<v8:Type>";
+    const TYPE_CLOSE: &str = "</v8:Type>";
+    const ID_OPEN: &str = "<v8:TypeId>";
+    const ID_CLOSE: &str = "</v8:TypeId>";
+
+    let mut members = Vec::new();
     let mut cursor = 0usize;
-    while let Some(relative_start) = xml[cursor..].find(OPEN) {
-        let start = cursor + relative_start;
-        let value_start = start + OPEN.len();
-        let Some(relative_end) = xml[value_start..].find(CLOSE) else {
+    loop {
+        let next_type = xml[cursor..].find(TYPE_OPEN).map(|at| cursor + at);
+        let next_id = xml[cursor..].find(ID_OPEN).map(|at| cursor + at);
+        let (start, open, close, is_id) = match (next_type, next_id) {
+            (Some(at_type), Some(at_id)) if at_type < at_id => {
+                (at_type, TYPE_OPEN, TYPE_CLOSE, false)
+            }
+            (Some(_), Some(at_id)) => (at_id, ID_OPEN, ID_CLOSE, true),
+            (Some(at_type), None) => (at_type, TYPE_OPEN, TYPE_CLOSE, false),
+            (None, Some(at_id)) => (at_id, ID_OPEN, ID_CLOSE, true),
+            (None, None) => break,
+        };
+        let value_start = start + open.len();
+        let Some(relative_end) = xml[value_start..].find(close) else {
             break;
         };
         let value_end = value_start + relative_end;
-        let type_id = xml[value_start..value_end].trim();
-        let Some(replacement) =
-            data_composition_type_id_xml(type_id, dcs_type_index, "cfg", false, false)
-        else {
-            rewritten.push_str(&xml[cursor..value_end + CLOSE.len()]);
-            cursor = value_end + CLOSE.len();
-            continue;
+        let end = value_end + close.len();
+        let value = xml[value_start..value_end].trim();
+        let (rendered, kind) = if is_id {
+            match data_composition_type_id_xml(value, dcs_type_index, "cfg", false, false) {
+                Some(replacement) => {
+                    let kind = if replacement.starts_with("<v8:TypeSet") {
+                        FormServerStateTypeKind::Family
+                    } else {
+                        FormServerStateTypeKind::Reference(value.to_ascii_lowercase())
+                    };
+                    (replacement, kind)
+                }
+                None => (
+                    xml[start..end].to_string(),
+                    FormServerStateTypeKind::Unevidenced,
+                ),
+            }
+        } else {
+            (
+                xml[start..end].to_string(),
+                FormServerStateTypeKind::Builtin(value.to_string()),
+            )
         };
-        rewritten.push_str(&xml[cursor..start]);
-        rewritten.push_str(&replacement);
-        cursor = value_end + CLOSE.len();
+        members.push(FormServerStateTypeMember {
+            start,
+            end,
+            rendered,
+            kind,
+        });
+        cursor = end;
     }
-    if cursor == 0 {
+    members
+}
+
+/// Resolves a dynamic list's embedded type ids and writes each run of type
+/// siblings in the platform's own order.
+///
+/// The embedded schema is a storage document like any other, and loses the
+/// same one thing about a type list: its schema puts every literal `Type`
+/// before every `TypeId`, so a list mixing the two arrives grouped while the
+/// platform writes it interleaved. The rule that repairs it already exists --
+/// [`ibcmd_xml::evidenced_type_run_permutation`] -- and is asked here rather
+/// than restated, so both callers stay one rule.
+///
+/// Evidence: UT 11.5.27.75,
+/// `Documents/ОперацияСЭлектроннымБилетом/Forms/ФормаСписка`, whose dynamic
+/// list field declares `xs:string` beside `cfg:EnumRef.ТипыОперацийСБилетами`.
+/// The enum's generated type uuid sorts below the whole evidenced interval of
+/// `xs:string`, so the platform writes the reference first; storage hands the
+/// pair over builtin-first.
+fn rewrite_form_server_state_type_ids(xml: &mut String, dcs_type_index: &DcsTypeIndex) {
+    let members = collect_form_server_state_type_members(xml, dcs_type_index);
+    if members.is_empty() {
         return;
+    }
+    let mut rewritten = String::with_capacity(xml.len());
+    let mut cursor = 0usize;
+    let mut index = 0usize;
+    while index < members.len() {
+        // Siblings of one run stand at one depth with nothing but layout
+        // whitespace between them, which is what makes their order the only
+        // thing that moves.
+        let mut run_end = index + 1;
+        while run_end < members.len()
+            && xml[members[run_end - 1].end..members[run_end].start]
+                .chars()
+                .all(char::is_whitespace)
+        {
+            run_end += 1;
+        }
+        let run = &members[index..run_end];
+        let kinds: Vec<TypeRunMember<'_>> = run
+            .iter()
+            .map(|member| member.kind.as_run_member())
+            .collect();
+        let order = evidenced_type_run_permutation(&kinds)
+            .unwrap_or_else(|| (0..run.len()).collect::<Vec<_>>());
+        rewritten.push_str(&xml[cursor..run[0].start]);
+        for (slot, member) in order.iter().enumerate() {
+            rewritten.push_str(&run[*member].rendered);
+            if let Some(pair) = run.get(slot..slot + 2) {
+                rewritten.push_str(&xml[pair[0].end..pair[1].start]);
+            }
+        }
+        cursor = run[run.len() - 1].end;
+        index = run_end;
     }
     rewritten.push_str(&xml[cursor..]);
     *xml = rewritten;
@@ -8890,6 +9058,7 @@ fn parse_form_child_item_with_metadata_owners(
             .collect::<Vec<_>>()
     });
     let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
+    probe_dump("ITEM", field, fields);
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
     if id == "0" {
@@ -26173,11 +26342,86 @@ pub(super) fn form_list_settings_order_has_output(order: Option<&FormListSetting
     !matches!(order, None | Some(FormListSettingsOrder::EmptyStorage))
 }
 
+/// Splits an XML fragment into the lines the re-indenter is allowed to re-space.
+///
+/// A newline that falls inside element text content is part of the value, not
+/// part of the fragment's layout, so it stays with the line that carries it.
+/// The two are told apart by what stands between the last `>` and the newline:
+/// only whitespace means the newline separates two tags, anything else means a
+/// text node is open and the platform stored that newline itself.
+///
+/// Evidence: UT 11.5.27.75. The dynamic list of
+/// `DataProcessors/ЗаполнениеКатегорийПодакцизныхТоваров/Forms/РабочееМесто`
+/// stores a `<dcssch:expression>` whose `ВЫБОР`/`КОГДА`/`КОНЕЦ` clauses are
+/// separated by bare `\n` plus the query's own tabs, and the platform writes
+/// those bytes through untouched while re-spacing every tag around them.
+/// Re-indenting each physical line instead rewrote all four separators as
+/// `\r\n` plus six tabs.
+fn xml_fragment_logical_lines(fragment: &str) -> Vec<&str> {
+    let bytes = fragment.as_bytes();
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    let mut index = 0usize;
+    let mut in_tag = false;
+    let mut quote: Option<u8> = None;
+    let mut text_seen = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_tag {
+            match quote {
+                Some(open) => {
+                    if byte == open {
+                        quote = None;
+                    }
+                }
+                None => match byte {
+                    b'"' | b'\'' => quote = Some(byte),
+                    b'>' => {
+                        in_tag = false;
+                        text_seen = false;
+                    }
+                    _ => {}
+                },
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'<' {
+            if fragment[index..].starts_with("<![CDATA[") {
+                // A character-data section is text whatever it spells, and its
+                // `>` bytes close nothing.
+                text_seen = true;
+                index = fragment[index..]
+                    .find("]]>")
+                    .map_or(bytes.len(), |offset| index + offset + "]]>".len());
+                continue;
+            }
+            in_tag = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'\n' {
+            if !text_seen {
+                lines.push(&fragment[start..index]);
+                start = index + 1;
+            }
+            index += 1;
+            continue;
+        }
+        if !byte.is_ascii_whitespace() {
+            text_seen = true;
+        }
+        index += 1;
+    }
+    lines.push(&fragment[start..]);
+    lines
+}
+
 pub(super) fn indent_xml_fragment(fragment: &str, indent: &str) -> String {
     let mut xml = String::new();
     let mut level = 0usize;
-    for line in fragment
-        .lines()
+    for line in xml_fragment_logical_lines(fragment)
+        .into_iter()
         .map(str::trim)
         .filter(|line| !line.is_empty())
     {

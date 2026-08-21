@@ -40,11 +40,11 @@ pub use dcs::{
     validate_dcs_inline_settings_fragment_structure,
 };
 pub use dcs_schema::{
-    DcsInlineSettingsFragment, DcsInnerSchemaError, emit_dcs_area_template_source_fragment,
-    emit_dcs_area_template_storage_document,
+    DcsInlineSettingsFragment, DcsInnerSchemaError, TypeRunMember,
+    emit_dcs_area_template_source_fragment, emit_dcs_area_template_storage_document,
     emit_dcs_area_template_storage_document_with_references, emit_dcs_inner_schema_source_document,
-    emit_dcs_query_union_link_source_document, parse_dcs_area_template_source_document,
-    parse_dcs_area_template_storage_document,
+    emit_dcs_query_union_link_source_document, evidenced_type_run_permutation,
+    parse_dcs_area_template_source_document, parse_dcs_area_template_storage_document,
     parse_dcs_area_template_storage_document_with_references,
     parse_dcs_inner_schema_storage_document,
     parse_dcs_inner_schema_storage_document_with_references,
