@@ -5290,25 +5290,87 @@ impl FormSpecialFieldSchema {
         }
     }
 
+    /// The 18-member track-bar option tuple, read off the whole population it
+    /// has in UT 11.5.27.75 -- all 9 `TrackBarField` items of the
+    /// configuration, joined to the platform's own element for each. Every
+    /// member below is a total function of the platform answer on those 9:
+    /// the value the platform prints where it prints one, and one fixed
+    /// default where it prints nothing.
+    ///
+    /// * 1 `Width`, default `32` -- printed `35`, `9`, `20`, silent on the 6
+    ///   that hold `32`. The arm used to admit `32` and so wrote a width on
+    ///   all six.
+    /// * 2 `Height`, default `2` -- printed `1` on 3, silent on the 6 that
+    ///   hold `2`.
+    /// * 5 `MinValue`, default `0`; 6 `MaxValue`, default `100`; 7 `Step`,
+    ///   default `1`; 9 `LargeStep`, default `10`; 10 `MarkingStep`, default
+    ///   `5`.
+    /// * 11 `MarkingAppearance`: `1` on exactly the 3 items the platform
+    ///   writes `TopLeft` on, `2` on the other 6. No other code occurs, so the
+    ///   remaining appearances stay unread rather than guessed.
+    /// * 13 `AutoMaxWidth`: `0` on the one item the platform writes `false`
+    ///   on, `1` on the other 8.
+    fn track_bar_dimension(options: &[&str], slot: usize, default: &str) -> Option<String> {
+        let value = options.get(slot)?.trim();
+        (value != default && value.parse::<i64>().is_ok()).then(|| value.to_string())
+    }
+
     pub(crate) fn width(self, options: &[&str]) -> Option<String> {
         let value = options.get(1)?.trim();
         let is_non_default = match self.kind {
-            FormSpecialFieldKind::ProgressBar => value != "0" && value != "32",
-            FormSpecialFieldKind::TrackBar => value != "0",
+            FormSpecialFieldKind::ProgressBar | FormSpecialFieldKind::TrackBar => {
+                value != "0" && value != "32"
+            }
             FormSpecialFieldKind::Chart => false,
         };
         (is_non_default && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
+    pub(crate) fn height(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 2, "2"))
+            .flatten()
+    }
+
+    pub(crate) fn min_value(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 5, "0"))
+            .flatten()
+    }
+
+    pub(crate) fn step(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 7, "1"))
+            .flatten()
+    }
+
+    pub(crate) fn large_step(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 9, "10"))
+            .flatten()
+    }
+
+    pub(crate) fn marking_step(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 10, "5"))
+            .flatten()
+    }
+
+    pub(crate) fn marking_appearance(self, options: &[&str]) -> Option<&'static str> {
+        matches!(
+            (self.kind, options.get(11).map(|field| field.trim())),
+            (FormSpecialFieldKind::TrackBar, Some("1"))
+        )
+        .then_some("TopLeft")
+    }
+
     pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
-        match self.kind {
-            FormSpecialFieldKind::ProgressBar
-                if options.get(11).map(|field| field.trim()) == Some("0") =>
-            {
-                Some(false)
-            }
-            _ => None,
-        }
+        let slot = match self.kind {
+            FormSpecialFieldKind::ProgressBar => 11,
+            FormSpecialFieldKind::TrackBar => 13,
+            FormSpecialFieldKind::Chart => return None,
+        };
+        (options.get(slot).map(|field| field.trim()) == Some("0")).then_some(false)
     }
 
     /// The progress bar keeps `HorizontalStretch` in the same option member the
@@ -5342,11 +5404,12 @@ impl FormSpecialFieldSchema {
     }
 
     pub(crate) fn max_value(self, options: &[&str]) -> Option<String> {
-        if self.kind != FormSpecialFieldKind::ProgressBar {
-            return None;
+        match self.kind {
+            FormSpecialFieldKind::ProgressBar | FormSpecialFieldKind::TrackBar => {
+                Self::track_bar_dimension(options, 6, "100")
+            }
+            FormSpecialFieldKind::Chart => None,
         }
-        let value = options.get(6)?.trim();
-        (value != "100" && value.parse::<i64>().is_ok()).then(|| value.to_string())
     }
 
     pub(crate) fn show_percent(self, options: &[&str]) -> Option<bool> {

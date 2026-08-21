@@ -1319,6 +1319,11 @@ pub(super) struct FormChildItem {
     pub(super) vertical_stretch: Option<bool>,
     pub(super) spreadsheet_document_properties: Option<FormSpreadsheetDocumentFieldProperties>,
     pub(super) max_value: Option<String>,
+    pub(super) min_value: Option<String>,
+    pub(super) step: Option<String>,
+    pub(super) large_step: Option<String>,
+    pub(super) marking_step: Option<String>,
+    pub(super) marking_appearance: Option<&'static str>,
     pub(super) input_min_value: Option<FormInputBoundValue>,
     pub(super) input_max_value: Option<FormInputBoundValue>,
     pub(super) command_uniqueness: Option<bool>,
@@ -10523,6 +10528,8 @@ fn parse_form_child_item_with_metadata_owners(
                         && default_height != Some(value.as_str())
                         && value.parse::<u32>().is_ok()
                 })
+        } else if let Some((schema, options)) = special_field_layout.as_ref() {
+            schema.height(options)
         } else if tag == "Table" {
             table_schema.and_then(|schema| schema.height(&fields))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
@@ -10804,6 +10811,21 @@ fn parse_form_child_item_with_metadata_owners(
         max_value: special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.max_value(options)),
+        min_value: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.min_value(options)),
+        step: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.step(options)),
+        large_step: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.large_step(options)),
+        marking_step: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.marking_step(options)),
+        marking_appearance: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.marking_appearance(options)),
         input_min_value: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| {
@@ -22572,10 +22594,49 @@ pub(super) fn format_form_child_item_xml(
         item,
         indent + 1,
     ));
+    // A track bar writes its value run behind the stretch pair and ahead of
+    // `ContextMenu`, `ExtendedTooltip` and `Events`, in the order the platform
+    // spells it: `MinValue`, `MaxValue`, `Step`, `LargeStep`, `MarkingStep`,
+    // `MarkingAppearance`.  Of the 9 native track bars, one pins
+    // `MinValue` < `MaxValue` < `Step` < `LargeStep`, one pins
+    // `Step` < `MarkingStep`, three pin `HorizontalStretch` < `Step` and two
+    // pin `Height` < `MarkingAppearance`; no pair is observed both ways, and
+    // `MarkingAppearance` shares no item with `Step` or `MarkingStep`, so it
+    // closes the run at the nearest position that satisfies every pair.
+    if let Some(min_value) = &item.min_value {
+        xml.push_str(&format!(
+            "{tab}\t<MinValue>{}</MinValue>\r\n",
+            escape_xml_text(min_value)
+        ));
+    }
     if let Some(max_value) = &item.max_value {
         xml.push_str(&format!(
             "{tab}\t<MaxValue>{}</MaxValue>\r\n",
             escape_xml_text(max_value)
+        ));
+    }
+    if let Some(step) = &item.step {
+        xml.push_str(&format!(
+            "{tab}\t<Step>{}</Step>\r\n",
+            escape_xml_text(step)
+        ));
+    }
+    if let Some(large_step) = &item.large_step {
+        xml.push_str(&format!(
+            "{tab}\t<LargeStep>{}</LargeStep>\r\n",
+            escape_xml_text(large_step)
+        ));
+    }
+    if let Some(marking_step) = &item.marking_step {
+        xml.push_str(&format!(
+            "{tab}\t<MarkingStep>{}</MarkingStep>\r\n",
+            escape_xml_text(marking_step)
+        ));
+    }
+    if let Some(marking_appearance) = item.marking_appearance {
+        xml.push_str(&format!(
+            "{tab}\t<MarkingAppearance>{}</MarkingAppearance>\r\n",
+            escape_xml_text(marking_appearance)
         ));
     }
     if item.show_percent == Some(true) {
