@@ -13783,6 +13783,11 @@ fn parse_form_input_field_edit_text_update(
         "0" => None,
         "1" => Some("DontUse"),
         "2" => Some("OnValueChange"),
+        // The third code is read off the platform, not interpolated: of the
+        // 50 065 traced `InputField` option tuples of UT 11.5.27.75 exactly
+        // one holds `3` here, and the platform writes
+        // `<EditTextUpdate>Always</EditTextUpdate>` on exactly that item.
+        "3" => Some("Always"),
         _ => None,
     }
 }
@@ -15011,6 +15016,15 @@ pub(super) fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<
     ) {
         (Some(marker), Some(FORM_UPDATE_ON_DATA_CHANGE_UUID), Some("0")) if marker == "#" => {
             Some("Auto")
+        }
+        // The bag's third member is the enum ordinal, not a shape byte that
+        // must read `0`: of the 1 947 traced `Table` items of UT 11.5.27.75
+        // that carry this bag entry, 1 946 hold `0` and the platform writes
+        // `Auto`, and the one that holds `1` is the one it writes
+        // `DontUpdate` on.  No other ordinal occurs, so the remaining members
+        // of the enumeration stay unread rather than guessed.
+        (Some(marker), Some(FORM_UPDATE_ON_DATA_CHANGE_UUID), Some("1")) if marker == "#" => {
+            Some("DontUpdate")
         }
         _ => None,
     }
@@ -21682,6 +21696,18 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(value)
         ));
     }
+    // A list addition writes `Visible` ahead of its `AdditionSource`, at the
+    // same early site every other item kind puts it. The one native addition
+    // that carries the element -- the only one of the 13 942 in UT 11.5.27.75
+    // -- writes `Visible`, `AdditionSource`, `Title`, `ContextMenu`,
+    // `ExtendedTooltip` in that order.
+    if matches!(
+        item.tag,
+        "SearchStringAddition" | "SearchControlAddition" | "ViewStatusAddition"
+    ) && item.visible == Some(false)
+    {
+        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    }
     if item.tag.ends_with("Addition") {
         if item.addition_source_item.is_some() || item.item_type.is_some() {
             xml.push_str(&format!("{tab}\t<AdditionSource>\r\n"));
@@ -21788,7 +21814,15 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_back_color)
         ));
     }
-    if !matches!(item.tag, "Button" | "Table") && item.visible == Some(false) {
+    if !matches!(
+        item.tag,
+        "Button"
+            | "Table"
+            | "SearchStringAddition"
+            | "SearchControlAddition"
+            | "ViewStatusAddition"
+    ) && item.visible == Some(false)
+    {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
     if item.tag != "Table" && item.tag != "Button" && item.user_visible_common == Some(false) {

@@ -4441,6 +4441,32 @@ impl FormChildItemVisibleSchema {
             {
                 43 + top_level_offset
             }
+            // The three special-field kinds share that very layout: all 56
+            // `ProgressBarField`, `TrackBarField` and `ChartField` items of
+            // UT 11.5.27.75 are wrapper-`37` 59-member records, and slot 43
+            // reads `1` on the 55 whose native document carries no
+            // `<Visible>`, and `0` on the one chart field it writes
+            // `<Visible>false</Visible>` on. They were simply never listed.
+            ("37", "ProgressBarField", Some("9"))
+            | ("37", "TrackBarField", Some("10"))
+            | ("37", "ChartField", Some("11"))
+                if field_count == 59 && top_level_offset == 0 =>
+            {
+                43
+            }
+            // The three list additions share one 24-member wrapper-`5` layout
+            // and keep the flag in slot 9. All 13 942 of them in UT
+            // 11.5.27.75 -- 4 773 search strings, 4 543 view statuses and
+            // 4 626 search controls -- read `1` there except the single
+            // search string the platform writes `<Visible>false</Visible>`
+            // on, which reads `0`. No third code occurs.
+            ("5", "SearchStringAddition", Some("0"))
+            | ("5", "ViewStatusAddition", Some("1"))
+            | ("5", "SearchControlAddition", Some("2"))
+                if field_count == 24 =>
+            {
+                9
+            }
             ("55", "Table", _) if field_count >= 99 && (field_count - 99) % 2 == 0 => {
                 field_count.checked_sub(35)?
             }
@@ -6606,6 +6632,11 @@ impl FormTableSchema {
         match fields.get(6)?.trim() {
             "1" => Some("Auto"),
             "3" => Some("Top"),
+            // Read off the platform, not interpolated: of the 4 543 traced
+            // `Table` items of UT 11.5.27.75 exactly one holds `5` here, and
+            // the platform writes `<TitleLocation>Bottom</TitleLocation>` on
+            // exactly that table. The remaining ordinals stay unread.
+            "5" => Some("Bottom"),
             _ => None,
         }
     }
