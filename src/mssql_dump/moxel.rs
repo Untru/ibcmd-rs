@@ -772,15 +772,19 @@ pub(super) struct MoxelChart {
     real_points: Vec<MoxelChartPoint>,
     cur_series: usize,
     cur_point: usize,
+    chart_type: &'static str,
     labels_location: &'static str,
     title: Vec<MoxelLocalizedValue>,
     values_scale_format: Vec<MoxelLocalizedValue>,
     is_auto_series_name: bool,
     max_series: usize,
+    base_val: usize,
     is_outline: bool,
     rebuild_time: usize,
     gauge_bands: Vec<MoxelChartGaugeBand>,
+    auto_max_value: bool,
     user_max_value: String,
+    auto_min_value: bool,
     user_min_value: String,
     real_data_items: Vec<MoxelChartDataItem>,
     spline_strain: usize,
@@ -845,8 +849,11 @@ pub(super) struct MoxelChartRectangle {
 
 #[derive(Default)]
 pub(super) struct MoxelChartAxis {
+    base_value: Option<String>,
     min_value: Option<String>,
     max_value: Option<String>,
+    min_detection: bool,
+    max_detection: bool,
 }
 
 pub(super) struct MoxelPicture {
@@ -4368,6 +4375,26 @@ const MAX_MOXEL_CHART_LOCALIZED_VALUES: usize = 64;
 const MAX_MOXEL_CHART_DECIMAL_BYTES: usize = 4096;
 const MAX_MOXEL_CHART_DECIMAL_EXPONENT: u64 = 4096;
 
+/// The stored chart-kind code.
+///
+/// Evidence (native 1С:УТ 11.5.27.75): the 13 stored `Chart` drawings spell
+/// three codes and the platform publishes exactly three kinds beside them -
+/// `0` for the 6 `Line` charts of `ПроверкаКонтрагента/ФинансовыйАнализ`, `38`
+/// for the 6 `Gauge` charts of `ДосьеКонтрагента/ФинансовыйАнализ` and `9` for
+/// the one `StackedBar` of
+/// `СравнительныйАнализПоказателейРаботыМенеджеров/СравнительныйАнализМенеджеров`.
+/// A code the corpus does not spell is not this reader's case and refuses the
+/// chart rather than being named on a guess - which is what writing `Line`
+/// unconditionally amounted to.
+fn moxel_chart_type(code: &str) -> Option<&'static str> {
+    match code.trim() {
+        "0" => Some("Line"),
+        "9" => Some("StackedBar"),
+        "38" => Some("Gauge"),
+        _ => None,
+    }
+}
+
 fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     if text.len() > MAX_MOXEL_CHART_BYTES {
         return None;
@@ -4423,6 +4450,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     validate_moxel_chart_v74_front(tail)?;
     let cur_series = parse_moxel_chart_usize(tail.first()?)?;
     let cur_point = parse_moxel_chart_usize(tail.get(1)?)?;
+    let chart_type = moxel_chart_type(tail.get(2)?)?;
     let labels_location = match tail.get(5)?.trim() {
         "0" => "Edge",
         "4" => "Auto",
@@ -4432,9 +4460,12 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
     let max_series = parse_moxel_chart_usize(tail.get(46)?)?;
+    let base_val = parse_moxel_chart_usize(tail.get(49)?)?;
     let is_outline = parse_moxel_chart_bool(tail.get(50)?)?;
     let gauge_bands = parse_moxel_chart_gauge_bands(tail.get(69)?)?;
+    let auto_max_value = parse_moxel_chart_bool(tail.get(77)?)?;
     let user_max_value = normalize_moxel_chart_decimal(tail.get(78)?)?;
+    let auto_min_value = parse_moxel_chart_bool(tail.get(79)?)?;
     let user_min_value = normalize_moxel_chart_decimal(tail.get(80)?)?;
 
     let mut real_data_items = Vec::with_capacity(real_data_count);
@@ -4478,15 +4509,19 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         real_points,
         cur_series,
         cur_point,
+        chart_type,
         labels_location,
         title,
         values_scale_format,
         is_auto_series_name,
         max_series,
+        base_val,
         is_outline,
         rebuild_time,
         gauge_bands,
+        auto_max_value,
         user_max_value,
+        auto_min_value,
         user_min_value,
         real_data_items,
         spline_strain,
@@ -4680,12 +4715,7 @@ fn parse_moxel_chart_data_item(
 
 fn parse_moxel_chart_axis(text: &str) -> Option<MoxelChartAxis> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 5
-        || fields.first()?.trim() != "0"
-        || fields.get(1)?.trim() != "0"
-        || fields.get(3)?.trim() != "0"
-        || fields.get(4)?.trim() != "0"
-    {
+    if fields.len() != 5 || fields.first()?.trim() != "0" {
         return None;
     }
     let range = split_1c_braced_fields(fields.get(2)?, 0)?;
@@ -4696,12 +4726,31 @@ fn parse_moxel_chart_axis(text: &str) -> Option<MoxelChartAxis> {
     {
         return None;
     }
+    let base = normalize_moxel_chart_decimal(fields.get(1)?)?;
     let min = normalize_moxel_chart_decimal(range.get(2)?)?;
     let max = normalize_moxel_chart_decimal(range.get(4)?)?;
     Some(MoxelChartAxis {
+        base_value: (base != "0").then_some(base),
         min_value: (min != "0").then_some(min),
         max_value: (max != "0").then_some(max),
+        // The two limit-detection flags. Only `0` and `2` are stored, and the
+        // element appears for exactly the axes that store `2`: over the 26
+        // axis records of the corpus's 13 charts, the 6 that store `2` in the
+        // maximum's slot are the 6 publishing `maxValueDetectionMethod` and the
+        // 5 that store `2` in the minimum's are the 5 publishing
+        // `minValueDetectionMethod`, all in ДосьеКонтрагента/ФинансовыйАнализ.
+        // A third value is not this reader's case.
+        max_detection: moxel_chart_axis_detection(fields.get(3)?)?,
+        min_detection: moxel_chart_axis_detection(fields.get(4)?)?,
     })
+}
+
+fn moxel_chart_axis_detection(text: &str) -> Option<bool> {
+    match text.trim() {
+        "0" => Some(false),
+        "2" => Some(true),
+        _ => None,
+    }
 }
 
 fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
@@ -4718,7 +4767,6 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
 
 fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
     let expected = [
-        (2, "0"),
         (3, "0"),
         (4, "\", \""),
         (6, "{1,0}"),
@@ -4760,7 +4808,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (45, "0"),
         (47, "30"),
         (48, "1"),
-        (49, "0"),
         (51, "0"),
         (52, "0"),
         (53, "1"),
@@ -4786,8 +4833,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (74, "0"),
         (75, "5"),
         (76, "{3,0,{11119017}}"),
-        (77, "1"),
-        (79, "1"),
         (81, "1"),
         (82, "0"),
         (83, "0"),
@@ -9896,7 +9941,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     }
     push_moxel_chart_text(xml, "curSeries", chart.cur_series);
     push_moxel_chart_text(xml, "curPoint", chart.cur_point);
-    push_moxel_chart_literal(xml, "chartType", "Line");
+    push_moxel_chart_literal(xml, "chartType", chart.chart_type);
     push_moxel_chart_literal(xml, "circleLabelType", "None");
     push_moxel_chart_literal(xml, "labelsDelimiter", ", ");
     push_moxel_chart_literal(xml, "labelsLocation", chart.labels_location);
@@ -9948,7 +9993,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_text(xml, "maxSeries", chart.max_series);
     push_moxel_chart_text(xml, "maxSeriesPrc", 30);
     push_moxel_chart_literal(xml, "spaceMode", "Half");
-    push_moxel_chart_text(xml, "baseVal", 0);
+    push_moxel_chart_text(xml, "baseVal", chart.base_val);
     push_moxel_chart_bool(xml, "isOutline", chart.is_outline);
     push_moxel_chart_text(xml, "realPiePoint", 0);
     push_moxel_chart_text(xml, "realStockSeries", 0);
@@ -9979,9 +10024,9 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_bool(xml, "gaugeLabelsArcDirection", false);
     push_moxel_chart_text(xml, "gaugeBushThickness", 5);
     push_moxel_chart_literal(xml, "gaugeBushColor", "#A9A9A9");
-    push_moxel_chart_bool(xml, "autoMaxValue", true);
+    push_moxel_chart_bool(xml, "autoMaxValue", chart.auto_max_value);
     push_moxel_chart_literal(xml, "userMaxValue", &chart.user_max_value);
-    push_moxel_chart_bool(xml, "autoMinValue", true);
+    push_moxel_chart_bool(xml, "autoMinValue", chart.auto_min_value);
     push_moxel_chart_literal(xml, "userMinValue", &chart.user_min_value);
     push_moxel_chart_bool(xml, "elementsIsInit", true);
     push_moxel_chart_bool(xml, "titleIsInit", true);
@@ -10228,11 +10273,22 @@ fn push_moxel_chart_rectangle_xml(xml: &mut String, tag: &str, rect: &MoxelChart
 }
 
 fn push_moxel_chart_axis_xml(xml: &mut String, tag: &str, axis: &MoxelChartAxis) {
-    if axis.min_value.is_none() && axis.max_value.is_none() {
+    if axis.base_value.is_none()
+        && axis.min_value.is_none()
+        && axis.max_value.is_none()
+        && !axis.min_detection
+        && !axis.max_detection
+    {
         push_moxel_chart_empty(xml, tag);
         return;
     }
     xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
+    if let Some(value) = &axis.base_value {
+        xml.push_str(&format!(
+            "\t\t\t\t<d3p1:baseValue>{}</d3p1:baseValue>\r\n",
+            escape_xml_element_text(value)
+        ));
+    }
     if let Some(value) = &axis.min_value {
         xml.push_str(&format!(
             "\t\t\t\t<d3p1:minValue xsi:type=\"xs:decimal\">{}</d3p1:minValue>\r\n",
@@ -10244,6 +10300,18 @@ fn push_moxel_chart_axis_xml(xml: &mut String, tag: &str, axis: &MoxelChartAxis)
             "\t\t\t\t<d3p1:maxValue xsi:type=\"xs:decimal\">{}</d3p1:maxValue>\r\n",
             escape_xml_element_text(value)
         ));
+    }
+    if axis.min_detection {
+        xml.push_str(
+            "\t\t\t\t<d3p1:minValueDetectionMethod>UseValueWithLimitations\
+             </d3p1:minValueDetectionMethod>\r\n",
+        );
+    }
+    if axis.max_detection {
+        xml.push_str(
+            "\t\t\t\t<d3p1:maxValueDetectionMethod>UseValueWithLimitations\
+             </d3p1:maxValueDetectionMethod>\r\n",
+        );
     }
     xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
 }
