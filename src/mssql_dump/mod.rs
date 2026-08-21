@@ -2385,6 +2385,7 @@ struct DumpRowContext<'a> {
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
     type_index_collisions: &'a BTreeSet<String>,
+    moxel_generated_types: &'a BTreeMap<String, String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
     object_ref_resolutions: &'a BTreeMap<String, MetadataObjectReferenceResolution>,
@@ -2595,6 +2596,8 @@ fn dump_table_rows_with_options_mode(
     } else {
         MetadataTypeIndexes::default()
     };
+    let moxel_generated_types =
+        build_moxel_generated_type_index(&type_index, &type_index_collisions);
     let refs_for_standalone =
         extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
     let form_refs = if refs_for_standalone {
@@ -2813,6 +2816,7 @@ fn dump_table_rows_with_options_mode(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         type_index_collisions: &type_index_collisions,
+        moxel_generated_types: &moxel_generated_types,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
         object_ref_resolutions: &object_ref_resolutions,
@@ -3594,6 +3598,8 @@ fn dump_table_rows_streamed(
     } else {
         MetadataTypeIndexes::default()
     };
+    let moxel_generated_types =
+        build_moxel_generated_type_index(&type_index, &type_index_collisions);
     timings.prepare_type_index_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let form_refs = if (extract_metadata_xml
@@ -3926,6 +3932,7 @@ fn dump_table_rows_streamed(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         type_index_collisions: &type_index_collisions,
+        moxel_generated_types: &moxel_generated_types,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
         object_ref_resolutions: &object_ref_resolutions,
@@ -8559,6 +8566,38 @@ const DCS_BUILTIN_REFERENCE_TYPE_SETS: &[(&str, &str)] = &[
     ),
     ("e61ef7b8-f3e1-4f4b-8ac7-676e90524997", "cfg:CatalogRef"),
 ];
+
+/// Generated-type id -> the reference a spreadsheet's value type publishes for
+/// it.
+///
+/// A MOXCEL value-type descriptor `{"#",<uuid>}` names a *generated* type, not
+/// a metadata object: `Reports/АнализРаспределенияНДС/Templates/Таблица` stores
+/// `fcd1e4a9-753c-4260-96ee-6b847c186dc5`, which is the `TypeId` of the
+/// `DocumentRef.РаспределениеНДС` generated type, and the platform publishes
+/// exactly that generated type's own name. The object-reference index is keyed
+/// by the metadata object's uuid and so can never answer such a descriptor.
+///
+/// Only the kind the corpus evidences is carried: the same corpus's other
+/// descriptor, `48fa9d68-ae46-4d76-988a-88927f7a0ca6`, is the
+/// `DefinedType.ДенежнаяСуммаЛюбогоЗнака` generated type and the platform
+/// publishes it as `<v8:TypeId>`, so every kind but `DocumentRef` is left to
+/// the identity form rather than guessed. A type id the index resolves two
+/// ways decides nothing and is left out.
+fn build_moxel_generated_type_index(
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+) -> BTreeMap<String, String> {
+    type_index
+        .iter()
+        .filter(|(type_id, _)| !type_index_collisions.contains(*type_id))
+        .filter_map(|(type_id, reference)| {
+            reference
+                .strip_prefix("cfg:")
+                .filter(|name| name.starts_with("DocumentRef."))
+                .map(|name| (type_id.clone(), name.to_string()))
+        })
+        .collect()
+}
 
 fn build_metadata_type_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<String, String> {
     build_metadata_type_indexes_from_texts(rows).references

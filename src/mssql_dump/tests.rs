@@ -33578,9 +33578,14 @@ fn moxel_value_and_control_types_come_from_their_document_tables() {
 /// rather than guessed.
 #[test]
 fn moxel_value_type_descriptors_decode_by_their_pattern() {
+    // The generated-type index, keyed by the `GeneratedType/TypeId` a `{"#"}`
+    // descriptor actually stores. The metadata-object index this test used to
+    // pass is keyed by the document's own uuid (`d45c60f7-...`) and can never
+    // answer such a descriptor, so the mapping it asserted never fired outside
+    // the test.
     let object_refs = BTreeMap::from([(
         "fcd1e4a9-753c-4260-96ee-6b847c186dc5".to_string(),
-        "Document.РаспределениеНДС".to_string(),
+        "DocumentRef.РаспределениеНДС".to_string(),
     )]);
 
     let cases = [

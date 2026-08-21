@@ -1066,6 +1066,12 @@ pub(super) fn resolve_existing_moxel_default_format_index(
         .or_else(|| last_exact_match(&target_exact).map(|index| (index, false)))
 }
 
+/// The stand-in for callers that carry no generated-type index: an empty one
+/// leaves every `{"#",<uuid>}` value type on its identity form, which is what
+/// those callers published before the index existed.
+static NO_MOXEL_GENERATED_TYPES: std::sync::LazyLock<BTreeMap<String, String>> =
+    std::sync::LazyLock::new(BTreeMap::new);
+
 pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
@@ -1081,10 +1087,25 @@ pub fn try_extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Result<String, MxlDiagnostic> {
+    try_extract_moxel_spreadsheet_xml_with_generated_types(
+        bytes,
+        object_refs,
+        &NO_MOXEL_GENERATED_TYPES,
+    )
+}
+
+/// The same extraction with the configuration's generated-type index in hand,
+/// which is what a `{"#",<uuid>}` value type names.
+pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+) -> Result<String, MxlDiagnostic> {
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).map_err(|error| {
         MxlDiagnostic::decoder("mxl.decoder.binary-container", error.to_string())
     })?;
-    let decoded = decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, None)?;
+    let decoded =
+        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, generated_types, None)?;
     write_moxel_spreadsheet_xml(&decoded)
 }
 
@@ -1094,8 +1115,13 @@ pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
-    let decoded =
-        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, trace_sink).ok()?;
+    let decoded = decode_moxel_spreadsheet_ir(
+        body.native_body_text(),
+        object_refs,
+        &NO_MOXEL_GENERATED_TYPES,
+        trace_sink,
+    )
+    .ok()?;
     write_moxel_spreadsheet_xml(&decoded).ok()
 }
 
@@ -1107,8 +1133,13 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
     let body = crate::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
-    let decoded =
-        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, trace_sink).ok()?;
+    let decoded = decode_moxel_spreadsheet_ir(
+        body.native_body_text(),
+        object_refs,
+        &NO_MOXEL_GENERATED_TYPES,
+        trace_sink,
+    )
+    .ok()?;
     write_moxel_spreadsheet_xml(&decoded).ok()
 }
 
@@ -1118,10 +1149,16 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
 fn decode_moxel_spreadsheet_ir(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Result<DecodedMoxelSpreadsheet, MxlDiagnostic> {
-    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, trace_sink)
-        .ok_or_else(|| {
+    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(
+        text,
+        object_refs,
+        generated_types,
+        trace_sink,
+    )
+    .ok_or_else(|| {
         MxlDiagnostic::decoder(
             "mxl.decoder.canonical-ir",
             "native MOXCEL body could not be decoded into supported spreadsheet IR",
@@ -1181,12 +1218,13 @@ pub(super) fn parse_moxel_spreadsheet_text(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MoxelSpreadsheet> {
-    parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, None)
+    parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, &NO_MOXEL_GENERATED_TYPES, None)
 }
 
 fn parse_moxel_spreadsheet_text_with_line_trace(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<MoxelSpreadsheet> {
     let body = text.trim_start_matches('\u{feff}');
@@ -1773,7 +1811,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         leading_default_format,
         source_format_map,
         height,
-        value_types: parse_moxel_value_types(&fields, object_refs),
+        value_types: parse_moxel_value_types(&fields, generated_types),
         control_types: parse_moxel_control_types(&fields),
         mask_refs: parse_moxel_mask_refs(&fields),
     };
@@ -5090,7 +5128,7 @@ pub(super) enum MoxelValueType {
 /// letting some formats publish a type and others silently drop theirs.
 pub(super) fn parse_moxel_value_types(
     fields: &[&str],
-    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
 ) -> Vec<MoxelValueType> {
     for (start, count_field) in fields.iter().enumerate() {
         let Some(count) = parse_moxel_canonical_positive_count(count_field) else {
@@ -5110,7 +5148,7 @@ pub(super) fn parse_moxel_value_types(
         }
         return entries
             .iter()
-            .map(|entry| parse_moxel_value_type(entry, object_refs))
+            .map(|entry| parse_moxel_value_type(entry, generated_types))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
     }
@@ -5121,7 +5159,7 @@ const MAX_MOXEL_VALUE_TYPES: usize = 2048;
 
 pub(super) fn parse_moxel_value_type(
     text: &str,
-    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
 ) -> Option<MoxelValueType> {
     let fields = split_1c_braced_fields(text, 0)?;
     if unquote_moxel_string(fields.first()?)? != "Pattern" {
@@ -5176,7 +5214,7 @@ pub(super) fn parse_moxel_value_type(
         }
         "#" if payload.len() == 2 => {
             let uuid = parse_uuid_field(payload.get(1)?.trim())?;
-            Some(match moxel_config_type_ref(&uuid, object_refs) {
+            Some(match moxel_config_type_ref(&uuid, generated_types) {
                 Some(reference) => MoxelValueType::ConfigRef(reference),
                 None => MoxelValueType::TypeId(uuid),
             })
@@ -5195,9 +5233,8 @@ pub(super) fn parse_moxel_value_type(
 /// published as `<v8:TypeId>`. Only the object kind that corpus evidences is
 /// mapped; any other kind falls back to the identity form rather than guessing
 /// its reference suffix.
-fn moxel_config_type_ref(uuid: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
-    let name = object_refs.get(uuid)?.strip_prefix("Document.")?;
-    Some(format!("DocumentRef.{name}"))
+fn moxel_config_type_ref(uuid: &str, generated_types: &BTreeMap<String, String>) -> Option<String> {
+    generated_types.get(&uuid.to_ascii_lowercase()).cloned()
 }
 
 /// Fixed root trailer every MOXCEL body ends with: `0, 0, 1, 0, 0, 0`.
