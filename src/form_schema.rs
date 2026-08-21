@@ -4272,6 +4272,18 @@ impl FormConditionalGroupSchema {
             {
                 Some(Self { prefix_slot: 5 })
             }
+            // A decoration takes the very same prefix in the very same slot.
+            // UT 11.5.27.75 spells exactly one: a 37-member wrapper-`12`
+            // record -- the 36-member decoration layout plus the tuple
+            // `{0,{0,{"B",0},0}}` at slot 5, with the decoration discriminator
+            // behind it at slot 6 -- and the platform writes that item as a
+            // `LabelDecoration` carrying
+            // `<UserVisible><xr:Common>false</xr:Common></UserVisible>`.  It
+            // was dropped whole, subtree and all, because only wrapper `22`
+            // was ever admitted here.  The normalized record is re-checked by
+            // `FormDecorationHeaderSchema`, so this arm only has to name the
+            // one member the prefix adds.
+            ("12", 37, Some(false), Some("0" | "1")) => Some(Self { prefix_slot: 5 }),
             _ => None,
         }
     }

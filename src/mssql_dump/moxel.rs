@@ -58,6 +58,12 @@ pub(super) struct MoxelSpreadsheet {
     /// order. The column/pool split is position-only, so this is that same
     /// split run over `1..=n`; empty when there is no table to split.
     pub(super) internal_sources: Vec<usize>,
+    /// The published format pool as internal slots, in the order the platform
+    /// itself writes it: every stored reference in publication order, each
+    /// source-table entry taking the next position the first time it is named.
+    /// `None` where the document does not present a source table this order can
+    /// be built from, which leaves the pool on its previous path.
+    pub(super) first_use_pool: Option<Vec<usize>>,
     pub(super) print_area: Option<MoxelArea>,
     /// `groupsBackColor`, `groupsColor`, `headersBackColor`, `headersColor`, in
     /// publication order, each `None` where the document leaves the role at its
@@ -1436,7 +1442,51 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     if source_column_format_offset == 0 && column_formats.is_empty() && formats.is_empty() {
         restore_moxel_source_format_refs_without_format_table(&mut rows);
     }
-    if source_column_format_offset > 0 {
+    // The platform's own pool order, taken from the stored references. It only
+    // applies where the column/pool split is the source-reference split, so that
+    // a column's projected slot still lands inside the column half - a column
+    // pointing past it would make the renderer read the pool from the wrong
+    // half.
+    let source_first_use_order = moxel_internal_by_source(&internal_sources)
+        .filter(|internal_by_source| {
+            // The walk is the platform's own; a body this writer packed stores
+            // its references on a different convention and keeps its own path.
+            moxel_body_has_fixed_prefix(&fields)
+                && !column_formats.is_empty()
+                && column_sets.iter().all(|column_set| {
+                    std::iter::once(column_set.raw_default_format_index)
+                        .chain(column_set.columns.iter().map(|column| {
+                            column.source_format_index.unwrap_or(column.format_index)
+                        }))
+                        .all(|source_format_index| {
+                            source_format_index == 0
+                                || internal_by_source
+                                    .get(source_format_index)
+                                    .is_some_and(|internal| *internal <= column_formats.len())
+                        })
+                })
+        })
+        .and_then(|internal_by_source| {
+            moxel_first_use_source_order(
+                &column_sets,
+                &rows,
+                &drawings,
+                header_footer_slots.as_ref(),
+                internal_sources.len(),
+            )
+            .map(|(sources, default_format_position)| {
+                (internal_by_source, sources, default_format_position)
+            })
+        });
+    let mut drawings = drawings;
+    if let Some((internal_by_source, _, _)) = &source_first_use_order {
+        remap_moxel_sites_to_source_slots(
+            &mut column_sets,
+            &mut rows,
+            &mut drawings,
+            internal_by_source,
+        );
+    } else if source_column_format_offset > 0 {
         if sparse_source_format_refs {
             if let Some(source_format_map) = &source_format_map {
                 remap_moxel_column_set_source_format_indices(&mut column_sets, source_format_map);
@@ -1488,7 +1538,13 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         remap_moxel_row_and_cell_output_format_indices(&mut rows, &source_column_format_refs);
     }
     let extra_formats = BTreeMap::new();
-    let header_footer_format_index = if needs_sparse_column_set_default_format {
+    let header_footer_format_index = if let Some((internal_by_source, _, _)) =
+        &source_first_use_order
+    {
+        header_footer_format_ref
+            .and_then(|source_format_index| internal_by_source.get(source_format_index).copied())
+            .filter(|internal| *internal > 0)
+    } else if needs_sparse_column_set_default_format {
         resolve_sparse_moxel_column_set_default_format_index(
             &mut column_sets,
             column_formats.len(),
@@ -1654,6 +1710,50 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     {
         default_set.default_format_index = Some(shared_format_index);
     }
+    // The document's own default format takes its position in the same walk,
+    // between the drawings and the header/footer records. Where it materializes
+    // a slot of its own the pool grows by exactly that one entry; where the
+    // table already carries it the walk is the table's own length.
+    let first_use_pool = source_first_use_order.and_then(
+        |(internal_by_source, sources, default_format_position)| {
+            let mut ordered = sources
+                .iter()
+                .map(|source_format_index| {
+                    internal_by_source
+                        .get(*source_format_index)
+                        .copied()
+                        .unwrap_or(0)
+                })
+                .collect::<Vec<_>>();
+            if ordered.iter().any(|internal| *internal == 0) {
+                return None;
+            }
+            match default_format_index {
+                Some(index) if index > ordered.len() => {
+                    if index != ordered.len() + 1 {
+                        return None;
+                    }
+                    ordered.insert(default_format_position, index);
+                }
+                // A leading default format the table does not already carry is
+                // materialized by the renderer, which appends it; that is only
+                // the platform's position when nothing follows the walk.
+                None if default_format_position < ordered.len()
+                    && leading_default_format
+                        .as_ref()
+                        .is_some_and(|leading| !leading.is_empty())
+                    && !column_formats
+                        .iter()
+                        .chain(formats.iter())
+                        .any(|format| Some(format) == leading_default_format.as_ref()) =>
+                {
+                    return None;
+                }
+                _ => {}
+            }
+            Some(ordered)
+        },
+    );
     let mut spreadsheet = MoxelSpreadsheet {
         column_count,
         column_sets,
@@ -1672,6 +1772,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         named_items,
         areas,
         internal_sources,
+        first_use_pool,
         print_area,
         group_header_colors: parse_moxel_group_header_colors(&fields, &style_refs),
         print_settings,
@@ -7732,7 +7833,29 @@ fn render_moxel_spreadsheet_xml(
     // documents and 76 column-set references over 1810 column sets, and all
     // 172 name the *first* pool position holding their bytes - none names a
     // later duplicate and none points past the pool.
+    // Where the pool is the platform's own first-reference walk, a stored
+    // reference is answered by the position of the entry it actually names -
+    // the walk already put every entry where the platform puts it, and a
+    // duplicate body later in the table keeps its own position.
+    let source_first_use_position = |source_format_ref: usize| -> Option<usize> {
+        let ordered = spreadsheet
+            .first_use_pool
+            .as_ref()
+            .filter(|ordered| ordered.as_slice() == output_format_indices)?;
+        let internal = spreadsheet
+            .internal_sources
+            .iter()
+            .position(|source| *source == source_format_ref)
+            .map(|at| at + 1)?;
+        ordered
+            .iter()
+            .position(|slot| *slot == internal)
+            .map(|at| at + 1)
+    };
     let published_source_format = |source_format_ref: usize| -> Option<usize> {
+        if let Some(position) = source_first_use_position(source_format_ref) {
+            return Some(position);
+        }
         let format = source_format_ref
             .checked_sub(1)
             .and_then(|at| spreadsheet.source_formats.get(at))?;
@@ -8106,6 +8229,13 @@ pub(super) fn moxel_sparse_source_output_order(
 pub(super) fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec<usize> {
     let format_count = moxel_output_format_count(spreadsheet);
     if let Some(ordered) = spreadsheet
+        .first_use_pool
+        .as_ref()
+        .filter(|ordered| ordered.len() == format_count)
+    {
+        return ordered.clone();
+    }
+    if let Some(ordered) = spreadsheet
         .source_format_map
         .as_ref()
         .and_then(|source_format_map| source_format_map.output_internal_indices(format_count))
@@ -8362,6 +8492,181 @@ pub(super) fn remap_moxel_row_or_cell_source_format_index(
         .filter(|source_format_index| **source_format_index < source_slot)
         .count();
     source_slot + source_column_format_refs.len() - removed_before
+}
+
+/// The pool position the platform gives a stored format reference.
+///
+/// Evidence (native 1С:УТ 11.5.27.75, read straight from the stored MOXCEL
+/// bodies of all 683 spreadsheet templates): the published index of a stored
+/// reference is the position that reference takes when the document is walked
+/// in publication order - for every column set its own default reference and
+/// then its columns, then for every row the row's reference followed by each
+/// cell's and that cell's note's, then the drawings, then the document's own
+/// default format, then the six header/footer records in the order the body
+/// stores them - each source-table entry claiming the next pool position the
+/// first time it is named, and the entries nothing names filling the tail in
+/// table order.
+///
+/// Rebuilding every column, column-set default, row, cell, note and
+/// header/footer reference of the corpus this way - including whether a row
+/// publishes `<formatIndex>` at all - reproduces the platform in 670 of the 683
+/// documents with no counterexample. The other 13 publish a pool this reader
+/// cannot line up with a source table at all (its length is neither the table's
+/// nor the table's plus the materialized default) and are left on their
+/// previous path.
+///
+/// Returns the source-table positions in pool order together with the number of
+/// positions that precede the document's own default format.
+fn moxel_first_use_source_order(
+    column_sets: &[MoxelColumnSet],
+    rows: &[MoxelRow],
+    drawings: &[MoxelDrawing],
+    header_footer_slots: Option<&Vec<Option<MoxelHeaderFooter>>>,
+    table_len: usize,
+) -> Option<(Vec<usize>, usize)> {
+    /// Claims the next pool position for a stored reference. A stored `0` names
+    /// nothing; a reference past the table is not this reader's case.
+    fn push(
+        source_format_index: usize,
+        table_len: usize,
+        seen: &mut [bool],
+        ordered: &mut Vec<usize>,
+    ) -> bool {
+        if source_format_index == 0 {
+            return true;
+        }
+        if source_format_index > table_len {
+            return false;
+        }
+        if !seen[source_format_index] {
+            seen[source_format_index] = true;
+            ordered.push(source_format_index);
+        }
+        true
+    }
+
+    if table_len == 0 {
+        return None;
+    }
+    let mut seen = vec![false; table_len + 1];
+    let mut ordered = Vec::with_capacity(table_len);
+    for column_set in column_sets {
+        if !push(
+            column_set.raw_default_format_index,
+            table_len,
+            &mut seen,
+            &mut ordered,
+        ) {
+            return None;
+        }
+        for column in &column_set.columns {
+            let source_format_index = column.source_format_index.unwrap_or(column.format_index);
+            if !push(source_format_index, table_len, &mut seen, &mut ordered) {
+                return None;
+            }
+        }
+    }
+    // A row, cell or note keeps its stored reference offset by one, so that the
+    // stored zero - "this record names no format" - stays distinguishable.
+    for row in rows {
+        let source_format_index = row.source_format_index.unwrap_or(0).saturating_sub(1);
+        if !push(source_format_index, table_len, &mut seen, &mut ordered) {
+            return None;
+        }
+        for cell in &row.cells {
+            let source_format_index = cell.source_format_index.unwrap_or(0).saturating_sub(1);
+            if !push(source_format_index, table_len, &mut seen, &mut ordered) {
+                return None;
+            }
+            if let Some(note) = &cell.note
+                && !push(
+                    note.source_format_index.saturating_sub(1),
+                    table_len,
+                    &mut seen,
+                    &mut ordered,
+                )
+            {
+                return None;
+            }
+        }
+    }
+    for drawing in drawings {
+        if !push(drawing.format_index, table_len, &mut seen, &mut ordered) {
+            return None;
+        }
+    }
+    let default_format_position = ordered.len();
+    if let Some(slots) = header_footer_slots {
+        for publication_slot in MOXEL_HEADER_FOOTER_PUBLICATION_ORDER {
+            if let Some(Some(record)) = slots.get(publication_slot)
+                && !push(record.source_format_ref, table_len, &mut seen, &mut ordered)
+            {
+                return None;
+            }
+        }
+    }
+    for source_format_index in 1..=table_len {
+        push(source_format_index, table_len, &mut seen, &mut ordered);
+    }
+    (ordered.len() == table_len).then_some((ordered, default_format_position))
+}
+
+/// Source-table position -> internal slot: the inverse of `internal_sources`.
+///
+/// `None` where the split is not a bijection onto the table, which leaves the
+/// document on its previous path rather than half-projected.
+fn moxel_internal_by_source(internal_sources: &[usize]) -> Option<Vec<usize>> {
+    let table_len = internal_sources.len();
+    let mut inverse = vec![0usize; table_len + 1];
+    for (offset, source_format_index) in internal_sources.iter().enumerate() {
+        if *source_format_index == 0
+            || *source_format_index > table_len
+            || inverse[*source_format_index] != 0
+        {
+            return None;
+        }
+        inverse[*source_format_index] = offset + 1;
+    }
+    inverse
+        .iter()
+        .skip(1)
+        .all(|internal| *internal != 0)
+        .then_some(inverse)
+}
+
+/// Projects every stored reference onto the internal slot that carries it.
+fn remap_moxel_sites_to_source_slots(
+    column_sets: &mut [MoxelColumnSet],
+    rows: &mut [MoxelRow],
+    drawings: &mut [MoxelDrawing],
+    internal_by_source: &[usize],
+) {
+    let slot = |source_format_index: usize| {
+        internal_by_source
+            .get(source_format_index)
+            .copied()
+            .unwrap_or(0)
+    };
+    for column_set in column_sets.iter_mut() {
+        column_set.default_format_index = (column_set.raw_default_format_index > 0)
+            .then(|| slot(column_set.raw_default_format_index));
+        for column in column_set.columns.iter_mut() {
+            let source_format_index = column.source_format_index.unwrap_or(column.format_index);
+            column.format_index = slot(source_format_index);
+        }
+    }
+    for row in rows.iter_mut() {
+        row.format_index = slot(row.source_format_index.unwrap_or(0).saturating_sub(1));
+        for cell in row.cells.iter_mut() {
+            cell.format_index = slot(cell.source_format_index.unwrap_or(0).saturating_sub(1));
+            if let Some(note) = &mut cell.note {
+                note.format_index = slot(note.source_format_index.saturating_sub(1));
+            }
+        }
+    }
+    for drawing in drawings.iter_mut() {
+        drawing.format_index = slot(drawing.format_index);
+    }
 }
 
 pub(super) fn moxel_internal_format_index_for_source_index(
@@ -10741,6 +11046,7 @@ mod moxel_exact_parity_tests {
             named_items: Vec::new(),
             areas: Vec::new(),
             internal_sources: Vec::new(),
+            first_use_pool: None,
             print_area: None,
             group_header_colors: [None, None, None, None],
             print_settings: None,
