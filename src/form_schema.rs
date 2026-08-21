@@ -2336,6 +2336,18 @@ impl FormChildItemDisplayImportanceSchema {
                 0,
             ) if field_count >= 29 => field_count.checked_sub(1)?,
             ("12", 36, "LabelDecoration" | "PictureDecoration", 0) => 34,
+            // The three list additions keep the importance code in the last
+            // member of their own 24-member wrapper-`5` record, exactly as the
+            // wrapper-`22` containers do.  Across all 13 942 of them in UT
+            // 11.5.27.75 the slot reads `0` on every addition the platform
+            // gives no `DisplayImportance`, `1` on the one it marks
+            // `VeryHigh` and `5` on the two it marks `VeryLow`.
+            (
+                "5",
+                24,
+                "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition",
+                0,
+            ) => 23,
             ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => field_count.checked_sub(4)?,
             (
                 "37",
@@ -7454,6 +7466,7 @@ pub(crate) enum FormLabelFieldOptionSlot {
     MaxWidth,
     AutoMaxHeight,
     MaxHeight,
+    PasswordMode,
 }
 
 impl FormLabelFieldOptionSlot {
@@ -7479,6 +7492,12 @@ impl FormLabelFieldOptionSlot {
             Self::Hiperlink => 7,
             Self::TextColor => 8,
             Self::Font => 10,
+            // Of the 25 156 traced `LabelField` option tuples of UT
+            // 11.5.27.75, slot 11 reads `2` on the 25 154 that carry no
+            // `<PasswordMode>` and `0` on the one the platform writes
+            // `<PasswordMode>false</PasswordMode>` on.  No other code occurs,
+            // so the raised state stays unread rather than guessed.
+            Self::PasswordMode => 11,
             Self::AutoMaxWidth => 15,
             Self::MaxWidth => 16,
             Self::AutoMaxHeight => 18,

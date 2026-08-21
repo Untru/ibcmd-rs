@@ -10919,7 +10919,11 @@ fn parse_form_child_item_with_metadata_owners(
         show_percent: special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.show_percent(options)),
-        password_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        password_mode: if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.password_mode)
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_password_mode(input_field_extended_options.as_deref())
         } else {
             None
@@ -11643,6 +11647,7 @@ pub(super) struct FormLabelFieldOptions {
     pub(super) font_xml: Option<String>,
     pub(super) text_color: Option<String>,
     pub(super) mark_negatives: Option<bool>,
+    pub(super) password_mode: Option<bool>,
     pub(super) hyperlink_style: bool,
 }
 
@@ -11753,6 +11758,13 @@ pub(super) fn parse_form_label_field_options(
         text_color: options
             .get(LabelFieldSlot::TextColor.index())
             .and_then(|field| parse_form_label_field_text_color(field, object_refs)),
+        password_mode: match options
+            .get(LabelFieldSlot::PasswordMode.index())
+            .map(|field| field.trim())
+        {
+            Some("0") => Some(false),
+            _ => None,
+        },
         mark_negatives: parse_form_option_mark_negatives(
             &options,
             LabelFieldSlot::MarkNegatives.index(),
@@ -22765,7 +22777,9 @@ pub(super) fn format_form_child_item_xml(
     if item.mark_negatives == Some(true) {
         xml.push_str(&format!("{tab}\t<MarkNegatives>true</MarkNegatives>\r\n"));
     }
-    if let Some(password_mode) = item.password_mode {
+    if item.tag != "LabelField"
+        && let Some(password_mode) = item.password_mode
+    {
         xml.push_str(&format!(
             "{tab}\t<PasswordMode>{}</PasswordMode>\r\n",
             if password_mode { "true" } else { "false" }
@@ -23198,6 +23212,16 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "LabelField" {
         if item.hiperlink == Some(true) {
             xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
+        }
+        // The one native label that carries `PasswordMode` writes it directly
+        // behind `Hiperlink` and ahead of `TextColor`, inside this same tail;
+        // it shares no label with `Border`, `BorderColor`, `BackColor` or
+        // `Font`.
+        if let Some(password_mode) = item.password_mode {
+            xml.push_str(&format!(
+                "{tab}\t<PasswordMode>{}</PasswordMode>\r\n",
+                if password_mode { "true" } else { "false" }
+            ));
         }
         xml.push_str(&format_form_control_border_xml(item, indent + 1));
         if let Some(border_color) = &item.border_color {
