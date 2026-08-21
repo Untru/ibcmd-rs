@@ -27513,17 +27513,29 @@ fn normalizes_help_pages_to_lf_after_link_rewrite() {
     assert_eq!(rewritten, b"<p>one</p>\n<p>two</p>\n");
 }
 
+/// Fixture: `tests/fixtures/moxel_signature_stamp_raw.txt`, 2368 bytes, sha256
+/// `dd1b56edffc4af754d08d24c2266603ba55b1c6b9f6de9cc2b96ea9ed6fd59e5`. It is the
+/// complete native MOXCEL body of the `Штамп` template of catalog
+/// `СертификатыКлючейЭлектроннойПодписиИШифрования` in 1С:Управление торговлей
+/// 11.5.27.75 (`1cv8.cf`), as produced by this project's compatible-MXL
+/// decoder.
+///
+/// The body this test used to carry was a cut-down rewrite of that one - its
+/// columns record removed, its format table replaced with a shorter invented
+/// one and its style reference re-pointed at a uuid the document does not
+/// carry. Every number below is now the platform's own for the real body: the
+/// eleven rows, the seventeen pool entries, and `<defaultFormatIndex>17`.
 #[test]
 fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
     let object_refs = BTreeMap::from([(
-        "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
+        "802c7f0d-1a6d-4aaa-a8a3-3f1ea59b4fee".to_string(),
         "StyleItem.ЦветШтампаЭП".to_string(),
     )]);
     let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},3,{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},7,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{3221308845,1,1,1,2,139,6,2,2,0,0,0},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},1,{4,0,{0},\"\",-1,-1,1,0,\"\"}}",
-            &object_refs,
-        )
-        .unwrap();
+        include_str!("../../tests/fixtures/moxel_signature_stamp_raw.txt"),
+        &object_refs,
+    )
+    .unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert!(xml.contains("<size>3</size>"));
@@ -27536,39 +27548,36 @@ fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
     assert!(xml.contains("<f>5</f>"));
     assert!(xml.contains("<f>6</f>"));
     assert!(xml.contains("<f>5</f>\r\n\t\t\t\t\t<tl/>"));
-    assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
-    assert!(xml.contains("<parameter>ТекстШтампа</parameter>"));
-    assert!(!xml.contains("<v8:content>ТекстШтампа</v8:content>"));
+    assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
+    assert!(xml.contains("<parameter>ТекстОтметки</parameter>"));
+    assert!(!xml.contains("<v8:content>ТекстОтметки</v8:content>"));
     assert!(xml.contains("<templateMode>true</templateMode>"));
-    assert!(xml.contains("<defaultFormatIndex>9</defaultFormatIndex>"));
-    assert!(xml.contains("<height>7</height>"));
-    assert!(xml.contains("<vgRows>7</vgRows>"));
+    assert!(xml.contains("<defaultFormatIndex>17</defaultFormatIndex>"));
+    assert!(xml.contains("<height>11</height>"));
+    assert!(xml.contains("<vgRows>11</vgRows>"));
     assert_eq!(
         xml.matches("\t<format>\r\n").count() + xml.matches("\t<format/>\r\n").count(),
-        9
+        17
     );
-    assert_eq!(xml.matches("\t<format/>\r\n").count(), 1);
+    assert_eq!(xml.matches("\t<format/>\r\n").count(), 0);
     assert!(xml.contains("\t<format>\r\n\t\t<width>25</width>\r\n\t</format>"));
     assert!(xml.contains("\t<format>\r\n\t\t<width>85</width>\r\n\t</format>"));
     assert!(xml.contains("\t<format>\r\n\t\t<width>226</width>\r\n\t</format>"));
     assert!(xml.contains(
-            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<leftBorder>0</leftBorder>\r\n\t\t<topBorder>0</topBorder>\r\n\t\t<rightBorder>0</rightBorder>\r\n\t\t<height>45</height>\r\n\t\t<width>72</width>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t</format>"
-        ));
+        "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<leftBorder>0</leftBorder>\r\n\t\t<topBorder>0</topBorder>\r\n\t\t<rightBorder>0</rightBorder>\r\n\t\t<height>45</height>\r\n\t\t<width>72</width>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t</format>"
+    ));
     assert!(xml.contains(
-            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<rightBorder>1</rightBorder>\r\n\t\t<borderColor>style:ЦветШтампаЭП</borderColor>\r\n\t\t<width>219</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textColor>style:ЦветШтампаЭП</textColor>\r\n\t\t<protection>true</protection>\r\n\t</format>"
-        ));
+        "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<rightBorder>1</rightBorder>\r\n\t\t<borderColor>style:ЦветШтампаЭП</borderColor>\r\n\t\t<width>219</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textColor>style:ЦветШтампаЭП</textColor>\r\n\t\t<protection>true</protection>\r\n\t</format>"
+    ));
     assert!(xml.contains(
-            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>90</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t</format>"
-        ));
-    assert!(xml.contains(
-            "\t<format>\r\n\t\t<font>1</font>\r\n\t\t<topBorder>1</topBorder>\r\n\t\t<rightBorder>1</rightBorder>\r\n\t\t<borderColor>style:ЦветШтампаЭП</borderColor>\r\n\t\t<width>139</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textColor>style:ЦветШтампаЭП</textColor>\r\n\t\t<textPlacement>Block</textPlacement>\r\n\t\t<protection>true</protection>\r\n\t\t<indent>0</indent>\r\n\t\t<autoIndent>0</autoIndent>\r\n\t</format>"
-        ));
+        "\t<format>\r\n\t\t<font>1</font>\r\n\t\t<topBorder>1</topBorder>\r\n\t\t<rightBorder>1</rightBorder>\r\n\t\t<borderColor>style:ЦветШтампаЭП</borderColor>\r\n\t\t<width>139</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textColor>style:ЦветШтампаЭП</textColor>\r\n\t\t<textPlacement>Block</textPlacement>\r\n\t\t<protection>true</protection>\r\n\t\t<indent>0</indent>\r\n\t\t<autoIndent>0</autoIndent>\r\n\t</format>"
+    ));
     assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
     assert!(xml.contains("\t<picture>\r\n\t\t<index>0</index>\r\n\t\t<picture/>\r\n\t</picture>"));
     let default_format_index_pos = xml
-        .find("<defaultFormatIndex>9</defaultFormatIndex>")
+        .find("<defaultFormatIndex>17</defaultFormatIndex>")
         .unwrap();
-    let height_pos = xml.find("<height>7</height>").unwrap();
+    let height_pos = xml.find("<height>11</height>").unwrap();
     let merge_pos = xml.find("<merge>").unwrap();
     assert!(default_format_index_pos < merge_pos);
     assert!(height_pos < merge_pos);
@@ -27579,22 +27588,15 @@ fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
     assert!(xml.contains("<namedItem xsi:type=\"NamedItemCells\">"));
     assert!(xml.contains("<name>Штамп</name>"));
     assert!(xml.contains("<type>Rectangle</type>"));
-    assert!(xml.contains("<beginRow>1</beginRow>"));
-    assert!(xml.contains("<endRow>6</endRow>"));
-    assert!(xml.contains("<beginColumn>1</beginColumn>"));
-    assert!(xml.contains("<endColumn>2</endColumn>"));
     assert!(xml.contains(
-            "<line width=\"1\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">None</v8ui:style>\r\n\t</line>"
-        ));
+        "<line width=\"1\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">None</v8ui:style>\r\n\t</line>"
+    ));
     assert!(xml.contains(
-            "<line width=\"1\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">Solid</v8ui:style>\r\n\t</line>"
-        ));
+        "<font faceName=\"Arial\" height=\"6\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
+    ));
     assert!(xml.contains(
-            "<font faceName=\"Arial\" height=\"6\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
-        ));
-    assert!(xml.contains(
-            "<font faceName=\"Arial\" height=\"8\" bold=\"true\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
-        ));
+        "<font faceName=\"Arial\" height=\"8\" bold=\"true\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
+    ));
     let line_pos = xml.find("<line width=\"1\"").unwrap();
     let font_pos = xml.find("<font faceName=\"Arial\"").unwrap();
     let format_pos = xml.find("<format>").unwrap();
@@ -31852,24 +31854,40 @@ fn formats_moxel_prefers_leading_width_only_source_column_formats() {
     );
 }
 
+/// Fixture: `tests/fixtures/moxel_file_transfer_report_raw.txt`, 1159 bytes,
+/// sha256
+/// `5cc5db95436638be41bd6ddf85a05e6299876c26f3a3904576d0e07872ba3b46`. It is the
+/// complete native MOXCEL body of the `МакетОтчета` template of data processor
+/// `ПереносФайлов` in 1С:Управление торговлей 11.5.27.75 (`1cv8.cf`), as
+/// produced by this project's compatible-MXL decoder.
+///
+/// The body this test used to carry was that one with five spans cut out of it,
+/// among them the whole `{3,0,<nil>,3,0,5,1,6,2,7}` columns record - a body the
+/// platform never writes, and whose expected numbering could therefore only
+/// ever have been this reader's own. Every assertion below now holds against
+/// the platform's own bytes for the complete body: the `<formatIndex>5</...>`
+/// on the third row and the `<f>6</f>` on the cell carrying the detail
+/// parameter are the pool positions the platform itself publishes.
 #[test]
 fn formats_moxel_detail_parameters_and_row_format_offsets() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,3,0,0,3,0,{0,1},1,{0,1},2,{0,1},1,0,3,0,{16,1,{1,1,{\"ru\",\"Файл\"}},0},1,{16,1,{1,1,{\"ru\",\"Причина\"}},0},2,{16,1,{1,1,{\"ru\",\"Размещение\"}},0},2,2,3,0,{24,3,\"Версия\",{1,1,{\"\",\"Название\"}},0},1,{16,4,{1,1,{\"\",\"Ошибка\"}},0},2,{16,4,{1,1,{\"\",\"Размещение\"}},0},{2,\"Заголовок\",{1,{1,-1,1,-1,1,00000000-0000-0000-0000-000000000000},0},\"Строка\",{1,{1,-1,2,-1,2,00000000-0000-0000-0000-000000000000},0}},7,{1,0},{64,54},{67158528,0,3,1,1},{49664,0,3,1},{128,318},{128,363},{128,324},1,{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},2,{3,3,{-1}},{3,3,{-3}}}",
-            &BTreeMap::new(),
-        )
-        .unwrap();
+        include_str!("../../tests/fixtures/moxel_file_transfer_report_raw.txt"),
+        &BTreeMap::new(),
+    )
+    .unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert!(xml.contains("<index>2</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>5</formatIndex>"));
     assert!(xml.contains(
-            "<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>\r\n\t\t\t\t\t<detailParameter>Версия</detailParameter>"
-        ));
+        "<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>\r\n\t\t\t\t\t<detailParameter>Версия</detailParameter>"
+    ));
     assert!(xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t</format>"));
     assert!(xml.contains("\t<format>\r\n\t\t<height>54</height>\r\n\t</format>"));
     assert!(xml.contains(
-            "\t<format>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<fillType>Parameter</fillType>\r\n\t\t<hyperLink>true</hyperLink>\r\n\t</format>"
-        ));
+        "\t<format>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<fillType>Parameter</fillType>\r\n\t\t<hyperLink>true</hyperLink>\r\n\t</format>"
+    ));
+    assert!(xml.contains("\t<format>\r\n\t\t<width>318</width>\r\n\t</format>"));
+    assert!(xml.contains("<defaultFormatIndex>8</defaultFormatIndex>"));
     assert!(!xml.contains("<line width=\"1\""));
 }
 
@@ -33632,9 +33650,14 @@ fn moxel_value_and_control_types_come_from_their_document_tables() {
 /// rather than guessed.
 #[test]
 fn moxel_value_type_descriptors_decode_by_their_pattern() {
+    // The generated-type index, keyed by the `GeneratedType/TypeId` a `{"#"}`
+    // descriptor actually stores. The metadata-object index this test used to
+    // pass is keyed by the document's own uuid (`d45c60f7-...`) and can never
+    // answer such a descriptor, so the mapping it asserted never fired outside
+    // the test.
     let object_refs = BTreeMap::from([(
         "fcd1e4a9-753c-4260-96ee-6b847c186dc5".to_string(),
-        "Document.РаспределениеНДС".to_string(),
+        "DocumentRef.РаспределениеНДС".to_string(),
     )]);
 
     let cases = [
@@ -33654,6 +33677,10 @@ fn moxel_value_type_descriptors_decode_by_their_pattern() {
             "{\"Pattern\",{\"#\",48fa9d68-ae46-4d76-988a-88927f7a0ca6}}",
             "<v8:TypeId>48fa9d68-ae46-4d76-988a-88927f7a0ca6</v8:TypeId>",
         ),
+        // `Documents/ЛистКассовойКниги/Templates/ПФ_MXL_ЛистКассовойКниги` is
+        // the corpus's only descriptor with no payload, and it is the document
+        // that publishes `<valueType/>` - ten times, once per format naming it.
+        ("{\"Pattern\"}", "\t\t<valueType/>\r\n"),
     ];
     for (descriptor, expected) in cases {
         let value_type = parse_moxel_value_type(descriptor, &object_refs)
@@ -33670,7 +33697,6 @@ fn moxel_value_type_descriptors_decode_by_their_pattern() {
         "{\"Pattern\",{\"S\",3,2}}",
         "{\"Pattern\",{\"X\"}}",
         "{\"Pattern\",{\"S\",3}}",
-        "{\"Pattern\"}",
     ] {
         assert!(
             parse_moxel_value_type(descriptor, &object_refs).is_none(),

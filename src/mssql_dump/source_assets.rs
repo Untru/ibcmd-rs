@@ -1817,8 +1817,12 @@ pub(super) fn write_source_asset(
             )?;
         }
         SourceAssetKind::MoxelSpreadsheet => {
-            let xml =
-                extract_moxel_source_asset_xml(bytes, context.object_refs, &asset.primary_path)?;
+            let xml = extract_moxel_source_asset_xml(
+                bytes,
+                context.object_refs,
+                context.moxel_generated_types,
+                &asset.primary_path,
+            )?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1844,14 +1848,16 @@ pub(super) fn write_source_asset(
 fn extract_moxel_source_asset_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
     source_path: &Path,
 ) -> Result<String> {
-    try_extract_moxel_spreadsheet_xml(bytes, object_refs).with_context(|| {
-        format!(
-            "failed to extract spreadsheet template from source asset {}",
-            source_path.display()
-        )
-    })
+    try_extract_moxel_spreadsheet_xml_with_generated_types(bytes, object_refs, generated_types)
+        .with_context(|| {
+            format!(
+                "failed to extract spreadsheet template from source asset {}",
+                source_path.display()
+            )
+        })
 }
 
 #[cfg(test)]
@@ -1862,6 +1868,7 @@ mod mxl_source_asset_tests {
     fn typed_mxl_diagnostic_survives_source_asset_context() {
         let error = extract_moxel_source_asset_xml(
             &[0],
+            &BTreeMap::new(),
             &BTreeMap::new(),
             Path::new("Templates/Example/Ext/Template.xml"),
         )

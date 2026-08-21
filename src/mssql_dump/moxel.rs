@@ -772,15 +772,19 @@ pub(super) struct MoxelChart {
     real_points: Vec<MoxelChartPoint>,
     cur_series: usize,
     cur_point: usize,
+    chart_type: &'static str,
     labels_location: &'static str,
     title: Vec<MoxelLocalizedValue>,
     values_scale_format: Vec<MoxelLocalizedValue>,
     is_auto_series_name: bool,
     max_series: usize,
+    base_val: usize,
     is_outline: bool,
     rebuild_time: usize,
     gauge_bands: Vec<MoxelChartGaugeBand>,
+    auto_max_value: bool,
     user_max_value: String,
+    auto_min_value: bool,
     user_min_value: String,
     real_data_items: Vec<MoxelChartDataItem>,
     spline_strain: usize,
@@ -845,8 +849,11 @@ pub(super) struct MoxelChartRectangle {
 
 #[derive(Default)]
 pub(super) struct MoxelChartAxis {
+    base_value: Option<String>,
     min_value: Option<String>,
     max_value: Option<String>,
+    min_detection: bool,
+    max_detection: bool,
 }
 
 pub(super) struct MoxelPicture {
@@ -1066,6 +1073,12 @@ pub(super) fn resolve_existing_moxel_default_format_index(
         .or_else(|| last_exact_match(&target_exact).map(|index| (index, false)))
 }
 
+/// The stand-in for callers that carry no generated-type index: an empty one
+/// leaves every `{"#",<uuid>}` value type on its identity form, which is what
+/// those callers published before the index existed.
+static NO_MOXEL_GENERATED_TYPES: std::sync::LazyLock<BTreeMap<String, String>> =
+    std::sync::LazyLock::new(BTreeMap::new);
+
 pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
@@ -1081,10 +1094,25 @@ pub fn try_extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Result<String, MxlDiagnostic> {
+    try_extract_moxel_spreadsheet_xml_with_generated_types(
+        bytes,
+        object_refs,
+        &NO_MOXEL_GENERATED_TYPES,
+    )
+}
+
+/// The same extraction with the configuration's generated-type index in hand,
+/// which is what a `{"#",<uuid>}` value type names.
+pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+) -> Result<String, MxlDiagnostic> {
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).map_err(|error| {
         MxlDiagnostic::decoder("mxl.decoder.binary-container", error.to_string())
     })?;
-    let decoded = decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, None)?;
+    let decoded =
+        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, generated_types, None)?;
     write_moxel_spreadsheet_xml(&decoded)
 }
 
@@ -1094,8 +1122,13 @@ pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
-    let decoded =
-        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, trace_sink).ok()?;
+    let decoded = decode_moxel_spreadsheet_ir(
+        body.native_body_text(),
+        object_refs,
+        &NO_MOXEL_GENERATED_TYPES,
+        trace_sink,
+    )
+    .ok()?;
     write_moxel_spreadsheet_xml(&decoded).ok()
 }
 
@@ -1107,8 +1140,13 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
     let body = crate::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
-    let decoded =
-        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, trace_sink).ok()?;
+    let decoded = decode_moxel_spreadsheet_ir(
+        body.native_body_text(),
+        object_refs,
+        &NO_MOXEL_GENERATED_TYPES,
+        trace_sink,
+    )
+    .ok()?;
     write_moxel_spreadsheet_xml(&decoded).ok()
 }
 
@@ -1118,10 +1156,16 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
 fn decode_moxel_spreadsheet_ir(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Result<DecodedMoxelSpreadsheet, MxlDiagnostic> {
-    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, trace_sink)
-        .ok_or_else(|| {
+    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(
+        text,
+        object_refs,
+        generated_types,
+        trace_sink,
+    )
+    .ok_or_else(|| {
         MxlDiagnostic::decoder(
             "mxl.decoder.canonical-ir",
             "native MOXCEL body could not be decoded into supported spreadsheet IR",
@@ -1181,12 +1225,13 @@ pub(super) fn parse_moxel_spreadsheet_text(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MoxelSpreadsheet> {
-    parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, None)
+    parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, &NO_MOXEL_GENERATED_TYPES, None)
 }
 
 fn parse_moxel_spreadsheet_text_with_line_trace(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<MoxelSpreadsheet> {
     let body = text.trim_start_matches('\u{feff}');
@@ -1442,30 +1487,12 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     if source_column_format_offset == 0 && column_formats.is_empty() && formats.is_empty() {
         restore_moxel_source_format_refs_without_format_table(&mut rows);
     }
-    // The platform's own pool order, taken from the stored references. It only
-    // applies where the column/pool split is the source-reference split, so that
-    // a column's projected slot still lands inside the column half - a column
-    // pointing past it would make the renderer read the pool from the wrong
-    // half.
+    // The platform's own pool order, taken from the stored references. The walk
+    // is the platform's own, so it only applies to a body that carries the
+    // platform's fixed header/footer prefix: a body this writer packed stores
+    // its references on a different convention and keeps its own path.
     let source_first_use_order = moxel_internal_by_source(&internal_sources)
-        .filter(|internal_by_source| {
-            // The walk is the platform's own; a body this writer packed stores
-            // its references on a different convention and keeps its own path.
-            moxel_body_has_fixed_prefix(&fields)
-                && !column_formats.is_empty()
-                && column_sets.iter().all(|column_set| {
-                    std::iter::once(column_set.raw_default_format_index)
-                        .chain(column_set.columns.iter().map(|column| {
-                            column.source_format_index.unwrap_or(column.format_index)
-                        }))
-                        .all(|source_format_index| {
-                            source_format_index == 0
-                                || internal_by_source
-                                    .get(source_format_index)
-                                    .is_some_and(|internal| *internal <= column_formats.len())
-                        })
-                })
-        })
+        .filter(|_| moxel_body_has_fixed_prefix(&fields) && !column_formats.is_empty())
         .and_then(|internal_by_source| {
             moxel_first_use_source_order(
                 &column_sets,
@@ -1791,7 +1818,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         leading_default_format,
         source_format_map,
         height,
-        value_types: parse_moxel_value_types(&fields, object_refs),
+        value_types: parse_moxel_value_types(&fields, generated_types),
         control_types: parse_moxel_control_types(&fields),
         mask_refs: parse_moxel_mask_refs(&fields),
     };
@@ -4348,6 +4375,26 @@ const MAX_MOXEL_CHART_LOCALIZED_VALUES: usize = 64;
 const MAX_MOXEL_CHART_DECIMAL_BYTES: usize = 4096;
 const MAX_MOXEL_CHART_DECIMAL_EXPONENT: u64 = 4096;
 
+/// The stored chart-kind code.
+///
+/// Evidence (native 1С:УТ 11.5.27.75): the 13 stored `Chart` drawings spell
+/// three codes and the platform publishes exactly three kinds beside them -
+/// `0` for the 6 `Line` charts of `ПроверкаКонтрагента/ФинансовыйАнализ`, `38`
+/// for the 6 `Gauge` charts of `ДосьеКонтрагента/ФинансовыйАнализ` and `9` for
+/// the one `StackedBar` of
+/// `СравнительныйАнализПоказателейРаботыМенеджеров/СравнительныйАнализМенеджеров`.
+/// A code the corpus does not spell is not this reader's case and refuses the
+/// chart rather than being named on a guess - which is what writing `Line`
+/// unconditionally amounted to.
+fn moxel_chart_type(code: &str) -> Option<&'static str> {
+    match code.trim() {
+        "0" => Some("Line"),
+        "9" => Some("StackedBar"),
+        "38" => Some("Gauge"),
+        _ => None,
+    }
+}
+
 fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     if text.len() > MAX_MOXEL_CHART_BYTES {
         return None;
@@ -4403,6 +4450,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     validate_moxel_chart_v74_front(tail)?;
     let cur_series = parse_moxel_chart_usize(tail.first()?)?;
     let cur_point = parse_moxel_chart_usize(tail.get(1)?)?;
+    let chart_type = moxel_chart_type(tail.get(2)?)?;
     let labels_location = match tail.get(5)?.trim() {
         "0" => "Edge",
         "4" => "Auto",
@@ -4412,9 +4460,12 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
     let max_series = parse_moxel_chart_usize(tail.get(46)?)?;
+    let base_val = parse_moxel_chart_usize(tail.get(49)?)?;
     let is_outline = parse_moxel_chart_bool(tail.get(50)?)?;
     let gauge_bands = parse_moxel_chart_gauge_bands(tail.get(69)?)?;
+    let auto_max_value = parse_moxel_chart_bool(tail.get(77)?)?;
     let user_max_value = normalize_moxel_chart_decimal(tail.get(78)?)?;
+    let auto_min_value = parse_moxel_chart_bool(tail.get(79)?)?;
     let user_min_value = normalize_moxel_chart_decimal(tail.get(80)?)?;
 
     let mut real_data_items = Vec::with_capacity(real_data_count);
@@ -4458,15 +4509,19 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         real_points,
         cur_series,
         cur_point,
+        chart_type,
         labels_location,
         title,
         values_scale_format,
         is_auto_series_name,
         max_series,
+        base_val,
         is_outline,
         rebuild_time,
         gauge_bands,
+        auto_max_value,
         user_max_value,
+        auto_min_value,
         user_min_value,
         real_data_items,
         spline_strain,
@@ -4660,12 +4715,7 @@ fn parse_moxel_chart_data_item(
 
 fn parse_moxel_chart_axis(text: &str) -> Option<MoxelChartAxis> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 5
-        || fields.first()?.trim() != "0"
-        || fields.get(1)?.trim() != "0"
-        || fields.get(3)?.trim() != "0"
-        || fields.get(4)?.trim() != "0"
-    {
+    if fields.len() != 5 || fields.first()?.trim() != "0" {
         return None;
     }
     let range = split_1c_braced_fields(fields.get(2)?, 0)?;
@@ -4676,12 +4726,31 @@ fn parse_moxel_chart_axis(text: &str) -> Option<MoxelChartAxis> {
     {
         return None;
     }
+    let base = normalize_moxel_chart_decimal(fields.get(1)?)?;
     let min = normalize_moxel_chart_decimal(range.get(2)?)?;
     let max = normalize_moxel_chart_decimal(range.get(4)?)?;
     Some(MoxelChartAxis {
+        base_value: (base != "0").then_some(base),
         min_value: (min != "0").then_some(min),
         max_value: (max != "0").then_some(max),
+        // The two limit-detection flags. Only `0` and `2` are stored, and the
+        // element appears for exactly the axes that store `2`: over the 26
+        // axis records of the corpus's 13 charts, the 6 that store `2` in the
+        // maximum's slot are the 6 publishing `maxValueDetectionMethod` and the
+        // 5 that store `2` in the minimum's are the 5 publishing
+        // `minValueDetectionMethod`, all in ДосьеКонтрагента/ФинансовыйАнализ.
+        // A third value is not this reader's case.
+        max_detection: moxel_chart_axis_detection(fields.get(3)?)?,
+        min_detection: moxel_chart_axis_detection(fields.get(4)?)?,
     })
+}
+
+fn moxel_chart_axis_detection(text: &str) -> Option<bool> {
+    match text.trim() {
+        "0" => Some(false),
+        "2" => Some(true),
+        _ => None,
+    }
 }
 
 fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
@@ -4698,7 +4767,6 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
 
 fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
     let expected = [
-        (2, "0"),
         (3, "0"),
         (4, "\", \""),
         (6, "{1,0}"),
@@ -4740,7 +4808,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (45, "0"),
         (47, "30"),
         (48, "1"),
-        (49, "0"),
         (51, "0"),
         (52, "0"),
         (53, "1"),
@@ -4766,8 +4833,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (74, "0"),
         (75, "5"),
         (76, "{3,0,{11119017}}"),
-        (77, "1"),
-        (79, "1"),
         (81, "1"),
         (82, "0"),
         (83, "0"),
@@ -5087,6 +5152,9 @@ pub(super) enum MoxelValueType {
     ConfigRef(String),
     /// A type the configuration does not name: published by identity.
     TypeId(String),
+    /// A `Pattern` that carries no descriptor at all, published as the empty
+    /// `<valueType/>`.
+    Empty,
 }
 
 /// Decodes the document's value-type table.
@@ -5096,16 +5164,16 @@ pub(super) enum MoxelValueType {
 /// Evidence (native 1С:УТ 11.5.27.75, all 683 MOXCEL spreadsheet templates):
 /// 53 documents carry the table and the descriptors collapse onto 36 distinct
 /// shapes. Rendering every one of them through the rules below and comparing
-/// against the published `<valueType>` blocks reproduces 52 of the 53 documents
-/// exactly (the 53rd publishes none), with the qualifier defaults confirmed by
-/// the bare forms: `{"S"}` is `Length 0`/`Variable` and `{"N"}` is
-/// `Digits 0`/`FractionDigits 0`/`Any`.
+/// against the published `<valueType>` blocks reproduces all 53 documents
+/// exactly, with the qualifier defaults confirmed by the bare forms: `{"S"}` is
+/// `Length 0`/`Variable`, `{"N"}` is `Digits 0`/`FractionDigits 0`/`Any`, and a
+/// `Pattern` with no descriptor at all is the empty `<valueType/>`.
 ///
 /// A descriptor outside these shapes refuses the whole table rather than
 /// letting some formats publish a type and others silently drop theirs.
 pub(super) fn parse_moxel_value_types(
     fields: &[&str],
-    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
 ) -> Vec<MoxelValueType> {
     for (start, count_field) in fields.iter().enumerate() {
         let Some(count) = parse_moxel_canonical_positive_count(count_field) else {
@@ -5125,7 +5193,7 @@ pub(super) fn parse_moxel_value_types(
         }
         return entries
             .iter()
-            .map(|entry| parse_moxel_value_type(entry, object_refs))
+            .map(|entry| parse_moxel_value_type(entry, generated_types))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
     }
@@ -5136,10 +5204,22 @@ const MAX_MOXEL_VALUE_TYPES: usize = 2048;
 
 pub(super) fn parse_moxel_value_type(
     text: &str,
-    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
 ) -> Option<MoxelValueType> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if unquote_moxel_string(fields.first()?)? != "Pattern" || fields.len() != 2 {
+    if unquote_moxel_string(fields.first()?)? != "Pattern" {
+        return None;
+    }
+    // A `Pattern` with no descriptor is the empty type, not a broken entry.
+    // `Documents/ЛистКассовойКниги/Templates/ПФ_MXL_ЛистКассовойКниги` is the
+    // only document in the corpus whose table carries this shape - a table of
+    // exactly one entry - and it is the document that publishes `<valueType/>`,
+    // once for each of the ten formats that name the entry. Refusing it took
+    // the whole table down with it and dropped all ten lines.
+    if fields.len() == 1 {
+        return Some(MoxelValueType::Empty);
+    }
+    if fields.len() != 2 {
         return None;
     }
     let payload = split_1c_braced_fields(fields.get(1)?, 0)?;
@@ -5179,7 +5259,7 @@ pub(super) fn parse_moxel_value_type(
         }
         "#" if payload.len() == 2 => {
             let uuid = parse_uuid_field(payload.get(1)?.trim())?;
-            Some(match moxel_config_type_ref(&uuid, object_refs) {
+            Some(match moxel_config_type_ref(&uuid, generated_types) {
                 Some(reference) => MoxelValueType::ConfigRef(reference),
                 None => MoxelValueType::TypeId(uuid),
             })
@@ -5198,9 +5278,8 @@ pub(super) fn parse_moxel_value_type(
 /// published as `<v8:TypeId>`. Only the object kind that corpus evidences is
 /// mapped; any other kind falls back to the identity form rather than guessing
 /// its reference suffix.
-fn moxel_config_type_ref(uuid: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
-    let name = object_refs.get(uuid)?.strip_prefix("Document.")?;
-    Some(format!("DocumentRef.{name}"))
+fn moxel_config_type_ref(uuid: &str, generated_types: &BTreeMap<String, String>) -> Option<String> {
+    generated_types.get(&uuid.to_ascii_lowercase()).cloned()
 }
 
 /// Fixed root trailer every MOXCEL body ends with: `0, 0, 1, 0, 0, 0`.
@@ -5382,20 +5461,15 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
             _ => return None,
         }
     }
-    // The two extended keys come as a pair, on top of a record that carries
-    // every other key. The printer name (key 14) is the one that can be
-    // absent: one document stores the nineteen keys without it, and demanding
-    // a count of exactly twenty refused the whole record - the twenty-one
-    // published lines that are its entire difference from the platform. The
-    // record's own arity is already checked against its declared count above.
-    let has_extended_keys = seen_keys.contains(&19) || seen_keys.contains(&20);
-    if has_extended_keys
-        && (!seen_keys.contains(&19)
-            || !seen_keys.contains(&20)
-            || !(0..=17).all(|key| key == 14 || seen_keys.contains(&key)))
-    {
-        return None;
-    }
+    // The record's key set is the published member set, with nothing else
+    // deciding either side. Across the 683 stored records in the corpus the
+    // two sets are equal in every document and for all eleven distinct key
+    // sets that occur - including the two documents that store keys 19 and 20
+    // over a *partial* base (1, 2, 5, margins, 14), which a demand for the
+    // whole of 0..=17 behind the extended pair refused outright. That demand
+    // said "inadmissible" where the evidence only ever said "a shorter key
+    // set", so it is gone: the declared count, the key domain and the
+    // duplicate check above are the record's whole shape.
     Some(settings)
 }
 
@@ -9517,6 +9591,10 @@ fn push_moxel_format_body_xml(
 }
 
 pub(super) fn push_moxel_value_type_xml(xml: &mut String, value_type: &MoxelValueType) {
+    if matches!(value_type, MoxelValueType::Empty) {
+        xml.push_str("\t\t<valueType/>\r\n");
+        return;
+    }
     xml.push_str("\t\t<valueType>\r\n");
     match value_type {
         MoxelValueType::Boolean => xml.push_str("\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n"),
@@ -9556,6 +9634,8 @@ pub(super) fn push_moxel_value_type_xml(xml: &mut String, value_type: &MoxelValu
         MoxelValueType::TypeId(uuid) => {
             xml.push_str(&format!("\t\t\t<v8:TypeId>{uuid}</v8:TypeId>\r\n"))
         }
+        // Handled above, before the opening tag is written.
+        MoxelValueType::Empty => unreachable!(),
     }
     xml.push_str("\t\t</valueType>\r\n");
 }
@@ -9593,13 +9673,21 @@ pub(super) fn moxel_format_for_index(
     spreadsheet: &MoxelSpreadsheet,
     format_index: usize,
 ) -> MoxelFormat {
-    let column_format_slots = spreadsheet
-        .column_formats
-        .len()
-        .max(moxel_column_format_slots(
-            &spreadsheet.column_sets,
-            spreadsheet.column_count,
-        ));
+    // Where the pool is the platform's own first-reference walk every site
+    // already carries an internal slot, so the split's own length is the
+    // boundary between the two halves. Re-deriving it from the column
+    // references would read a remapped slot as a slot count.
+    let column_format_slots = if spreadsheet.first_use_pool.is_some() {
+        spreadsheet.column_formats.len()
+    } else {
+        spreadsheet
+            .column_formats
+            .len()
+            .max(moxel_column_format_slots(
+                &spreadsheet.column_sets,
+                spreadsheet.column_count,
+            ))
+    };
     if let Some(format) = spreadsheet
         .column_formats
         .get(format_index.saturating_sub(1))
@@ -9853,7 +9941,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     }
     push_moxel_chart_text(xml, "curSeries", chart.cur_series);
     push_moxel_chart_text(xml, "curPoint", chart.cur_point);
-    push_moxel_chart_literal(xml, "chartType", "Line");
+    push_moxel_chart_literal(xml, "chartType", chart.chart_type);
     push_moxel_chart_literal(xml, "circleLabelType", "None");
     push_moxel_chart_literal(xml, "labelsDelimiter", ", ");
     push_moxel_chart_literal(xml, "labelsLocation", chart.labels_location);
@@ -9905,7 +9993,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_text(xml, "maxSeries", chart.max_series);
     push_moxel_chart_text(xml, "maxSeriesPrc", 30);
     push_moxel_chart_literal(xml, "spaceMode", "Half");
-    push_moxel_chart_text(xml, "baseVal", 0);
+    push_moxel_chart_text(xml, "baseVal", chart.base_val);
     push_moxel_chart_bool(xml, "isOutline", chart.is_outline);
     push_moxel_chart_text(xml, "realPiePoint", 0);
     push_moxel_chart_text(xml, "realStockSeries", 0);
@@ -9936,9 +10024,9 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_bool(xml, "gaugeLabelsArcDirection", false);
     push_moxel_chart_text(xml, "gaugeBushThickness", 5);
     push_moxel_chart_literal(xml, "gaugeBushColor", "#A9A9A9");
-    push_moxel_chart_bool(xml, "autoMaxValue", true);
+    push_moxel_chart_bool(xml, "autoMaxValue", chart.auto_max_value);
     push_moxel_chart_literal(xml, "userMaxValue", &chart.user_max_value);
-    push_moxel_chart_bool(xml, "autoMinValue", true);
+    push_moxel_chart_bool(xml, "autoMinValue", chart.auto_min_value);
     push_moxel_chart_literal(xml, "userMinValue", &chart.user_min_value);
     push_moxel_chart_bool(xml, "elementsIsInit", true);
     push_moxel_chart_bool(xml, "titleIsInit", true);
@@ -9992,13 +10080,51 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     xml.push_str("\t\t</object>\r\n");
 }
 
+/// The name the platform writes for a series whose own name the user never
+/// changed.
+///
+/// A series record stores its name beside a `strIsChanged` flag, and the stored
+/// name is a cache of the automatic one until that flag is set. Where the flag
+/// is clear the platform does not publish the cache: it publishes the automatic
+/// name, and the corpus spells it `Pivot` in every one of the 15 series blocks
+/// it contains - `ПроверкаКонтрагента/ФинансовыйАнализ` (6),
+/// `ДосьеКонтрагента/ФинансовыйАнализ` (6),
+/// `АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий`,
+/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта` and
+/// `СравнительныйАнализПоказателейРаботыМенеджеров` - across two drawing kinds,
+/// `Chart` and `GanttChart`, while all 15 store `Сводная`. Derived from the
+/// first document and confirmed on the other four, which the derivation never
+/// saw. The item's own language is the stored one; only the content is the
+/// platform's.
+///
+/// No series in the corpus carries the flag set, so that branch is left
+/// publishing the stored name - what this writer already did - rather than
+/// being given a rule nothing evidences.
+const MOXEL_CHART_AUTOMATIC_SERIES_NAME: &str = "Pivot";
+
+fn push_moxel_chart_series_text_xml(xml: &mut String, series: &MoxelChartSeries) {
+    if series.str_is_changed {
+        push_moxel_chart_localized_xml(xml, "text", &series.text, 4);
+        return;
+    }
+    let automatic = series
+        .text
+        .iter()
+        .map(|value| MoxelLocalizedValue {
+            lang: value.lang.clone(),
+            content: MOXEL_CHART_AUTOMATIC_SERIES_NAME.to_string(),
+        })
+        .collect::<Vec<_>>();
+    push_moxel_chart_localized_xml(xml, "text", &automatic, 4);
+}
+
 fn push_moxel_chart_series_xml(xml: &mut String, tag: &str, series: &MoxelChartSeries) {
     xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
     push_moxel_chart_text_indented(xml, "id", series.id, 4);
     push_moxel_chart_literal_indented(xml, "color", &series.color, 4);
     push_moxel_chart_line_xml(xml, "line", &series.line, 4);
     push_moxel_chart_literal_indented(xml, "marker", series.marker, 4);
-    push_moxel_chart_localized_xml(xml, "text", &series.text, 4);
+    push_moxel_chart_series_text_xml(xml, series);
     push_moxel_chart_bool_indented(xml, "strIsChanged", series.str_is_changed, 4);
     push_moxel_chart_bool_indented(xml, "isExpand", series.is_expand, 4);
     push_moxel_chart_bool_indented(xml, "isIndicator", series.is_indicator, 4);
@@ -10147,11 +10273,22 @@ fn push_moxel_chart_rectangle_xml(xml: &mut String, tag: &str, rect: &MoxelChart
 }
 
 fn push_moxel_chart_axis_xml(xml: &mut String, tag: &str, axis: &MoxelChartAxis) {
-    if axis.min_value.is_none() && axis.max_value.is_none() {
+    if axis.base_value.is_none()
+        && axis.min_value.is_none()
+        && axis.max_value.is_none()
+        && !axis.min_detection
+        && !axis.max_detection
+    {
         push_moxel_chart_empty(xml, tag);
         return;
     }
     xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
+    if let Some(value) = &axis.base_value {
+        xml.push_str(&format!(
+            "\t\t\t\t<d3p1:baseValue>{}</d3p1:baseValue>\r\n",
+            escape_xml_element_text(value)
+        ));
+    }
     if let Some(value) = &axis.min_value {
         xml.push_str(&format!(
             "\t\t\t\t<d3p1:minValue xsi:type=\"xs:decimal\">{}</d3p1:minValue>\r\n",
@@ -10163,6 +10300,18 @@ fn push_moxel_chart_axis_xml(xml: &mut String, tag: &str, axis: &MoxelChartAxis)
             "\t\t\t\t<d3p1:maxValue xsi:type=\"xs:decimal\">{}</d3p1:maxValue>\r\n",
             escape_xml_element_text(value)
         ));
+    }
+    if axis.min_detection {
+        xml.push_str(
+            "\t\t\t\t<d3p1:minValueDetectionMethod>UseValueWithLimitations\
+             </d3p1:minValueDetectionMethod>\r\n",
+        );
+    }
+    if axis.max_detection {
+        xml.push_str(
+            "\t\t\t\t<d3p1:maxValueDetectionMethod>UseValueWithLimitations\
+             </d3p1:maxValueDetectionMethod>\r\n",
+        );
     }
     xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
 }
