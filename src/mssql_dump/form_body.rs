@@ -806,6 +806,8 @@ pub(super) struct FormAttribute {
     pub(super) explicit_empty_type: bool,
     pub(super) columns: Vec<FormAttributeColumn>,
     pub(super) additional_columns: Vec<FormAttributeAdditionalColumns>,
+    pub(super) view_rights: Option<FormRightsSetting>,
+    pub(super) edit_rights: Option<FormRightsSetting>,
     pub(super) main_attribute: bool,
     pub(super) saved_data: bool,
     pub(super) fill_check: Option<&'static str>,
@@ -851,6 +853,8 @@ pub(super) struct FormAttributeColumn {
     pub(super) title: Vec<(String, String)>,
     pub(super) value_types: Vec<ConstantValueType>,
     pub(super) explicit_empty_type: bool,
+    pub(super) view_rights: Option<FormRightsSetting>,
+    pub(super) edit_rights: Option<FormRightsSetting>,
     pub(super) functional_options: Vec<String>,
     pub(super) fill_check: Option<&'static str>,
 }
@@ -1060,6 +1064,7 @@ pub(super) struct FormCommand {
     pub(super) picture_ref: Option<String>,
     pub(super) picture_load_transparent: bool,
     pub(super) shortcut: Option<String>,
+    pub(super) use_rights: Option<FormRightsSetting>,
     pub(super) action: String,
     pub(super) representation: Option<&'static str>,
     pub(super) functional_options: Vec<String>,
@@ -3390,6 +3395,25 @@ fn parse_form_attribute_with_dcs_type_index(
         .is_some_and(|value_types| value_types.is_empty());
     let value_types = parsed_value_types.unwrap_or_default();
     let columns = parse_form_attribute_columns(&fields, type_index, object_refs);
+    // Slots 6 and 7 are the attribute's `<View>` and `<Edit>` permissions, in
+    // the same tuple the command-interface visibility uses.  Both were read by
+    // nobody, so the platform's blocks were simply never written.
+    //
+    // Evidence: UT 11.5.27.75, equality of sets over every attribute record the
+    // export walks against every rights block the platform writes under
+    // `Attributes/Attribute` anywhere in the configuration.  Slot 6 departs
+    // from the default tuple on exactly 16 records and the native tree carries
+    // exactly 16 `<View>` blocks, on those same attributes; slot 7 departs on
+    // exactly 18 and there are exactly 18 `<Edit>` blocks, again the same ones.
+    // Neither side has a member the other lacks.
+    let view_rights = fields
+        .get(6)
+        .and_then(|field| parse_form_rights_setting(field, object_refs))
+        .flatten();
+    let edit_rights = fields
+        .get(7)
+        .and_then(|field| parse_form_rights_setting(field, object_refs))
+        .flatten();
     let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
     let saved_data = fields.get(11).map(|value| value.trim()) == Some("1");
     let fill_check =
@@ -3467,6 +3491,8 @@ fn parse_form_attribute_with_dcs_type_index(
         explicit_empty_type,
         columns,
         additional_columns: Vec::new(),
+        view_rights,
+        edit_rights,
         main_attribute,
         saved_data,
         fill_check,
@@ -4091,6 +4117,24 @@ pub(super) fn parse_form_attribute_column(
         explicit_empty_type: parsed_value_types
             .as_ref()
             .is_some_and(|value_types| value_types.is_empty()),
+        // A column keeps its `<View>` and `<Edit>` permissions in the same two
+        // slots an attribute does, in the same tuple.
+        //
+        // Evidence: UT 11.5.27.75, equality of sets over all 53 251 column
+        // records the export walks against every rights block the platform
+        // writes under `Attributes/Attribute/Columns/Column` in the whole
+        // configuration -- slot 6 departs from the default tuple on exactly one
+        // record and there is exactly one native `<View>` block, on that same
+        // column; slot 7 departs on exactly three and there are exactly three
+        // native `<Edit>` blocks, on those same three columns.
+        view_rights: fields
+            .get(6)
+            .and_then(|field| parse_form_rights_setting(field, object_refs))
+            .flatten(),
+        edit_rights: fields
+            .get(7)
+            .and_then(|field| parse_form_rights_setting(field, object_refs))
+            .flatten(),
         functional_options: fields
             .get(8)
             .map(|field| parse_form_reference_list(field, object_refs))
@@ -6807,6 +6851,19 @@ fn parse_form_command_with_items(
         shortcut: fields
             .get(6)
             .and_then(|field| parse_common_command_shortcut_value(field)),
+        // Slot 5 is the command's `<Use>` permission, in the same tuple the
+        // command-interface visibility uses.
+        //
+        // Evidence: UT 11.5.27.75, equality of sets over all 16 633 command
+        // records the export walks against every rights block the platform
+        // writes under `Commands/Command` in the whole configuration -- the
+        // slot departs from the default tuple on exactly four records and the
+        // native tree carries exactly four `<Use>` blocks, on those same four
+        // commands, with the same common answer and the same role override.
+        use_rights: fields
+            .get(5)
+            .and_then(|field| parse_form_rights_setting(field, object_refs))
+            .flatten(),
         action,
         representation: parse_form_command_representation(fields.get(9).copied()),
         functional_options: fields
@@ -19753,6 +19810,49 @@ pub(super) fn parse_form_command_interface_visibility(
     )
 }
 
+/// A per-role permission of a form attribute, an attribute column or a form
+/// command: the common answer plus the roles that override it.
+///
+/// The platform stores it in exactly the tuple the command-interface
+/// visibility uses -- `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<value>},…}}`
+/// -- so the reader below is the command-interface reader, not a second table
+/// for the same fact.
+pub(super) type FormRightsSetting = FormCommandInterfaceVisibility;
+
+/// The rights tuple a form attribute, attribute column or command slot holds.
+///
+/// `None` means the slot is not a rights tuple at all; `Some(None)` means it is
+/// the default one (`common` true with no role overriding it), which the
+/// platform leaves unwritten.
+pub(super) fn parse_form_rights_setting(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<FormRightsSetting>> {
+    parse_form_command_interface_visibility(field, object_refs)
+}
+
+/// `<View>`/`<Edit>`/`<Use>` -- a rights setting under the given element name.
+pub(super) fn format_form_rights_setting_xml(
+    name: &str,
+    rights: &FormRightsSetting,
+    indent: &str,
+) -> String {
+    let mut xml = format!("{indent}<{name}>\r\n");
+    xml.push_str(&format!(
+        "{indent}\t<xr:Common>{}</xr:Common>\r\n",
+        xml_bool(rights.common)
+    ));
+    for (role, value) in &rights.role_values {
+        xml.push_str(&format!(
+            "{indent}\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+            escape_xml_text(role),
+            xml_bool(*value)
+        ));
+    }
+    xml.push_str(&format!("{indent}</{name}>\r\n"));
+    xml
+}
+
 pub(super) fn parse_form_typed_bool(field: &str) -> Option<bool> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.len() != 2 || fields.first().map(|value| value.trim()) != Some(r#""B""#) {
@@ -20473,6 +20573,15 @@ fn format_form_body_xml_with_dcs_profiles(
                     xml_bool(command.picture_load_transparent)
                 ));
                 xml.push_str("\t\t\t</Picture>\r\n");
+            }
+            // The command's permission sits ahead of its `Action`: UT
+            // 11.5.27.75, all four native `<Use>` blocks follow the command's
+            // `ToolTip` and are followed by `<Action>`.  None of the four
+            // carries a `Shortcut` or a `Picture`, so the block is not ordered
+            // against those by observation and takes the last position the
+            // evidence allows.
+            if let Some(rights) = &command.use_rights {
+                xml.push_str(&format_form_rights_setting_xml("Use", rights, "\t\t\t"));
             }
             if !command.action.is_empty() {
                 xml.push_str(&format!(
@@ -24995,6 +25104,18 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
         } else if attribute.explicit_empty_type {
             xml.push_str("\t\t\t<Type/>\r\n");
         }
+        // Both permissions sit between the attribute's `Type` and its
+        // `MainAttribute`, `View` ahead of `Edit`: UT 11.5.27.75, all 34 native
+        // blocks -- `Type` closes immediately before each of them, the two
+        // never appear in the other order on the 14 attributes that carry
+        // both, and on the two attributes that also write `MainAttribute` the
+        // element follows them.
+        if let Some(rights) = &attribute.view_rights {
+            xml.push_str(&format_form_rights_setting_xml("View", rights, "\t\t\t"));
+        }
+        if let Some(rights) = &attribute.edit_rights {
+            xml.push_str(&format_form_rights_setting_xml("Edit", rights, "\t\t\t"));
+        }
         if attribute.main_attribute {
             xml.push_str("\t\t\t<MainAttribute>true</MainAttribute>\r\n");
         }
@@ -25241,6 +25362,25 @@ pub(super) fn format_form_attribute_column_xml(
         ));
     } else if column.explicit_empty_type {
         xml.push_str(&format!("{indent}\t<Type/>\r\n"));
+    }
+    // A column's permissions follow its `Type`, exactly as an attribute's do:
+    // UT 11.5.27.75, all four native column blocks close their `Type`
+    // immediately before the block and `</Column>` immediately after it.  None
+    // of the four also carries `FillCheck` or `FunctionalOptions`, so they take
+    // the slot the attribute gives them, ahead of both.
+    if let Some(rights) = &column.view_rights {
+        xml.push_str(&format_form_rights_setting_xml(
+            "View",
+            rights,
+            &format!("{indent}\t"),
+        ));
+    }
+    if let Some(rights) = &column.edit_rights {
+        xml.push_str(&format_form_rights_setting_xml(
+            "Edit",
+            rights,
+            &format!("{indent}\t"),
+        ));
     }
     // A column's fill check follows its `Type`, exactly as an attribute's does.
     // UT 11.5.27.75 native tree, all 9 columns that carry one: `Type` precedes
