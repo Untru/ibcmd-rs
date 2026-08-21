@@ -3933,6 +3933,26 @@ pub(super) fn apply_form_attribute_save_field_bindings(
             .cloned()
             .collect::<BTreeSet<_>>();
         if let Some(bindings) = save_field_bindings.get(&attribute.name) {
+            // TEMPORARY PROBE -- removed before the gates.
+            if std::env::var_os("IBCMD_PROBE_SAVE").is_some() && bindings.len() >= 20 {
+                eprintln!(
+                    "PROBE SAVE2 attr={} owner={metadata_owner:?} n={}",
+                    attribute.name,
+                    bindings.len()
+                );
+                for binding in bindings {
+                    eprintln!(
+                        "PROBE SAVE2 key={} uuid={:?} bykey={:?} ref={:?}",
+                        binding.key,
+                        binding.metadata_uuid,
+                        data_path_by_binding_key.get(&binding.key),
+                        binding
+                            .metadata_uuid
+                            .as_deref()
+                            .and_then(|uuid| object_refs.get(uuid)),
+                    );
+                }
+            }
             for binding in bindings {
                 let data_path = data_path_by_binding_key
                     .get(&binding.key)
@@ -9231,7 +9251,21 @@ fn parse_form_child_item_with_metadata_owners(
         .and_then(|schema| parse_form_table_root_properties(schema, &fields))
         .unwrap_or_default();
     let button_data_path_slot = button_common_schema.and_then(|schema| schema.data_path_slot());
-    let strict_field_data_path = field_schema_and_options.is_some();
+    // A progress bar, a track bar and a chart bind their data exactly the way
+    // every other field does; only their option tuple is their own. Reading
+    // the bound slot strictly was switched on by the presence of the ordinary
+    // field schema, which these three never carry, so their binding fell
+    // through to the route that spells a name from the form's own item tree.
+    //
+    // Evidence: UT 11.5.27.75,
+    // `InformationRegisters/НоменклатураПродаваемаяСовместно/Forms/НастройкаПоискаАссоциаций`.
+    // Its three `TrackBarField` items and the three `LabelField` items beside
+    // them hold the identical bound slot `{2,{5},{0,<constant uuid>}}`, and
+    // the platform writes the identical `<DataPath>` for each pair. The label
+    // read it strictly and got `Константы.<constant>`; the track bar did not
+    // and got `Константы.<the label item's own name>`.
+    let strict_field_data_path = field_schema_and_options.is_some()
+        || parse_form_special_field_layout(wrapper, &fields).is_some();
     let owner_scoped_data_path =
         strict_field_data_path || table_schema.is_some() || button_data_path_slot.is_some();
     let data_paths = parse_form_child_item_data_path(
@@ -11537,6 +11571,27 @@ fn parse_form_child_item_with_metadata_owners(
         },
         choice_parameter_cluster: field_schema_and_options.as_ref().and_then(
             |(schema, options)| {
+                // TEMPORARY PROBE -- removed before the gates.
+                if std::env::var_os("IBCMD_PROBE_LINKS").is_some() {
+                    eprintln!(
+                        "PROBE LINKS id={id} tag={tag} params={:?} primary={:?} duplicate={:?} links={:?}",
+                        schema.input_field_option(options, InputFieldSlot::ChoiceParameters),
+                        schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinks),
+                        schema
+                            .input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate),
+                        canonical_form_input_field_choice_parameter_links_with_metadata(
+                            *schema,
+                            options,
+                            attribute_names_by_id,
+                            attribute_metadata_owners_by_id,
+                            table_name_by_id,
+                            table_column_names_by_id,
+                            type_link_data_path_by_table_column,
+                            data_path_by_binding_key,
+                            object_refs,
+                        ),
+                    );
+                }
                 schema.input_field_option(options, InputFieldSlot::ChoiceParameters)?;
                 Some(FormChoiceParameterCluster::new(
                     canonical_form_input_field_choice_parameter_links_with_metadata(
