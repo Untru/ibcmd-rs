@@ -11356,7 +11356,7 @@ fn parse_form_child_item_with_metadata_owners(
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
-            data_path_by_binding_key,
+            type_link_data_path_by_table_column,
             owner_scoped_bindings,
             object_refs,
         ),
@@ -11388,7 +11388,13 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
             *cluster.links_mut() = FormChoiceParameterLinks::Absent;
         }
         item.type_link = None;
-        item.title_data_path = None;
+        // The bound title is not one of the properties a conditional group
+        // withholds from its descendants: the platform writes
+        // `<TitleDataPath>` on all four such groups of UT 11.5.27.75 --
+        // `ЗаголовокКомментарияГруппы` and `ЗаголовокКомментарияПользователя`
+        // of `Catalogs/ВнешниеПользователи/Forms/ФормаСписка` and of
+        // `Catalogs/Пользователи/Forms/ФормаСписка` -- and blanking it here
+        // dropped every one.
         // A label field under a conditional group keeps the `<Width>` its own
         // option tuple declares: over the 4 636 unambiguously attributed forms
         // of the native UT 11.5.27.75 tree, option member 1 of the label field
@@ -18577,7 +18583,7 @@ pub(super) fn parse_form_title_data_path(
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
-    data_path_by_binding_key: &BTreeMap<String, String>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
@@ -18612,27 +18618,22 @@ pub(super) fn parse_form_title_data_path(
     ) {
         return Some(path);
     }
-    let binding = split_1c_braced_fields(binding, 0)?;
-    match binding.as_slice() {
-        [kind, owner, terminal] if kind.trim() == "2" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-            if owner.len() != 2
-                || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID
-                || terminal.len() != 1
-            {
-                return None;
-            }
-            resolve_form_item_current_data_path(
-                owner.first()?.trim(),
-                terminal.first()?.trim(),
-                table_name_by_id,
-                table_column_names_by_id,
-                data_path_by_binding_key,
-            )
-        }
-        _ => None,
-    }
+    // A chain rooted at a form item is read by the one route every other bound
+    // slot reads it with, against the table-column routes the form itself
+    // states. Reading it here through the *global* binding-key index instead
+    // spelled the bound item's own inferred name: table item 25 of
+    // `Catalogs/ВнешниеПользователи/Forms/ФормаСписка` carries column `10`,
+    // whose field-map name is `Description`, and the global index answered
+    // `Наименование`; the platform writes
+    // `Items.ГруппыВнешнихПользователей.CurrentData.Description`.
+    resolve_form_item_scoped_current_data_path(
+        binding,
+        table_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        object_refs,
+        owner_scoped_bindings,
+    )
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
@@ -18766,6 +18767,17 @@ fn resolve_form_table_row_picture_member(
                 object_refs,
                 false,
             )
+        })
+        .or_else(|| {
+            match resolve_form_owner_scoped_bound_data_path(
+                &extended,
+                attribute_metadata_owners_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            ) {
+                FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+                FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+            }
         })
         .or_else(|| {
             resolve_form_item_rooted_settings_composer_path(
