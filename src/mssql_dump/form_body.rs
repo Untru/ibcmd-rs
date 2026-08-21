@@ -806,6 +806,8 @@ pub(super) struct FormAttribute {
     pub(super) explicit_empty_type: bool,
     pub(super) columns: Vec<FormAttributeColumn>,
     pub(super) additional_columns: Vec<FormAttributeAdditionalColumns>,
+    pub(super) view_rights: Option<FormRightsSetting>,
+    pub(super) edit_rights: Option<FormRightsSetting>,
     pub(super) main_attribute: bool,
     pub(super) saved_data: bool,
     pub(super) fill_check: Option<&'static str>,
@@ -851,6 +853,8 @@ pub(super) struct FormAttributeColumn {
     pub(super) title: Vec<(String, String)>,
     pub(super) value_types: Vec<ConstantValueType>,
     pub(super) explicit_empty_type: bool,
+    pub(super) view_rights: Option<FormRightsSetting>,
+    pub(super) edit_rights: Option<FormRightsSetting>,
     pub(super) functional_options: Vec<String>,
     pub(super) fill_check: Option<&'static str>,
 }
@@ -1060,6 +1064,7 @@ pub(super) struct FormCommand {
     pub(super) picture_ref: Option<String>,
     pub(super) picture_load_transparent: bool,
     pub(super) shortcut: Option<String>,
+    pub(super) use_rights: Option<FormRightsSetting>,
     pub(super) action: String,
     pub(super) representation: Option<&'static str>,
     pub(super) functional_options: Vec<String>,
@@ -1356,6 +1361,7 @@ pub(super) struct FormChildItem {
     pub(super) table_title_height: Option<String>,
     pub(super) table_footer_height: Option<String>,
     pub(super) table_output: Option<&'static str>,
+    pub(super) html_document_output: Option<&'static str>,
     pub(super) pages_read_only: Option<bool>,
     pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
     pub(super) incomplete_choice_mode: Option<&'static str>,
@@ -3390,6 +3396,25 @@ fn parse_form_attribute_with_dcs_type_index(
         .is_some_and(|value_types| value_types.is_empty());
     let value_types = parsed_value_types.unwrap_or_default();
     let columns = parse_form_attribute_columns(&fields, type_index, object_refs);
+    // Slots 6 and 7 are the attribute's `<View>` and `<Edit>` permissions, in
+    // the same tuple the command-interface visibility uses.  Both were read by
+    // nobody, so the platform's blocks were simply never written.
+    //
+    // Evidence: UT 11.5.27.75, equality of sets over every attribute record the
+    // export walks against every rights block the platform writes under
+    // `Attributes/Attribute` anywhere in the configuration.  Slot 6 departs
+    // from the default tuple on exactly 16 records and the native tree carries
+    // exactly 16 `<View>` blocks, on those same attributes; slot 7 departs on
+    // exactly 18 and there are exactly 18 `<Edit>` blocks, again the same ones.
+    // Neither side has a member the other lacks.
+    let view_rights = fields
+        .get(6)
+        .and_then(|field| parse_form_rights_setting(field, object_refs))
+        .flatten();
+    let edit_rights = fields
+        .get(7)
+        .and_then(|field| parse_form_rights_setting(field, object_refs))
+        .flatten();
     let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
     let saved_data = fields.get(11).map(|value| value.trim()) == Some("1");
     let fill_check =
@@ -3467,6 +3492,8 @@ fn parse_form_attribute_with_dcs_type_index(
         explicit_empty_type,
         columns,
         additional_columns: Vec::new(),
+        view_rights,
+        edit_rights,
         main_attribute,
         saved_data,
         fill_check,
@@ -4091,6 +4118,24 @@ pub(super) fn parse_form_attribute_column(
         explicit_empty_type: parsed_value_types
             .as_ref()
             .is_some_and(|value_types| value_types.is_empty()),
+        // A column keeps its `<View>` and `<Edit>` permissions in the same two
+        // slots an attribute does, in the same tuple.
+        //
+        // Evidence: UT 11.5.27.75, equality of sets over all 53 251 column
+        // records the export walks against every rights block the platform
+        // writes under `Attributes/Attribute/Columns/Column` in the whole
+        // configuration -- slot 6 departs from the default tuple on exactly one
+        // record and there is exactly one native `<View>` block, on that same
+        // column; slot 7 departs on exactly three and there are exactly three
+        // native `<Edit>` blocks, on those same three columns.
+        view_rights: fields
+            .get(6)
+            .and_then(|field| parse_form_rights_setting(field, object_refs))
+            .flatten(),
+        edit_rights: fields
+            .get(7)
+            .and_then(|field| parse_form_rights_setting(field, object_refs))
+            .flatten(),
         functional_options: fields
             .get(8)
             .map(|field| parse_form_reference_list(field, object_refs))
@@ -6807,6 +6852,19 @@ fn parse_form_command_with_items(
         shortcut: fields
             .get(6)
             .and_then(|field| parse_common_command_shortcut_value(field)),
+        // Slot 5 is the command's `<Use>` permission, in the same tuple the
+        // command-interface visibility uses.
+        //
+        // Evidence: UT 11.5.27.75, equality of sets over all 16 633 command
+        // records the export walks against every rights block the platform
+        // writes under `Commands/Command` in the whole configuration -- the
+        // slot departs from the default tuple on exactly four records and the
+        // native tree carries exactly four `<Use>` blocks, on those same four
+        // commands, with the same common answer and the same role override.
+        use_rights: fields
+            .get(5)
+            .and_then(|field| parse_form_rights_setting(field, object_refs))
+            .flatten(),
         action,
         representation: parse_form_command_representation(fields.get(9).copied()),
         functional_options: fields
@@ -8707,39 +8765,6 @@ fn parse_form_control_border(
     schema.non_default_tuple_border(&tuple)
 }
 
-// TEMPORARY INSTRUMENTATION -- remove before gates.
-fn f1_dump_slot(tag: &str, name: &str, id: &str, fields: &[&str]) {
-    use std::io::Write as _;
-    use std::sync::OnceLock;
-    static FILTER: OnceLock<Option<Vec<String>>> = OnceLock::new();
-    let filter = FILTER.get_or_init(|| {
-        std::env::var("IBCMD_F1_ITEMS").ok().map(|value| {
-            value
-                .split(',')
-                .map(|part| part.trim().to_string())
-                .collect()
-        })
-    });
-    let Some(filter) = filter.as_ref() else {
-        return;
-    };
-    if !filter.iter().any(|want| want == name) {
-        return;
-    }
-    let joined = fields
-        .iter()
-        .map(|field| field.trim())
-        .collect::<Vec<_>>()
-        .join("\u{1}");
-    let joined = joined
-        .replace('\\', "\\\\")
-        .replace('\r', "\\r")
-        .replace('\n', "\\n")
-        .replace('\t', "\\t");
-    let line = format!("F1SLOT\t{tag}\t{name}\t{id}\t{joined}\n");
-    let _ = std::io::stderr().write_all(line.as_bytes());
-}
-
 fn parse_form_child_item_with_metadata_owners(
     field: &str,
     main_data_path: Option<&str>,
@@ -8786,7 +8811,6 @@ fn parse_form_child_item_with_metadata_owners(
     }
     let tag = form_child_item_tag(wrapper, fields)?;
     let name = parse_form_child_item_name(wrapper, fields)?;
-    f1_dump_slot(tag, &name, id, fields);
     let button_top_level_offset = (tag == "Button")
         .then(|| form_button_top_level_offset(&fields))
         .unwrap_or(0);
@@ -10318,12 +10342,21 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        html_document_output: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| schema.html_document_output(options)),
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
         auto_add_incomplete: table_schema.and_then(|schema| schema.auto_add_incomplete(&fields)),
         format: if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
                 .map(|options| options.format.clone())
+                .unwrap_or_default()
+        } else if tag == "Page" && page_schema.is_some() {
+            show_title_options
+                .as_deref()
+                .and_then(|options| options.get(5))
+                .map(|field| parse_form_localized_strings(field))
                 .unwrap_or_default()
         } else if tag == "LabelField" {
             label_field_options
@@ -13034,7 +13067,25 @@ pub(super) fn parse_form_enum_design_time_reference(
         return Some(format!("{owner_reference}.EmptyRef"));
     }
     if owner.kind() != GeneratedMetadataReferenceOwnerKind::Enum {
-        return None;
+        // Outside an enumeration the value identifier names a *predefined
+        // item* of the owner, which is not a metadata object and therefore has
+        // no entry of its own in the reference index; the owner-qualified
+        // predefined-item name is the only thing that can name it, and the
+        // refusal here used to swallow every such reference -- and with it, in
+        // a choice parameter, the whole `<ChoiceParameters>` block.
+        //
+        // Evidence: UT 11.5.27.75, equality of sets over every design-time
+        // reference the form writer renders as a bare identifier pair. 61 such
+        // pairs exist in the export; the 8 whose type identifier names a
+        // configuration type *and* whose value identifier is a predefined item
+        // of that type are exactly the 8 the platform spells out
+        // (`Catalog.СтавкиНДС.БезНДС`,
+        // `Catalog.КлассификаторНСИЗЕРНО.ТипХранения*` and five
+        // `ChartOfCharacteristicTypes.СтатьиРасходов.*`), character for
+        // character; the other 53 name a type the configuration no longer
+        // carries, and the platform keeps the identifier pair on every one of
+        // them, which is what returning `None` here still does.
+        return form_predefined_item_reference(&owner_reference, &value_uuid, object_refs);
     }
     let value_ref = parse_design_time_reference(value_id.trim(), object_refs)?;
     let enum_value_prefix = format!("{owner_reference}.EnumValue.");
@@ -13042,6 +13093,42 @@ pub(super) fn parse_form_enum_design_time_reference(
         .strip_prefix(&enum_value_prefix)
         .is_some_and(|name| !name.is_empty())
         .then_some(value_ref)
+}
+
+/// The name of the predefined item a design-time reference pair names, or
+/// `None` when the pair names no object this configuration carries.
+///
+/// This is the fallback of the choice-list value reader, whose primary answer
+/// is the plain value-identifier lookup: an enumeration value is a metadata
+/// object in its own right and resolves there, a predefined item is not and
+/// only resolves through its owner.
+pub(super) fn form_predefined_item_design_time_reference(
+    type_id: &str,
+    value_id: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let value_uuid = Uuid::parse_str(value_id.trim()).ok()?;
+    if value_uuid.is_nil() {
+        return None;
+    }
+    let type_reference =
+        unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())?;
+    let owner = parse_generated_metadata_reference_owner(type_reference)?;
+    form_predefined_item_reference(&owner.owner_reference(), &value_uuid, object_refs)
+}
+
+/// The name of a predefined item of `owner_reference`, from the owner-qualified
+/// entries the form reference index carries alongside the metadata objects.
+pub(super) fn form_predefined_item_reference(
+    owner_reference: &str,
+    value_uuid: &Uuid,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    object_refs
+        .get(&format!("owner-value:{owner_reference}:{value_uuid}"))
+        .cloned()
 }
 
 pub(super) fn parse_form_input_field_type_link(
@@ -14277,7 +14364,17 @@ fn try_parse_form_radio_button_choice_list(
                 .and_then(parse_generated_metadata_reference_owner)
                 .map(|owner| owner.owner_reference())
         },
-        |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, value_id| {
+            parse_design_time_reference(value_id, object_refs).or_else(|| {
+                form_predefined_item_design_time_reference(
+                    type_id,
+                    value_id,
+                    type_index,
+                    type_index_collisions,
+                    object_refs,
+                )
+            })
+        },
     )?;
     Some(decoded.items().to_vec())
 }
@@ -14298,7 +14395,17 @@ pub(super) fn try_parse_form_input_field_choice_list(
                 .and_then(parse_generated_metadata_reference_owner)
                 .map(|owner| owner.owner_reference())
         },
-        |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, value_id| {
+            parse_design_time_reference(value_id, object_refs).or_else(|| {
+                form_predefined_item_design_time_reference(
+                    type_id,
+                    value_id,
+                    type_index,
+                    type_index_collisions,
+                    object_refs,
+                )
+            })
+        },
     )?;
     Some(decoded.items().to_vec())
 }
@@ -16647,82 +16754,7 @@ pub(super) fn parse_form_child_item_data_path(
         multiple_value: multiple_value_paths.0,
         multiple_value_present: multiple_value_paths.1,
     };
-    f1_dump_path(
-        tag,
-        name,
-        id,
-        fields,
-        &input_slots,
-        button_data_path_slot,
-        &paths,
-        parent_data_path,
-        main_data_path,
-    );
     paths
-}
-
-// TEMPORARY INSTRUMENTATION -- remove before gates.
-#[allow(clippy::too_many_arguments)]
-fn f1_dump_path(
-    tag: &str,
-    name: &str,
-    id: &str,
-    fields: &[&str],
-    input_slots: &[usize],
-    button_data_path_slot: Option<usize>,
-    paths: &FormChildItemDataPaths,
-    parent_data_path: Option<&str>,
-    main_data_path: Option<&str>,
-) {
-    use std::io::Write as _;
-    use std::sync::OnceLock;
-    static FILTER: OnceLock<Option<Vec<String>>> = OnceLock::new();
-    let filter = FILTER.get_or_init(|| {
-        std::env::var("IBCMD_F1_ITEMS").ok().map(|value| {
-            value
-                .split(',')
-                .map(|part| part.trim().to_string())
-                .collect()
-        })
-    });
-    let Some(filter) = filter.as_ref() else {
-        return;
-    };
-    if !filter.iter().any(|want| want == name) {
-        return;
-    }
-    let escape = |text: &str| {
-        text.replace('\\', "\\\\")
-            .replace('\r', "\\r")
-            .replace('\n', "\\n")
-            .replace('\t', "\\t")
-    };
-    let mut slots = Vec::new();
-    if tag == "Table" {
-        slots.push(11usize);
-    } else if let Some(slot) = button_data_path_slot {
-        slots.push(slot);
-    } else {
-        slots.extend_from_slice(input_slots);
-    }
-    let rendered = slots
-        .iter()
-        .map(|slot| {
-            format!(
-                "[{slot}]={}",
-                escape(fields.get(*slot).map(|f| f.trim()).unwrap_or("<none>"))
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    let line = format!(
-        "F1PATH\t{tag}\t{name}\t{id}\tprimary={:?}\tfooter={:?}\tparent={:?}\tmain={:?}\t{rendered}\n",
-        paths.primary.as_ref().map(|p| p.data_path.as_str()),
-        paths.footer,
-        parent_data_path,
-        main_data_path
-    );
-    let _ = std::io::stderr().write_all(line.as_bytes());
 }
 
 /// The id a one-segment bound chain `{1,{<id>}}` names, and nothing else.
@@ -19753,6 +19785,49 @@ pub(super) fn parse_form_command_interface_visibility(
     )
 }
 
+/// A per-role permission of a form attribute, an attribute column or a form
+/// command: the common answer plus the roles that override it.
+///
+/// The platform stores it in exactly the tuple the command-interface
+/// visibility uses -- `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<value>},…}}`
+/// -- so the reader below is the command-interface reader, not a second table
+/// for the same fact.
+pub(super) type FormRightsSetting = FormCommandInterfaceVisibility;
+
+/// The rights tuple a form attribute, attribute column or command slot holds.
+///
+/// `None` means the slot is not a rights tuple at all; `Some(None)` means it is
+/// the default one (`common` true with no role overriding it), which the
+/// platform leaves unwritten.
+pub(super) fn parse_form_rights_setting(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<FormRightsSetting>> {
+    parse_form_command_interface_visibility(field, object_refs)
+}
+
+/// `<View>`/`<Edit>`/`<Use>` -- a rights setting under the given element name.
+pub(super) fn format_form_rights_setting_xml(
+    name: &str,
+    rights: &FormRightsSetting,
+    indent: &str,
+) -> String {
+    let mut xml = format!("{indent}<{name}>\r\n");
+    xml.push_str(&format!(
+        "{indent}\t<xr:Common>{}</xr:Common>\r\n",
+        xml_bool(rights.common)
+    ));
+    for (role, value) in &rights.role_values {
+        xml.push_str(&format!(
+            "{indent}\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+            escape_xml_text(role),
+            xml_bool(*value)
+        ));
+    }
+    xml.push_str(&format!("{indent}</{name}>\r\n"));
+    xml
+}
+
 pub(super) fn parse_form_typed_bool(field: &str) -> Option<bool> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.len() != 2 || fields.first().map(|value| value.trim()) != Some(r#""B""#) {
@@ -20474,6 +20549,15 @@ fn format_form_body_xml_with_dcs_profiles(
                 ));
                 xml.push_str("\t\t\t</Picture>\r\n");
             }
+            // The command's permission sits ahead of its `Action`: UT
+            // 11.5.27.75, all four native `<Use>` blocks follow the command's
+            // `ToolTip` and are followed by `<Action>`.  None of the four
+            // carries a `Shortcut` or a `Picture`, so the block is not ordered
+            // against those by observation and takes the last position the
+            // evidence allows.
+            if let Some(rights) = &command.use_rights {
+                xml.push_str(&format_form_rights_setting_xml("Use", rights, "\t\t\t"));
+            }
             if !command.action.is_empty() {
                 xml.push_str(&format!(
                     "\t\t\t<Action>{}</Action>\r\n",
@@ -20769,6 +20853,15 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
             escape_xml_text(value)
         ));
     }
+    // `ShowGroups` leads the drag pair, it does not trail it: on the three of
+    // the four native fields that carry it together with the pair,
+    // `<ShowGroups>false</ShowGroups>` stands between `SelectionShowMode` and
+    // `EnableStartDrag`, and on the fourth -- which has no pair --
+    // `SelectionShowMode` still precedes it.  It never shares a field with
+    // `Output`, so the two are not ordered against each other by observation.
+    if properties.show_groups == Some(false) {
+        xml.push_str(&format!("{tab}<ShowGroups>false</ShowGroups>\r\n"));
+    }
     if properties.enable_start_drag == Some(false) {
         xml.push_str(&format!(
             "{tab}<EnableStartDrag>false</EnableStartDrag>\r\n"
@@ -20789,16 +20882,6 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
             "{tab}<ViewScalingMode>{}</ViewScalingMode>\r\n",
             escape_xml_text(value)
         ));
-    }
-    // `ShowGroups` trails everything it is ever seen with -- `DataPath` (4),
-    // `TitleLocation` (4), `HorizontalScrollBar` (4), `Protection` (4),
-    // `Height` (3), `VerticalStretch` (3), `VerticalScrollBar` (3),
-    // `SelectionShowMode` (3), `AutoMaxWidth` (2), `MaxWidth` (2),
-    // `AutoMaxHeight` (2), `MaxHeight` (2), `ReadOnly` (2), `SkipOnInput` (2),
-    // `Width`, `HorizontalStretch`, `ShowGrid` and `Enabled` -- and leads only
-    // `ContextMenu` (4) on the four native fields that carry it.
-    if properties.show_groups == Some(false) {
-        xml.push_str(&format!("{tab}<ShowGroups>false</ShowGroups>\r\n"));
     }
     // `DrawingSelectionShowMode` closes the same run: the one native field
     // that carries it puts it behind `DataPath` and `TitleLocation` and ahead
@@ -22993,7 +23076,9 @@ pub(super) fn format_form_child_item_xml(
             fixing_in_table.xml_value()
         ));
     }
-    if !matches!(item.tag, "UsualGroup" | "InputField") && !item.format.is_empty() {
+    // `UsualGroup`, `InputField` and `Page` each write `Format` from their own
+    // property order, at the place their own native items put it.
+    if !matches!(item.tag, "UsualGroup" | "InputField" | "Page") && !item.format.is_empty() {
         xml.push_str(&format_form_localized_section(
             "Format",
             &item.format,
@@ -23522,6 +23607,19 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(file_drag_mode)
         ));
     }
+    // An `HTMLDocumentField` writes `<Output>` at the end of its scalar run:
+    // on all 7 native fields that carry it, it trails `DataPath` (7),
+    // `TitleLocation` (7), `SkipOnInput` (5), `ToolTipRepresentation` (3),
+    // `Title` (1) and the geometry run -- `Width`, `Height`, `MaxHeight`,
+    // `HorizontalStretch` (1 each) -- and leads `BorderColor` (1),
+    // `ContextMenu` (7), `ExtendedTooltip` (7) and `Events` (2), with no pair
+    // counted both ways.
+    if let Some(output) = item.html_document_output {
+        xml.push_str(&format!(
+            "{tab}\t<Output>{}</Output>\r\n",
+            escape_xml_text(output)
+        ));
+    }
     if matches!(
         item.tag,
         "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField"
@@ -23883,6 +23981,13 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
                         escape_xml_text(tooltip_representation)
                     ));
                 }
+            }
+            FormPageXmlProperty::Format => {
+                xml.push_str(&format_form_localized_section(
+                    "Format",
+                    &item.format,
+                    indent,
+                ));
             }
             FormPageXmlProperty::Picture => {
                 if let Some(reference) = &item.picture_ref {
@@ -24995,6 +25100,18 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
         } else if attribute.explicit_empty_type {
             xml.push_str("\t\t\t<Type/>\r\n");
         }
+        // Both permissions sit between the attribute's `Type` and its
+        // `MainAttribute`, `View` ahead of `Edit`: UT 11.5.27.75, all 34 native
+        // blocks -- `Type` closes immediately before each of them, the two
+        // never appear in the other order on the 14 attributes that carry
+        // both, and on the two attributes that also write `MainAttribute` the
+        // element follows them.
+        if let Some(rights) = &attribute.view_rights {
+            xml.push_str(&format_form_rights_setting_xml("View", rights, "\t\t\t"));
+        }
+        if let Some(rights) = &attribute.edit_rights {
+            xml.push_str(&format_form_rights_setting_xml("Edit", rights, "\t\t\t"));
+        }
         if attribute.main_attribute {
             xml.push_str("\t\t\t<MainAttribute>true</MainAttribute>\r\n");
         }
@@ -25241,6 +25358,25 @@ pub(super) fn format_form_attribute_column_xml(
         ));
     } else if column.explicit_empty_type {
         xml.push_str(&format!("{indent}\t<Type/>\r\n"));
+    }
+    // A column's permissions follow its `Type`, exactly as an attribute's do:
+    // UT 11.5.27.75, all four native column blocks close their `Type`
+    // immediately before the block and `</Column>` immediately after it.  None
+    // of the four also carries `FillCheck` or `FunctionalOptions`, so they take
+    // the slot the attribute gives them, ahead of both.
+    if let Some(rights) = &column.view_rights {
+        xml.push_str(&format_form_rights_setting_xml(
+            "View",
+            rights,
+            &format!("{indent}\t"),
+        ));
+    }
+    if let Some(rights) = &column.edit_rights {
+        xml.push_str(&format_form_rights_setting_xml(
+            "Edit",
+            rights,
+            &format!("{indent}\t"),
+        ));
     }
     // A column's fill check follows its `Type`, exactly as an attribute's does.
     // UT 11.5.27.75 native tree, all 9 columns that carry one: `Type` precedes

@@ -9349,6 +9349,8 @@ fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
 #[test]
 fn formats_dynamic_list_server_state_xml_in_settings() {
     let xml = format_form_attributes_xml(&[FormAttribute {
+        view_rights: None,
+        edit_rights: None,
             id: "2".to_string(),
             name: "Список".to_string(),
             title: Vec::new(),
@@ -10120,6 +10122,8 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
     apply_implicit_form_dynamic_list_settings(&mut settings);
 
     let xml = format_form_attributes_xml(&[FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "2".to_string(),
         name: "Список".to_string(),
         title: Vec::new(),
@@ -10506,6 +10510,8 @@ fn rejects_non_dcs_or_malformed_dynamic_list_appearance() {
 #[test]
 fn formats_explicit_false_dynamic_data_read() {
     let xml = format_form_attributes_xml(&[FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "2".to_string(),
         name: "Список".to_string(),
         title: Vec::new(),
@@ -10669,6 +10675,8 @@ fn form_attribute_column_type_pattern_resolves_platform_references() {
         // is declared on the Form root, so no namespace attribute is added.
         let xml = format_form_attribute_column_xml(
             &FormAttributeColumn {
+                view_rights: None,
+                edit_rights: None,
                 fill_check: None,
                 id: "6".to_owned(),
                 name: "ВидСравнения".to_owned(),
@@ -10768,6 +10776,8 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
     );
 
     let mut attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Объект".to_string(),
         title: Vec::new(),
@@ -11529,6 +11539,8 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
 
     fn attribute(dynamic_list: bool) -> FormAttribute {
         FormAttribute {
+            view_rights: None,
+            edit_rights: None,
             id: "1".to_string(),
             name: "Rows".to_string(),
             title: Vec::new(),
@@ -11822,6 +11834,8 @@ fn rejects_malformed_nested_value_table_additional_columns_routes() {
         .push(FormAttributeAdditionalColumns {
             table: "СвУпПред.Пред".to_string(),
             columns: vec![FormAttributeColumn {
+                view_rights: None,
+                edit_rights: None,
                 fill_check: None,
                 id: "1".to_string(),
                 name: "СведОрг".to_string(),
@@ -11860,6 +11874,8 @@ fn rejects_malformed_nested_value_table_additional_columns_routes() {
         .push(FormAttributeAdditionalColumns {
             table: "СвУпПред.Пред".to_string(),
             columns: vec![FormAttributeColumn {
+                view_rights: None,
+                edit_rights: None,
                 fill_check: None,
                 id: "1".to_string(),
                 name: "ДругаяКолонка".to_string(),
@@ -11926,6 +11942,7 @@ fn extracts_form_body_xml_uses_type_index_for_parameters_without_breaking_object
 #[test]
 fn formatter_emits_form_command_children_in_native_order() {
     let commands = [FormCommand {
+        use_rights: None,
         id: "1".to_string(),
         reference_uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
         name: "ЗаписатьИЗакрыть".to_string(),
@@ -12092,6 +12109,8 @@ fn extracts_form_child_items_from_layout_pairs() {
     );
     let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
     let attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Список".to_string(),
         title: Vec::new(),
@@ -13822,6 +13841,8 @@ fn extracts_wrapper55_table_row_picture_data_path() {
 #[test]
 fn extracts_wrapper55_table_user_settings_group() {
     let attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Rows".to_string(),
         title: Vec::new(),
@@ -15187,6 +15208,8 @@ fn extracts_form_standard_command_names_from_kind0_buttons() {
 #[test]
 fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
     let attribute = FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "8".to_string(),
         name: "ПериодВыборкиДокументов".to_string(),
         title: Vec::new(),
@@ -15348,6 +15371,8 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
 #[test]
 fn resolves_document_form_paths_from_the_typed_metadata_owner() {
     let attribute = FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Object".to_string(),
         title: Vec::new(),
@@ -15489,6 +15514,8 @@ fn typed_form_metadata_paths_cover_members_and_fail_closed() {
     }
 
     let chart_owner = form_attribute_metadata_owner(&FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Plan".to_string(),
         title: Vec::new(),
@@ -15571,6 +15598,8 @@ fn indexes_direct_table_columns_from_their_structural_table_parent() {
     let table = r#"{73,{785,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"ТаблицаСумм",0,0,1,{1,0},0,{1,{19}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#
         .replacen("{1,0}", &child_container, 1);
     let attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "19".to_string(),
         name: "ТаблицаСумм".to_string(),
         title: Vec::new(),
@@ -15690,6 +15719,8 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
     let line_b = line_number_field("42", "SecondaryLineNumber");
     let line_c = line_number_field("43", "TertiaryLineNumber");
     let mut attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Object".to_string(),
         title: Vec::new(),
@@ -15861,6 +15892,8 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
 #[test]
 fn extracts_nested_table_additional_columns_group() {
     let attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Объект".to_string(),
         title: Vec::new(),
@@ -15904,6 +15937,8 @@ fn extracts_nested_table_additional_columns_group() {
 #[test]
 fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_unindexed() {
     let attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Объект".to_string(),
         title: Vec::new(),
@@ -15911,6 +15946,8 @@ fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_u
         exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: vec![FormAttributeColumn {
+            view_rights: None,
+            edit_rights: None,
             fill_check: None,
             id: "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
             name: "ДополнительнаяРегистрация".to_string(),
@@ -15953,6 +15990,8 @@ fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_u
 fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
     let metadata_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let attributes = vec![FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Object".to_string(),
         title: Vec::new(),
@@ -16052,6 +16091,8 @@ fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
 #[test]
 fn resolves_additional_columns_binding_per_owner_and_rejects_collisions() {
     let attribute = |id: &str, name: &str| FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: id.to_string(),
         name: name.to_string(),
         title: Vec::new(),
@@ -19845,6 +19886,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
     let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
     let command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let commands = vec![FormCommand {
+        use_rights: None,
         id: "15".to_string(),
         reference_uuid: command_uuid.to_string(),
         name: "Run".to_string(),
@@ -19926,6 +19968,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
 #[test]
 fn formats_table_search_additions_as_direct_sections() {
     let table = FormChildItem {
+        html_document_output: None,
         button_check: None,
         tag: "Table",
         id: "25".to_string(),
@@ -20161,6 +20204,7 @@ fn formats_table_search_additions_as_direct_sections() {
         command_source: None,
         child_items: vec![
             FormChildItem {
+                html_document_output: None,
                 button_check: None,
                 tag: "SearchStringAddition",
                 id: "26".to_string(),
@@ -20397,6 +20441,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 child_items: Vec::new(),
             },
             FormChildItem {
+                html_document_output: None,
                 button_check: None,
                 tag: "InputField",
                 id: "40".to_string(),
@@ -23097,6 +23142,8 @@ fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct()
 #[test]
 fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_terminals() {
     let attribute = FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: "1".to_string(),
         name: "Object".to_string(),
         title: Vec::new(),
@@ -23684,6 +23731,8 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
         "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения".to_string(),
     );
     let additional_column = |id: &str, name: &str| FormAttributeColumn {
+        view_rights: None,
+        edit_rights: None,
         fill_check: None,
         id: id.to_string(),
         name: name.to_string(),
@@ -23694,6 +23743,8 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
     };
     let attributes = vec![
         FormAttribute {
+            view_rights: None,
+            edit_rights: None,
             id: "1".to_string(),
             name: "Отбор".to_string(),
             title: Vec::new(),
@@ -23720,6 +23771,8 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
             type_description_settings: None,
         },
         FormAttribute {
+            view_rights: None,
+            edit_rights: None,
             id: "2".to_string(),
             name: "Объект".to_string(),
             title: Vec::new(),
@@ -63419,6 +63472,8 @@ fn data_path_input_field(id: &str, name: &str, binding: &str) -> String {
 
 fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>) -> FormAttribute {
     FormAttribute {
+        view_rights: None,
+        edit_rights: None,
         id: id.to_string(),
         name: name.to_string(),
         title: Vec::new(),
@@ -63635,6 +63690,8 @@ fn resolves_metadata_attribute_leaves_against_the_shorter_binding() {
     );
     let mut attribute = data_path_form_attribute("1", "ТаблицаОстатков", None);
     attribute.columns = vec![FormAttributeColumn {
+        view_rights: None,
+        edit_rights: None,
         fill_check: None,
         id: "3".to_string(),
         name: "Номенклатура".to_string(),
@@ -64229,6 +64286,8 @@ fn chain_walk_indexes_with_metadata_field_types(
 
 fn chain_walk_column(id: &str, name: &str, reference: Option<&str>) -> FormAttributeColumn {
     FormAttributeColumn {
+        view_rights: None,
+        edit_rights: None,
         fill_check: None,
         id: id.to_string(),
         name: name.to_string(),
@@ -64983,6 +65042,8 @@ fn footer_family_child_items_xml(
 
 fn footer_family_column(id: &str, name: &str) -> FormAttributeColumn {
     FormAttributeColumn {
+        view_rights: None,
+        edit_rights: None,
         fill_check: None,
         id: id.to_string(),
         name: name.to_string(),

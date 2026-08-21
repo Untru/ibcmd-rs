@@ -2393,6 +2393,14 @@ struct DumpRowContext<'a> {
     recalculation_refs: &'a BTreeMap<String, CalculationRecalculationReference>,
     root_recalculation_refs: &'a CalculationRootRecalculationReferences,
     predefined_item_refs: &'a BTreeMap<String, String>,
+    /// The object reference index a form is parsed against: the plain one with
+    /// the owner-qualified predefined-item names laid over it.  A design-time
+    /// reference in a form names a predefined item of an arbitrary object, and
+    /// a predefined item is not a metadata object, so the plain index cannot
+    /// name it.  The two key spaces are disjoint -- a predefined-item key is
+    /// `owner-value:<owner>:<uuid>`, never a bare identifier -- so every
+    /// existing lookup through this index answers exactly as before.
+    form_object_refs: &'a BTreeMap<String, String>,
     role_rights_object_refs: &'a BTreeMap<String, String>,
     metadata_order: &'a BTreeMap<String, usize>,
     field_refs: &'a BTreeMap<String, String>,
@@ -2788,6 +2796,13 @@ fn dump_table_rows_with_options_mode(
         &type_index,
         &object_refs,
     )?;
+    let mut form_object_refs = object_refs.clone();
+    form_object_refs.extend(build_form_predefined_item_reference_index(
+        &rows,
+        &body_owners,
+        &type_index,
+        &object_refs,
+    ));
     let mut metadata_object_refs = object_refs.clone();
     extend_metadata_owner_value_references(&mut metadata_object_refs, &predefined_item_refs)?;
     extend_metadata_owner_value_references(
@@ -2821,6 +2836,7 @@ fn dump_table_rows_with_options_mode(
         recalculation_refs: &recalculation_refs,
         root_recalculation_refs: &root_recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
+        form_object_refs: &form_object_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,
@@ -3899,6 +3915,13 @@ fn dump_table_rows_streamed(
         &type_index,
         &object_refs,
     )?;
+    let mut form_object_refs = object_refs.clone();
+    form_object_refs.extend(build_form_predefined_item_reference_index(
+        &rows,
+        &required_body_owners,
+        &type_index,
+        &object_refs,
+    ));
     let mut metadata_object_refs = object_refs.clone();
     extend_metadata_owner_value_references(&mut metadata_object_refs, &predefined_item_refs)?;
     extend_metadata_owner_value_references(
@@ -3934,6 +3957,7 @@ fn dump_table_rows_streamed(
         recalculation_refs: &recalculation_refs,
         root_recalculation_refs: &root_recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
+        form_object_refs: &form_object_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,

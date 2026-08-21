@@ -266,6 +266,7 @@ pub(crate) enum FormPageXmlProperty {
     HorizontalStretch,
     VerticalStretch,
     Picture,
+    Format,
     GroupHorizontalAlign,
     GroupVerticalAlign,
     Group,
@@ -306,6 +307,19 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::HorizontalStretch,
     FormPageXmlProperty::VerticalStretch,
     FormPageXmlProperty::Picture,
+    // A page carries the same localised `<Format>` its sibling grouping
+    // controls do, in option member 5 of its own tuple.  Over all 5 801 `Page`
+    // records the export walks the member is the empty container `{1,0}` on
+    // 5 799 and a populated one on exactly the two the platform writes a
+    // `<Format>` for -- `СтраницаТовары` (in four forms) and
+    // `СтраницаСертификаты` -- which are, block for block, the five native
+    // `Page`/`Format` pairs in the configuration.  The member had no reader, so
+    // the block was never written.
+    //
+    // Position: on all five, `Title` leads it (5), `Picture` leads it (1), and
+    // it leads `TitleDataPath` (5), `ExtendedTooltip` (5) and `ChildItems` (5),
+    // with no pair counted both ways.
+    FormPageXmlProperty::Format,
     // A page's group alignment pair sits between its geometry block and its
     // `Group`, exactly where `UsualGroup` puts its own.  UT 11.5.27.75 native
     // tree, the 4 pages that carry `GroupVerticalAlign`: `Title` leads it (4)
@@ -2959,6 +2973,7 @@ pub(crate) struct FormFieldSchema {
     top_level_offset: usize,
     input_field_options: bool,
     spreadsheet_document_options: bool,
+    html_document_options: bool,
     picture_field_options: bool,
     title_slot: usize,
     footer_text_slot: usize,
@@ -3154,8 +3169,36 @@ impl FormChildItemEventCollectionSchema {
     }
 }
 
+/// The `<Output>` code a form item stores, under the one table every item kind
+/// that writes the element shares: `0` writes nothing, `1` writes `Enable`,
+/// `2` writes `Disable`.
+///
+/// Evidence: UT 11.5.27.75, equality of sets per item kind against every
+/// `<Output>` the platform writes anywhere in the configuration -- `Table` slot
+/// 40 (4 536 / 5 / 1), `SpreadSheetDocumentField` option 12 (144 records with
+/// `0` and no element, 3 with `1` and `Enable`, 1 with `2` and `Disable`) and
+/// `HTMLDocumentField` option 4 (171 / 4 / 3), each with no record holding a
+/// code the platform writes nothing for and no element written without it.
+pub(crate) fn form_output_code(value: Option<&str>) -> Option<&'static str> {
+    match value.map(str::trim) {
+        Some("1") => Some("Enable"),
+        Some("2") => Some("Disable"),
+        _ => None,
+    }
+}
+
 impl FormFieldSchema {
     pub(crate) const OPTIONS_BASE_SLOT: usize = 39;
+
+    /// The `<Output>` of an `HTMLDocumentField`, option member 4 of its own
+    /// 13-member tuple.  The member has no meaning in any other field kind's
+    /// tuple, which is why the schema gates it on the kind rather than reading
+    /// the same index everywhere.
+    pub(crate) fn html_document_output(self, options: &[&str]) -> Option<&'static str> {
+        self.html_document_options
+            .then(|| form_output_code(options.get(4).copied()))
+            .flatten()
+    }
 
     pub(crate) const fn options_slot(self) -> usize {
         Self::OPTIONS_BASE_SLOT + self.top_level_offset
@@ -3249,6 +3292,7 @@ impl FormFieldSchema {
             top_level_offset,
             input_field_options: item_tag == "InputField",
             spreadsheet_document_options: item_tag == "SpreadSheetDocumentField",
+            html_document_options: item_tag == "HTMLDocumentField",
             picture_field_options: item_tag == "PictureField",
             title_slot: 9 + top_level_offset,
             // The footer's own caption sits ten slots past the title's, in the
@@ -6606,11 +6650,7 @@ impl FormTableSchema {
     }
 
     pub(crate) fn output(self, fields: &[&str]) -> Option<&'static str> {
-        match fields.get(Self::OUTPUT_SLOT)?.trim() {
-            "1" => Some("Enable"),
-            "2" => Some("Disable"),
-            _ => None,
-        }
+        form_output_code(fields.get(Self::OUTPUT_SLOT).copied())
     }
 
     pub(crate) fn refresh_request(self, fields: &[&str]) -> Option<&'static str> {
@@ -6879,7 +6919,7 @@ impl FormSpreadsheetDocumentFieldProperties {
                 Some("3") => Some("WhenMultipleCellsSelected"),
                 _ => None,
             },
-            output: (option(12) == Some("1")).then_some("Enable"),
+            output: form_output_code(option(12)),
             protection: explicit_true(10),
             enable_start_drag: explicit_false(16),
             enable_drag: explicit_false(17),
