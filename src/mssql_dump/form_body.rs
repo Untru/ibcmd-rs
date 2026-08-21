@@ -836,6 +836,10 @@ pub(super) struct FormAttributeMetadataOwner {
 pub(super) struct FormAttributeSaveFieldBinding {
     pub(super) key: String,
     pub(super) metadata_uuid: Option<String>,
+    /// The member codes the walk spells after the metadata member it opens
+    /// with. Empty for the one-component entry, which names the member and
+    /// stops there.
+    pub(super) members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3878,9 +3882,19 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
             if let Some(indexes) = indexes {
                 return Some(FormAttributeSaveEntry::ValueTypeProperty(indexes));
             }
-            // Only a one-component walk is ever a form-item binding; a longer one
-            // that is not a pure index walk has no observed reading.
-            let [_, payload] = entry.as_slice() else {
+            // The walk opens with the member it binds and may spell further
+            // members after it, each a bare code. Reading only the
+            // one-component shape refused the longer walks outright, and
+            // because the whole list is read as one, refusing a single entry
+            // threw every other entry of that attribute away with it.
+            //
+            // Evidence: UT 11.5.27.75,
+            // `DataProcessors/ПлатежныйКалендарь/Forms/Форма`. Its `Объект`
+            // attribute declares 26 saved fields, 25 of them one-component
+            // and the 26th `{3,{0,<uuid>},{0},{1}}`, which the platform writes
+            // `Объект.КомпоновщикОтбор.Settings.Filter`. The one refusal cost
+            // the whole `<Save>` block.
+            let [_, payload, rest @ ..] = entry.as_slice() else {
                 return None;
             };
             let payload_fields = split_1c_braced_fields(payload.trim(), 0)?;
@@ -3889,8 +3903,23 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
                 [kind, uuid] if kind.trim() == "0" => parse_non_zero_uuid(uuid.trim()),
                 _ => None,
             };
+            let members = rest
+                .iter()
+                .map(|component| {
+                    let fields = split_1c_braced_fields(component.trim(), 0)?;
+                    let [code] = fields.as_slice() else {
+                        return None;
+                    };
+                    let code = code.trim();
+                    code.parse::<i64>().ok().map(|_| code.to_string())
+                })
+                .collect::<Option<Vec<_>>>()?;
             Some(FormAttributeSaveEntry::Binding(
-                FormAttributeSaveFieldBinding { key, metadata_uuid },
+                FormAttributeSaveFieldBinding {
+                    key,
+                    metadata_uuid,
+                    members,
+                },
             ))
         })
         .collect()
@@ -3954,16 +3983,31 @@ pub(super) fn apply_form_attribute_save_field_bindings(
                 }
             }
             for binding in bindings {
-                let data_path = data_path_by_binding_key
-                    .get(&binding.key)
-                    .cloned()
-                    .or_else(|| {
-                        resolve_form_attribute_save_metadata_path(
-                            &metadata_owner,
-                            binding.metadata_uuid.as_deref()?,
-                            object_refs,
-                        )
-                    });
+                let data_path = if binding.members.is_empty() {
+                    data_path_by_binding_key
+                        .get(&binding.key)
+                        .cloned()
+                        .or_else(|| {
+                            resolve_form_attribute_save_metadata_path(
+                                &metadata_owner,
+                                binding.metadata_uuid.as_deref()?,
+                                object_refs,
+                            )
+                        })
+                } else {
+                    // A walk that spells members past the one it binds names a
+                    // settings composer and walks it with the same member
+                    // table an item's bound slot is walked with. The binding
+                    // key covers only the first component, so it answers a
+                    // shorter path than the entry states and is not asked.
+                    let base = resolve_form_attribute_save_metadata_path(
+                        &metadata_owner,
+                        binding.metadata_uuid.as_deref().unwrap_or_default(),
+                        object_refs,
+                    );
+                    base.zip(form_settings_composer_member_walk(&binding.members))
+                        .map(|(base, tail)| format!("{base}{tail}"))
+                };
                 if let Some(data_path) = data_path
                     && seen.insert(data_path.clone())
                 {
@@ -18270,6 +18314,20 @@ fn form_settings_composer_member(
         .find_map(|(candidate, name, next)| (*candidate == member_id).then_some((*name, *next)))
 }
 
+/// The `.Member.Member` tail a chain spells after it has named the settings
+/// composer it walks, using the same member table an item's bound slot uses.
+fn form_settings_composer_member_walk(members: &[String]) -> Option<String> {
+    let mut owner = Some(FormSettingsComposerType::SettingsComposer);
+    let mut path = String::new();
+    for member in members {
+        let (name, next) = form_settings_composer_member(owner?, member.as_str())?;
+        path.push('.');
+        path.push_str(name);
+        owner = next;
+    }
+    Some(path)
+}
+
 pub(super) fn resolve_form_settings_composer_chain_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
@@ -23590,6 +23648,17 @@ pub(super) fn format_form_child_item_xml(
     // `ChoiceListButton` (13), `ChoiceListHeight` (4) and `DropListWidth` (1);
     // `ChoiceParameterLinks` before `ChoiceList` (1) and `ChoiceListButton` (3) —
     // with no counter-example.
+    // TEMPORARY PROBE -- removed before the gates.
+    if std::env::var_os("IBCMD_PROBE_LINKS").is_some() && item.tag == "InputField" {
+        eprintln!(
+            "PROBE WRITE id={} name={} cluster={:?}",
+            item.id,
+            item.name,
+            item.choice_parameter_cluster
+                .as_ref()
+                .map(|cluster| format!("{:?}", cluster.links()))
+        );
+    }
     if let Some(cluster) = &item.choice_parameter_cluster {
         xml.push_str(
             &format_form_choice_parameter_cluster_xml(cluster, indent + 1)
