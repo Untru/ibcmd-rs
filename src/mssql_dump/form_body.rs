@@ -1361,6 +1361,7 @@ pub(super) struct FormChildItem {
     pub(super) table_title_height: Option<String>,
     pub(super) table_footer_height: Option<String>,
     pub(super) table_output: Option<&'static str>,
+    pub(super) html_document_output: Option<&'static str>,
     pub(super) pages_read_only: Option<bool>,
     pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
     pub(super) incomplete_choice_mode: Option<&'static str>,
@@ -10375,12 +10376,21 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        html_document_output: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| schema.html_document_output(options)),
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
         auto_add_incomplete: table_schema.and_then(|schema| schema.auto_add_incomplete(&fields)),
         format: if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
                 .map(|options| options.format.clone())
+                .unwrap_or_default()
+        } else if tag == "Page" && page_schema.is_some() {
+            show_title_options
+                .as_deref()
+                .and_then(|options| options.get(5))
+                .map(|field| parse_form_localized_strings(field))
                 .unwrap_or_default()
         } else if tag == "LabelField" {
             label_field_options
@@ -20878,6 +20888,15 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
             escape_xml_text(value)
         ));
     }
+    // `ShowGroups` leads the drag pair, it does not trail it: on the three of
+    // the four native fields that carry it together with the pair,
+    // `<ShowGroups>false</ShowGroups>` stands between `SelectionShowMode` and
+    // `EnableStartDrag`, and on the fourth -- which has no pair --
+    // `SelectionShowMode` still precedes it.  It never shares a field with
+    // `Output`, so the two are not ordered against each other by observation.
+    if properties.show_groups == Some(false) {
+        xml.push_str(&format!("{tab}<ShowGroups>false</ShowGroups>\r\n"));
+    }
     if properties.enable_start_drag == Some(false) {
         xml.push_str(&format!(
             "{tab}<EnableStartDrag>false</EnableStartDrag>\r\n"
@@ -20898,16 +20917,6 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
             "{tab}<ViewScalingMode>{}</ViewScalingMode>\r\n",
             escape_xml_text(value)
         ));
-    }
-    // `ShowGroups` trails everything it is ever seen with -- `DataPath` (4),
-    // `TitleLocation` (4), `HorizontalScrollBar` (4), `Protection` (4),
-    // `Height` (3), `VerticalStretch` (3), `VerticalScrollBar` (3),
-    // `SelectionShowMode` (3), `AutoMaxWidth` (2), `MaxWidth` (2),
-    // `AutoMaxHeight` (2), `MaxHeight` (2), `ReadOnly` (2), `SkipOnInput` (2),
-    // `Width`, `HorizontalStretch`, `ShowGrid` and `Enabled` -- and leads only
-    // `ContextMenu` (4) on the four native fields that carry it.
-    if properties.show_groups == Some(false) {
-        xml.push_str(&format!("{tab}<ShowGroups>false</ShowGroups>\r\n"));
     }
     // `DrawingSelectionShowMode` closes the same run: the one native field
     // that carries it puts it behind `DataPath` and `TitleLocation` and ahead
@@ -23102,7 +23111,9 @@ pub(super) fn format_form_child_item_xml(
             fixing_in_table.xml_value()
         ));
     }
-    if !matches!(item.tag, "UsualGroup" | "InputField") && !item.format.is_empty() {
+    // `UsualGroup`, `InputField` and `Page` each write `Format` from their own
+    // property order, at the place their own native items put it.
+    if !matches!(item.tag, "UsualGroup" | "InputField" | "Page") && !item.format.is_empty() {
         xml.push_str(&format_form_localized_section(
             "Format",
             &item.format,
@@ -23631,6 +23642,19 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(file_drag_mode)
         ));
     }
+    // An `HTMLDocumentField` writes `<Output>` at the end of its scalar run:
+    // on all 7 native fields that carry it, it trails `DataPath` (7),
+    // `TitleLocation` (7), `SkipOnInput` (5), `ToolTipRepresentation` (3),
+    // `Title` (1) and the geometry run -- `Width`, `Height`, `MaxHeight`,
+    // `HorizontalStretch` (1 each) -- and leads `BorderColor` (1),
+    // `ContextMenu` (7), `ExtendedTooltip` (7) and `Events` (2), with no pair
+    // counted both ways.
+    if let Some(output) = item.html_document_output {
+        xml.push_str(&format!(
+            "{tab}\t<Output>{}</Output>\r\n",
+            escape_xml_text(output)
+        ));
+    }
     if matches!(
         item.tag,
         "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField"
@@ -23992,6 +24016,13 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
                         escape_xml_text(tooltip_representation)
                     ));
                 }
+            }
+            FormPageXmlProperty::Format => {
+                xml.push_str(&format_form_localized_section(
+                    "Format",
+                    &item.format,
+                    indent,
+                ));
             }
             FormPageXmlProperty::Picture => {
                 if let Some(reference) = &item.picture_ref {

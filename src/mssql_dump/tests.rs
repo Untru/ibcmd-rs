@@ -19968,6 +19968,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
 #[test]
 fn formats_table_search_additions_as_direct_sections() {
     let table = FormChildItem {
+        html_document_output: None,
         button_check: None,
         tag: "Table",
         id: "25".to_string(),
@@ -20203,6 +20204,7 @@ fn formats_table_search_additions_as_direct_sections() {
         command_source: None,
         child_items: vec![
             FormChildItem {
+                html_document_output: None,
                 button_check: None,
                 tag: "SearchStringAddition",
                 id: "26".to_string(),
@@ -20439,6 +20441,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 child_items: Vec::new(),
             },
             FormChildItem {
+                html_document_output: None,
                 button_check: None,
                 tag: "InputField",
                 id: "40".to_string(),
