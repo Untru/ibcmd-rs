@@ -9246,7 +9246,16 @@ fn parse_form_child_item_with_metadata_owners(
         append_form_child_items_by_tag(
             &mut child_items,
             &fields,
-            &["ContextMenu"],
+            // The PDF viewer field owns a view-status addition of its own next
+            // to its context menu: each of the five `PDFDocumentField` records
+            // of UT 11.5.27.75 carries exactly one wrapper-`22` context menu
+            // and exactly one wrapper-`5` view-status addition, and the
+            // platform writes both, name for name and id for id.
+            if tag == "PDFDocumentField" {
+                &["ContextMenu", "ViewStatusAddition"]
+            } else {
+                &["ContextMenu"]
+            },
             main_data_path,
             child_parent_data_path,
             Some(tag),
@@ -11212,9 +11221,21 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         addition_source_item: if tag.ends_with("Addition") {
-            fields
-                .get(19)
-                .and_then(|field| parse_form_search_addition_source_item(field, table_name_by_id))
+            fields.get(19).and_then(|field| {
+                parse_form_search_addition_source_item(field, table_name_by_id).or_else(|| {
+                    // A view-status addition owned by a PDF viewer field names
+                    // that field, not a table, so the table-only index cannot
+                    // answer it. Slot 19 holds `{<owner id>,1}` on all five such
+                    // additions of UT 11.5.27.75 and the id is the owning
+                    // `PDFDocumentField`'s own, which is what the platform
+                    // writes in `<AdditionSource><Item>`. The wider item index is
+                    // consulted only under that owner, so no addition that the
+                    // table index already answers changes hands.
+                    (_parent_tag == Some("PDFDocumentField"))
+                        .then(|| parse_form_search_addition_source_item(field, item_name_by_id))
+                        .flatten()
+                })
+            })
         } else {
             None
         },
@@ -11519,6 +11540,7 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "GraphicalSchemaField"
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
+            | "PDFDocumentField"
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
@@ -12383,6 +12405,31 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             font: Some(9),
+        },
+    ),
+    (
+        // The PDF viewer field's own 14-member tuple. Its extent pair sits in
+        // the same first two slots and carries the same `50`/`10` unwritten
+        // defaults the other character-metric document fields do: of the five
+        // `PDFDocumentField` items of UT 11.5.27.75 the four that carry no
+        // `<Width>`/`<Height>` read `50`/`10` and the one that carries
+        // `<Width>1</Width><Height>1</Height>` reads `1`/`1`. No max-extent,
+        // stretch or font coordinate is claimed: all five items agree slot for
+        // slot across the rest of the tuple and none of them carries any such
+        // element, so nothing in the corpus tells those slots apart.
+        "PDFDocumentField",
+        FormDocumentFieldGeometry {
+            discriminator: "1",
+            len: 14,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: None,
+            auto_max_width: None,
+            auto_max_height: None,
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            font: None,
         },
     ),
 ];
@@ -15620,6 +15667,13 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
                 "14" => (wrapper == "37").then_some("GraphicalSchemaField"),
                 "15" => (wrapper == "37").then_some("HTMLDocumentField"),
                 "17" => Some("FormattedDocumentField"),
+                // The PDF viewer field. Census of UT 11.5.27.75: the
+                // configuration holds exactly five items whose wrapper-`37`
+                // record spells `20` in the discriminator slot, and they are
+                // exactly the five `<PDFDocumentField>` elements of the native
+                // tree, name for name and id for id. The reader had no arm for
+                // the code at all, so all five items were dropped whole.
+                "20" => (wrapper == "37").then_some("PDFDocumentField"),
                 _ => None,
             }
         }
@@ -17012,7 +17066,12 @@ pub(super) fn parse_form_child_item_data_path(
         "CalendarField"
         | "GraphicalSchemaField"
         | "SpreadSheetDocumentField"
-        | "HTMLDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        | "HTMLDocumentField"
+        // The PDF viewer field spells its binding in the same slot 11 the
+        // other document fields do: all five items of UT 11.5.27.75 hold a
+        // one-segment chain there naming the form attribute the platform
+        // writes in `<DataPath>`, and none of them falls back to a parent path.
+        | "PDFDocumentField" => resolve_slots(&input_slots, &parse_bound),
         "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
         "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
         "Button" => button_data_path_slot
@@ -24461,10 +24520,21 @@ pub(super) fn format_form_child_item_xml(
         }
     } else if is_form_field_direct_service_parent(item.tag) {
         if !table_addition_child {
-            xml.push_str(&format_form_child_items_xml(
-                &direct_regular_children,
-                indent + 1,
-            ));
+            // A `PDFDocumentField` owns its view-status addition the way a
+            // `Table` does -- as a direct element behind `ExtendedTooltip`, not
+            // inside a `<ChildItems>` group. All five of UT 11.5.27.75's PDF
+            // fields write the addition bare, and none of them writes a
+            // `<ChildItems>` element at all.
+            if item.tag == "PDFDocumentField" {
+                for child in &direct_regular_children {
+                    xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+                }
+            } else {
+                xml.push_str(&format_form_child_items_xml(
+                    &direct_regular_children,
+                    indent + 1,
+                ));
+            }
         }
     } else if !table_addition_child {
         xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
