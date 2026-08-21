@@ -4602,6 +4602,48 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
         "\t\t\t<DynamicListsUserSettingsStorage/>\r\n\t\t\t<URLExternalDataStorage/>\r\n\t\t\t<Content/>\r\n\t\t\t<DefaultReportForm/>\r\n\t\t\t<DefaultReportVariantForm/>\r\n\t\t\t<DefaultReportSettingsForm/>\r\n\t\t\t<DefaultReportAppearanceTemplate/>\r\n\t\t\t<DefaultDynamicListSettingsForm/>\r\n\t\t\t<DefaultSearchForm/>\r\n\t\t\t<DefaultDataHistoryChangeHistoryForm/>\r\n\t\t\t<DefaultDataHistoryVersionDataForm/>\r\n\t\t\t<DefaultDataHistoryVersionDifferencesForm/>\r\n\t\t\t<DefaultCollaborationSystemUsersChoiceForm/>\r\n\t\t\t<RequiredMobileApplicationPermissions/>\r\n\t\t\t<UsedMobileApplicationFunctionalities>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Biometrics</app:functionality>\r\n\t\t\t\t\t<app:use>true</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Location</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BackgroundLocation</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BluetoothPrinters</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>WiFiPrinters</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Contacts</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Calendars</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>PushNotifications</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>LocalNotifications</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>InAppPurchases</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>PersonalComputerFileExchange</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Ads</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>NumberDialing</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>CallProcessing</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>CallLog</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AutoSendSMS</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>ReceiveSMS</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>SMSLog</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Camera</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Microphone</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>MusicLibrary</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>PictureAndVideoLibraries</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AudioPlaybackAndVibration</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BackgroundAudioPlaybackAndVibration</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>InstallPackages</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>OSBackup</app:functionality>\r\n\t\t\t\t\t<app:use>true</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>ApplicationUsageStatistics</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BarcodeScanning</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>BackgroundAudioRecording</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AllFilesAccess</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Videoconferences</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>NFC</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>DocumentScanning</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>SpeechToText</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>Geofences</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>IncomingShareRequests</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>AllIncomingShareRequestsTypesProcessing</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t\t<app:functionality>\r\n\t\t\t\t\t<app:functionality>TextToSpeech</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>\r\n\t\t\t\t</app:functionality>\r\n\t\t\t</UsedMobileApplicationFunctionalities>\r\n\t\t\t<StandaloneConfigurationRestrictionRoles/>\r\n\t\t\t<MobileApplicationURLs/>\r\n\t\t\t<AllowedIncomingShareRequestTypes/>\r\n\t\t\t<MainClientApplicationWindowMode>Normal</MainClientApplicationWindowMode>\r\n\t\t\t<DefaultInterface/>\r\n\t\t\t<DefaultStyle/>\r\n"
     }
 
+    /// The three slices of [`Self::storage_and_mobile_functionality_segment`]
+    /// that stay verbatim once `DefaultReportForm`..`DefaultReportSettingsForm`
+    /// and `UsedMobileApplicationFunctionalities` are emitted from their own
+    /// decoded coordinates. They are cut out of that one sha-bound constant
+    /// at its own element boundaries, so no second copy of the evidence
+    /// exists to drift from it.
+    ///
+    /// `DynamicListsUserSettingsStorage` through `Content`.
+    pub fn storage_and_content_segment(&self) -> &'static str {
+        let whole = self.storage_and_mobile_functionality_segment();
+        let end = whole
+            .find("\t\t\t<DefaultReportForm/>")
+            .expect("the evidenced default block always carries DefaultReportForm");
+        &whole[..end]
+    }
+
+    /// `DefaultReportAppearanceTemplate` through
+    /// `RequiredMobileApplicationPermissions`.
+    pub fn default_forms_and_permissions_segment(&self) -> &'static str {
+        let whole = self.storage_and_mobile_functionality_segment();
+        let start = whole
+            .find("\t\t\t<DefaultReportAppearanceTemplate/>")
+            .expect("the evidenced default block always carries DefaultReportAppearanceTemplate");
+        let end = whole
+            .find("\t\t\t<UsedMobileApplicationFunctionalities>")
+            .expect(
+                "the evidenced default block always carries UsedMobileApplicationFunctionalities",
+            );
+        &whole[start..end]
+    }
+
+    /// `StandaloneConfigurationRestrictionRoles` through `DefaultStyle`.
+    pub fn standalone_through_default_style_segment(&self) -> &'static str {
+        let whole = self.storage_and_mobile_functionality_segment();
+        let start = whole
+            .find("\t\t\t<StandaloneConfigurationRestrictionRoles/>")
+            .expect(
+                "the evidenced default block always carries StandaloneConfigurationRestrictionRoles",
+            );
+        &whole[start..]
+    }
+
     /// `DataLockControlMode` and `ObjectAutonumerationMode`. Inserted
     /// immediately after the writer's own (already-correct)
     /// `BriefInformation`/`DetailedInformation`/`Copyright`/
@@ -4648,12 +4690,17 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
     }
 
     /// `ModalityUseMode` (offset 867): single ASCII digit, `'2'` = `DontUse`
-    /// (platform default), `'0'` = `Use`. No other index value has been
-    /// observed by any evidenced corpus; any other byte must fail closed
-    /// rather than guess at unobserved enum members.
+    /// (platform default), `'0'` = `Use`, `'1'` = `UseWithWarnings`. The
+    /// third member is read straight off the platform, not interpolated:
+    /// «1С:Управление торговлей 11.5.27.75» carries `1` in this very tuple
+    /// field and its own `Configuration.xml` answers `UseWithWarnings`. No
+    /// other index value has been observed by any evidenced corpus; any
+    /// other byte must fail closed rather than guess at unobserved enum
+    /// members.
     pub fn modality_use_mode_xml(&self, digit: u8) -> Option<&'static str> {
         match digit {
             b'2' => Some("DontUse"),
+            b'1' => Some("UseWithWarnings"),
             b'0' => Some("Use"),
             _ => None,
         }
@@ -4733,6 +4780,64 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
     /// See [`Self::include_help_in_contents_tuple_field`] (offset 2669).
     pub fn synchronous_platform_extension_and_add_in_call_use_mode_tuple_field(&self) -> usize {
         41
+    }
+
+    /// Tuple fields of the three default report forms, in the order the
+    /// platform prints them. Read off the platform, by elimination over a
+    /// hold-out corpus the six offsets above were never fitted to:
+    /// «1С:Управление торговлей 11.5.27.75» is the only configuration whose
+    /// Properties tuple differs from the all-default reference here -- it
+    /// carries three design-time uuids in fields 30/31/32 where the
+    /// reference carries the nil uuid, its own `Configuration.xml` is the
+    /// only one whose `DefaultReportForm`/`DefaultReportVariantForm`/
+    /// `DefaultReportSettingsForm` are non-empty, and the three uuids resolve
+    /// to exactly the three `CommonForm` names it prints, in exactly this
+    /// order.
+    pub fn default_report_form_tuple_field(&self) -> usize {
+        30
+    }
+
+    /// See [`Self::default_report_form_tuple_field`].
+    pub fn default_report_variant_form_tuple_field(&self) -> usize {
+        31
+    }
+
+    /// See [`Self::default_report_form_tuple_field`].
+    pub fn default_report_settings_form_tuple_field(&self) -> usize {
+        32
+    }
+
+    /// Tuple fields of the 61-field Configuration `<Properties>` tuple that
+    /// no reader decodes and that therefore stay proven -- rather than
+    /// assumed -- only by requiring byte identity with the evidenced
+    /// all-default reference. Everything not listed here is either decoded
+    /// from its own coordinate (fields
+    /// 1..8, 10, 13, 14, 15, 16, 22..26, 28..33, 36, 38, 39, 41, 43, 53) or
+    /// carries no `<Properties>` output at all (fields 12, 40 and 51 -- see
+    /// [`Self::tuple_fields_without_properties_output`]).
+    pub fn unproven_tuple_fields(&self) -> &'static [usize] {
+        &[
+            0, 9, 11, 17, 18, 19, 20, 21, 27, 34, 35, 37, 42, 44, 45, 46, 47, 48, 49, 50, 52, 54,
+            55, 56, 57, 58, 59, 60,
+        ]
+    }
+
+    /// Tuple fields that differ between a configuration and the all-default
+    /// reference without any `<Properties>` field differing with them, and
+    /// that are therefore excluded from the identity check.
+    ///
+    /// Observation, not assumption: «1С:Управление торговлей 11.5.27.75»
+    /// differs from the reference in exactly these three fields on top of
+    /// the decoded ones, and every one of the 21 `<Properties>` fields that
+    /// differs between the two configurations is accounted for by a decoded
+    /// coordinate. Field 12 is a design-time role reference the 2.20 dialect
+    /// prints nowhere, field 40 a 28/29-entry typed-value table and field 51
+    /// a 34/35-row flag table. The residual risk is named: no corpus exhibits
+    /// a `<Properties>` difference these three could explain, so a
+    /// configuration in which one of them *did* drive output would be
+    /// mis-emitted rather than refused.
+    pub fn tuple_fields_without_properties_output(&self) -> &'static [usize] {
+        &[12, 40, 51]
     }
 
     /// Inverse of [`Self::include_help_in_contents_xml`].
@@ -13050,6 +13155,36 @@ mod configuration_properties_evidenced_default_block_policy_tests {
         output
     }
 
+    /// The three slices the writer actually emits must partition the one
+    /// sha-bound constant they are cut from, leaving exactly the two runs the
+    /// writer replaces with decoded values: the three default report forms
+    /// and the mobile-functionality block. If a cut point ever drifted, the
+    /// leftovers would stop being those two runs and this fails.
+    #[test]
+    fn split_segments_partition_the_storage_and_mobile_segment() {
+        let policy = configuration_properties_evidenced_default_block_policy();
+        let whole = policy.storage_and_mobile_functionality_segment();
+        let head = policy.storage_and_content_segment();
+        let middle = policy.default_forms_and_permissions_segment();
+        let tail = policy.standalone_through_default_style_segment();
+
+        let after_head = &whole[head.len()..];
+        let report_forms = &after_head[..after_head.find(middle).unwrap()];
+        assert_eq!(
+            report_forms,
+            "\t\t\t<DefaultReportForm/>\r\n\
+\t\t\t<DefaultReportVariantForm/>\r\n\
+\t\t\t<DefaultReportSettingsForm/>\r\n"
+        );
+
+        let after_middle = &whole[head.len() + report_forms.len() + middle.len()..];
+        let mobile = &after_middle[..after_middle.len() - tail.len()];
+        assert!(mobile.starts_with("\t\t\t<UsedMobileApplicationFunctionalities>\r\n"));
+        assert!(mobile.ends_with("\t\t\t</UsedMobileApplicationFunctionalities>\r\n"));
+        assert_eq!(mobile.matches("<app:functionality>\r\n").count(), 38);
+        assert_eq!(format!("{head}{report_forms}{middle}{mobile}{tail}"), whole);
+    }
+
     /// Every lexical segment in the policy, plus the six typed fields at
     /// their platform-default values, must reconstruct an EXACT, ordered,
     /// contiguous substring of the sha-bound bundled native
@@ -13139,7 +13274,11 @@ mod configuration_properties_evidenced_default_block_policy_tests {
         assert_eq!(policy.include_help_in_contents_xml(b'2'), None);
         assert_eq!(policy.modality_use_mode_xml(b'2'), Some("DontUse"));
         assert_eq!(policy.modality_use_mode_xml(b'0'), Some("Use"));
-        assert_eq!(policy.modality_use_mode_xml(b'1'), None);
+        // `'1'` is observed: «1С:Управление торговлей 11.5.27.75» carries it
+        // and prints `UseWithWarnings`. `'3'` is past the enumeration and
+        // stays refused.
+        assert_eq!(policy.modality_use_mode_xml(b'1'), Some("UseWithWarnings"));
+        assert_eq!(policy.modality_use_mode_xml(b'3'), None);
         assert_eq!(
             policy.interface_compatibility_mode_xml(b'2'),
             Some("TaxiEnableVersion8_2")
@@ -13191,7 +13330,7 @@ mod configuration_properties_evidenced_default_block_policy_tests {
 
         // Lexemes that exist in the platform's own enumerations but were
         // never observed in any evidenced corpus must NOT be guessed at.
-        assert_eq!(policy.modality_use_mode_digit("UseWithWarnings"), None);
+        assert_eq!(policy.modality_use_mode_digit("Auto"), None);
         assert_eq!(
             policy.interface_compatibility_mode_digit("Version8_2Enable8_3"),
             None

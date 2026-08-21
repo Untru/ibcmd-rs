@@ -2002,35 +2002,35 @@ pub(super) fn extract_configuration_source_xml(
     let mut properties =
         parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
     properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
-    match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block(
-        text.as_bytes(),
-    ) {
-        Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
-        Err(
-            super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::HeaderAnchorNotFound
-            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::HeaderAnchorNotUnique { .. }
-            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::FieldAnchorNotFound { .. }
-            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::FieldAnchorNotUnique { .. },
-        ) => {
-            // This text doesn't match the shape the six evidenced offsets
-            // were proven against at all (e.g. a synthetic/SQL-sourced text
-            // shape a non-CF caller constructed) -- never proven to be the
-            // evidenced family, so fall back to today's existing per-field
-            // behavior rather than fail closed on a coordinate we have no
-            // evidence about either way.
-        }
-        Err(
-            super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnrecognizedDigit { .. }
-            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnmappedRangeMismatch { .. }
-            | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnmappedRangeOutOfBounds,
-        ) => {
-            // The text DOES match the evidenced family's structural shape,
-            // but its content diverges from the proven all-default reference
-            // somewhere we cannot yet decode -- fail closed (no XML for this
-            // Configuration object at all) rather than silently repeat
-            // today's incomplete-but-quiet omission of ~30 Properties
-            // fields.
-            return None;
+    let evidenced_property_fields = configuration_root_property_fields(text, uuid);
+    if let Some(property_fields) = evidenced_property_fields.as_deref() {
+        match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block(
+            property_fields,
+        ) {
+            Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
+            Err(
+                super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnexpectedTupleArity { .. }
+                | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnexpectedFieldShape { .. }
+                | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnexpectedFieldClass { .. },
+            ) => {
+                // This tuple doesn't have the shape the proven field indices
+                // were established against at all (e.g. a synthetic/SQL-sourced
+                // text a non-CF caller constructed) -- never proven to be the
+                // evidenced family, so fall back to today's existing per-field
+                // behavior rather than fail closed on a coordinate we have no
+                // evidence about either way.
+            }
+            Err(
+                super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnrecognizedDigit { .. }
+                | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnprovenFieldMismatch { .. },
+            ) => {
+                // The tuple DOES have the evidenced family's shape, but a
+                // field we cannot yet decode diverges from the proven
+                // all-default reference -- fail closed (no XML for this
+                // Configuration object at all) rather than silently repeat
+                // the incomplete-but-quiet omission of ~30 Properties fields.
+                return None;
+            }
         }
     }
     if configuration_root_property_fields(text, uuid).is_some() {
@@ -2052,6 +2052,30 @@ pub(super) fn extract_configuration_source_xml(
             source_version.as_str(),
         )
         .unwrap_or_default();
+    if let Some(property_fields) = evidenced_property_fields.as_deref() {
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        for (slot, target) in [
+            (
+                policy.default_report_form_tuple_field(),
+                &mut properties.default_report_form,
+            ),
+            (
+                policy.default_report_variant_form_tuple_field(),
+                &mut properties.default_report_variant_form,
+            ),
+            (
+                policy.default_report_settings_form_tuple_field(),
+                &mut properties.default_report_settings_form,
+            ),
+        ] {
+            *target = parse_configuration_root_reference_slot(
+                property_fields,
+                slot,
+                object_refs,
+                "CommonForm.",
+            );
+        }
+    }
     let root_layout = parse_configuration_root_layout(text, uuid);
     let child_objects = root_layout
         .is_none()
@@ -2143,6 +2167,9 @@ pub(super) fn parse_configuration_properties_from_text(
             object_refs,
             "SettingsStorage.",
         ),
+        default_report_form: None,
+        default_report_variant_form: None,
+        default_report_settings_form: None,
         used_mobile_application_functionalities: Vec::new(),
         compatibility_mode: fields
             .get(43)
@@ -2346,15 +2373,6 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
     if raw_fields.len() != count.checked_add(3)? {
         return None;
     }
-    let expected_count = match source_version {
-        "2.17" | "2.20" => 37,
-        "2.21" => 38,
-        _ => return None,
-    };
-    if count != expected_count {
-        return None;
-    }
-
     let trailing = parse_1c_bool_flag(raw_fields.last()?.trim())?;
     let mut functionalities = Vec::with_capacity(38);
     for ((expected_id, name), field) in CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
@@ -2372,13 +2390,32 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
         });
     }
 
+    // The record's own declared count decides how the table's last entry is
+    // spelled; the dialect only decides whether that entry is printed. A
+    // record that spells all `full` entries as pairs is complete as it
+    // stands, and the shorter one carries its last entry in the trailing
+    // scalar instead.
+    //
+    // The `2.20`+`full` arm is the one this table was missing: every
+    // 8.3.27.2214 configuration retained here -- all nine bundled evidence
+    // corpora and «1С:Управление торговлей 11.5.27.75» -- declares 38, spells
+    // the 38 ids of the table above in order, and its flags decode to that
+    // configuration's own `<UsedMobileApplicationFunctionalities>` block
+    // value for value; every one of them is exported at `2.20`, where the old
+    // table demanded 37 and so dropped the block outright.
+    let full = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES.len();
     match (source_version, count) {
-        ("2.17", 37) => {}
-        ("2.20", 37) => functionalities.push(ConfigurationMobileApplicationFunctionality {
-            name: "TextToSpeech",
-            use_functionality: trailing,
-        }),
-        ("2.21", 38) => {}
+        // The 2.17 dialect prints no `TextToSpeech` at all, so the shorter
+        // record's trailing scalar is read for its shape and dropped. No
+        // corpus shows how a full-length record maps onto that dialect.
+        ("2.17", n) if n + 1 == full => {}
+        ("2.20", n) if n + 1 == full => {
+            functionalities.push(ConfigurationMobileApplicationFunctionality {
+                name: CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES[full - 1].1,
+                use_functionality: trailing,
+            })
+        }
+        ("2.20" | "2.21", n) if n == full => {}
         _ => return None,
     }
     Some(functionalities)

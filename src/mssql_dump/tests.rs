@@ -43087,7 +43087,13 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
         ("68 field count", 68, 60, valid38.as_str(), "2.21"),
         ("76 field count", 76, 76, valid38.as_str(), "2.21"),
         ("2.17 count", 68, 61, valid38.as_str(), "2.17"),
-        ("2.20 count", 76, 77, valid38.as_str(), "2.20"),
+        // `("2.20 count", 76, 77, valid38, "2.20")` used to sit here,
+        // demanding that a full-length record be refused at the 2.20 dialect.
+        // The platform's own bytes disprove it: all nine bundled 8.3.27.2214
+        // evidence configurations, and «1С:Управление торговлей 11.5.27.75»,
+        // declare the full 38 and are exported at 2.20, and every one of them
+        // prints the whole block. The dialect decides whether the table's last
+        // entry is printed, not how long the record may be.
         ("2.21 count", 67, 60, valid37.as_str(), "2.21"),
         ("unknown source version", 67, 60, valid37.as_str(), "9.99"),
     ] {
