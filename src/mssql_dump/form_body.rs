@@ -1114,6 +1114,7 @@ pub(super) struct FormExtendedTooltip {
     pub(super) horizontal_stretch: Option<bool>,
     pub(super) vertical_stretch: Option<bool>,
     pub(super) text_color: Option<String>,
+    pub(super) back_color: Option<String>,
     pub(super) font_xml: Option<String>,
     pub(super) title: Option<FormExtendedTooltipTitle>,
     pub(super) title_height: Option<String>,
@@ -1143,6 +1144,7 @@ impl FormExtendedTooltip {
             || self.horizontal_stretch.is_some()
             || self.vertical_stretch.is_some()
             || self.text_color.is_some()
+            || self.back_color.is_some()
             || self.font_xml.is_some()
             || self.title.is_some()
             || self.title_height.is_some()
@@ -1286,6 +1288,8 @@ pub(super) struct FormChildItem {
     pub(super) hiperlink: Option<bool>,
     pub(super) text_color: Option<String>,
     pub(super) back_color: Option<String>,
+    pub(super) title_back_color: Option<String>,
+    pub(super) hidden_state_title_back_color: Option<String>,
     pub(super) border_color: Option<String>,
     pub(super) button_parameter: Option<String>,
     pub(super) button_check: Option<bool>,
@@ -9856,6 +9860,16 @@ fn parse_form_child_item_with_metadata_owners(
             "Page" => fields
                 .get(18)
                 .and_then(|field| parse_common_command_shortcut_value(field)),
+            // A `Table` spells the same tuple in slot 51 of its own head.
+            // Census of all 4 543 traced `Table` items of UT 11.5.27.75: the
+            // slot decodes to a shortcut on exactly the 3 the platform writes
+            // `<Shortcut>` on -- `Ctrl+1`, `Ctrl+2` and `Ctrl+S`, value for
+            // value -- and to nothing on the other 4 540, across record
+            // lengths from 103 to 153 members, so the coordinate is in the
+            // fixed head rather than at some length-dependent offset.
+            "Table" => fields
+                .get(51)
+                .and_then(|field| parse_common_command_shortcut_value(field)),
             _ => None,
         },
         choice_list_height: (tag == "InputField")
@@ -10245,6 +10259,17 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        title_back_color: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| fields.get(schema.title_back_color_slot()))
+            .and_then(|field| parse_form_control_color(field, object_refs)),
+        hidden_state_title_back_color: show_title_schema
+            .and_then(|schema| {
+                show_title_options
+                    .as_deref()?
+                    .get(schema.hidden_state_title_back_color_option_slot()?)
+            })
+            .and_then(|field| parse_form_control_color(field, object_refs)),
         border_color: if let Some(schema) = button_color_schema {
             fields
                 .get(schema.border_color_slot())
@@ -15595,6 +15620,9 @@ pub(super) fn parse_form_child_item_extended_tooltip(
         let Some(events) = parse_form_extended_tooltip_option_events(&event_fields) else {
             return Some(tooltip);
         };
+        tooltip.back_color = options
+            .get(FormExtendedTooltipSchema::BACK_COLOR_OPTION_SLOT)
+            .and_then(|field| parse_form_control_color(field.trim(), object_refs));
         tooltip.width = extract_form_dimension(&nested, schema.width_slot());
         tooltip.auto_max_width = match nested
             .get(schema.auto_max_width_slot())
@@ -20997,6 +21025,11 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::Shortcut => item
+            .item_shortcut
+            .as_ref()
+            .map(|value| format!("{tab}<Shortcut>{}</Shortcut>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
         FormTableXmlProperty::Output => item
             .table_output
             .map(|value| format!("{tab}<Output>{}</Output>\r\n", escape_xml_text(value)))
@@ -21720,6 +21753,17 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
+        ));
+    }
+    // Both native fields that carry `TitleBackColor` write it immediately
+    // behind `DataPath` and ahead of `TitleLocation`, `EditMode`,
+    // `ShowInFooter`, `AutoCellHeight`, `FooterHorizontalAlign`, `MultiLine`,
+    // `OpenButton`, `TextEdit`, `ValuesPicture`, `ContextMenu`,
+    // `ExtendedTooltip` and `Events`; nothing else shares a field with it.
+    if let Some(title_back_color) = &item.title_back_color {
+        xml.push_str(&format!(
+            "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
+            escape_xml_text(title_back_color)
         ));
     }
     if !matches!(item.tag, "Button" | "Table") && item.visible == Some(false) {
@@ -24448,6 +24492,14 @@ fn format_form_usual_group_properties_xml(
                     ));
                 }
             }
+            FormUsualGroupXmlProperty::HiddenStateTitleBackColor => {
+                if let Some(value) = &item.hidden_state_title_back_color {
+                    xml.push_str(&format!(
+                        "{tab}<HiddenStateTitleBackColor>{}</HiddenStateTitleBackColor>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
             FormUsualGroupXmlProperty::ThroughAlign => {
                 if let Some(value) = item.through_align {
                     xml.push_str(&format!(
@@ -24667,6 +24719,11 @@ fn format_form_extended_tooltip_property_xml(
             .text_color
             .as_ref()
             .map(|value| format!("{tab}<TextColor>{}</TextColor>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::BackColor => tooltip
+            .back_color
+            .as_ref()
+            .map(|value| format!("{tab}<BackColor>{}</BackColor>\r\n", escape_xml_text(value)))
             .unwrap_or_default(),
         FormExtendedTooltipXmlProperty::Font => tooltip
             .font_xml

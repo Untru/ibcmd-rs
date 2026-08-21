@@ -1006,6 +1006,7 @@ pub(crate) enum FormUsualGroupXmlProperty {
     United,
     ChildItemsWidth,
     BackColor,
+    HiddenStateTitleBackColor,
     ThroughAlign,
     CurrentRowUse,
 }
@@ -1031,6 +1032,12 @@ pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
     FormUsualGroupXmlProperty::United,
     FormUsualGroupXmlProperty::ChildItemsWidth,
     FormUsualGroupXmlProperty::BackColor,
+    // The one native usual group that carries `HiddenStateTitleBackColor`
+    // writes it behind `Title`, `Behavior`, `Representation` and `ShowTitle`
+    // and ahead of `ExtendedTooltip` and `ChildItems`; it shares no group with
+    // `BackColor`, `ThroughAlign` or `CurrentRowUse`, so it joins their site
+    // rather than opening a second one.
+    FormUsualGroupXmlProperty::HiddenStateTitleBackColor,
     FormUsualGroupXmlProperty::ThroughAlign,
     // The one native usual group that carries `CurrentRowUse` writes it
     // behind `Title`, `HorizontalStretch`, `GroupHorizontalAlign`, `Group`,
@@ -1059,9 +1066,10 @@ impl FormUsualGroupXmlProperty {
             Self::Format | Self::ShowLeftMargin | Self::United | Self::ChildItemsWidth => {
                 FormUsualGroupXmlAnchor::AfterRepresentation
             }
-            Self::BackColor | Self::ThroughAlign | Self::CurrentRowUse => {
-                FormUsualGroupXmlAnchor::AfterShowTitle
-            }
+            Self::BackColor
+            | Self::HiddenStateTitleBackColor
+            | Self::ThroughAlign
+            | Self::CurrentRowUse => FormUsualGroupXmlAnchor::AfterShowTitle,
         }
     }
 }
@@ -1650,6 +1658,7 @@ pub(crate) enum FormExtendedTooltipXmlProperty {
     GroupVerticalAlign,
     HorizontalAlign,
     VerticalAlign,
+    BackColor,
     Events,
 }
 
@@ -1684,6 +1693,11 @@ pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProper
     FormExtendedTooltipXmlProperty::GroupVerticalAlign,
     FormExtendedTooltipXmlProperty::HorizontalAlign,
     FormExtendedTooltipXmlProperty::VerticalAlign,
+    // A tooltip's `BackColor` closes its property block, immediately ahead of
+    // `Events`.  Both native tooltips that carry one pin it from a different
+    // side and neither is contradicted: one reads `TextColor`, `Title`,
+    // `Hyperlink`, `BackColor` and the other `BackColor`, `Events`.
+    FormExtendedTooltipXmlProperty::BackColor,
     FormExtendedTooltipXmlProperty::Events,
 ];
 
@@ -1711,6 +1725,15 @@ impl FormExtendedTooltipSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
     pub(crate) const TITLE_SLOT: usize = 22;
     pub(crate) const EVENT_OPTION_SLOT: usize = 5;
+    /// The option slot immediately behind the event record carries the
+    /// tooltip's `BackColor`, in the same three-member `{3, space, payload}`
+    /// shape every control colour uses.  Census of all 206 891 traced
+    /// `ExtendedTooltip` records of UT 11.5.27.75: exactly two option slots in
+    /// the whole configuration hold a colour that is not the platform's
+    /// "unset" encoding, both of them this one, and they are exactly the two
+    /// tooltips the platform writes `<BackColor>` on -- `style:ToolTipBackColor`
+    /// and `#FFDCDC`, value for value.
+    pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 6;
     /// `Hyperlink` flag slot of the tooltip option tuple: `1` on exactly the 8
     /// native `ExtendedTooltip` items that carry `<Hyperlink>true</Hyperlink>`
     /// and `0` on the other 170 224.
@@ -3178,6 +3201,22 @@ impl FormFieldSchema {
         Self::OPTIONS_BASE_SLOT + self.top_level_offset
     }
 
+    /// The field's `TitleBackColor`, a top-level slot carrying the same
+    /// three-member `{3, space, payload}` value every control colour uses, and
+    /// shifted by the same head offset the options slot is.
+    ///
+    /// Census of every colour-bearing item record of UT 11.5.27.75 -- all
+    /// 11 099 of them, scanned at every top-level and every nested slot: this
+    /// coordinate holds a colour on exactly two items, and they are exactly
+    /// the two the platform writes `<TitleBackColor>` on, value for value. No
+    /// other item in the configuration holds anything but the platform's
+    /// "unset" encoding here.
+    pub(crate) const TITLE_BACK_COLOR_BASE_SLOT: usize = 33;
+
+    pub(crate) const fn title_back_color_slot(self) -> usize {
+        Self::TITLE_BACK_COLOR_BASE_SLOT + self.top_level_offset
+    }
+
     pub(crate) fn item_tag_from_discriminator(discriminator: &str) -> Option<&'static str> {
         match discriminator {
             "1" => Some("LabelField"),
@@ -4572,6 +4611,7 @@ impl FormCommandBarSchema {
 pub(crate) struct FormChildItemShowTitleSchema {
     option_slot: usize,
     back_color_option_slot: Option<usize>,
+    hidden_state_title_back_color_option_slot: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -4678,24 +4718,36 @@ impl FormChildItemShowTitleSchema {
             return Some(Self {
                 option_slot: 6,
                 back_color_option_slot: Some(9),
+                // Unobserved on a `Page`: no native page carries a
+                // `HiddenStateTitleBackColor`, so this layout refuses rather
+                // than borrowing the usual group's coordinate.
+                hidden_state_title_back_color_option_slot: None,
             });
         }
         if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
             return None;
         }
-        let (option_slot, back_color_option_slot) = match (
-            item_tag,
-            direct_discriminator,
-            options.len(),
-            options.first().map(|field| field.trim()),
-        ) {
-            ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None),
-            ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9)),
-            _ => return None,
-        };
+        // The usual group's own 29-member option tuple carries a second
+        // colour beside `BackColor`: option 23 is its
+        // `HiddenStateTitleBackColor`.  Census of every colour-bearing item
+        // record of UT 11.5.27.75 -- all 11 099, scanned at every top-level
+        // and nested slot -- finds a colour there on exactly one item, and it
+        // is exactly the one the platform writes the element on.
+        let (option_slot, back_color_option_slot, hidden_state_title_back_color_option_slot) =
+            match (
+                item_tag,
+                direct_discriminator,
+                options.len(),
+                options.first().map(|field| field.trim()),
+            ) {
+                ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None, None),
+                ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9), Some(23)),
+                _ => return None,
+            };
         Some(Self {
             option_slot,
             back_color_option_slot,
+            hidden_state_title_back_color_option_slot,
         })
     }
 
@@ -4705,6 +4757,10 @@ impl FormChildItemShowTitleSchema {
 
     pub(crate) const fn back_color_option_slot(self) -> Option<usize> {
         self.back_color_option_slot
+    }
+
+    pub(crate) const fn hidden_state_title_back_color_option_slot(self) -> Option<usize> {
+        self.hidden_state_title_back_color_option_slot
     }
 }
 
@@ -5729,6 +5785,7 @@ pub(crate) enum FormTableXmlProperty {
     Title,
     TitleFont,
     Font,
+    Shortcut,
     CommandSet,
     CurrentRowUse,
     ToolTip,
@@ -5938,6 +5995,13 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // nearest position that satisfies every observed pair.
     FormTableXmlProperty::TitleFont,
     FormTableXmlProperty::Font,
+    // A table's `Shortcut` sits between its title block and its command set.
+    // UT 11.5.27.75 native tree, the 3 tables that carry one: it trails
+    // `Title` (2), `RowPictureDataPath` (1), `DataPath` (3),
+    // `EnableStartDrag` (3) and `Representation` (1), and leads `RowFilter`
+    // (3), `CommandSet` (1), `ContextMenu` (3) and `AutoCommandBar` (3);
+    // nothing this block writes ever follows it.
+    FormTableXmlProperty::Shortcut,
     FormTableXmlProperty::CommandSet,
     FormTableXmlProperty::ToolTip,
     FormTableXmlProperty::ToolTipRepresentation,
