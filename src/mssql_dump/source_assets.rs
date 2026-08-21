@@ -1382,7 +1382,7 @@ pub(super) fn write_source_asset(
                 context.type_index,
                 context.type_index_collisions,
                 context.dcs_type_index,
-                context.object_refs,
+                context.form_object_refs,
                 context.field_type_refs,
                 context.information_register_field_refs,
                 context.information_register_master_dimensions,
@@ -2496,6 +2496,67 @@ pub(super) fn build_predefined_item_reference_index(
     }
 
     Ok(index)
+}
+
+/// Predefined-item references for every owner that stores predefined data.
+///
+/// [`build_predefined_item_reference_index`] is built for the owners whose own
+/// XML needs the names; a form names a predefined item of *any* object, so this
+/// one walks every owner that has a predefined-data body.  An owner the
+/// reference index does not name, a body the blob reader does not read and a
+/// collision inside one owner are all skipped rather than fatal: a form that
+/// cannot resolve its reference keeps the raw identifiers the platform itself
+/// keeps for an unresolvable one.
+pub(super) fn build_form_predefined_item_reference_index(
+    rows: &[ConfigRow],
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let rows_by_file_name = rows
+        .iter()
+        .filter(|row| !row.binary_hex.is_empty())
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let mut index = BTreeMap::new();
+    for (owner_uuid, owner) in body_owners {
+        let Some(model) = predefined_data_source_model(&owner.kind) else {
+            continue;
+        };
+        let Some(suffix) = predefined_data_suffix(&owner.kind) else {
+            continue;
+        };
+        let Some(row) = rows_by_file_name.get(format!("{owner_uuid}.{suffix}").as_str()) else {
+            continue;
+        };
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some(items) = parse_predefined_data_blob_with_model(&bytes, type_index, model) else {
+            continue;
+        };
+        let Some(owner_reference) = object_refs.get(owner_uuid) else {
+            continue;
+        };
+        let mut ambiguous_item_ids = BTreeSet::new();
+        let mut owner_index = BTreeMap::new();
+        if insert_predefined_item_references(
+            &mut owner_index,
+            &mut ambiguous_item_ids,
+            owner_reference,
+            &items,
+        )
+        .is_err()
+        {
+            continue;
+        }
+        for (key, reference) in owner_index {
+            if metadata_owner_value_reference_key_parts(&key).is_some() {
+                index.insert(key, reference);
+            }
+        }
+    }
+    index
 }
 
 pub(super) fn insert_predefined_item_references(

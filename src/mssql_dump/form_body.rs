@@ -13101,7 +13101,25 @@ pub(super) fn parse_form_enum_design_time_reference(
         return Some(format!("{owner_reference}.EmptyRef"));
     }
     if owner.kind() != GeneratedMetadataReferenceOwnerKind::Enum {
-        return None;
+        // Outside an enumeration the value identifier names a *predefined
+        // item* of the owner, which is not a metadata object and therefore has
+        // no entry of its own in the reference index; the owner-qualified
+        // predefined-item name is the only thing that can name it, and the
+        // refusal here used to swallow every such reference -- and with it, in
+        // a choice parameter, the whole `<ChoiceParameters>` block.
+        //
+        // Evidence: UT 11.5.27.75, equality of sets over every design-time
+        // reference the form writer renders as a bare identifier pair. 61 such
+        // pairs exist in the export; the 8 whose type identifier names a
+        // configuration type *and* whose value identifier is a predefined item
+        // of that type are exactly the 8 the platform spells out
+        // (`Catalog.СтавкиНДС.БезНДС`,
+        // `Catalog.КлассификаторНСИЗЕРНО.ТипХранения*` and five
+        // `ChartOfCharacteristicTypes.СтатьиРасходов.*`), character for
+        // character; the other 53 name a type the configuration no longer
+        // carries, and the platform keeps the identifier pair on every one of
+        // them, which is what returning `None` here still does.
+        return form_predefined_item_reference(&owner_reference, &value_uuid, object_refs);
     }
     let value_ref = parse_design_time_reference(value_id.trim(), object_refs)?;
     let enum_value_prefix = format!("{owner_reference}.EnumValue.");
@@ -13109,6 +13127,42 @@ pub(super) fn parse_form_enum_design_time_reference(
         .strip_prefix(&enum_value_prefix)
         .is_some_and(|name| !name.is_empty())
         .then_some(value_ref)
+}
+
+/// The name of the predefined item a design-time reference pair names, or
+/// `None` when the pair names no object this configuration carries.
+///
+/// This is the fallback of the choice-list value reader, whose primary answer
+/// is the plain value-identifier lookup: an enumeration value is a metadata
+/// object in its own right and resolves there, a predefined item is not and
+/// only resolves through its owner.
+pub(super) fn form_predefined_item_design_time_reference(
+    type_id: &str,
+    value_id: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let value_uuid = Uuid::parse_str(value_id.trim()).ok()?;
+    if value_uuid.is_nil() {
+        return None;
+    }
+    let type_reference =
+        unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())?;
+    let owner = parse_generated_metadata_reference_owner(type_reference)?;
+    form_predefined_item_reference(&owner.owner_reference(), &value_uuid, object_refs)
+}
+
+/// The name of a predefined item of `owner_reference`, from the owner-qualified
+/// entries the form reference index carries alongside the metadata objects.
+pub(super) fn form_predefined_item_reference(
+    owner_reference: &str,
+    value_uuid: &Uuid,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    object_refs
+        .get(&format!("owner-value:{owner_reference}:{value_uuid}"))
+        .cloned()
 }
 
 pub(super) fn parse_form_input_field_type_link(
@@ -14344,7 +14398,17 @@ fn try_parse_form_radio_button_choice_list(
                 .and_then(parse_generated_metadata_reference_owner)
                 .map(|owner| owner.owner_reference())
         },
-        |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, value_id| {
+            parse_design_time_reference(value_id, object_refs).or_else(|| {
+                form_predefined_item_design_time_reference(
+                    type_id,
+                    value_id,
+                    type_index,
+                    type_index_collisions,
+                    object_refs,
+                )
+            })
+        },
     )?;
     Some(decoded.items().to_vec())
 }
@@ -14365,7 +14429,17 @@ pub(super) fn try_parse_form_input_field_choice_list(
                 .and_then(parse_generated_metadata_reference_owner)
                 .map(|owner| owner.owner_reference())
         },
-        |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, value_id| {
+            parse_design_time_reference(value_id, object_refs).or_else(|| {
+                form_predefined_item_design_time_reference(
+                    type_id,
+                    value_id,
+                    type_index,
+                    type_index_collisions,
+                    object_refs,
+                )
+            })
+        },
     )?;
     Some(decoded.items().to_vec())
 }
