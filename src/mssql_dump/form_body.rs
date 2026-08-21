@@ -11389,12 +11389,11 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
         }
         item.type_link = None;
         // The bound title is not one of the properties a conditional group
-        // withholds from its descendants: the platform writes
-        // `<TitleDataPath>` on all four such groups of UT 11.5.27.75 --
-        // `ЗаголовокКомментарияГруппы` and `ЗаголовокКомментарияПользователя`
-        // of `Catalogs/ВнешниеПользователи/Forms/ФормаСписка` and of
-        // `Catalogs/Пользователи/Forms/ФормаСписка` -- and blanking it here
-        // dropped every one.
+        // withholds from its descendants. UT 11.5.27.75 carries four groups
+        // that are both a conditional group's descendant and title-bound --
+        // two comment headers in each of two catalog list forms -- and the
+        // platform writes `<TitleDataPath>` on every one of them, so blanking
+        // it here dropped four elements and gained none.
         // A label field under a conditional group keeps the `<Width>` its own
         // option tuple declares: over the 4 636 unambiguously attributed forms
         // of the native UT 11.5.27.75 tree, option member 1 of the label field
@@ -18621,11 +18620,10 @@ pub(super) fn parse_form_title_data_path(
     // A chain rooted at a form item is read by the one route every other bound
     // slot reads it with, against the table-column routes the form itself
     // states. Reading it here through the *global* binding-key index instead
-    // spelled the bound item's own inferred name: table item 25 of
-    // `Catalogs/ВнешниеПользователи/Forms/ФормаСписка` carries column `10`,
-    // whose field-map name is `Description`, and the global index answered
-    // `Наименование`; the platform writes
-    // `Items.ГруппыВнешнихПользователей.CurrentData.Description`.
+    // answered a column id with whatever name some unrelated item had inferred
+    // for that same id: on two catalog list forms of UT 11.5.27.75 the column
+    // the group's title binds to is named `Description` by the list's own field
+    // map, and the global index answered the caption of a label field instead.
     resolve_form_item_scoped_current_data_path(
         binding,
         table_name_by_id,
