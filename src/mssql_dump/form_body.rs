@@ -15445,6 +15445,24 @@ pub(super) fn parse_form_child_item_title(
     {
         return title;
     }
+    // A `PictureDecoration` spells its title record in the same slot and the
+    // same `{1, values, formatted}` shape its `LabelDecoration` sibling does.
+    // Census of all 3 725 traced picture decorations of UT 11.5.27.75: the
+    // record's third member is `0` on the 3 723 whose native `<Title>` reads
+    // `formatted="false"` (or that write no title at all) and `1` on the two
+    // that read `formatted="true"`, with no third code. The flag had no
+    // reader, so every picture decoration was written `formatted="false"`.
+    if tag == "PictureDecoration"
+        && let Some(formatted) = parse_form_picture_decoration_title_formatted(fields)
+    {
+        let values = fields
+            .get(7)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default();
+        if !values.is_empty() {
+            return (values, Some(formatted));
+        }
+    }
     if let Some(schema) = field_schema {
         return (
             fields
@@ -15472,6 +15490,27 @@ pub(super) fn parse_form_child_item_title(
         })
         .unwrap_or_default();
     (values, None)
+}
+
+/// The formatted flag of a `PictureDecoration` title, read under the same
+/// shape guard the label decoration's title record answers to.
+fn parse_form_picture_decoration_title_formatted(fields: &[&str]) -> Option<bool> {
+    if fields.first().map(|field| field.trim()) != Some("12")
+        || fields.len() != 36
+        || fields.get(5).map(|field| field.trim()) != Some("1")
+    {
+        return None;
+    }
+    let title =
+        split_1c_braced_fields(fields.get(FormLabelDecorationSchema::TITLE_SLOT)?.trim(), 0)?;
+    if title.len() != 3 || title.first()?.trim() != "1" {
+        return None;
+    }
+    match title.get(2)?.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
 }
 
 pub(super) fn parse_form_label_decoration_title(
@@ -22007,6 +22046,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_height)
         ));
     }
+    xml.push_str(&format_form_tooltip_representation_xml(
+        item,
+        FormTooltipRepresentationXmlOrder::FieldPropertiesBeforeCommandSet,
+        indent + 1,
+    ));
     if matches!(
         item.tag,
         "SpreadSheetDocumentField" | "FormattedDocumentField"

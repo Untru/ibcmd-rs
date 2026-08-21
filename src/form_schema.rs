@@ -5521,6 +5521,7 @@ pub(crate) enum FormTooltipRepresentationXmlOrder {
     UsualGroupHeader,
     DecorationHeader,
     FieldProperties,
+    FieldPropertiesBeforeCommandSet,
     ButtonGroupHeader,
     AfterTitle,
 }
@@ -5670,13 +5671,22 @@ pub(crate) fn form_tooltip_representation_xml_order(
         | FormTooltipRepresentationItemKind::ProgressBarField
         | FormTooltipRepresentationItemKind::TrackBarField
         | FormTooltipRepresentationItemKind::ChartField
-        // Both document-field kinds place it exactly where their sibling fields
+        // An `HTMLDocumentField` places it exactly where its sibling fields
         // do: behind `DataPath`/`SkipOnInput`/`TitleLocation` and ahead of the
-        // geometry run (`Width`, `Height`, `MaxHeight`), `CommandSet`,
+        // geometry run (`Width`, `Height`, `MaxHeight`), `BorderColor`,
         // `ContextMenu` and `ExtendedTooltip`.
-        | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
         | FormTooltipRepresentationItemKind::HTMLDocumentField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
+        }
+        // A `SpreadSheetDocumentField` writes it one step earlier, ahead of its
+        // own `CommandSet`: both native spreadsheet fields that carry the
+        // property carry a command set too, and both write `DataPath`,
+        // `TitleLocation`, `ToolTipRepresentation`, `CommandSet`,
+        // `SelectionShowMode`, `ContextMenu`, `ExtendedTooltip` in that order.
+        // (A `Table` writes the two the other way round, on all 18 that carry
+        // both, but it has its own ordered property list.)
+        FormTooltipRepresentationItemKind::SpreadSheetDocumentField => {
+            Some(FormTooltipRepresentationXmlOrder::FieldPropertiesBeforeCommandSet)
         }
         FormTooltipRepresentationItemKind::Button => {
             Some(FormTooltipRepresentationXmlOrder::AfterTitle)
