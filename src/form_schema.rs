@@ -6952,7 +6952,17 @@ impl FormSpreadsheetDocumentFieldProperties {
                 Some("3") => Some("WhenMultipleCellsSelected"),
                 _ => None,
             },
-            output: (option(12) == Some("1")).then_some("Enable"),
+            // Slot 12 is one code, not a flag with a hole in it, and it uses
+            // the same `1`/`2` pairing the `Table` header does: of the 184
+            // `SpreadSheetDocumentField` option tuples UT 11.5.27.75 spells
+            // out, 180 hold `0` and write nothing, 3 hold `1` and write
+            // `Enable`, and the one that holds `2` is the one the platform
+            // writes `<Output>Disable</Output>` on.  Reading only `1` lost it.
+            output: match option(12) {
+                Some("1") => Some("Enable"),
+                Some("2") => Some("Disable"),
+                _ => None,
+            },
             protection: explicit_true(10),
             enable_start_drag: explicit_false(16),
             enable_drag: explicit_false(17),

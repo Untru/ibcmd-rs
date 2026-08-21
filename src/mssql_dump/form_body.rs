@@ -1356,6 +1356,7 @@ pub(super) struct FormChildItem {
     pub(super) table_title_height: Option<String>,
     pub(super) table_footer_height: Option<String>,
     pub(super) table_output: Option<&'static str>,
+    pub(super) html_document_output: Option<&'static str>,
     pub(super) pages_read_only: Option<bool>,
     pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
     pub(super) incomplete_choice_mode: Option<&'static str>,
@@ -10989,6 +10990,26 @@ fn parse_form_child_item_with_metadata_owners(
         table_title_height: table_schema.and_then(|schema| schema.title_height(&fields)),
         table_footer_height: table_schema.and_then(|schema| schema.footer_height(&fields)),
         table_output: table_schema.and_then(|schema| schema.output(&fields)),
+        // An `HTMLDocumentField` spells `Output` in slot 4 of its own kind-`3`
+        // option tuple, with the same `1`/`2` code its `Table` and
+        // `SpreadSheetDocumentField` siblings use.  Census of all 141 traced
+        // `HTMLDocumentField` option tuples of UT 11.5.27.75: the slot is a
+        // total function of the platform answer -- `0` on the 134 that carry
+        // no `<Output>`, `1` on the 4 that say `Enable` and `2` on the 3 that
+        // say `Disable`, with no code mapping to two answers.  The slot had no
+        // reader, so none of the 7 was ever written.
+        html_document_output: (tag == "HTMLDocumentField")
+            .then(|| {
+                document_field_options
+                    .as_deref()
+                    .and_then(|options| options.get(4))
+                    .and_then(|field| match field.trim() {
+                        "1" => Some("Enable"),
+                        "2" => Some("Disable"),
+                        _ => None,
+                    })
+            })
+            .flatten(),
         // A `Pages` group carries its own read-only switch in slot 11: on all
         // 2 687 traced `Pages` items the slot is `1` on exactly the 7 the
         // platform writes `<ReadOnly>true</ReadOnly>` on and `0` on the other
@@ -23526,6 +23547,19 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
             escape_xml_text(file_drag_mode)
+        ));
+    }
+    // All 7 native `HTMLDocumentField` items that carry `Output` write it
+    // behind `DataPath`, `Title`, `TitleLocation`, `ToolTipRepresentation` and
+    // the geometry run (`Width`, `Height`, `MaxHeight`, `HorizontalStretch`)
+    // and ahead of `BorderColor`, `ContextMenu`, `ExtendedTooltip` and
+    // `Events` -- the site immediately in front of the colour pair below.
+    if item.tag == "HTMLDocumentField"
+        && let Some(output) = item.html_document_output
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Output>{}</Output>\r\n",
+            escape_xml_text(output)
         ));
     }
     if matches!(
