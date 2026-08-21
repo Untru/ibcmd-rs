@@ -1442,30 +1442,12 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     if source_column_format_offset == 0 && column_formats.is_empty() && formats.is_empty() {
         restore_moxel_source_format_refs_without_format_table(&mut rows);
     }
-    // The platform's own pool order, taken from the stored references. It only
-    // applies where the column/pool split is the source-reference split, so that
-    // a column's projected slot still lands inside the column half - a column
-    // pointing past it would make the renderer read the pool from the wrong
-    // half.
+    // The platform's own pool order, taken from the stored references. The walk
+    // is the platform's own, so it only applies to a body that carries the
+    // platform's fixed header/footer prefix: a body this writer packed stores
+    // its references on a different convention and keeps its own path.
     let source_first_use_order = moxel_internal_by_source(&internal_sources)
-        .filter(|internal_by_source| {
-            // The walk is the platform's own; a body this writer packed stores
-            // its references on a different convention and keeps its own path.
-            moxel_body_has_fixed_prefix(&fields)
-                && !column_formats.is_empty()
-                && column_sets.iter().all(|column_set| {
-                    std::iter::once(column_set.raw_default_format_index)
-                        .chain(column_set.columns.iter().map(|column| {
-                            column.source_format_index.unwrap_or(column.format_index)
-                        }))
-                        .all(|source_format_index| {
-                            source_format_index == 0
-                                || internal_by_source
-                                    .get(source_format_index)
-                                    .is_some_and(|internal| *internal <= column_formats.len())
-                        })
-                })
-        })
+        .filter(|_| moxel_body_has_fixed_prefix(&fields) && !column_formats.is_empty())
         .and_then(|internal_by_source| {
             moxel_first_use_source_order(
                 &column_sets,
@@ -9609,13 +9591,21 @@ pub(super) fn moxel_format_for_index(
     spreadsheet: &MoxelSpreadsheet,
     format_index: usize,
 ) -> MoxelFormat {
-    let column_format_slots = spreadsheet
-        .column_formats
-        .len()
-        .max(moxel_column_format_slots(
-            &spreadsheet.column_sets,
-            spreadsheet.column_count,
-        ));
+    // Where the pool is the platform's own first-reference walk every site
+    // already carries an internal slot, so the split's own length is the
+    // boundary between the two halves. Re-deriving it from the column
+    // references would read a remapped slot as a slot count.
+    let column_format_slots = if spreadsheet.first_use_pool.is_some() {
+        spreadsheet.column_formats.len()
+    } else {
+        spreadsheet
+            .column_formats
+            .len()
+            .max(moxel_column_format_slots(
+                &spreadsheet.column_sets,
+                spreadsheet.column_count,
+            ))
+    };
     if let Some(format) = spreadsheet
         .column_formats
         .get(format_index.saturating_sub(1))
