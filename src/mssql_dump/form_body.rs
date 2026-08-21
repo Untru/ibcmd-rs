@@ -9744,6 +9744,7 @@ fn parse_form_child_item_with_metadata_owners(
                                 .as_ref()
                                 .map(|resolved| resolved.data_path.as_str()),
                             attribute_names_by_id,
+                            table_name_by_id,
                             table_column_names_by_id,
                             attribute_metadata_owners_by_id,
                             owner_scoped_bindings,
@@ -13140,93 +13141,56 @@ pub(super) fn parse_form_input_field_type_link(
     }
     // The slot is a bound chain wearing a frame: `{3,<K>,<s1>,…,<sK>,<link>}`
     // holds the very same `{K,s1,…,sK}` every data-path slot holds, with the
-    // link-item flag after it. The two shapes the arms below spell are the two
-    // this route learnt first; the rest are read by lifting the chain out of
-    // the frame and resolving it exactly as a data path is resolved.
+    // link-item flag after it. So the chain is lifted out of the frame and
+    // resolved exactly as a data path is resolved, instead of spelling out the
+    // handful of chain shapes this route happened to learn first -- a
+    // whitelist which refused four of the five terminal shapes the
+    // configuration actually carries.
     //
-    // Evidence: UT 11.5.27.75 -- `Documents/СписаниеНДСНаРасходы/Forms/ФормаДокумента`
-    // InputField `АналитикаРасходов` carries
-    // `{3,2,{1},{0,538fb853-…},0}`, whose chain `{2,{1},{0,538fb853-…}}` is the
-    // `СтатьяРасходов` attribute of the document, and the platform writes
-    // `<xr:DataPath>Объект.СтатьяРасходов</xr:DataPath>`;
+    // Evidence: UT 11.5.27.75.
+    // `Documents/СписаниеНДСНаРасходы/Forms/ФормаДокумента` InputField
+    // `АналитикаРасходов` carries `{3,2,{1},{0,383b2b0a-…},0}`, whose chain
+    // `{2,{1},{0,383b2b0a-…}}` is the `СтатьяРасходов` attribute of the
+    // document reached from form attribute 1, written `Объект.СтатьяРасходов`;
+    // the same item's `<ChoiceParameterLinks>` states that very path from the
+    // very same two-member terminal.
+    // `Catalogs/Новости/Forms/ФормаДокумента` InputField
+    // `КатегорииПростыеЗначениеКатегорииНовостей` carries
+    // `{3,2,{59,02023637-…},{0,80c61119-…},0}`, a metadata terminal under table
+    // item 59, written
+    // `Items.КатегорииПростые.CurrentData.КатегорияНовостей`.
     // `Documents/ВводОстатков/Forms/ФормаРасчетыМеждуОрганизациями` InputField
     // `РасчетыПоРеализацииРасчетныйДокумент` carries
     // `{3,2,{77,02023637-…},{1,5bdad865-…},0}`, an additional column of table
-    // item 77, written
-    // `Items.РасчетыПоРеализации.CurrentData.ТипРасчетов`.
-    let framed_chain = (fields.len() >= 3).then(|| {
-        format!(
-            "{{{}}}",
-            fields[1..fields.len() - 1]
-                .iter()
-                .map(|field| field.trim())
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    });
-    let (data_path, link_item) = match fields.as_slice() {
-        [_, mode, owner, link_item] if mode.trim() == "1" && link_item.trim() == "0" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            if owner.len() != 1 {
-                return None;
-            }
-            let data_path = attribute_names_by_id.get(owner.first()?.trim())?.clone();
-            (data_path, "0")
-        }
-        [_, mode, owner, terminal, link_item] if mode.trim() == "2" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID {
-                return None;
-            }
-            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-            if terminal.len() != 1 {
-                return None;
-            }
-            let link_item = match link_item.trim() {
-                "0" => "0",
-                "1" => "1",
-                _ => return None,
-            };
-            let key = (
-                owner.first()?.trim().to_string(),
-                terminal.first()?.trim().to_string(),
-            );
-            match data_path_by_table_column.get(&key) {
-                Some(data_path) => (data_path.clone(), link_item),
-                None => (
-                    resolve_form_type_link_chain(
-                        framed_chain.as_deref()?,
-                        attribute_names_by_id,
-                        data_path_by_table_column,
-                        table_name_by_id,
-                        table_column_names_by_id,
-                        owner_scoped_bindings,
-                        object_refs,
-                    )?,
-                    link_item,
-                ),
-            }
-        }
-        _ => {
-            let link_item = match fields.last()?.trim() {
-                "0" => "0",
-                "1" => "1",
-                _ => return None,
-            };
-            (
-                resolve_form_type_link_chain(
-                    framed_chain.as_deref()?,
-                    attribute_names_by_id,
-                    data_path_by_table_column,
-                    table_name_by_id,
-                    table_column_names_by_id,
-                    owner_scoped_bindings,
-                    object_refs,
-                )?,
-                link_item,
-            )
-        }
+    // item 77, written `Items.РасчетыПоРеализации.CurrentData.ТипРасчетов`.
+    // The one-member owner `{1}` and the two-member terminals are all readable;
+    // only the arms that demanded a two-member owner and a one-member terminal
+    // were not.
+    let link_item = match fields.last()?.trim() {
+        "0" => "0",
+        "1" => "1",
+        _ => return None,
     };
+    if fields.len() < 3 {
+        return None;
+    }
+    let chain = format!(
+        "{{{}}}",
+        fields[1..fields.len() - 1]
+            .iter()
+            .map(|field| field.trim())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let data_path = resolve_form_type_link_chain(
+        &chain,
+        attribute_names_by_id,
+        data_path_by_table_column,
+        table_name_by_id,
+        table_column_names_by_id,
+        owner_scoped_bindings,
+        object_refs,
+    )?;
     Some(FormTypeLink {
         data_path,
         link_item,
@@ -16545,6 +16509,19 @@ pub(super) fn parse_form_child_item_data_path(
                         object_refs,
                         aggregate,
                     )
+                })
+                // A dynamic list's own negative member is named by the source,
+                // so it is read before the routes that spell a name the source
+                // never states. The table-path index reached `{2,{2},{-2}}` on
+                // `DataProcessors/СервисSellmonitor/Forms/ПодборКарточекТоваров`
+                // and answered it with the bound item's own name,
+                // `СписокМаркетплейсOzon.СписокМаркетплейсOzonОтбор`, where the
+                // platform writes `СписокМаркетплейсOzon.Filter`.
+                .or_else(|| {
+                    resolve_form_dynamic_list_member_data_path(
+                        field,
+                        attribute_metadata_owners_by_id,
+                    )
                 }),
         );
         if !matches!(chain, FormOwnerScopedDataPath::Unknown) {
@@ -16599,12 +16576,6 @@ pub(super) fn parse_form_child_item_data_path(
                             table_name_by_id,
                             owner_scoped_bindings,
                             object_refs,
-                        )
-                    })
-                    .or_else(|| {
-                        resolve_form_dynamic_list_member_data_path(
-                            field,
-                            attribute_metadata_owners_by_id,
                         )
                     }),
                 )
@@ -17892,7 +17863,17 @@ fn form_settings_composer_member(
             ("10002", "ValuePicture", None),
             ("10003", "Value", None),
         ],
-        Fields => &[("10000", "Use", None), ("10002", "Field", None)],
+        // `10001` is the collection's own picture member, the one a table's
+        // row picture names. Single observation, UT 11.5.27.75
+        // `SettingsStorages/ХранилищеВариантовОтчетов/Forms/ЭлементУсловногоОформленияОтчета`:
+        // Table `ОформляемыеПоля` is bound to
+        // `КомпоновщикНастроек.Settings.ConditionalAppearance[0].Fields` and
+        // its row picture slot holds `{10001}`, written `…Fields.FieldPicture`.
+        Fields => &[
+            ("10000", "Use", None),
+            ("10001", "FieldPicture", None),
+            ("10002", "Field", None),
+        ],
     };
     table
         .iter()
@@ -18749,12 +18730,67 @@ pub(super) fn form_dynamic_list_default_picture_is_out_of_main_table(
 /// old reader produced anything, and the appended chain reproduces the
 /// platform's path on every one it resolves. The shape never occurs on a table
 /// that carries no row picture.
+/// One member appended to a table's own bound chain, resolved through the very
+/// walkers the data-path slot resolves that chain with.
+///
+/// The row picture names a member of what the table's chain reached, so it has
+/// no grammar of its own. Reading it with only the attribute-rooted walker left
+/// three shapes unspelled that the data-path slot of the very same tables
+/// reads: an item-rooted chain
+/// (`DataProcessors/ИнтеграцияС1СДокументооборот/Forms/АдреснаяКнига`, Table
+/// `АдресатыАдреса`, written
+/// `Items.Адресаты.CurrentData.Адреса.Картинка`), a settings-composer chain
+/// (`SettingsStorages/ХранилищеВариантовОтчетов/Forms/ЭлементУсловногоОформленияОтчета`,
+/// Table `ОформляемыеПоля`, written
+/// `КомпоновщикНастроек.Settings.ConditionalAppearance[0].Fields.FieldPicture`)
+/// and a plain declared column the row-picture index does not carry
+/// (`DataProcessors/УправлениеПродажамиНаOzon/Forms/НастройкиПринадлежностиТоваровСхемамРаботы`,
+/// Table `СписокКатегорийОтбора`, written `СписокКатегорийОтбора.Check`).
+#[allow(clippy::too_many_arguments)]
+fn resolve_form_table_row_picture_member(
+    binding: &str,
+    segment: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let extended = form_bound_chain_with_extra_segment(binding, segment)?;
+    resolve_form_settings_composer_chain_data_path(&extended, attribute_metadata_owners_by_id)
+        .or_else(|| {
+            resolve_form_bound_chain_member_path(
+                &extended,
+                attribute_names_by_id,
+                owner_scoped_bindings,
+                object_refs,
+                false,
+            )
+        })
+        .or_else(|| {
+            resolve_form_item_rooted_settings_composer_path(
+                &extended,
+                table_name_by_id,
+                owner_scoped_bindings,
+            )
+        })
+        .or_else(|| {
+            resolve_form_item_rooted_chain_data_path(
+                &extended,
+                table_name_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            )
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_table_row_picture_data_path(
     schema: FormTableSchema,
     fields: &[&str],
     data_path: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
@@ -18775,16 +18811,14 @@ pub(super) fn parse_form_table_row_picture_data_path(
                 .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID) =>
         {
             let binding = fields.get(schema.data_path_slot())?.trim();
-            let extended = form_bound_chain_with_extra_segment(
+            return resolve_form_table_row_picture_member(
                 binding,
                 &format!("{{{},{}}}", column_id.trim(), uuid.trim()),
-            )?;
-            return resolve_form_bound_chain_member_path(
-                &extended,
                 attribute_names_by_id,
+                attribute_metadata_owners_by_id,
+                table_name_by_id,
                 owner_scoped_bindings,
                 object_refs,
-                false,
             );
         }
         [column_id] if column_id.trim() == "10000000" => {
@@ -18800,12 +18834,39 @@ pub(super) fn parse_form_table_row_picture_data_path(
             return Some(format!("{prefix}{table_name}.DefaultPicture"));
         }
         [column_id] if column_id.trim().parse::<u64>().is_ok() => {
-            let table_id =
-                parse_exact_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())?;
-            let column_name = table_column_names_by_id
-                .get(&table_id)?
-                .get(column_id.trim())?
-                .as_str();
+            let binding = fields.get(schema.data_path_slot())?.trim();
+            let Some(table_id) = parse_exact_form_attribute_binding_id(binding) else {
+                // The table's binding is a chain, not a bare attribute, so the
+                // member it names is read by the same walkers the data path
+                // slot reads the chain with -- one segment longer.
+                return resolve_form_table_row_picture_member(
+                    binding,
+                    &format!("{{{}}}", column_id.trim()),
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    table_name_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                );
+            };
+            let Some(column_name) = table_column_names_by_id
+                .get(&table_id)
+                .and_then(|columns| columns.get(column_id.trim()))
+                .map(String::as_str)
+            else {
+                // The row-picture index carries only the collection's own
+                // picture column, and the slot may name any member the chain
+                // walker can reach -- `Check` of a value list, for one.
+                return resolve_form_table_row_picture_member(
+                    binding,
+                    &format!("{{{}}}", column_id.trim()),
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    table_name_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                );
+            };
             // The row picture reads the same field a data path reads, so the
             // list's own `~` marker applies here too. Evidence: UT 11.5.27.75
             // `DataProcessors/УправлениеВыгрузкамиВБидзаар/Forms/СписокПодключенийКСервису`,
