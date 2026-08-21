@@ -5087,6 +5087,9 @@ pub(super) enum MoxelValueType {
     ConfigRef(String),
     /// A type the configuration does not name: published by identity.
     TypeId(String),
+    /// A `Pattern` that carries no descriptor at all, published as the empty
+    /// `<valueType/>`.
+    Empty,
 }
 
 /// Decodes the document's value-type table.
@@ -5096,10 +5099,10 @@ pub(super) enum MoxelValueType {
 /// Evidence (native 1С:УТ 11.5.27.75, all 683 MOXCEL spreadsheet templates):
 /// 53 documents carry the table and the descriptors collapse onto 36 distinct
 /// shapes. Rendering every one of them through the rules below and comparing
-/// against the published `<valueType>` blocks reproduces 52 of the 53 documents
-/// exactly (the 53rd publishes none), with the qualifier defaults confirmed by
-/// the bare forms: `{"S"}` is `Length 0`/`Variable` and `{"N"}` is
-/// `Digits 0`/`FractionDigits 0`/`Any`.
+/// against the published `<valueType>` blocks reproduces all 53 documents
+/// exactly, with the qualifier defaults confirmed by the bare forms: `{"S"}` is
+/// `Length 0`/`Variable`, `{"N"}` is `Digits 0`/`FractionDigits 0`/`Any`, and a
+/// `Pattern` with no descriptor at all is the empty `<valueType/>`.
 ///
 /// A descriptor outside these shapes refuses the whole table rather than
 /// letting some formats publish a type and others silently drop theirs.
@@ -5139,7 +5142,19 @@ pub(super) fn parse_moxel_value_type(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MoxelValueType> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if unquote_moxel_string(fields.first()?)? != "Pattern" || fields.len() != 2 {
+    if unquote_moxel_string(fields.first()?)? != "Pattern" {
+        return None;
+    }
+    // A `Pattern` with no descriptor is the empty type, not a broken entry.
+    // `Documents/ЛистКассовойКниги/Templates/ПФ_MXL_ЛистКассовойКниги` is the
+    // only document in the corpus whose table carries this shape - a table of
+    // exactly one entry - and it is the document that publishes `<valueType/>`,
+    // once for each of the ten formats that name the entry. Refusing it took
+    // the whole table down with it and dropped all ten lines.
+    if fields.len() == 1 {
+        return Some(MoxelValueType::Empty);
+    }
+    if fields.len() != 2 {
         return None;
     }
     let payload = split_1c_braced_fields(fields.get(1)?, 0)?;
@@ -5382,20 +5397,15 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
             _ => return None,
         }
     }
-    // The two extended keys come as a pair, on top of a record that carries
-    // every other key. The printer name (key 14) is the one that can be
-    // absent: one document stores the nineteen keys without it, and demanding
-    // a count of exactly twenty refused the whole record - the twenty-one
-    // published lines that are its entire difference from the platform. The
-    // record's own arity is already checked against its declared count above.
-    let has_extended_keys = seen_keys.contains(&19) || seen_keys.contains(&20);
-    if has_extended_keys
-        && (!seen_keys.contains(&19)
-            || !seen_keys.contains(&20)
-            || !(0..=17).all(|key| key == 14 || seen_keys.contains(&key)))
-    {
-        return None;
-    }
+    // The record's key set is the published member set, with nothing else
+    // deciding either side. Across the 683 stored records in the corpus the
+    // two sets are equal in every document and for all eleven distinct key
+    // sets that occur - including the two documents that store keys 19 and 20
+    // over a *partial* base (1, 2, 5, margins, 14), which a demand for the
+    // whole of 0..=17 behind the extended pair refused outright. That demand
+    // said "inadmissible" where the evidence only ever said "a shorter key
+    // set", so it is gone: the declared count, the key domain and the
+    // duplicate check above are the record's whole shape.
     Some(settings)
 }
 
@@ -9517,6 +9527,10 @@ fn push_moxel_format_body_xml(
 }
 
 pub(super) fn push_moxel_value_type_xml(xml: &mut String, value_type: &MoxelValueType) {
+    if matches!(value_type, MoxelValueType::Empty) {
+        xml.push_str("\t\t<valueType/>\r\n");
+        return;
+    }
     xml.push_str("\t\t<valueType>\r\n");
     match value_type {
         MoxelValueType::Boolean => xml.push_str("\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n"),
@@ -9556,6 +9570,8 @@ pub(super) fn push_moxel_value_type_xml(xml: &mut String, value_type: &MoxelValu
         MoxelValueType::TypeId(uuid) => {
             xml.push_str(&format!("\t\t\t<v8:TypeId>{uuid}</v8:TypeId>\r\n"))
         }
+        // Handled above, before the opening tag is written.
+        MoxelValueType::Empty => unreachable!(),
     }
     xml.push_str("\t\t</valueType>\r\n");
 }

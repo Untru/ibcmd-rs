@@ -33582,6 +33582,10 @@ fn moxel_value_type_descriptors_decode_by_their_pattern() {
             "{\"Pattern\",{\"#\",48fa9d68-ae46-4d76-988a-88927f7a0ca6}}",
             "<v8:TypeId>48fa9d68-ae46-4d76-988a-88927f7a0ca6</v8:TypeId>",
         ),
+        // `Documents/ЛистКассовойКниги/Templates/ПФ_MXL_ЛистКассовойКниги` is
+        // the corpus's only descriptor with no payload, and it is the document
+        // that publishes `<valueType/>` - ten times, once per format naming it.
+        ("{\"Pattern\"}", "\t\t<valueType/>\r\n"),
     ];
     for (descriptor, expected) in cases {
         let value_type = parse_moxel_value_type(descriptor, &object_refs)
@@ -33598,7 +33602,6 @@ fn moxel_value_type_descriptors_decode_by_their_pattern() {
         "{\"Pattern\",{\"S\",3,2}}",
         "{\"Pattern\",{\"X\"}}",
         "{\"Pattern\",{\"S\",3}}",
-        "{\"Pattern\"}",
     ] {
         assert!(
             parse_moxel_value_type(descriptor, &object_refs).is_none(),
