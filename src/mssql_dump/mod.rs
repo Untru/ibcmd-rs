@@ -8311,6 +8311,12 @@ struct ConfigurationProperties {
     reports_user_settings_storage: Option<ConfigurationRootReference>,
     reports_variants_storage: Option<ConfigurationRootReference>,
     form_data_settings_storage: Option<ConfigurationRootReference>,
+    /// The three default report forms, decoded from tuple fields 30/31/32.
+    /// Populated only by the CF-container decode path, and emitted only by
+    /// the evidenced branch of the writer that owns that span.
+    default_report_form: Option<ConfigurationRootReference>,
+    default_report_variant_form: Option<ConfigurationRootReference>,
+    default_report_settings_form: Option<ConfigurationRootReference>,
     used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
     compatibility_mode: Option<String>,
     /// Set only by the CF-container decode path
@@ -30786,7 +30792,7 @@ fn format_configuration_source_xml(
     } else {
         push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
     }
-    if evidenced.is_some() {
+    if evidenced.is_some() && properties.default_roles.is_empty() {
         insert.push_str(
             ibcmd_schema::configuration_properties_evidenced_default_block_policy()
                 .default_roles_segment(),
@@ -30843,35 +30849,37 @@ fn format_configuration_source_xml(
         properties.form_data_settings_storage.as_ref(),
     );
     if evidenced.is_some() {
-        insert.push_str(
-            ibcmd_schema::configuration_properties_evidenced_default_block_policy()
-                .storage_and_mobile_functionality_segment(),
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        insert.push_str(policy.storage_and_content_segment());
+        for (name, reference) in [
+            ("DefaultReportForm", &properties.default_report_form),
+            (
+                "DefaultReportVariantForm",
+                &properties.default_report_variant_form,
+            ),
+            (
+                "DefaultReportSettingsForm",
+                &properties.default_report_settings_form,
+            ),
+        ] {
+            push_optional_root_reference_xml(&mut insert, name, reference.as_ref());
+        }
+        insert.push_str(policy.default_forms_and_permissions_segment());
+        push_used_mobile_application_functionalities_xml(
+            &mut insert,
+            &properties.used_mobile_application_functionalities,
         );
+        insert.push_str(policy.standalone_through_default_style_segment());
         push_optional_simple_property_xml(
             &mut insert,
             "DefaultLanguage",
             properties.default_language.as_deref(),
         );
     } else {
-        if !properties
-            .used_mobile_application_functionalities
-            .is_empty()
-        {
-            insert.push_str("\t\t\t<UsedMobileApplicationFunctionalities>\r\n");
-            for functionality in &properties.used_mobile_application_functionalities {
-                insert.push_str("\t\t\t\t<app:functionality>\r\n");
-                insert.push_str(&format!(
-                    "\t\t\t\t\t<app:functionality>{}</app:functionality>\r\n",
-                    escape_xml_element_text(functionality.name)
-                ));
-                insert.push_str(&format!(
-                    "\t\t\t\t\t<app:use>{}</app:use>\r\n",
-                    xml_bool(functionality.use_functionality)
-                ));
-                insert.push_str("\t\t\t\t</app:functionality>\r\n");
-            }
-            insert.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
-        }
+        push_used_mobile_application_functionalities_xml(
+            &mut insert,
+            &properties.used_mobile_application_functionalities,
+        );
     }
     if let Some(localized) = &properties.localized_properties {
         push_localized_property(
@@ -31043,6 +31051,29 @@ fn push_optional_localized_property_xml(xml: &mut String, name: &str, values: &[
     xml.push_str("\t\t\t</");
     xml.push_str(name);
     xml.push_str(">\r\n");
+}
+
+fn push_used_mobile_application_functionalities_xml(
+    xml: &mut String,
+    functionalities: &[ConfigurationMobileApplicationFunctionality],
+) {
+    if functionalities.is_empty() {
+        return;
+    }
+    xml.push_str("\t\t\t<UsedMobileApplicationFunctionalities>\r\n");
+    for functionality in functionalities {
+        xml.push_str("\t\t\t\t<app:functionality>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t<app:functionality>{}</app:functionality>\r\n",
+            escape_xml_element_text(functionality.name)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<app:use>{}</app:use>\r\n",
+            xml_bool(functionality.use_functionality)
+        ));
+        xml.push_str("\t\t\t\t</app:functionality>\r\n");
+    }
+    xml.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
 }
 
 fn push_optional_root_reference_xml(

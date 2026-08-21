@@ -1123,6 +1123,7 @@ pub(super) struct FormExtendedTooltip {
     pub(super) horizontal_stretch: Option<bool>,
     pub(super) vertical_stretch: Option<bool>,
     pub(super) text_color: Option<String>,
+    pub(super) back_color: Option<String>,
     pub(super) font_xml: Option<String>,
     pub(super) title: Option<FormExtendedTooltipTitle>,
     pub(super) title_height: Option<String>,
@@ -1152,6 +1153,7 @@ impl FormExtendedTooltip {
             || self.horizontal_stretch.is_some()
             || self.vertical_stretch.is_some()
             || self.text_color.is_some()
+            || self.back_color.is_some()
             || self.font_xml.is_some()
             || self.title.is_some()
             || self.title_height.is_some()
@@ -1295,6 +1297,8 @@ pub(super) struct FormChildItem {
     pub(super) hiperlink: Option<bool>,
     pub(super) text_color: Option<String>,
     pub(super) back_color: Option<String>,
+    pub(super) title_back_color: Option<String>,
+    pub(super) hidden_state_title_back_color: Option<String>,
     pub(super) border_color: Option<String>,
     pub(super) button_parameter: Option<String>,
     pub(super) button_check: Option<bool>,
@@ -1324,6 +1328,11 @@ pub(super) struct FormChildItem {
     pub(super) vertical_stretch: Option<bool>,
     pub(super) spreadsheet_document_properties: Option<FormSpreadsheetDocumentFieldProperties>,
     pub(super) max_value: Option<String>,
+    pub(super) min_value: Option<String>,
+    pub(super) step: Option<String>,
+    pub(super) large_step: Option<String>,
+    pub(super) marking_step: Option<String>,
+    pub(super) marking_appearance: Option<&'static str>,
     pub(super) input_min_value: Option<FormInputBoundValue>,
     pub(super) input_max_value: Option<FormInputBoundValue>,
     pub(super) command_uniqueness: Option<bool>,
@@ -2959,6 +2968,12 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "8f42e083-be92-4102-b1f0-fa58452c1a63" => Some("BeforeWriteAtServer"),
         "93dfba16-26db-46f8-acb5-4f92f50c855f" => Some("NavigationProcessing"),
         "961ee7c6-0327-422b-adcb-97a90c46753d" => Some("OnSaveUserSettingsAtServer"),
+        // A table's own `OnSaveUserSettingsAtServer` is a second identifier
+        // for the same event name, alongside the form-level one above. Read
+        // off the platform: this is the only identifier in all 44 237 native
+        // `<Event>` elements of UT 11.5.27.75 that no entry named, and the
+        // platform prints `OnSaveUserSettingsAtServer` for it.
+        "a73dae96-734d-42e4-8ae7-b70249ecd233" => Some("OnSaveUserSettingsAtServer"),
         "9cc34712-da5f-4faa-a653-343d2085fbe8" => Some("BeforeWrite"),
         "a7a9dc42-29b6-4c5b-8980-6d0b87149bdd" => Some("BeforeCollapse"),
         "aeba313d-c467-44b3-b4a2-956340932c8f" => Some("Creating"),
@@ -9945,6 +9960,16 @@ fn parse_form_child_item_with_metadata_owners(
             "Page" => fields
                 .get(18)
                 .and_then(|field| parse_common_command_shortcut_value(field)),
+            // A `Table` spells the same tuple in slot 51 of its own head.
+            // Census of all 4 543 traced `Table` items of UT 11.5.27.75: the
+            // slot decodes to a shortcut on exactly the 3 the platform writes
+            // `<Shortcut>` on -- `Ctrl+1`, `Ctrl+2` and `Ctrl+S`, value for
+            // value -- and to nothing on the other 4 540, across record
+            // lengths from 103 to 153 members, so the coordinate is in the
+            // fixed head rather than at some length-dependent offset.
+            "Table" => fields
+                .get(51)
+                .and_then(|field| parse_common_command_shortcut_value(field)),
             _ => None,
         },
         choice_list_height: (tag == "InputField")
@@ -10334,6 +10359,17 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        title_back_color: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| fields.get(schema.title_back_color_slot()))
+            .and_then(|field| parse_form_control_color(field, object_refs)),
+        hidden_state_title_back_color: show_title_schema
+            .and_then(|schema| {
+                show_title_options
+                    .as_deref()?
+                    .get(schema.hidden_state_title_back_color_option_slot()?)
+            })
+            .and_then(|field| parse_form_control_color(field, object_refs)),
         border_color: if let Some(schema) = button_color_schema {
             fields
                 .get(schema.border_color_slot())
@@ -10414,6 +10450,14 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        // An `HTMLDocumentField` spells `Output` in slot 4 of its own kind-`3`
+        // option tuple, with the same `1`/`2` code its `Table` and
+        // `SpreadSheetDocumentField` siblings use.  Census of the traced
+        // `HTMLDocumentField` option tuples of UT 11.5.27.75: the slot is a
+        // total function of the platform answer -- `0` where no `<Output>` is
+        // written, `1` on exactly the items that say `Enable` and `2` on
+        // exactly those that say `Disable`, with no code mapping to two
+        // answers.  The slot had no reader, so none of them was ever written.
         html_document_output: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| schema.html_document_output(options)),
@@ -10596,6 +10640,8 @@ fn parse_form_child_item_with_metadata_owners(
                         && default_height != Some(value.as_str())
                         && value.parse::<u32>().is_ok()
                 })
+        } else if let Some((schema, options)) = special_field_layout.as_ref() {
+            schema.height(options)
         } else if tag == "Table" {
             table_schema.and_then(|schema| schema.height(&fields))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
@@ -10877,6 +10923,21 @@ fn parse_form_child_item_with_metadata_owners(
         max_value: special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.max_value(options)),
+        min_value: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.min_value(options)),
+        step: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.step(options)),
+        large_step: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.large_step(options)),
+        marking_step: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.marking_step(options)),
+        marking_appearance: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.marking_appearance(options)),
         input_min_value: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| {
@@ -10970,7 +11031,11 @@ fn parse_form_child_item_with_metadata_owners(
         show_percent: special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.show_percent(options)),
-        password_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        password_mode: if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.password_mode)
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_password_mode(input_field_extended_options.as_deref())
         } else {
             None
@@ -11683,6 +11748,7 @@ pub(super) struct FormLabelFieldOptions {
     pub(super) font_xml: Option<String>,
     pub(super) text_color: Option<String>,
     pub(super) mark_negatives: Option<bool>,
+    pub(super) password_mode: Option<bool>,
     pub(super) hyperlink_style: bool,
 }
 
@@ -11793,6 +11859,13 @@ pub(super) fn parse_form_label_field_options(
         text_color: options
             .get(LabelFieldSlot::TextColor.index())
             .and_then(|field| parse_form_label_field_text_color(field, object_refs)),
+        password_mode: match options
+            .get(LabelFieldSlot::PasswordMode.index())
+            .map(|field| field.trim())
+        {
+            Some("0") => Some(false),
+            _ => None,
+        },
         mark_negatives: parse_form_option_mark_negatives(
             &options,
             LabelFieldSlot::MarkNegatives.index(),
@@ -13942,6 +14015,11 @@ fn parse_form_input_field_edit_text_update(
         "0" => None,
         "1" => Some("DontUse"),
         "2" => Some("OnValueChange"),
+        // The third code is read off the platform, not interpolated: of the
+        // 50 065 traced `InputField` option tuples of UT 11.5.27.75 exactly
+        // one holds `3` here, and the platform writes
+        // `<EditTextUpdate>Always</EditTextUpdate>` on exactly that item.
+        "3" => Some("Always"),
         _ => None,
     }
 }
@@ -15191,6 +15269,15 @@ pub(super) fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<
         (Some(marker), Some(FORM_UPDATE_ON_DATA_CHANGE_UUID), Some("0")) if marker == "#" => {
             Some("Auto")
         }
+        // The bag's third member is the enum ordinal, not a shape byte that
+        // must read `0`: of the 1 947 traced `Table` items of UT 11.5.27.75
+        // that carry this bag entry, 1 946 hold `0` and the platform writes
+        // `Auto`, and the one that holds `1` is the one it writes
+        // `DontUpdate` on.  No other ordinal occurs, so the remaining members
+        // of the enumeration stay unread rather than guessed.
+        (Some(marker), Some(FORM_UPDATE_ON_DATA_CHANGE_UUID), Some("1")) if marker == "#" => {
+            Some("DontUpdate")
+        }
         _ => None,
     }
 }
@@ -15598,6 +15685,24 @@ pub(super) fn parse_form_child_item_title(
     {
         return title;
     }
+    // A `PictureDecoration` spells its title record in the same slot and the
+    // same `{1, values, formatted}` shape its `LabelDecoration` sibling does.
+    // Census of all 3 725 traced picture decorations of UT 11.5.27.75: the
+    // record's third member is `0` on the 3 723 whose native `<Title>` reads
+    // `formatted="false"` (or that write no title at all) and `1` on the two
+    // that read `formatted="true"`, with no third code. The flag had no
+    // reader, so every picture decoration was written `formatted="false"`.
+    if tag == "PictureDecoration"
+        && let Some(formatted) = parse_form_picture_decoration_title_formatted(fields)
+    {
+        let values = fields
+            .get(7)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default();
+        if !values.is_empty() {
+            return (values, Some(formatted));
+        }
+    }
     if let Some(schema) = field_schema {
         return (
             fields
@@ -15625,6 +15730,27 @@ pub(super) fn parse_form_child_item_title(
         })
         .unwrap_or_default();
     (values, None)
+}
+
+/// The formatted flag of a `PictureDecoration` title, read under the same
+/// shape guard the label decoration's title record answers to.
+fn parse_form_picture_decoration_title_formatted(fields: &[&str]) -> Option<bool> {
+    if fields.first().map(|field| field.trim()) != Some("12")
+        || fields.len() != 36
+        || fields.get(5).map(|field| field.trim()) != Some("1")
+    {
+        return None;
+    }
+    let title =
+        split_1c_braced_fields(fields.get(FormLabelDecorationSchema::TITLE_SLOT)?.trim(), 0)?;
+    if title.len() != 3 || title.first()?.trim() != "1" {
+        return None;
+    }
+    match title.get(2)?.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
 }
 
 pub(super) fn parse_form_label_decoration_title(
@@ -15821,6 +15947,9 @@ pub(super) fn parse_form_child_item_extended_tooltip(
         let Some(events) = parse_form_extended_tooltip_option_events(&event_fields) else {
             return Some(tooltip);
         };
+        tooltip.back_color = options
+            .get(FormExtendedTooltipSchema::BACK_COLOR_OPTION_SLOT)
+            .and_then(|field| parse_form_control_color(field.trim(), object_refs));
         tooltip.width = extract_form_dimension(&nested, schema.width_slot());
         tooltip.auto_max_width = match nested
             .get(schema.auto_max_width_slot())
@@ -21377,6 +21506,11 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::Shortcut => item
+            .item_shortcut
+            .as_ref()
+            .map(|value| format!("{tab}<Shortcut>{}</Shortcut>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
         FormTableXmlProperty::Output => item
             .table_output
             .map(|value| format!("{tab}<Output>{}</Output>\r\n", escape_xml_text(value)))
@@ -22007,6 +22141,18 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(value)
         ));
     }
+    // A list addition writes `Visible` ahead of its `AdditionSource`, at the
+    // same early site every other item kind puts it. The one native addition
+    // that carries the element -- the only one of the 13 942 in UT 11.5.27.75
+    // -- writes `Visible`, `AdditionSource`, `Title`, `ContextMenu`,
+    // `ExtendedTooltip` in that order.
+    if matches!(
+        item.tag,
+        "SearchStringAddition" | "SearchControlAddition" | "ViewStatusAddition"
+    ) && item.visible == Some(false)
+    {
+        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    }
     if item.tag.ends_with("Addition") {
         if item.addition_source_item.is_some() || item.item_type.is_some() {
             xml.push_str(&format!("{tab}\t<AdditionSource>\r\n"));
@@ -22102,7 +22248,26 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(data_path)
         ));
     }
-    if !matches!(item.tag, "Button" | "Table") && item.visible == Some(false) {
+    // Both native fields that carry `TitleBackColor` write it immediately
+    // behind `DataPath` and ahead of `TitleLocation`, `EditMode`,
+    // `ShowInFooter`, `AutoCellHeight`, `FooterHorizontalAlign`, `MultiLine`,
+    // `OpenButton`, `TextEdit`, `ValuesPicture`, `ContextMenu`,
+    // `ExtendedTooltip` and `Events`; nothing else shares a field with it.
+    if let Some(title_back_color) = &item.title_back_color {
+        xml.push_str(&format!(
+            "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
+            escape_xml_text(title_back_color)
+        ));
+    }
+    if !matches!(
+        item.tag,
+        "Button"
+            | "Table"
+            | "SearchStringAddition"
+            | "SearchControlAddition"
+            | "ViewStatusAddition"
+    ) && item.visible == Some(false)
+    {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
     if item.tag != "Table" && item.tag != "Button" && item.user_visible_common == Some(false) {
@@ -22275,6 +22440,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_height)
         ));
     }
+    xml.push_str(&format_form_tooltip_representation_xml(
+        item,
+        FormTooltipRepresentationXmlOrder::FieldPropertiesBeforeCommandSet,
+        indent + 1,
+    ));
     if matches!(
         item.tag,
         "SpreadSheetDocumentField" | "FormattedDocumentField"
@@ -22908,10 +23078,49 @@ pub(super) fn format_form_child_item_xml(
         item,
         indent + 1,
     ));
+    // A track bar writes its value run behind the stretch pair and ahead of
+    // `ContextMenu`, `ExtendedTooltip` and `Events`, in the order the platform
+    // spells it: `MinValue`, `MaxValue`, `Step`, `LargeStep`, `MarkingStep`,
+    // `MarkingAppearance`.  Of the 9 native track bars, one pins
+    // `MinValue` < `MaxValue` < `Step` < `LargeStep`, one pins
+    // `Step` < `MarkingStep`, three pin `HorizontalStretch` < `Step` and two
+    // pin `Height` < `MarkingAppearance`; no pair is observed both ways, and
+    // `MarkingAppearance` shares no item with `Step` or `MarkingStep`, so it
+    // closes the run at the nearest position that satisfies every pair.
+    if let Some(min_value) = &item.min_value {
+        xml.push_str(&format!(
+            "{tab}\t<MinValue>{}</MinValue>\r\n",
+            escape_xml_text(min_value)
+        ));
+    }
     if let Some(max_value) = &item.max_value {
         xml.push_str(&format!(
             "{tab}\t<MaxValue>{}</MaxValue>\r\n",
             escape_xml_text(max_value)
+        ));
+    }
+    if let Some(step) = &item.step {
+        xml.push_str(&format!(
+            "{tab}\t<Step>{}</Step>\r\n",
+            escape_xml_text(step)
+        ));
+    }
+    if let Some(large_step) = &item.large_step {
+        xml.push_str(&format!(
+            "{tab}\t<LargeStep>{}</LargeStep>\r\n",
+            escape_xml_text(large_step)
+        ));
+    }
+    if let Some(marking_step) = &item.marking_step {
+        xml.push_str(&format!(
+            "{tab}\t<MarkingStep>{}</MarkingStep>\r\n",
+            escape_xml_text(marking_step)
+        ));
+    }
+    if let Some(marking_appearance) = item.marking_appearance {
+        xml.push_str(&format!(
+            "{tab}\t<MarkingAppearance>{}</MarkingAppearance>\r\n",
+            escape_xml_text(marking_appearance)
         ));
     }
     if item.show_percent == Some(true) {
@@ -23006,7 +23215,9 @@ pub(super) fn format_form_child_item_xml(
     if item.mark_negatives == Some(true) {
         xml.push_str(&format!("{tab}\t<MarkNegatives>true</MarkNegatives>\r\n"));
     }
-    if let Some(password_mode) = item.password_mode {
+    if item.tag != "LabelField"
+        && let Some(password_mode) = item.password_mode
+    {
         xml.push_str(&format!(
             "{tab}\t<PasswordMode>{}</PasswordMode>\r\n",
             if password_mode { "true" } else { "false" }
@@ -23441,6 +23652,16 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "LabelField" {
         if item.hiperlink == Some(true) {
             xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
+        }
+        // The one native label that carries `PasswordMode` writes it directly
+        // behind `Hiperlink` and ahead of `TextColor`, inside this same tail;
+        // it shares no label with `Border`, `BorderColor`, `BackColor` or
+        // `Font`.
+        if let Some(password_mode) = item.password_mode {
+            xml.push_str(&format!(
+                "{tab}\t<PasswordMode>{}</PasswordMode>\r\n",
+                if password_mode { "true" } else { "false" }
+            ));
         }
         xml.push_str(&format_form_control_border_xml(item, indent + 1));
         if let Some(border_color) = &item.border_color {
@@ -23938,7 +24159,9 @@ pub(super) fn format_form_child_item_xml(
     // `HorizontalStretch` (1 each) -- and leads `BorderColor` (1),
     // `ContextMenu` (7), `ExtendedTooltip` (7) and `Events` (2), with no pair
     // counted both ways.
-    if let Some(output) = item.html_document_output {
+    if item.tag == "HTMLDocumentField"
+        && let Some(output) = item.html_document_output
+    {
         xml.push_str(&format!(
             "{tab}\t<Output>{}</Output>\r\n",
             escape_xml_text(output)
@@ -24837,6 +25060,14 @@ fn format_form_usual_group_properties_xml(
                     ));
                 }
             }
+            FormUsualGroupXmlProperty::HiddenStateTitleBackColor => {
+                if let Some(value) = &item.hidden_state_title_back_color {
+                    xml.push_str(&format!(
+                        "{tab}<HiddenStateTitleBackColor>{}</HiddenStateTitleBackColor>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
             FormUsualGroupXmlProperty::ThroughAlign => {
                 if let Some(value) = item.through_align {
                     xml.push_str(&format!(
@@ -25056,6 +25287,11 @@ fn format_form_extended_tooltip_property_xml(
             .text_color
             .as_ref()
             .map(|value| format!("{tab}<TextColor>{}</TextColor>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::BackColor => tooltip
+            .back_color
+            .as_ref()
+            .map(|value| format!("{tab}<BackColor>{}</BackColor>\r\n", escape_xml_text(value)))
             .unwrap_or_default(),
         FormExtendedTooltipXmlProperty::Font => tooltip
             .font_xml

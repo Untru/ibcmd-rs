@@ -12616,9 +12616,26 @@ fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
     // — "6" is a genuinely valid code (ShowLeft), not a malformed value, so
     // it doesn't belong in this "should be rejected" fuzz list; "9" (past
     // the valid range) and "-1" (negative) remain correctly rejected.
+    //
+    // The kind row is `"7"` (`TextDocumentField`), not `"6"`
+    // (`SpreadSheetDocumentField`): a census of all 89 813 wrapper-`37`
+    // records in UT 11.5.27.75 reads reverse offset 9 as `0` on all 68
+    // `TextDocumentField` records — the platform prints
+    // `ToolTipRepresentation` on none of the corpus's 68 text-document
+    // fields — while it reads `1` on 2 of the 222 spreadsheet-document
+    // fields, exactly the 2 the platform prints `None` on. Keying the row to
+    // kind `"6"` asserted a rule the platform's own bytes disprove; keying it
+    // to a value (`"3"`) that offset never carries for that kind made the
+    // fixture spell a record the platform does not write.
+    //
+    // The arity rows stay: the same census finds the record length is a total
+    // function of the head shape — 83 290 records with an unshifted head are
+    // all 59 members long and 6 523 with a shifted one are all 60 — so 58,
+    // and 60-with-an-unshifted-head, are lengths no wrapper-`37` record has.
+    // They pin the reader to reading *its own* record's reverse offset 9.
     for (wrapper, kind, field_count, raw) in [
         ("48", "2", 59, "3"),
-        ("37", "6", 59, "3"),
+        ("37", "7", 59, "3"),
         ("37", "2", 58, "3"),
         ("37", "2", 60, "3"),
         ("37", "2", 59, ""),
@@ -12645,20 +12662,43 @@ fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
         assert!(!format_form_child_items_xml(&[item], 1).contains("<ToolTipRepresentation>"));
     }
 
-    let raw =
-        tooltip_representation_field_record_for_test("37", "2", 59, "3", r#"{1,1,{"en","Tip"}}"#);
-    let mut fields = split_1c_braced_fields(&raw, 0)
-        .unwrap()
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    fields[5] = "0".to_string();
-    fields[6] = "2".to_string();
-    fields[7] = "\"ShiftedField\"".to_string();
-    let item = parse_tooltip_representation_field_for_test(&format!("{{{}}}", fields.join(",")));
+    // A shifted top-level head moves the kind discriminator from slot 5 to
+    // slot 6 and — per the census above, without exception — grows the record
+    // to 60 members, so the property moves with it, from slot 50 to slot 51.
+    // The absolute slot 50 an unshifted record spells it in carries something
+    // else here and must not be read.
+    let shifted = |slot_50: &str, slot_51: &str| {
+        let raw = tooltip_representation_field_record_for_test(
+            "37",
+            "2",
+            60,
+            slot_50,
+            r#"{1,1,{"en","Tip"}}"#,
+        );
+        let mut fields = split_1c_braced_fields(&raw, 0)
+            .unwrap()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        fields[5] = "0".to_string();
+        fields[6] = "2".to_string();
+        fields[7] = "\"ShiftedField\"".to_string();
+        fields[51] = slot_51.to_string();
+        parse_tooltip_representation_field_for_test(&format!("{{{}}}", fields.join(",")))
+    };
+
+    let item = shifted("3", "0");
     assert_eq!(item.tag, "InputField");
     assert_eq!(item.tooltip_representation, None);
     assert!(!format_form_child_items_xml(&[item], 1).contains("<ToolTipRepresentation>"));
+
+    let item = shifted("0", "3");
+    assert_eq!(item.tag, "InputField");
+    assert_eq!(item.tooltip_representation, Some("Button"));
+    assert!(
+        format_form_child_items_xml(&[item], 1)
+            .contains("<ToolTipRepresentation>Button</ToolTipRepresentation>")
+    );
 }
 
 #[test]
@@ -20110,6 +20150,8 @@ fn formats_table_search_additions_as_direct_sections() {
         hiperlink: None,
         text_color: None,
         back_color: None,
+        title_back_color: None,
+        hidden_state_title_back_color: None,
         border_color: None,
         button_parameter: None,
         control_border: None,
@@ -20138,6 +20180,11 @@ fn formats_table_search_additions_as_direct_sections() {
         vertical_stretch: None,
         spreadsheet_document_properties: None,
         max_value: None,
+        min_value: None,
+        step: None,
+        large_step: None,
+        marking_step: None,
+        marking_appearance: None,
         input_min_value: None,
         input_max_value: None,
         command_uniqueness: None,
@@ -20346,6 +20393,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 hiperlink: None,
                 text_color: None,
                 back_color: None,
+                title_back_color: None,
+                hidden_state_title_back_color: None,
                 border_color: None,
                 button_parameter: None,
                 control_border: None,
@@ -20374,6 +20423,11 @@ fn formats_table_search_additions_as_direct_sections() {
                 vertical_stretch: None,
                 spreadsheet_document_properties: None,
                 max_value: None,
+                min_value: None,
+                step: None,
+                large_step: None,
+                marking_step: None,
+                marking_appearance: None,
                 input_min_value: None,
                 input_max_value: None,
                 command_uniqueness: None,
@@ -20583,6 +20637,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 hiperlink: None,
                 text_color: None,
                 back_color: None,
+                title_back_color: None,
+                hidden_state_title_back_color: None,
                 border_color: None,
                 button_parameter: None,
                 control_border: None,
@@ -20611,6 +20667,11 @@ fn formats_table_search_additions_as_direct_sections() {
                 vertical_stretch: None,
                 spreadsheet_document_properties: None,
                 max_value: None,
+                min_value: None,
+                step: None,
+                large_step: None,
+                marking_step: None,
+                marking_appearance: None,
                 input_min_value: None,
                 input_max_value: None,
                 command_uniqueness: None,
@@ -43145,7 +43206,13 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
         ("68 field count", 68, 60, valid38.as_str(), "2.21"),
         ("76 field count", 76, 76, valid38.as_str(), "2.21"),
         ("2.17 count", 68, 61, valid38.as_str(), "2.17"),
-        ("2.20 count", 76, 77, valid38.as_str(), "2.20"),
+        // `("2.20 count", 76, 77, valid38, "2.20")` used to sit here,
+        // demanding that a full-length record be refused at the 2.20 dialect.
+        // The platform's own bytes disprove it: all nine bundled 8.3.27.2214
+        // evidence configurations, and «1С:Управление торговлей 11.5.27.75»,
+        // declare the full 38 and are exported at 2.20, and every one of them
+        // prints the whole block. The dialect decides whether the table's last
+        // entry is printed, not how long the record may be.
         ("2.21 count", 67, 60, valid37.as_str(), "2.21"),
         ("unknown source version", 67, 60, valid37.as_str(), "9.99"),
     ] {

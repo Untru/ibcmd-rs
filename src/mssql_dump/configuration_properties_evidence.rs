@@ -1,16 +1,25 @@
 //! Evidence-honest decode of the Configuration `<Properties>` span the
 //! compiler cannot yet decode field-by-field (`DefaultRoles` through
-//! `DefaultConstantsForm`). See MINI-GATE-A-CONFIG-PROPS-01: six fields have
-//! corpus-proven single-byte offsets into the raw config-body tuple text and
-//! are decoded and emitted typed; everything else in the span is emitted
-//! verbatim from `ibcmd_schema::configuration_properties_evidenced_default_block_policy`
-//! only after a byte-range comparison proves this exact corpus's tuple
-//! matches the evidenced all-default reference everywhere outside the six
-//! known offsets. Any anchor miss, unrecognized digit, or byte-range
-//! mismatch fails closed -- this module never emits a guess.
+//! `DefaultConstantsForm`). See MINI-GATE-A-CONFIG-PROPS-01.
+//!
+//! The span's coordinates are *tuple field indices* of the 61-field
+//! Configuration `<Properties>` tuple, not byte offsets into the config-body
+//! text: a configuration whose Name, Synonym, roles or references differ in
+//! length from the evidenced reference shifts every byte in the tuple, but
+//! shifts no field index. Six fields carry a corpus-proven single-byte enum
+//! or boolean and are emitted typed; three more carry the default report
+//! forms; `UsedMobileApplicationFunctionalities` is read from its own
+//! declared count elsewhere. Everything still undecoded in the span is
+//! emitted verbatim from
+//! `ibcmd_schema::configuration_properties_evidenced_default_block_policy`
+//! only after a field-by-field comparison proves this corpus's tuple matches
+//! the evidenced all-default reference in every field that carries such a
+//! value. Any arity surprise, unrecognized digit, or field mismatch fails
+//! closed -- this module never emits a guess.
 
 use std::sync::LazyLock;
 
+use super::split_1c_braced_fields;
 use crate::module_blob::decode_base64_mime;
 
 /// Base64 of the retained, all-default `dcs-area-style-item-uuid` config-body
@@ -20,41 +29,27 @@ use crate::module_blob::decode_base64_mime;
 /// `0f7275e8-b27a-44e3-a033-d5a9ca5da59a` (the Configuration root record
 /// named by `root`) from that corpus's manifest-pinned
 /// `configuration.cf.b64` (sha256 `bd64046b...`). The sole fail-closed
-/// comparison reference for the "unmapped" span.
+/// comparison reference for the still-undecoded fields of the span.
 const EVIDENCED_DEFAULT_REFERENCE_B64: &str = include_str!(
     "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid/config-body-unpacked.bin.b64"
 );
 
-static EVIDENCED_DEFAULT_REFERENCE_BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| {
-    decode_base64_mime(EVIDENCED_DEFAULT_REFERENCE_B64.trim())
-        .expect("bundled evidenced-default config-body reference is valid base64")
+static EVIDENCED_DEFAULT_REFERENCE_TEXT: LazyLock<String> = LazyLock::new(|| {
+    let bytes = decode_base64_mime(EVIDENCED_DEFAULT_REFERENCE_B64.trim())
+        .expect("bundled evidenced-default config-body reference is valid base64");
+    String::from_utf8(bytes).expect("bundled evidenced-default config-body reference is UTF-8")
 });
 
-/// Marks the boundary between the variable-length header (config uuid, Name,
-/// Synonym -- already decoded correctly elsewhere) and the stable-layout
-/// remainder of the tuple. Present exactly once in every evidenced corpus;
-/// its position gives the constant byte SHIFT a different corpus's header
-/// length induces on every later offset.
-const HEADER_END_ANCHOR: &[u8] = b"},\"\",0,";
-
-const INCLUDE_HELP_SUFFIX: &[u8] =
-    b",\"\",\"\",\"\",1,\r\n{0,0},1,\r\n{0,0},1,00000000-0000-0000-0000-000000000000";
-const USE_MANAGED_FORM_PREFIX: &[u8] = b"80327,\r\n{0,0},";
-const INTERFACE_COMPAT_SUFFIX: &[u8] =
-    b",\r\n{0,0},\r\n{28,\r\n{\r\n{\"#\",e4c53f94-e5f7-4a34-8c10-218bd811cae1,";
-const MODALITY_INTERFACE_SEP: &[u8] = b",00000000-0000-0000-0000-000000000000,";
-const SYNCHRONOUS_PREFIX: &[u8] = b"\r\n}\r\n},";
-const SYNCHRONOUS_SUFFIX: &[u8] = b",\"\",80327,1,0,00000000-0000-0000-0000-000000000000,";
-
-/// Start (inclusive) and end (exclusive) of the fail-closed comparison
-/// window, in the *base* reference's own byte coordinates -- translated by
-/// the header-length SHIFT for every other corpus. Proven empirically: every
-/// byte in [200, 4266) of the base reference, outside the six known-offset
-/// positions, is identical across every evidenced corpus (all five
-/// single-field probes, both group probes, and `dcs-form-list-settings-server-state`'s
-/// differently-shaped config uuid/Name/Synonym header).
-const UNMAPPED_RANGE_START: usize = 200;
-const UNMAPPED_RANGE_END: usize = 4266;
+/// The reference's own Configuration `<Properties>` tuple, split into its
+/// declared fields the same way every probe's is.
+static EVIDENCED_DEFAULT_REFERENCE_FIELDS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    let text: &'static str = &EVIDENCED_DEFAULT_REFERENCE_TEXT;
+    let start = text
+        .find("{68,")
+        .expect("the evidenced reference opens its Properties tuple with `{68,`");
+    split_1c_braced_fields(text, start)
+        .expect("the evidenced reference's Properties tuple is well-formed")
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ConfigurationPropertiesEvidencedFields {
@@ -68,196 +63,156 @@ pub(crate) struct ConfigurationPropertiesEvidencedFields {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ConfigurationPropertiesEvidenceError {
-    HeaderAnchorNotFound,
-    HeaderAnchorNotUnique { count: usize },
-    FieldAnchorNotFound { field: &'static str },
-    FieldAnchorNotUnique { field: &'static str, count: usize },
+    /// The tuple does not have the reference's field count at all, so none of
+    /// the proven field indices mean anything here. Not my case -- the caller
+    /// keeps its existing per-field behaviour.
+    UnexpectedTupleArity { found: usize },
+    /// A field the reference spells as a single byte is not a single byte
+    /// here. Again a shape mismatch, not a content disagreement.
+    UnexpectedFieldShape { field: &'static str },
+    /// A field this module cannot decode is not even written in the same
+    /// syntactic class as the reference's (a bare scalar where the reference
+    /// spells a uuid, and so on). That is a different tuple dialect, not a
+    /// configuration that disagrees -- not my case either.
+    UnexpectedFieldClass { field: usize },
+    /// A single byte at a proven coordinate that no evidenced corpus has ever
+    /// shown. Fail closed rather than guess at an unobserved enum member.
     UnrecognizedDigit { field: &'static str, byte: u8 },
-    UnmappedRangeMismatch { relative_offset: usize },
-    UnmappedRangeOutOfBounds,
+    /// A field this module cannot decode disagrees with the evidenced
+    /// all-default reference, so the verbatim segments covering it are no
+    /// longer proven for this corpus. Fail closed.
+    UnprovenFieldMismatch { field: usize },
 }
 
-fn find_unique(
-    haystack: &[u8],
-    needle: &[u8],
-    field: &'static str,
-) -> Result<usize, ConfigurationPropertiesEvidenceError> {
-    let mut matches = haystack
-        .windows(needle.len().max(1))
-        .enumerate()
-        .filter(|(_, window)| *window == needle)
-        .map(|(index, _)| index);
-    let Some(first) = matches.next() else {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound { field });
-    };
-    let count = 1 + matches.count();
-    if count != 1 {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotUnique { field, count });
+/// The syntactic class a Properties tuple field is written in. Two tuples
+/// that spell the same field in different classes are different dialects of
+/// the record, not two configurations that disagree about a value -- the
+/// flat/SQL-sourced shapes this crate also reads write a bare `0` where the
+/// CF container writes a uuid or a nested group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldClass {
+    Uuid,
+    Group,
+    Quoted,
+    Scalar,
+}
+
+fn field_class(field: &str) -> FieldClass {
+    if field.starts_with('{') {
+        FieldClass::Group
+    } else if field.starts_with('"') {
+        FieldClass::Quoted
+    } else if field.len() == 36
+        && field.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+    {
+        FieldClass::Uuid
+    } else {
+        FieldClass::Scalar
     }
-    Ok(first)
 }
 
-fn header_end_offset(text: &[u8]) -> Result<usize, ConfigurationPropertiesEvidenceError> {
-    let mut matches = text
-        .windows(HEADER_END_ANCHOR.len())
-        .enumerate()
-        .filter(|(_, window)| *window == HEADER_END_ANCHOR)
-        .map(|(index, _)| index);
-    let Some(first) = matches.next() else {
-        return Err(ConfigurationPropertiesEvidenceError::HeaderAnchorNotFound);
-    };
-    let count = 1 + matches.count();
-    if count != 1 {
-        return Err(ConfigurationPropertiesEvidenceError::HeaderAnchorNotUnique { count });
+fn field_at<'a>(
+    fields: &'a [&'a str],
+    index: usize,
+    name: &'static str,
+) -> Result<&'a str, ConfigurationPropertiesEvidenceError> {
+    fields
+        .get(index)
+        .map(|field| field.trim())
+        .ok_or(ConfigurationPropertiesEvidenceError::UnexpectedFieldShape { field: name })
+}
+
+/// Reads the single ASCII byte a proven coordinate spells, then maps it
+/// through the policy's evidenced value table.
+fn typed_field(
+    fields: &[&str],
+    index: usize,
+    name: &'static str,
+    map: impl Fn(u8) -> Option<&'static str>,
+) -> Result<&'static str, ConfigurationPropertiesEvidenceError> {
+    let field = field_at(fields, index, name)?;
+    let bytes = field.as_bytes();
+    if bytes.len() != 1 {
+        return Err(ConfigurationPropertiesEvidenceError::UnexpectedFieldShape { field: name });
     }
-    Ok(first)
+    map(bytes[0]).ok_or(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
+        field: name,
+        byte: bytes[0],
+    })
 }
 
-/// Reads `text[position]`, requiring exactly one ASCII byte.
-fn digit_at(
-    text: &[u8],
-    position: usize,
-    field: &'static str,
-) -> Result<u8, ConfigurationPropertiesEvidenceError> {
-    text.get(position)
-        .copied()
-        .ok_or(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound { field })
-}
-
-/// Parses the six typed fields and fail-closed-verifies the remainder of the
-/// Configuration Properties tuple against the evidenced all-default
-/// reference. `text` is the config-body tuple's own decoded bytes (the same
-/// bytes `parse_configuration_properties_from_text` already receives).
+/// Parses the six typed fields and fail-closed-verifies every field of the
+/// Configuration `<Properties>` tuple this module still cannot decode against
+/// the evidenced all-default reference. `fields` is that tuple already split
+/// into its declared fields (`configuration_root_property_fields`).
 pub(crate) fn parse_configuration_properties_evidenced_default_block(
-    text: &[u8],
+    fields: &[&str],
 ) -> Result<ConfigurationPropertiesEvidencedFields, ConfigurationPropertiesEvidenceError> {
     let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
-
-    // -- 428: IncludeHelpInContents --
-    let suffix_428 = find_unique(text, INCLUDE_HELP_SUFFIX, "IncludeHelpInContents")?;
-    if suffix_428 == 0 {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "IncludeHelpInContents",
+    let reference = &*EVIDENCED_DEFAULT_REFERENCE_FIELDS;
+    if fields.len() != reference.len() {
+        return Err(ConfigurationPropertiesEvidenceError::UnexpectedTupleArity {
+            found: fields.len(),
         });
     }
-    let field_428 = suffix_428 - 1;
-    let include_help_in_contents_xml = policy
-        .include_help_in_contents_xml(digit_at(text, field_428, "IncludeHelpInContents")?)
-        .ok_or(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
-            field: "IncludeHelpInContents",
-            byte: text[field_428],
-        })?;
 
-    // -- 623/625: UseManagedFormInOrdinaryApplication / UseOrdinaryFormInManagedApplication --
-    let prefix_623 = find_unique(
-        text,
-        USE_MANAGED_FORM_PREFIX,
+    let include_help_in_contents_xml = typed_field(
+        fields,
+        policy.include_help_in_contents_tuple_field(),
+        "IncludeHelpInContents",
+        |digit| policy.include_help_in_contents_xml(digit),
+    )?;
+    let use_managed_form_in_ordinary_application_xml = typed_field(
+        fields,
+        policy.use_managed_form_in_ordinary_application_tuple_field(),
         "UseManagedFormInOrdinaryApplication",
+        |digit| policy.use_managed_form_in_ordinary_application_xml(digit),
     )?;
-    let field_623 = prefix_623 + USE_MANAGED_FORM_PREFIX.len();
-    let field_625 = field_623 + 2;
-    if text.get(field_623 + 1) != Some(&b',') || text.get(field_625).is_none() {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "UseOrdinaryFormInManagedApplication",
-        });
-    }
-    let use_managed_form_in_ordinary_application_xml = policy
-        .use_managed_form_in_ordinary_application_xml(digit_at(
-            text,
-            field_623,
-            "UseManagedFormInOrdinaryApplication",
-        )?)
-        .ok_or(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
-            field: "UseManagedFormInOrdinaryApplication",
-            byte: text[field_623],
-        })?;
-    let use_ordinary_form_in_managed_application_xml = policy
-        .use_ordinary_form_in_managed_application_xml(digit_at(
-            text,
-            field_625,
-            "UseOrdinaryFormInManagedApplication",
-        )?)
-        .ok_or(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
-            field: "UseOrdinaryFormInManagedApplication",
-            byte: text[field_625],
-        })?;
-
-    // -- 867/906: ModalityUseMode / InterfaceCompatibilityMode --
-    let suffix_906 = find_unique(text, INTERFACE_COMPAT_SUFFIX, "InterfaceCompatibilityMode")?;
-    if suffix_906 == 0 {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "InterfaceCompatibilityMode",
-        });
-    }
-    let field_906 = suffix_906 - 1;
-    let sep_start = field_906.checked_sub(MODALITY_INTERFACE_SEP.len()).ok_or(
-        ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "ModalityUseMode",
-        },
+    let use_ordinary_form_in_managed_application_xml = typed_field(
+        fields,
+        policy.use_ordinary_form_in_managed_application_tuple_field(),
+        "UseOrdinaryFormInManagedApplication",
+        |digit| policy.use_ordinary_form_in_managed_application_xml(digit),
     )?;
-    if &text[sep_start..field_906] != MODALITY_INTERFACE_SEP {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "ModalityUseMode",
-        });
-    }
-    let field_867 = sep_start.checked_sub(1).ok_or(
-        ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "ModalityUseMode",
-        },
+    let modality_use_mode_xml = typed_field(
+        fields,
+        policy.modality_use_mode_tuple_field(),
+        "ModalityUseMode",
+        |digit| policy.modality_use_mode_xml(digit),
     )?;
-    let modality_use_mode_xml = policy
-        .modality_use_mode_xml(digit_at(text, field_867, "ModalityUseMode")?)
-        .ok_or(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
-            field: "ModalityUseMode",
-            byte: text[field_867],
-        })?;
-    let interface_compatibility_mode_xml = policy
-        .interface_compatibility_mode_xml(digit_at(text, field_906, "InterfaceCompatibilityMode")?)
-        .ok_or(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
-            field: "InterfaceCompatibilityMode",
-            byte: text[field_906],
-        })?;
-
-    // -- 2669: SynchronousPlatformExtensionAndAddInCallUseMode --
-    let suffix_2669 = find_unique(
-        text,
-        SYNCHRONOUS_SUFFIX,
+    let interface_compatibility_mode_xml = typed_field(
+        fields,
+        policy.interface_compatibility_mode_tuple_field(),
+        "InterfaceCompatibilityMode",
+        |digit| policy.interface_compatibility_mode_xml(digit),
+    )?;
+    let synchronous_platform_extension_and_add_in_call_use_mode_xml = typed_field(
+        fields,
+        policy.synchronous_platform_extension_and_add_in_call_use_mode_tuple_field(),
         "SynchronousPlatformExtensionAndAddInCallUseMode",
+        |digit| policy.synchronous_platform_extension_and_add_in_call_use_mode_xml(digit),
     )?;
-    if suffix_2669 == 0 {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "SynchronousPlatformExtensionAndAddInCallUseMode",
-        });
-    }
-    let field_2669 = suffix_2669 - 1;
-    let prefix_start = field_2669.checked_sub(SYNCHRONOUS_PREFIX.len()).ok_or(
-        ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "SynchronousPlatformExtensionAndAddInCallUseMode",
-        },
-    )?;
-    if &text[prefix_start..field_2669] != SYNCHRONOUS_PREFIX {
-        return Err(ConfigurationPropertiesEvidenceError::FieldAnchorNotFound {
-            field: "SynchronousPlatformExtensionAndAddInCallUseMode",
-        });
-    }
-    let synchronous_platform_extension_and_add_in_call_use_mode_xml = policy
-        .synchronous_platform_extension_and_add_in_call_use_mode_xml(digit_at(
-            text,
-            field_2669,
-            "SynchronousPlatformExtensionAndAddInCallUseMode",
-        )?)
-        .ok_or(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
-            field: "SynchronousPlatformExtensionAndAddInCallUseMode",
-            byte: text[field_2669],
-        })?;
 
-    // -- fail-closed comparison of everything else in the span --
-    verify_unmapped_range(
-        text,
-        &[
-            field_428, field_623, field_625, field_867, field_906, field_2669,
-        ],
-    )?;
+    for &index in policy.unproven_tuple_fields() {
+        let (Some(ours), Some(theirs)) = (fields.get(index), reference.get(index)) else {
+            return Err(ConfigurationPropertiesEvidenceError::UnexpectedTupleArity {
+                found: fields.len(),
+            });
+        };
+        let (ours, theirs) = (ours.trim(), theirs.trim());
+        if ours == theirs {
+            continue;
+        }
+        if field_class(ours) != field_class(theirs) {
+            return Err(ConfigurationPropertiesEvidenceError::UnexpectedFieldClass {
+                field: index,
+            });
+        }
+        return Err(ConfigurationPropertiesEvidenceError::UnprovenFieldMismatch { field: index });
+    }
 
     Ok(ConfigurationPropertiesEvidencedFields {
         include_help_in_contents_xml,
@@ -267,44 +222,6 @@ pub(crate) fn parse_configuration_properties_evidenced_default_block(
         synchronous_platform_extension_and_add_in_call_use_mode_xml,
         interface_compatibility_mode_xml,
     })
-}
-
-fn verify_unmapped_range(
-    text: &[u8],
-    // Positions of the six typed fields *within `text`'s own coordinate
-    // space* (i.e. as returned by the anchor searches above, already
-    // resolved against a possibly-shifted header) -- NOT base-reference
-    // coordinates.
-    known_positions_in_probe: &[usize],
-) -> Result<(), ConfigurationPropertiesEvidenceError> {
-    let reference = &*EVIDENCED_DEFAULT_REFERENCE_BYTES;
-    let base_header_end = header_end_offset(reference)?;
-    let probe_header_end = header_end_offset(text)?;
-    let shift = probe_header_end as isize - base_header_end as isize;
-
-    for base_offset in UNMAPPED_RANGE_START..UNMAPPED_RANGE_END {
-        let probe_offset = base_offset as isize + shift;
-        if probe_offset < 0 {
-            return Err(ConfigurationPropertiesEvidenceError::UnmappedRangeOutOfBounds);
-        }
-        let probe_offset = probe_offset as usize;
-        if known_positions_in_probe.contains(&probe_offset) {
-            continue;
-        }
-        let (Some(reference_byte), Some(probe_byte)) =
-            (reference.get(base_offset), text.get(probe_offset))
-        else {
-            return Err(ConfigurationPropertiesEvidenceError::UnmappedRangeOutOfBounds);
-        };
-        if reference_byte != probe_byte {
-            return Err(
-                ConfigurationPropertiesEvidenceError::UnmappedRangeMismatch {
-                    relative_offset: base_offset,
-                },
-            );
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -326,6 +243,23 @@ mod tests {
 
     fn load(b64: &str) -> Vec<u8> {
         decode_base64_mime(b64.trim()).unwrap()
+    }
+
+    /// The production entry point takes the Properties tuple already split
+    /// into its declared fields; these fixtures are the whole config body, so
+    /// split them the same way `configuration_root_property_fields` does.
+    fn fields_of(text: &[u8]) -> Vec<&str> {
+        let text = std::str::from_utf8(text).expect("every evidenced fixture is UTF-8");
+        let start = text
+            .find("{68,")
+            .expect("every evidenced config body opens its Properties tuple with `{68,`");
+        split_1c_braced_fields(text, start).expect("the Properties tuple is well-formed")
+    }
+
+    fn parse(
+        text: &[u8],
+    ) -> Result<ConfigurationPropertiesEvidencedFields, ConfigurationPropertiesEvidenceError> {
+        parse_configuration_properties_evidenced_default_block(&fields_of(text))
     }
 
     /// Byte ranges of the 61 top-level fields of the config-body tuple's
@@ -408,6 +342,50 @@ mod tests {
         }
     }
 
+    /// One table, one fact: every one of the 61 Properties tuple fields is
+    /// accounted for exactly once -- decoded from its own coordinate, proven
+    /// by identity with the evidenced reference, or observed to drive no
+    /// `<Properties>` output at all. A field that fell through all three
+    /// would be emitted from a segment nothing proves.
+    #[test]
+    fn every_properties_tuple_field_is_accounted_for_exactly_once() {
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        // Fields the readers in `refs.rs` decode themselves: the record
+        // header (Name/Synonym/Comment), NamePrefix, DefaultRunMode, the five
+        // localized properties, DefaultStyle's sibling DefaultLanguage,
+        // Vendor/Version/UpdateCatalogAddress, the four settings storages,
+        // ConfigurationExtensionCompatibilityMode, the two ordinary-form
+        // booleans, the three default report forms, UsePurposes, the three
+        // enum bytes, DefaultRoles, CompatibilityMode and the mobile
+        // functionalities.
+        let decoded = [
+            1usize, 2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16, 22, 23, 24, 25, 26, 28, 29, 30, 31,
+            32, 33, 36, 38, 39, 41, 43, 53,
+        ];
+        let mut seen = vec![0usize; 61];
+        for index in decoded
+            .iter()
+            .copied()
+            .chain(policy.unproven_tuple_fields().iter().copied())
+            .chain(
+                policy
+                    .tuple_fields_without_properties_output()
+                    .iter()
+                    .copied(),
+            )
+        {
+            seen[index] += 1;
+        }
+        assert!(
+            seen.iter().all(|count| *count == 1),
+            "fields covered twice or not at all: {:?}",
+            seen.iter()
+                .enumerate()
+                .filter(|(_, count)| **count != 1)
+                .collect::<Vec<_>>()
+        );
+    }
+
     /// The compiler emits the all-default
     /// `<UsedMobileApplicationFunctionalities>` block by turning it into the
     /// numeric IDs the platform's own tuple marks as used. Those IDs come
@@ -440,7 +418,7 @@ mod tests {
     #[test]
     fn all_default_base_corpus_decodes_to_the_platform_default_values() {
         let text = load(T1_BASE_B64);
-        let fields = parse_configuration_properties_evidenced_default_block(&text).unwrap();
+        let fields = parse(&text).unwrap();
         assert_eq!(fields.include_help_in_contents_xml, "false");
         assert_eq!(fields.use_managed_form_in_ordinary_application_xml, "false");
         assert_eq!(fields.use_ordinary_form_in_managed_application_xml, "false");
@@ -457,67 +435,51 @@ mod tests {
 
     /// Positive per-field case: a single-field probe corpus's own typed
     /// field reflects its known non-default value, and the fail-closed
-    /// unmapped-range comparison still passes (this probe changes only the
-    /// six known offsets, nothing else).
+    /// unproven-field comparison still passes (this probe changes only the
+    /// six known coordinates, nothing else).
     #[test]
     fn single_field_probe_decodes_its_own_non_default_value() {
         let text = load(INCLUDE_HELP_IN_CONTENTS_B64);
-        let fields = parse_configuration_properties_evidenced_default_block(&text).unwrap();
+        let fields = parse(&text).unwrap();
         assert_eq!(fields.include_help_in_contents_xml, "true");
         // The other five stay at their platform default in this probe.
         assert_eq!(fields.use_managed_form_in_ordinary_application_xml, "false");
         assert_eq!(fields.modality_use_mode_xml, "DontUse");
     }
 
-    /// MINI-GATE-A-CONFIG-PROPS-01 gate negative: mutating a byte in the
-    /// span the compiler still cannot decode field-by-field (i.e. outside
-    /// all six known offsets) must fail closed with a typed error, never a
-    /// silently-wrong or silently-truncated XML emission.
+    /// MINI-GATE-A-CONFIG-PROPS-01 gate negative: mutating a byte in a field
+    /// the module still cannot decode must fail closed with a typed error,
+    /// never a silently-wrong or silently-truncated XML emission. Byte 355
+    /// sits inside tuple field 11, a nil-uuid field no reader touches and
+    /// that the verbatim segments therefore stand or fall with.
     #[test]
-    fn mutating_an_unmapped_byte_fails_closed() {
+    fn mutating_an_unproven_field_fails_closed() {
         let mut text = load(T1_BASE_B64);
-        // Byte 1000 sits well inside the fail-closed comparison window
-        // (200..4266) and outside all six known offsets (428/623/625/
-        // 867/906/2669) -- part of the still-unmapped
-        // `UsedMobileApplicationFunctionalities` span.
-        let mutated_byte = text[1000];
-        text[1000] = if mutated_byte == b'0' { b'9' } else { b'0' };
-        let result = parse_configuration_properties_evidenced_default_block(&text);
+        let mutated_byte = text[355];
+        text[355] = if mutated_byte == b'0' { b'9' } else { b'0' };
         assert_eq!(
-            result,
-            Err(
-                ConfigurationPropertiesEvidenceError::UnmappedRangeMismatch {
-                    relative_offset: 1000
-                }
-            )
+            parse(&text),
+            Err(ConfigurationPropertiesEvidenceError::UnprovenFieldMismatch { field: 11 })
         );
     }
 
-    /// Gate negative, second flavor: mutating a byte adjacent to (but not
-    /// inside) `UNMAPPED_RANGE_START..UNMAPPED_RANGE_END` is out of the
-    /// verified window and must not be silently accepted as a false
-    /// positive -- confirmed here by picking an offset just past the six
-    /// known positions in the enum-group probe (which already carries
-    /// non-default values at 867/906/2669) so the byte flip is unambiguous.
+    /// Gate negative, second flavor: the same must hold in a corpus that
+    /// already carries non-default values at the six known coordinates, so
+    /// the mismatch cannot be confused with one of them. Byte 2700 is inside
+    /// tuple field 46, another nil-uuid field no reader decodes.
     #[test]
-    fn mutating_an_unmapped_byte_in_a_non_default_probe_still_fails_closed() {
+    fn mutating_an_unproven_field_in_a_non_default_probe_still_fails_closed() {
         let mut text = load(T3_ENUM_GROUP_B64);
-        let probe_position = 3000;
-        let mutated_byte = text[probe_position];
-        text[probe_position] = if mutated_byte == b'0' { b'9' } else { b'0' };
-        let result = parse_configuration_properties_evidenced_default_block(&text);
+        let mutated_byte = text[2700];
+        text[2700] = if mutated_byte == b'0' { b'9' } else { b'0' };
         assert_eq!(
-            result,
-            Err(
-                ConfigurationPropertiesEvidenceError::UnmappedRangeMismatch {
-                    relative_offset: probe_position
-                }
-            )
+            parse(&text),
+            Err(ConfigurationPropertiesEvidenceError::UnprovenFieldMismatch { field: 46 })
         );
     }
 
     /// MINI-GATE-A-CONFIG-PROPS-01 gate positive-mutation: mutating one of
-    /// the six known-offset bytes changes exactly that field's typed XML
+    /// the six known-coordinate bytes changes exactly that field's typed XML
     /// value, correctly, without disturbing the other five or the
     /// fail-closed comparison.
     #[test]
@@ -525,42 +487,44 @@ mod tests {
         let mut text = load(T1_BASE_B64);
         assert_eq!(text[428], b'0');
         text[428] = b'1';
-        let fields = parse_configuration_properties_evidenced_default_block(&text).unwrap();
+        let fields = parse(&text).unwrap();
         assert_eq!(fields.include_help_in_contents_xml, "true");
         assert_eq!(fields.use_managed_form_in_ordinary_application_xml, "false");
         assert_eq!(fields.modality_use_mode_xml, "DontUse");
     }
 
     /// Same gate, for one of the enum-typed fields (index-based, not
-    /// boolean): mutating offset 867 from `'2'` (DontUse) to `'0'` (Use)
-    /// must change only `ModalityUseMode`'s XML.
+    /// boolean): mutating tuple field 36 from `'2'` (DontUse) through `'1'`
+    /// (UseWithWarnings, the value «1С:Управление торговлей 11.5.27.75»
+    /// carries) to `'0'` (Use) must change only `ModalityUseMode`'s XML.
     #[test]
-    fn mutating_the_modality_use_mode_offset_changes_only_that_fields_xml() {
-        let mut text = load(T1_BASE_B64);
-        assert_eq!(text[867], b'2');
-        text[867] = b'0';
-        let fields = parse_configuration_properties_evidenced_default_block(&text).unwrap();
-        assert_eq!(fields.modality_use_mode_xml, "Use");
-        assert_eq!(
-            fields.interface_compatibility_mode_xml,
-            "TaxiEnableVersion8_2"
-        );
-        assert_eq!(
-            fields.synchronous_platform_extension_and_add_in_call_use_mode_xml,
-            "DontUse"
-        );
+    fn mutating_the_modality_use_mode_field_changes_only_that_fields_xml() {
+        for (digit, expected) in [(b'0', "Use"), (b'1', "UseWithWarnings")] {
+            let mut text = load(T1_BASE_B64);
+            assert_eq!(text[867], b'2');
+            text[867] = digit;
+            let fields = parse(&text).unwrap();
+            assert_eq!(fields.modality_use_mode_xml, expected);
+            assert_eq!(
+                fields.interface_compatibility_mode_xml,
+                "TaxiEnableVersion8_2"
+            );
+            assert_eq!(
+                fields.synchronous_platform_extension_and_add_in_call_use_mode_xml,
+                "DontUse"
+            );
+        }
     }
 
-    /// An unrecognized digit at a known offset (never observed by any
+    /// An unrecognized digit at a known coordinate (never observed by any
     /// evidenced corpus) must fail closed rather than guess at an unproven
     /// enum member.
     #[test]
-    fn unrecognized_digit_at_a_known_offset_fails_closed() {
+    fn unrecognized_digit_at_a_known_coordinate_fails_closed() {
         let mut text = load(T1_BASE_B64);
         text[867] = b'7';
-        let result = parse_configuration_properties_evidenced_default_block(&text);
         assert_eq!(
-            result,
+            parse(&text),
             Err(ConfigurationPropertiesEvidenceError::UnrecognizedDigit {
                 field: "ModalityUseMode",
                 byte: b'7',
@@ -580,8 +544,22 @@ mod tests {
     #[test]
     fn modality_use_mode_single_field_probe_decodes_in_isolation() {
         let text = load(MODALITY_USE_MODE_B64);
-        let fields = parse_configuration_properties_evidenced_default_block(&text).unwrap();
+        let fields = parse(&text).unwrap();
         assert_eq!(fields.modality_use_mode_xml, "Use");
         assert_eq!(fields.include_help_in_contents_xml, "false");
+    }
+
+    /// A tuple with a different field count is not this module's case: the
+    /// proven coordinates are field indices, and they mean nothing in a tuple
+    /// that does not have the reference's shape.
+    #[test]
+    fn a_differently_sized_tuple_is_not_my_case() {
+        let text = load(T1_BASE_B64);
+        let mut fields = fields_of(&text);
+        fields.pop();
+        assert_eq!(
+            parse_configuration_properties_evidenced_default_block(&fields),
+            Err(ConfigurationPropertiesEvidenceError::UnexpectedTupleArity { found: 60 })
+        );
     }
 }

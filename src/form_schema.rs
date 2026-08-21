@@ -1020,6 +1020,7 @@ pub(crate) enum FormUsualGroupXmlProperty {
     United,
     ChildItemsWidth,
     BackColor,
+    HiddenStateTitleBackColor,
     ThroughAlign,
     CurrentRowUse,
 }
@@ -1045,6 +1046,12 @@ pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
     FormUsualGroupXmlProperty::United,
     FormUsualGroupXmlProperty::ChildItemsWidth,
     FormUsualGroupXmlProperty::BackColor,
+    // The one native usual group that carries `HiddenStateTitleBackColor`
+    // writes it behind `Title`, `Behavior`, `Representation` and `ShowTitle`
+    // and ahead of `ExtendedTooltip` and `ChildItems`; it shares no group with
+    // `BackColor`, `ThroughAlign` or `CurrentRowUse`, so it joins their site
+    // rather than opening a second one.
+    FormUsualGroupXmlProperty::HiddenStateTitleBackColor,
     FormUsualGroupXmlProperty::ThroughAlign,
     // The one native usual group that carries `CurrentRowUse` writes it
     // behind `Title`, `HorizontalStretch`, `GroupHorizontalAlign`, `Group`,
@@ -1073,9 +1080,10 @@ impl FormUsualGroupXmlProperty {
             Self::Format | Self::ShowLeftMargin | Self::United | Self::ChildItemsWidth => {
                 FormUsualGroupXmlAnchor::AfterRepresentation
             }
-            Self::BackColor | Self::ThroughAlign | Self::CurrentRowUse => {
-                FormUsualGroupXmlAnchor::AfterShowTitle
-            }
+            Self::BackColor
+            | Self::HiddenStateTitleBackColor
+            | Self::ThroughAlign
+            | Self::CurrentRowUse => FormUsualGroupXmlAnchor::AfterShowTitle,
         }
     }
 }
@@ -1664,6 +1672,7 @@ pub(crate) enum FormExtendedTooltipXmlProperty {
     GroupVerticalAlign,
     HorizontalAlign,
     VerticalAlign,
+    BackColor,
     Events,
 }
 
@@ -1698,6 +1707,11 @@ pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProper
     FormExtendedTooltipXmlProperty::GroupVerticalAlign,
     FormExtendedTooltipXmlProperty::HorizontalAlign,
     FormExtendedTooltipXmlProperty::VerticalAlign,
+    // A tooltip's `BackColor` closes its property block, immediately ahead of
+    // `Events`.  Both native tooltips that carry one pin it from a different
+    // side and neither is contradicted: one reads `TextColor`, `Title`,
+    // `Hyperlink`, `BackColor` and the other `BackColor`, `Events`.
+    FormExtendedTooltipXmlProperty::BackColor,
     FormExtendedTooltipXmlProperty::Events,
 ];
 
@@ -1725,6 +1739,15 @@ impl FormExtendedTooltipSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
     pub(crate) const TITLE_SLOT: usize = 22;
     pub(crate) const EVENT_OPTION_SLOT: usize = 5;
+    /// The option slot immediately behind the event record carries the
+    /// tooltip's `BackColor`, in the same three-member `{3, space, payload}`
+    /// shape every control colour uses.  Census of all 206 891 traced
+    /// `ExtendedTooltip` records of UT 11.5.27.75: exactly two option slots in
+    /// the whole configuration hold a colour that is not the platform's
+    /// "unset" encoding, both of them this one, and they are exactly the two
+    /// tooltips the platform writes `<BackColor>` on -- `style:ToolTipBackColor`
+    /// and `#FFDCDC`, value for value.
+    pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 6;
     /// `Hyperlink` flag slot of the tooltip option tuple: `1` on exactly the 8
     /// native `ExtendedTooltip` items that carry `<Hyperlink>true</Hyperlink>`
     /// and `0` on the other 170 224.
@@ -2327,6 +2350,18 @@ impl FormChildItemDisplayImportanceSchema {
                 0,
             ) if field_count >= 29 => field_count.checked_sub(1)?,
             ("12", 36, "LabelDecoration" | "PictureDecoration", 0) => 34,
+            // The three list additions keep the importance code in the last
+            // member of their own 24-member wrapper-`5` record, exactly as the
+            // wrapper-`22` containers do.  Across all 13 942 of them in UT
+            // 11.5.27.75 the slot reads `0` on every addition the platform
+            // gives no `DisplayImportance`, `1` on the one it marks
+            // `VeryHigh` and `5` on the two it marks `VeryLow`.
+            (
+                "5",
+                24,
+                "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition",
+                0,
+            ) => 23,
             ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => field_count.checked_sub(4)?,
             (
                 "37",
@@ -3056,6 +3091,9 @@ const FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID: &str = "2042ec93-3108-4190-b767-e
 const FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID: &str =
     "411a4578-276c-4f4a-b56a-b3b01181c997";
 const FORM_SPREADSHEET_SELECTION_EVENT_UUID: &str = "22287505-97d8-4258-a318-209e2493f7eb";
+const FORM_SPREADSHEET_URL_PROCESSING_EVENT_UUID: &str = "06d41ccc-4e8a-46f8-aeff-b3303cf753d2";
+const FORM_SPREADSHEET_BEFORE_PRINT_EVENT_UUID: &str = "61455593-0982-4415-bc2e-2e8722a7abd0";
+const FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID: &str = "83c14f85-ab1f-4c77-bd3b-81970b72543b";
 const FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID: &str = "1490ede6-6f33-4c6d-b971-53b2541331ea";
 const FORM_CALENDAR_SELECTION_EVENT_UUID: &str = "2feb1ee9-b750-4352-bb4c-67ba1c608dc6";
 const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
@@ -3150,14 +3188,28 @@ impl FormChildItemEventCollectionSchema {
                     "OnChangeAreaContent",
                 ),
                 (FORM_SPREADSHEET_SELECTION_EVENT_UUID, "Selection"),
+                // A collection that names one member this table does not know
+                // is discarded whole, so a single missing identifier costs
+                // every event beside it. These two were the missing ones: the
+                // corpus writes `06d41ccc` beside the already-named
+                // `DetailProcessing` and `61455593` beside the already-named
+                // `Selection`, and the platform prints `URLProcessing` and
+                // `BeforePrint` for them.
+                (FORM_SPREADSHEET_URL_PROCESSING_EVENT_UUID, "URLProcessing"),
+                (FORM_SPREADSHEET_BEFORE_PRINT_EVENT_UUID, "BeforePrint"),
             ],
             FormChildItemEventCollectionOwner::CalendarField => &[
                 (FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID, "OnPeriodOutput"),
                 (FORM_CALENDAR_SELECTION_EVENT_UUID, "Selection"),
             ],
-            FormChildItemEventCollectionOwner::GraphicalSchemaField => {
-                &[(FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID, "Selection")]
-            }
+            FormChildItemEventCollectionOwner::GraphicalSchemaField => &[
+                (FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID, "Selection"),
+                // Same all-or-nothing rule: the corpus's only graphical-schema
+                // collection with two members names `83c14f85` beside the
+                // already-named `Selection`, and the platform prints
+                // `OnActivate` for it.
+                (FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
+            ],
             FormChildItemEventCollectionOwner::Pages => &[(
                 FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID,
                 "OnCurrentPageChange",
@@ -3202,6 +3254,22 @@ impl FormFieldSchema {
 
     pub(crate) const fn options_slot(self) -> usize {
         Self::OPTIONS_BASE_SLOT + self.top_level_offset
+    }
+
+    /// The field's `TitleBackColor`, a top-level slot carrying the same
+    /// three-member `{3, space, payload}` value every control colour uses, and
+    /// shifted by the same head offset the options slot is.
+    ///
+    /// Census of every colour-bearing item record of UT 11.5.27.75 -- all
+    /// 11 099 of them, scanned at every top-level and every nested slot: this
+    /// coordinate holds a colour on exactly two items, and they are exactly
+    /// the two the platform writes `<TitleBackColor>` on, value for value. No
+    /// other item in the configuration holds anything but the platform's
+    /// "unset" encoding here.
+    pub(crate) const TITLE_BACK_COLOR_BASE_SLOT: usize = 33;
+
+    pub(crate) const fn title_back_color_slot(self) -> usize {
+        Self::TITLE_BACK_COLOR_BASE_SLOT + self.top_level_offset
     }
 
     pub(crate) fn item_tag_from_discriminator(discriminator: &str) -> Option<&'static str> {
@@ -4429,6 +4497,32 @@ impl FormChildItemVisibleSchema {
             {
                 43 + top_level_offset
             }
+            // The three special-field kinds share that very layout: all 56
+            // `ProgressBarField`, `TrackBarField` and `ChartField` items of
+            // UT 11.5.27.75 are wrapper-`37` 59-member records, and slot 43
+            // reads `1` on the 55 whose native document carries no
+            // `<Visible>`, and `0` on the one chart field it writes
+            // `<Visible>false</Visible>` on. They were simply never listed.
+            ("37", "ProgressBarField", Some("9"))
+            | ("37", "TrackBarField", Some("10"))
+            | ("37", "ChartField", Some("11"))
+                if field_count == 59 && top_level_offset == 0 =>
+            {
+                43
+            }
+            // The three list additions share one 24-member wrapper-`5` layout
+            // and keep the flag in slot 9. All 13 942 of them in UT
+            // 11.5.27.75 -- 4 773 search strings, 4 543 view statuses and
+            // 4 626 search controls -- read `1` there except the single
+            // search string the platform writes `<Visible>false</Visible>`
+            // on, which reads `0`. No third code occurs.
+            ("5", "SearchStringAddition", Some("0"))
+            | ("5", "ViewStatusAddition", Some("1"))
+            | ("5", "SearchControlAddition", Some("2"))
+                if field_count == 24 =>
+            {
+                9
+            }
             ("55", "Table", _) if field_count >= 99 && (field_count - 99) % 2 == 0 => {
                 field_count.checked_sub(35)?
             }
@@ -4599,6 +4693,7 @@ impl FormCommandBarSchema {
 pub(crate) struct FormChildItemShowTitleSchema {
     option_slot: usize,
     back_color_option_slot: Option<usize>,
+    hidden_state_title_back_color_option_slot: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -4705,24 +4800,36 @@ impl FormChildItemShowTitleSchema {
             return Some(Self {
                 option_slot: 6,
                 back_color_option_slot: Some(9),
+                // Unobserved on a `Page`: no native page carries a
+                // `HiddenStateTitleBackColor`, so this layout refuses rather
+                // than borrowing the usual group's coordinate.
+                hidden_state_title_back_color_option_slot: None,
             });
         }
         if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
             return None;
         }
-        let (option_slot, back_color_option_slot) = match (
-            item_tag,
-            direct_discriminator,
-            options.len(),
-            options.first().map(|field| field.trim()),
-        ) {
-            ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None),
-            ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9)),
-            _ => return None,
-        };
+        // The usual group's own 29-member option tuple carries a second
+        // colour beside `BackColor`: option 23 is its
+        // `HiddenStateTitleBackColor`.  Census of every colour-bearing item
+        // record of UT 11.5.27.75 -- all 11 099, scanned at every top-level
+        // and nested slot -- finds a colour there on exactly one item, and it
+        // is exactly the one the platform writes the element on.
+        let (option_slot, back_color_option_slot, hidden_state_title_back_color_option_slot) =
+            match (
+                item_tag,
+                direct_discriminator,
+                options.len(),
+                options.first().map(|field| field.trim()),
+            ) {
+                ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None, None),
+                ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9), Some(23)),
+                _ => return None,
+            };
         Some(Self {
             option_slot,
             back_color_option_slot,
+            hidden_state_title_back_color_option_slot,
         })
     }
 
@@ -4732,6 +4839,10 @@ impl FormChildItemShowTitleSchema {
 
     pub(crate) const fn back_color_option_slot(self) -> Option<usize> {
         self.back_color_option_slot
+    }
+
+    pub(crate) const fn hidden_state_title_back_color_option_slot(self) -> Option<usize> {
+        self.hidden_state_title_back_color_option_slot
     }
 }
 
@@ -5261,25 +5372,87 @@ impl FormSpecialFieldSchema {
         }
     }
 
+    /// The 18-member track-bar option tuple, read off the whole population it
+    /// has in UT 11.5.27.75 -- all 9 `TrackBarField` items of the
+    /// configuration, joined to the platform's own element for each. Every
+    /// member below is a total function of the platform answer on those 9:
+    /// the value the platform prints where it prints one, and one fixed
+    /// default where it prints nothing.
+    ///
+    /// * 1 `Width`, default `32` -- printed `35`, `9`, `20`, silent on the 6
+    ///   that hold `32`. The arm used to admit `32` and so wrote a width on
+    ///   all six.
+    /// * 2 `Height`, default `2` -- printed `1` on 3, silent on the 6 that
+    ///   hold `2`.
+    /// * 5 `MinValue`, default `0`; 6 `MaxValue`, default `100`; 7 `Step`,
+    ///   default `1`; 9 `LargeStep`, default `10`; 10 `MarkingStep`, default
+    ///   `5`.
+    /// * 11 `MarkingAppearance`: `1` on exactly the 3 items the platform
+    ///   writes `TopLeft` on, `2` on the other 6. No other code occurs, so the
+    ///   remaining appearances stay unread rather than guessed.
+    /// * 13 `AutoMaxWidth`: `0` on the one item the platform writes `false`
+    ///   on, `1` on the other 8.
+    fn track_bar_dimension(options: &[&str], slot: usize, default: &str) -> Option<String> {
+        let value = options.get(slot)?.trim();
+        (value != default && value.parse::<i64>().is_ok()).then(|| value.to_string())
+    }
+
     pub(crate) fn width(self, options: &[&str]) -> Option<String> {
         let value = options.get(1)?.trim();
         let is_non_default = match self.kind {
-            FormSpecialFieldKind::ProgressBar => value != "0" && value != "32",
-            FormSpecialFieldKind::TrackBar => value != "0",
+            FormSpecialFieldKind::ProgressBar | FormSpecialFieldKind::TrackBar => {
+                value != "0" && value != "32"
+            }
             FormSpecialFieldKind::Chart => false,
         };
         (is_non_default && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
+    pub(crate) fn height(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 2, "2"))
+            .flatten()
+    }
+
+    pub(crate) fn min_value(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 5, "0"))
+            .flatten()
+    }
+
+    pub(crate) fn step(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 7, "1"))
+            .flatten()
+    }
+
+    pub(crate) fn large_step(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 9, "10"))
+            .flatten()
+    }
+
+    pub(crate) fn marking_step(self, options: &[&str]) -> Option<String> {
+        (self.kind == FormSpecialFieldKind::TrackBar)
+            .then(|| Self::track_bar_dimension(options, 10, "5"))
+            .flatten()
+    }
+
+    pub(crate) fn marking_appearance(self, options: &[&str]) -> Option<&'static str> {
+        matches!(
+            (self.kind, options.get(11).map(|field| field.trim())),
+            (FormSpecialFieldKind::TrackBar, Some("1"))
+        )
+        .then_some("TopLeft")
+    }
+
     pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
-        match self.kind {
-            FormSpecialFieldKind::ProgressBar
-                if options.get(11).map(|field| field.trim()) == Some("0") =>
-            {
-                Some(false)
-            }
-            _ => None,
-        }
+        let slot = match self.kind {
+            FormSpecialFieldKind::ProgressBar => 11,
+            FormSpecialFieldKind::TrackBar => 13,
+            FormSpecialFieldKind::Chart => return None,
+        };
+        (options.get(slot).map(|field| field.trim()) == Some("0")).then_some(false)
     }
 
     /// The progress bar keeps `HorizontalStretch` in the same option member the
@@ -5313,11 +5486,12 @@ impl FormSpecialFieldSchema {
     }
 
     pub(crate) fn max_value(self, options: &[&str]) -> Option<String> {
-        if self.kind != FormSpecialFieldKind::ProgressBar {
-            return None;
+        match self.kind {
+            FormSpecialFieldKind::ProgressBar | FormSpecialFieldKind::TrackBar => {
+                Self::track_bar_dimension(options, 6, "100")
+            }
+            FormSpecialFieldKind::Chart => None,
         }
-        let value = options.get(6)?.trim();
-        (value != "100" && value.parse::<i64>().is_ok()).then(|| value.to_string())
     }
 
     pub(crate) fn show_percent(self, options: &[&str]) -> Option<bool> {
@@ -5349,6 +5523,9 @@ enum FormTooltipRepresentationItemKind {
     ProgressBarField,
     TrackBarField,
     ChartField,
+    SpreadSheetDocumentField,
+    HTMLDocumentField,
+    CommandBar,
     Button,
     Other,
 }
@@ -5374,6 +5551,9 @@ impl FormTooltipRepresentationItemKind {
             "ProgressBarField" => Self::ProgressBarField,
             "TrackBarField" => Self::TrackBarField,
             "ChartField" => Self::ChartField,
+            "SpreadSheetDocumentField" => Self::SpreadSheetDocumentField,
+            "HTMLDocumentField" => Self::HTMLDocumentField,
+            "CommandBar" => Self::CommandBar,
             "Button" => Self::Button,
             _ => Self::Other,
         }
@@ -5385,6 +5565,7 @@ pub(crate) enum FormTooltipRepresentationXmlOrder {
     UsualGroupHeader,
     DecorationHeader,
     FieldProperties,
+    FieldPropertiesBeforeCommandSet,
     ButtonGroupHeader,
     AfterTitle,
 }
@@ -5437,6 +5618,15 @@ pub(crate) fn form_tooltip_representation_schema(
                 // mapping to two answers.
                 | (FormTooltipRepresentationItemKind::UsualGroup, Some("5"))
                 | (FormTooltipRepresentationItemKind::ButtonGroup, Some("6"))
+                // A `CommandBar` is the wrapper-`22` item the same discriminator
+                // slot codes `0`, and it obeys the very same `field_count - 7`
+                // rule; it was simply never admitted.  UT 11.5.27.75, all 1 842
+                // native command bars: reverse offset 7 reads `1` on exactly the
+                // 3 the platform answers `<ToolTipRepresentation>None`, and `0`
+                // on the other 1 839.  Reverse offset 8 reads `1` on 1 841 of
+                // them, so the neighbouring slot is excluded outright rather
+                // than merely unpreferred.
+                | (FormTooltipRepresentationItemKind::CommandBar, Some("0"))
         );
         if admitted {
             return Some(FormTooltipRepresentationSchema {
@@ -5444,16 +5634,45 @@ pub(crate) fn form_tooltip_representation_schema(
             });
         }
     }
+    // A wrapper-`37` field carries its `ToolTipRepresentation` code at reverse
+    // offset 9, not at the absolute slot 50 a 59-member record happens to spell
+    // it in.  The record grows by one member when the item carries an extended
+    // top-level head (`form_input_field_top_level_offset`), which also moves the
+    // kind discriminator off slot 5 -- so the pairing this arm used to demand
+    // could never match a 60-member record, and every such field silently lost
+    // the property.  The kind alone decides admission here because
+    // `form_child_item_tag` already derives the tag from that very
+    // discriminator, read at its shifted position.
+    //
+    // Evidence, UT 11.5.27.75 native tree: at reverse offset 9 the 60-member
+    // records answer non-`Omit` on exactly 16 items, and the platform prints
+    // exactly those 16, value for value (`Button` 4, `ShowBottom` 8,
+    // `ShowRight` 3, `Balloon` 1); the 59-member records keep the reading the
+    // absolute slot 50 already gave them.  The same offset carries the two
+    // document-field kinds the whitelist never named: it answers `None` on
+    // exactly the 4 `HTMLDocumentField` and 2 `SpreadSheetDocumentField` items
+    // the platform answers `None` on, and `Omit` on the other 172 and 220.
+    if wrapper == "37"
+        && matches!(
+            item_kind,
+            FormTooltipRepresentationItemKind::LabelField
+                | FormTooltipRepresentationItemKind::InputField
+                | FormTooltipRepresentationItemKind::CheckBoxField
+                | FormTooltipRepresentationItemKind::PictureField
+                | FormTooltipRepresentationItemKind::RadioButtonField
+                | FormTooltipRepresentationItemKind::CalendarField
+                | FormTooltipRepresentationItemKind::ProgressBarField
+                | FormTooltipRepresentationItemKind::TrackBarField
+                | FormTooltipRepresentationItemKind::ChartField
+                | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
+                | FormTooltipRepresentationItemKind::HTMLDocumentField
+        )
+    {
+        return Some(FormTooltipRepresentationSchema {
+            slot: field_count.checked_sub(9)?,
+        });
+    }
     let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
-        ("37", 59, FormTooltipRepresentationItemKind::LabelField, Some("1"))
-        | ("37", 59, FormTooltipRepresentationItemKind::InputField, Some("2"))
-        | ("37", 59, FormTooltipRepresentationItemKind::CheckBoxField, Some("3"))
-        | ("37", 59, FormTooltipRepresentationItemKind::PictureField, Some("4"))
-        | ("37", 59, FormTooltipRepresentationItemKind::RadioButtonField, Some("5"))
-        | ("37", 59, FormTooltipRepresentationItemKind::CalendarField, Some("8"))
-        | ("37", 59, FormTooltipRepresentationItemKind::ProgressBarField, Some("9"))
-        | ("37", 59, FormTooltipRepresentationItemKind::TrackBarField, Some("10"))
-        | ("37", 59, FormTooltipRepresentationItemKind::ChartField, Some("11")) => 50,
         ("31", 52, FormTooltipRepresentationItemKind::Button, _) => 30,
         _ => return None,
     };
@@ -5473,6 +5692,12 @@ pub(crate) fn form_tooltip_representation_xml_order(
         FormTooltipRepresentationItemKind::ButtonGroup => {
             Some(FormTooltipRepresentationXmlOrder::ButtonGroupHeader)
         }
+        // All 3 native command bars that carry the property write it directly
+        // behind their title block and ahead of `HorizontalLocation` (2) and
+        // `ExtendedTooltip` (3) -- the same site `Popup`/`Pages` use.
+        FormTooltipRepresentationItemKind::CommandBar => {
+            Some(FormTooltipRepresentationXmlOrder::AfterTitle)
+        }
         FormTooltipRepresentationItemKind::ColumnGroup => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }
@@ -5489,8 +5714,23 @@ pub(crate) fn form_tooltip_representation_xml_order(
         | FormTooltipRepresentationItemKind::CalendarField
         | FormTooltipRepresentationItemKind::ProgressBarField
         | FormTooltipRepresentationItemKind::TrackBarField
-        | FormTooltipRepresentationItemKind::ChartField => {
+        | FormTooltipRepresentationItemKind::ChartField
+        // An `HTMLDocumentField` places it exactly where its sibling fields
+        // do: behind `DataPath`/`SkipOnInput`/`TitleLocation` and ahead of the
+        // geometry run (`Width`, `Height`, `MaxHeight`), `BorderColor`,
+        // `ContextMenu` and `ExtendedTooltip`.
+        | FormTooltipRepresentationItemKind::HTMLDocumentField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
+        }
+        // A `SpreadSheetDocumentField` writes it one step earlier, ahead of its
+        // own `CommandSet`: both native spreadsheet fields that carry the
+        // property carry a command set too, and both write `DataPath`,
+        // `TitleLocation`, `ToolTipRepresentation`, `CommandSet`,
+        // `SelectionShowMode`, `ContextMenu`, `ExtendedTooltip` in that order.
+        // (A `Table` writes the two the other way round, on all 18 that carry
+        // both, but it has its own ordered property list.)
+        FormTooltipRepresentationItemKind::SpreadSheetDocumentField => {
+            Some(FormTooltipRepresentationXmlOrder::FieldPropertiesBeforeCommandSet)
         }
         FormTooltipRepresentationItemKind::Button => {
             Some(FormTooltipRepresentationXmlOrder::AfterTitle)
@@ -5700,6 +5940,7 @@ pub(crate) enum FormTableXmlProperty {
     Title,
     TitleFont,
     Font,
+    Shortcut,
     CommandSet,
     CurrentRowUse,
     ToolTip,
@@ -5909,6 +6150,13 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // nearest position that satisfies every observed pair.
     FormTableXmlProperty::TitleFont,
     FormTableXmlProperty::Font,
+    // A table's `Shortcut` sits between its title block and its command set.
+    // UT 11.5.27.75 native tree, the 3 tables that carry one: it trails
+    // `Title` (2), `RowPictureDataPath` (1), `DataPath` (3),
+    // `EnableStartDrag` (3) and `Representation` (1), and leads `RowFilter`
+    // (3), `CommandSet` (1), `ContextMenu` (3) and `AutoCommandBar` (3);
+    // nothing this block writes ever follows it.
+    FormTableXmlProperty::Shortcut,
     FormTableXmlProperty::CommandSet,
     FormTableXmlProperty::ToolTip,
     FormTableXmlProperty::ToolTipRepresentation,
@@ -6450,6 +6698,11 @@ impl FormTableSchema {
         match fields.get(6)?.trim() {
             "1" => Some("Auto"),
             "3" => Some("Top"),
+            // Read off the platform, not interpolated: of the 4 543 traced
+            // `Table` items of UT 11.5.27.75 exactly one holds `5` here, and
+            // the platform writes `<TitleLocation>Bottom</TitleLocation>` on
+            // exactly that table. The remaining ordinals stay unread.
+            "5" => Some("Bottom"),
             _ => None,
         }
     }
@@ -6919,6 +7172,12 @@ impl FormSpreadsheetDocumentFieldProperties {
                 Some("3") => Some("WhenMultipleCellsSelected"),
                 _ => None,
             },
+            // Slot 12 is one code, not a flag with a hole in it, and it uses
+            // the same `1`/`2` pairing the `Table` header does: of the 184
+            // `SpreadSheetDocumentField` option tuples UT 11.5.27.75 spells
+            // out, 180 hold `0` and write nothing, 3 hold `1` and write
+            // `Enable`, and the one that holds `2` is the one the platform
+            // writes `<Output>Disable</Output>` on.  Reading only `1` lost it.
             output: form_output_code(option(12)),
             protection: explicit_true(10),
             enable_start_drag: explicit_false(16),
@@ -7253,6 +7512,7 @@ pub(crate) enum FormLabelFieldOptionSlot {
     MaxWidth,
     AutoMaxHeight,
     MaxHeight,
+    PasswordMode,
 }
 
 impl FormLabelFieldOptionSlot {
@@ -7278,6 +7538,12 @@ impl FormLabelFieldOptionSlot {
             Self::Hiperlink => 7,
             Self::TextColor => 8,
             Self::Font => 10,
+            // Of the 25 156 traced `LabelField` option tuples of UT
+            // 11.5.27.75, slot 11 reads `2` on the 25 154 that carry no
+            // `<PasswordMode>` and `0` on the one the platform writes
+            // `<PasswordMode>false</PasswordMode>` on.  No other code occurs,
+            // so the raised state stays unread rather than guessed.
+            Self::PasswordMode => 11,
             Self::AutoMaxWidth => 15,
             Self::MaxWidth => 16,
             Self::AutoMaxHeight => 18,

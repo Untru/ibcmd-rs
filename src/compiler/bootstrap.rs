@@ -2761,11 +2761,16 @@ mod tests {
     #[test]
     fn an_evidenced_property_value_outside_the_proven_map_fails_closed() {
         for (from, to, property, value) in [
+            // `UseWithWarnings` used to be this row's lexeme. It is now
+            // observed -- «1С:Управление торговлей 11.5.27.75» writes `1` in
+            // this tuple field and prints it -- so it is a proven map member,
+            // not a refusal case. `Auto` is not in the platform's enumeration
+            // at all and stays refused.
             (
                 "<ModalityUseMode>DontUse</ModalityUseMode>",
-                "<ModalityUseMode>UseWithWarnings</ModalityUseMode>",
+                "<ModalityUseMode>Auto</ModalityUseMode>",
                 "ModalityUseMode",
-                "UseWithWarnings",
+                "Auto",
             ),
             (
                 "<InterfaceCompatibilityMode>TaxiEnableVersion8_2</InterfaceCompatibilityMode>",
