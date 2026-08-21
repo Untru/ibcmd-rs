@@ -3041,6 +3041,9 @@ const FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID: &str = "2042ec93-3108-4190-b767-e
 const FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID: &str =
     "411a4578-276c-4f4a-b56a-b3b01181c997";
 const FORM_SPREADSHEET_SELECTION_EVENT_UUID: &str = "22287505-97d8-4258-a318-209e2493f7eb";
+const FORM_SPREADSHEET_URL_PROCESSING_EVENT_UUID: &str = "06d41ccc-4e8a-46f8-aeff-b3303cf753d2";
+const FORM_SPREADSHEET_BEFORE_PRINT_EVENT_UUID: &str = "61455593-0982-4415-bc2e-2e8722a7abd0";
+const FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID: &str = "83c14f85-ab1f-4c77-bd3b-81970b72543b";
 const FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID: &str = "1490ede6-6f33-4c6d-b971-53b2541331ea";
 const FORM_CALENDAR_SELECTION_EVENT_UUID: &str = "2feb1ee9-b750-4352-bb4c-67ba1c608dc6";
 const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
@@ -3135,14 +3138,28 @@ impl FormChildItemEventCollectionSchema {
                     "OnChangeAreaContent",
                 ),
                 (FORM_SPREADSHEET_SELECTION_EVENT_UUID, "Selection"),
+                // A collection that names one member this table does not know
+                // is discarded whole, so a single missing identifier costs
+                // every event beside it. These two were the missing ones: the
+                // corpus writes `06d41ccc` beside the already-named
+                // `DetailProcessing` and `61455593` beside the already-named
+                // `Selection`, and the platform prints `URLProcessing` and
+                // `BeforePrint` for them.
+                (FORM_SPREADSHEET_URL_PROCESSING_EVENT_UUID, "URLProcessing"),
+                (FORM_SPREADSHEET_BEFORE_PRINT_EVENT_UUID, "BeforePrint"),
             ],
             FormChildItemEventCollectionOwner::CalendarField => &[
                 (FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID, "OnPeriodOutput"),
                 (FORM_CALENDAR_SELECTION_EVENT_UUID, "Selection"),
             ],
-            FormChildItemEventCollectionOwner::GraphicalSchemaField => {
-                &[(FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID, "Selection")]
-            }
+            FormChildItemEventCollectionOwner::GraphicalSchemaField => &[
+                (FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID, "Selection"),
+                // Same all-or-nothing rule: the corpus's only graphical-schema
+                // collection with two members names `83c14f85` beside the
+                // already-named `Selection`, and the platform prints
+                // `OnActivate` for it.
+                (FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
+            ],
             FormChildItemEventCollectionOwner::Pages => &[(
                 FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID,
                 "OnCurrentPageChange",

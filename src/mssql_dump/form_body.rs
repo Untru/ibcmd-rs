@@ -2949,6 +2949,12 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "8f42e083-be92-4102-b1f0-fa58452c1a63" => Some("BeforeWriteAtServer"),
         "93dfba16-26db-46f8-acb5-4f92f50c855f" => Some("NavigationProcessing"),
         "961ee7c6-0327-422b-adcb-97a90c46753d" => Some("OnSaveUserSettingsAtServer"),
+        // A table's own `OnSaveUserSettingsAtServer` is a second identifier
+        // for the same event name, alongside the form-level one above. Read
+        // off the platform: this is the only identifier in all 44 237 native
+        // `<Event>` elements of UT 11.5.27.75 that no entry named, and the
+        // platform prints `OnSaveUserSettingsAtServer` for it.
+        "a73dae96-734d-42e4-8ae7-b70249ecd233" => Some("OnSaveUserSettingsAtServer"),
         "9cc34712-da5f-4faa-a653-343d2085fbe8" => Some("BeforeWrite"),
         "a7a9dc42-29b6-4c5b-8980-6d0b87149bdd" => Some("BeforeCollapse"),
         "aeba313d-c467-44b3-b4a2-956340932c8f" => Some("Creating"),
