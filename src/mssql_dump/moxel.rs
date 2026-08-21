@@ -10035,13 +10035,51 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     xml.push_str("\t\t</object>\r\n");
 }
 
+/// The name the platform writes for a series whose own name the user never
+/// changed.
+///
+/// A series record stores its name beside a `strIsChanged` flag, and the stored
+/// name is a cache of the automatic one until that flag is set. Where the flag
+/// is clear the platform does not publish the cache: it publishes the automatic
+/// name, and the corpus spells it `Pivot` in every one of the 15 series blocks
+/// it contains - `ПроверкаКонтрагента/ФинансовыйАнализ` (6),
+/// `ДосьеКонтрагента/ФинансовыйАнализ` (6),
+/// `АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий`,
+/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта` and
+/// `СравнительныйАнализПоказателейРаботыМенеджеров` - across two drawing kinds,
+/// `Chart` and `GanttChart`, while all 15 store `Сводная`. Derived from the
+/// first document and confirmed on the other four, which the derivation never
+/// saw. The item's own language is the stored one; only the content is the
+/// platform's.
+///
+/// No series in the corpus carries the flag set, so that branch is left
+/// publishing the stored name - what this writer already did - rather than
+/// being given a rule nothing evidences.
+const MOXEL_CHART_AUTOMATIC_SERIES_NAME: &str = "Pivot";
+
+fn push_moxel_chart_series_text_xml(xml: &mut String, series: &MoxelChartSeries) {
+    if series.str_is_changed {
+        push_moxel_chart_localized_xml(xml, "text", &series.text, 4);
+        return;
+    }
+    let automatic = series
+        .text
+        .iter()
+        .map(|value| MoxelLocalizedValue {
+            lang: value.lang.clone(),
+            content: MOXEL_CHART_AUTOMATIC_SERIES_NAME.to_string(),
+        })
+        .collect::<Vec<_>>();
+    push_moxel_chart_localized_xml(xml, "text", &automatic, 4);
+}
+
 fn push_moxel_chart_series_xml(xml: &mut String, tag: &str, series: &MoxelChartSeries) {
     xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
     push_moxel_chart_text_indented(xml, "id", series.id, 4);
     push_moxel_chart_literal_indented(xml, "color", &series.color, 4);
     push_moxel_chart_line_xml(xml, "line", &series.line, 4);
     push_moxel_chart_literal_indented(xml, "marker", series.marker, 4);
-    push_moxel_chart_localized_xml(xml, "text", &series.text, 4);
+    push_moxel_chart_series_text_xml(xml, series);
     push_moxel_chart_bool_indented(xml, "strIsChanged", series.str_is_changed, 4);
     push_moxel_chart_bool_indented(xml, "isExpand", series.is_expand, 4);
     push_moxel_chart_bool_indented(xml, "isIndicator", series.is_indicator, 4);
