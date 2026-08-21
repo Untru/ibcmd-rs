@@ -817,6 +817,10 @@ pub(super) struct FormAttribute {
     pub(super) settings: Option<FormDynamicListSettings>,
     pub(super) spreadsheet_document_settings: Option<String>,
     pub(super) type_description_settings: Option<Vec<ConstantValueType>>,
+    /// The field-map ids of a dynamic list whose field name is outside the
+    /// list's resolvable-field universe. The platform marks a path onto one of
+    /// them with a leading `~`, exactly as it does in `<UseAlways>`.
+    pub(super) unresolvable_field_item_ids: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3483,6 +3487,38 @@ fn parse_form_attribute_with_dcs_type_index(
     let type_description_settings = fields
         .get(14)
         .and_then(|field| parse_form_type_description_settings(field, type_index));
+    // The same resolvable-field universe `<UseAlways>` is measured against,
+    // recorded per field-map id so a data path onto one of those fields can
+    // carry the platform's own `~` marker.
+    let unresolvable_field_item_ids = fields
+        .get(14)
+        .and_then(|field| {
+            let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
+            let universe = form_dynamic_list_use_always_universe(
+                settings.as_ref(),
+                &settings_fields,
+                object_refs,
+            )?;
+            let mut field_name_by_item_id =
+                parse_form_dynamic_list_field_name_by_item_id(&settings_fields);
+            if let Some(settings) = settings.as_ref() {
+                for field in &settings.fields {
+                    if let Some(item_id) = &field.item_id {
+                        field_name_by_item_id
+                            .entry(item_id.clone())
+                            .or_insert_with(|| field.field.clone());
+                    }
+                }
+            }
+            Some(
+                field_name_by_item_id
+                    .into_iter()
+                    .filter(|(_, field_name)| !universe.contains(field_name))
+                    .map(|(item_id, _)| item_id)
+                    .collect::<BTreeSet<String>>(),
+            )
+        })
+        .unwrap_or_default();
     Some(FormAttribute {
         id: id.to_string(),
         name,
@@ -3503,6 +3539,7 @@ fn parse_form_attribute_with_dcs_type_index(
         settings,
         spreadsheet_document_settings,
         type_description_settings,
+        unresolvable_field_item_ids,
     })
 }
 
@@ -4742,6 +4779,15 @@ pub(super) fn form_dynamic_list_use_always_universe(
             // A virtual-table main table on an auto list is unobserved.
             return None;
         }
+        if kind == "DocumentJournal" {
+            // A journal's columns are addressable fields of the list, and the
+            // object-reference index carries no `Column` child at all -- 0 of
+            // the whole UT 11.5.27.75 index -- so the universe of a journal
+            // main table cannot be built from it. That is a refusal, not an
+            // empty universe: an empty one would mark every field of every
+            // journal list unresolvable.
+            return None;
+        }
         let pairs = form_dynamic_list_std_attribute_pairs(kind)?;
         if !object_refs
             .values()
@@ -4759,6 +4805,19 @@ pub(super) fn form_dynamic_list_use_always_universe(
             object_refs,
             FORM_DYNAMIC_LIST_MAIN_TABLE_CHILD_KINDS,
         ));
+        // Every common attribute is a field of the tables it is attached to,
+        // and its name is spelled the same on all of them. The index carries
+        // the common attributes themselves but not the per-table content, so
+        // the universe admits all of their names: a name that no table of the
+        // configuration carries is still resolvable somewhere, and admitting
+        // one too many only withholds a marker -- it never invents one.
+        universe.extend(
+            object_refs
+                .values()
+                .filter_map(|reference| reference.strip_prefix("CommonAttribute."))
+                .filter(|name| !name.is_empty() && !name.contains('.'))
+                .map(str::to_string),
+        );
     }
     if let Some(server_state_xml) = &settings.server_state_xml {
         universe.extend(form_dynamic_list_calculated_field_data_paths(
@@ -7488,6 +7547,10 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// reads past `CurrentData` are only meaningful against the row type of
     /// that collection.
     table_settings_composer_type: BTreeMap<String, FormSettingsComposerType>,
+    /// The dynamic-list columns whose field name is outside the list's
+    /// resolvable-field universe. A data path onto one of them carries the
+    /// platform's `~` marker, the same marker `<UseAlways>` already writes.
+    unresolvable_columns: BTreeSet<FormAttributeColumnKey>,
 }
 
 /// The attribute-namespace root a chain rooted at a form item continues from.
@@ -7557,6 +7620,14 @@ fn collect_form_attribute_data_path_columns(
         owner_scoped_bindings
             .dynamic_list_attribute_ids
             .insert(attribute.id.clone());
+        for item_id in &attribute.unresolvable_field_item_ids {
+            owner_scoped_bindings
+                .unresolvable_columns
+                .insert(FormAttributeColumnKey {
+                    attribute_id: attribute.id.clone(),
+                    column_id: item_id.clone(),
+                });
+        }
     }
 }
 
@@ -9697,6 +9768,7 @@ fn parse_form_child_item_with_metadata_owners(
                                 .as_ref()
                                 .map(|resolved| resolved.data_path.as_str()),
                             attribute_names_by_id,
+                            table_name_by_id,
                             table_column_names_by_id,
                             attribute_metadata_owners_by_id,
                             owner_scoped_bindings,
@@ -11259,6 +11331,10 @@ fn parse_form_child_item_with_metadata_owners(
             audited_input_field_options,
             attribute_names_by_id,
             type_link_data_path_by_table_column,
+            table_name_by_id,
+            table_column_names_by_id,
+            owner_scoped_bindings,
+            object_refs,
         ),
         extended_tooltip: parse_form_child_item_extended_tooltip(&fields, object_refs),
         events: {
@@ -11313,7 +11389,7 @@ fn parse_form_child_item_with_metadata_owners(
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
-            data_path_by_binding_key,
+            type_link_data_path_by_table_column,
             owner_scoped_bindings,
             object_refs,
         ),
@@ -11345,7 +11421,12 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
             *cluster.links_mut() = FormChoiceParameterLinks::Absent;
         }
         item.type_link = None;
-        item.title_data_path = None;
+        // The bound title is not one of the properties a conditional group
+        // withholds from its descendants. UT 11.5.27.75 carries four groups
+        // that are both a conditional group's descendant and title-bound --
+        // two comment headers in each of two catalog list forms -- and the
+        // platform writes `<TitleDataPath>` on every one of them, so blanking
+        // it here dropped four elements and gained none.
         // A label field under a conditional group keeps the `<Width>` its own
         // option tuple declares: over the 4 636 unambiguously attributed forms
         // of the native UT 11.5.27.75 tree, option member 1 of the label field
@@ -13131,10 +13212,15 @@ pub(super) fn form_predefined_item_reference(
         .cloned()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_input_field_type_link(
     options: Option<&[&str]>,
     attribute_names_by_id: &BTreeMap<String, String>,
     data_path_by_table_column: &BTreeMap<(String, String), String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<FormTypeLink> {
     let options = options.filter(|options| {
         options.len() == 66 && options.first().map(|field| field.trim()) == Some("36")
@@ -13145,40 +13231,100 @@ pub(super) fn parse_form_input_field_type_link(
     if fields.first().map(|field| field.trim()) != Some("3") {
         return None;
     }
-    let (data_path, link_item) = match fields.as_slice() {
-        [_, mode, owner, link_item] if mode.trim() == "1" && link_item.trim() == "0" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            if owner.len() != 1 {
-                return None;
-            }
-            let data_path = attribute_names_by_id.get(owner.first()?.trim())?.clone();
-            (data_path, "0")
-        }
-        [_, mode, owner, terminal, link_item] if mode.trim() == "2" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID {
-                return None;
-            }
-            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-            if terminal.len() != 1 {
-                return None;
-            }
-            let link_item = match link_item.trim() {
-                "0" => "0",
-                "1" => "1",
-                _ => return None,
-            };
-            let key = (
-                owner.first()?.trim().to_string(),
-                terminal.first()?.trim().to_string(),
-            );
-            (data_path_by_table_column.get(&key)?.clone(), link_item)
-        }
+    // The slot is a bound chain wearing a frame: `{3,<K>,<s1>,…,<sK>,<link>}`
+    // holds the very same `{K,s1,…,sK}` every data-path slot holds, with the
+    // link-item flag after it. So the chain is lifted out of the frame and
+    // resolved exactly as a data path is resolved, instead of spelling out the
+    // handful of chain shapes this route happened to learn first -- a
+    // whitelist which refused four of the five terminal shapes the
+    // configuration actually carries.
+    //
+    // Evidence: UT 11.5.27.75.
+    // `Documents/СписаниеНДСНаРасходы/Forms/ФормаДокумента` InputField
+    // `АналитикаРасходов` carries `{3,2,{1},{0,383b2b0a-…},0}`, whose chain
+    // `{2,{1},{0,383b2b0a-…}}` is the `СтатьяРасходов` attribute of the
+    // document reached from form attribute 1, written `Объект.СтатьяРасходов`;
+    // the same item's `<ChoiceParameterLinks>` states that very path from the
+    // very same two-member terminal.
+    // `Catalogs/Новости/Forms/ФормаДокумента` InputField
+    // `КатегорииПростыеЗначениеКатегорииНовостей` carries
+    // `{3,2,{59,02023637-…},{0,80c61119-…},0}`, a metadata terminal under table
+    // item 59, written
+    // `Items.КатегорииПростые.CurrentData.КатегорияНовостей`.
+    // `Documents/ВводОстатков/Forms/ФормаРасчетыМеждуОрганизациями` InputField
+    // `РасчетыПоРеализацииРасчетныйДокумент` carries
+    // `{3,2,{77,02023637-…},{1,5bdad865-…},0}`, an additional column of table
+    // item 77, written `Items.РасчетыПоРеализации.CurrentData.ТипРасчетов`.
+    // The one-member owner `{1}` and the two-member terminals are all readable;
+    // only the arms that demanded a two-member owner and a one-member terminal
+    // were not.
+    let link_item = match fields.last()?.trim() {
+        "0" => "0",
+        "1" => "1",
         _ => return None,
     };
+    if fields.len() < 3 {
+        return None;
+    }
+    let chain = format!(
+        "{{{}}}",
+        fields[1..fields.len() - 1]
+            .iter()
+            .map(|field| field.trim())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let data_path = resolve_form_type_link_chain(
+        &chain,
+        attribute_names_by_id,
+        data_path_by_table_column,
+        table_name_by_id,
+        table_column_names_by_id,
+        owner_scoped_bindings,
+        object_refs,
+    )?;
     Some(FormTypeLink {
         data_path,
         link_item,
+    })
+}
+
+/// Resolves the chain a type-link slot frames, through the same routes a data
+/// path slot goes through.
+#[allow(clippy::too_many_arguments)]
+fn resolve_form_type_link_chain(
+    chain: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    data_path_by_table_column: &BTreeMap<(String, String), String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    resolve_form_item_scoped_current_data_path(
+        chain,
+        table_name_by_id,
+        table_column_names_by_id,
+        data_path_by_table_column,
+        object_refs,
+        owner_scoped_bindings,
+    )
+    .or_else(|| {
+        resolve_form_item_rooted_chain_data_path(
+            chain,
+            table_name_by_id,
+            owner_scoped_bindings,
+            object_refs,
+        )
+    })
+    .or_else(|| {
+        resolve_form_bound_chain_member_path(
+            chain,
+            attribute_names_by_id,
+            owner_scoped_bindings,
+            object_refs,
+            false,
+        )
     })
 }
 
@@ -16475,6 +16621,19 @@ pub(super) fn parse_form_child_item_data_path(
                         object_refs,
                         aggregate,
                     )
+                })
+                // A dynamic list's own negative member is named by the source,
+                // so it is read before the routes that spell a name the source
+                // never states. The table-path index reached `{2,{2},{-2}}` on
+                // `DataProcessors/СервисSellmonitor/Forms/ПодборКарточекТоваров`
+                // and answered it with the bound item's own name,
+                // `СписокМаркетплейсOzon.СписокМаркетплейсOzonОтбор`, where the
+                // platform writes `СписокМаркетплейсOzon.Filter`.
+                .or_else(|| {
+                    resolve_form_dynamic_list_member_data_path(
+                        field,
+                        attribute_metadata_owners_by_id,
+                    )
                 }),
         );
         if !matches!(chain, FormOwnerScopedDataPath::Unknown) {
@@ -17741,7 +17900,17 @@ fn form_settings_composer_member(
             ("10002", "ValuePicture", None),
             ("10003", "Value", None),
         ],
-        Fields => &[("10000", "Use", None), ("10002", "Field", None)],
+        // `10001` is the collection's own picture member, the one a table's
+        // row picture names. Single observation, UT 11.5.27.75
+        // `SettingsStorages/ХранилищеВариантовОтчетов/Forms/ЭлементУсловногоОформленияОтчета`:
+        // Table `ОформляемыеПоля` is bound to
+        // `КомпоновщикНастроек.Settings.ConditionalAppearance[0].Fields` and
+        // its row picture slot holds `{10001}`, written `…Fields.FieldPicture`.
+        Fields => &[
+            ("10000", "Use", None),
+            ("10001", "FieldPicture", None),
+            ("10002", "Field", None),
+        ],
     };
     table
         .iter()
@@ -17816,6 +17985,47 @@ fn resolve_form_settings_composer_chain(
         }
     }
     Some((path, owner))
+}
+
+/// The members a dynamic list carries in its own right, numbered by negative
+/// codes so they cannot be confused with the list's own fields.
+///
+/// `-6` is the list's settings composer, already read by the composer chain.
+/// Evidence for the two below, UT 11.5.27.75:
+/// `InformationRegisters/ОбработчикиОбновления/Forms/ФормаСписка` InputField
+/// `Порядок` carries `{2,{1},{-1}}` against the `Список` dynamic list and is
+/// written `Список.Order`;
+/// `DataProcessors/СервисSellmonitor/Forms/ПодборКарточекТоваров` Table
+/// `СписокМаркетплейсOzonОтбор` carries `{2,{2},{-2}}` and is written
+/// `СписокМаркетплейсOzon.Filter`. Both are the only paths of their shape in
+/// the configuration; every other negative code on a dynamic list stays
+/// unresolved rather than guessed.
+fn resolve_form_dynamic_list_member_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let [kind, owner, terminal] = fields.as_slice() else {
+        return None;
+    };
+    if kind.trim() != "2" {
+        return None;
+    }
+    let owner = split_1c_braced_fields(owner.trim(), 0)?;
+    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+    let ([attribute_id], [marker]) = (owner.as_slice(), terminal.as_slice()) else {
+        return None;
+    };
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
+    if !attribute.has_dynamic_list_settings {
+        return None;
+    }
+    let name = match marker.trim() {
+        "-1" => "Order",
+        "-2" => "Filter",
+        _ => return None,
+    };
+    Some(format!("{}.{name}", attribute.name))
 }
 
 fn form_type_reference_is_standard_period(reference: &str) -> bool {
@@ -17919,7 +18129,19 @@ fn resolve_form_attribute_column_data_path(
     let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id) else {
         return FormOwnerScopedDataPath::Unknown;
     };
-    FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, column_name))
+    // A field the list cannot resolve against its data source is written with
+    // the platform's own `~` marker, exactly as `<UseAlways>` writes it.
+    // Evidence: UT 11.5.27.75
+    // `InformationRegisters/НастройкиОбменаЕИСДляЗаказчиков/Forms/ФормаСписка`,
+    // LabelField `РегистрационныйНомерЕРУЗ` carries `{2,{1},{16}}` and is
+    // written `~Список.РегистрационныйНомерЕРУЗ`, while the same field name
+    // under a list that does resolve it is written without the marker.
+    let marker = if owner_scoped_bindings.unresolvable_columns.contains(&key) {
+        "~"
+    } else {
+        ""
+    };
+    FormOwnerScopedDataPath::Resolved(format!("{marker}{}.{}", attribute.name, column_name))
 }
 
 fn parse_form_bound_data_path_with_metadata_owner(
@@ -18392,7 +18614,7 @@ pub(super) fn parse_form_title_data_path(
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
-    data_path_by_binding_key: &BTreeMap<String, String>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
@@ -18427,27 +18649,21 @@ pub(super) fn parse_form_title_data_path(
     ) {
         return Some(path);
     }
-    let binding = split_1c_braced_fields(binding, 0)?;
-    match binding.as_slice() {
-        [kind, owner, terminal] if kind.trim() == "2" => {
-            let owner = split_1c_braced_fields(owner.trim(), 0)?;
-            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-            if owner.len() != 2
-                || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID
-                || terminal.len() != 1
-            {
-                return None;
-            }
-            resolve_form_item_current_data_path(
-                owner.first()?.trim(),
-                terminal.first()?.trim(),
-                table_name_by_id,
-                table_column_names_by_id,
-                data_path_by_binding_key,
-            )
-        }
-        _ => None,
-    }
+    // A chain rooted at a form item is read by the one route every other bound
+    // slot reads it with, against the table-column routes the form itself
+    // states. Reading it here through the *global* binding-key index instead
+    // answered a column id with whatever name some unrelated item had inferred
+    // for that same id: on two catalog list forms of UT 11.5.27.75 the column
+    // the group's title binds to is named `Description` by the list's own field
+    // map, and the global index answered the caption of a label field instead.
+    resolve_form_item_scoped_current_data_path(
+        binding,
+        table_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        object_refs,
+        owner_scoped_bindings,
+    )
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
@@ -18545,12 +18761,78 @@ pub(super) fn form_dynamic_list_default_picture_is_out_of_main_table(
 /// old reader produced anything, and the appended chain reproduces the
 /// platform's path on every one it resolves. The shape never occurs on a table
 /// that carries no row picture.
+/// One member appended to a table's own bound chain, resolved through the very
+/// walkers the data-path slot resolves that chain with.
+///
+/// The row picture names a member of what the table's chain reached, so it has
+/// no grammar of its own. Reading it with only the attribute-rooted walker left
+/// three shapes unspelled that the data-path slot of the very same tables
+/// reads: an item-rooted chain
+/// (`DataProcessors/ИнтеграцияС1СДокументооборот/Forms/АдреснаяКнига`, Table
+/// `АдресатыАдреса`, written
+/// `Items.Адресаты.CurrentData.Адреса.Картинка`), a settings-composer chain
+/// (`SettingsStorages/ХранилищеВариантовОтчетов/Forms/ЭлементУсловногоОформленияОтчета`,
+/// Table `ОформляемыеПоля`, written
+/// `КомпоновщикНастроек.Settings.ConditionalAppearance[0].Fields.FieldPicture`)
+/// and a plain declared column the row-picture index does not carry
+/// (`DataProcessors/УправлениеПродажамиНаOzon/Forms/НастройкиПринадлежностиТоваровСхемамРаботы`,
+/// Table `СписокКатегорийОтбора`, written `СписокКатегорийОтбора.Check`).
+#[allow(clippy::too_many_arguments)]
+fn resolve_form_table_row_picture_member(
+    binding: &str,
+    segment: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let extended = form_bound_chain_with_extra_segment(binding, segment)?;
+    resolve_form_settings_composer_chain_data_path(&extended, attribute_metadata_owners_by_id)
+        .or_else(|| {
+            resolve_form_bound_chain_member_path(
+                &extended,
+                attribute_names_by_id,
+                owner_scoped_bindings,
+                object_refs,
+                false,
+            )
+        })
+        .or_else(|| {
+            match resolve_form_owner_scoped_bound_data_path(
+                &extended,
+                attribute_metadata_owners_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            ) {
+                FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+                FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+            }
+        })
+        .or_else(|| {
+            resolve_form_item_rooted_settings_composer_path(
+                &extended,
+                table_name_by_id,
+                owner_scoped_bindings,
+            )
+        })
+        .or_else(|| {
+            resolve_form_item_rooted_chain_data_path(
+                &extended,
+                table_name_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            )
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_table_row_picture_data_path(
     schema: FormTableSchema,
     fields: &[&str],
     data_path: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
@@ -18571,16 +18853,14 @@ pub(super) fn parse_form_table_row_picture_data_path(
                 .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID) =>
         {
             let binding = fields.get(schema.data_path_slot())?.trim();
-            let extended = form_bound_chain_with_extra_segment(
+            return resolve_form_table_row_picture_member(
                 binding,
                 &format!("{{{},{}}}", column_id.trim(), uuid.trim()),
-            )?;
-            return resolve_form_bound_chain_member_path(
-                &extended,
                 attribute_names_by_id,
+                attribute_metadata_owners_by_id,
+                table_name_by_id,
                 owner_scoped_bindings,
                 object_refs,
-                false,
             );
         }
         [column_id] if column_id.trim() == "10000000" => {
@@ -18596,12 +18876,56 @@ pub(super) fn parse_form_table_row_picture_data_path(
             return Some(format!("{prefix}{table_name}.DefaultPicture"));
         }
         [column_id] if column_id.trim().parse::<u64>().is_ok() => {
-            let table_id =
-                parse_exact_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())?;
-            table_column_names_by_id
-                .get(&table_id)?
-                .get(column_id.trim())?
-                .as_str()
+            let binding = fields.get(schema.data_path_slot())?.trim();
+            let Some(table_id) = parse_exact_form_attribute_binding_id(binding) else {
+                // The table's binding is a chain, not a bare attribute, so the
+                // member it names is read by the same walkers the data path
+                // slot reads the chain with -- one segment longer.
+                return resolve_form_table_row_picture_member(
+                    binding,
+                    &format!("{{{}}}", column_id.trim()),
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    table_name_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                );
+            };
+            let Some(column_name) = table_column_names_by_id
+                .get(&table_id)
+                .and_then(|columns| columns.get(column_id.trim()))
+                .map(String::as_str)
+            else {
+                // The row-picture index carries only the collection's own
+                // picture column, and the slot may name any member the chain
+                // walker can reach -- `Check` of a value list, for one.
+                return resolve_form_table_row_picture_member(
+                    binding,
+                    &format!("{{{}}}", column_id.trim()),
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    table_name_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                );
+            };
+            // The row picture reads the same field a data path reads, so the
+            // list's own `~` marker applies here too. Evidence: UT 11.5.27.75
+            // `DataProcessors/УправлениеВыгрузкамиВБидзаар/Forms/СписокПодключенийКСервису`,
+            // Table `СписокПодключений` is written
+            // `~СписокПодключений.НеОбновлятьДанныеТорговойПлощадки`.
+            if !table_name.starts_with('~')
+                && owner_scoped_bindings
+                    .unresolvable_columns
+                    .contains(&FormAttributeColumnKey {
+                        attribute_id: table_id,
+                        column_id: column_id.trim().to_string(),
+                    })
+            {
+                let column_name = normalize_form_table_column_name(table_name, column_name);
+                return Some(format!("~{table_name}.{column_name}"));
+            }
+            column_name
         }
         [kind, uuid] if matches!(kind.trim(), "0" | "4") => {
             let uuid = parse_non_zero_uuid(uuid.trim())?;
