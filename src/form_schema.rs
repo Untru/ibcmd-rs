@@ -5305,6 +5305,9 @@ enum FormTooltipRepresentationItemKind {
     ProgressBarField,
     TrackBarField,
     ChartField,
+    SpreadSheetDocumentField,
+    HTMLDocumentField,
+    CommandBar,
     Button,
     Other,
 }
@@ -5330,6 +5333,9 @@ impl FormTooltipRepresentationItemKind {
             "ProgressBarField" => Self::ProgressBarField,
             "TrackBarField" => Self::TrackBarField,
             "ChartField" => Self::ChartField,
+            "SpreadSheetDocumentField" => Self::SpreadSheetDocumentField,
+            "HTMLDocumentField" => Self::HTMLDocumentField,
+            "CommandBar" => Self::CommandBar,
             "Button" => Self::Button,
             _ => Self::Other,
         }
@@ -5393,6 +5399,15 @@ pub(crate) fn form_tooltip_representation_schema(
                 // mapping to two answers.
                 | (FormTooltipRepresentationItemKind::UsualGroup, Some("5"))
                 | (FormTooltipRepresentationItemKind::ButtonGroup, Some("6"))
+                // A `CommandBar` is the wrapper-`22` item the same discriminator
+                // slot codes `0`, and it obeys the very same `field_count - 7`
+                // rule; it was simply never admitted.  UT 11.5.27.75, all 1 842
+                // native command bars: reverse offset 7 reads `1` on exactly the
+                // 3 the platform answers `<ToolTipRepresentation>None`, and `0`
+                // on the other 1 839.  Reverse offset 8 reads `1` on 1 841 of
+                // them, so the neighbouring slot is excluded outright rather
+                // than merely unpreferred.
+                | (FormTooltipRepresentationItemKind::CommandBar, Some("0"))
         );
         if admitted {
             return Some(FormTooltipRepresentationSchema {
@@ -5400,16 +5415,45 @@ pub(crate) fn form_tooltip_representation_schema(
             });
         }
     }
+    // A wrapper-`37` field carries its `ToolTipRepresentation` code at reverse
+    // offset 9, not at the absolute slot 50 a 59-member record happens to spell
+    // it in.  The record grows by one member when the item carries an extended
+    // top-level head (`form_input_field_top_level_offset`), which also moves the
+    // kind discriminator off slot 5 -- so the pairing this arm used to demand
+    // could never match a 60-member record, and every such field silently lost
+    // the property.  The kind alone decides admission here because
+    // `form_child_item_tag` already derives the tag from that very
+    // discriminator, read at its shifted position.
+    //
+    // Evidence, UT 11.5.27.75 native tree: at reverse offset 9 the 60-member
+    // records answer non-`Omit` on exactly 16 items, and the platform prints
+    // exactly those 16, value for value (`Button` 4, `ShowBottom` 8,
+    // `ShowRight` 3, `Balloon` 1); the 59-member records keep the reading the
+    // absolute slot 50 already gave them.  The same offset carries the two
+    // document-field kinds the whitelist never named: it answers `None` on
+    // exactly the 4 `HTMLDocumentField` and 2 `SpreadSheetDocumentField` items
+    // the platform answers `None` on, and `Omit` on the other 172 and 220.
+    if wrapper == "37"
+        && matches!(
+            item_kind,
+            FormTooltipRepresentationItemKind::LabelField
+                | FormTooltipRepresentationItemKind::InputField
+                | FormTooltipRepresentationItemKind::CheckBoxField
+                | FormTooltipRepresentationItemKind::PictureField
+                | FormTooltipRepresentationItemKind::RadioButtonField
+                | FormTooltipRepresentationItemKind::CalendarField
+                | FormTooltipRepresentationItemKind::ProgressBarField
+                | FormTooltipRepresentationItemKind::TrackBarField
+                | FormTooltipRepresentationItemKind::ChartField
+                | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
+                | FormTooltipRepresentationItemKind::HTMLDocumentField
+        )
+    {
+        return Some(FormTooltipRepresentationSchema {
+            slot: field_count.checked_sub(9)?,
+        });
+    }
     let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
-        ("37", 59, FormTooltipRepresentationItemKind::LabelField, Some("1"))
-        | ("37", 59, FormTooltipRepresentationItemKind::InputField, Some("2"))
-        | ("37", 59, FormTooltipRepresentationItemKind::CheckBoxField, Some("3"))
-        | ("37", 59, FormTooltipRepresentationItemKind::PictureField, Some("4"))
-        | ("37", 59, FormTooltipRepresentationItemKind::RadioButtonField, Some("5"))
-        | ("37", 59, FormTooltipRepresentationItemKind::CalendarField, Some("8"))
-        | ("37", 59, FormTooltipRepresentationItemKind::ProgressBarField, Some("9"))
-        | ("37", 59, FormTooltipRepresentationItemKind::TrackBarField, Some("10"))
-        | ("37", 59, FormTooltipRepresentationItemKind::ChartField, Some("11")) => 50,
         ("31", 52, FormTooltipRepresentationItemKind::Button, _) => 30,
         _ => return None,
     };
@@ -5429,6 +5473,12 @@ pub(crate) fn form_tooltip_representation_xml_order(
         FormTooltipRepresentationItemKind::ButtonGroup => {
             Some(FormTooltipRepresentationXmlOrder::ButtonGroupHeader)
         }
+        // All 3 native command bars that carry the property write it directly
+        // behind their title block and ahead of `HorizontalLocation` (2) and
+        // `ExtendedTooltip` (3) -- the same site `Popup`/`Pages` use.
+        FormTooltipRepresentationItemKind::CommandBar => {
+            Some(FormTooltipRepresentationXmlOrder::AfterTitle)
+        }
         FormTooltipRepresentationItemKind::ColumnGroup => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }
@@ -5445,7 +5495,13 @@ pub(crate) fn form_tooltip_representation_xml_order(
         | FormTooltipRepresentationItemKind::CalendarField
         | FormTooltipRepresentationItemKind::ProgressBarField
         | FormTooltipRepresentationItemKind::TrackBarField
-        | FormTooltipRepresentationItemKind::ChartField => {
+        | FormTooltipRepresentationItemKind::ChartField
+        // Both document-field kinds place it exactly where their sibling fields
+        // do: behind `DataPath`/`SkipOnInput`/`TitleLocation` and ahead of the
+        // geometry run (`Width`, `Height`, `MaxHeight`), `CommandSet`,
+        // `ContextMenu` and `ExtendedTooltip`.
+        | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
+        | FormTooltipRepresentationItemKind::HTMLDocumentField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }
         FormTooltipRepresentationItemKind::Button => {
