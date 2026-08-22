@@ -546,8 +546,33 @@ pub(crate) struct FormRootAutoCommandBarSchema {
 }
 
 impl FormRootAutoCommandBarSchema {
+    /// The item id of a form's own command bar is `-1` on 5 200 of the 5 201
+    /// forms of UT 11.5.27.75 -- and on the 5 201st it is an ordinary item id.
+    /// Requiring `-1` therefore refused that one record outright and the whole
+    /// `<AutoCommandBar>` block, its `<Autofill>false</Autofill>` and its
+    /// fourteen buttons went unwritten.
+    ///
+    /// Evidence: `Documents/ЭлектроннаяСопроводительнаяВедомость/Forms/ОсновнаяФорма`
+    /// carries `{22,{607,02023637-…},0,0,0,9,"ФормаКоманднаяПанель",…}` as a
+    /// direct member of its form record, and the platform writes
+    /// `<AutoCommandBar name="ФормаКоманднаяПанель" id="607">`.
+    ///
+    /// The `-1` route stays exactly as it was, so none of the 5 200 can change
+    /// answer; a record with any other id is accepted only when it declares
+    /// itself an auto command bar in slot 5, the same `9` the nested schema
+    /// already requires.  On all 22 form records dumped for this package the
+    /// two routes select the same record wherever the `-1` one selects any.
     pub(crate) fn from_raw_layout(wrapper: &str, item_id: &str, fields: &[&str]) -> Option<Self> {
-        if wrapper != "22" || item_id != "-1" {
+        const AUTO_COMMAND_BAR_DISCRIMINATOR_SLOT: usize = 5;
+        if wrapper != "22" {
+            return None;
+        }
+        if item_id != "-1"
+            && fields
+                .get(AUTO_COMMAND_BAR_DISCRIMINATOR_SLOT)
+                .map(|field| field.trim())
+                != Some("9")
+        {
             return None;
         }
         let marker = match fields.get(FormNestedAutoCommandBarSchema::MARKER_SLOT) {
