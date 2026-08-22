@@ -8464,7 +8464,7 @@ struct IntegrationServiceChannelProperties {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum ConstantValueType {
+pub(super) enum ConstantValueType {
     Boolean,
     String {
         length: Option<u32>,

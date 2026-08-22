@@ -816,6 +816,7 @@ pub(super) struct FormAttribute {
     pub(super) functional_options: Vec<String>,
     pub(super) settings: Option<FormDynamicListSettings>,
     pub(super) spreadsheet_document_settings: Option<String>,
+    pub(super) chart_settings: Option<String>,
     pub(super) type_description_settings: Option<Vec<ConstantValueType>>,
     /// The field-map ids of a dynamic list whose field name is outside the
     /// list's resolvable-field universe. The platform marks a path onto one of
@@ -3492,6 +3493,9 @@ fn parse_form_attribute_with_dcs_type_index(
     let spreadsheet_document_settings = fields.get(14).and_then(|field| {
         parse_form_spreadsheet_document_settings(field, &value_types, object_refs)
     });
+    let chart_settings = fields
+        .get(14)
+        .and_then(|field| parse_form_chart_settings_xml(field, &value_types, object_refs, 3));
     let mut use_always = parse_form_attribute_direct_use_always(
         &name,
         fields.get(8).copied(),
@@ -3569,6 +3573,7 @@ fn parse_form_attribute_with_dcs_type_index(
         functional_options,
         settings,
         spreadsheet_document_settings,
+        chart_settings,
         type_description_settings,
         unresolvable_field_item_ids,
     })
@@ -26484,6 +26489,8 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
                 "\t\t\t\t",
             ));
             xml.push_str("\t\t\t</Settings>\r\n");
+        } else if let Some(chart_settings) = &attribute.chart_settings {
+            xml.push_str(chart_settings);
         } else if let Some(type_description_settings) = &attribute.type_description_settings {
             if type_description_settings.is_empty() {
                 xml.push_str("\t\t\t<Settings xsi:type=\"v8:TypeDescription\"/>\r\n");
@@ -27089,4 +27096,554 @@ pub(super) fn form_body_module_text_bytes(body: &ParsedFormBodyBlob) -> Option<V
     bytes.extend_from_slice(b"\xEF\xBB\xBF");
     bytes.extend_from_slice(body.module_text.as_bytes());
     Some(bytes)
+}
+
+/// The `<Settings>` block a form attribute of chart type carries.
+///
+/// A chart-typed form attribute stores its whole design in the same slot 14
+/// every other attribute keeps its settings in, as
+/// `{0,1,"Chart",{"#",<chart type uuid>,{11},{74,…}}}`.  Nothing read that
+/// slot for a chart, so the block went unwritten on every chart attribute of
+/// the configuration.
+///
+/// The payload is the same `{{11},{74,…}}` record the spreadsheet-document
+/// writer already builds for a chart drawing, so the slot order below is the
+/// one that formatter states, member for member; only the values differ,
+/// because a form chart carries no series and no points.
+///
+/// Scope: this reader accepts exactly the shape both chart attributes of the
+/// 197-member tail carry -- no series records, no point records -- and refuses
+/// anything else, including the richer four-series shape
+/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` stores, whose extra
+/// elements (`realSeriesData`, `seriesScale`, `titleAreaPlacement`,
+/// `valuesToolTipShowMode`, …) no second observation pins.
+///
+/// Evidence: UT 11.5.27.75 carries four chart attributes.  Two of them --
+/// `Catalogs/ВариантыАнализаЦелевыхПоказателей/Forms/НастройкаДемоДанных`
+/// `Диаграмма` and
+/// `InformationRegisters/СезонныеКоэффициенты/Forms/СезонныеКоэффициенты`
+/// `Диаграмма` -- store byte-identical records; the third,
+/// `Reports/СверкаРасчетовСКонтрагентами/Forms/ФормаОтчета` `СостояниеСверки`,
+/// stores the same 197-member shape with 32 members different.  Those two
+/// distinct records are what every slot below is read from, and this writer
+/// reproduces both `<Settings>` blocks byte for byte.  A member the two agree
+/// on is written as the value they agree on and says so; a member whose slot
+/// the pair does not tell apart is not claimed, and the shape is checked so a
+/// record that disagrees is refused rather than approximated.
+fn parse_form_chart_settings_xml(
+    field: &str,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let is_chart = matches!(
+        value_types,
+        [ConstantValueType::Reference { reference }] if reference == FORM_CHART_TYPE_REFERENCE
+    );
+    if !is_chart {
+        return None;
+    }
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 4
+        || outer.first()?.trim() != "0"
+        || outer.get(1)?.trim() != "1"
+        || outer.get(2)?.trim() != r#""Chart""#
+    {
+        return None;
+    }
+    let holder = split_1c_braced_fields(outer.get(3)?.trim(), 0)?;
+    if holder.len() != 4
+        || holder.first()?.trim() != r##""#""##
+        || !holder
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_VALUE_TYPE_UUID)
+        || form_chart_compact(holder.get(2)?) != "{11}"
+    {
+        return None;
+    }
+    let data = split_1c_braced_fields(holder.get(3)?.trim(), 0)?;
+    format_form_chart_settings_xml(&data, object_refs, indent)
+}
+
+const FORM_CHART_TYPE_REFERENCE: &str = "d5p1:Chart";
+const FORM_CHART_VALUE_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
+const FORM_CHART_BORDER_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
+const FORM_CHART_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
+/// The one series record a chart with no series still carries, and the first
+/// slot of the tail behind it.
+const FORM_CHART_SERIES_FIELDS: usize = 11;
+const FORM_CHART_TAIL_START: usize = 18;
+const FORM_CHART_TAIL_FIELDS: usize = 197;
+
+/// A stored member with its layout whitespace removed, for the members whose
+/// whole shape is compared against a fixed token: the record is line-broken and
+/// the breaks fall inside braced members.
+fn form_chart_compact(text: &str) -> String {
+    let mut compact = String::with_capacity(text.len());
+    let mut quoted = false;
+    let mut chars = text.trim().chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            compact.push(ch);
+            if quoted && chars.peek() == Some(&'"') {
+                compact.push(chars.next().unwrap_or('"'));
+            } else {
+                quoted = !quoted;
+            }
+        } else if quoted || !ch.is_whitespace() {
+            compact.push(ch);
+        }
+    }
+    compact
+}
+
+fn form_chart_code(value: &str, table: &[(&str, &'static str)]) -> Option<&'static str> {
+    let value = value.trim();
+    table
+        .iter()
+        .find_map(|(code, name)| (*code == value).then_some(*name))
+}
+
+fn form_chart_bool(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("false"),
+        "1" => Some("true"),
+        _ => None,
+    }
+}
+
+fn form_chart_integer(value: &str) -> Option<&str> {
+    let value = value.trim();
+    value.parse::<i64>().ok()?;
+    Some(value)
+}
+
+/// A stored colour, in the one spelling the chart writes: the shared control
+/// colour reader answers every space the two records use, and the "unset"
+/// space it declines is the platform's `auto`.
+fn form_chart_color(field: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
+    if let Some(color) = parse_form_control_color(field, object_refs) {
+        return Some(color);
+    }
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    (fields.len() == 3
+        && fields.first()?.trim() == "3"
+        && fields.get(1)?.trim() == "4"
+        && fields.get(2)?.trim() == "{0}")
+        .then(|| "auto".to_string())
+}
+
+fn form_chart_localized_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let values = parse_form_localized_strings(field.trim());
+    if values.is_empty() {
+        let fields = split_1c_braced_fields(field.trim(), 0)?;
+        if fields.len() != 2 || fields.first()?.trim() != "1" || fields.get(1)?.trim() != "0" {
+            return None;
+        }
+        return Some(format!("{tab}<d4p1:{name}/>\r\n"));
+    }
+    Some(format_form_localized_section(
+        &format!("d4p1:{name}"),
+        &values,
+        indent,
+    ))
+}
+
+/// `{4,0,{0},1,<width>,0,<solid line uuid>,0}`.
+fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 8
+        || fields.first()?.trim() != "4"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(3)?.trim() != "1"
+        || fields.get(5)?.trim() != "0"
+        || !fields.get(6)?.trim().eq_ignore_ascii_case(FORM_CHART_LINE_UUID)
+        || fields.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let width = form_chart_integer(fields.get(4)?)?;
+    Some(format!(
+        "{tab}<d4p1:{name} width=\"{width}\" gap=\"false\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">Solid</v8ui:style>\r\n\
+{tab}</d4p1:{name}>\r\n"
+    ))
+}
+
+/// `{3,0,{0},<style>,<width>,0,<border uuid>}`.
+fn form_chart_border_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 7
+        || fields.first()?.trim() != "3"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_BORDER_UUID)
+    {
+        return None;
+    }
+    let style = match fields.get(3)?.trim() {
+        "0" => "WithoutBorder",
+        "1" => "Single",
+        _ => return None,
+    };
+    let width = form_chart_integer(fields.get(4)?)?;
+    Some(format!(
+        "{tab}<d4p1:{name} width=\"{width}\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
+{tab}</d4p1:{name}>\r\n"
+    ))
+}
+
+/// A stored decimal, written the way the platform writes it. The two records
+/// spell every one of these members as a plain decimal literal, so an
+/// exponent form -- which the funnel members do use -- is not one of them.
+fn form_chart_decimal(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if value.contains(['e', 'E']) {
+        return None;
+    }
+    value.parse::<f64>().ok()?;
+    Some(value)
+}
+
+/// A stored fraction written as a percentage: `1e-1` is the platform's `10`.
+fn form_chart_percent(value: &str) -> Option<String> {
+    let value = value.trim();
+    let parsed: f64 = value.parse().ok()?;
+    let scaled = parsed * 100.0;
+    let rounded = scaled.round();
+    if (scaled - rounded).abs() > 1e-9 || !rounded.is_finite() {
+        return None;
+    }
+    Some(format!("{}", rounded as i64))
+}
+
+/// The four members of a placement rectangle, stored left, top, right, bottom
+/// and written left, right, top, bottom.
+fn form_chart_rectangle_xml(name: &str, fields: &[&str], indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let [left, top, right, bottom] = fields else {
+        return None;
+    };
+    let left = form_chart_decimal(left)?;
+    let top = form_chart_decimal(top)?;
+    let right = form_chart_decimal(right)?;
+    let bottom = form_chart_decimal(bottom)?;
+    Some(format!(
+        "{tab}<d4p1:{name}>\r\n\
+{tab}\t<d4p1:left>{left}</d4p1:left>\r\n\
+{tab}\t<d4p1:right>{right}</d4p1:right>\r\n\
+{tab}\t<d4p1:top>{top}</d4p1:top>\r\n\
+{tab}\t<d4p1:bottom>{bottom}</d4p1:bottom>\r\n\
+{tab}</d4p1:{name}>\r\n"
+    ))
+}
+
+/// The series record: colour, line, marker, text, three flags, the id, two
+/// `{"U"}` placeholders and the colour-priority flag, in that order -- the
+/// same eleven members the spreadsheet chart reader already walks.
+///
+/// The stored colour is not what the platform writes: both records hold an
+/// RGB there and both are written `auto`, with the colour-priority flag clear.
+/// A record with that flag set is refused rather than guessed at.
+fn form_chart_series_xml(
+    name: &str,
+    fields: &[&str],
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    if fields.len() != FORM_CHART_SERIES_FIELDS
+        || form_chart_compact(fields.get(8)?) != r#"{"U"}"#
+        || form_chart_compact(fields.get(9)?) != r#"{"U"}"#
+        || fields.get(10)?.trim() != "0"
+    {
+        return None;
+    }
+    let id = form_chart_integer(fields.get(7)?)?;
+    let marker = form_chart_code(fields.get(2)?, &[("1", "Auto")])?;
+    let mut xml = format!("{tab}<d4p1:{name}>\r\n");
+    xml.push_str(&format!("{inner_tab}<d4p1:id>{id}</d4p1:id>\r\n"));
+    xml.push_str(&format!("{inner_tab}<d4p1:color>auto</d4p1:color>\r\n"));
+    xml.push_str(&form_chart_line_xml("line", fields.get(1)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:marker>{marker}</d4p1:marker>\r\n"
+    ));
+    xml.push_str(&form_chart_localized_xml("text", fields.get(3)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:strIsChanged>{}</d4p1:strIsChanged>\r\n",
+        form_chart_bool(fields.get(4)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:isExpand>{}</d4p1:isExpand>\r\n",
+        form_chart_bool(fields.get(5)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:isIndicator>{}</d4p1:isIndicator>\r\n",
+        form_chart_bool(fields.get(6)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:colorPriority>false</d4p1:colorPriority>\r\n"
+    ));
+    xml.push_str(&format!("{tab}</d4p1:{name}>\r\n"));
+    Some(xml)
+}
+
+/// The design members, in the order the platform writes them.
+///
+/// Every read below names the tail slot it comes from.  Six members are
+/// written as a literal instead: `circleExpandMode`, `chart3Dcrd`,
+/// `titleIsInit`, `legendIsInit`, `chartIsInit` and `transparentLabelsBkg`.
+/// The two records agree on all six and nothing in the pair tells their slots
+/// apart -- `transparentLabelsBkg` even reads `0` on both while the platform
+/// writes `true` -- so each is guarded on the slots that would have to move
+/// for the literal to be wrong, and the record is refused when they do.
+#[allow(clippy::too_many_lines)]
+fn format_form_chart_settings_xml(
+    data: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let child = indent + 1;
+    let child_tab = "\t".repeat(child);
+    if data.first()?.trim() != "74"
+        || data.get(4)?.trim() != "0"
+        || data.get(17)?.trim() != "0"
+        || data.len() != FORM_CHART_TAIL_START + FORM_CHART_TAIL_FIELDS
+    {
+        return None;
+    }
+    let series = data.get(5..5 + FORM_CHART_SERIES_FIELDS)?;
+    let t = data.get(FORM_CHART_TAIL_START..)?;
+    let mut xml = format!(
+        "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d4p1:Chart\">\r\n"
+    );
+    macro_rules! scalar {
+        ($name:expr, $value:expr) => {
+            xml.push_str(&format!(
+                "{child_tab}<d4p1:{}>{}</d4p1:{}>\r\n",
+                $name, $value, $name
+            ))
+        };
+    }
+    macro_rules! empty {
+        ($name:expr) => {
+            xml.push_str(&format!("{child_tab}<d4p1:{}/>\r\n", $name))
+        };
+    }
+    macro_rules! color {
+        ($name:expr, $slot:expr) => {
+            scalar!($name, form_chart_color(t.get($slot)?, object_refs)?)
+        };
+    }
+    scalar!("seriesCurId", form_chart_integer(data.get(1)?)?);
+    scalar!("pointsCurId", form_chart_integer(data.get(2)?)?);
+    scalar!("isSeriesDesign", form_chart_bool(data.get(3)?)?);
+    scalar!("realSeriesCount", "0");
+    xml.push_str(&form_chart_series_xml("realExSeriesData", series, child)?);
+    scalar!("isPointsDesign", form_chart_bool(data.get(16)?)?);
+    scalar!("realPointCount", "0");
+    scalar!("curSeries", form_chart_integer(t.first()?)?);
+    scalar!("curPoint", form_chart_integer(t.get(1)?)?);
+    scalar!(
+        "chartType",
+        form_chart_code(t.get(2)?, &[("6", "Column3D"), ("12", "Pie")])?
+    );
+    scalar!(
+        "circleLabelType",
+        form_chart_code(t.get(3)?, &[("0", "None"), ("7", "ValuePercent")])?
+    );
+    scalar!(
+        "labelsDelimiter",
+        escape_xml_element_text(&parse_1c_string(t.get(4)?.trim())?)
+    );
+    scalar!(
+        "labelsLocation",
+        form_chart_code(t.get(5)?, &[("0", "Edge"), ("3", "EdgeAuto")])?
+    );
+    xml.push_str(&form_chart_localized_xml("lbFormat", t.get(6)?, child)?);
+    xml.push_str(&form_chart_localized_xml("lbpFormat", t.get(7)?, child)?);
+    color!("labelsColor", 8);
+    if t.get(9)?.trim() != "0" || t.get(10)?.trim() != "0" {
+        return None;
+    }
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:labelsFont kind=\"AutoFont\"/>\r\n"
+    ));
+    scalar!("transparentLabelsBkg", "true");
+    color!("labelsBkgColor", 104);
+    xml.push_str(&form_chart_border_xml("labelsBorder", t.get(105)?, child)?);
+    color!("labelsBorderColor", 106);
+    scalar!("circleExpandMode", "None");
+    scalar!("chart3Dcrd", "SouthWest");
+    xml.push_str(&form_chart_localized_xml("title", t.get(11)?, child)?);
+    scalar!("isShowTitle", form_chart_bool(t.get(12)?)?);
+    scalar!("isShowLegend", form_chart_bool(t.get(13)?)?);
+    xml.push_str(&form_chart_border_xml("ttlBorder", t.get(14)?, child)?);
+    color!("ttlBorderColor", 15);
+    xml.push_str(&form_chart_border_xml("lgBorder", t.get(16)?, child)?);
+    color!("lgBorderColor", 17);
+    xml.push_str(&form_chart_border_xml("chBorder", t.get(18)?, child)?);
+    color!("chBorderColor", 19);
+    scalar!("transparent", form_chart_bool(t.get(20)?)?);
+    color!("bkgColor", 21);
+    scalar!("isTrnspTtl", form_chart_bool(t.get(22)?)?);
+    color!("ttlColor", 23);
+    scalar!("isTrnspLeg", form_chart_bool(t.get(24)?)?);
+    color!("legColor", 25);
+    scalar!("isTrnspCh", form_chart_bool(t.get(26)?)?);
+    color!("chColor", 27);
+    color!("ttlTxtColor", 28);
+    color!("legTxtColor", 29);
+    color!("chTxtColor", 30);
+    for (name, slot) in [("ttlFont", 31usize), ("legFont", 32), ("chFont", 33)] {
+        if form_chart_compact(t.get(slot)?) != "{7,3,0,1,100}" {
+            return None;
+        }
+        xml.push_str(&format!("{child_tab}<d4p1:{name} kind=\"AutoFont\"/>\r\n"));
+    }
+    scalar!("isShowScale", form_chart_bool(t.get(34)?)?);
+    scalar!("isShowScaleVL", form_chart_bool(t.get(35)?)?);
+    scalar!("isShowSeriesScale", form_chart_bool(t.get(36)?)?);
+    scalar!("isShowPointsScale", form_chart_bool(t.get(37)?)?);
+    scalar!("isShowValuesScale", form_chart_bool(t.get(38)?)?);
+    xml.push_str(&form_chart_localized_xml("vsFormat", t.get(39)?, child)?);
+    scalar!(
+        "xLabelsOrientation",
+        form_chart_code(t.get(40)?, &[("0", "Auto")])?
+    );
+    xml.push_str(&form_chart_line_xml("scaleLine", t.get(41)?, child)?);
+    color!("scaleColor", 42);
+    scalar!("isAutoSeriesName", form_chart_bool(t.get(43)?)?);
+    scalar!("isAutoPointName", form_chart_bool(t.get(44)?)?);
+    scalar!("maxMode", form_chart_code(t.get(45)?, &[("0", "NotDefined")])?);
+    scalar!("maxSeries", form_chart_integer(t.get(46)?)?);
+    scalar!("maxSeriesPrc", form_chart_integer(t.get(47)?)?);
+    scalar!("spaceMode", form_chart_code(t.get(48)?, &[("1", "Half")])?);
+    scalar!("baseVal", form_chart_integer(t.get(49)?)?);
+    scalar!("isOutline", form_chart_bool(t.get(50)?)?);
+    scalar!("realPiePoint", form_chart_integer(t.get(51)?)?);
+    scalar!("realStockSeries", form_chart_integer(t.get(52)?)?);
+    scalar!("isLight", form_chart_bool(t.get(53)?)?);
+    scalar!("isGradient", form_chart_bool(t.get(54)?)?);
+    scalar!("isTransposition", form_chart_bool(t.get(55)?)?);
+    scalar!("hideBaseVal", form_chart_bool(t.get(56)?)?);
+    scalar!("dataTable", form_chart_bool(t.get(57)?)?);
+    scalar!("dtVerLines", form_chart_bool(t.get(58)?)?);
+    scalar!("dtHorLines", form_chart_bool(t.get(59)?)?);
+    scalar!("dtHAlign", form_chart_code(t.get(60)?, &[("2", "Right")])?);
+    xml.push_str(&form_chart_localized_xml("dtFormat", t.get(61)?, child)?);
+    scalar!("dtKeys", form_chart_bool(t.get(62)?)?);
+    scalar!("paletteKind", form_chart_code(t.get(63)?, &[("0", "Auto")])?);
+    scalar!("animation", form_chart_code(t.get(64)?, &[("0", "Auto")])?);
+    scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
+    if t.get(82)?.trim() != "0" || t.get(83)?.trim() != "0" || t.get(84)?.trim() != "0" {
+        return None;
+    }
+    scalar!("isTransposed", "false");
+    scalar!("autoTransposition", "false");
+    scalar!("legendScrollEnable", "false");
+    color!("surfaceColor", 66);
+    scalar!(
+        "radarScaleType",
+        form_chart_code(t.get(67)?, &[("0", "Circle")])?
+    );
+    scalar!(
+        "gaugeValuesPresentation",
+        form_chart_code(t.get(68)?, &[("0", "Needle")])?
+    );
+    if form_chart_compact(t.get(69)?) != "{1,0,0,0}" {
+        return None;
+    }
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:gaugeQualityBands useTextStr=\"false\" useTooltipStr=\"false\"/>\r\n"
+    ));
+    scalar!("beginGaugeAngle", form_chart_integer(t.get(70)?)?);
+    scalar!("endGaugeAngle", form_chart_integer(t.get(71)?)?);
+    scalar!("gaugeThickness", form_chart_integer(t.get(72)?)?);
+    scalar!(
+        "gaugeLabelsLocation",
+        form_chart_code(t.get(73)?, &[("1", "InsideScale")])?
+    );
+    scalar!("gaugeLabelsArcDirection", form_chart_bool(t.get(74)?)?);
+    scalar!("gaugeBushThickness", form_chart_integer(t.get(75)?)?);
+    color!("gaugeBushColor", 76);
+    scalar!("autoMaxValue", form_chart_bool(t.get(77)?)?);
+    scalar!("userMaxValue", form_chart_decimal(t.get(78)?)?);
+    scalar!("autoMinValue", form_chart_bool(t.get(79)?)?);
+    scalar!("userMinValue", form_chart_decimal(t.get(80)?)?);
+    scalar!("elementsIsInit", form_chart_bool(t.get(81)?)?);
+    if t.get(88)?.trim() != "1" || t.get(89)?.trim() != "1" || t.get(92)?.trim() != "1" {
+        return None;
+    }
+    scalar!("titleIsInit", "true");
+    scalar!("legendIsInit", "true");
+    scalar!("chartIsInit", "true");
+    xml.push_str(&form_chart_rectangle_xml(
+        "elementsChart",
+        t.get(163..167)?,
+        child,
+    )?);
+    xml.push_str(&form_chart_rectangle_xml(
+        "elementsLegend",
+        t.get(167..171)?,
+        child,
+    )?);
+    xml.push_str(&form_chart_rectangle_xml(
+        "elementsTitle",
+        t.get(171..175)?,
+        child,
+    )?);
+    color!("borderColor", 95);
+    xml.push_str(&form_chart_border_xml("border", t.get(96)?, child)?);
+    let description = parse_1c_string(t.get(97)?.trim())?;
+    if description.is_empty() {
+        empty!("dataSourceDescription");
+    } else {
+        scalar!(
+            "dataSourceDescription",
+            escape_xml_element_text(&description)
+        );
+    }
+    scalar!("isDataSourceMode", form_chart_bool(t.get(98)?)?);
+    scalar!("isRandomizedNewValues", form_chart_bool(t.get(99)?)?);
+    scalar!("splineStrain", form_chart_integer(t.get(112)?)?);
+    scalar!("translucencePercent", form_chart_decimal(t.get(111)?)?);
+    scalar!("funnelNeckHeightPercent", form_chart_percent(t.get(113)?)?);
+    scalar!("funnelNeckWidthPercent", form_chart_percent(t.get(114)?)?);
+    scalar!("funnelGapSumPercent", form_chart_percent(t.get(115)?)?);
+    xml.push_str(&form_chart_line_xml(
+        "multiStageLinkLine",
+        t.get(116)?,
+        child,
+    )?);
+    color!("multiStageLinkColor", 117);
+    for (name, slot) in [("valuesAxis", 127usize), ("pointsAxis", 128)] {
+        if form_chart_compact(t.get(slot)?) != "{0,0,{0,1,0,1,0},0,0}" {
+            return None;
+        }
+        xml.push_str(&format!("{child_tab}<d4p1:{name}/>\r\n"));
+    }
+    // The legend placement is written only when its slot names one: the two
+    // records read `0` and `6`, and the platform writes nothing on the first
+    // and `None` on the second.
+    if t.get(161)?.trim() != "0" {
+        scalar!(
+            "legendPlacement",
+            form_chart_code(t.get(161)?, &[("6", "None")])?
+        );
+    }
+    xml.push_str(&format!("{tab}</Settings>\r\n"));
+    Some(xml)
 }
