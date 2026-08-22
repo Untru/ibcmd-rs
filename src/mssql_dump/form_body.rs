@@ -74,11 +74,11 @@ use ibcmd_schema::{
     parse_generated_metadata_owner, parse_metadata_data_path,
 };
 use ibcmd_xml::{
-    DcsChildParseOutcome, DcsSettingsChildrenError, FormChoiceParametersEmitError,
+    DcsChildParseOutcome, DcsSettingsChildrenError, FormChoiceParametersEmitError, TypeRunMember,
     emit_form_attributes_conditional_appearance_fragment, emit_form_choice_parameter_links,
-    emit_form_choice_parameters, parse_dcs_conditional_appearance_storage_document,
-    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
-    platform_default_form_list_settings_conditional_appearance,
+    emit_form_choice_parameters, evidenced_type_run_permutation,
+    parse_dcs_conditional_appearance_storage_document, parse_dcs_filter_storage_document,
+    parse_dcs_order_storage_document, platform_default_form_list_settings_conditional_appearance,
     platform_default_form_list_settings_filter, platform_default_form_list_settings_order,
 };
 use sha2::{Digest, Sha256};
@@ -836,6 +836,10 @@ pub(super) struct FormAttributeMetadataOwner {
 pub(super) struct FormAttributeSaveFieldBinding {
     pub(super) key: String,
     pub(super) metadata_uuid: Option<String>,
+    /// The member codes the walk spells after the metadata member it opens
+    /// with. Empty for the one-component entry, which names the member and
+    /// stops there.
+    pub(super) members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3826,9 +3830,19 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
             if let Some(indexes) = indexes {
                 return Some(FormAttributeSaveEntry::ValueTypeProperty(indexes));
             }
-            // Only a one-component walk is ever a form-item binding; a longer one
-            // that is not a pure index walk has no observed reading.
-            let [_, payload] = entry.as_slice() else {
+            // The walk opens with the member it binds and may spell further
+            // members after it, each a bare code. Reading only the
+            // one-component shape refused the longer walks outright, and
+            // because the whole list is read as one, refusing a single entry
+            // threw every other entry of that attribute away with it.
+            //
+            // Evidence: UT 11.5.27.75,
+            // `DataProcessors/ПлатежныйКалендарь/Forms/Форма`. Its `Объект`
+            // attribute declares 26 saved fields, 25 of them one-component
+            // and the 26th `{3,{0,<uuid>},{0},{1}}`, which the platform writes
+            // `Объект.КомпоновщикОтбор.Settings.Filter`. The one refusal cost
+            // the whole `<Save>` block.
+            let [_, payload, rest @ ..] = entry.as_slice() else {
                 return None;
             };
             let payload_fields = split_1c_braced_fields(payload.trim(), 0)?;
@@ -3837,8 +3851,23 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
                 [kind, uuid] if kind.trim() == "0" => parse_non_zero_uuid(uuid.trim()),
                 _ => None,
             };
+            let members = rest
+                .iter()
+                .map(|component| {
+                    let fields = split_1c_braced_fields(component.trim(), 0)?;
+                    let [code] = fields.as_slice() else {
+                        return None;
+                    };
+                    let code = code.trim();
+                    code.parse::<i64>().ok().map(|_| code.to_string())
+                })
+                .collect::<Option<Vec<_>>>()?;
             Some(FormAttributeSaveEntry::Binding(
-                FormAttributeSaveFieldBinding { key, metadata_uuid },
+                FormAttributeSaveFieldBinding {
+                    key,
+                    metadata_uuid,
+                    members,
+                },
             ))
         })
         .collect()
@@ -3882,16 +3911,31 @@ pub(super) fn apply_form_attribute_save_field_bindings(
             .collect::<BTreeSet<_>>();
         if let Some(bindings) = save_field_bindings.get(&attribute.name) {
             for binding in bindings {
-                let data_path = data_path_by_binding_key
-                    .get(&binding.key)
-                    .cloned()
-                    .or_else(|| {
-                        resolve_form_attribute_save_metadata_path(
-                            &metadata_owner,
-                            binding.metadata_uuid.as_deref()?,
-                            object_refs,
-                        )
-                    });
+                let data_path = if binding.members.is_empty() {
+                    data_path_by_binding_key
+                        .get(&binding.key)
+                        .cloned()
+                        .or_else(|| {
+                            resolve_form_attribute_save_metadata_path(
+                                &metadata_owner,
+                                binding.metadata_uuid.as_deref()?,
+                                object_refs,
+                            )
+                        })
+                } else {
+                    // A walk that spells members past the one it binds names a
+                    // settings composer and walks it with the same member
+                    // table an item's bound slot is walked with. The binding
+                    // key covers only the first component, so it answers a
+                    // shorter path than the entry states and is not asked.
+                    let base = resolve_form_attribute_save_metadata_path(
+                        &metadata_owner,
+                        binding.metadata_uuid.as_deref().unwrap_or_default(),
+                        object_refs,
+                    );
+                    base.zip(form_settings_composer_member_walk(&binding.members))
+                        .map(|(base, tail)| format!("{base}{tail}"))
+                };
                 if let Some(data_path) = data_path
                     && seen.insert(data_path.clone())
                 {
@@ -6684,33 +6728,149 @@ fn replace_form_server_state_fragments(
     Some(())
 }
 
-fn rewrite_form_server_state_type_ids(xml: &mut String, dcs_type_index: &DcsTypeIndex) {
-    const OPEN: &str = "<v8:TypeId>";
-    const CLOSE: &str = "</v8:TypeId>";
+/// One `Type`/`TypeId` sibling of a dynamic list's embedded schema: where it
+/// stands in the blob, how it is written out, and what orders it.
+struct FormServerStateTypeMember {
+    start: usize,
+    end: usize,
+    rendered: String,
+    kind: FormServerStateTypeKind,
+}
 
-    let mut rewritten = String::with_capacity(xml.len());
+enum FormServerStateTypeKind {
+    Builtin(String),
+    Reference(String),
+    Family,
+    Unevidenced,
+}
+
+impl FormServerStateTypeKind {
+    fn as_run_member(&self) -> TypeRunMember<'_> {
+        match self {
+            Self::Builtin(qname) => TypeRunMember::Builtin(qname.as_str()),
+            Self::Reference(uuid) => TypeRunMember::Reference(uuid.as_str()),
+            Self::Family => TypeRunMember::Family,
+            Self::Unevidenced => TypeRunMember::Unevidenced,
+        }
+    }
+}
+
+/// Reads every `Type`/`TypeId` sibling out of the blob, in document order,
+/// with the text each one is written as.
+fn collect_form_server_state_type_members(
+    xml: &str,
+    dcs_type_index: &DcsTypeIndex,
+) -> Vec<FormServerStateTypeMember> {
+    const TYPE_OPEN: &str = "<v8:Type>";
+    const TYPE_CLOSE: &str = "</v8:Type>";
+    const ID_OPEN: &str = "<v8:TypeId>";
+    const ID_CLOSE: &str = "</v8:TypeId>";
+
+    let mut members = Vec::new();
     let mut cursor = 0usize;
-    while let Some(relative_start) = xml[cursor..].find(OPEN) {
-        let start = cursor + relative_start;
-        let value_start = start + OPEN.len();
-        let Some(relative_end) = xml[value_start..].find(CLOSE) else {
+    loop {
+        let next_type = xml[cursor..].find(TYPE_OPEN).map(|at| cursor + at);
+        let next_id = xml[cursor..].find(ID_OPEN).map(|at| cursor + at);
+        let (start, open, close, is_id) = match (next_type, next_id) {
+            (Some(at_type), Some(at_id)) if at_type < at_id => {
+                (at_type, TYPE_OPEN, TYPE_CLOSE, false)
+            }
+            (Some(_), Some(at_id)) => (at_id, ID_OPEN, ID_CLOSE, true),
+            (Some(at_type), None) => (at_type, TYPE_OPEN, TYPE_CLOSE, false),
+            (None, Some(at_id)) => (at_id, ID_OPEN, ID_CLOSE, true),
+            (None, None) => break,
+        };
+        let value_start = start + open.len();
+        let Some(relative_end) = xml[value_start..].find(close) else {
             break;
         };
         let value_end = value_start + relative_end;
-        let type_id = xml[value_start..value_end].trim();
-        let Some(replacement) =
-            data_composition_type_id_xml(type_id, dcs_type_index, "cfg", false, false)
-        else {
-            rewritten.push_str(&xml[cursor..value_end + CLOSE.len()]);
-            cursor = value_end + CLOSE.len();
-            continue;
+        let end = value_end + close.len();
+        let value = xml[value_start..value_end].trim();
+        let (rendered, kind) = if is_id {
+            match data_composition_type_id_xml(value, dcs_type_index, "cfg", false, false) {
+                Some(replacement) => {
+                    let kind = if replacement.starts_with("<v8:TypeSet") {
+                        FormServerStateTypeKind::Family
+                    } else {
+                        FormServerStateTypeKind::Reference(value.to_ascii_lowercase())
+                    };
+                    (replacement, kind)
+                }
+                None => (
+                    xml[start..end].to_string(),
+                    FormServerStateTypeKind::Unevidenced,
+                ),
+            }
+        } else {
+            (
+                xml[start..end].to_string(),
+                FormServerStateTypeKind::Builtin(value.to_string()),
+            )
         };
-        rewritten.push_str(&xml[cursor..start]);
-        rewritten.push_str(&replacement);
-        cursor = value_end + CLOSE.len();
+        members.push(FormServerStateTypeMember {
+            start,
+            end,
+            rendered,
+            kind,
+        });
+        cursor = end;
     }
-    if cursor == 0 {
+    members
+}
+
+/// Resolves a dynamic list's embedded type ids and writes each run of type
+/// siblings in the platform's own order.
+///
+/// The embedded schema is a storage document like any other, and loses the
+/// same one thing about a type list: its schema puts every literal `Type`
+/// before every `TypeId`, so a list mixing the two arrives grouped while the
+/// platform writes it interleaved. The rule that repairs it already exists --
+/// [`ibcmd_xml::evidenced_type_run_permutation`] -- and is asked here rather
+/// than restated, so both callers stay one rule.
+///
+/// Evidence: UT 11.5.27.75,
+/// `Documents/ОперацияСЭлектроннымБилетом/Forms/ФормаСписка`, whose dynamic
+/// list field declares `xs:string` beside `cfg:EnumRef.ТипыОперацийСБилетами`.
+/// The enum's generated type uuid sorts below the whole evidenced interval of
+/// `xs:string`, so the platform writes the reference first; storage hands the
+/// pair over builtin-first.
+fn rewrite_form_server_state_type_ids(xml: &mut String, dcs_type_index: &DcsTypeIndex) {
+    let members = collect_form_server_state_type_members(xml, dcs_type_index);
+    if members.is_empty() {
         return;
+    }
+    let mut rewritten = String::with_capacity(xml.len());
+    let mut cursor = 0usize;
+    let mut index = 0usize;
+    while index < members.len() {
+        // Siblings of one run stand at one depth with nothing but layout
+        // whitespace between them, which is what makes their order the only
+        // thing that moves.
+        let mut run_end = index + 1;
+        while run_end < members.len()
+            && xml[members[run_end - 1].end..members[run_end].start]
+                .chars()
+                .all(char::is_whitespace)
+        {
+            run_end += 1;
+        }
+        let run = &members[index..run_end];
+        let kinds: Vec<TypeRunMember<'_>> = run
+            .iter()
+            .map(|member| member.kind.as_run_member())
+            .collect();
+        let order = evidenced_type_run_permutation(&kinds)
+            .unwrap_or_else(|| (0..run.len()).collect::<Vec<_>>());
+        rewritten.push_str(&xml[cursor..run[0].start]);
+        for (slot, member) in order.iter().enumerate() {
+            rewritten.push_str(&run[*member].rendered);
+            if let Some(pair) = run.get(slot..slot + 2) {
+                rewritten.push_str(&xml[pair[0].end..pair[1].start]);
+            }
+        }
+        cursor = run[run.len() - 1].end;
+        index = run_end;
     }
     rewritten.push_str(&xml[cursor..]);
     *xml = rewritten;
@@ -9062,7 +9222,21 @@ fn parse_form_child_item_with_metadata_owners(
         .and_then(|schema| parse_form_table_root_properties(schema, &fields))
         .unwrap_or_default();
     let button_data_path_slot = button_common_schema.and_then(|schema| schema.data_path_slot());
-    let strict_field_data_path = field_schema_and_options.is_some();
+    // A progress bar, a track bar and a chart bind their data exactly the way
+    // every other field does; only their option tuple is their own. Reading
+    // the bound slot strictly was switched on by the presence of the ordinary
+    // field schema, which these three never carry, so their binding fell
+    // through to the route that spells a name from the form's own item tree.
+    //
+    // Evidence: UT 11.5.27.75,
+    // `InformationRegisters/НоменклатураПродаваемаяСовместно/Forms/НастройкаПоискаАссоциаций`.
+    // Its three `TrackBarField` items and the three `LabelField` items beside
+    // them hold the identical bound slot `{2,{5},{0,<constant uuid>}}`, and
+    // the platform writes the identical `<DataPath>` for each pair. The label
+    // read it strictly and got `Константы.<constant>`; the track bar did not
+    // and got `Константы.<the label item's own name>`.
+    let strict_field_data_path = field_schema_and_options.is_some()
+        || parse_form_special_field_layout(wrapper, &fields).is_some();
     let owner_scoped_data_path =
         strict_field_data_path || table_schema.is_some() || button_data_path_slot.is_some();
     let data_paths = parse_form_child_item_data_path(
@@ -9246,7 +9420,16 @@ fn parse_form_child_item_with_metadata_owners(
         append_form_child_items_by_tag(
             &mut child_items,
             &fields,
-            &["ContextMenu"],
+            // The PDF viewer field owns a view-status addition of its own next
+            // to its context menu: each of the five `PDFDocumentField` records
+            // of UT 11.5.27.75 carries exactly one wrapper-`22` context menu
+            // and exactly one wrapper-`5` view-status addition, and the
+            // platform writes both, name for name and id for id.
+            if tag == "PDFDocumentField" {
+                &["ContextMenu", "ViewStatusAddition"]
+            } else {
+                &["ContextMenu"]
+            },
             main_data_path,
             child_parent_data_path,
             Some(tag),
@@ -11212,9 +11395,21 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         addition_source_item: if tag.ends_with("Addition") {
-            fields
-                .get(19)
-                .and_then(|field| parse_form_search_addition_source_item(field, table_name_by_id))
+            fields.get(19).and_then(|field| {
+                parse_form_search_addition_source_item(field, table_name_by_id).or_else(|| {
+                    // A view-status addition owned by a PDF viewer field names
+                    // that field, not a table, so the table-only index cannot
+                    // answer it. Slot 19 holds `{<owner id>,1}` on all five such
+                    // additions of UT 11.5.27.75 and the id is the owning
+                    // `PDFDocumentField`'s own, which is what the platform
+                    // writes in `<AdditionSource><Item>`. The wider item index is
+                    // consulted only under that owner, so no addition that the
+                    // table index already answers changes hands.
+                    (_parent_tag == Some("PDFDocumentField"))
+                        .then(|| parse_form_search_addition_source_item(field, item_name_by_id))
+                        .flatten()
+                })
+            })
         } else {
             None
         },
@@ -11519,6 +11714,7 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "GraphicalSchemaField"
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
+            | "PDFDocumentField"
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
@@ -12383,6 +12579,31 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             font: Some(9),
+        },
+    ),
+    (
+        // The PDF viewer field's own 14-member tuple. Its extent pair sits in
+        // the same first two slots and carries the same `50`/`10` unwritten
+        // defaults the other character-metric document fields do: of the five
+        // `PDFDocumentField` items of UT 11.5.27.75 the four that carry no
+        // `<Width>`/`<Height>` read `50`/`10` and the one that carries
+        // `<Width>1</Width><Height>1</Height>` reads `1`/`1`. No max-extent,
+        // stretch or font coordinate is claimed: all five items agree slot for
+        // slot across the rest of the tuple and none of them carries any such
+        // element, so nothing in the corpus tells those slots apart.
+        "PDFDocumentField",
+        FormDocumentFieldGeometry {
+            discriminator: "1",
+            len: 14,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: None,
+            auto_max_width: None,
+            auto_max_height: None,
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            font: None,
         },
     ),
 ];
@@ -15620,6 +15841,13 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
                 "14" => (wrapper == "37").then_some("GraphicalSchemaField"),
                 "15" => (wrapper == "37").then_some("HTMLDocumentField"),
                 "17" => Some("FormattedDocumentField"),
+                // The PDF viewer field. Census of UT 11.5.27.75: the
+                // configuration holds exactly five items whose wrapper-`37`
+                // record spells `20` in the discriminator slot, and they are
+                // exactly the five `<PDFDocumentField>` elements of the native
+                // tree, name for name and id for id. The reader had no arm for
+                // the code at all, so all five items were dropped whole.
+                "20" => (wrapper == "37").then_some("PDFDocumentField"),
                 _ => None,
             }
         }
@@ -17012,7 +17240,12 @@ pub(super) fn parse_form_child_item_data_path(
         "CalendarField"
         | "GraphicalSchemaField"
         | "SpreadSheetDocumentField"
-        | "HTMLDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        | "HTMLDocumentField"
+        // The PDF viewer field spells its binding in the same slot 11 the
+        // other document fields do: all five items of UT 11.5.27.75 hold a
+        // one-segment chain there naming the form attribute the platform
+        // writes in `<DataPath>`, and none of them falls back to a parent path.
+        | "PDFDocumentField" => resolve_slots(&input_slots, &parse_bound),
         "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
         "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
         "Button" => button_data_path_slot
@@ -18044,6 +18277,20 @@ fn form_settings_composer_member(
     table
         .iter()
         .find_map(|(candidate, name, next)| (*candidate == member_id).then_some((*name, *next)))
+}
+
+/// The `.Member.Member` tail a chain spells after it has named the settings
+/// composer it walks, using the same member table an item's bound slot uses.
+fn form_settings_composer_member_walk(members: &[String]) -> Option<String> {
+    let mut owner = Some(FormSettingsComposerType::SettingsComposer);
+    let mut path = String::new();
+    for member in members {
+        let (name, next) = form_settings_composer_member(owner?, member.as_str())?;
+        path.push('.');
+        path.push_str(name);
+        owner = next;
+    }
+    Some(path)
 }
 
 pub(super) fn resolve_form_settings_composer_chain_data_path(
@@ -24461,10 +24708,21 @@ pub(super) fn format_form_child_item_xml(
         }
     } else if is_form_field_direct_service_parent(item.tag) {
         if !table_addition_child {
-            xml.push_str(&format_form_child_items_xml(
-                &direct_regular_children,
-                indent + 1,
-            ));
+            // A `PDFDocumentField` owns its view-status addition the way a
+            // `Table` does -- as a direct element behind `ExtendedTooltip`, not
+            // inside a `<ChildItems>` group. All five of UT 11.5.27.75's PDF
+            // fields write the addition bare, and none of them writes a
+            // `<ChildItems>` element at all.
+            if item.tag == "PDFDocumentField" {
+                for child in &direct_regular_children {
+                    xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+                }
+            } else {
+                xml.push_str(&format_form_child_items_xml(
+                    &direct_regular_children,
+                    indent + 1,
+                ));
+            }
         }
     } else if !table_addition_child {
         xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
@@ -26173,11 +26431,86 @@ pub(super) fn form_list_settings_order_has_output(order: Option<&FormListSetting
     !matches!(order, None | Some(FormListSettingsOrder::EmptyStorage))
 }
 
+/// Splits an XML fragment into the lines the re-indenter is allowed to re-space.
+///
+/// A newline that falls inside element text content is part of the value, not
+/// part of the fragment's layout, so it stays with the line that carries it.
+/// The two are told apart by what stands between the last `>` and the newline:
+/// only whitespace means the newline separates two tags, anything else means a
+/// text node is open and the platform stored that newline itself.
+///
+/// Evidence: UT 11.5.27.75. The dynamic list of
+/// `DataProcessors/ЗаполнениеКатегорийПодакцизныхТоваров/Forms/РабочееМесто`
+/// stores a `<dcssch:expression>` whose `ВЫБОР`/`КОГДА`/`КОНЕЦ` clauses are
+/// separated by bare `\n` plus the query's own tabs, and the platform writes
+/// those bytes through untouched while re-spacing every tag around them.
+/// Re-indenting each physical line instead rewrote all four separators as
+/// `\r\n` plus six tabs.
+fn xml_fragment_logical_lines(fragment: &str) -> Vec<&str> {
+    let bytes = fragment.as_bytes();
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    let mut index = 0usize;
+    let mut in_tag = false;
+    let mut quote: Option<u8> = None;
+    let mut text_seen = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_tag {
+            match quote {
+                Some(open) => {
+                    if byte == open {
+                        quote = None;
+                    }
+                }
+                None => match byte {
+                    b'"' | b'\'' => quote = Some(byte),
+                    b'>' => {
+                        in_tag = false;
+                        text_seen = false;
+                    }
+                    _ => {}
+                },
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'<' {
+            if fragment[index..].starts_with("<![CDATA[") {
+                // A character-data section is text whatever it spells, and its
+                // `>` bytes close nothing.
+                text_seen = true;
+                index = fragment[index..]
+                    .find("]]>")
+                    .map_or(bytes.len(), |offset| index + offset + "]]>".len());
+                continue;
+            }
+            in_tag = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'\n' {
+            if !text_seen {
+                lines.push(&fragment[start..index]);
+                start = index + 1;
+            }
+            index += 1;
+            continue;
+        }
+        if !byte.is_ascii_whitespace() {
+            text_seen = true;
+        }
+        index += 1;
+    }
+    lines.push(&fragment[start..]);
+    lines
+}
+
 pub(super) fn indent_xml_fragment(fragment: &str, indent: &str) -> String {
     let mut xml = String::new();
     let mut level = 0usize;
-    for line in fragment
-        .lines()
+    for line in xml_fragment_logical_lines(fragment)
+        .into_iter()
         .map(str::trim)
         .filter(|line| !line.is_empty())
     {

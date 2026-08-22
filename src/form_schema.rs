@@ -2801,6 +2801,10 @@ impl FormFieldTitleLocationSchema {
             "GraphicalSchemaField" => "14",
             "HTMLDocumentField" => "15",
             "FormattedDocumentField" => "17",
+            // Slot 7 reads `0` on all five `PDFDocumentField` items of UT
+            // 11.5.27.75 and the platform writes `<TitleLocation>None</TitleLocation>`
+            // on all five, the same code-to-value pair the other field kinds use.
+            "PDFDocumentField" => "20",
             _ => return None,
         };
         if !matches!(wrapper, "37" | "48")
@@ -3340,10 +3344,22 @@ impl FormFieldSchema {
             "GraphicalSchemaField" => ("14", 14, "3", None, None, None),
             "HTMLDocumentField" => ("15", 13, "3", None, None, Some(3)),
             "FormattedDocumentField" => ("17", 16, "1", None, None, Some(8)),
+            // The PDF viewer field carries one member more than the other
+            // field kinds at the same head offset: all five of UT
+            // 11.5.27.75's `PDFDocumentField` items spell a 60-member
+            // wrapper-`37` record with the name in slot 6, and none of them
+            // holds a colour in any option slot, so no colour coordinate is
+            // claimed here.
+            "PDFDocumentField" => ("20", 14, "1", None, None, None),
             _ => return None,
         };
+        let field_count_base = if item_tag == "PDFDocumentField" {
+            60
+        } else {
+            59
+        };
         if wrapper != "37"
-            || field_count != 59 + top_level_offset
+            || field_count != field_count_base + top_level_offset
             || top_level_offset > 1
             || (top_level_offset == 1
                 && !matches!(
@@ -3406,6 +3422,10 @@ impl FormFieldSchema {
                     | "PictureField"
                     | "SpreadSheetDocumentField"
                     | "FormattedDocumentField"
+                    // Slot 14 reads `1` on the one `PDFDocumentField` of UT
+                    // 11.5.27.75 the platform writes `<ReadOnly>true</ReadOnly>`
+                    // on and `0` on the other four, which carry no element.
+                    | "PDFDocumentField"
             )
             .then_some(14 + top_level_offset),
             title_height_slot: matches!(

@@ -10770,10 +10770,12 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
             FormAttributeSaveFieldBinding {
                 key: "0|11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
                 metadata_uuid: Some("11a93e3a-3c5b-4242-913c-02474a383344".to_string()),
+                members: Vec::new(),
             },
             FormAttributeSaveFieldBinding {
                 key: "0|ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string(),
                 metadata_uuid: Some("ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string()),
+                members: Vec::new(),
             }
         ])
     );

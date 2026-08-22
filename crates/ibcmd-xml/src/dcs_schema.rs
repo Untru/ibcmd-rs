@@ -3226,6 +3226,55 @@ fn type_sorts_before(left: &TypeSortKey, right: &TypeSortKey) -> Result<bool, Dc
 /// exactly as storage had it, which is also what makes this incapable of
 /// changing any list the writer already spelled correctly.
 fn evidenced_type_run_order(run: &[TypeRunEntry]) -> Result<Vec<usize>, DcsInnerSchemaError> {
+    let keys: Vec<TypeSortKey> = run.iter().map(|entry| entry.key.clone()).collect();
+    evidenced_type_sort_order(&keys)
+}
+
+/// One member of a run of `Type`/`TypeId` siblings, as a writer that renders
+/// such a run outside the storage-document rewrite sees it.
+///
+/// The same loss the rewrite repairs happens wherever storage hands a type
+/// list over: its schema puts every literal `Type` before every `TypeId`, so
+/// the run arrives grouped while the platform writes it interleaved. A caller
+/// holding its own rendering of the run states each member's kind here and
+/// applies the permutation to its own output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TypeRunMember<'a> {
+    /// A platform builtin, named by the QName the document writes for it.
+    Builtin(&'a str),
+    /// A configuration type, named by the storage uuid that orders it.
+    Reference(&'a str),
+    /// A reference family -- what storage spells as a `TypeSet`.
+    Family,
+    /// A member nothing observed places: a type id the configuration resolves
+    /// to no name, or a literal QName the bounds table does not carry.
+    Unevidenced,
+}
+
+/// The permutation that writes `members` in the platform's order, or `None`
+/// when nothing observed decides it.
+///
+/// `None` is a refusal, not an ordering: a caller that gets it must leave its
+/// run exactly as it stands rather than pick an order the corpus never shows.
+/// This is the same rule [`evidenced_type_run_order`] applies inside the
+/// storage-document rewrite, asked without that rewrite's byte ranges.
+pub fn evidenced_type_run_permutation(members: &[TypeRunMember<'_>]) -> Option<Vec<usize>> {
+    let keys: Vec<TypeSortKey> = members
+        .iter()
+        .map(|member| match member {
+            TypeRunMember::Builtin(qname) => builtin_type_sort_bounds(qname)
+                .map_or(TypeSortKey::Unevidenced, |(lower, upper)| {
+                    TypeSortKey::Builtin { lower, upper }
+                }),
+            TypeRunMember::Reference(uuid) => TypeSortKey::Reference((*uuid).to_ascii_lowercase()),
+            TypeRunMember::Family => TypeSortKey::Family,
+            TypeRunMember::Unevidenced => TypeSortKey::Unevidenced,
+        })
+        .collect();
+    evidenced_type_sort_order(&keys).ok()
+}
+
+fn evidenced_type_sort_order(run: &[TypeSortKey]) -> Result<Vec<usize>, DcsInnerSchemaError> {
     let builtins: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Builtin { .. }));
     let references: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Reference(_)));
     let families: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Family));
@@ -3250,7 +3299,7 @@ fn evidenced_type_run_order(run: &[TypeRunEntry]) -> Result<Vec<usize>, DcsInner
     let mut pending = builtins.as_slice();
     for reference in references {
         while let Some((builtin, rest)) = pending.split_first() {
-            if !type_sorts_before(&run[*builtin].key, &run[reference].key)? {
+            if !type_sorts_before(&run[*builtin], &run[reference])? {
                 break;
             }
             ordered.push(*builtin);
@@ -3263,11 +3312,11 @@ fn evidenced_type_run_order(run: &[TypeRunEntry]) -> Result<Vec<usize>, DcsInner
     Ok(ordered)
 }
 
-fn indices_of(run: &[TypeRunEntry], want: impl Fn(&TypeSortKey) -> bool) -> Vec<usize> {
+fn indices_of(run: &[TypeSortKey], want: impl Fn(&TypeSortKey) -> bool) -> Vec<usize> {
     run.iter()
         .enumerate()
-        .filter(|(_index, entry)| want(&entry.key))
-        .map(|(index, _entry)| index)
+        .filter(|(_index, key)| want(key))
+        .map(|(index, _key)| index)
         .collect()
 }
 
