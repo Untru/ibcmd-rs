@@ -10830,8 +10830,11 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.width().map(str::to_owned))
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.width(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.width(options))
+        {
+            Some(value)
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(16 + button_top_level_offset)
@@ -10873,8 +10876,11 @@ fn parse_form_child_item_with_metadata_owners(
                         && default_height != Some(value.as_str())
                         && value.parse::<u32>().is_ok()
                 })
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.height(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.height(options))
+        {
+            Some(value)
         } else if tag == "Table" {
             table_schema.and_then(|schema| schema.height(&fields))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
@@ -11096,8 +11102,11 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|options| options.horizontal_stretch)
         } else if tag == "Page" {
             page_properties.and_then(|properties| properties.horizontal_stretch())
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.horizontal_stretch(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.horizontal_stretch(options))
+        {
+            Some(value)
         } else if let Some(value) =
             parse_form_document_field_flag(tag, fields, |layout| layout.horizontal_stretch)
         {
