@@ -473,6 +473,7 @@ enum FormXmlAutoShowState {
 enum FormXmlReportResultViewMode {
     Auto,
     Default,
+    Compact,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -11643,6 +11644,7 @@ fn parse_form_report_result_view_mode_xml(value: &str) -> Result<FormXmlReportRe
     match value {
         "Auto" => Ok(FormXmlReportResultViewMode::Auto),
         "Default" => Ok(FormXmlReportResultViewMode::Default),
+        "Compact" => Ok(FormXmlReportResultViewMode::Compact),
         other => Err(anyhow!("unsupported Form ReportResultViewMode: {other}")),
     }
 }
@@ -12588,6 +12590,7 @@ fn form_report_result_view_mode_code(value: FormXmlReportResultViewMode) -> &'st
     match value {
         FormXmlReportResultViewMode::Auto => "0",
         FormXmlReportResultViewMode::Default => "1",
+        FormXmlReportResultViewMode::Compact => "2",
     }
 }
 

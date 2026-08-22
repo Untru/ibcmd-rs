@@ -2275,6 +2275,14 @@ pub(super) fn extract_form_report_result_view_mode(fields: &[&str]) -> Option<&'
     ) {
         (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("0")) => Some("Auto"),
         (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("1")) => Some("Default"),
+        // `2` is the third value the property takes, and the table stopped at
+        // `1`, so the element went unwritten on the one root of the
+        // configuration that carries it.  Evidence, UT 11.5.27.75:
+        // `Reports/СверкаРасчетовСКонтрагентами/Forms/ФормаОтчета` holds
+        // `27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,2}` in its root
+        // property bag, and the platform writes
+        // `<ReportResultViewMode>Compact</ReportResultViewMode>`.
+        (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("2")) => Some("Compact"),
         _ => None,
     }
 }
