@@ -7977,6 +7977,7 @@ pub(super) enum FormStandardCommandOwnerKind {
     SpreadsheetDocument,
     GraphicalSchema,
     FormattedDocument,
+    PdfDocument,
 }
 
 #[cfg(test)]
@@ -8478,6 +8479,19 @@ fn collect_form_child_item_indexes_from_field_traced(
             },
         );
     }
+    if let Some(wrapper) = wrapper
+        && form_pdf_document_field_layout(wrapper, &fields)
+        && let Some(id) = form_child_item_id(&fields)
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        indexes.standard_command_owner_name_by_id.insert(
+            id.to_string(),
+            FormStandardCommandOwner {
+                name,
+                kind: FormStandardCommandOwnerKind::PdfDocument,
+            },
+        );
+    }
     if let Some((_, _, id, name)) = structural_identity.as_ref() {
         indexes
             .command_source_owner_name_by_id
@@ -8745,6 +8759,15 @@ pub(super) fn form_formatted_document_field_layout(wrapper: &str, fields: &[&str
         && fields
             .get(5 + form_input_field_top_level_offset(fields))
             .is_some_and(|value| value.trim() == "17")
+}
+
+/// The PDF viewer field, told apart by the same type marker the item-tag table
+/// already reads for it.
+pub(super) fn form_pdf_document_field_layout(wrapper: &str, fields: &[&str]) -> bool {
+    wrapper == "37"
+        && fields
+            .get(5 + form_input_field_top_level_offset(fields))
+            .is_some_and(|value| value.trim() == "20")
 }
 
 pub(super) fn form_child_item_id<'a>(fields: &[&'a str]) -> Option<&'a str> {
@@ -19686,6 +19709,9 @@ pub(super) fn parse_form_button_command_name(
             FormStandardCommandOwnerKind::FormattedDocument => {
                 form_formatted_document_standard_command_suffix(&uuid)
             }
+            FormStandardCommandOwnerKind::PdfDocument => {
+                form_pdf_document_standard_command_suffix(&uuid)
+            }
             FormStandardCommandOwnerKind::GraphicalSchema => {
                 form_graphical_schema_standard_command_suffix(&uuid)
             }
@@ -19922,6 +19948,34 @@ pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Opt
         "ec647dcc-2be7-486c-9046-d8b371f9909e" => Some("DecreaseFontSize"),
         "f20eefc2-f819-4ab1-be67-87b3ca2e26e6" => Some("Bold"),
         "f5814962-2bef-43dd-b633-a193d4b0970e" => Some("Undo"),
+        _ => None,
+    }
+}
+
+/// The standard commands a PDF viewer field owns, by the uuid its command
+/// record names.
+///
+/// The field kind itself was only taught to the reader recently; it was never
+/// entered in the standard-command owner index, so every button that names one
+/// of its commands resolved to nothing and went out without a `<CommandName>`.
+///
+/// Evidence, UT 11.5.27.75:
+/// `DataProcessors/РаспознаваниеДокументовОтправкаФайлов/Forms/ОтправитьФайлы`
+/// carries the PDF viewer field `ПолеПросмотраPDF` as item 198 and eight
+/// buttons whose command record is `{198, <uuid>}`; the platform writes each of
+/// them as `Form.Item.ПолеПросмотраPDF.StandardCommand.<name>`, and every row
+/// below is one of those eight pairs.  An unobserved uuid returns `None` rather
+/// than a guessed name.
+pub(super) fn form_pdf_document_standard_command_suffix(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "d9117be6-f436-40fd-9670-8d71b99b2477" => Some("ScaleUp"),
+        "1e5ebd8b-32ee-4af9-b85c-3a0417000660" => Some("ScaleDown"),
+        "30f0b852-3284-4ae4-838b-f89b78388bdc" => Some("RotateClockwise"),
+        "e28575de-9fe8-4a8e-a285-13250de33d49" => Some("RotateCounterclockwise"),
+        "a4e92b1d-5e86-4a86-b276-00e71ecf3fd4" => Some("GoToBegin"),
+        "32a87619-85ce-495a-a195-2719f5e9c71e" => Some("GoBack"),
+        "85a1b7ee-e94d-4783-b519-4af123f58596" => Some("GoForward"),
+        "3e80231d-e169-456e-8373-0b9d4c15c8ab" => Some("GoToEnd"),
         _ => None,
     }
 }
