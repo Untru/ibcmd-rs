@@ -1566,6 +1566,44 @@ impl FormFieldHeaderPictureSchema {
         })
     }
 
+    /// The footer picture of the same four field kinds, read from the slot
+    /// directly behind the header one.
+    ///
+    /// The header picture already establishes that a field carries its two
+    /// column pictures as adjacent picture records; the footer is the second
+    /// of the pair.  Evidence, UT 11.5.27.75: slot `30 + offset` holds the
+    /// platform's "empty" picture record on every field of the corpus but two,
+    /// and a reference record on exactly the two the platform writes
+    /// `<FooterPicture>` on - `CommonForms/РаспределениеРасходовНаПоступления`
+    /// item `СписокДокументовВес` (`CommonPicture.Предупреждение32`) and
+    /// `DataProcessors/ТорговыеПредложения/Forms/ФормированиеЗаказов` item
+    /// `КонтрагентыСуммаСНДС` (`CommonPicture.Сумма`), both with the
+    /// transparency flag clear.  The record was never read, so the element was
+    /// never written.
+    pub(crate) fn from_footer_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        value: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "37"
+            || field_count != 59 + top_level_offset
+            || top_level_offset > 1
+            || !matches!(
+                item_tag,
+                "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
+            )
+        {
+            return None;
+        }
+        let value = FormPictureValueSchema::from_raw_layout(value)?;
+        Some(Self {
+            picture_slot: 30 + top_level_offset,
+            value,
+        })
+    }
+
     pub(crate) const fn picture_slot(self) -> usize {
         self.picture_slot
     }

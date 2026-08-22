@@ -1395,6 +1395,9 @@ pub(super) struct FormChildItem {
     pub(super) header_picture_ref: Option<String>,
     pub(super) header_picture_file_name: Option<String>,
     pub(super) header_picture_load_transparent: bool,
+    pub(super) footer_picture_ref: Option<String>,
+    pub(super) footer_picture_file_name: Option<String>,
+    pub(super) footer_picture_load_transparent: bool,
     pub(super) picture_size: Option<&'static str>,
     pub(super) zoomable: Option<bool>,
     pub(super) image_scale: Option<String>,
@@ -9608,6 +9611,13 @@ fn parse_form_child_item_with_metadata_owners(
         object_refs,
     )
     .or_else(|| parse_form_column_group_header_picture(wrapper, tag, fields, object_refs));
+    let footer_picture = parse_form_field_footer_picture(
+        wrapper,
+        tag,
+        &fields,
+        input_field_top_level_offset,
+        object_refs,
+    );
     let choice_button_picture = field_schema_and_options
         .as_ref()
         .and_then(|(schema, options)| {
@@ -11472,6 +11482,15 @@ fn parse_form_child_item_with_metadata_owners(
             .as_ref()
             .and_then(|picture| picture.file_name.clone()),
         header_picture_load_transparent: header_picture
+            .as_ref()
+            .is_some_and(|picture| picture.load_transparent),
+        footer_picture_ref: footer_picture
+            .as_ref()
+            .and_then(|picture| picture.reference.clone()),
+        footer_picture_file_name: footer_picture
+            .as_ref()
+            .and_then(|picture| picture.file_name.clone()),
+        footer_picture_load_transparent: footer_picture
             .as_ref()
             .is_some_and(|picture| picture.load_transparent),
         picture_size: if tag == "PictureDecoration" {
@@ -16488,6 +16507,37 @@ fn parse_form_field_header_picture(
         schema.kind(),
         schema.load_transparent(),
         "HeaderPicture",
+        object_refs,
+    )
+}
+
+/// `FooterPicture` of a field, read from the slot behind its header picture.
+fn parse_form_field_footer_picture(
+    wrapper: &str,
+    item_tag: &str,
+    fields: &[&str],
+    top_level_offset: usize,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormOwnedPicture> {
+    let picture_slot = 30 + top_level_offset;
+    let raw = fields.get(picture_slot)?.trim();
+    let value = split_1c_braced_fields(raw, 0)?;
+    let schema = FormFieldHeaderPictureSchema::from_footer_layout(
+        wrapper,
+        fields.len(),
+        item_tag,
+        top_level_offset,
+        &value,
+    )?;
+    if schema.picture_slot() != picture_slot {
+        return None;
+    }
+    parse_form_owned_picture(
+        raw,
+        &value,
+        schema.kind(),
+        schema.load_transparent(),
+        "FooterPicture",
         object_refs,
     )
 }
@@ -22930,6 +22980,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(footer_horizontal_align)
         ));
     }
+    // `FooterPicture` closes the footer run. Both native items that carry one
+    // pin it from a different side and neither is contradicted: one reads
+    // `EditMode`, `FooterPicture`, `AutoMarkIncomplete` and the other
+    // `FooterDataPath`, `FooterFont`, `FooterPicture`, `Width`.
+    xml.push_str(&format_form_field_footer_picture_xml(item, indent + 1));
     if let Some(check_box_type) = item.check_box_type {
         xml.push_str(&format!(
             "{tab}\t<CheckBoxType>{}</CheckBoxType>\r\n",
@@ -25455,6 +25510,41 @@ fn format_form_field_header_picture_xml(item: &FormChildItem, indent: usize) -> 
         }
     }
     xml.push_str(&format!("{tab}</HeaderPicture>\r\n"));
+    xml
+}
+
+/// `FooterPicture` writes the same two members in the same order the header
+/// picture does; only the element name and the slot differ.
+fn format_form_field_footer_picture_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.footer_picture_ref.is_none() && item.footer_picture_file_name.is_none() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<FooterPicture>\r\n");
+    for property in FORM_FIELD_HEADER_PICTURE_XML_ORDER {
+        match property {
+            FormFieldHeaderPictureXmlProperty::Value => {
+                if let Some(reference) = &item.footer_picture_ref {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Ref>{}</xr:Ref>\r\n",
+                        escape_xml_text(reference)
+                    ));
+                } else if let Some(file_name) = &item.footer_picture_file_name {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Abs>{}</xr:Abs>\r\n",
+                        escape_xml_text(file_name)
+                    ));
+                }
+            }
+            FormFieldHeaderPictureXmlProperty::LoadTransparent => {
+                xml.push_str(&format!(
+                    "{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+                    xml_bool(item.footer_picture_load_transparent)
+                ));
+            }
+        }
+    }
+    xml.push_str(&format!("{tab}</FooterPicture>\r\n"));
     xml
 }
 
