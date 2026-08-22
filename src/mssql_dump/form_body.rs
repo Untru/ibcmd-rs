@@ -12670,6 +12670,48 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             font: None,
         },
     ),
+    (
+        // The chart field's own 11-member tuple, which no geometry row
+        // claimed, so none of its extents or stretch flags ever reached the
+        // XML.  Its extent pair sits in the same first two slots and carries
+        // the same `50`/`10` unwritten defaults the other character-metric
+        // document fields do, and the stretch pair sits where the picture and
+        // spreadsheet fields keep theirs.
+        //
+        // Evidence: UT 11.5.27.75 has exactly five `ChartField` items and this
+        // row is a total function of the platform's answer on all five.
+        // `Catalogs/ВариантыАнализаЦелевыхПоказателей/Forms/НастройкаДемоДанных`
+        // `Диаграмма`, `InformationRegisters/СезонныеКоэффициенты/Forms/СезонныеКоэффициенты`
+        // `Диаграмма` and
+        // `DataProcessors/ОценкаПроизводительности/Forms/ПодборЦелевогоВремениКлючевыхОпераций`
+        // `ДиаграммаЗамеровВремени` all read `{1,50,10,1,1,{0,1,0},1,0,0,1,0}`
+        // and the platform writes no extent and no stretch on any of them;
+        // `Reports/СверкаРасчетовСКонтрагентами/Forms/ФормаОтчета`
+        // `СостояниеСверки` reads `{1,35,10,0,0,…,1,0}` and is written
+        // `<Width>35</Width>`, `<HorizontalStretch>false</HorizontalStretch>`,
+        // `<VerticalStretch>false</VerticalStretch>`;
+        // `DataProcessors/ПроверкаКонтрагента/Forms/Форма`
+        // `ДиаграммаПоказателей` reads `{1,45,10,0,0,…,1,15}` and adds
+        // `<MaxHeight>15</MaxHeight>`.
+        //
+        // No max-width or auto-max coordinate is claimed: all five items agree
+        // slot for slot across the rest of the tuple and none of them carries
+        // any such element, so nothing in the corpus tells those slots apart.
+        "ChartField",
+        FormDocumentFieldGeometry {
+            discriminator: "1",
+            len: 11,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: Some(10),
+            auto_max_width: None,
+            auto_max_height: None,
+            horizontal_stretch: Some(3),
+            vertical_stretch: Some(4),
+            font: None,
+        },
+    ),
 ];
 
 fn form_document_field_geometry_options<'a>(
