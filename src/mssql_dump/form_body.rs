@@ -7925,14 +7925,12 @@ pub(super) fn collect_form_item_rooted_chain_roots(
     let mut table_root = BTreeMap::new();
     let mut table_settings_composer_type = BTreeMap::new();
     for (table_id, binding) in &indexes.table_binding_by_id {
-        if let Some((_, Some(kind))) =
-            resolve_form_settings_composer_chain(
-                binding,
-                &attribute_metadata_owners_by_id,
-                object_refs,
-                &metadata_field_types,
-            )
-        {
+        if let Some((_, Some(kind))) = resolve_form_settings_composer_chain(
+            binding,
+            &attribute_metadata_owners_by_id,
+            object_refs,
+            &metadata_field_types,
+        ) {
             table_settings_composer_type.insert(table_id.clone(), kind);
         }
         let Some(segments) = parse_form_bound_chain_segments(binding) else {
@@ -11505,12 +11503,20 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(25 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
                 .map(|(_, load_transparent)| load_transparent)
-                .or_else(|| embedded_picture.as_ref().map(|picture| picture.load_transparent))
+                .or_else(|| {
+                    embedded_picture
+                        .as_ref()
+                        .map(|picture| picture.load_transparent)
+                })
                 .unwrap_or(false)
         } else if tag == "PictureField" {
             parse_form_picture_field_value(picture_field_options.as_deref(), object_refs)
                 .map(|(_, load_transparent)| load_transparent)
-                .or_else(|| embedded_picture.as_ref().map(|picture| picture.load_transparent))
+                .or_else(|| {
+                    embedded_picture
+                        .as_ref()
+                        .map(|picture| picture.load_transparent)
+                })
                 .unwrap_or(false)
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_value(&fields, object_refs)
@@ -17184,34 +17190,31 @@ pub(super) fn parse_form_child_item_data_path(
                 object_refs,
                 &owner_scoped_bindings.metadata_field_types,
             )
-                .or_else(|| {
-                    resolve_form_standard_period_column_data_path(
-                        field,
-                        attribute_metadata_owners_by_id,
-                    )
-                })
-                .or_else(|| {
-                    resolve_form_bound_chain_member_path(
-                        field,
-                        attribute_names_by_id,
-                        owner_scoped_bindings,
-                        object_refs,
-                        aggregate,
-                    )
-                })
-                // A dynamic list's own negative member is named by the source,
-                // so it is read before the routes that spell a name the source
-                // never states. The table-path index reached `{2,{2},{-2}}` on
-                // `DataProcessors/СервисSellmonitor/Forms/ПодборКарточекТоваров`
-                // and answered it with the bound item's own name,
-                // `СписокМаркетплейсOzon.СписокМаркетплейсOzonОтбор`, where the
-                // platform writes `СписокМаркетплейсOzon.Filter`.
-                .or_else(|| {
-                    resolve_form_dynamic_list_member_data_path(
-                        field,
-                        attribute_metadata_owners_by_id,
-                    )
-                }),
+            .or_else(|| {
+                resolve_form_standard_period_column_data_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                )
+            })
+            .or_else(|| {
+                resolve_form_bound_chain_member_path(
+                    field,
+                    attribute_names_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                    aggregate,
+                )
+            })
+            // A dynamic list's own negative member is named by the source,
+            // so it is read before the routes that spell a name the source
+            // never states. The table-path index reached `{2,{2},{-2}}` on
+            // `DataProcessors/СервисSellmonitor/Forms/ПодборКарточекТоваров`
+            // and answered it with the bound item's own name,
+            // `СписокМаркетплейсOzon.СписокМаркетплейсOzonОтбор`, where the
+            // platform writes `СписокМаркетплейсOzon.Filter`.
+            .or_else(|| {
+                resolve_form_dynamic_list_member_data_path(field, attribute_metadata_owners_by_id)
+            }),
         );
         if !matches!(chain, FormOwnerScopedDataPath::Unknown) {
             return chain;
@@ -19440,40 +19443,40 @@ fn resolve_form_table_row_picture_member(
         &owner_scoped_bindings.metadata_field_types,
     )
     .or_else(|| {
-            resolve_form_bound_chain_member_path(
-                &extended,
-                attribute_names_by_id,
-                owner_scoped_bindings,
-                object_refs,
-                false,
-            )
-        })
-        .or_else(|| {
-            match resolve_form_owner_scoped_bound_data_path(
-                &extended,
-                attribute_metadata_owners_by_id,
-                owner_scoped_bindings,
-                object_refs,
-            ) {
-                FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
-                FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
-            }
-        })
-        .or_else(|| {
-            resolve_form_item_rooted_settings_composer_path(
-                &extended,
-                table_name_by_id,
-                owner_scoped_bindings,
-            )
-        })
-        .or_else(|| {
-            resolve_form_item_rooted_chain_data_path(
-                &extended,
-                table_name_by_id,
-                owner_scoped_bindings,
-                object_refs,
-            )
-        })
+        resolve_form_bound_chain_member_path(
+            &extended,
+            attribute_names_by_id,
+            owner_scoped_bindings,
+            object_refs,
+            false,
+        )
+    })
+    .or_else(|| {
+        match resolve_form_owner_scoped_bound_data_path(
+            &extended,
+            attribute_metadata_owners_by_id,
+            owner_scoped_bindings,
+            object_refs,
+        ) {
+            FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+            FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+        }
+    })
+    .or_else(|| {
+        resolve_form_item_rooted_settings_composer_path(
+            &extended,
+            table_name_by_id,
+            owner_scoped_bindings,
+        )
+    })
+    .or_else(|| {
+        resolve_form_item_rooted_chain_data_path(
+            &extended,
+            table_name_by_id,
+            owner_scoped_bindings,
+            object_refs,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -27261,7 +27264,10 @@ fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String>
         || form_chart_compact(fields.get(2)?) != "{0}"
         || fields.get(3)?.trim() != "1"
         || fields.get(5)?.trim() != "0"
-        || !fields.get(6)?.trim().eq_ignore_ascii_case(FORM_CHART_LINE_UUID)
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_LINE_UUID)
         || fields.get(7)?.trim() != "0"
     {
         return None;
@@ -27355,11 +27361,7 @@ fn form_chart_rectangle_xml(name: &str, fields: &[&str], indent: usize) -> Optio
 /// The stored colour is not what the platform writes: both records hold an
 /// RGB there and both are written `auto`, with the colour-priority flag clear.
 /// A record with that flag set is refused rather than guessed at.
-fn form_chart_series_xml(
-    name: &str,
-    fields: &[&str],
-    indent: usize,
-) -> Option<String> {
+fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<String> {
     let tab = "\t".repeat(indent);
     let inner = indent + 1;
     let inner_tab = "\t".repeat(inner);
@@ -27527,7 +27529,10 @@ fn format_form_chart_settings_xml(
     color!("scaleColor", 42);
     scalar!("isAutoSeriesName", form_chart_bool(t.get(43)?)?);
     scalar!("isAutoPointName", form_chart_bool(t.get(44)?)?);
-    scalar!("maxMode", form_chart_code(t.get(45)?, &[("0", "NotDefined")])?);
+    scalar!(
+        "maxMode",
+        form_chart_code(t.get(45)?, &[("0", "NotDefined")])?
+    );
     scalar!("maxSeries", form_chart_integer(t.get(46)?)?);
     scalar!("maxSeriesPrc", form_chart_integer(t.get(47)?)?);
     scalar!("spaceMode", form_chart_code(t.get(48)?, &[("1", "Half")])?);
@@ -27545,7 +27550,10 @@ fn format_form_chart_settings_xml(
     scalar!("dtHAlign", form_chart_code(t.get(60)?, &[("2", "Right")])?);
     xml.push_str(&form_chart_localized_xml("dtFormat", t.get(61)?, child)?);
     scalar!("dtKeys", form_chart_bool(t.get(62)?)?);
-    scalar!("paletteKind", form_chart_code(t.get(63)?, &[("0", "Auto")])?);
+    scalar!(
+        "paletteKind",
+        form_chart_code(t.get(63)?, &[("0", "Auto")])?
+    );
     scalar!("animation", form_chart_code(t.get(64)?, &[("0", "Auto")])?);
     scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
     if t.get(82)?.trim() != "0" || t.get(83)?.trim() != "0" || t.get(84)?.trim() != "0" {
