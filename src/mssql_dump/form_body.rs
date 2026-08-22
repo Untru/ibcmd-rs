@@ -16116,12 +16116,31 @@ pub(super) fn parse_form_input_field_input_hint(
         .unwrap_or_default()
 }
 
+/// The events an extended tooltip's option record declares, read by the count
+/// the record itself states.
+///
+/// The reader used to accept the record only when it decoded to exactly one
+/// `URLProcessing` event, and returned `None` for anything else -- which did
+/// not merely drop the events: the caller treats a `None` here as "this is not
+/// a tooltip I can read" and falls back to the bare `<ExtendedTooltip
+/// name=… id=…/>`, so every other property of that tooltip was dropped with
+/// them.
+///
+/// Evidence, UT 11.5.27.75:
+/// `InformationRegisters/ЗаказыТорговыхПлощадок/Forms/ФормаСпискаЗаказов`
+/// tooltip `ГиперссылкаЗаказыНаТорговойПлощадкеРасширеннаяПодсказка` (id 428)
+/// declares one event, `{1,11707a99-…,"ЗаказыНаOzonНажатие",1,0,11707a99-…,0,1}`,
+/// which the platform writes as `<Event name="Click">ЗаказыНаOzonНажатие</Event>`;
+/// we wrote the tooltip empty, losing its `<TextColor>`, `<Hyperlink>` and
+/// `<Events>` alike.  The declared count is what the shared event reader
+/// already walks, so the name is no longer a gate.
 fn parse_form_extended_tooltip_option_events(fields: &[&str]) -> Option<Vec<FormBodyEvent>> {
-    if fields.first().map(|value| value.trim()) == Some("0") {
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if count == 0 {
         return Some(Vec::new());
     }
     let events = parse_form_child_item_event_record(fields);
-    (events.len() == 1 && events.first()?.name == "URLProcessing").then_some(events)
+    (events.len() == count).then_some(events)
 }
 
 /// Identity of the extended tooltip nested in a child-item record, read with
