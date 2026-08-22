@@ -7914,11 +7914,19 @@ pub(super) fn collect_form_item_rooted_chain_roots(
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
     let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
+    // Cloned out of the index before the loop borrows it: the walk below writes
+    // back into the same index.
+    let metadata_field_types = Arc::clone(&indexes.owner_scoped_bindings.metadata_field_types);
     let mut table_root = BTreeMap::new();
     let mut table_settings_composer_type = BTreeMap::new();
     for (table_id, binding) in &indexes.table_binding_by_id {
         if let Some((_, Some(kind))) =
-            resolve_form_settings_composer_chain(binding, &attribute_metadata_owners_by_id)
+            resolve_form_settings_composer_chain(
+                binding,
+                &attribute_metadata_owners_by_id,
+                object_refs,
+                &metadata_field_types,
+            )
         {
             table_settings_composer_type.insert(table_id.clone(), kind);
         }
@@ -17129,7 +17137,12 @@ pub(super) fn parse_form_child_item_data_path(
     let aggregate_member = parent_data_path.is_none();
     let parse_bound_slot = |field: &str, aggregate: bool| {
         let chain = FormOwnerScopedDataPath::from_option(
-            resolve_form_settings_composer_chain_data_path(field, attribute_metadata_owners_by_id)
+            resolve_form_settings_composer_chain_data_path(
+                field,
+                attribute_metadata_owners_by_id,
+                object_refs,
+                &owner_scoped_bindings.metadata_field_types,
+            )
                 .or_else(|| {
                     resolve_form_standard_period_column_data_path(
                         field,
@@ -18462,9 +18475,16 @@ fn form_settings_composer_member_walk(members: &[String]) -> Option<String> {
 pub(super) fn resolve_form_settings_composer_chain_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_field_types: &BTreeMap<String, String>,
 ) -> Option<String> {
-    resolve_form_settings_composer_chain(field, attribute_metadata_owners_by_id)
-        .map(|(path, _)| path)
+    resolve_form_settings_composer_chain(
+        field,
+        attribute_metadata_owners_by_id,
+        object_refs,
+        metadata_field_types,
+    )
+    .map(|(path, _)| path)
 }
 
 /// The composer chain plus the type it walked to, for the callers that need to
@@ -18472,6 +18492,8 @@ pub(super) fn resolve_form_settings_composer_chain_data_path(
 fn resolve_form_settings_composer_chain(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_field_types: &BTreeMap<String, String>,
 ) -> Option<(String, Option<FormSettingsComposerType>)> {
     let segments = parse_form_bound_chain_segments(field)?;
     let (root, members) = segments.split_first()?;
@@ -18493,15 +18515,55 @@ fn resolve_form_settings_composer_chain(
                     if index.trim() == "0"
                         && uuid
                             .trim()
-                            .eq_ignore_ascii_case(FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID) => {}
+                            .eq_ignore_ascii_case(FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID) =>
+                {
+                    path.push_str(".SettingsComposer");
+                }
                 // A dynamic list names its own composer by code rather than by the
                 // member uuid an object uses. The code is not free: `-6` reads
                 // `Parent` on the object attributes that carry one, so it opens the
                 // composer only where the attribute really is a dynamic list.
-                [code] if code.trim() == "-6" && attribute.has_dynamic_list_settings => {}
+                [code] if code.trim() == "-6" && attribute.has_dynamic_list_settings => {
+                    path.push_str(".SettingsComposer");
+                }
+                // An object can also own a composer as a metadata attribute of
+                // its own, and then the chain names that attribute's uuid where
+                // the object's built-in member would stand.  The route refused
+                // that shape, so the walk stopped at the form attribute and the
+                // export named the attribute alone.
+                //
+                // Two independent facts have to line up before a segment is read
+                // this way, so a plain metadata member of any other type still
+                // fails closed: the uuid has to resolve to a member of the very
+                // object the form attribute is typed as -- the same match the
+                // saved-field walk requires -- and that member's *declared* type
+                // has to be the settings composer itself.
+                //
+                // Evidence: UT 11.5.27.75,
+                // `DataProcessors/СверкаПродажЛьготныхТоваровОплаченныхЭСФСС/Forms/Форма`.
+                // Its two settings tables bind `{3,{1},{0,f69186c1-…},{1}}` and
+                // `{3,{1},{0,3fcc6fc5-…},{0}}`, which the platform writes
+                // `Объект.КомпоновщикНастроекОтбор.UserSettings` and
+                // `Объект.КомпоновщикНастроекОтчет.Settings`; the route refused
+                // both, and every column under those two tables fell back to
+                // naming the form attribute alone.
+                [index, uuid] if index.trim() == "0" && !rest.is_empty() => {
+                    let uuid = parse_non_zero_uuid(uuid.trim())?;
+                    if metadata_field_types.get(&uuid).map(String::as_str)
+                        != Some("dcsset:SettingsComposer")
+                    {
+                        return None;
+                    }
+                    let reference = object_refs.get(&uuid)?;
+                    let (owner_base, relative_path) = form_metadata_data_path_route(reference)?;
+                    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
+                        return None;
+                    }
+                    path.push('.');
+                    path.push_str(&relative_path);
+                }
                 _ => return None,
             }
-            path.push_str(".SettingsComposer");
             rest
         };
     let mut owner = Some(FormSettingsComposerType::SettingsComposer);
@@ -19330,8 +19392,13 @@ fn resolve_form_table_row_picture_member(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let extended = form_bound_chain_with_extra_segment(binding, segment)?;
-    resolve_form_settings_composer_chain_data_path(&extended, attribute_metadata_owners_by_id)
-        .or_else(|| {
+    resolve_form_settings_composer_chain_data_path(
+        &extended,
+        attribute_metadata_owners_by_id,
+        object_refs,
+        &owner_scoped_bindings.metadata_field_types,
+    )
+    .or_else(|| {
             resolve_form_bound_chain_member_path(
                 &extended,
                 attribute_names_by_id,

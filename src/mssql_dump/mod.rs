@@ -1001,8 +1001,9 @@ const METADATA_OBJECT_REF_TYPE_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f
 const CONSTANTS_SET_TYPE_UUID: &str = "dcfc3784-a14f-4786-ac7b-c82db5ba275f";
 const CHART_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
 const REPORT_BUILDER_TYPE_UUID: &str = "0dda99d9-ae9f-43d2-b7ac-44f3fb0d4059";
-const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str = "cab0d12b-3c88-4993-8edc-8c3827cadc7d";
-const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME: &str = "dcsset:SettingsComposer";
+pub(super) const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str =
+    "cab0d12b-3c88-4993-8edc-8c3827cadc7d";
+pub(super) const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME: &str = "dcsset:SettingsComposer";
 const DATA_COMPOSITION_SETTINGS_NAMESPACE_ATTRIBUTE: &str =
     r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#;
 // Platform type IDs used by serialized Form type patterns.
@@ -15832,7 +15833,7 @@ fn parse_metadata_child_value_types(
         .unwrap_or_default()
 }
 
-fn parse_metadata_child_value_types_with_builtin(
+pub(super) fn parse_metadata_child_value_types_with_builtin(
     text: &str,
     marker_start: usize,
     child_uuid: &str,
@@ -30281,7 +30282,7 @@ fn event_subscription_builtin_type_reference(
     None
 }
 
-fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
+pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
     match type_id {
         "acf6192e-81ca-46ef-93a6-5a6968b78663" => Some("v8:ValueTable"),
         "140b5ff4-37b1-4df5-b5ec-a0bfd2b94f8f" => Some("v8ui:FormattedString"),
