@@ -2156,11 +2156,11 @@ pub(super) fn extract_form_command_set_excluded_commands(
     extend_joint_form_excluded_commands(
         &mut commands,
         &command_set,
-        (
+        &[
             "441362c1-0c86-4f73-bf50-6e1048a2db73",
             "4c569466-1af5-4fc1-9b63-7bf6493097bf",
-        ),
-        ("Post", "UndoPosting"),
+        ],
+        &["Post", "UndoPosting"],
     );
     commands
 }
@@ -15696,14 +15696,20 @@ fn map_known_form_excluded_commands(
     commands
 }
 
+/// A group of excluded commands whose members are only ever observed together,
+/// so the corpus pins the *set* of names against the *set* of uuids and nothing
+/// pins which name belongs to which uuid.  The group is written as a group for
+/// that reason: naming the members individually would be a guess, and the
+/// element list the platform writes is a sorted set, so the group reproduces it
+/// exactly without claiming the pairing.
 fn extend_joint_form_excluded_commands(
     commands: &mut Vec<&'static str>,
     uuids: &[&str],
-    uuid_pair: (&str, &str),
-    command_pair: (&'static str, &'static str),
+    joint_uuids: &[&str],
+    joint_commands: &[&'static str],
 ) {
-    if uuids.contains(&uuid_pair.0) && uuids.contains(&uuid_pair.1) {
-        commands.extend([command_pair.0, command_pair.1]);
+    if joint_uuids.iter().all(|uuid| uuids.contains(uuid)) {
+        commands.extend(joint_commands.iter().copied());
         commands.sort_unstable();
         commands.dedup();
     }
@@ -15716,20 +15722,41 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
     extend_joint_form_excluded_commands(
         &mut commands,
         uuids,
-        (
+        &[
             "48e12019-0fd6-46eb-aab6-2acba716a623",
             "fc120c02-7f39-469b-b357-b2dd8d4b0765",
-        ),
-        ("AddAutoOrderItem", "Expand"),
+        ],
+        &["AddAutoOrderItem", "Expand"],
     );
     extend_joint_form_excluded_commands(
         &mut commands,
         uuids,
-        (
+        &[
             "15664824-eedc-4a92-9f6b-c89a2dead157",
             "d77e5787-b130-4355-8f8f-01ecec82f843",
-        ),
-        ("Choose", "ChooseAll"),
+        ],
+        &["Choose", "ChooseAll"],
+    );
+    // The three standard commands a settings table excludes beside
+    // `UserSettingItemProperties`.  Evidence: UT 11.5.27.75,
+    // `DataProcessors/СверкаПродажЛьготныхТоваровОплаченныхЭСФСС/Forms/Форма`
+    // table `КомпоновщикНастроекОтчетНастройки`, whose excluded-command list is
+    // `{4,1f1e900a-…,329bb47c-…,a10f1c0b-…,e809ae75-…}` and which the platform
+    // writes as `AddChart`, `AddNestedSchema`, `UserSettingItemProperties` and
+    // `UserSettings`.  `1f1e900a` is already named on its own elsewhere; the
+    // other three occur nowhere else in the configuration -- neither in another
+    // excluded-command list nor as a button's `<CommandName>` -- so which of the
+    // three names belongs to which uuid is unobserved and the group is named as
+    // a group.
+    extend_joint_form_excluded_commands(
+        &mut commands,
+        uuids,
+        &[
+            "329bb47c-392f-4779-a1af-347d06bb624b",
+            "a10f1c0b-73ec-448f-b6d2-be0c86e95712",
+            "e809ae75-11b6-480d-bc87-caf93b28236d",
+        ],
+        &["AddChart", "AddNestedSchema", "UserSettings"],
     );
     commands
 }
