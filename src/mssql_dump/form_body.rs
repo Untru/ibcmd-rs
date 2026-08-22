@@ -11723,9 +11723,19 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
             item.data_path = None;
             item.data_path_provenance = None;
         }
-        if let Some(cluster) = &mut item.choice_parameter_cluster {
-            *cluster.links_mut() = FormChoiceParameterLinks::Absent;
-        }
+        // `ChoiceParameterLinks` is not one of the properties a conditional
+        // group withholds from its descendants; blanking it here dropped links
+        // the platform does write.
+        //
+        // Evidence, UT 11.5.27.75:
+        // `Documents/КорректировкаРеализации/Forms/ФормаДокументаДоВводаОстатков`
+        // items `ТаблицаКорректировкиНоменклатураНабора` and
+        // `ТаблицаКорректировкиХарактеристикаНабора` are both descendants of a
+        // conditional group and the platform writes a one-link
+        // `<ChoiceParameterLinks>` on each -- `НалогообложениеНДС` ->
+        // `Объект.НалогообложениеНДС` with `DontChange`, and `Номенклатура` ->
+        // `Items.ТаблицаКорректировки.CurrentData.НоменклатураНабора` with
+        // `Clear`.  The blanking removed both.
         item.type_link = None;
         // The bound title is not one of the properties a conditional group
         // withholds from its descendants. UT 11.5.27.75 carries four groups
