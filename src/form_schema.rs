@@ -1354,17 +1354,38 @@ pub(crate) enum FormPictureValueKind {
 pub(crate) struct FormPictureValueSchema {
     kind: FormPictureValueKind,
     load_transparent: bool,
+    transparent_pixel: Option<(i64, i64)>,
 }
 
 impl FormPictureValueSchema {
     pub(crate) fn from_raw_layout(value: &[&str]) -> Option<Self> {
         if value.first().map(|field| field.trim()) != Some("4")
             || value.get(3).map(|field| field.trim()) != Some("\"\"")
-            || value.get(4).map(|field| field.trim()) != Some("-1")
-            || value.get(5).map(|field| field.trim()) != Some("-1")
         {
             return None;
         }
+        // Members 4 and 5 are the transparent pixel's coordinates, `-1, -1`
+        // when the picture declares none. The pair was read as a fixed `-1,
+        // -1` prologue, so a record that does declare a pixel failed the shape
+        // test and the whole picture went unwritten -- not just the pixel.
+        //
+        // Evidence: UT 11.5.27.75,
+        // `Catalogs/ИсточникиДанныхПланирования/Forms/ФормаЗаполнения`
+        // `PictureField` `ПравилоЗаполненияПрисоединять`, whose picture record
+        // reads `{4,3,{0},"",7,4,1,{<payload>},0,""}` and which the platform
+        // writes as `<xr:Abs>ValuesPicture.bmp</xr:Abs>`,
+        // `<xr:LoadTransparent>true</xr:LoadTransparent>` and
+        // `<xr:TransparentPixel x="7" y="4"/>`. The same pair in the same two
+        // members is what the `ExtPicture` writer already reads for the
+        // stand-alone common pictures.
+        let transparent_pixel = match (
+            value.get(4).map(|field| field.trim()),
+            value.get(5).map(|field| field.trim()),
+        ) {
+            (Some("-1"), Some("-1")) => None,
+            (Some(x), Some(y)) => Some((x.parse().ok()?, y.parse().ok()?)),
+            _ => return None,
+        };
         let load_transparent = match value.get(6).map(|field| field.trim()) {
             Some("0") => false,
             Some("1") => true,
@@ -1406,6 +1427,7 @@ impl FormPictureValueSchema {
         Some(Self {
             kind,
             load_transparent,
+            transparent_pixel,
         })
     }
 
@@ -1415,6 +1437,10 @@ impl FormPictureValueSchema {
 
     pub(crate) const fn load_transparent(self) -> bool {
         self.load_transparent
+    }
+
+    pub(crate) const fn transparent_pixel(self) -> Option<(i64, i64)> {
+        self.transparent_pixel
     }
 }
 

@@ -1403,6 +1403,7 @@ pub(super) struct FormChildItem {
     pub(super) image_scale: Option<String>,
     pub(super) nonselected_picture_text: Vec<(String, String)>,
     pub(super) picture_file_name: Option<String>,
+    pub(super) picture_transparent_pixel: Option<(i64, i64)>,
     pub(super) title: Vec<(String, String)>,
     pub(super) usual_group_shortcut: Option<String>,
     pub(super) title_formatted: Option<bool>,
@@ -11451,12 +11452,12 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(25 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
                 .map(|(_, load_transparent)| load_transparent)
-                .or_else(|| embedded_picture.as_ref().map(|(_, flag)| *flag))
+                .or_else(|| embedded_picture.as_ref().map(|picture| picture.load_transparent))
                 .unwrap_or(false)
         } else if tag == "PictureField" {
             parse_form_picture_field_value(picture_field_options.as_deref(), object_refs)
                 .map(|(_, load_transparent)| load_transparent)
-                .or_else(|| embedded_picture.as_ref().map(|(_, flag)| *flag))
+                .or_else(|| embedded_picture.as_ref().map(|picture| picture.load_transparent))
                 .unwrap_or(false)
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_value(&fields, object_refs)
@@ -11548,8 +11549,11 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             embedded_picture
                 .as_ref()
-                .map(|(file_name, _)| file_name.clone())
+                .map(|picture| picture.file_name.clone())
         },
+        picture_transparent_pixel: embedded_picture
+            .as_ref()
+            .and_then(|picture| picture.transparent_pixel),
         title,
         usual_group_shortcut: extended_group_options
             .as_ref()
@@ -16355,7 +16359,7 @@ pub(super) fn parse_form_picture_decoration_file_name(fields: &[&str]) -> Option
 fn parse_form_embedded_picture_file_name(
     field: &str,
     property_name: &str,
-) -> Option<(String, bool)> {
+) -> Option<FormEmbeddedPicture> {
     let value = split_1c_braced_fields(field.trim(), 0)?;
     let schema = FormPictureValueSchema::from_raw_layout(&value)?;
     if schema.kind() != FormPictureValueKind::Embedded {
@@ -16368,10 +16372,20 @@ fn parse_form_embedded_picture_file_name(
     if !is_form_item_picture_content(&content) {
         return None;
     }
-    Some((
-        form_item_picture_file_name(property_name, &content),
-        schema.load_transparent(),
-    ))
+    Some(FormEmbeddedPicture {
+        file_name: form_item_picture_file_name(property_name, &content),
+        load_transparent: schema.load_transparent(),
+        transparent_pixel: schema.transparent_pixel(),
+    })
+}
+
+/// A control's inline picture: the file name the asset writer gives the payload,
+/// the transparency flag and the transparent pixel the record declares.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormEmbeddedPicture {
+    file_name: String,
+    load_transparent: bool,
+    transparent_pixel: Option<(i64, i64)>,
 }
 
 pub(super) fn parse_form_picture_decoration_picture_value(
@@ -23483,11 +23497,18 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<ValuesPicture>\r\n\
 {tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</ValuesPicture>\r\n",
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
                 escape_xml_text(file_name),
                 xml_bool(item.picture_load_transparent)
             ));
+            // The transparent pixel closes the picture, exactly as the
+            // stand-alone `ExtPicture` writer already spells it.
+            if let Some((x, y)) = item.picture_transparent_pixel {
+                xml.push_str(&format!(
+                    "{tab}\t\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+                ));
+            }
+            xml.push_str(&format!("{tab}\t</ValuesPicture>\r\n"));
         }
         // A `PictureField` writes `BorderColor` between its `ValuesPicture` and
         // its `Border`. UT 11.5.27.75 native tree, all 24 picture fields that
