@@ -1269,6 +1269,22 @@ pub(super) fn build_metadata_field_reference_index_from_texts(
 /// than approximated: the only consumer dereferences the declared type to reach
 /// its standard attributes, and a value with more than one possible type has no
 /// single set of those.
+/// The one platform type this index has to name in its own right.
+///
+/// A data-composition settings composer is not a configuration type, so it is
+/// absent from the type index and the child that declares it came out with no
+/// declared type at all -- which is what left the settings-composer route with
+/// nothing to check a chain segment against.  The row names exactly that one
+/// platform type; every other builtin stays out, so no other child changes its
+/// answer.
+fn settings_composer_builtin_type_reference(type_id: &str) -> Option<&'static str> {
+    builtin_type_reference(type_id).or_else(|| {
+        type_id
+            .eq_ignore_ascii_case(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID)
+            .then_some(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME)
+    })
+}
+
 pub(super) fn build_metadata_field_type_reference_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,
@@ -1278,8 +1294,13 @@ pub(super) fn build_metadata_field_type_reference_index_from_texts(
         for (header, marker_start) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
         {
-            let value_types =
-                parse_metadata_child_value_types(&row.text, marker_start, &header.uuid, type_index);
+            let value_types = parse_metadata_child_value_types_with_builtin(
+                &row.text,
+                marker_start,
+                &header.uuid,
+                type_index,
+                settings_composer_builtin_type_reference,
+            );
             let [ConstantValueType::Reference { reference }] = value_types.as_slice() else {
                 continue;
             };

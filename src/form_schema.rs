@@ -546,8 +546,33 @@ pub(crate) struct FormRootAutoCommandBarSchema {
 }
 
 impl FormRootAutoCommandBarSchema {
+    /// The item id of a form's own command bar is `-1` on 5 200 of the 5 201
+    /// forms of UT 11.5.27.75 -- and on the 5 201st it is an ordinary item id.
+    /// Requiring `-1` therefore refused that one record outright and the whole
+    /// `<AutoCommandBar>` block, its `<Autofill>false</Autofill>` and its
+    /// fourteen buttons went unwritten.
+    ///
+    /// Evidence: `Documents/ЭлектроннаяСопроводительнаяВедомость/Forms/ОсновнаяФорма`
+    /// carries `{22,{607,02023637-…},0,0,0,9,"ФормаКоманднаяПанель",…}` as a
+    /// direct member of its form record, and the platform writes
+    /// `<AutoCommandBar name="ФормаКоманднаяПанель" id="607">`.
+    ///
+    /// The `-1` route stays exactly as it was, so none of the 5 200 can change
+    /// answer; a record with any other id is accepted only when it declares
+    /// itself an auto command bar in slot 5, the same `9` the nested schema
+    /// already requires.  On all 22 form records dumped for this package the
+    /// two routes select the same record wherever the `-1` one selects any.
     pub(crate) fn from_raw_layout(wrapper: &str, item_id: &str, fields: &[&str]) -> Option<Self> {
-        if wrapper != "22" || item_id != "-1" {
+        const AUTO_COMMAND_BAR_DISCRIMINATOR_SLOT: usize = 5;
+        if wrapper != "22" {
+            return None;
+        }
+        if item_id != "-1"
+            && fields
+                .get(AUTO_COMMAND_BAR_DISCRIMINATOR_SLOT)
+                .map(|field| field.trim())
+                != Some("9")
+        {
             return None;
         }
         let marker = match fields.get(FormNestedAutoCommandBarSchema::MARKER_SLOT) {
@@ -1354,17 +1379,38 @@ pub(crate) enum FormPictureValueKind {
 pub(crate) struct FormPictureValueSchema {
     kind: FormPictureValueKind,
     load_transparent: bool,
+    transparent_pixel: Option<(i64, i64)>,
 }
 
 impl FormPictureValueSchema {
     pub(crate) fn from_raw_layout(value: &[&str]) -> Option<Self> {
         if value.first().map(|field| field.trim()) != Some("4")
             || value.get(3).map(|field| field.trim()) != Some("\"\"")
-            || value.get(4).map(|field| field.trim()) != Some("-1")
-            || value.get(5).map(|field| field.trim()) != Some("-1")
         {
             return None;
         }
+        // Members 4 and 5 are the transparent pixel's coordinates, `-1, -1`
+        // when the picture declares none. The pair was read as a fixed `-1,
+        // -1` prologue, so a record that does declare a pixel failed the shape
+        // test and the whole picture went unwritten -- not just the pixel.
+        //
+        // Evidence: UT 11.5.27.75,
+        // `Catalogs/ИсточникиДанныхПланирования/Forms/ФормаЗаполнения`
+        // `PictureField` `ПравилоЗаполненияПрисоединять`, whose picture record
+        // reads `{4,3,{0},"",7,4,1,{<payload>},0,""}` and which the platform
+        // writes as `<xr:Abs>ValuesPicture.bmp</xr:Abs>`,
+        // `<xr:LoadTransparent>true</xr:LoadTransparent>` and
+        // `<xr:TransparentPixel x="7" y="4"/>`. The same pair in the same two
+        // members is what the `ExtPicture` writer already reads for the
+        // stand-alone common pictures.
+        let transparent_pixel = match (
+            value.get(4).map(|field| field.trim()),
+            value.get(5).map(|field| field.trim()),
+        ) {
+            (Some("-1"), Some("-1")) => None,
+            (Some(x), Some(y)) => Some((x.parse().ok()?, y.parse().ok()?)),
+            _ => return None,
+        };
         let load_transparent = match value.get(6).map(|field| field.trim()) {
             Some("0") => false,
             Some("1") => true,
@@ -1406,6 +1452,7 @@ impl FormPictureValueSchema {
         Some(Self {
             kind,
             load_transparent,
+            transparent_pixel,
         })
     }
 
@@ -1415,6 +1462,10 @@ impl FormPictureValueSchema {
 
     pub(crate) const fn load_transparent(self) -> bool {
         self.load_transparent
+    }
+
+    pub(crate) const fn transparent_pixel(self) -> Option<(i64, i64)> {
+        self.transparent_pixel
     }
 }
 
@@ -1562,6 +1613,44 @@ impl FormFieldHeaderPictureSchema {
         let value = FormPictureValueSchema::from_raw_layout(value)?;
         Some(Self {
             picture_slot: Self::COLUMN_GROUP_PICTURE_SLOT,
+            value,
+        })
+    }
+
+    /// The footer picture of the same four field kinds, read from the slot
+    /// directly behind the header one.
+    ///
+    /// The header picture already establishes that a field carries its two
+    /// column pictures as adjacent picture records; the footer is the second
+    /// of the pair.  Evidence, UT 11.5.27.75: slot `30 + offset` holds the
+    /// platform's "empty" picture record on every field of the corpus but two,
+    /// and a reference record on exactly the two the platform writes
+    /// `<FooterPicture>` on - `CommonForms/РаспределениеРасходовНаПоступления`
+    /// item `СписокДокументовВес` (`CommonPicture.Предупреждение32`) and
+    /// `DataProcessors/ТорговыеПредложения/Forms/ФормированиеЗаказов` item
+    /// `КонтрагентыСуммаСНДС` (`CommonPicture.Сумма`), both with the
+    /// transparency flag clear.  The record was never read, so the element was
+    /// never written.
+    pub(crate) fn from_footer_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        value: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "37"
+            || field_count != 59 + top_level_offset
+            || top_level_offset > 1
+            || !matches!(
+                item_tag,
+                "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
+            )
+        {
+            return None;
+        }
+        let value = FormPictureValueSchema::from_raw_layout(value)?;
+        Some(Self {
+            picture_slot: 30 + top_level_offset,
             value,
         })
     }

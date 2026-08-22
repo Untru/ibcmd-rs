@@ -816,6 +816,7 @@ pub(super) struct FormAttribute {
     pub(super) functional_options: Vec<String>,
     pub(super) settings: Option<FormDynamicListSettings>,
     pub(super) spreadsheet_document_settings: Option<String>,
+    pub(super) chart_settings: Option<String>,
     pub(super) type_description_settings: Option<Vec<ConstantValueType>>,
     /// The field-map ids of a dynamic list whose field name is outside the
     /// list's resolvable-field universe. The platform marks a path onto one of
@@ -1395,11 +1396,15 @@ pub(super) struct FormChildItem {
     pub(super) header_picture_ref: Option<String>,
     pub(super) header_picture_file_name: Option<String>,
     pub(super) header_picture_load_transparent: bool,
+    pub(super) footer_picture_ref: Option<String>,
+    pub(super) footer_picture_file_name: Option<String>,
+    pub(super) footer_picture_load_transparent: bool,
     pub(super) picture_size: Option<&'static str>,
     pub(super) zoomable: Option<bool>,
     pub(super) image_scale: Option<String>,
     pub(super) nonselected_picture_text: Vec<(String, String)>,
     pub(super) picture_file_name: Option<String>,
+    pub(super) picture_transparent_pixel: Option<(i64, i64)>,
     pub(super) title: Vec<(String, String)>,
     pub(super) usual_group_shortcut: Option<String>,
     pub(super) title_formatted: Option<bool>,
@@ -2152,11 +2157,11 @@ pub(super) fn extract_form_command_set_excluded_commands(
     extend_joint_form_excluded_commands(
         &mut commands,
         &command_set,
-        (
+        &[
             "441362c1-0c86-4f73-bf50-6e1048a2db73",
             "4c569466-1af5-4fc1-9b63-7bf6493097bf",
-        ),
-        ("Post", "UndoPosting"),
+        ],
+        &["Post", "UndoPosting"],
     );
     commands
 }
@@ -2271,6 +2276,14 @@ pub(super) fn extract_form_report_result_view_mode(fields: &[&str]) -> Option<&'
     ) {
         (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("0")) => Some("Auto"),
         (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("1")) => Some("Default"),
+        // `2` is the third value the property takes, and the table stopped at
+        // `1`, so the element went unwritten on the one root of the
+        // configuration that carries it.  Evidence, UT 11.5.27.75:
+        // `Reports/СверкаРасчетовСКонтрагентами/Forms/ФормаОтчета` holds
+        // `27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,2}` in its root
+        // property bag, and the platform writes
+        // `<ReportResultViewMode>Compact</ReportResultViewMode>`.
+        (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("2")) => Some("Compact"),
         _ => None,
     }
 }
@@ -3480,6 +3493,9 @@ fn parse_form_attribute_with_dcs_type_index(
     let spreadsheet_document_settings = fields.get(14).and_then(|field| {
         parse_form_spreadsheet_document_settings(field, &value_types, object_refs)
     });
+    let chart_settings = fields
+        .get(14)
+        .and_then(|field| parse_form_chart_settings_xml(field, &value_types, object_refs, 3));
     let mut use_always = parse_form_attribute_direct_use_always(
         &name,
         fields.get(8).copied(),
@@ -3557,6 +3573,7 @@ fn parse_form_attribute_with_dcs_type_index(
         functional_options,
         settings,
         spreadsheet_document_settings,
+        chart_settings,
         type_description_settings,
         unresolvable_field_item_ids,
     })
@@ -7902,12 +7919,18 @@ pub(super) fn collect_form_item_rooted_chain_roots(
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
     let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
+    // Cloned out of the index before the loop borrows it: the walk below writes
+    // back into the same index.
+    let metadata_field_types = Arc::clone(&indexes.owner_scoped_bindings.metadata_field_types);
     let mut table_root = BTreeMap::new();
     let mut table_settings_composer_type = BTreeMap::new();
     for (table_id, binding) in &indexes.table_binding_by_id {
-        if let Some((_, Some(kind))) =
-            resolve_form_settings_composer_chain(binding, &attribute_metadata_owners_by_id)
-        {
+        if let Some((_, Some(kind))) = resolve_form_settings_composer_chain(
+            binding,
+            &attribute_metadata_owners_by_id,
+            object_refs,
+            &metadata_field_types,
+        ) {
             table_settings_composer_type.insert(table_id.clone(), kind);
         }
         let Some(segments) = parse_form_bound_chain_segments(binding) else {
@@ -7973,6 +7996,7 @@ pub(super) enum FormStandardCommandOwnerKind {
     SpreadsheetDocument,
     GraphicalSchema,
     FormattedDocument,
+    PdfDocument,
 }
 
 #[cfg(test)]
@@ -8474,6 +8498,19 @@ fn collect_form_child_item_indexes_from_field_traced(
             },
         );
     }
+    if let Some(wrapper) = wrapper
+        && form_pdf_document_field_layout(wrapper, &fields)
+        && let Some(id) = form_child_item_id(&fields)
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        indexes.standard_command_owner_name_by_id.insert(
+            id.to_string(),
+            FormStandardCommandOwner {
+                name,
+                kind: FormStandardCommandOwnerKind::PdfDocument,
+            },
+        );
+    }
     if let Some((_, _, id, name)) = structural_identity.as_ref() {
         indexes
             .command_source_owner_name_by_id
@@ -8741,6 +8778,15 @@ pub(super) fn form_formatted_document_field_layout(wrapper: &str, fields: &[&str
         && fields
             .get(5 + form_input_field_top_level_offset(fields))
             .is_some_and(|value| value.trim() == "17")
+}
+
+/// The PDF viewer field, told apart by the same type marker the item-tag table
+/// already reads for it.
+pub(super) fn form_pdf_document_field_layout(wrapper: &str, fields: &[&str]) -> bool {
+    wrapper == "37"
+        && fields
+            .get(5 + form_input_field_top_level_offset(fields))
+            .is_some_and(|value| value.trim() == "20")
 }
 
 pub(super) fn form_child_item_id<'a>(fields: &[&'a str]) -> Option<&'a str> {
@@ -9608,6 +9654,13 @@ fn parse_form_child_item_with_metadata_owners(
         object_refs,
     )
     .or_else(|| parse_form_column_group_header_picture(wrapper, tag, fields, object_refs));
+    let footer_picture = parse_form_field_footer_picture(
+        wrapper,
+        tag,
+        &fields,
+        input_field_top_level_offset,
+        object_refs,
+    );
     let choice_button_picture = field_schema_and_options
         .as_ref()
         .and_then(|(schema, options)| {
@@ -10780,8 +10833,11 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.width().map(str::to_owned))
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.width(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.width(options))
+        {
+            Some(value)
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(16 + button_top_level_offset)
@@ -10823,8 +10879,11 @@ fn parse_form_child_item_with_metadata_owners(
                         && default_height != Some(value.as_str())
                         && value.parse::<u32>().is_ok()
                 })
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.height(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.height(options))
+        {
+            Some(value)
         } else if tag == "Table" {
             table_schema.and_then(|schema| schema.height(&fields))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
@@ -11046,8 +11105,11 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|options| options.horizontal_stretch)
         } else if tag == "Page" {
             page_properties.and_then(|properties| properties.horizontal_stretch())
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.horizontal_stretch(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.horizontal_stretch(options))
+        {
+            Some(value)
         } else if let Some(value) =
             parse_form_document_field_flag(tag, fields, |layout| layout.horizontal_stretch)
         {
@@ -11441,12 +11503,20 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(25 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
                 .map(|(_, load_transparent)| load_transparent)
-                .or_else(|| embedded_picture.as_ref().map(|(_, flag)| *flag))
+                .or_else(|| {
+                    embedded_picture
+                        .as_ref()
+                        .map(|picture| picture.load_transparent)
+                })
                 .unwrap_or(false)
         } else if tag == "PictureField" {
             parse_form_picture_field_value(picture_field_options.as_deref(), object_refs)
                 .map(|(_, load_transparent)| load_transparent)
-                .or_else(|| embedded_picture.as_ref().map(|(_, flag)| *flag))
+                .or_else(|| {
+                    embedded_picture
+                        .as_ref()
+                        .map(|picture| picture.load_transparent)
+                })
                 .unwrap_or(false)
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_value(&fields, object_refs)
@@ -11472,6 +11542,15 @@ fn parse_form_child_item_with_metadata_owners(
             .as_ref()
             .and_then(|picture| picture.file_name.clone()),
         header_picture_load_transparent: header_picture
+            .as_ref()
+            .is_some_and(|picture| picture.load_transparent),
+        footer_picture_ref: footer_picture
+            .as_ref()
+            .and_then(|picture| picture.reference.clone()),
+        footer_picture_file_name: footer_picture
+            .as_ref()
+            .and_then(|picture| picture.file_name.clone()),
+        footer_picture_load_transparent: footer_picture
             .as_ref()
             .is_some_and(|picture| picture.load_transparent),
         picture_size: if tag == "PictureDecoration" {
@@ -11529,8 +11608,11 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             embedded_picture
                 .as_ref()
-                .map(|(file_name, _)| file_name.clone())
+                .map(|picture| picture.file_name.clone())
         },
+        picture_transparent_pixel: embedded_picture
+            .as_ref()
+            .and_then(|picture| picture.transparent_pixel),
         title,
         usual_group_shortcut: extended_group_options
             .as_ref()
@@ -11677,9 +11759,19 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
             item.data_path = None;
             item.data_path_provenance = None;
         }
-        if let Some(cluster) = &mut item.choice_parameter_cluster {
-            *cluster.links_mut() = FormChoiceParameterLinks::Absent;
-        }
+        // `ChoiceParameterLinks` is not one of the properties a conditional
+        // group withholds from its descendants; blanking it here dropped links
+        // the platform does write.
+        //
+        // Evidence, UT 11.5.27.75:
+        // `Documents/КорректировкаРеализации/Forms/ФормаДокументаДоВводаОстатков`
+        // items `ТаблицаКорректировкиНоменклатураНабора` and
+        // `ТаблицаКорректировкиХарактеристикаНабора` are both descendants of a
+        // conditional group and the platform writes a one-link
+        // `<ChoiceParameterLinks>` on each -- `НалогообложениеНДС` ->
+        // `Объект.НалогообложениеНДС` with `DontChange`, and `Номенклатура` ->
+        // `Items.ТаблицаКорректировки.CurrentData.НоменклатураНабора` with
+        // `Clear`.  The blanking removed both.
         item.type_link = None;
         // The bound title is not one of the properties a conditional group
         // withholds from its descendants. UT 11.5.27.75 carries four groups
@@ -12603,6 +12695,48 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: None,
             horizontal_stretch: None,
             vertical_stretch: None,
+            font: None,
+        },
+    ),
+    (
+        // The chart field's own 11-member tuple, which no geometry row
+        // claimed, so none of its extents or stretch flags ever reached the
+        // XML.  Its extent pair sits in the same first two slots and carries
+        // the same `50`/`10` unwritten defaults the other character-metric
+        // document fields do, and the stretch pair sits where the picture and
+        // spreadsheet fields keep theirs.
+        //
+        // Evidence: UT 11.5.27.75 has exactly five `ChartField` items and this
+        // row is a total function of the platform's answer on all five.
+        // `Catalogs/ВариантыАнализаЦелевыхПоказателей/Forms/НастройкаДемоДанных`
+        // `Диаграмма`, `InformationRegisters/СезонныеКоэффициенты/Forms/СезонныеКоэффициенты`
+        // `Диаграмма` and
+        // `DataProcessors/ОценкаПроизводительности/Forms/ПодборЦелевогоВремениКлючевыхОпераций`
+        // `ДиаграммаЗамеровВремени` all read `{1,50,10,1,1,{0,1,0},1,0,0,1,0}`
+        // and the platform writes no extent and no stretch on any of them;
+        // `Reports/СверкаРасчетовСКонтрагентами/Forms/ФормаОтчета`
+        // `СостояниеСверки` reads `{1,35,10,0,0,…,1,0}` and is written
+        // `<Width>35</Width>`, `<HorizontalStretch>false</HorizontalStretch>`,
+        // `<VerticalStretch>false</VerticalStretch>`;
+        // `DataProcessors/ПроверкаКонтрагента/Forms/Форма`
+        // `ДиаграммаПоказателей` reads `{1,45,10,0,0,…,1,15}` and adds
+        // `<MaxHeight>15</MaxHeight>`.
+        //
+        // No max-width or auto-max coordinate is claimed: all five items agree
+        // slot for slot across the rest of the tuple and none of them carries
+        // any such element, so nothing in the corpus tells those slots apart.
+        "ChartField",
+        FormDocumentFieldGeometry {
+            discriminator: "1",
+            len: 11,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: Some(10),
+            auto_max_width: None,
+            auto_max_height: None,
+            horizontal_stretch: Some(3),
+            vertical_stretch: Some(4),
             font: None,
         },
     ),
@@ -15582,14 +15716,20 @@ fn map_known_form_excluded_commands(
     commands
 }
 
+/// A group of excluded commands whose members are only ever observed together,
+/// so the corpus pins the *set* of names against the *set* of uuids and nothing
+/// pins which name belongs to which uuid.  The group is written as a group for
+/// that reason: naming the members individually would be a guess, and the
+/// element list the platform writes is a sorted set, so the group reproduces it
+/// exactly without claiming the pairing.
 fn extend_joint_form_excluded_commands(
     commands: &mut Vec<&'static str>,
     uuids: &[&str],
-    uuid_pair: (&str, &str),
-    command_pair: (&'static str, &'static str),
+    joint_uuids: &[&str],
+    joint_commands: &[&'static str],
 ) {
-    if uuids.contains(&uuid_pair.0) && uuids.contains(&uuid_pair.1) {
-        commands.extend([command_pair.0, command_pair.1]);
+    if joint_uuids.iter().all(|uuid| uuids.contains(uuid)) {
+        commands.extend(joint_commands.iter().copied());
         commands.sort_unstable();
         commands.dedup();
     }
@@ -15602,20 +15742,41 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
     extend_joint_form_excluded_commands(
         &mut commands,
         uuids,
-        (
+        &[
             "48e12019-0fd6-46eb-aab6-2acba716a623",
             "fc120c02-7f39-469b-b357-b2dd8d4b0765",
-        ),
-        ("AddAutoOrderItem", "Expand"),
+        ],
+        &["AddAutoOrderItem", "Expand"],
     );
     extend_joint_form_excluded_commands(
         &mut commands,
         uuids,
-        (
+        &[
             "15664824-eedc-4a92-9f6b-c89a2dead157",
             "d77e5787-b130-4355-8f8f-01ecec82f843",
-        ),
-        ("Choose", "ChooseAll"),
+        ],
+        &["Choose", "ChooseAll"],
+    );
+    // The three standard commands a settings table excludes beside
+    // `UserSettingItemProperties`.  Evidence: UT 11.5.27.75,
+    // `DataProcessors/СверкаПродажЛьготныхТоваровОплаченныхЭСФСС/Forms/Форма`
+    // table `КомпоновщикНастроекОтчетНастройки`, whose excluded-command list is
+    // `{4,1f1e900a-…,329bb47c-…,a10f1c0b-…,e809ae75-…}` and which the platform
+    // writes as `AddChart`, `AddNestedSchema`, `UserSettingItemProperties` and
+    // `UserSettings`.  `1f1e900a` is already named on its own elsewhere; the
+    // other three occur nowhere else in the configuration -- neither in another
+    // excluded-command list nor as a button's `<CommandName>` -- so which of the
+    // three names belongs to which uuid is unobserved and the group is named as
+    // a group.
+    extend_joint_form_excluded_commands(
+        &mut commands,
+        uuids,
+        &[
+            "329bb47c-392f-4779-a1af-347d06bb624b",
+            "a10f1c0b-73ec-448f-b6d2-be0c86e95712",
+            "e809ae75-11b6-480d-bc87-caf93b28236d",
+        ],
+        &["AddChart", "AddNestedSchema", "UserSettings"],
     );
     commands
 }
@@ -16093,12 +16254,31 @@ pub(super) fn parse_form_input_field_input_hint(
         .unwrap_or_default()
 }
 
+/// The events an extended tooltip's option record declares, read by the count
+/// the record itself states.
+///
+/// The reader used to accept the record only when it decoded to exactly one
+/// `URLProcessing` event, and returned `None` for anything else -- which did
+/// not merely drop the events: the caller treats a `None` here as "this is not
+/// a tooltip I can read" and falls back to the bare `<ExtendedTooltip
+/// name=… id=…/>`, so every other property of that tooltip was dropped with
+/// them.
+///
+/// Evidence, UT 11.5.27.75:
+/// `InformationRegisters/ЗаказыТорговыхПлощадок/Forms/ФормаСпискаЗаказов`
+/// tooltip `ГиперссылкаЗаказыНаТорговойПлощадкеРасширеннаяПодсказка` (id 428)
+/// declares one event, `{1,11707a99-…,"ЗаказыНаOzonНажатие",1,0,11707a99-…,0,1}`,
+/// which the platform writes as `<Event name="Click">ЗаказыНаOzonНажатие</Event>`;
+/// we wrote the tooltip empty, losing its `<TextColor>`, `<Hyperlink>` and
+/// `<Events>` alike.  The declared count is what the shared event reader
+/// already walks, so the name is no longer a gate.
 fn parse_form_extended_tooltip_option_events(fields: &[&str]) -> Option<Vec<FormBodyEvent>> {
-    if fields.first().map(|value| value.trim()) == Some("0") {
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if count == 0 {
         return Some(Vec::new());
     }
     let events = parse_form_child_item_event_record(fields);
-    (events.len() == 1 && events.first()?.name == "URLProcessing").then_some(events)
+    (events.len() == count).then_some(events)
 }
 
 /// Identity of the extended tooltip nested in a child-item record, read with
@@ -16336,7 +16516,7 @@ pub(super) fn parse_form_picture_decoration_file_name(fields: &[&str]) -> Option
 fn parse_form_embedded_picture_file_name(
     field: &str,
     property_name: &str,
-) -> Option<(String, bool)> {
+) -> Option<FormEmbeddedPicture> {
     let value = split_1c_braced_fields(field.trim(), 0)?;
     let schema = FormPictureValueSchema::from_raw_layout(&value)?;
     if schema.kind() != FormPictureValueKind::Embedded {
@@ -16349,10 +16529,20 @@ fn parse_form_embedded_picture_file_name(
     if !is_form_item_picture_content(&content) {
         return None;
     }
-    Some((
-        form_item_picture_file_name(property_name, &content),
-        schema.load_transparent(),
-    ))
+    Some(FormEmbeddedPicture {
+        file_name: form_item_picture_file_name(property_name, &content),
+        load_transparent: schema.load_transparent(),
+        transparent_pixel: schema.transparent_pixel(),
+    })
+}
+
+/// A control's inline picture: the file name the asset writer gives the payload,
+/// the transparency flag and the transparent pixel the record declares.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormEmbeddedPicture {
+    file_name: String,
+    load_transparent: bool,
+    transparent_pixel: Option<(i64, i64)>,
 }
 
 pub(super) fn parse_form_picture_decoration_picture_value(
@@ -16488,6 +16678,37 @@ fn parse_form_field_header_picture(
         schema.kind(),
         schema.load_transparent(),
         "HeaderPicture",
+        object_refs,
+    )
+}
+
+/// `FooterPicture` of a field, read from the slot behind its header picture.
+fn parse_form_field_footer_picture(
+    wrapper: &str,
+    item_tag: &str,
+    fields: &[&str],
+    top_level_offset: usize,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormOwnedPicture> {
+    let picture_slot = 30 + top_level_offset;
+    let raw = fields.get(picture_slot)?.trim();
+    let value = split_1c_braced_fields(raw, 0)?;
+    let schema = FormFieldHeaderPictureSchema::from_footer_layout(
+        wrapper,
+        fields.len(),
+        item_tag,
+        top_level_offset,
+        &value,
+    )?;
+    if schema.picture_slot() != picture_slot {
+        return None;
+    }
+    parse_form_owned_picture(
+        raw,
+        &value,
+        schema.kind(),
+        schema.load_transparent(),
+        "FooterPicture",
         object_refs,
     )
 }
@@ -16963,35 +17184,37 @@ pub(super) fn parse_form_child_item_data_path(
     let aggregate_member = parent_data_path.is_none();
     let parse_bound_slot = |field: &str, aggregate: bool| {
         let chain = FormOwnerScopedDataPath::from_option(
-            resolve_form_settings_composer_chain_data_path(field, attribute_metadata_owners_by_id)
-                .or_else(|| {
-                    resolve_form_standard_period_column_data_path(
-                        field,
-                        attribute_metadata_owners_by_id,
-                    )
-                })
-                .or_else(|| {
-                    resolve_form_bound_chain_member_path(
-                        field,
-                        attribute_names_by_id,
-                        owner_scoped_bindings,
-                        object_refs,
-                        aggregate,
-                    )
-                })
-                // A dynamic list's own negative member is named by the source,
-                // so it is read before the routes that spell a name the source
-                // never states. The table-path index reached `{2,{2},{-2}}` on
-                // `DataProcessors/СервисSellmonitor/Forms/ПодборКарточекТоваров`
-                // and answered it with the bound item's own name,
-                // `СписокМаркетплейсOzon.СписокМаркетплейсOzonОтбор`, where the
-                // platform writes `СписокМаркетплейсOzon.Filter`.
-                .or_else(|| {
-                    resolve_form_dynamic_list_member_data_path(
-                        field,
-                        attribute_metadata_owners_by_id,
-                    )
-                }),
+            resolve_form_settings_composer_chain_data_path(
+                field,
+                attribute_metadata_owners_by_id,
+                object_refs,
+                &owner_scoped_bindings.metadata_field_types,
+            )
+            .or_else(|| {
+                resolve_form_standard_period_column_data_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                )
+            })
+            .or_else(|| {
+                resolve_form_bound_chain_member_path(
+                    field,
+                    attribute_names_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                    aggregate,
+                )
+            })
+            // A dynamic list's own negative member is named by the source,
+            // so it is read before the routes that spell a name the source
+            // never states. The table-path index reached `{2,{2},{-2}}` on
+            // `DataProcessors/СервисSellmonitor/Forms/ПодборКарточекТоваров`
+            // and answered it with the bound item's own name,
+            // `СписокМаркетплейсOzon.СписокМаркетплейсOzonОтбор`, where the
+            // platform writes `СписокМаркетплейсOzon.Filter`.
+            .or_else(|| {
+                resolve_form_dynamic_list_member_data_path(field, attribute_metadata_owners_by_id)
+            }),
         );
         if !matches!(chain, FormOwnerScopedDataPath::Unknown) {
             return chain;
@@ -18296,9 +18519,16 @@ fn form_settings_composer_member_walk(members: &[String]) -> Option<String> {
 pub(super) fn resolve_form_settings_composer_chain_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_field_types: &BTreeMap<String, String>,
 ) -> Option<String> {
-    resolve_form_settings_composer_chain(field, attribute_metadata_owners_by_id)
-        .map(|(path, _)| path)
+    resolve_form_settings_composer_chain(
+        field,
+        attribute_metadata_owners_by_id,
+        object_refs,
+        metadata_field_types,
+    )
+    .map(|(path, _)| path)
 }
 
 /// The composer chain plus the type it walked to, for the callers that need to
@@ -18306,6 +18536,8 @@ pub(super) fn resolve_form_settings_composer_chain_data_path(
 fn resolve_form_settings_composer_chain(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_field_types: &BTreeMap<String, String>,
 ) -> Option<(String, Option<FormSettingsComposerType>)> {
     let segments = parse_form_bound_chain_segments(field)?;
     let (root, members) = segments.split_first()?;
@@ -18327,15 +18559,55 @@ fn resolve_form_settings_composer_chain(
                     if index.trim() == "0"
                         && uuid
                             .trim()
-                            .eq_ignore_ascii_case(FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID) => {}
+                            .eq_ignore_ascii_case(FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID) =>
+                {
+                    path.push_str(".SettingsComposer");
+                }
                 // A dynamic list names its own composer by code rather than by the
                 // member uuid an object uses. The code is not free: `-6` reads
                 // `Parent` on the object attributes that carry one, so it opens the
                 // composer only where the attribute really is a dynamic list.
-                [code] if code.trim() == "-6" && attribute.has_dynamic_list_settings => {}
+                [code] if code.trim() == "-6" && attribute.has_dynamic_list_settings => {
+                    path.push_str(".SettingsComposer");
+                }
+                // An object can also own a composer as a metadata attribute of
+                // its own, and then the chain names that attribute's uuid where
+                // the object's built-in member would stand.  The route refused
+                // that shape, so the walk stopped at the form attribute and the
+                // export named the attribute alone.
+                //
+                // Two independent facts have to line up before a segment is read
+                // this way, so a plain metadata member of any other type still
+                // fails closed: the uuid has to resolve to a member of the very
+                // object the form attribute is typed as -- the same match the
+                // saved-field walk requires -- and that member's *declared* type
+                // has to be the settings composer itself.
+                //
+                // Evidence: UT 11.5.27.75,
+                // `DataProcessors/СверкаПродажЛьготныхТоваровОплаченныхЭСФСС/Forms/Форма`.
+                // Its two settings tables bind `{3,{1},{0,f69186c1-…},{1}}` and
+                // `{3,{1},{0,3fcc6fc5-…},{0}}`, which the platform writes
+                // `Объект.КомпоновщикНастроекОтбор.UserSettings` and
+                // `Объект.КомпоновщикНастроекОтчет.Settings`; the route refused
+                // both, and every column under those two tables fell back to
+                // naming the form attribute alone.
+                [index, uuid] if index.trim() == "0" && !rest.is_empty() => {
+                    let uuid = parse_non_zero_uuid(uuid.trim())?;
+                    if metadata_field_types.get(&uuid).map(String::as_str)
+                        != Some("dcsset:SettingsComposer")
+                    {
+                        return None;
+                    }
+                    let reference = object_refs.get(&uuid)?;
+                    let (owner_base, relative_path) = form_metadata_data_path_route(reference)?;
+                    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
+                        return None;
+                    }
+                    path.push('.');
+                    path.push_str(&relative_path);
+                }
                 _ => return None,
             }
-            path.push_str(".SettingsComposer");
             rest
         };
     let mut owner = Some(FormSettingsComposerType::SettingsComposer);
@@ -19164,42 +19436,47 @@ fn resolve_form_table_row_picture_member(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let extended = form_bound_chain_with_extra_segment(binding, segment)?;
-    resolve_form_settings_composer_chain_data_path(&extended, attribute_metadata_owners_by_id)
-        .or_else(|| {
-            resolve_form_bound_chain_member_path(
-                &extended,
-                attribute_names_by_id,
-                owner_scoped_bindings,
-                object_refs,
-                false,
-            )
-        })
-        .or_else(|| {
-            match resolve_form_owner_scoped_bound_data_path(
-                &extended,
-                attribute_metadata_owners_by_id,
-                owner_scoped_bindings,
-                object_refs,
-            ) {
-                FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
-                FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
-            }
-        })
-        .or_else(|| {
-            resolve_form_item_rooted_settings_composer_path(
-                &extended,
-                table_name_by_id,
-                owner_scoped_bindings,
-            )
-        })
-        .or_else(|| {
-            resolve_form_item_rooted_chain_data_path(
-                &extended,
-                table_name_by_id,
-                owner_scoped_bindings,
-                object_refs,
-            )
-        })
+    resolve_form_settings_composer_chain_data_path(
+        &extended,
+        attribute_metadata_owners_by_id,
+        object_refs,
+        &owner_scoped_bindings.metadata_field_types,
+    )
+    .or_else(|| {
+        resolve_form_bound_chain_member_path(
+            &extended,
+            attribute_names_by_id,
+            owner_scoped_bindings,
+            object_refs,
+            false,
+        )
+    })
+    .or_else(|| {
+        match resolve_form_owner_scoped_bound_data_path(
+            &extended,
+            attribute_metadata_owners_by_id,
+            owner_scoped_bindings,
+            object_refs,
+        ) {
+            FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+            FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+        }
+    })
+    .or_else(|| {
+        resolve_form_item_rooted_settings_composer_path(
+            &extended,
+            table_name_by_id,
+            owner_scoped_bindings,
+        )
+    })
+    .or_else(|| {
+        resolve_form_item_rooted_chain_data_path(
+            &extended,
+            table_name_by_id,
+            owner_scoped_bindings,
+            object_refs,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -19603,6 +19880,9 @@ pub(super) fn parse_form_button_command_name(
             FormStandardCommandOwnerKind::FormattedDocument => {
                 form_formatted_document_standard_command_suffix(&uuid)
             }
+            FormStandardCommandOwnerKind::PdfDocument => {
+                form_pdf_document_standard_command_suffix(&uuid)
+            }
             FormStandardCommandOwnerKind::GraphicalSchema => {
                 form_graphical_schema_standard_command_suffix(&uuid)
             }
@@ -19839,6 +20119,34 @@ pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Opt
         "ec647dcc-2be7-486c-9046-d8b371f9909e" => Some("DecreaseFontSize"),
         "f20eefc2-f819-4ab1-be67-87b3ca2e26e6" => Some("Bold"),
         "f5814962-2bef-43dd-b633-a193d4b0970e" => Some("Undo"),
+        _ => None,
+    }
+}
+
+/// The standard commands a PDF viewer field owns, by the uuid its command
+/// record names.
+///
+/// The field kind itself was only taught to the reader recently; it was never
+/// entered in the standard-command owner index, so every button that names one
+/// of its commands resolved to nothing and went out without a `<CommandName>`.
+///
+/// Evidence, UT 11.5.27.75:
+/// `DataProcessors/РаспознаваниеДокументовОтправкаФайлов/Forms/ОтправитьФайлы`
+/// carries the PDF viewer field `ПолеПросмотраPDF` as item 198 and eight
+/// buttons whose command record is `{198, <uuid>}`; the platform writes each of
+/// them as `Form.Item.ПолеПросмотраPDF.StandardCommand.<name>`, and every row
+/// below is one of those eight pairs.  An unobserved uuid returns `None` rather
+/// than a guessed name.
+pub(super) fn form_pdf_document_standard_command_suffix(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "d9117be6-f436-40fd-9670-8d71b99b2477" => Some("ScaleUp"),
+        "1e5ebd8b-32ee-4af9-b85c-3a0417000660" => Some("ScaleDown"),
+        "30f0b852-3284-4ae4-838b-f89b78388bdc" => Some("RotateClockwise"),
+        "e28575de-9fe8-4a8e-a285-13250de33d49" => Some("RotateCounterclockwise"),
+        "a4e92b1d-5e86-4a86-b276-00e71ecf3fd4" => Some("GoToBegin"),
+        "32a87619-85ce-495a-a195-2719f5e9c71e" => Some("GoBack"),
+        "85a1b7ee-e94d-4783-b519-4af123f58596" => Some("GoForward"),
+        "3e80231d-e169-456e-8373-0b9d4c15c8ab" => Some("GoToEnd"),
         _ => None,
     }
 }
@@ -22930,6 +23238,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(footer_horizontal_align)
         ));
     }
+    // `FooterPicture` closes the footer run. Both native items that carry one
+    // pin it from a different side and neither is contradicted: one reads
+    // `EditMode`, `FooterPicture`, `AutoMarkIncomplete` and the other
+    // `FooterDataPath`, `FooterFont`, `FooterPicture`, `Width`.
+    xml.push_str(&format_form_field_footer_picture_xml(item, indent + 1));
     if let Some(check_box_type) = item.check_box_type {
         xml.push_str(&format!(
             "{tab}\t<CheckBoxType>{}</CheckBoxType>\r\n",
@@ -23428,11 +23741,18 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<ValuesPicture>\r\n\
 {tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</ValuesPicture>\r\n",
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
                 escape_xml_text(file_name),
                 xml_bool(item.picture_load_transparent)
             ));
+            // The transparent pixel closes the picture, exactly as the
+            // stand-alone `ExtPicture` writer already spells it.
+            if let Some((x, y)) = item.picture_transparent_pixel {
+                xml.push_str(&format!(
+                    "{tab}\t\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+                ));
+            }
+            xml.push_str(&format!("{tab}\t</ValuesPicture>\r\n"));
         }
         // A `PictureField` writes `BorderColor` between its `ValuesPicture` and
         // its `Border`. UT 11.5.27.75 native tree, all 24 picture fields that
@@ -25458,6 +25778,41 @@ fn format_form_field_header_picture_xml(item: &FormChildItem, indent: usize) -> 
     xml
 }
 
+/// `FooterPicture` writes the same two members in the same order the header
+/// picture does; only the element name and the slot differ.
+fn format_form_field_footer_picture_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.footer_picture_ref.is_none() && item.footer_picture_file_name.is_none() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<FooterPicture>\r\n");
+    for property in FORM_FIELD_HEADER_PICTURE_XML_ORDER {
+        match property {
+            FormFieldHeaderPictureXmlProperty::Value => {
+                if let Some(reference) = &item.footer_picture_ref {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Ref>{}</xr:Ref>\r\n",
+                        escape_xml_text(reference)
+                    ));
+                } else if let Some(file_name) = &item.footer_picture_file_name {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Abs>{}</xr:Abs>\r\n",
+                        escape_xml_text(file_name)
+                    ));
+                }
+            }
+            FormFieldHeaderPictureXmlProperty::LoadTransparent => {
+                xml.push_str(&format!(
+                    "{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+                    xml_bool(item.footer_picture_load_transparent)
+                ));
+            }
+        }
+    }
+    xml.push_str(&format!("{tab}</FooterPicture>\r\n"));
+    xml
+}
+
 fn should_emit_form_picture_size(picture_size: &str) -> bool {
     picture_size != "RealSize"
 }
@@ -26137,6 +26492,8 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
                 "\t\t\t\t",
             ));
             xml.push_str("\t\t\t</Settings>\r\n");
+        } else if let Some(chart_settings) = &attribute.chart_settings {
+            xml.push_str(chart_settings);
         } else if let Some(type_description_settings) = &attribute.type_description_settings {
             if type_description_settings.is_empty() {
                 xml.push_str("\t\t\t<Settings xsi:type=\"v8:TypeDescription\"/>\r\n");
@@ -26742,4 +27099,559 @@ pub(super) fn form_body_module_text_bytes(body: &ParsedFormBodyBlob) -> Option<V
     bytes.extend_from_slice(b"\xEF\xBB\xBF");
     bytes.extend_from_slice(body.module_text.as_bytes());
     Some(bytes)
+}
+
+/// The `<Settings>` block a form attribute of chart type carries.
+///
+/// A chart-typed form attribute stores its whole design in the same slot 14
+/// every other attribute keeps its settings in, as
+/// `{0,1,"Chart",{"#",<chart type uuid>,{11},{74,…}}}`.  Nothing read that
+/// slot for a chart, so the block went unwritten on every chart attribute of
+/// the configuration.
+///
+/// The payload is the same `{{11},{74,…}}` record the spreadsheet-document
+/// writer already builds for a chart drawing, so the slot order below is the
+/// one that formatter states, member for member; only the values differ,
+/// because a form chart carries no series and no points.
+///
+/// Scope: this reader accepts exactly the shape both chart attributes of the
+/// 197-member tail carry -- no series records, no point records -- and refuses
+/// anything else, including the richer four-series shape
+/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` stores, whose extra
+/// elements (`realSeriesData`, `seriesScale`, `titleAreaPlacement`,
+/// `valuesToolTipShowMode`, …) no second observation pins.
+///
+/// Evidence: UT 11.5.27.75 carries four chart attributes.  Two of them --
+/// `Catalogs/ВариантыАнализаЦелевыхПоказателей/Forms/НастройкаДемоДанных`
+/// `Диаграмма` and
+/// `InformationRegisters/СезонныеКоэффициенты/Forms/СезонныеКоэффициенты`
+/// `Диаграмма` -- store byte-identical records; the third,
+/// `Reports/СверкаРасчетовСКонтрагентами/Forms/ФормаОтчета` `СостояниеСверки`,
+/// stores the same 197-member shape with 32 members different.  Those two
+/// distinct records are what every slot below is read from, and this writer
+/// reproduces both `<Settings>` blocks byte for byte.  A member the two agree
+/// on is written as the value they agree on and says so; a member whose slot
+/// the pair does not tell apart is not claimed, and the shape is checked so a
+/// record that disagrees is refused rather than approximated.
+fn parse_form_chart_settings_xml(
+    field: &str,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let is_chart = matches!(
+        value_types,
+        [ConstantValueType::Reference { reference }] if reference == FORM_CHART_TYPE_REFERENCE
+    );
+    if !is_chart {
+        return None;
+    }
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 4
+        || outer.first()?.trim() != "0"
+        || outer.get(1)?.trim() != "1"
+        || outer.get(2)?.trim() != r#""Chart""#
+    {
+        return None;
+    }
+    let holder = split_1c_braced_fields(outer.get(3)?.trim(), 0)?;
+    if holder.len() != 4
+        || holder.first()?.trim() != r##""#""##
+        || !holder
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_VALUE_TYPE_UUID)
+        || form_chart_compact(holder.get(2)?) != "{11}"
+    {
+        return None;
+    }
+    let data = split_1c_braced_fields(holder.get(3)?.trim(), 0)?;
+    format_form_chart_settings_xml(&data, object_refs, indent)
+}
+
+const FORM_CHART_TYPE_REFERENCE: &str = "d5p1:Chart";
+const FORM_CHART_VALUE_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
+const FORM_CHART_BORDER_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
+const FORM_CHART_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
+/// The one series record a chart with no series still carries, and the first
+/// slot of the tail behind it.
+const FORM_CHART_SERIES_FIELDS: usize = 11;
+const FORM_CHART_TAIL_START: usize = 18;
+const FORM_CHART_TAIL_FIELDS: usize = 197;
+
+/// A stored member with its layout whitespace removed, for the members whose
+/// whole shape is compared against a fixed token: the record is line-broken and
+/// the breaks fall inside braced members.
+fn form_chart_compact(text: &str) -> String {
+    let mut compact = String::with_capacity(text.len());
+    let mut quoted = false;
+    let mut chars = text.trim().chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            compact.push(ch);
+            if quoted && chars.peek() == Some(&'"') {
+                compact.push(chars.next().unwrap_or('"'));
+            } else {
+                quoted = !quoted;
+            }
+        } else if quoted || !ch.is_whitespace() {
+            compact.push(ch);
+        }
+    }
+    compact
+}
+
+fn form_chart_code(value: &str, table: &[(&str, &'static str)]) -> Option<&'static str> {
+    let value = value.trim();
+    table
+        .iter()
+        .find_map(|(code, name)| (*code == value).then_some(*name))
+}
+
+fn form_chart_bool(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("false"),
+        "1" => Some("true"),
+        _ => None,
+    }
+}
+
+fn form_chart_integer(value: &str) -> Option<&str> {
+    let value = value.trim();
+    value.parse::<i64>().ok()?;
+    Some(value)
+}
+
+/// A stored colour, in the one spelling the chart writes: the shared control
+/// colour reader answers every space the two records use, and the "unset"
+/// space it declines is the platform's `auto`.
+fn form_chart_color(field: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
+    if let Some(color) = parse_form_control_color(field, object_refs) {
+        return Some(color);
+    }
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    (fields.len() == 3
+        && fields.first()?.trim() == "3"
+        && fields.get(1)?.trim() == "4"
+        && fields.get(2)?.trim() == "{0}")
+        .then(|| "auto".to_string())
+}
+
+fn form_chart_localized_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let values = parse_form_localized_strings(field.trim());
+    if values.is_empty() {
+        let fields = split_1c_braced_fields(field.trim(), 0)?;
+        if fields.len() != 2 || fields.first()?.trim() != "1" || fields.get(1)?.trim() != "0" {
+            return None;
+        }
+        return Some(format!("{tab}<d4p1:{name}/>\r\n"));
+    }
+    Some(format_form_localized_section(
+        &format!("d4p1:{name}"),
+        &values,
+        indent,
+    ))
+}
+
+/// `{4,0,{0},1,<width>,0,<solid line uuid>,0}`.
+fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 8
+        || fields.first()?.trim() != "4"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(3)?.trim() != "1"
+        || fields.get(5)?.trim() != "0"
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_LINE_UUID)
+        || fields.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let width = form_chart_integer(fields.get(4)?)?;
+    Some(format!(
+        "{tab}<d4p1:{name} width=\"{width}\" gap=\"false\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">Solid</v8ui:style>\r\n\
+{tab}</d4p1:{name}>\r\n"
+    ))
+}
+
+/// `{3,0,{0},<style>,<width>,0,<border uuid>}`.
+fn form_chart_border_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 7
+        || fields.first()?.trim() != "3"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_BORDER_UUID)
+    {
+        return None;
+    }
+    let style = match fields.get(3)?.trim() {
+        "0" => "WithoutBorder",
+        "1" => "Single",
+        _ => return None,
+    };
+    let width = form_chart_integer(fields.get(4)?)?;
+    Some(format!(
+        "{tab}<d4p1:{name} width=\"{width}\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
+{tab}</d4p1:{name}>\r\n"
+    ))
+}
+
+/// A stored decimal, written the way the platform writes it. The two records
+/// spell every one of these members as a plain decimal literal, so an
+/// exponent form -- which the funnel members do use -- is not one of them.
+fn form_chart_decimal(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if value.contains(['e', 'E']) {
+        return None;
+    }
+    value.parse::<f64>().ok()?;
+    Some(value)
+}
+
+/// A stored fraction written as a percentage: `1e-1` is the platform's `10`.
+fn form_chart_percent(value: &str) -> Option<String> {
+    let value = value.trim();
+    let parsed: f64 = value.parse().ok()?;
+    let scaled = parsed * 100.0;
+    let rounded = scaled.round();
+    if (scaled - rounded).abs() > 1e-9 || !rounded.is_finite() {
+        return None;
+    }
+    Some(format!("{}", rounded as i64))
+}
+
+/// The four members of a placement rectangle, stored left, top, right, bottom
+/// and written left, right, top, bottom.
+fn form_chart_rectangle_xml(name: &str, fields: &[&str], indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let [left, top, right, bottom] = fields else {
+        return None;
+    };
+    let left = form_chart_decimal(left)?;
+    let top = form_chart_decimal(top)?;
+    let right = form_chart_decimal(right)?;
+    let bottom = form_chart_decimal(bottom)?;
+    Some(format!(
+        "{tab}<d4p1:{name}>\r\n\
+{tab}\t<d4p1:left>{left}</d4p1:left>\r\n\
+{tab}\t<d4p1:right>{right}</d4p1:right>\r\n\
+{tab}\t<d4p1:top>{top}</d4p1:top>\r\n\
+{tab}\t<d4p1:bottom>{bottom}</d4p1:bottom>\r\n\
+{tab}</d4p1:{name}>\r\n"
+    ))
+}
+
+/// The series record: colour, line, marker, text, three flags, the id, two
+/// `{"U"}` placeholders and the colour-priority flag, in that order -- the
+/// same eleven members the spreadsheet chart reader already walks.
+///
+/// The stored colour is not what the platform writes: both records hold an
+/// RGB there and both are written `auto`, with the colour-priority flag clear.
+/// A record with that flag set is refused rather than guessed at.
+fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    if fields.len() != FORM_CHART_SERIES_FIELDS
+        || form_chart_compact(fields.get(8)?) != r#"{"U"}"#
+        || form_chart_compact(fields.get(9)?) != r#"{"U"}"#
+        || fields.get(10)?.trim() != "0"
+    {
+        return None;
+    }
+    let id = form_chart_integer(fields.get(7)?)?;
+    let marker = form_chart_code(fields.get(2)?, &[("1", "Auto")])?;
+    let mut xml = format!("{tab}<d4p1:{name}>\r\n");
+    xml.push_str(&format!("{inner_tab}<d4p1:id>{id}</d4p1:id>\r\n"));
+    xml.push_str(&format!("{inner_tab}<d4p1:color>auto</d4p1:color>\r\n"));
+    xml.push_str(&form_chart_line_xml("line", fields.get(1)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:marker>{marker}</d4p1:marker>\r\n"
+    ));
+    xml.push_str(&form_chart_localized_xml("text", fields.get(3)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:strIsChanged>{}</d4p1:strIsChanged>\r\n",
+        form_chart_bool(fields.get(4)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:isExpand>{}</d4p1:isExpand>\r\n",
+        form_chart_bool(fields.get(5)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:isIndicator>{}</d4p1:isIndicator>\r\n",
+        form_chart_bool(fields.get(6)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:colorPriority>false</d4p1:colorPriority>\r\n"
+    ));
+    xml.push_str(&format!("{tab}</d4p1:{name}>\r\n"));
+    Some(xml)
+}
+
+/// The design members, in the order the platform writes them.
+///
+/// Every read below names the tail slot it comes from.  Six members are
+/// written as a literal instead: `circleExpandMode`, `chart3Dcrd`,
+/// `titleIsInit`, `legendIsInit`, `chartIsInit` and `transparentLabelsBkg`.
+/// The two records agree on all six and nothing in the pair tells their slots
+/// apart -- `transparentLabelsBkg` even reads `0` on both while the platform
+/// writes `true` -- so each is guarded on the slots that would have to move
+/// for the literal to be wrong, and the record is refused when they do.
+#[allow(clippy::too_many_lines)]
+fn format_form_chart_settings_xml(
+    data: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let child = indent + 1;
+    let child_tab = "\t".repeat(child);
+    if data.first()?.trim() != "74"
+        || data.get(4)?.trim() != "0"
+        || data.get(17)?.trim() != "0"
+        || data.len() != FORM_CHART_TAIL_START + FORM_CHART_TAIL_FIELDS
+    {
+        return None;
+    }
+    let series = data.get(5..5 + FORM_CHART_SERIES_FIELDS)?;
+    let t = data.get(FORM_CHART_TAIL_START..)?;
+    let mut xml = format!(
+        "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d4p1:Chart\">\r\n"
+    );
+    macro_rules! scalar {
+        ($name:expr, $value:expr) => {
+            xml.push_str(&format!(
+                "{child_tab}<d4p1:{}>{}</d4p1:{}>\r\n",
+                $name, $value, $name
+            ))
+        };
+    }
+    macro_rules! empty {
+        ($name:expr) => {
+            xml.push_str(&format!("{child_tab}<d4p1:{}/>\r\n", $name))
+        };
+    }
+    macro_rules! color {
+        ($name:expr, $slot:expr) => {
+            scalar!($name, form_chart_color(t.get($slot)?, object_refs)?)
+        };
+    }
+    scalar!("seriesCurId", form_chart_integer(data.get(1)?)?);
+    scalar!("pointsCurId", form_chart_integer(data.get(2)?)?);
+    scalar!("isSeriesDesign", form_chart_bool(data.get(3)?)?);
+    scalar!("realSeriesCount", "0");
+    xml.push_str(&form_chart_series_xml("realExSeriesData", series, child)?);
+    scalar!("isPointsDesign", form_chart_bool(data.get(16)?)?);
+    scalar!("realPointCount", "0");
+    scalar!("curSeries", form_chart_integer(t.first()?)?);
+    scalar!("curPoint", form_chart_integer(t.get(1)?)?);
+    scalar!(
+        "chartType",
+        form_chart_code(t.get(2)?, &[("6", "Column3D"), ("12", "Pie")])?
+    );
+    scalar!(
+        "circleLabelType",
+        form_chart_code(t.get(3)?, &[("0", "None"), ("7", "ValuePercent")])?
+    );
+    scalar!(
+        "labelsDelimiter",
+        escape_xml_element_text(&parse_1c_string(t.get(4)?.trim())?)
+    );
+    scalar!(
+        "labelsLocation",
+        form_chart_code(t.get(5)?, &[("0", "Edge"), ("3", "EdgeAuto")])?
+    );
+    xml.push_str(&form_chart_localized_xml("lbFormat", t.get(6)?, child)?);
+    xml.push_str(&form_chart_localized_xml("lbpFormat", t.get(7)?, child)?);
+    color!("labelsColor", 8);
+    if t.get(9)?.trim() != "0" || t.get(10)?.trim() != "0" {
+        return None;
+    }
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:labelsFont kind=\"AutoFont\"/>\r\n"
+    ));
+    scalar!("transparentLabelsBkg", "true");
+    color!("labelsBkgColor", 104);
+    xml.push_str(&form_chart_border_xml("labelsBorder", t.get(105)?, child)?);
+    color!("labelsBorderColor", 106);
+    scalar!("circleExpandMode", "None");
+    scalar!("chart3Dcrd", "SouthWest");
+    xml.push_str(&form_chart_localized_xml("title", t.get(11)?, child)?);
+    scalar!("isShowTitle", form_chart_bool(t.get(12)?)?);
+    scalar!("isShowLegend", form_chart_bool(t.get(13)?)?);
+    xml.push_str(&form_chart_border_xml("ttlBorder", t.get(14)?, child)?);
+    color!("ttlBorderColor", 15);
+    xml.push_str(&form_chart_border_xml("lgBorder", t.get(16)?, child)?);
+    color!("lgBorderColor", 17);
+    xml.push_str(&form_chart_border_xml("chBorder", t.get(18)?, child)?);
+    color!("chBorderColor", 19);
+    scalar!("transparent", form_chart_bool(t.get(20)?)?);
+    color!("bkgColor", 21);
+    scalar!("isTrnspTtl", form_chart_bool(t.get(22)?)?);
+    color!("ttlColor", 23);
+    scalar!("isTrnspLeg", form_chart_bool(t.get(24)?)?);
+    color!("legColor", 25);
+    scalar!("isTrnspCh", form_chart_bool(t.get(26)?)?);
+    color!("chColor", 27);
+    color!("ttlTxtColor", 28);
+    color!("legTxtColor", 29);
+    color!("chTxtColor", 30);
+    for (name, slot) in [("ttlFont", 31usize), ("legFont", 32), ("chFont", 33)] {
+        if form_chart_compact(t.get(slot)?) != "{7,3,0,1,100}" {
+            return None;
+        }
+        xml.push_str(&format!("{child_tab}<d4p1:{name} kind=\"AutoFont\"/>\r\n"));
+    }
+    scalar!("isShowScale", form_chart_bool(t.get(34)?)?);
+    scalar!("isShowScaleVL", form_chart_bool(t.get(35)?)?);
+    scalar!("isShowSeriesScale", form_chart_bool(t.get(36)?)?);
+    scalar!("isShowPointsScale", form_chart_bool(t.get(37)?)?);
+    scalar!("isShowValuesScale", form_chart_bool(t.get(38)?)?);
+    xml.push_str(&form_chart_localized_xml("vsFormat", t.get(39)?, child)?);
+    scalar!(
+        "xLabelsOrientation",
+        form_chart_code(t.get(40)?, &[("0", "Auto")])?
+    );
+    xml.push_str(&form_chart_line_xml("scaleLine", t.get(41)?, child)?);
+    color!("scaleColor", 42);
+    scalar!("isAutoSeriesName", form_chart_bool(t.get(43)?)?);
+    scalar!("isAutoPointName", form_chart_bool(t.get(44)?)?);
+    scalar!(
+        "maxMode",
+        form_chart_code(t.get(45)?, &[("0", "NotDefined")])?
+    );
+    scalar!("maxSeries", form_chart_integer(t.get(46)?)?);
+    scalar!("maxSeriesPrc", form_chart_integer(t.get(47)?)?);
+    scalar!("spaceMode", form_chart_code(t.get(48)?, &[("1", "Half")])?);
+    scalar!("baseVal", form_chart_integer(t.get(49)?)?);
+    scalar!("isOutline", form_chart_bool(t.get(50)?)?);
+    scalar!("realPiePoint", form_chart_integer(t.get(51)?)?);
+    scalar!("realStockSeries", form_chart_integer(t.get(52)?)?);
+    scalar!("isLight", form_chart_bool(t.get(53)?)?);
+    scalar!("isGradient", form_chart_bool(t.get(54)?)?);
+    scalar!("isTransposition", form_chart_bool(t.get(55)?)?);
+    scalar!("hideBaseVal", form_chart_bool(t.get(56)?)?);
+    scalar!("dataTable", form_chart_bool(t.get(57)?)?);
+    scalar!("dtVerLines", form_chart_bool(t.get(58)?)?);
+    scalar!("dtHorLines", form_chart_bool(t.get(59)?)?);
+    scalar!("dtHAlign", form_chart_code(t.get(60)?, &[("2", "Right")])?);
+    xml.push_str(&form_chart_localized_xml("dtFormat", t.get(61)?, child)?);
+    scalar!("dtKeys", form_chart_bool(t.get(62)?)?);
+    scalar!(
+        "paletteKind",
+        form_chart_code(t.get(63)?, &[("0", "Auto")])?
+    );
+    scalar!("animation", form_chart_code(t.get(64)?, &[("0", "Auto")])?);
+    scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
+    if t.get(82)?.trim() != "0" || t.get(83)?.trim() != "0" || t.get(84)?.trim() != "0" {
+        return None;
+    }
+    scalar!("isTransposed", "false");
+    scalar!("autoTransposition", "false");
+    scalar!("legendScrollEnable", "false");
+    color!("surfaceColor", 66);
+    scalar!(
+        "radarScaleType",
+        form_chart_code(t.get(67)?, &[("0", "Circle")])?
+    );
+    scalar!(
+        "gaugeValuesPresentation",
+        form_chart_code(t.get(68)?, &[("0", "Needle")])?
+    );
+    if form_chart_compact(t.get(69)?) != "{1,0,0,0}" {
+        return None;
+    }
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:gaugeQualityBands useTextStr=\"false\" useTooltipStr=\"false\"/>\r\n"
+    ));
+    scalar!("beginGaugeAngle", form_chart_integer(t.get(70)?)?);
+    scalar!("endGaugeAngle", form_chart_integer(t.get(71)?)?);
+    scalar!("gaugeThickness", form_chart_integer(t.get(72)?)?);
+    scalar!(
+        "gaugeLabelsLocation",
+        form_chart_code(t.get(73)?, &[("1", "InsideScale")])?
+    );
+    scalar!("gaugeLabelsArcDirection", form_chart_bool(t.get(74)?)?);
+    scalar!("gaugeBushThickness", form_chart_integer(t.get(75)?)?);
+    color!("gaugeBushColor", 76);
+    scalar!("autoMaxValue", form_chart_bool(t.get(77)?)?);
+    scalar!("userMaxValue", form_chart_decimal(t.get(78)?)?);
+    scalar!("autoMinValue", form_chart_bool(t.get(79)?)?);
+    scalar!("userMinValue", form_chart_decimal(t.get(80)?)?);
+    scalar!("elementsIsInit", form_chart_bool(t.get(81)?)?);
+    if t.get(88)?.trim() != "1" || t.get(89)?.trim() != "1" || t.get(92)?.trim() != "1" {
+        return None;
+    }
+    scalar!("titleIsInit", "true");
+    scalar!("legendIsInit", "true");
+    scalar!("chartIsInit", "true");
+    xml.push_str(&form_chart_rectangle_xml(
+        "elementsChart",
+        t.get(163..167)?,
+        child,
+    )?);
+    xml.push_str(&form_chart_rectangle_xml(
+        "elementsLegend",
+        t.get(167..171)?,
+        child,
+    )?);
+    xml.push_str(&form_chart_rectangle_xml(
+        "elementsTitle",
+        t.get(171..175)?,
+        child,
+    )?);
+    color!("borderColor", 95);
+    xml.push_str(&form_chart_border_xml("border", t.get(96)?, child)?);
+    let description = parse_1c_string(t.get(97)?.trim())?;
+    if description.is_empty() {
+        empty!("dataSourceDescription");
+    } else {
+        scalar!(
+            "dataSourceDescription",
+            escape_xml_element_text(&description)
+        );
+    }
+    scalar!("isDataSourceMode", form_chart_bool(t.get(98)?)?);
+    scalar!("isRandomizedNewValues", form_chart_bool(t.get(99)?)?);
+    scalar!("splineStrain", form_chart_integer(t.get(112)?)?);
+    scalar!("translucencePercent", form_chart_decimal(t.get(111)?)?);
+    scalar!("funnelNeckHeightPercent", form_chart_percent(t.get(113)?)?);
+    scalar!("funnelNeckWidthPercent", form_chart_percent(t.get(114)?)?);
+    scalar!("funnelGapSumPercent", form_chart_percent(t.get(115)?)?);
+    xml.push_str(&form_chart_line_xml(
+        "multiStageLinkLine",
+        t.get(116)?,
+        child,
+    )?);
+    color!("multiStageLinkColor", 117);
+    for (name, slot) in [("valuesAxis", 127usize), ("pointsAxis", 128)] {
+        if form_chart_compact(t.get(slot)?) != "{0,0,{0,1,0,1,0},0,0}" {
+            return None;
+        }
+        xml.push_str(&format!("{child_tab}<d4p1:{name}/>\r\n"));
+    }
+    // The legend placement is written only when its slot names one: the two
+    // records read `0` and `6`, and the platform writes nothing on the first
+    // and `None` on the second.
+    if t.get(161)?.trim() != "0" {
+        scalar!(
+            "legendPlacement",
+            form_chart_code(t.get(161)?, &[("6", "None")])?
+        );
+    }
+    xml.push_str(&format!("{tab}</Settings>\r\n"));
+    Some(xml)
 }

@@ -9348,7 +9348,7 @@ fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
 
 #[test]
 fn formats_dynamic_list_server_state_xml_in_settings() {
-    let xml = format_form_attributes_xml(&[FormAttribute {
+    let xml = format_form_attributes_xml(&[FormAttribute { chart_settings: None,
         view_rights: None,
         edit_rights: None,
             id: "2".to_string(),
@@ -10123,6 +10123,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
     apply_implicit_form_dynamic_list_settings(&mut settings);
 
     let xml = format_form_attributes_xml(&[FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "2".to_string(),
@@ -10512,6 +10513,7 @@ fn rejects_non_dcs_or_malformed_dynamic_list_appearance() {
 #[test]
 fn formats_explicit_false_dynamic_data_read() {
     let xml = format_form_attributes_xml(&[FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "2".to_string(),
@@ -10781,6 +10783,7 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
     );
 
     let mut attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -11545,6 +11548,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
 
     fn attribute(dynamic_list: bool) -> FormAttribute {
         FormAttribute {
+            chart_settings: None,
             view_rights: None,
             edit_rights: None,
             id: "1".to_string(),
@@ -12116,6 +12120,7 @@ fn extracts_form_child_items_from_layout_pairs() {
     );
     let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
     let attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -13889,6 +13894,7 @@ fn extracts_wrapper55_table_row_picture_data_path() {
 #[test]
 fn extracts_wrapper55_table_user_settings_group() {
     let attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -15257,6 +15263,7 @@ fn extracts_form_standard_command_names_from_kind0_buttons() {
 #[test]
 fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
     let attribute = FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "8".to_string(),
@@ -15421,6 +15428,7 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
 #[test]
 fn resolves_document_form_paths_from_the_typed_metadata_owner() {
     let attribute = FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -15565,6 +15573,7 @@ fn typed_form_metadata_paths_cover_members_and_fail_closed() {
     }
 
     let chart_owner = form_attribute_metadata_owner(&FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -15650,6 +15659,7 @@ fn indexes_direct_table_columns_from_their_structural_table_parent() {
     let table = r#"{73,{785,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"ТаблицаСумм",0,0,1,{1,0},0,{1,{19}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#
         .replacen("{1,0}", &child_container, 1);
     let attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "19".to_string(),
@@ -15772,6 +15782,7 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
     let line_b = line_number_field("42", "SecondaryLineNumber");
     let line_c = line_number_field("43", "TertiaryLineNumber");
     let mut attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -15946,6 +15957,7 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
 #[test]
 fn extracts_nested_table_additional_columns_group() {
     let attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -15992,6 +16004,7 @@ fn extracts_nested_table_additional_columns_group() {
 #[test]
 fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_unindexed() {
     let attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16046,6 +16059,7 @@ fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_u
 fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
     let metadata_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let attributes = vec![FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16148,6 +16162,7 @@ fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
 #[test]
 fn resolves_additional_columns_binding_per_owner_and_rejects_collisions() {
     let attribute = |id: &str, name: &str| FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: id.to_string(),
@@ -20026,6 +20041,10 @@ fn extracts_table_service_child_items_from_layout_fields() {
 #[test]
 fn formats_table_search_additions_as_direct_sections() {
     let table = FormChildItem {
+        footer_picture_ref: None,
+        footer_picture_file_name: None,
+        footer_picture_load_transparent: false,
+        picture_transparent_pixel: None,
         html_document_output: None,
         button_check: None,
         tag: "Table",
@@ -20269,6 +20288,10 @@ fn formats_table_search_additions_as_direct_sections() {
         command_source: None,
         child_items: vec![
             FormChildItem {
+                footer_picture_ref: None,
+                footer_picture_file_name: None,
+                footer_picture_load_transparent: false,
+                picture_transparent_pixel: None,
                 html_document_output: None,
                 button_check: None,
                 tag: "SearchStringAddition",
@@ -20513,6 +20536,10 @@ fn formats_table_search_additions_as_direct_sections() {
                 child_items: Vec::new(),
             },
             FormChildItem {
+                footer_picture_ref: None,
+                footer_picture_file_name: None,
+                footer_picture_load_transparent: false,
+                picture_transparent_pixel: None,
                 html_document_output: None,
                 button_check: None,
                 tag: "InputField",
@@ -23221,6 +23248,7 @@ fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct()
 #[test]
 fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_terminals() {
     let attribute = FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -23823,6 +23851,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
     };
     let attributes = vec![
         FormAttribute {
+            chart_settings: None,
             view_rights: None,
             edit_rights: None,
             id: "1".to_string(),
@@ -23852,6 +23881,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
             unresolvable_field_item_ids: BTreeSet::new(),
         },
         FormAttribute {
+            chart_settings: None,
             view_rights: None,
             edit_rights: None,
             id: "2".to_string(),
@@ -63586,6 +63616,7 @@ fn data_path_input_field(id: &str, name: &str, binding: &str) -> String {
 
 fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>) -> FormAttribute {
     FormAttribute {
+        chart_settings: None,
         view_rights: None,
         edit_rights: None,
         id: id.to_string(),
@@ -64575,7 +64606,13 @@ fn walks_settings_composer_chains_through_their_typed_namespace() {
         ),
     ] {
         assert_eq!(
-            resolve_form_settings_composer_chain_data_path(binding, &owners).as_deref(),
+            resolve_form_settings_composer_chain_data_path(
+                binding,
+                &owners,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .as_deref(),
             Some(expected),
             "{binding}"
         );
@@ -64583,18 +64620,34 @@ fn walks_settings_composer_chains_through_their_typed_namespace() {
 
     let indexed = format!("{{6,{{2}},{{0}},{{4}},{{{index}}},{{10002}},{{10003}}}}");
     assert_eq!(
-        resolve_form_settings_composer_chain_data_path(&indexed, &owners).as_deref(),
+        resolve_form_settings_composer_chain_data_path(
+            &indexed,
+            &owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .as_deref(),
         Some("КомпоновщикНастроек.Settings.ConditionalAppearance[0].Filter.ComparisonType")
     );
 
     // An id the type was never observed to carry stays unresolved, and so does
     // a member read off a type that carries no members at all.
     assert_eq!(
-        resolve_form_settings_composer_chain_data_path("{3,{2},{0},{9}}", &owners),
+        resolve_form_settings_composer_chain_data_path(
+            "{3,{2},{0},{9}}",
+            &owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
         None
     );
     assert_eq!(
-        resolve_form_settings_composer_chain_data_path("{4,{2},{0},{1},{10000},{0}}", &owners),
+        resolve_form_settings_composer_chain_data_path(
+            "{4,{2},{0},{1},{10000},{0}}",
+            &owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
         None
     );
 
@@ -64603,7 +64656,9 @@ fn walks_settings_composer_chains_through_their_typed_namespace() {
     assert_eq!(
         resolve_form_settings_composer_chain_data_path(
             "{3,{2},{0},{1}}",
-            &form_attribute_metadata_owners_by_id(std::slice::from_ref(&plain))
+            &form_attribute_metadata_owners_by_id(std::slice::from_ref(&plain)),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
         ),
         None
     );
