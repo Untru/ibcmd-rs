@@ -1474,7 +1474,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         &number_format_refs,
     )
     .unwrap_or_default();
-    let (column_formats, mut formats) = (column_formats, formats);
+    let (mut column_formats, mut formats) = (column_formats, formats);
     let source_format_map = source_format_map.filter(|source_format_map| {
         moxel_source_format_refs_are_complete(
             source_format_map,
@@ -1599,6 +1599,25 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .filter(|lines| moxel_line_table_covers_references(lines, &all_formats))
     {
         Some(lines) => {
+            let line_scan_formats = all_formats
+                .iter()
+                .cloned()
+                .chain(std::iter::once(default_format.clone()))
+                .collect::<Vec<_>>();
+            let (lines, line_remap) = compact_moxel_line_table(lines, &line_scan_formats);
+            let all_formats = if let Some(line_remap) = &line_remap {
+                for format in column_formats.iter_mut().chain(formats.iter_mut()) {
+                    remap_moxel_format_line_refs(format, line_remap);
+                }
+                remap_moxel_format_line_refs(&mut default_format, line_remap);
+                column_formats
+                    .iter()
+                    .chain(formats.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                all_formats
+            };
             let lines = finalize_moxel_line_slots(
                 lines
                     .into_iter()
@@ -4190,6 +4209,81 @@ pub(super) fn moxel_used_line_indexes(formats: &[MoxelFormat]) -> BTreeSet<usize
         }
     }
     indexes
+}
+
+/// Drops any line-table entry no format actually cites and orders the
+/// survivors by the order formats first cite them, returning the map from
+/// stored index to published index for the callers that must move with it.
+/// `None` means the stored table was already exactly this order, so nothing
+/// needs remapping.
+///
+/// Evidence (ERP UH `Web_Service`): the document's own line table
+/// (`parse_moxel_line_table`) is stored in the packer's own order, not a
+/// publication order - `ОстаткиИОбороты` declares five entries, four cited,
+/// and those four happen to publish in stored order, but `КарточкаСчета`
+/// declares five entries `[Solid/1, Solid/2, None/1, Dotted/1, None/2]`
+/// (stored positions 0..4) and publishes four of them as
+/// `[Solid/2, Solid/1, None/2, None/1]` - stored order 0,1 and 2,4 each
+/// swapped. Scanning `formats` in their own pool order and, within a format,
+/// its members in `border, left, top, right, bottom, drawing` order (the
+/// same order `moxel_used_line_indexes` reads) and keeping each raw index
+/// the first time it appears reproduces both documents with no
+/// counterexample: `КарточкаСчета`'s first format to cite a line names
+/// stored index 1 before 0, which is exactly the swap. The 1С:УТ evidence
+/// this table's doc comment records (604 documents, 0 count mismatches)
+/// never exercised this path because every entry there was both cited and
+/// already stored in first-use order.
+fn compact_moxel_line_table(
+    lines: Vec<MoxelLine>,
+    formats: &[MoxelFormat],
+) -> (Vec<MoxelLine>, Option<BTreeMap<usize, usize>>) {
+    let mut order = Vec::new();
+    let mut seen = BTreeSet::new();
+    for format in formats {
+        for value in [
+            format.border,
+            format.left_border,
+            format.top_border,
+            format.right_border,
+            format.bottom_border,
+            format.drawing_border,
+        ] {
+            if let Some(index) = value
+                && seen.insert(index)
+            {
+                order.push(index);
+            }
+        }
+    }
+    if order.iter().copied().eq(0..lines.len()) {
+        return (lines, None);
+    }
+    let mut remap = BTreeMap::new();
+    let mut kept = Vec::with_capacity(order.len());
+    for old_index in order {
+        if let Some(line) = lines.get(old_index) {
+            remap.insert(old_index, kept.len());
+            kept.push(line.clone());
+        }
+    }
+    (kept, Some(remap))
+}
+
+fn remap_moxel_format_line_refs(format: &mut MoxelFormat, remap: &BTreeMap<usize, usize>) {
+    for slot in [
+        &mut format.border,
+        &mut format.left_border,
+        &mut format.top_border,
+        &mut format.right_border,
+        &mut format.bottom_border,
+        &mut format.drawing_border,
+    ] {
+        if let Some(index) = slot
+            && let Some(mapped) = remap.get(index)
+        {
+            *index = *mapped;
+        }
+    }
 }
 
 pub(super) fn parse_moxel_pictures(
