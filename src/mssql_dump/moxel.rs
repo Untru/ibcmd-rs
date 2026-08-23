@@ -3267,8 +3267,6 @@ const MOXCEL_FONT_KNOWN_MASK: usize = (1 << MOXCEL_FONT_FACE_NAME_BIT)
     | (1 << MOXCEL_FONT_UNDERLINE_BIT)
     | (1 << MOXCEL_FONT_STRIKEOUT_BIT)
     | (1 << MOXCEL_FONT_SCALE_BIT);
-/// The one mask an absolute descriptor carries; it fills every slot anyway.
-const MOXCEL_ABSOLUTE_FONT_MASK: usize = MOXCEL_FONT_KNOWN_MASK;
 /// Members appear in slot order, which puts the face name last.
 const MOXCEL_FONT_MEMBER_ORDER: [usize; 6] = [
     MOXCEL_FONT_HEIGHT_BIT,
@@ -3315,11 +3313,16 @@ pub(super) fn parse_moxel_font(
     }
     match fields.get(1)?.trim() {
         // An absolute descriptor writes every slot, so its members are read at
-        // fixed offsets; only the one observed mask is admitted.
+        // fixed offsets. Field 2 was gated on the one mask 1С:УТ ever showed
+        // there (`MOXCEL_FONT_KNOWN_MASK`), but ERP UH `Web_Service`
+        // (`ОборотноСальдоваяВедомостьПоСчету`, five records, and
+        // `ОстаткиИОбороты`, five more) stores 0, 2, 4, 6 there instead across
+        // records whose remaining eighteen fields are otherwise the same
+        // fixed shape and whose face/height/weight/style bytes the platform
+        // publishes unchanged - the arity (`fields.len() == 19`) already
+        // names this shape, so an extra equality on an unused field only
+        // rejected valid records.
         "0" if fields.len() == 19 => {
-            if fields.get(2)?.trim().parse::<usize>().ok()? != MOXCEL_ABSOLUTE_FONT_MASK {
-                return None;
-            }
             let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
             let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
             Some(MoxelFont {
