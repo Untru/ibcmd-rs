@@ -25285,7 +25285,13 @@ fn parse_task_properties_from_text(
         }
     };
 
-    if !task_characteristics_is_empty(fields.get(44)?)
+    // Field 45 is constant "1" across all five cross-edition captures
+    // (УТ, БСП демо, WMS5, ERP WE, БСП WE) and does not track any XML
+    // property discovered so far -- it is not `IncludeHelpInContents`,
+    // which lives at field 24 (see below). Kept as a validated reserved
+    // constant rather than invented XML: unknown values fail closed.
+    if fields.get(45)?.trim() != "1"
+        || !task_characteristics_is_empty(fields.get(44)?)
         || !owner_graph::task_reserved_tail_is_zero(&fields)
     {
         return None;
@@ -25322,7 +25328,7 @@ fn parse_task_properties_from_text(
         number_allowed_length: parse_task_number_allowed_length_slot(fields.get(20)?)?.xml_value(),
         check_unique: information_register_bool(fields.get(21)?)?,
         autonumbering: information_register_bool(fields.get(23)?)?,
-        task_number_auto_prefix: parse_task_number_auto_prefix_slot(fields.get(24)?)?.xml_value(),
+        task_number_auto_prefix: parse_task_number_auto_prefix_slot(fields.get(31)?)?.xml_value(),
         description_length: parse_exchange_plan_u32(fields.get(22)?)?,
         addressing,
         main_addressing_attribute,
@@ -25341,10 +25347,11 @@ fn parse_task_properties_from_text(
             "1" => "AsDescription",
             _ => return None,
         },
-        edit_type: match fields.get(31)?.trim() {
-            "0" => "InDialog",
-            _ => return None,
-        },
+        // No corpus slot varies with EditType across the five cross-edition
+        // captures; it is a fixed structural constant for Task objects, the
+        // same way the encoder validates it (`require_enum_value(..,
+        // "EditType", "InDialog")`) without ever writing a field for it.
+        edit_type: "InDialog",
         input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
@@ -25358,7 +25365,7 @@ fn parse_task_properties_from_text(
         auxiliary_choice_form,
         choice_history_on_input: parse_task_choice_history_on_input_slot(fields.get(43)?)?
             .xml_value(),
-        include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(45)?)?,
+        include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(24)?)?,
         data_lock_fields,
         data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(32)?)?
             .xml_value(),
