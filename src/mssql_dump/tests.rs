@@ -68607,3 +68607,60 @@ fn respells_an_embedded_spreadsheet_documents_qualified_names_and_indent() {
         "{indented}"
     );
 }
+
+/// Real Subsystem text captured from ERP UH 3.2.12.6's `Web_Service.cf`
+/// (`WebСервисУХ`, uuid `4070bb4b-b2e4-408e-9157-42cc46291d02`): a Subsystem
+/// stored under discriminator 21, the same code the register families use.
+/// Confirms both the header-index-1 classification rule in
+/// `metadata_source_for_object_fields` and that
+/// `parse_subsystem_properties_from_text` accepts code 21 as well as the
+/// more common 22.
+#[test]
+fn code21_subsystem_classifies_and_extracts_like_code22() {
+    let uuid = "4070bb4b-b2e4-408e-9157-42cc46291d02";
+    let text = "{1,\r\n\
+{21,\r\n\
+{2,\r\n\
+{1,0,4070bb4b-b2e4-408e-9157-42cc46291d02},\"WebСервисУХ\",\r\n\
+{1,\"ru\",\"Web сервис УХ\"},\"\",0,1,7f676314-716a-4d54-8335-a71a3857b21c,3,00000000-0000-0000-0000-000000000000},1,\r\n\
+{0,0},0,\r\n\
+{4,0,\r\n\
+{0},\"\",-1,-1,1,0,\"\"},\r\n\
+{0},\r\n\
+{0,4,\r\n\
+{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,\r\n\
+{1,776b91d8-2253-47db-8dd6-11b6c2b4df55}\r\n\
+},\r\n\
+{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,\r\n\
+{1,d75fc78d-6801-4a64-9cd6-d79047ca2b24}\r\n\
+},\r\n\
+{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,\r\n\
+{1,36e515e5-9db0-4a1c-9a68-1df7625bdfaa}\r\n\
+},\r\n\
+{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,\r\n\
+{1,300c8045-655d-41da-bf92-d3de432334e1}\r\n\
+}\r\n\
+}\r\n\
+},1,\r\n\
+{37f2fa9a-b276-11d4-9435-004095e12fc7,0}\r\n\
+}";
+    let code = parse_metadata_object_code(text);
+    assert_eq!(code, Some(21));
+    let source = metadata_source_for_text(21, text, uuid);
+    assert_eq!(source, Some(("Subsystem", "Subsystems")));
+
+    let audit = metadata_text_row_audit_from_text(uuid, text.to_string());
+    match audit {
+        MetadataTextRowAudit::Extracted(row) => {
+            assert_eq!(row.kind.as_deref(), Some("Subsystem"));
+            assert_eq!(row.folder, Some("Subsystems"));
+        }
+        MetadataTextRowAudit::ExtractedWithWarning(row, miss) => {
+            panic!(
+                "expected clean extraction, got warning {miss:?} for row kind={:?} folder={:?}",
+                row.kind, row.folder
+            );
+        }
+        MetadataTextRowAudit::Miss(miss) => panic!("expected extraction, got miss {miss:?}"),
+    }
+}
