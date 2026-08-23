@@ -2133,6 +2133,11 @@ pub(super) fn normalize_moxel_column_set_format_indices(column_sets: &mut [Moxel
 /// the two window scans this replaces returned the same verdict as this anchor
 /// on all 683 documents, so nothing that depended on them moves.
 const MOXEL_HEADER_FOOTER_BLOCK_START: usize = 7;
+/// Largest forward jump in a row's own index the anchored row scan accepts
+/// as a run of skipped default-format empty rows. `1_000_000` mirrors the
+/// existing MOXCEL column-count ceiling used elsewhere in this reader as a
+/// generic sanity bound, not an observed corpus maximum.
+const MAX_MOXEL_ROW_GAP: usize = 1_000_000;
 
 /// Block slot -> publication slot, where publication order is `leftHeader`,
 /// `centerHeader`, `rightHeader`, `leftFooter`, `centerFooter`, `rightFooter`.
@@ -2535,19 +2540,50 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
         if height == 0 || height > 1_000_000 {
             continue;
         }
+        // Only the structurally-verified anchor (the fixed prefix behind the
+        // header/footer block) is trusted to read a forward jump in the
+        // record's own index as a skipped default-format empty row rather
+        // than corruption; every other position in this scan is a heuristic
+        // guess whose "best length wins" comparison must not be inflated by
+        // manufactured gap rows.
+        let allow_forward_gap = Some(index) == anchored_row_block;
         let mut rows = Vec::new();
         let mut cursor = index + 3;
         let mut expected_row_index = 0usize;
-        while rows.len() < height {
-            let Some((row, next_cursor)) = parse_moxel_row_at(fields, cursor, expected_row_index)
-            else {
+        let mut explicit_count = 0usize;
+        while explicit_count < height {
+            let parsed = if allow_forward_gap {
+                parse_moxel_row_at_allow_forward_gap(fields, cursor)
+            } else {
+                parse_moxel_row_at(fields, cursor, expected_row_index)
+            };
+            let Some((row, next_cursor)) = parsed else {
                 break;
             };
-            if next_cursor <= cursor {
+            if next_cursor <= cursor || row.index < expected_row_index {
                 break;
             }
+            if row.index > expected_row_index {
+                // Bound the gap so a spurious anchor cannot manufacture an
+                // unbounded row list from an accidental forward-looking
+                // number in unrelated data.
+                if row.index - expected_row_index > MAX_MOXEL_ROW_GAP {
+                    break;
+                }
+                for gap_index in expected_row_index..row.index {
+                    rows.push(MoxelRow {
+                        index: gap_index,
+                        index_to: None,
+                        format_index: 1,
+                        source_format_index: None,
+                        columns_id: None,
+                        cells: Vec::new(),
+                    });
+                }
+            }
+            expected_row_index = row.index + 1;
             rows.push(row);
-            expected_row_index += 1;
+            explicit_count += 1;
             cursor = next_cursor;
         }
         if rows.len() > best_rows.len() {
@@ -2635,6 +2671,54 @@ pub(super) fn parse_moxel_row_at(
     )
 }
 
+/// Parses the next record in the anchored row block, accepting whatever row
+/// index the record itself carries instead of requiring it to equal the
+/// caller's running counter.
+///
+/// Evidence (ERP UH `Web_Service`, `ОстаткиИОбороты`): the stored row count
+/// behind the anchor (14) is the count of records the *stream* carries, not
+/// the sheet's logical row count (17, the separately-stored value that also
+/// drives `<height>`). The three-row gap is exactly the rows the platform
+/// publishes as `<row><empty>true</empty></row>` with no `<formatIndex>` -
+/// an empty row at the ambient default format is not written to the stream
+/// at all, only rows that name a member are. The next record's own index
+/// then jumps past the missing ones (`4` is followed directly by a record
+/// naming index `6`, skipping `5`). Requiring strict equality here read that
+/// jump as corruption and stopped decoding every row after the gap.
+pub(super) fn parse_moxel_row_at_allow_forward_gap(
+    fields: &[&str],
+    index: usize,
+) -> Option<(MoxelRow, usize)> {
+    if let Some(row) = parse_moxel_row_shape_with_expectation(
+        fields,
+        index,
+        None,
+        MoxelRowShape {
+            row_index_offset: 0,
+            format_offset: 1,
+            cell_count_offset: 2,
+            cells_offset: 3,
+            allow_empty: true,
+            validate_empty_prefix: false,
+        },
+    ) {
+        return Some(row);
+    }
+    parse_moxel_row_shape_with_expectation(
+        fields,
+        index,
+        None,
+        MoxelRowShape {
+            row_index_offset: 3,
+            format_offset: 4,
+            cell_count_offset: 5,
+            cells_offset: 6,
+            allow_empty: true,
+            validate_empty_prefix: true,
+        },
+    )
+}
+
 pub(super) fn parse_moxel_row_at_for_scanning(
     fields: &[&str],
     index: usize,
@@ -2689,12 +2773,28 @@ pub(super) fn parse_moxel_row_shape(
     expected_row_index: usize,
     shape: MoxelRowShape,
 ) -> Option<(MoxelRow, usize)> {
+    parse_moxel_row_shape_with_expectation(fields, index, Some(expected_row_index), shape)
+}
+
+/// The same record shape, but with the equality gate against a caller-known
+/// index made optional. `None` accepts whatever index the record itself
+/// carries: the anchored row scan uses this to detect a *forward* jump in the
+/// stored index, which a stream that skips a default-formatted empty row
+/// produces (evidence below), rather than folding on a plain mismatch.
+fn parse_moxel_row_shape_with_expectation(
+    fields: &[&str],
+    index: usize,
+    expected_row_index: Option<usize>,
+    shape: MoxelRowShape,
+) -> Option<(MoxelRow, usize)> {
     let row_index = fields
         .get(index + shape.row_index_offset)?
         .trim()
         .parse::<usize>()
         .ok()?;
-    if row_index != expected_row_index {
+    if let Some(expected_row_index) = expected_row_index
+        && row_index != expected_row_index
+    {
         return None;
     }
     let format_index = fields
