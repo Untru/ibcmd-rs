@@ -172,8 +172,18 @@ fn decode_plain(
     if declared_columns > MAX_COLUMNS {
         return Err(MxlCodecError::LimitExceeded("MOXCEL column count"));
     }
+    // `{current, default, 0, count, (id, code, description) * count, 0}`: the
+    // record declares its own member count at position 3, so the shape check
+    // has to read that declared count rather than assume a single language
+    // (evidence: ERP UH `Web_Service`, two spreadsheets carry a two-language
+    // record - `ru` and `en` - at 11 fields, `count=2`, still `count*3+5`).
     let language = required_list(&fields[3], "MOXCEL language descriptor")?;
-    if language.len() != 8 {
+    let language_shape_ok = language.len() >= 5
+        && required_token(&language[3], "MOXCEL language count")
+            .ok()
+            .and_then(|token| token.parse::<usize>().ok())
+            .is_some_and(|count| count <= 64 && language.len() == count * 3 + 5);
+    if !language_shape_ok {
         return Err(MxlCodecError::InvalidShape(
             "MOXCEL language descriptor has an unknown layout".to_string(),
         ));
