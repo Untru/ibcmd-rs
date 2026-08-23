@@ -2814,7 +2814,17 @@ fn dump_table_rows_with_options_mode(
         &metadata_value_predefined_item_refs,
     )?;
     let configuration_module_groups = configuration_module_groups(&file_names_owned);
-    ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
+    // A path claimed by two storage entries is a refusal about those entries,
+    // not about the export: both are withheld and named, and everything that
+    // claims its path alone is still produced.
+    let mut source_assets = source_assets;
+    let mut source_asset_diagnostics = source_asset_diagnostics;
+    for (file_name, message) in
+        colliding_source_asset_paths(&source_assets, &source_asset_diagnostics)
+    {
+        source_assets.remove(&file_name);
+        source_asset_diagnostics.insert(file_name, message);
+    }
 
     let context = DumpRowContext {
         output_dir,
@@ -3936,7 +3946,17 @@ fn dump_table_rows_streamed(
         &metadata_value_predefined_item_refs,
     )?;
     let configuration_module_groups = configuration_module_groups(&file_names);
-    ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
+    // A path claimed by two storage entries is a refusal about those entries,
+    // not about the export: both are withheld and named, and everything that
+    // claims its path alone is still produced.
+    let mut source_assets = source_assets;
+    let mut source_asset_diagnostics = source_asset_diagnostics;
+    for (file_name, message) in
+        colliding_source_asset_paths(&source_assets, &source_asset_diagnostics)
+    {
+        source_assets.remove(&file_name);
+        source_asset_diagnostics.insert(file_name, message);
+    }
     timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
     timings.prepare_indexes_ms = elapsed_ms(prepare_started);
 

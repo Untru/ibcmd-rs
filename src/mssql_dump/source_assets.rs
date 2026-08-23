@@ -459,23 +459,41 @@ pub(super) fn parse_hex_u32_bytes(bytes: &[u8]) -> Option<u32> {
     u32::from_str_radix(std::str::from_utf8(bytes).ok()?, 16).ok()
 }
 
-pub(super) fn ensure_unique_source_asset_paths(
+/// Every storage entry whose output path another entry also claims, with the
+/// message naming both claimants.
+///
+/// A collision is a refusal about those entries, not about the export: writing
+/// either one would silently overwrite the other, so both are withheld and
+/// named, and every entry that claims its path alone is still produced. Taking
+/// down the whole run instead hides the rest of the picture, which is exactly
+/// what a foreign configuration is exported to reveal.
+pub(super) fn colliding_source_asset_paths(
     source_assets: &BTreeMap<String, SourceAsset>,
     diagnostics: &BTreeMap<String, String>,
-) -> Result<()> {
-    let mut paths = BTreeMap::<String, &str>::new();
+) -> BTreeMap<String, String> {
+    let mut claimants = BTreeMap::<String, Vec<&str>>::new();
     for (file_name, asset) in source_assets {
         let path = asset.primary_path.to_string_lossy().replace('\\', "/");
-        if let Some(previous_file_name) = paths.insert(path.clone(), file_name.as_str()) {
-            let mut message = format!(
-                "source asset output path {path} is produced by both {previous_file_name} and {file_name}"
-            );
-            append_source_asset_diagnostic(&mut message, previous_file_name, diagnostics);
-            append_source_asset_diagnostic(&mut message, file_name, diagnostics);
-            bail!("{message}");
+        claimants.entry(path).or_default().push(file_name.as_str());
+    }
+    let mut refused = BTreeMap::<String, String>::new();
+    for (path, names) in claimants {
+        if names.len() < 2 {
+            continue;
+        }
+        let mut message = format!(
+            "source asset output path {path} is produced by both {} and {}",
+            names[0],
+            names[1..].join(" and ")
+        );
+        for name in &names {
+            append_source_asset_diagnostic(&mut message, name, diagnostics);
+        }
+        for name in names {
+            refused.insert(name.to_string(), message.clone());
         }
     }
-    Ok(())
+    refused
 }
 
 fn append_source_asset_diagnostic(

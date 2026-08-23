@@ -5183,6 +5183,13 @@ fn rejects_duplicate_source_asset_primary_paths() {
                 kind: SourceAssetKind::InflatedBinary,
             },
         ),
+        (
+            "alone".to_string(),
+            SourceAsset {
+                primary_path: PathBuf::from("Shared/Ext/Other.xml"),
+                kind: SourceAssetKind::InflatedBinary,
+            },
+        ),
     ]);
     let diagnostics = BTreeMap::from([
         (
@@ -5195,15 +5202,21 @@ fn rejects_duplicate_source_asset_primary_paths() {
         ),
     ]);
 
-    let error = ensure_unique_source_asset_paths(&source_assets, &diagnostics)
-        .expect_err("duplicate source asset paths must be rejected");
-    let error = error.to_string();
+    let refused = colliding_source_asset_paths(&source_assets, &diagnostics);
 
-    assert!(error.contains("produced by both"));
-    assert!(error.contains("first: form \"ФормаСписка\""));
-    assert!(error.contains("found 0; candidates: none"));
-    assert!(error.contains("second: form \"ФормаСписка\""));
-    assert!(error.contains("Catalogs/Products, Catalogs/Services"));
+    // Both claimants of the shared path are withheld and named; the entry that
+    // claims its own path alone is untouched.
+    assert_eq!(
+        refused.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec!["first", "second"]
+    );
+    let message = refused.get("first").expect("first is refused");
+    assert_eq!(message, refused.get("second").expect("second is refused"));
+    assert!(message.contains("produced by both"));
+    assert!(message.contains("first: form \"ФормаСписка\""));
+    assert!(message.contains("found 0; candidates: none"));
+    assert!(message.contains("second: form \"ФормаСписка\""));
+    assert!(message.contains("found 2; candidates: Catalogs/Products, Catalogs/Services"));
 }
 
 #[test]
