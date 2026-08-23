@@ -302,6 +302,29 @@ fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<Co
         .collect())
 }
 
+/// The stamp a dynamic update leaves on the entries it writes beside the live
+/// ones: `<id>_dynupdate_<session uuid>`, optionally with the usual `.part`
+/// suffix.
+///
+/// These entries are **not** newer versions of the entry whose id they carry.
+/// In ERP «Управление холдингом» 3.2.12.6 the id `024d5d02-…` is the scheduled
+/// job `ЗакрытиеМесяца` in the live set and a form record named `Форма` in the
+/// stamped set -- a scheduled job does not become a form, so the two sets name
+/// different object spaces rather than two states of one.
+///
+/// The platform answers for itself which set is the configuration: the
+/// `versions` row, its own inventory, lists the live entries and never the
+/// stamped ones. Comparing the manifest against it therefore has to compare
+/// the live half, and a stamped entry is outside that comparison by
+/// construction instead of missing from it. Nothing here decides whether such
+/// an entry should ever be exported; it decides only that its presence is not
+/// an inventory defect.
+const DYNAMIC_UPDATE_STAMP: &str = "_dynupdate_";
+
+pub(super) fn is_dynamic_update_entry(name: &str) -> bool {
+    name.contains(DYNAMIC_UPDATE_STAMP)
+}
+
 fn validate_versions_inventory(
     versions: &[ConfigVersionEntry],
     file_names: &BTreeSet<String>,
@@ -314,6 +337,7 @@ fn validate_versions_inventory(
     let manifest_names = file_names
         .iter()
         .map(String::as_str)
+        .filter(|name| !is_dynamic_update_entry(name))
         .collect::<BTreeSet<_>>();
     if version_names == manifest_names {
         return Ok(());
