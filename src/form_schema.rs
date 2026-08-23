@@ -4345,6 +4345,21 @@ impl FormCheckBoxFieldSchema {
 pub(crate) struct FormChildItemUserVisibleSchema;
 
 impl FormChildItemUserVisibleSchema {
+    /// Validates the conditional-`UserVisible` prefix shape and returns the
+    /// value it actually carries.
+    ///
+    /// The census that named this slot only ever saw `Some(false)` -- the
+    /// non-default state the platform writes
+    /// `<UserVisible><xr:Common>false</xr:Common></UserVisible>` for -- on
+    /// `Button` and `PictureField`. ERP UH MDM_Management's `LabelField` and
+    /// `InputField` items carry the identical marker-and-tuple pair at the
+    /// identical slots of the same wrapper-`37` layout, at the same
+    /// evidenced field count and offset, but at the *default* value `true`,
+    /// which the platform writes no `<UserVisible>` element for at all. The
+    /// shape is the same envelope regardless of which field kind wraps it or
+    /// which of the two values it holds, so both are read through here
+    /// instead of only the one value the original two tags happened to show,
+    /// and the caller gets the value itself rather than a presence marker.
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -4352,17 +4367,23 @@ impl FormChildItemUserVisibleSchema {
         top_level_offset: usize,
         conditional_marker: Option<&str>,
         user_visible_common: Option<bool>,
-    ) -> Option<Self> {
+    ) -> Option<bool> {
         match (
             wrapper,
             field_count,
             item_tag,
             top_level_offset,
             conditional_marker,
-            user_visible_common,
         ) {
-            ("31", 53, "Button", 1, Some("1"), Some(false))
-            | ("37", 60, "PictureField", 1, Some("1"), Some(false)) => Some(Self),
+            ("31", 53, "Button", 1, Some("1"))
+            | (
+                "37",
+                60,
+                "PictureField" | "LabelField" | "InputField" | "CheckBoxField"
+                | "RadioButtonField" | "TextDocumentField",
+                1,
+                Some("1"),
+            ) => user_visible_common,
             _ => None,
         }
     }
@@ -4527,7 +4548,14 @@ impl FormConditionalTableSchema {
             user_visible_common,
             conditional_marker,
         ) {
-            ("55", field_count, Some(false), Some("1"))
+            // `Some(false)` is the non-default state the platform writes
+            // `<UserVisible><xr:Common>false</xr:Common></UserVisible>` for.
+            // `Some(true)` is the default state, written as no `<UserVisible>`
+            // element at all -- ERP UH MDM_Management's `Список` dynamic-list
+            // tables carry the very same prefix tuple at its default value, so
+            // the slot has to be recognized on both values or a default-valued
+            // table is misread past this point entirely.
+            ("55", field_count, Some(false) | Some(true), Some("1"))
                 if field_count >= 100 && (field_count - 100) % 2 == 0 =>
             {
                 Some(Self { prefix_slot: 5 })
