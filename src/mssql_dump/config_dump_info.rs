@@ -456,10 +456,28 @@ fn build_config_dump_children(
         if !version_ids.contains(row.file_name.as_str()) {
             continue;
         }
+        // The Configuration record opens with its own metadata header, whose
+        // uuid is the configuration's identity rather than a child of it: the
+        // platform addresses the configuration by its storage key and its
+        // parts by `<identity>.<n>`, and the bare identity never appears as a
+        // `<Metadata>` id (0 occurrences across УТ, БСП demo, ERP УХ and both
+        // ERP УХ mini-configurations).
+        //
+        // That identity was previously recognized only through
+        // `configuration_module_groups`, which infers it from *file names* --
+        // an owner id carrying module-like suffixes but no bare record. ERP
+        // УХ's `Web_Service` and `MDM_Management` ship no configuration module
+        // records at all, so that set comes out empty, the identity header is
+        // taken for an unnameable child, and ConfigDumpInfo.xml is skipped
+        // whole. Reading it from the record that states it holds either way.
+        let configuration_identity = parse_configuration_header_uuid(&row.text);
         for (header, _) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
         {
             if version_ids.contains(header.uuid.as_str()) {
+                continue;
+            }
+            if configuration_identity.as_deref() == Some(header.uuid.as_str()) {
                 continue;
             }
             if configuration_module_groups.contains(&header.uuid) {

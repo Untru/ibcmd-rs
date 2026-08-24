@@ -10474,9 +10474,30 @@ fn metadata_object_fields(text: &str) -> Option<Vec<&str>> {
     split_1c_braced_fields(object_text, 0)
 }
 
+/// The index of the field carrying the object's own header tuple.
+///
+/// The tuple's third member is the object's uuid and its second is always
+/// `0`; the first member tracks the layout of the header block the tuple
+/// opens. Two are observed on platform 8.3.27.2214:
+///
+/// * `{1,0,<uuid>}` opens the eight-member block -- uuid tuple, `Name`,
+///   `Synonym`, `Comment`, then a four-member tail `0,0,<nil uuid>,0`. This
+///   is what УТ, БСП and the full ERP УХ write, and the only one the reader
+///   knew.
+/// * `{0,0,<uuid>}` opens a four-member block that stops after `Comment`.
+///   ERP УХ's `Web_Service` and `MDM_Management` write their `Русский`
+///   language this way (uuid `1912dfb1-c8bc-4fec-b692-b2d9660f569b`, 91
+///   packed bytes), while the same platform writes the full ERP УХ's own
+///   `Русский` (`0663bf5b-…`) as an eight-member block. Refusing the short
+///   spelling dropped the object whole, and with it `ConfigDumpInfo.xml`,
+///   which is written only when every entry of the platform's `versions`
+///   inventory routes.
+///
+/// The long spelling is looked up first, so no record that already carried
+/// one can change index.
 fn metadata_header_field_index(fields: &[&str], uuid: &str) -> Option<usize> {
-    let marker = format!("{{1,0,{uuid}}}");
-    fields.iter().position(|field| field.contains(&marker))
+    let position = |marker: String| fields.iter().position(move |field| field.contains(&marker));
+    position(format!("{{1,0,{uuid}}}")).or_else(|| position(format!("{{0,0,{uuid}}}")))
 }
 
 fn field_starts_with(field: Option<&&str>, prefix: &str) -> bool {

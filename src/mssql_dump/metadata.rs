@@ -329,8 +329,13 @@ pub(super) fn is_code21_accounting_register_fields(fields: &[&str], uuid: &str) 
 }
 
 pub(super) fn parse_metadata_header_from_text(text: &str, uuid: &str) -> Option<MetadataHeader> {
-    let marker = format!("{{1,0,{uuid}}},");
-    let mut offset = text.find(&marker)? + marker.len();
+    // `Name`, `Synonym` and `Comment` follow the object's own header tuple in
+    // both header-block layouts the platform writes; only the tuple's own
+    // first member differs. See `metadata_header_field_index` for the two
+    // spellings and where each was observed.
+    let mut offset = [format!("{{1,0,{uuid}}},"), format!("{{0,0,{uuid}}},")]
+        .into_iter()
+        .find_map(|marker| text.find(&marker).map(|start| start + marker.len()))?;
     offset = skip_ascii_ws_at(text, offset);
     let (name, consumed) = parse_1c_quoted_string_with_len(&text[offset..])?;
     offset += consumed;
