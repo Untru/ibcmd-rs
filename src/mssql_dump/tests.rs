@@ -25556,6 +25556,369 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
 }
 
 #[test]
+fn label_decoration_writes_shortcut_from_fixed_slot_sixteen() {
+    // Real bytes: DataProcessors/ОбновлениеВерсииИБ/Forms/ФормаВерсииИБ/
+    // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
+    // `30c55f12-6fa4-411e-a401-c15332430c9c.0`). `ИнструкцияРедактированияВерсий`
+    // is the only native `LabelDecoration` observed carrying `<Shortcut>`
+    // across SSL demo, SSL base and UT 11.5.27.75 (15 127 `LabelDecoration`
+    // items traced): raw slot 16 is `{0,118,0}`, the platform's own
+    // `{0,keycode,modifiers}` tuple for `F7`, and the platform writes
+    // `<Shortcut>F7</Shortcut>` behind `SkipOnInput` and ahead of `Title`.
+    let with_shortcut = parse_form_child_item(
+        r#"{12,
+{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнструкцияРедактированияВерсий",
+{1,1,
+{"ru","Для выполнения обработчиков обновления при запуске системы укажите версию ИБ до обновления
+или удалите информацию о версии ИБ для имитации запуска с ""пустой"" базы (при этом будут
+выполнены только обработчики первоначального заполнения). Затем перезапустите приложения."}
+},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,118,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},1,
+{22,
+{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ИнструкцияРедактированияВерсийКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,0,
+{1,
+{1,1,
+{"ru","Для выполнения обработчиков обновления при запуске системы укажите версию ИБ до обновления
+или удалите информацию о версии ИБ для имитации запуска с ""пустой"" базы (при этом будут
+выполнены только обработчики первоначального заполнения). Затем перезапустите приложения."}
+},0},0,1,
+{12,
+{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнструкцияРедактированияВерсийРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,1,0,3,3,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(with_shortcut.tag, "LabelDecoration");
+    assert_eq!(with_shortcut.item_shortcut.as_deref(), Some("F7"));
+    let xml = format_form_child_items_xml(std::slice::from_ref(&with_shortcut), 1);
+    let skip = xml.find("<SkipOnInput>false</SkipOnInput>").unwrap();
+    let shortcut = xml.find("<Shortcut>F7</Shortcut>").unwrap();
+    let title = xml.find("<Title").unwrap();
+    assert!(skip < shortcut, "Shortcut trails SkipOnInput: {xml}");
+    assert!(shortcut < title, "Shortcut leads Title: {xml}");
+
+    // Same form, real bytes for a titled `LabelDecoration` the platform
+    // writes no `<Shortcut>` on (`ДекорацияУточнение`): raw slot 16 reads
+    // `{0,0,0}`, which the shared decoder already turns into `None`.
+    let without_shortcut = parse_form_child_item(
+        r#"{12,
+{105,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияУточнение",
+{1,1,
+{"ru","секунд"}
+},
+{1,1,
+{"ru","Если установить паузу, то приостанавливает выполнение обработчика для просмотра ошибок в процессе обработки данных.
+см. Документ._ДемоЗаказПокупателя.ОбработатьДанныеДляПереходаНаНовуюВерсию"}
+},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},1,
+{22,
+{106,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ДекорацияУточнениеКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,2,
+{1,
+{1,1,
+{"ru","секунд"}
+},0},3,1,
+{12,
+{107,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияУточнениеРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},1,0,0,1,0,3,3,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(without_shortcut.tag, "LabelDecoration");
+    assert_eq!(without_shortcut.item_shortcut, None);
+    let xml_without = format_form_child_items_xml(std::slice::from_ref(&without_shortcut), 1);
+    assert!(
+        !xml_without.contains("<Shortcut>"),
+        "no Shortcut expected: {xml_without}"
+    );
+}
+
+#[test]
+fn graphical_schema_field_writes_edit_false_exactly_when_read_only() {
+    // Real bytes: DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма/
+    // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
+    // `2d885109-4c96-41c0-a996-785bfd793c2d.0`). Traced across SSL demo, SSL
+    // base, UT 11.5.27.75 and ERP УХ 3.2.12.6 -- 14 native
+    // `GraphicalSchemaField` items, the construct's whole population -- the 9
+    // that carry `<ReadOnly>true</ReadOnly>` all also write
+    // `<Edit>false</Edit>` immediately behind their geometry (`Width`/
+    // `Height`), and the other 5 write neither, with no counter-example.
+    let read_only_item = parse_form_child_item(
+        r#"{37,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,14,"КартаМаршрута",0,0,
+{1,1,
+{"ru","Карта маршрута"}
+},
+{1,0},
+{1,
+{3}
+},
+{0},1,1,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{3,80,25,0,0,
+{3,4,
+{0}
+},
+{1,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,"КартаМаршрутаВыбор",1,0,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,0,1},1,0,0,1,0,1,1},
+{0,1,0},1,
+{22,
+{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартаМаршрутаКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},1,a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Задачи",
+{1,1,
+{"ru","Показать задачи для точки маршрута"}
+},1,
+{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",0,0,1,
+{12,
+{47,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗадачиРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{48,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартаМаршрутаРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(read_only_item.tag, "GraphicalSchemaField");
+    assert_eq!(read_only_item.read_only, Some(true));
+    assert_eq!(read_only_item.width.as_deref(), Some("80"));
+    assert_eq!(read_only_item.height.as_deref(), Some("25"));
+    let xml = format_form_child_items_xml(std::slice::from_ref(&read_only_item), 1);
+    let height = xml.find("<Height>25</Height>").unwrap();
+    let edit = xml.find("<Edit>false</Edit>").unwrap();
+    let context_menu = xml.find("<ContextMenu").unwrap();
+    assert!(height < edit, "Edit trails Height: {xml}");
+    assert!(edit < context_menu, "Edit leads ContextMenu: {xml}");
+
+    // Negative control: the project's own synthetic document-field record
+    // (`document_field_record_for_test`, already used above and at
+    // `dispatches_wrapper_37_document_fields_without_owner_specific_conditions`
+    // and `parses_document_field_properties_from_common_and_typed_slots`)
+    // with slot 14 -- the `show_title`-shaped slot `GraphicalSchemaField`
+    // shares with `TextDocumentField`/`HTMLDocumentField`/`RadioButtonField`
+    // and the one this tag's `read_only` is actually read from, since
+    // `FormFieldSchema::read_only_slot` does not cover `GraphicalSchemaField`
+    // -- flipped from the template's default `"1"` to `"0"`. A native
+    // `GraphicalSchemaField` with `<ReadOnly>` absent behaves the same way:
+    // `DataProcessors/СтруктураВладения` and `DataProcessors/СхемыСправки` of
+    // ERP УХ 3.2.12.6 both carry it, but neither form round-trips through the
+    // single-item harness in isolation (both are rejected upstream by an
+    // unrelated DCS conditional-appearance gap, out of scope here), so the
+    // negative side is exercised through the existing synthetic record
+    // instead of real bytes.
+    let mut editable_fields: Vec<String> = split_1c_braced_fields(
+        &document_field_record_for_test("14", r#"{1,1,{"en","Schema"}}"#),
+        0,
+    )
+    .unwrap()
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    editable_fields[14] = "0".to_string();
+    let editable_record = format!("{{{}}}", editable_fields.join(","));
+    let editable_item = parse_form_child_item(
+        &editable_record,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(editable_item.tag, "GraphicalSchemaField");
+    assert_ne!(editable_item.read_only, Some(true));
+    let xml_editable = format_form_child_items_xml(std::slice::from_ref(&editable_item), 1);
+    assert!(
+        !xml_editable.contains("<Edit>"),
+        "no Edit expected: {xml_editable}"
+    );
+}
+
+#[test]
 fn preserves_fixed_allowed_length_in_form_type_xml() {
     let value_types = normalize_form_type_pattern(vec![ConstantValueType::String {
         length: Some(12),

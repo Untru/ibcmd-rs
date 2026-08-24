@@ -10377,6 +10377,20 @@ fn parse_form_child_item_with_metadata_owners(
             "Table" => fields
                 .get(51)
                 .and_then(|field| parse_common_command_shortcut_value(field)),
+            // A `LabelDecoration` keeps the same tuple in fixed slot 16 of its
+            // own 36-member head -- not offset-corrected, because decorations
+            // never carry the extended-layout prefix that shifts it for
+            // fields. SSL demo's DataProcessors/ОбновлениеВерсииИБ carries the
+            // only native `<Shortcut>` (`F7`) found on a `LabelDecoration`
+            // across the SSL demo, SSL base and UT 11.5.27.75 corpora (15 127
+            // items traced); its raw slot 16 is `{0,118,0}` -- the exact
+            // shortcut tuple -- while four other traced items across two
+            // unrelated forms that carry no `<Shortcut>` all read `{0,0,0}`
+            // there, which the shared decoder already turns into `None`, with
+            // no counter-example.
+            "LabelDecoration" => fields
+                .get(16)
+                .and_then(|field| parse_common_command_shortcut_value(field)),
             _ => None,
         },
         choice_list_height: (tag == "InputField")
@@ -23574,6 +23588,16 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(height)
         ));
     }
+    // A `GraphicalSchemaField` writes `Edit` immediately behind its geometry
+    // (`Width`/`Height` when set, else right behind `TitleLocation`) and
+    // ahead of everything else. Traced across SSL demo, SSL base, UT
+    // 11.5.27.75 and ERP УХ 3.2.12.6 (14 native items, the construct's whole
+    // population): the 9 that carry `<ReadOnly>true</ReadOnly>` all also
+    // write `<Edit>false</Edit>` right there, and the other 5 -- `ReadOnly`
+    // false or absent -- write neither, with no counter-example.
+    if item.tag == "GraphicalSchemaField" && item.read_only == Some(true) {
+        xml.push_str(&format!("{tab}\t<Edit>false</Edit>\r\n"));
+    }
     // A calendar field writes its border behind the title block and ahead of
     // the calendar run: on the one native calendar that carries one,
     // `DataPath` and `TitleLocation` lead it and `ShowMonthsPanel`,
@@ -23613,6 +23637,20 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
             if skip_on_input { "true" } else { "false" }
+        ));
+    }
+    // A `LabelDecoration`'s `Shortcut` trails its own `AutoMaxWidth`/
+    // `SkipOnInput` pair and leads the decoration's `Title` block (written
+    // next by `format_form_decoration_header_xml`), unlike the field family's
+    // `Shortcut`, which trails the title block instead. SSL demo's sole
+    // native example -- DataProcessors/ОбновлениеВерсииИБ -- writes it in
+    // exactly that slot.
+    if item.tag == "LabelDecoration"
+        && let Some(shortcut) = &item.item_shortcut
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Shortcut>{}</Shortcut>\r\n",
+            escape_xml_text(shortcut)
         ));
     }
     if item.tag == "Button" {
