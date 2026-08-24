@@ -25945,6 +25945,77 @@ fn writes_common_picture_xml_and_asset_to_source_layout() {
 }
 
 #[test]
+fn writes_common_picture_xml_for_pre_layout_upgrade_code3_record() {
+    // ERP УХ 3.2.12.6 ships `CommonPictures/AppStore.xml` (uuid
+    // `4bca6ec8-858d-4fc3-9b44-7aac1a1d6c94`) as a code-3 record whose
+    // header block declares seven members --
+    // `{2,{1,0,<uuid>},Name,Synonym,Comment,0,0,<nil uuid>}` -- with no
+    // trailing slot at all for `AvailabilityForChoice`/
+    // `AvailabilityForAppearance`, unlike the eight-member block code 4
+    // carries once the platform re-imports/re-saves the very same picture.
+    // Bytes captured via `ibcmd-rs cf extract` from ERP_UH 3.2.12.6's
+    // `1cv8.cf`. `metadata_source_for_object_fields` already routes this
+    // exact shape to `CommonPicture`; this test guards the property parser
+    // that turns it into the top-level `CommonPictures/AppStore.xml`.
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let uuid = "4bca6ec8-858d-4fc3-9b44-7aac1a1d6c94";
+    let metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{3,\r\n{{2,\r\n{{1,0,{uuid}}},\"AppStore\",\r\n{{1,\"ru\",\"App store\"}},\"\",0,0,00000000-0000-0000-0000-000000000000}}\r\n}},0}}"
+        )
+        .as_bytes(),
+    );
+    let zip = b"PK\x03\x04";
+    let picture = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:UEsDBA==}}}");
+    let rows = vec![
+        ConfigRow {
+            file_name: uuid.to_string(),
+            part_no: 0,
+            data_size: metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&metadata),
+        },
+        ConfigRow {
+            file_name: format!("{uuid}.0"),
+            part_no: 0,
+            data_size: picture.len() as i64,
+            binary_hex: encode_hex_for_test(&picture),
+        },
+    ];
+    let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+    assert_eq!(dumped.metadata_xml_rows, 1);
+    assert_eq!(dumped.source_asset_rows, 1);
+    assert!(root.join("CommonPictures/AppStore.xml").exists());
+    let appstore_xml = fs::read_to_string(root.join("CommonPictures/AppStore.xml")).unwrap();
+    assert!(appstore_xml.starts_with('\u{feff}'));
+    assert!(
+        appstore_xml.contains(r#"<CommonPicture uuid="4bca6ec8-858d-4fc3-9b44-7aac1a1d6c94">"#)
+    );
+    assert!(appstore_xml.contains("<Name>AppStore</Name>"));
+    assert!(appstore_xml.contains("<Comment/>"));
+    assert!(appstore_xml.contains("<AvailabilityForChoice>false</AvailabilityForChoice>"));
+    assert!(appstore_xml.contains("<AvailabilityForAppearance>false</AvailabilityForAppearance>"));
+    assert!(!appstore_xml.ends_with("\r\n"));
+    // The seven-member block is a declared absence of the two flags, not an
+    // unknown value -- confirmed against all 673 of ERP УХ's code-3 common
+    // pictures, every one of which the platform round-trips as
+    // `false`/`false` (see the parser's doc comment). It must never fall
+    // back to the sibling `Style` family this same code/header-index pair
+    // used to be misrouted to before commit 1645b1c.
+    assert!(!root.join("Styles/AppStore.xml").exists());
+    assert_eq!(
+        fs::read(root.join("CommonPictures/AppStore/Ext/Picture/Picture.zip")).unwrap(),
+        zip
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn extracts_ext_picture_transparent_pixel_from_multiline_wrapper() {
     let wrapper = "{1,\r\n{1,0,10,7},\r\n{\r\n{#base64:iVBORw0KGgo=\r\n}\r\n}\r\n}";
     let picture = extract_ext_picture(&deflate_for_test(wrapper.as_bytes())).unwrap();

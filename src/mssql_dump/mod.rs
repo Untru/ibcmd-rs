@@ -10556,15 +10556,33 @@ fn parse_common_picture_properties_from_text(
     uuid: &str,
 ) -> Option<CommonPictureProperties> {
     let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("4")
-        || metadata_header_field_index(&fields, uuid) != Some(1)
-    {
+    if metadata_header_field_index(&fields, uuid) != Some(1) {
         return None;
     }
-    Some(CommonPictureProperties {
-        availability_for_choice: parse_1c_bool_flag(fields.get(2)?.trim())?,
-        availability_for_appearance: parse_1c_bool_flag(fields.get(3)?.trim())?,
-    })
+    match fields.first().map(|value| value.trim()) {
+        Some("4") => Some(CommonPictureProperties {
+            availability_for_choice: parse_1c_bool_flag(fields.get(2)?.trim())?,
+            availability_for_appearance: parse_1c_bool_flag(fields.get(3)?.trim())?,
+        }),
+        // The older of the two layouts the platform has used (see
+        // `metadata_source_for_object_fields` in metadata.rs) writes the
+        // header block as `{3,{2,{1,0,<uuid>},Name,Synonym,Comment,0,0,<nil
+        // uuid>}}` -- a declared seven-member block with no trailing slot
+        // for these two flags at all, unlike the eight-member block code 4
+        // carries. This is a declared absence, not an unknown: ERP УХ
+        // 3.2.12.6's 673 code-3 common pictures all round-trip through the
+        // platform as `false`/`false` (confirmed against every one of their
+        // native `CommonPictures/*.xml` exports), so the block's own
+        // declared arity is read, not a guessed value stuffed into a
+        // missing member.
+        Some("3") if fields.len() == 2 && field_starts_with(fields.get(1), "{2,") => {
+            Some(CommonPictureProperties {
+                availability_for_choice: false,
+                availability_for_appearance: false,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_functional_option_properties_from_text(
