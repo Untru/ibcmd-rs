@@ -1474,7 +1474,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         &number_format_refs,
     )
     .unwrap_or_default();
-    let (column_formats, mut formats) = (column_formats, formats);
+    let (mut column_formats, mut formats) = (column_formats, formats);
     let source_format_map = source_format_map.filter(|source_format_map| {
         moxel_source_format_refs_are_complete(
             source_format_map,
@@ -1599,6 +1599,25 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .filter(|lines| moxel_line_table_covers_references(lines, &all_formats))
     {
         Some(lines) => {
+            let line_scan_formats = all_formats
+                .iter()
+                .cloned()
+                .chain(std::iter::once(default_format.clone()))
+                .collect::<Vec<_>>();
+            let (lines, line_remap) = compact_moxel_line_table(lines, &line_scan_formats);
+            let all_formats = if let Some(line_remap) = &line_remap {
+                for format in column_formats.iter_mut().chain(formats.iter_mut()) {
+                    remap_moxel_format_line_refs(format, line_remap);
+                }
+                remap_moxel_format_line_refs(&mut default_format, line_remap);
+                column_formats
+                    .iter()
+                    .chain(formats.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                all_formats
+            };
             let lines = finalize_moxel_line_slots(
                 lines
                     .into_iter()
@@ -2133,6 +2152,11 @@ pub(super) fn normalize_moxel_column_set_format_indices(column_sets: &mut [Moxel
 /// the two window scans this replaces returned the same verdict as this anchor
 /// on all 683 documents, so nothing that depended on them moves.
 const MOXEL_HEADER_FOOTER_BLOCK_START: usize = 7;
+/// Largest forward jump in a row's own index the anchored row scan accepts
+/// as a run of skipped default-format empty rows. `1_000_000` mirrors the
+/// existing MOXCEL column-count ceiling used elsewhere in this reader as a
+/// generic sanity bound, not an observed corpus maximum.
+const MAX_MOXEL_ROW_GAP: usize = 1_000_000;
 
 /// Block slot -> publication slot, where publication order is `leftHeader`,
 /// `centerHeader`, `rightHeader`, `leftFooter`, `centerFooter`, `rightFooter`.
@@ -2535,19 +2559,50 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
         if height == 0 || height > 1_000_000 {
             continue;
         }
+        // Only the structurally-verified anchor (the fixed prefix behind the
+        // header/footer block) is trusted to read a forward jump in the
+        // record's own index as a skipped default-format empty row rather
+        // than corruption; every other position in this scan is a heuristic
+        // guess whose "best length wins" comparison must not be inflated by
+        // manufactured gap rows.
+        let allow_forward_gap = Some(index) == anchored_row_block;
         let mut rows = Vec::new();
         let mut cursor = index + 3;
         let mut expected_row_index = 0usize;
-        while rows.len() < height {
-            let Some((row, next_cursor)) = parse_moxel_row_at(fields, cursor, expected_row_index)
-            else {
+        let mut explicit_count = 0usize;
+        while explicit_count < height {
+            let parsed = if allow_forward_gap {
+                parse_moxel_row_at_allow_forward_gap(fields, cursor)
+            } else {
+                parse_moxel_row_at(fields, cursor, expected_row_index)
+            };
+            let Some((row, next_cursor)) = parsed else {
                 break;
             };
-            if next_cursor <= cursor {
+            if next_cursor <= cursor || row.index < expected_row_index {
                 break;
             }
+            if row.index > expected_row_index {
+                // Bound the gap so a spurious anchor cannot manufacture an
+                // unbounded row list from an accidental forward-looking
+                // number in unrelated data.
+                if row.index - expected_row_index > MAX_MOXEL_ROW_GAP {
+                    break;
+                }
+                for gap_index in expected_row_index..row.index {
+                    rows.push(MoxelRow {
+                        index: gap_index,
+                        index_to: None,
+                        format_index: 1,
+                        source_format_index: None,
+                        columns_id: None,
+                        cells: Vec::new(),
+                    });
+                }
+            }
+            expected_row_index = row.index + 1;
             rows.push(row);
-            expected_row_index += 1;
+            explicit_count += 1;
             cursor = next_cursor;
         }
         if rows.len() > best_rows.len() {
@@ -2635,6 +2690,54 @@ pub(super) fn parse_moxel_row_at(
     )
 }
 
+/// Parses the next record in the anchored row block, accepting whatever row
+/// index the record itself carries instead of requiring it to equal the
+/// caller's running counter.
+///
+/// Evidence (ERP UH `Web_Service`, `ОстаткиИОбороты`): the stored row count
+/// behind the anchor (14) is the count of records the *stream* carries, not
+/// the sheet's logical row count (17, the separately-stored value that also
+/// drives `<height>`). The three-row gap is exactly the rows the platform
+/// publishes as `<row><empty>true</empty></row>` with no `<formatIndex>` -
+/// an empty row at the ambient default format is not written to the stream
+/// at all, only rows that name a member are. The next record's own index
+/// then jumps past the missing ones (`4` is followed directly by a record
+/// naming index `6`, skipping `5`). Requiring strict equality here read that
+/// jump as corruption and stopped decoding every row after the gap.
+pub(super) fn parse_moxel_row_at_allow_forward_gap(
+    fields: &[&str],
+    index: usize,
+) -> Option<(MoxelRow, usize)> {
+    if let Some(row) = parse_moxel_row_shape_with_expectation(
+        fields,
+        index,
+        None,
+        MoxelRowShape {
+            row_index_offset: 0,
+            format_offset: 1,
+            cell_count_offset: 2,
+            cells_offset: 3,
+            allow_empty: true,
+            validate_empty_prefix: false,
+        },
+    ) {
+        return Some(row);
+    }
+    parse_moxel_row_shape_with_expectation(
+        fields,
+        index,
+        None,
+        MoxelRowShape {
+            row_index_offset: 3,
+            format_offset: 4,
+            cell_count_offset: 5,
+            cells_offset: 6,
+            allow_empty: true,
+            validate_empty_prefix: true,
+        },
+    )
+}
+
 pub(super) fn parse_moxel_row_at_for_scanning(
     fields: &[&str],
     index: usize,
@@ -2689,12 +2792,28 @@ pub(super) fn parse_moxel_row_shape(
     expected_row_index: usize,
     shape: MoxelRowShape,
 ) -> Option<(MoxelRow, usize)> {
+    parse_moxel_row_shape_with_expectation(fields, index, Some(expected_row_index), shape)
+}
+
+/// The same record shape, but with the equality gate against a caller-known
+/// index made optional. `None` accepts whatever index the record itself
+/// carries: the anchored row scan uses this to detect a *forward* jump in the
+/// stored index, which a stream that skips a default-formatted empty row
+/// produces (evidence below), rather than folding on a plain mismatch.
+fn parse_moxel_row_shape_with_expectation(
+    fields: &[&str],
+    index: usize,
+    expected_row_index: Option<usize>,
+    shape: MoxelRowShape,
+) -> Option<(MoxelRow, usize)> {
     let row_index = fields
         .get(index + shape.row_index_offset)?
         .trim()
         .parse::<usize>()
         .ok()?;
-    if row_index != expected_row_index {
+    if let Some(expected_row_index) = expected_row_index
+        && row_index != expected_row_index
+    {
         return None;
     }
     let format_index = fields
@@ -3167,8 +3286,6 @@ const MOXCEL_FONT_KNOWN_MASK: usize = (1 << MOXCEL_FONT_FACE_NAME_BIT)
     | (1 << MOXCEL_FONT_UNDERLINE_BIT)
     | (1 << MOXCEL_FONT_STRIKEOUT_BIT)
     | (1 << MOXCEL_FONT_SCALE_BIT);
-/// The one mask an absolute descriptor carries; it fills every slot anyway.
-const MOXCEL_ABSOLUTE_FONT_MASK: usize = MOXCEL_FONT_KNOWN_MASK;
 /// Members appear in slot order, which puts the face name last.
 const MOXCEL_FONT_MEMBER_ORDER: [usize; 6] = [
     MOXCEL_FONT_HEIGHT_BIT,
@@ -3215,11 +3332,16 @@ pub(super) fn parse_moxel_font(
     }
     match fields.get(1)?.trim() {
         // An absolute descriptor writes every slot, so its members are read at
-        // fixed offsets; only the one observed mask is admitted.
+        // fixed offsets. Field 2 was gated on the one mask 1С:УТ ever showed
+        // there (`MOXCEL_FONT_KNOWN_MASK`), but ERP UH `Web_Service`
+        // (`ОборотноСальдоваяВедомостьПоСчету`, five records, and
+        // `ОстаткиИОбороты`, five more) stores 0, 2, 4, 6 there instead across
+        // records whose remaining eighteen fields are otherwise the same
+        // fixed shape and whose face/height/weight/style bytes the platform
+        // publishes unchanged - the arity (`fields.len() == 19`) already
+        // names this shape, so an extra equality on an unused field only
+        // rejected valid records.
         "0" if fields.len() == 19 => {
-            if fields.get(2)?.trim().parse::<usize>().ok()? != MOXCEL_ABSOLUTE_FONT_MASK {
-                return None;
-            }
             let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
             let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
             Some(MoxelFont {
@@ -4087,6 +4209,81 @@ pub(super) fn moxel_used_line_indexes(formats: &[MoxelFormat]) -> BTreeSet<usize
         }
     }
     indexes
+}
+
+/// Drops any line-table entry no format actually cites and orders the
+/// survivors by the order formats first cite them, returning the map from
+/// stored index to published index for the callers that must move with it.
+/// `None` means the stored table was already exactly this order, so nothing
+/// needs remapping.
+///
+/// Evidence (ERP UH `Web_Service`): the document's own line table
+/// (`parse_moxel_line_table`) is stored in the packer's own order, not a
+/// publication order - `ОстаткиИОбороты` declares five entries, four cited,
+/// and those four happen to publish in stored order, but `КарточкаСчета`
+/// declares five entries `[Solid/1, Solid/2, None/1, Dotted/1, None/2]`
+/// (stored positions 0..4) and publishes four of them as
+/// `[Solid/2, Solid/1, None/2, None/1]` - stored order 0,1 and 2,4 each
+/// swapped. Scanning `formats` in their own pool order and, within a format,
+/// its members in `border, left, top, right, bottom, drawing` order (the
+/// same order `moxel_used_line_indexes` reads) and keeping each raw index
+/// the first time it appears reproduces both documents with no
+/// counterexample: `КарточкаСчета`'s first format to cite a line names
+/// stored index 1 before 0, which is exactly the swap. The 1С:УТ evidence
+/// this table's doc comment records (604 documents, 0 count mismatches)
+/// never exercised this path because every entry there was both cited and
+/// already stored in first-use order.
+fn compact_moxel_line_table(
+    lines: Vec<MoxelLine>,
+    formats: &[MoxelFormat],
+) -> (Vec<MoxelLine>, Option<BTreeMap<usize, usize>>) {
+    let mut order = Vec::new();
+    let mut seen = BTreeSet::new();
+    for format in formats {
+        for value in [
+            format.border,
+            format.left_border,
+            format.top_border,
+            format.right_border,
+            format.bottom_border,
+            format.drawing_border,
+        ] {
+            if let Some(index) = value
+                && seen.insert(index)
+            {
+                order.push(index);
+            }
+        }
+    }
+    if order.iter().copied().eq(0..lines.len()) {
+        return (lines, None);
+    }
+    let mut remap = BTreeMap::new();
+    let mut kept = Vec::with_capacity(order.len());
+    for old_index in order {
+        if let Some(line) = lines.get(old_index) {
+            remap.insert(old_index, kept.len());
+            kept.push(line.clone());
+        }
+    }
+    (kept, Some(remap))
+}
+
+fn remap_moxel_format_line_refs(format: &mut MoxelFormat, remap: &BTreeMap<usize, usize>) {
+    for slot in [
+        &mut format.border,
+        &mut format.left_border,
+        &mut format.top_border,
+        &mut format.right_border,
+        &mut format.bottom_border,
+        &mut format.drawing_border,
+    ] {
+        if let Some(index) = slot
+            && let Some(mapped) = remap.get(index)
+        {
+            *index = *mapped;
+        }
+    }
 }
 
 pub(super) fn parse_moxel_pictures(
