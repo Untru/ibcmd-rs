@@ -4240,6 +4240,18 @@ impl FormCheckBoxFieldSchema {
         match (wrapper, field_count) {
             ("37", 59) => Some(0),
             ("37", 60) => Some(1),
+            // A `Table`'s own implicit `CheckBoxField` column (wrapper `35`,
+            // see `form_child_item_tag`) reaches this schema with its own
+            // conditional `UserVisible`-common prefix already stripped by
+            // the caller (`parse_form_child_item_with_metadata_owners`'s
+            // `wrapper35_prefix_slot` normalization), unlike wrapper `37`
+            // whose own shift this schema still has to read itself. ERP УХ
+            // MDM_Management's `InformationRegisters/СоответствиеЗаявокНаИзменениеНСИ/Forms/ФормаСписка`
+            // carries its `ОбменВыполнен` `CheckBoxField` at 57 members
+            // after that normalization, with the name already unshifted at
+            // slot 6 exactly like wrapper `37`'s own offset-`0` shape --
+            // hence offset `0` here too, not a new value.
+            ("35", 57) => Some(0),
             _ => None,
         }
     }
