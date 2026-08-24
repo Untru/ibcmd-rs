@@ -4766,12 +4766,15 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
 
     /// `InterfaceCompatibilityMode` (offset 906): single ASCII digit, `'2'`
     /// = `TaxiEnableVersion8_2` (platform default), `'0'` =
-    /// `Version8_2`. No other index value has been observed; any other byte
-    /// must fail closed.
+    /// `Version8_2`. `'3'` is observed: WMS5's
+    /// `МодульWebОбмена_ERP25.cf` carries it at tuple field 38 and its
+    /// native `Configuration.xml` prints `Taxi` there -- no other index
+    /// value has been observed; any other byte must fail closed.
     pub fn interface_compatibility_mode_xml(&self, digit: u8) -> Option<&'static str> {
         match digit {
             b'2' => Some("TaxiEnableVersion8_2"),
             b'0' => Some("Version8_2"),
+            b'3' => Some("Taxi"),
             _ => None,
         }
     }
@@ -13326,6 +13329,9 @@ mod configuration_properties_evidenced_default_block_policy_tests {
             policy.interface_compatibility_mode_xml(b'0'),
             Some("Version8_2")
         );
+        // `'3'` is observed: WMS5's `МодульWebОбмена_ERP25.cf` carries it and
+        // prints `Taxi`.
+        assert_eq!(policy.interface_compatibility_mode_xml(b'3'), Some("Taxi"));
         assert_eq!(policy.interface_compatibility_mode_xml(b'1'), None);
     }
 

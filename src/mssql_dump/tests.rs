@@ -42891,8 +42891,12 @@ fn extracts_atomic_configuration_localized_properties_for_proven_layouts() {
         (53, mobile.as_str()),
     ];
     let expected = ConfigurationLocalizedProperties {
-        brief_information: vec![("en".to_string(), "Brief info".to_string())],
-        detailed_information: vec![("en".to_string(), "Detailed & \"quoted\" info".to_string())],
+        // Tuple field 4 carries the text placed under `<DetailedInformation>`
+        // natively, and field 5 the text placed under `<BriefInformation>`
+        // -- see the swap fix and its evidence (WMS5's
+        // `МодульWebОбмена_ERP25.cf`) in `parse_configuration_localized_properties_from_root`.
+        brief_information: vec![("en".to_string(), "Detailed & \"quoted\" info".to_string())],
+        detailed_information: vec![("en".to_string(), "Brief info".to_string())],
         copyright: vec![
             ("en".to_string(), "Copyright Vendor".to_string()),
             ("ru".to_string(), "Vendor rights".to_string()),
@@ -43466,7 +43470,11 @@ fn extracts_configuration_xml_with_native_scalar_properties() {
         assert!(xml.contains(
             "<UpdateCatalogAddress>https://updates.example.invalid/</UpdateCatalogAddress>"
         ));
-        assert!(xml.contains("<CompatibilityMode>Version8_3_20</CompatibilityMode>"));
+        // `CompatibilityMode` (tuple field 43, `80320` in this fixture)
+        // mirrors `ConfigurationExtensionCompatibilityMode` (field 26,
+        // `80327`) on this `{68,` shape rather than reading its own field --
+        // see the evidence in `parse_configuration_properties_from_text`.
+        assert!(xml.contains("<CompatibilityMode>Version8_3_27</CompatibilityMode>"));
         assert!(!xml.contains("ConfigDumpInfo"));
     }
 }
@@ -43610,10 +43618,14 @@ fn extracts_configuration_xml_with_localized_info_properties() {
             xml.find("<DefaultStyle>Style.Main</DefaultStyle>").unwrap()
                 < xml.find("<BriefInformation>").unwrap()
         );
+        // `CompatibilityMode` (tuple field 43, `80320` in this fixture)
+        // mirrors `ConfigurationExtensionCompatibilityMode` (field 26,
+        // `80327`) on this `{68,` shape rather than reading its own field --
+        // see the evidence in `parse_configuration_properties_from_text`.
         assert!(
             xml.find("</ConfigurationInformationAddress>").unwrap()
                 < xml
-                    .find("<CompatibilityMode>Version8_3_20</CompatibilityMode>")
+                    .find("<CompatibilityMode>Version8_3_27</CompatibilityMode>")
                     .unwrap()
         );
         assert!(!xml.contains(style_uuid));
