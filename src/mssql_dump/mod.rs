@@ -29052,7 +29052,15 @@ fn parse_command_group_picture_value(
     if picture_kind == 1 {
         let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
         if ref_fields.first()?.trim() == "0" {
-            let uuid = ref_fields.get(1)?.trim();
+            // Same bare-index reference `parse_common_command_picture_value`
+            // had to admit: a one-element `{0}` descriptor (no uuid member)
+            // means the platform's own `<xr:Ref>0</xr:Ref>`, not a picture
+            // object lookup. Reading past the end used to abort the whole
+            // `CommandGroup` record -- confirmed on ERP УХ MDM_Management's
+            // `СогласованиеУХ`, whose `Picture` field is exactly `{0}`.
+            let Some(uuid) = ref_fields.get(1).map(|field| field.trim()) else {
+                return Some((Some("0".to_string()), load_transparent));
+            };
             if let Some(reference) = object_refs.get(uuid)
                 && reference.starts_with("CommonPicture.")
             {
