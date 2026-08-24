@@ -9183,8 +9183,30 @@ fn parse_form_child_item_with_metadata_owners(
     // `ContextMenu`/`AutoCommandBar` service items carry the same prefix at
     // its default value `true`, which a hardcoded `false` would mislabel as
     // the non-default state and wrongly emit `<UserVisible>` for.
+    // A `Table`'s own implicit display field (wrapper `35`, see
+    // `form_child_item_tag`) carries the identical prefix tuple at the
+    // identical slot 5, but `FormConditionalGroupSchema`/`FormConditionalTableSchema`
+    // only ever learned wrapper `22`/`73`/`55` shapes, so this wrapper needs
+    // its own recognition. Detected by the tuple's own value shape (as
+    // `parse_form_child_item_extended_tooltip` already does for its
+    // differently-sized wrapper-`12` case) rather than by a hardcoded total
+    // field count, since a leaf `LabelField` here has no reason to share a
+    // length with any evidenced group/table shape. Without this, ERP УХ
+    // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка`
+    // LabelField "Ссылка" -- prefix value `true`, the platform's own default
+    // it writes no `<UserVisible>` for -- fell through to the generic
+    // "offset shifted implies false" fallback below and wrote a spurious
+    // `<UserVisible><xr:Common>false</xr:Common></UserVisible>` in place of
+    // its `<Title>`.
+    let wrapper35_prefix_slot = (wrapper == "35"
+        && raw_fields.get(4).map(|value| value.trim()) == Some("1")
+        && raw_fields
+            .get(5)
+            .is_some_and(|value| parse_form_conditional_user_visible_common(value).is_some()))
+    .then_some(5usize);
     let conditional_user_visible_common = (conditional_group_schema.is_some()
-        || conditional_table_schema.is_some())
+        || conditional_table_schema.is_some()
+        || wrapper35_prefix_slot.is_some())
     .then(|| {
         raw_fields
             .get(5)
@@ -9193,7 +9215,8 @@ fn parse_form_child_item_with_metadata_owners(
     .flatten();
     let conditional_prefix_slot = conditional_group_schema
         .map(|schema| schema.prefix_slot())
-        .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()));
+        .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()))
+        .or(wrapper35_prefix_slot);
     let normalized_fields = conditional_prefix_slot.map(|prefix_slot| {
         raw_fields
             .iter()
@@ -9389,8 +9412,21 @@ fn parse_form_child_item_with_metadata_owners(
     // and got `Константы.<the label item's own name>`.
     let strict_field_data_path = field_schema_and_options.is_some()
         || parse_form_special_field_layout(wrapper, &fields).is_some();
-    let owner_scoped_data_path =
-        strict_field_data_path || table_schema.is_some() || button_data_path_slot.is_some();
+    // A `Table`'s own implicit display field (wrapper `35`) binds through the
+    // identical owner-scoped `{2,{attribute_id},{column_id}}` chain the
+    // `Table` item itself resolves through (`table_schema.is_some()` below)
+    // -- it names a column of the same dynamic list, just from inside the
+    // field rather than from the table. ERP УХ MDM_Management's
+    // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка` LabelField
+    // "Ссылка" carries `{2,{1},{6}}` (attribute `Список`, column `6`) and the
+    // platform writes `<DataPath>Список.Ref</DataPath>`; without this the
+    // binding was never even attempted, since neither `table_schema`,
+    // `strict_field_data_path` nor a button data-path slot applies to a
+    // field.
+    let owner_scoped_data_path = strict_field_data_path
+        || table_schema.is_some()
+        || button_data_path_slot.is_some()
+        || wrapper == "35";
     let data_paths = parse_form_child_item_data_path(
         tag,
         &fields,
@@ -16118,7 +16154,16 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
             }
         }
         "31" | "34" => Some("Button"),
-        "37" | "48" => {
+        // `35` is a `Table`'s own implicit display field for `List`
+        // representation (no explicit `<Columns>`): ERP УХ MDM_Management's
+        // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка` carries its
+        // `LabelField` "Ссылка" this way, `{35,{11,<uuid>},0,0,1,{0,{0,{"B",1},0}},1,"Ссылка",...}`
+        // -- the same conditional `UserVisible`-common tuple and discriminator
+        // shift `form_input_field_top_level_offset` already reads generically
+        // (it detects the shift by whether slot 6 holds a name string, not by
+        // wrapper code), so admitting `35` alongside `37`/`48` here reproduces
+        // it with no new offset logic.
+        "35" | "37" | "48" => {
             if let Some((schema, _)) = parse_form_special_field_layout(wrapper, fields) {
                 return Some(schema.xml_tag());
             }
@@ -16188,7 +16233,7 @@ pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Opti
     let indexes: &[usize] = match wrapper {
         "73" | "55" => &[5],
         "31" | "34" => &[5, 6],
-        "37" | "48" => &[6, 7],
+        "35" | "37" | "48" => &[6, 7],
         _ => &[6],
     };
     indexes.iter().find_map(|index| {
@@ -16240,7 +16285,7 @@ pub(super) fn parse_form_child_item_title(
         ("FormattedDocumentField", "37" | "48") => &[9],
         (_, "73" | "55") => &[9],
         (_, "31" | "34") => &[6, 7],
-        (_, "37" | "48") => &[9, 10],
+        (_, "35" | "37" | "48") => &[9, 10],
         _ => &[7],
     };
     let values = indexes
