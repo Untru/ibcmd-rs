@@ -1177,7 +1177,22 @@ pub(super) fn source_assets_from_metadata_text_inner(
         .map(|(body_id, _)| body_id.clone())
         .chain(misses.keys().cloned())
         .collect::<BTreeSet<_>>();
-    for (body_id, body_row) in rows_by_file_name {
+    // `rows_by_file_name` is keyed by `"<owner-uuid>.<suffix>"`, so every row
+    // owned by this object lives in the exact lexicographic range
+    // `[uuid+".", uuid+"/")` -- `.` (0x2E) and `/` (0x2F) are adjacent bytes,
+    // so this range is tight: it holds precisely the keys whose owner prefix
+    // equals `uuid`, nothing more and nothing less. Scanning that range
+    // instead of the whole corpus turns an O(rows-per-object) owner lookup
+    // into O(log rows), which matters here because this function runs once
+    // per metadata object -- a full scan per object made the caller
+    // quadratic in corpus size. The `row_id.owner() != uuid` check below is
+    // kept as a defensive no-op so behavior is unchanged even if that
+    // assumption is ever wrong for some key.
+    let owner_range_start = format!("{uuid}.");
+    let owner_range_end = format!("{uuid}/");
+    for (body_id, body_row) in
+        rows_by_file_name.range(owner_range_start.as_str()..owner_range_end.as_str())
+    {
         let Ok(row_id) = ConfigRowId::parse(body_id) else {
             continue;
         };
