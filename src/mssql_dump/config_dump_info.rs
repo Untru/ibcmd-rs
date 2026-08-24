@@ -2,7 +2,38 @@ use super::*;
 use uuid::Uuid;
 
 const CONFIG_DUMP_INFO_FILE_NAME: &str = "ConfigDumpInfo.xml";
-const VERSIONS_SERVICE_NAMES: [&str; 3] = ["root", "version", "versions"];
+/// Service names the streamed MSSQL `Config` table's `versions` row embeds
+/// inside its own blob content, and which are therefore stripped from the
+/// parsed entry list.
+const VERSIONS_EMBEDDED_SERVICE_NAMES: [&str; 3] = ["root", "version", "versions"];
+
+/// Storage records that stand beside the per-object ones and carry no
+/// metadata object of their own, so the `versions` inventory does not list
+/// them and the export writes no file for them.
+///
+/// `deleted` is the fourth, and it appears only in a .cf the platform itself
+/// saved: `ibcmd infobase config save` writes it (4 unpacked bytes, content
+/// `0`), while none of the five vendor distributions on hand carries it at
+/// all -- УТ 11.5.27.75, БСП демо 3.1.12.297, ERP УХ 3.2.12.6 and both ERP УХ
+/// mini-configurations have zero elements by that name. The platform's own
+/// export of such an infobase writes no `deleted` file either. Counting it as
+/// an object with no version entry failed the whole export of every .cf the
+/// platform saves -- which is every .cf a purpose-built seed configuration
+/// can produce.
+const MANIFEST_SERVICE_NAMES: [&str; 3] = ["root", "version", "versions"];
+
+/// A service record that is present in some images and absent in others, so it
+/// is taken *out of* the comparison rather than required by it -- the same
+/// treatment [`is_dynamic_update_entry`] gets, and for the same reason.
+///
+/// `ibcmd infobase config save` writes it (4 unpacked bytes, content `0`);
+/// none of the five vendor distributions on hand carries it at all -- УТ
+/// 11.5.27.75, БСП демо 3.1.12.297, ERP УХ 3.2.12.6 and both ERP УХ
+/// mini-configurations have zero elements by that name -- and the platform's
+/// own export writes no file for it either way. Requiring it would fail every
+/// vendor .cf; counting it as an object with no version entry failed every
+/// .cf the platform saves, and so every purpose-built seed configuration.
+const OPTIONAL_SERVICE_NAME: &str = "deleted";
 
 /// The Configuration object's own metadata text always embeds a `{1,0,...}`
 /// header reference to its (thick-client) `CommandInterface` sub-object at
@@ -289,7 +320,7 @@ fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<Co
     }
 
     if origin.embeds_service_entries() {
-        for service_name in VERSIONS_SERVICE_NAMES {
+        for service_name in VERSIONS_EMBEDDED_SERVICE_NAMES {
             if !named.contains_key(service_name) {
                 bail!("Config versions row has no service entry {service_name}");
             }
@@ -297,7 +328,7 @@ fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<Co
     }
     Ok(named
         .into_iter()
-        .filter(|(name, _)| !VERSIONS_SERVICE_NAMES.contains(&name.as_str()))
+        .filter(|(name, _)| !VERSIONS_EMBEDDED_SERVICE_NAMES.contains(&name.as_str()))
         .map(|(id, version)| ConfigVersionEntry { id, version })
         .collect())
 }
@@ -332,12 +363,12 @@ fn validate_versions_inventory(
     let version_names = versions
         .iter()
         .map(|entry| entry.id.as_str())
-        .chain(VERSIONS_SERVICE_NAMES)
+        .chain(MANIFEST_SERVICE_NAMES)
         .collect::<BTreeSet<_>>();
     let manifest_names = file_names
         .iter()
         .map(String::as_str)
-        .filter(|name| !is_dynamic_update_entry(name))
+        .filter(|name| !is_dynamic_update_entry(name) && *name != OPTIONAL_SERVICE_NAME)
         .collect::<BTreeSet<_>>();
     if version_names == manifest_names {
         return Ok(());
