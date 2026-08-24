@@ -992,7 +992,19 @@ fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
             "AccumulationRegisters/Stock",
             ".3",
             SourceAssetRole::Aggregates,
-            deflate_for_test(b"{0,{9,{0},{0,0,{0,0}}}}"),
+            // One column-`#` (Id) plus two column-`N` (UseCode, Periodicity)
+            // descriptors and a single data row: a genuinely non-empty
+            // aggregate. A structurally-valid-but-zero-row blob (as this
+            // fixture used to be) is exactly the shape the platform never
+            // writes `Ext/Aggregates.xml` for -- see
+            // `owner_bound_source_asset`'s `Aggregates` arm -- so it no
+            // longer belongs in a fixture meant to prove an asset gets
+            // created.
+            deflate_for_test(
+                b"{0,{9,{3,{0,\"Id\",{0,{\"#\"}}},{0,\"UseCode\",{0,{\"N\"}}},\
+{0,\"Periodicity\",{0,{\"N\"}}}},{0,0,{0,1,{0,0,3,\
+{0,{1,11111111-1111-4111-8111-111111111111}},{0,0},{0,1}}}}}}",
+            ),
         ),
     ];
 

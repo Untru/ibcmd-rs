@@ -256,7 +256,8 @@ pub(super) fn dynamic_source_asset(
     }
     if let Some(model) = predefined_data_source_model(&owner.kind)
         && predefined_data_suffix(&owner.kind) == Some(suffix)
-        && parse_predefined_data_blob_with_model(bytes, context.type_index, model).is_some()
+        && parse_predefined_data_blob_with_model(bytes, context.type_index, model)
+            .is_some_and(|items| !items.is_empty())
     {
         let route = predefined_data_route(&owner.kind)?;
         return Some(SourceAsset {
@@ -305,12 +306,20 @@ pub(super) fn dynamic_owner_bound_source_asset(
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(super) enum OwnerBoundSourceAssetFailure {
     Decoder,
+    /// Decoded cleanly to zero items -- not a decoder failure, but still not
+    /// an asset: the platform does not write `Ext/Aggregates.xml` for a
+    /// register whose aggregates row decodes to an empty set (ERP UH
+    /// `AccumulationRegisters/ОперацииБюджетов`, confirmed against its
+    /// native tree). Kept distinct from `Decoder` so the miss reason stays
+    /// honest about what actually happened.
+    Empty,
     Relation(SourceAssetRelationError),
 }
 
 const ROLE_RIGHTS_DECODER_MISS: &str = "role_rights_decoder_failed";
 const ACCUMULATION_REGISTER_AGGREGATES_DECODER_MISS: &str =
     "accumulation_register_aggregates_decoder_failed";
+const ACCUMULATION_REGISTER_AGGREGATES_EMPTY: &str = "accumulation_register_aggregates_empty";
 
 pub(super) fn owner_bound_source_asset(
     route: &SourceAssetRoute,
@@ -335,8 +344,11 @@ pub(super) fn owner_bound_source_asset(
             })
         }
         SourceAssetRole::Aggregates => {
-            parse_accumulation_register_aggregates_blob(bytes)
+            let aggregates = parse_accumulation_register_aggregates_blob(bytes)
                 .ok_or(OwnerBoundSourceAssetFailure::Decoder)?;
+            if aggregates.is_empty() {
+                return Err(OwnerBoundSourceAssetFailure::Empty);
+            }
             let register_name = registry
                 .canonical_owner_name(route, header_name, owner_reference)
                 .map_err(OwnerBoundSourceAssetFailure::Relation)?
@@ -1227,6 +1239,9 @@ pub(super) fn source_assets_from_metadata_text_inner(
                     let reason = owner_bound_decoder_miss(route.role())?;
                     misses.insert(body_id, reason.to_owned());
                 }
+                Err(OwnerBoundSourceAssetFailure::Empty) => {
+                    misses.insert(body_id, ACCUMULATION_REGISTER_AGGREGATES_EMPTY.to_owned());
+                }
                 Err(OwnerBoundSourceAssetFailure::Relation(_)) => {}
             }
         }
@@ -1290,24 +1305,36 @@ pub(super) fn source_assets_from_metadata_text_inner(
         if !is_command_relation || !file_names.contains(body_id.as_str()) {
             continue;
         }
-        let parsed = rows_by_file_name
+        let decoded = rows_by_file_name
             .get(body_id.as_str())
             .and_then(|row| decode_hex(&row.binary_hex).ok())
-            .is_some_and(|bytes| {
-                parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
-            });
-        if parsed {
-            let route = crate::compiler::families::assets::SourceAssetRegistry
-                .route_by_suffix(kind, suffix)?;
-            assets.push((
-                body_id,
-                SourceAsset {
-                    primary_path: object_path.join(route.relative_path()),
-                    kind: SourceAssetKind::CommandInterface,
-                },
-            ));
-        } else {
-            misses.insert(body_id, "command_interface_decoder_failed".to_string());
+            .and_then(|bytes| parse_command_interface_blob(&bytes, command_refs, metadata_refs));
+        match decoded {
+            // Mirrors the identical `CommandInterface::is_empty` check in
+            // `source_asset_paths_with_indexes`'s Configuration-root loop: a
+            // decoded-but-entirely-empty command interface is a record the
+            // platform tracks by identity without ever rendering a file for.
+            // Six ERP UH nested subsystems (e.g.
+            // `Subsystems/ГосИС/Subsystems/ЗЕРНО`) decode their own
+            // `.0`/`.1` command interface to zero sections and stay absent
+            // from the native export tree.
+            Some(interface) if !interface.is_empty() => {
+                let route = crate::compiler::families::assets::SourceAssetRegistry
+                    .route_by_suffix(kind, suffix)?;
+                assets.push((
+                    body_id,
+                    SourceAsset {
+                        primary_path: object_path.join(route.relative_path()),
+                        kind: SourceAssetKind::CommandInterface,
+                    },
+                ));
+            }
+            Some(_) => {
+                misses.insert(body_id, "command_interface_empty".to_string());
+            }
+            None => {
+                misses.insert(body_id, "command_interface_decoder_failed".to_string());
+            }
         }
     }
 
@@ -1363,26 +1390,35 @@ pub(super) fn source_assets_from_metadata_text_inner(
         if let Some(model) = predefined_data_source_model(kind)
             && Some(row_id.suffix_component()) == predefined_data_suffix(kind)
         {
-            let parsed = decode_hex(&body_row.binary_hex)
+            let decoded = decode_hex(&body_row.binary_hex)
                 .ok()
-                .is_some_and(|predefined_bytes| {
-                    parse_predefined_data_blob_with_model(&predefined_bytes, type_index, model)
-                        .is_some()
-                });
-            if parsed {
-                let route = predefined_data_route(kind)?;
-                assets.push((
-                    (*body_id).to_string(),
-                    SourceAsset {
-                        primary_path: object_path.join(route.relative_path()),
-                        kind: SourceAssetKind::PredefinedData { model },
-                    },
-                ));
-            } else {
-                misses.insert(
-                    (*body_id).to_string(),
-                    "predefined_data_decoder_failed".to_string(),
-                );
+                .and_then(|bytes| parse_predefined_data_blob_with_model(&bytes, type_index, model));
+            match decoded {
+                Some(items) if !items.is_empty() => {
+                    let route = predefined_data_route(kind)?;
+                    assets.push((
+                        (*body_id).to_string(),
+                        SourceAsset {
+                            primary_path: object_path.join(route.relative_path()),
+                            kind: SourceAssetKind::PredefinedData { model },
+                        },
+                    ));
+                }
+                // Decoded cleanly to zero predefined items. The platform
+                // does not write `Ext/Predefined.xml` for these -- confirmed
+                // against 12 ERP UH catalogs/charts whose predefined-items
+                // row decodes to an empty set and whose native tree has no
+                // `Predefined.xml` at all. Recorded under its own reason,
+                // distinct from a genuine decode failure.
+                Some(_) => {
+                    misses.insert((*body_id).to_string(), "predefined_data_empty".to_string());
+                }
+                None => {
+                    misses.insert(
+                        (*body_id).to_string(),
+                        "predefined_data_decoder_failed".to_string(),
+                    );
+                }
             }
         } else if is_preferred_help {
             misses.insert((*body_id).to_string(), "help_decoder_failed".to_string());
