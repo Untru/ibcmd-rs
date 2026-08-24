@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-catalog-mdm-use-standard-commands",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "ERP UH 3.2.12.6 MDM_Management.cf",
+    "storage_elements": {
+      "catalog_false": "04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47 (Catalog.ТабличныеЧастиБД, UseStandardCommands=false)",
+      "catalog_true": "858c9634-d409-4b3c-940a-1597db774e56 (Catalog.ТипыБазДанных, UseStandardCommands=true)"
+    },
+    "capture": "`ibcmd infobase create --load=MDM_Management.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; each payload is the metadata-text CF element's raw-deflate body (the bare uuid row, not a `.0`/`.1` suffix)."
+  },
+  "retained": {
+    "catalog_false_packed_body": {
+      "size": 1831,
+      "sha256": "1e435f2b6941e44316a166b27c5f36a19905de18623951f348aedf2eaf732ebf"
+    },
+    "catalog_true_packed_body": {
+      "size": 2248,
+      "sha256": "774420280c788c0da678ba3918b64aca5d61619a1e248899dc688ef04d698f1f"
+    }
+  }
+}

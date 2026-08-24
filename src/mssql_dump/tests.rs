@@ -5916,6 +5916,7 @@ fn extracts_command_interface_subsystems_order() {
             MetadataCommandReference {
                 kind: "Subsystem".to_string(),
                 name: "Sales".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -5923,6 +5924,7 @@ fn extracts_command_interface_subsystems_order() {
             MetadataCommandReference {
                 kind: "Subsystem".to_string(),
                 name: "Purchases".to_string(),
+                use_standard_commands: true,
             },
         ),
     ]);
@@ -6015,6 +6017,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "DocumentJournal".to_string(),
                 name: "РеестрТорговыхДокументов".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6022,6 +6025,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Report".to_string(),
                 name: "КонтактнаяИнформация".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6029,6 +6033,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Role".to_string(),
                 name: "ОтчетыМаркетолога".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6036,6 +6041,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Role".to_string(),
                 name: "ОтчетыРуководителяОтделаПродаж".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6043,6 +6049,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Role".to_string(),
                 name: "ПолныеПрава".to_string(),
+                use_standard_commands: true,
             },
         ),
     ]);
@@ -6061,6 +6068,147 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
         .expect("native CommandsVisibility end")
         + CLOSE.len();
     assert!(xml.contains(&native_xml[start..end]), "{xml}");
+}
+
+/// `Catalog.ТабличныеЧастиБД` declares `UseStandardCommands=false`, so the
+/// platform keeps its command-interface entries as the raw `0:<uuid>` sentinel
+/// rather than resolving `Catalog.ТабличныеЧастиБД.StandardCommand.OpenList`
+/// (a standard command that does not exist on this target), while a sibling
+/// entry for `Catalog.ТипыБазДанных` (`UseStandardCommands=true`) resolves
+/// normally. Before the `use_standard_commands` gate on `MetadataCommandReference`,
+/// the reader resolved both alike -- wrong for the disabled one.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage element
+/// `27dc282e-77c4-462a-b827-a3616c7f11b4.1` of ERP UH 3.2.12.6's
+/// `MDM_Management.cf`, packed body sha256
+/// `a094aa5d41a51d21de0e729f7697de723c342fac493dfa9df2f1a80de2496c2f`; the
+/// expectation is the platform's own
+/// `Subsystems/ИнтеграцияСВнешнимиИсточникамиДанных/Subsystems/ВнешниеИнформационныеБазы/Ext/CommandInterface.xml`
+/// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214, sha256
+/// `7312e882df239654049d21ae922f9433bc5b9ab375105f905a877b0639613550`.
+#[test]
+fn platform_command_interface_declines_standard_command_when_use_standard_commands_false() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "command-interface-mdm-use-standard-commands-false/raw-packed.bin.b64"
+    )))
+    .expect("platform-attested command interface payload");
+    let native = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "command-interface-mdm-use-standard-commands-false/native-command-interface.xml.b64"
+    )))
+    .expect("platform-attested command interface export");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "a094aa5d41a51d21de0e729f7697de723c342fac493dfa9df2f1a80de2496c2f"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&native)),
+        "7312e882df239654049d21ae922f9433bc5b9ab375105f905a877b0639613550"
+    );
+
+    let metadata_refs = BTreeMap::from([
+        (
+            "04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47".to_string(),
+            MetadataCommandReference {
+                kind: "Catalog".to_string(),
+                name: "ТабличныеЧастиБД".to_string(),
+                use_standard_commands: false,
+            },
+        ),
+        (
+            "858c9634-d409-4b3c-940a-1597db774e56".to_string(),
+            MetadataCommandReference {
+                kind: "Catalog".to_string(),
+                name: "ТипыБазДанных".to_string(),
+                use_standard_commands: true,
+            },
+        ),
+        (
+            "c92b8991-fc53-416b-8505-f0493559e7fd".to_string(),
+            MetadataCommandReference {
+                kind: "Catalog".to_string(),
+                name: "ВнешниеИнформационныеБазы".to_string(),
+                use_standard_commands: true,
+            },
+        ),
+    ]);
+
+    let command_interface = parse_command_interface_blob(&packed, &BTreeMap::new(), &metadata_refs)
+        .expect("platform-attested command interface body must decode");
+    let xml = format_command_interface_xml(&command_interface);
+
+    let native_xml = std::str::from_utf8(&native).expect("native command interface is UTF-8");
+    for (open, close) in [
+        ("\t<CommandsVisibility>\r\n", "\t</CommandsVisibility>\r\n"),
+        ("\t<CommandsOrder>\r\n", "\t</CommandsOrder>\r\n"),
+    ] {
+        let start = native_xml
+            .find(open)
+            .unwrap_or_else(|| panic!("native {open} section"));
+        let end = native_xml
+            .find(close)
+            .unwrap_or_else(|| panic!("native {open} end"))
+            + close.len();
+        assert!(xml.contains(&native_xml[start..end]), "{xml}");
+    }
+    // The disabled catalog's own standard-command name never appears: every
+    // occurrence of its uuid stayed the raw sentinel, in both sections.
+    assert!(!xml.contains("ТабличныеЧастиБД.StandardCommand"));
+    assert_eq!(
+        xml.matches("0:04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47")
+            .count(),
+        2
+    );
+}
+
+/// The `use_standard_commands` field the previous test's fixed `metadata_refs`
+/// stood in for is itself read off the Catalog's own metadata row, not
+/// invented: offset 31 of the owner-graph-normalized fields, the same slot
+/// `parse_strict_catalog_properties_from_text` reads for the object's own
+/// `<UseStandardCommands>`. Two real ERP UH MDM_Management catalogs, one of
+/// each value, prove the extractor and the index built from it agree with
+/// what each catalog's own XML says.
+///
+/// Provenance (`manifest.json` in the fixture directory): metadata-text CF
+/// elements `04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47` (Catalog.ТабличныеЧастиБД)
+/// and `858c9634-d409-4b3c-940a-1597db774e56` (Catalog.ТипыБазДанных) of
+/// `MDM_Management.cf`.
+#[test]
+fn metadata_command_reference_index_reads_catalog_use_standard_commands_from_real_rows() {
+    let false_packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "catalog-mdm-use-standard-commands/catalog-false-packed.bin.b64"
+    )))
+    .expect("platform-attested catalog payload");
+    let true_packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "catalog-mdm-use-standard-commands/catalog-true-packed.bin.b64"
+    )))
+    .expect("platform-attested catalog payload");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&false_packed)),
+        "1e435f2b6941e44316a166b27c5f36a19905de18623951f348aedf2eaf732ebf"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&true_packed)),
+        "774420280c788c0da678ba3918b64aca5d61619a1e248899dc688ef04d698f1f"
+    );
+
+    let false_uuid = "04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47";
+    let true_uuid = "858c9634-d409-4b3c-940a-1597db774e56";
+    let rows = vec![
+        metadata_text_row_from_blob(false_uuid, &false_packed)
+            .expect("Catalog.ТабличныеЧастиБД metadata row must decode"),
+        metadata_text_row_from_blob(true_uuid, &true_packed)
+            .expect("Catalog.ТипыБазДанных metadata row must decode"),
+    ];
+    assert_eq!(rows[0].kind.as_deref(), Some("Catalog"));
+    assert_eq!(rows[1].kind.as_deref(), Some("Catalog"));
+
+    let index = build_metadata_command_reference_index_from_texts(&rows);
+    assert!(!index[false_uuid].use_standard_commands);
+    assert!(index[true_uuid].use_standard_commands);
 }
 
 #[test]
