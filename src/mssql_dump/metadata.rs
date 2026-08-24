@@ -266,6 +266,18 @@ pub(super) fn metadata_source_for_object_fields(
         19 => Some(("Report", "Reports")),
         20 if header_index == Some(5) => Some(("Enum", "Enums")),
         20 if header_index == Some(3) => Some(("Report", "Reports")),
+        // Discriminator 21 is shared between the register families and
+        // Subsystem: a real Calculation/Accounting register always embeds a
+        // long fixed preamble of bare well-known type-id UUIDs before its
+        // `{1,0,<uuid>}` header (confirmed on ERP UH 3.2.12.6's real
+        // `Начисления` calculation register and `МеждународныйБезКорреспонденции`
+        // accounting register: header_index == 15 for both), while a
+        // Subsystem's header is the very next field after the code (header_index
+        // == 1, exactly as for the unambiguous code-22 Subsystem shape below).
+        // Confirmed against the same corpus for the Subsystem `WebСервисУХ`,
+        // which the platform exports as `Subsystems/WebСервисУХ.xml` while we
+        // previously misrouted it to `CalculationRegisters/WebСервисУХ.xml`.
+        21 if header_index == Some(1) => Some(("Subsystem", "Subsystems")),
         21 if is_code21_accounting_register_fields(&fields, uuid) => {
             Some(("AccountingRegister", "AccountingRegisters"))
         }

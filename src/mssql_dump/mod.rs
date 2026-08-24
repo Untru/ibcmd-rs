@@ -10610,7 +10610,15 @@ fn parse_subsystem_properties_from_text(
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<SubsystemProperties> {
     let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("22")
+    // Subsystem shares discriminator 21 with the Calculation/Accounting
+    // register families (confirmed on ERP UH 3.2.12.6: the real Subsystem
+    // `WebСервисУХ` is stored under code 21, header_index 1, with the exact
+    // same field layout -- include-help/command-interface flags, picture,
+    // explanation, content list, use-one-command -- as an ordinary code-22
+    // Subsystem). `metadata_source_for_object_fields` already classifies
+    // both as `Subsystem`; this parser must accept both codes too instead of
+    // hard-coding the more common one.
+    if !matches!(fields.first().map(|value| value.trim()), Some("21" | "22"))
         || metadata_header_field_index(&fields, uuid) != Some(1)
     {
         return None;
