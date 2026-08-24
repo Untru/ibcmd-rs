@@ -4509,7 +4509,18 @@ impl FormConditionalGroupSchema {
             // `<UserVisible><xr:Common>false</xr:Common></UserVisible>`, so the
             // whole page and its subtree were being lost to the discriminator
             // whitelist alone.
-            ("22", field_count, Some(false), Some("2" | "3" | "4" | "5"))
+            //
+            // `Some(true)` -- the default state the platform writes no
+            // `<UserVisible>` for -- belongs here too, the same way it
+            // already does for the `8`/`9` arm below: ERP УХ
+            // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+            // carries four root `UsualGroup` items (discriminator `5`,
+            // field counts 31/33/35/35) with the tuple's own flag reading
+            // `1`, and the platform writes none of their four with a
+            // `<UserVisible>` element. Requiring `false` dropped all four
+            // groups, and with them the `LabelDecoration` sibling below and
+            // the whole subtree each carried.
+            ("22", field_count, Some(false) | Some(true), Some("2" | "3" | "4" | "5"))
                 if field_count >= 31 && (field_count - 31) % 2 == 0 =>
             {
                 Some(Self { prefix_slot: 5 })
@@ -4548,7 +4559,14 @@ impl FormConditionalGroupSchema {
             // was ever admitted here.  The normalized record is re-checked by
             // `FormDecorationHeaderSchema`, so this arm only has to name the
             // one member the prefix adds.
-            ("12", 37, Some(false), Some("0" | "1")) => Some(Self { prefix_slot: 5 }),
+            //
+            // `Some(true)` admits the default (no `<UserVisible>` written)
+            // state here too: ERP УХ MDM_Management's root `LabelDecoration`
+            // `ДекорацияНСИ` (`Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+            // and its siblings) carries the identical 37-member layout and
+            // discriminator `0` with the tuple's flag reading `1`, and the
+            // platform writes no `<UserVisible>` for it.
+            ("12", 37, Some(false) | Some(true), Some("0" | "1")) => Some(Self { prefix_slot: 5 }),
             _ => None,
         }
     }

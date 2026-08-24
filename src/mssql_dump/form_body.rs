@@ -16442,10 +16442,37 @@ pub(super) fn parse_form_child_item_extended_tooltip(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormExtendedTooltip> {
     fields.iter().find_map(|field| {
-        let nested = split_1c_braced_fields(field.trim(), 0)?;
-        if nested.first().map(|value| value.trim()) != Some("12") {
+        let raw_nested = split_1c_braced_fields(field.trim(), 0)?;
+        if raw_nested.first().map(|value| value.trim()) != Some("12") {
             return None;
         }
+        // Some `ExtendedTooltip` records carry the same conditional
+        // `UserVisible`-common prefix tuple at slot 5 that
+        // `form_conditional_group_schema` already strips for the sibling
+        // `LabelDecoration`/`PictureDecoration` wrapper-`12` shapes -- but at
+        // their own, 34-member (not 37-member) base length, so that fixed
+        // gate does not recognize this shape. Detected by the tuple's own
+        // value shape rather than by a hardcoded total length: ERP УХ
+        // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+        // carries a root `UsualGroup`'s own `ExtendedTooltip`
+        // (`СтандартныеРеквизитыExtendedTooltip`, id `359`) with the prefix
+        // present (35 members), right next to that same form's root
+        // `LabelDecoration`'s own tooltip carrying no prefix at all (34
+        // members) -- reading both at the unshifted slots 5/6 found the
+        // prefix tuple itself where the name was expected on the first and
+        // dropped it, while the second parsed fine.
+        let has_prefix = raw_nested.get(4).map(|value| value.trim()) == Some("1")
+            && raw_nested
+                .get(5)
+                .is_some_and(|value| parse_form_conditional_user_visible_common(value).is_some());
+        let normalized = has_prefix.then(|| {
+            raw_nested
+                .iter()
+                .enumerate()
+                .filter_map(|(index, field)| (index != 5).then_some(*field))
+                .collect::<Vec<_>>()
+        });
+        let nested = normalized.as_deref().unwrap_or(&raw_nested);
         if nested.get(5).map(|value| value.trim()) == Some("1") {
             return None;
         }
