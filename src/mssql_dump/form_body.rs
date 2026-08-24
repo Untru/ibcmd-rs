@@ -2408,7 +2408,7 @@ pub(super) fn extract_form_children_align(fields: &[&str]) -> Option<&'static st
 }
 
 pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
+    let tail_start = form_root_child_items_tail_start_49_or_50(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootVerticalScrollSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
@@ -2493,8 +2493,22 @@ pub(super) fn extract_form_custom_settings_folder(
 }
 
 pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
-    match fields.get(tail_start + 17).map(|field| field.trim())? {
+    // Same 24-vs-25-member trailer split `FormRootVerticalScrollSchema`
+    // documents: ERP УХ MDM_Management's `CommonForms/ФормаИзмененияРеквизитовНСИ`
+    // roots at `50` with the 25-member trailer (`form_root_child_items_tail_start_49_or_50`),
+    // one slot further out than the 24-member shape's own slot 17, and reads
+    // `0` there for the corpus's only root-level `<ShowTitle>false</ShowTitle>`.
+    // Neither MDM_Management dynamic-list form (24-member trailer, root
+    // `49`) carries a root `<ShowTitle>` at all, and both read something
+    // other than `0` at slot 17, so admitting root `49` here does not turn
+    // up a false positive on the samples available.
+    let tail_start = form_root_child_items_tail_start_49_or_50(fields)?;
+    let slot = match fields.len().checked_sub(tail_start)? {
+        24 => 17,
+        25 => 18,
+        _ => return None,
+    };
+    match fields.get(tail_start + slot).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
@@ -2777,9 +2791,33 @@ pub(super) fn parse_form_auto_command_bar_fields(
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
 ) -> Option<FormAutoCommandBar> {
-    let wrapper = fields.first()?.trim();
-    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let raw_fields = fields;
+    let wrapper = raw_fields.first()?.trim();
+    let identity = split_1c_braced_fields(raw_fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
+    // The same optional `UserVisible`-common prefix tuple
+    // (`form_conditional_group_schema`) that the general child-item reader
+    // already strips before reading a nested `AutoCommandBar`/`ContextMenu`
+    // also precedes the *root* auto command bar on ERP УХ MDM_Management's
+    // list forms: `{22,{-1,<uuid>},0,0,1,{0,{0,{"B",1},0}},9,"Name",…}`
+    // carries the tuple at slot 5, one field ahead of where every other
+    // field below assumed the `9` discriminator and the name sit. Without
+    // normalizing it away first, `FormRootAutoCommandBarSchema` read the
+    // tuple itself as the marker slot and refused the whole record, and the
+    // form's own `<AutoCommandBar>` (and any child items it carried) went
+    // unwritten -- confirmed on `Catalogs/ВнешниеИнформационныеБазы` and
+    // `Catalogs/ТипыБазДанных`'s list/item forms, whose id`-1` bar is this
+    // exact 30-member shape.
+    let conditional_group_schema = form_conditional_group_schema(wrapper, raw_fields);
+    let normalized_fields = conditional_group_schema.map(|schema| {
+        let prefix_slot = schema.prefix_slot();
+        raw_fields
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| (index != prefix_slot).then_some(*field))
+            .collect::<Vec<_>>()
+    });
+    let fields = normalized_fields.as_deref().unwrap_or(raw_fields);
     let schema = FormRootAutoCommandBarSchema::from_raw_layout(wrapper, id, fields)?;
     let (name, _) = parse_1c_quoted_string_with_len(fields.get(6)?.trim())?;
     if name.trim().is_empty() {
@@ -8880,11 +8918,64 @@ pub(super) fn parse_form_child_item_count(value: &str) -> Option<usize> {
 }
 
 pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
-    const ROOT_TRAILER_FIELDS: usize = 24;
-    if fields.first().map(|field| field.trim()) != Some("50") {
+    form_root_child_items_tail_start_for(fields, &["50"], &[24])
+}
+
+/// Same trailer search as `form_root_child_items_tail_start`, but also
+/// admitting root discriminator `49` (ERP УХ MDM_Management's own form root,
+/// alongside UT/БСП's `50`) and a 25-member trailer alongside the classic
+/// 24-member one.
+///
+/// This is a *separate* entry point rather than a broadened gate on the
+/// shared function above on purpose: `form_root_child_items_tail_start` has
+/// over a dozen callers, and most read a fixed trailer slot directly with no
+/// per-property discriminator re-check of their own (e.g.
+/// `extract_form_horizontal_align`'s `tail_start + 11`). Admitting `49`
+/// there activated every one of them for `49`-rooted forms at once, and
+/// `Catalogs/СправочникиБД/Forms/ФормаСписка` -- a form whose native output
+/// has no `<HorizontalAlign>` -- promptly grew a wrong
+/// `<HorizontalAlign>Left</HorizontalAlign>` from trailer slot 11 reading
+/// `0`. Only callers that have separately verified their own slot meaning
+/// for root `49` and for the 25-member trailer (so far:
+/// `FormRootVerticalScrollSchema`) should call this one instead.
+///
+/// The 25-member trailer itself: ERP УХ MDM_Management's dynamic-list forms
+/// (root `49`) end in exactly the same 24-member trailer
+/// `form_root_child_items_tail_start` already finds for root `50`, but its
+/// *item* and *common* forms (root `49` or `50` -- `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+/// and `CommonForms/ФормаИзмененияРеквизитовНСИ`) carry one further trailing
+/// member after that same 24-shape. Trying 24 then 25 and keeping whichever
+/// alone validates is unambiguous on all four forms checked: the 24-member
+/// search validates only for the two dynamic-list forms and the 25-member
+/// one only for the two item/common forms, never both.
+pub(super) fn form_root_child_items_tail_start_49_or_50(fields: &[&str]) -> Option<usize> {
+    form_root_child_items_tail_start_for(fields, &["49", "50"], &[24, 25])
+}
+
+fn form_root_child_items_tail_start_for(
+    fields: &[&str],
+    allowed_root_discriminators: &[&str],
+    root_trailer_field_counts: &[usize],
+) -> Option<usize> {
+    if !fields
+        .first()
+        .map(|field| field.trim())
+        .is_some_and(|value| allowed_root_discriminators.contains(&value))
+    {
         return None;
     }
-    let tail_start = fields.len().checked_sub(ROOT_TRAILER_FIELDS)?;
+    root_trailer_field_counts
+        .iter()
+        .find_map(|&root_trailer_fields| {
+            form_root_child_items_tail_start_at(fields, root_trailer_fields)
+        })
+}
+
+fn form_root_child_items_tail_start_at(
+    fields: &[&str],
+    root_trailer_fields: usize,
+) -> Option<usize> {
+    let tail_start = fields.len().checked_sub(root_trailer_fields)?;
     let mut matched_tail = None;
     let max_count = tail_start.saturating_sub(1) / 2;
     for count in 0usize..=max_count {
@@ -9092,8 +9183,30 @@ fn parse_form_child_item_with_metadata_owners(
     // `ContextMenu`/`AutoCommandBar` service items carry the same prefix at
     // its default value `true`, which a hardcoded `false` would mislabel as
     // the non-default state and wrongly emit `<UserVisible>` for.
+    // A `Table`'s own implicit display field (wrapper `35`, see
+    // `form_child_item_tag`) carries the identical prefix tuple at the
+    // identical slot 5, but `FormConditionalGroupSchema`/`FormConditionalTableSchema`
+    // only ever learned wrapper `22`/`73`/`55` shapes, so this wrapper needs
+    // its own recognition. Detected by the tuple's own value shape (as
+    // `parse_form_child_item_extended_tooltip` already does for its
+    // differently-sized wrapper-`12` case) rather than by a hardcoded total
+    // field count, since a leaf `LabelField` here has no reason to share a
+    // length with any evidenced group/table shape. Without this, ERP УХ
+    // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка`
+    // LabelField "Ссылка" -- prefix value `true`, the platform's own default
+    // it writes no `<UserVisible>` for -- fell through to the generic
+    // "offset shifted implies false" fallback below and wrote a spurious
+    // `<UserVisible><xr:Common>false</xr:Common></UserVisible>` in place of
+    // its `<Title>`.
+    let wrapper35_prefix_slot = (wrapper == "35"
+        && raw_fields.get(4).map(|value| value.trim()) == Some("1")
+        && raw_fields
+            .get(5)
+            .is_some_and(|value| parse_form_conditional_user_visible_common(value).is_some()))
+    .then_some(5usize);
     let conditional_user_visible_common = (conditional_group_schema.is_some()
-        || conditional_table_schema.is_some())
+        || conditional_table_schema.is_some()
+        || wrapper35_prefix_slot.is_some())
     .then(|| {
         raw_fields
             .get(5)
@@ -9102,7 +9215,8 @@ fn parse_form_child_item_with_metadata_owners(
     .flatten();
     let conditional_prefix_slot = conditional_group_schema
         .map(|schema| schema.prefix_slot())
-        .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()));
+        .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()))
+        .or(wrapper35_prefix_slot);
     let normalized_fields = conditional_prefix_slot.map(|prefix_slot| {
         raw_fields
             .iter()
@@ -9298,8 +9412,21 @@ fn parse_form_child_item_with_metadata_owners(
     // and got `Константы.<the label item's own name>`.
     let strict_field_data_path = field_schema_and_options.is_some()
         || parse_form_special_field_layout(wrapper, &fields).is_some();
-    let owner_scoped_data_path =
-        strict_field_data_path || table_schema.is_some() || button_data_path_slot.is_some();
+    // A `Table`'s own implicit display field (wrapper `35`) binds through the
+    // identical owner-scoped `{2,{attribute_id},{column_id}}` chain the
+    // `Table` item itself resolves through (`table_schema.is_some()` below)
+    // -- it names a column of the same dynamic list, just from inside the
+    // field rather than from the table. ERP УХ MDM_Management's
+    // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка` LabelField
+    // "Ссылка" carries `{2,{1},{6}}` (attribute `Список`, column `6`) and the
+    // platform writes `<DataPath>Список.Ref</DataPath>`; without this the
+    // binding was never even attempted, since neither `table_schema`,
+    // `strict_field_data_path` nor a button data-path slot applies to a
+    // field.
+    let owner_scoped_data_path = strict_field_data_path
+        || table_schema.is_some()
+        || button_data_path_slot.is_some()
+        || wrapper == "35";
     let data_paths = parse_form_child_item_data_path(
         tag,
         &fields,
@@ -9940,7 +10067,7 @@ fn parse_form_child_item_with_metadata_owners(
             fields
                 .get(13 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_show_title(field))
-        } else if matches!(wrapper, "37" | "48")
+        } else if matches!(wrapper, "35" | "37" | "48")
             && matches!(
                 tag,
                 "InputField"
@@ -10092,8 +10219,29 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        // Key 20 (`AllowGettingCurrentRowUrl`) is the property bag's own
+        // *unwritten default*, not an absent property: ERP УХ
+        // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка`
+        // carries a 12-pair bag that stops at key 19, while its sibling
+        // `Catalogs/СправочникиБД/Forms/ФормаСписка` carries a 13-pair bag
+        // with key 20 spelled out as `{"B",1}` -- and both write the native
+        // `<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>`.
+        // Across the whole MDM_Management tree the six files carrying the
+        // element are exactly the six carrying a dynamic-list `Table`
+        // (`xsi:type="DynamicList"`), and no occurrence ever reads `false`;
+        // the two tabular-part `Table`s of `Catalogs/СправочникиБД/Forms/ФормаЭлемента`
+        // have no counted bag at all (no key in 1..=25 resolves), confirming
+        // the bag itself -- not just key 20 -- is dynamic-list-only. Key 5
+        // (`AutoRefresh`) is present on every dynamic-list bag observed, so
+        // its presence stands in for "this table carries the bag and simply
+        // didn't write key 20", which reads as the default `true`.
         allow_getting_current_row_url: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, TableBagKey::AllowGettingCurrentRowUrl)
+                .or_else(|| {
+                    form_table_property_bag_value(&fields, TableBagKey::AutoRefresh)
+                        .is_some()
+                        .then_some(true)
+                })
         } else {
             None
         },
@@ -16006,7 +16154,16 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
             }
         }
         "31" | "34" => Some("Button"),
-        "37" | "48" => {
+        // `35` is a `Table`'s own implicit display field for `List`
+        // representation (no explicit `<Columns>`): ERP УХ MDM_Management's
+        // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка` carries its
+        // `LabelField` "Ссылка" this way, `{35,{11,<uuid>},0,0,1,{0,{0,{"B",1},0}},1,"Ссылка",...}`
+        // -- the same conditional `UserVisible`-common tuple and discriminator
+        // shift `form_input_field_top_level_offset` already reads generically
+        // (it detects the shift by whether slot 6 holds a name string, not by
+        // wrapper code), so admitting `35` alongside `37`/`48` here reproduces
+        // it with no new offset logic.
+        "35" | "37" | "48" => {
             if let Some((schema, _)) = parse_form_special_field_layout(wrapper, fields) {
                 return Some(schema.xml_tag());
             }
@@ -16076,7 +16233,7 @@ pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Opti
     let indexes: &[usize] = match wrapper {
         "73" | "55" => &[5],
         "31" | "34" => &[5, 6],
-        "37" | "48" => &[6, 7],
+        "35" | "37" | "48" => &[6, 7],
         _ => &[6],
     };
     indexes.iter().find_map(|index| {
@@ -16128,7 +16285,7 @@ pub(super) fn parse_form_child_item_title(
         ("FormattedDocumentField", "37" | "48") => &[9],
         (_, "73" | "55") => &[9],
         (_, "31" | "34") => &[6, 7],
-        (_, "37" | "48") => &[9, 10],
+        (_, "35" | "37" | "48") => &[9, 10],
         _ => &[7],
     };
     let values = indexes
@@ -16330,10 +16487,37 @@ pub(super) fn parse_form_child_item_extended_tooltip(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormExtendedTooltip> {
     fields.iter().find_map(|field| {
-        let nested = split_1c_braced_fields(field.trim(), 0)?;
-        if nested.first().map(|value| value.trim()) != Some("12") {
+        let raw_nested = split_1c_braced_fields(field.trim(), 0)?;
+        if raw_nested.first().map(|value| value.trim()) != Some("12") {
             return None;
         }
+        // Some `ExtendedTooltip` records carry the same conditional
+        // `UserVisible`-common prefix tuple at slot 5 that
+        // `form_conditional_group_schema` already strips for the sibling
+        // `LabelDecoration`/`PictureDecoration` wrapper-`12` shapes -- but at
+        // their own, 34-member (not 37-member) base length, so that fixed
+        // gate does not recognize this shape. Detected by the tuple's own
+        // value shape rather than by a hardcoded total length: ERP УХ
+        // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+        // carries a root `UsualGroup`'s own `ExtendedTooltip`
+        // (`СтандартныеРеквизитыExtendedTooltip`, id `359`) with the prefix
+        // present (35 members), right next to that same form's root
+        // `LabelDecoration`'s own tooltip carrying no prefix at all (34
+        // members) -- reading both at the unshifted slots 5/6 found the
+        // prefix tuple itself where the name was expected on the first and
+        // dropped it, while the second parsed fine.
+        let has_prefix = raw_nested.get(4).map(|value| value.trim()) == Some("1")
+            && raw_nested
+                .get(5)
+                .is_some_and(|value| parse_form_conditional_user_visible_common(value).is_some());
+        let normalized = has_prefix.then(|| {
+            raw_nested
+                .iter()
+                .enumerate()
+                .filter_map(|(index, field)| (index != 5).then_some(*field))
+                .collect::<Vec<_>>()
+        });
+        let nested = normalized.as_deref().unwrap_or(&raw_nested);
         if nested.get(5).map(|value| value.trim()) == Some("1") {
             return None;
         }

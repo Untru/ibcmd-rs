@@ -4240,6 +4240,18 @@ impl FormCheckBoxFieldSchema {
         match (wrapper, field_count) {
             ("37", 59) => Some(0),
             ("37", 60) => Some(1),
+            // A `Table`'s own implicit `CheckBoxField` column (wrapper `35`,
+            // see `form_child_item_tag`) reaches this schema with its own
+            // conditional `UserVisible`-common prefix already stripped by
+            // the caller (`parse_form_child_item_with_metadata_owners`'s
+            // `wrapper35_prefix_slot` normalization), unlike wrapper `37`
+            // whose own shift this schema still has to read itself. ERP УХ
+            // MDM_Management's `InformationRegisters/СоответствиеЗаявокНаИзменениеНСИ/Forms/ФормаСписка`
+            // carries its `ОбменВыполнен` `CheckBoxField` at 57 members
+            // after that normalization, with the name already unshifted at
+            // slot 6 exactly like wrapper `37`'s own offset-`0` shape --
+            // hence offset `0` here too, not a new value.
+            ("35", 57) => Some(0),
             _ => None,
         }
     }
@@ -4509,7 +4521,18 @@ impl FormConditionalGroupSchema {
             // `<UserVisible><xr:Common>false</xr:Common></UserVisible>`, so the
             // whole page and its subtree were being lost to the discriminator
             // whitelist alone.
-            ("22", field_count, Some(false), Some("2" | "3" | "4" | "5"))
+            //
+            // `Some(true)` -- the default state the platform writes no
+            // `<UserVisible>` for -- belongs here too, the same way it
+            // already does for the `8`/`9` arm below: ERP УХ
+            // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+            // carries four root `UsualGroup` items (discriminator `5`,
+            // field counts 31/33/35/35) with the tuple's own flag reading
+            // `1`, and the platform writes none of their four with a
+            // `<UserVisible>` element. Requiring `false` dropped all four
+            // groups, and with them the `LabelDecoration` sibling below and
+            // the whole subtree each carried.
+            ("22", field_count, Some(false) | Some(true), Some("2" | "3" | "4" | "5"))
                 if field_count >= 31 && (field_count - 31) % 2 == 0 =>
             {
                 Some(Self { prefix_slot: 5 })
@@ -4523,7 +4546,20 @@ impl FormConditionalGroupSchema {
             // the state the platform writes no `<UserVisible>` for -- rather
             // than the only value the `Page` census saw. Without this arm the
             // reader lost the `ContextMenu`/`AutoCommandBar` item whole.
-            ("22", 30, Some(false) | Some(true), Some("8" | "9")) => Some(Self { prefix_slot: 5 }),
+            // The 30-member base layout above is itself the *childless*
+            // shape: a root `AutoCommandBar` that carries its own
+            // `<ChildItems>` (e.g. ERP УХ MDM_Management's
+            // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`, whose
+            // root command bar holds one `<Button name="Справка">`) appends
+            // the same trailing `count,(uuid,value)*count` pairs the
+            // `Page`/group items already run 31+2k on, so admitting the same
+            // `+2k` progression here rather than the bare `30` reproduces it
+            // instead of losing the whole `<AutoCommandBar>` a second time.
+            ("22", field_count, Some(false) | Some(true), Some("8" | "9"))
+                if field_count >= 30 && (field_count - 30) % 2 == 0 =>
+            {
+                Some(Self { prefix_slot: 5 })
+            }
             // A decoration takes the very same prefix in the very same slot.
             // UT 11.5.27.75 spells exactly one: a 37-member wrapper-`12`
             // record -- the 36-member decoration layout plus the tuple
@@ -4535,7 +4571,14 @@ impl FormConditionalGroupSchema {
             // was ever admitted here.  The normalized record is re-checked by
             // `FormDecorationHeaderSchema`, so this arm only has to name the
             // one member the prefix adds.
-            ("12", 37, Some(false), Some("0" | "1")) => Some(Self { prefix_slot: 5 }),
+            //
+            // `Some(true)` admits the default (no `<UserVisible>` written)
+            // state here too: ERP УХ MDM_Management's root `LabelDecoration`
+            // `ДекорацияНСИ` (`Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+            // and its siblings) carries the identical 37-member layout and
+            // discriminator `0` with the tuple's flag reading `1`, and the
+            // platform writes no `<UserVisible>` for it.
+            ("12", 37, Some(false) | Some(true), Some("0" | "1")) => Some(Self { prefix_slot: 5 }),
             _ => None,
         }
     }
@@ -5250,14 +5293,47 @@ pub(crate) struct FormRootVerticalScrollSchema {
 }
 
 impl FormRootVerticalScrollSchema {
+    /// `50`-rooted forms (UT 11.5.27.75) carry the qualifier/mode pair at
+    /// trailer slots 5/15. ERP УХ MDM_Management's forms root at `49`
+    /// instead, and their otherwise byte-identical 24-member trailer carries
+    /// the same pair one slot later, at 6/16: `Catalogs/СправочникиБД/Forms/ФормаСписка`
+    /// (no native `<VerticalScroll>`) and `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка`
+    /// (native `<VerticalScroll>useIfNecessary</VerticalScroll>`) share an
+    /// identical trailer at every one of the other 22 positions and differ
+    /// only at slots 6 and 16 -- `0`/`0` on the first, `2`/`2` on the second --
+    /// exactly where the `50` reader's own slots 5/15 read `2`/`2` for
+    /// `useIfNecessary`. Reading root `49` at the `50` offsets found only the
+    /// empty string both trees carry at slot 5 and dropped the property.
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
         trailer_field_count: usize,
     ) -> Option<Self> {
-        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
-            qualifier_slot: 5,
-            mode_slot: 15,
-        })
+        match (root_discriminator, trailer_field_count) {
+            (Some("50"), 24) => Some(Self {
+                qualifier_slot: 5,
+                mode_slot: 15,
+            }),
+            (Some("49"), 24) => Some(Self {
+                qualifier_slot: 6,
+                mode_slot: 16,
+            }),
+            // ERP УХ MDM_Management's *item*/*common* forms (root `49` or
+            // `50`) carry one further trailing member after the same
+            // 24-shape the dynamic-list forms above end on -- see
+            // `form_root_child_items_tail_start_49_or_50`. The qualifier and
+            // mode still sit at the same slots 6/16 counted from the start
+            // of that trailer: `CommonForms/ФормаИзмененияРеквизитовНСИ`
+            // (no native `<VerticalScroll>`, both `0`) and
+            // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+            // (native `<VerticalScroll>useIfNecessary</VerticalScroll>`,
+            // both `2`) agree with the 24-member forms above at every other
+            // position.
+            (Some("49") | Some("50"), 25) => Some(Self {
+                qualifier_slot: 6,
+                mode_slot: 16,
+            }),
+            _ => None,
+        }
     }
 
     pub(crate) fn vertical_scroll(self, trailer: &[&str]) -> Option<&'static str> {
