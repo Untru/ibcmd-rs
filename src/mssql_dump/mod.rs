@@ -28807,15 +28807,77 @@ fn http_service_child_candidates_from_text(
     candidates
 }
 
+/// The `{` positions before `limit` that a backward `rfind('{')` sweep with
+/// per-candidate `scan_1c_braced_value` could accept as enclosing `limit` --
+/// in the sweep's own visit order (decreasing position).
+///
+/// Under the scanner's lexical rules (a doubled-quote 1C string literal is
+/// text, a stray `}` closes nothing) an out-of-string brace either closes
+/// before `limit` -- its scan starts in the same lexer phase and finds the
+/// same `}`, so the sweep rejects it as non-enclosing -- or is still open at
+/// `limit`, i.e. an ancestor of the offset. The only other positions the
+/// sweep ever accepts are `{` bytes *inside string literals*: their scan
+/// starts in the wrong phase (out-of-string) and can run to an arbitrary
+/// end, so they cannot be ruled out structurally and are returned alongside
+/// the ancestors to keep the fast path byte-for-byte equal to the sweep.
+/// That equivalence is not hypothetical: ERP УХ 3.2.12.6 carries a common
+/// form whose exported bytes flip if in-string braces are dropped from the
+/// candidate set.
+fn enclosing_brace_candidates_before(text: &str, limit: usize) -> Vec<usize> {
+    let bytes = &text.as_bytes()[..limit.min(text.len())];
+    let mut ancestors = Vec::new();
+    let mut in_string_opens = Vec::new();
+    let mut in_string = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            match byte {
+                b'"' => {
+                    if bytes.get(index + 1) == Some(&b'"') {
+                        index += 2;
+                        continue;
+                    }
+                    in_string = false;
+                }
+                b'{' => in_string_opens.push(index),
+                _ => {}
+            }
+        } else {
+            match byte {
+                b'"' => in_string = true,
+                b'{' => ancestors.push(index),
+                b'}' => {
+                    ancestors.pop();
+                }
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    let mut candidates = ancestors;
+    candidates.append(&mut in_string_opens);
+    candidates.sort_unstable_by(|left, right| right.cmp(left));
+    candidates
+}
+
 fn innermost_metadata_object_fields_around_header<'a>(
     text: &'a str,
     marker_start: usize,
     uuid: &str,
 ) -> Option<(usize, usize, Vec<&'a str>)> {
-    let mut search_end = marker_start;
+    // The previous spelling walked `rfind('{')` back through *every* brace
+    // of the prefix and scanned each one to ask whether it encloses
+    // `marker_start` -- quadratic in object size, and the dominant
+    // sequential cost of the reference-index phases
+    // (docs/evidence/export-superlinear-analysis.md, место №2). One forward
+    // pass now collects the only positions that sweep could ever accept
+    // (see `enclosing_brace_candidates_before`); they are visited in the
+    // sweep's own order with its exact strictly-smaller-`end` replacement
+    // rule, so ties and pathological in-string candidates resolve
+    // identically.
     let mut best: Option<(usize, usize, Vec<&'a str>)> = None;
-    while let Some(start) = text[..search_end].rfind('{') {
-        search_end = start;
+    for start in enclosing_brace_candidates_before(text, marker_start) {
         let Some(end) = scan_1c_braced_value(text, start) else {
             continue;
         };
