@@ -1474,7 +1474,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         &number_format_refs,
     )
     .unwrap_or_default();
-    let (column_formats, mut formats) = (column_formats, formats);
+    let (mut column_formats, mut formats) = (column_formats, formats);
     let source_format_map = source_format_map.filter(|source_format_map| {
         moxel_source_format_refs_are_complete(
             source_format_map,
@@ -1599,6 +1599,25 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .filter(|lines| moxel_line_table_covers_references(lines, &all_formats))
     {
         Some(lines) => {
+            let line_scan_formats = all_formats
+                .iter()
+                .cloned()
+                .chain(std::iter::once(default_format.clone()))
+                .collect::<Vec<_>>();
+            let (lines, line_remap) = compact_moxel_line_table(lines, &line_scan_formats);
+            let all_formats = if let Some(line_remap) = &line_remap {
+                for format in column_formats.iter_mut().chain(formats.iter_mut()) {
+                    remap_moxel_format_line_refs(format, line_remap);
+                }
+                remap_moxel_format_line_refs(&mut default_format, line_remap);
+                column_formats
+                    .iter()
+                    .chain(formats.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                all_formats
+            };
             let lines = finalize_moxel_line_slots(
                 lines
                     .into_iter()
@@ -4190,6 +4209,93 @@ pub(super) fn moxel_used_line_indexes(formats: &[MoxelFormat]) -> BTreeSet<usize
         }
     }
     indexes
+}
+
+/// Drops any line-table entry no format actually cites, returning the map
+/// from stored index to published index for the callers that must move with
+/// it. `None` means every entry is cited, so nothing needs remapping - the
+/// stored table already publishes as-is in that case (see below).
+///
+/// Evidence (ERP UH `Web_Service`): the document's own line table
+/// (`parse_moxel_line_table`) sometimes carries an entry no format cites at
+/// all, and the platform drops exactly that entry rather than publish it -
+/// `ОстаткиИОбороты` declares five entries, cites four, and publishes those
+/// four in their *citation* order, which for `КарточкаСчета`'s five entries,
+/// four cited, differs from stored order (`[Solid/1, Solid/2, None/1,
+/// Dotted/1, None/2]` stored, `[Solid/2, Solid/1, None/2, None/1]`
+/// published - `КарточкаСчета`'s first format to cite a line names stored
+/// index 1 before 0). Scanning `formats` in pool order and, within a format,
+/// its members in `border, left, top, right, bottom, drawing` order (the
+/// same order `moxel_used_line_indexes` reads) and keeping each cited raw
+/// index the first time it appears reproduces both documents.
+///
+/// Citation order only has evidence for the entries a table *drops*, though:
+/// SSL demo 3.1.12.297's `_ДемоРеализацияТоваров/.../ПФ_MXL_РеализацияТоваров`
+/// cites both of its two stored entries, and publishes them in stored order,
+/// not citation order (its first citation names index 1 before 0, same
+/// shape as `КарточкаСчета`'s swap, but here reordering breaks a document
+/// the un-reordered reader already matched byte for byte). So a table with
+/// full coverage is left exactly as stored; only a table that drops an
+/// uncited entry reorders the survivors by citation. The 1С:УТ evidence this
+/// table's doc comment records (604 documents, 0 count mismatches) never
+/// exercised either branch beyond "full coverage, stored order" - every
+/// entry there was both cited and already stored in citation order too.
+fn compact_moxel_line_table(
+    lines: Vec<MoxelLine>,
+    formats: &[MoxelFormat],
+) -> (Vec<MoxelLine>, Option<BTreeMap<usize, usize>>) {
+    // A table every entry is cited from publishes in its own stored order
+    // unchanged - re-measured against the SSL demo corpus's own two-entry
+    // tables, where reordering by citation instead flipped `width="1"`/`"2"`
+    // and every dependent border reference. Reordering only has evidence
+    // for the entries a table drops (below).
+    if moxel_used_line_indexes(formats).len() == lines.len() {
+        return (lines, None);
+    }
+    let mut order = Vec::new();
+    let mut seen = BTreeSet::new();
+    for format in formats {
+        for value in [
+            format.border,
+            format.left_border,
+            format.top_border,
+            format.right_border,
+            format.bottom_border,
+            format.drawing_border,
+        ] {
+            if let Some(index) = value
+                && seen.insert(index)
+            {
+                order.push(index);
+            }
+        }
+    }
+    let mut remap = BTreeMap::new();
+    let mut kept = Vec::with_capacity(order.len());
+    for old_index in order {
+        if let Some(line) = lines.get(old_index) {
+            remap.insert(old_index, kept.len());
+            kept.push(line.clone());
+        }
+    }
+    (kept, Some(remap))
+}
+
+fn remap_moxel_format_line_refs(format: &mut MoxelFormat, remap: &BTreeMap<usize, usize>) {
+    for slot in [
+        &mut format.border,
+        &mut format.left_border,
+        &mut format.top_border,
+        &mut format.right_border,
+        &mut format.bottom_border,
+        &mut format.drawing_border,
+    ] {
+        if let Some(index) = slot
+            && let Some(mapped) = remap.get(index)
+        {
+            *index = *mapped;
+        }
+    }
 }
 
 pub(super) fn parse_moxel_pictures(

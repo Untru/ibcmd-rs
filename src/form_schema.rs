@@ -4514,6 +4514,16 @@ impl FormConditionalGroupSchema {
             {
                 Some(Self { prefix_slot: 5 })
             }
+            // A `Table`'s own service `ContextMenu` (discriminator `8`) and
+            // `AutoCommandBar` (discriminator `9`) carry the identical
+            // marker-and-tuple prefix at the identical slot, but at their own
+            // much shorter 30-member base layout rather than the 31+2k one
+            // `Page`/group items run on, and ERP UH MDM_Management's `Список`
+            // dynamic-list tables carry it at the *default* value `true` --
+            // the state the platform writes no `<UserVisible>` for -- rather
+            // than the only value the `Page` census saw. Without this arm the
+            // reader lost the `ContextMenu`/`AutoCommandBar` item whole.
+            ("22", 30, Some(false) | Some(true), Some("8" | "9")) => Some(Self { prefix_slot: 5 }),
             // A decoration takes the very same prefix in the very same slot.
             // UT 11.5.27.75 spells exactly one: a 37-member wrapper-`12`
             // record -- the 36-member decoration layout plus the tuple
