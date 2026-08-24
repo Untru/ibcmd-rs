@@ -509,6 +509,138 @@ fn append_source_asset_diagnostic(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum OutputWriteRoute {
+    SourceAsset,
+    MetadataXml,
+    ModuleText,
+}
+
+/// Refused output paths for the write routes `colliding_source_asset_paths`
+/// cannot see: a form/template/subsystem's own descriptor XML, and a
+/// canonical module body. Grouped by write route rather than a single flat
+/// file-name key because the same row uuid can be a claimant on more than
+/// one route at once -- a form body is both a source asset (`Ext/Form.xml`)
+/// and a module-text owner (`Ext/Form/Module.bsl`) -- so refusing one
+/// route's collision must never silently withhold the other, unrelated
+/// route's output for the same uuid.
+#[derive(Debug, Default)]
+pub(super) struct ReferenceOutputCollisions {
+    /// Additional `source_assets` entries this pass refuses that
+    /// `colliding_source_asset_paths` could not see, because the collision
+    /// is with a form/template/subsystem/module path rather than another
+    /// source asset. Keyed exactly like `source_assets`.
+    pub(super) source_assets: BTreeMap<String, String>,
+    /// Keyed by the metadata row's own uuid: a form, template, or
+    /// subsystem's own descriptor-XML row.
+    pub(super) metadata_xml: BTreeMap<String, String>,
+    /// Keyed by the module body row id (`<uuid>.<suffix>`), matching
+    /// `module_text_paths`.
+    pub(super) module_text: BTreeMap<String, String>,
+}
+
+fn record_output_claim(
+    claimants: &mut BTreeMap<String, Vec<(OutputWriteRoute, String)>>,
+    route: OutputWriteRoute,
+    file_name: &str,
+    path: &Path,
+) {
+    let path = path.to_string_lossy().replace('\\', "/");
+    claimants
+        .entry(path)
+        .or_default()
+        .push((route, file_name.to_string()));
+}
+
+/// Every canonical output path claimed by more than one row across every
+/// file-writing route: `source_assets`, form/template/subsystem descriptor
+/// XML, and canonical module bodies. `colliding_source_asset_paths` only
+/// sees `source_assets` -- forms, templates, subsystems, and modules resolve
+/// their own output path through their own reference index
+/// (`form_refs`/`template_refs`/`subsystem_refs`/`module_text_paths`) that
+/// never passed through that check, so two objects resolving to the
+/// identical path there raced a writer instead of being refused. Folding
+/// `source_assets` back in here also catches a collision between routes, not
+/// just within one. A collision is a refusal about those specific
+/// claimants, not about the export: both are withheld and named, and every
+/// path claimed once alone is still produced.
+pub(super) fn colliding_reference_output_paths(
+    source_assets: &BTreeMap<String, SourceAsset>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    module_text_paths: &BTreeMap<String, PathBuf>,
+) -> ReferenceOutputCollisions {
+    let mut claimants = BTreeMap::<String, Vec<(OutputWriteRoute, String)>>::new();
+    for (file_name, asset) in source_assets {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::SourceAsset,
+            file_name,
+            &asset.primary_path,
+        );
+    }
+    for (uuid, form_ref) in form_refs {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::MetadataXml,
+            uuid,
+            &form_ref.relative_path,
+        );
+    }
+    for (uuid, template_ref) in template_refs {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::MetadataXml,
+            uuid,
+            &template_ref.relative_path,
+        );
+    }
+    for (uuid, subsystem_ref) in subsystem_refs {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::MetadataXml,
+            uuid,
+            &subsystem_ref.relative_path,
+        );
+    }
+    for (file_name, path) in module_text_paths {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::ModuleText,
+            file_name,
+            path,
+        );
+    }
+
+    let mut refused = ReferenceOutputCollisions::default();
+    for (path, entries) in claimants {
+        let mut distinct_names = entries
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>();
+        distinct_names.sort_unstable();
+        distinct_names.dedup();
+        if distinct_names.len() < 2 {
+            continue;
+        }
+        let message = format!(
+            "output path {path} is produced by both {} and {}",
+            distinct_names[0],
+            distinct_names[1..].join(" and ")
+        );
+        for (route, name) in entries {
+            let bucket = match route {
+                OutputWriteRoute::SourceAsset => &mut refused.source_assets,
+                OutputWriteRoute::MetadataXml => &mut refused.metadata_xml,
+                OutputWriteRoute::ModuleText => &mut refused.module_text,
+            };
+            bucket.insert(name, message.clone());
+        }
+    }
+    refused
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum PredefinedDataRowsetLayout {
     NestedTable,

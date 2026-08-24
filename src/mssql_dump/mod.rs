@@ -2379,6 +2379,7 @@ struct DumpRowContext<'a> {
     extract_module_text: bool,
     extract_metadata_xml: bool,
     collect_all_source_asset_diagnostics: bool,
+    refused_output_paths: &'a ReferenceOutputCollisions,
     module_text_paths: &'a BTreeMap<String, PathBuf>,
     source_assets: &'a BTreeMap<String, SourceAsset>,
     metadata_texts_by_file_name: &'a BTreeMap<&'a str, &'a MetadataTextRow>,
@@ -2825,6 +2826,27 @@ fn dump_table_rows_with_options_mode(
         source_assets.remove(&file_name);
         source_asset_diagnostics.insert(file_name, message);
     }
+    // Forms, templates, subsystems, and canonical module bodies each resolve
+    // their own output path through their own reference index, never through
+    // `source_assets`, so two rows that resolve to the identical path there
+    // are invisible to the check above and would otherwise race a writer. The
+    // same row uuid can be a claimant on more than one route at once (a
+    // form's body is both a source asset and a module-text owner, each with
+    // its own target path), so refusal is tracked per route rather than by a
+    // single flat file-name key: refusing a colliding module path must not
+    // also withhold that row's unrelated, non-colliding source asset.
+    let mut reference_collisions = colliding_reference_output_paths(
+        &source_assets,
+        &form_refs,
+        &template_refs,
+        &subsystem_refs,
+        &module_text_paths,
+    );
+    for (file_name, message) in std::mem::take(&mut reference_collisions.source_assets) {
+        if source_assets.remove(&file_name).is_some() {
+            source_asset_diagnostics.insert(file_name, message);
+        }
+    }
 
     let context = DumpRowContext {
         output_dir,
@@ -2835,6 +2857,7 @@ fn dump_table_rows_with_options_mode(
         extract_module_text,
         extract_metadata_xml,
         collect_all_source_asset_diagnostics,
+        refused_output_paths: &reference_collisions,
         module_text_paths: &module_text_paths,
         source_assets: &source_assets,
         metadata_texts_by_file_name: &metadata_texts_by_file_name,
@@ -3957,6 +3980,22 @@ fn dump_table_rows_streamed(
         source_assets.remove(&file_name);
         source_asset_diagnostics.insert(file_name, message);
     }
+    // See the identical comment in `dump_table_rows_with_options_mode`: forms,
+    // templates, subsystems, and canonical module bodies resolve their output
+    // path outside `source_assets`, so extend the same refusal to those
+    // routes here too.
+    let mut reference_collisions = colliding_reference_output_paths(
+        &source_assets,
+        &form_refs,
+        &template_refs,
+        &subsystem_refs,
+        &module_text_paths,
+    );
+    for (file_name, message) in std::mem::take(&mut reference_collisions.source_assets) {
+        if source_assets.remove(&file_name).is_some() {
+            source_asset_diagnostics.insert(file_name, message);
+        }
+    }
     timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
     timings.prepare_indexes_ms = elapsed_ms(prepare_started);
 
@@ -3969,6 +4008,7 @@ fn dump_table_rows_streamed(
         extract_module_text,
         extract_metadata_xml,
         collect_all_source_asset_diagnostics,
+        refused_output_paths: &reference_collisions,
         module_text_paths: &module_text_paths,
         source_assets: &source_assets,
         metadata_texts_by_file_name: &metadata_texts_by_file_name,
@@ -4754,25 +4794,62 @@ fn dump_table_row_bytes(
             Err(_) => None,
         };
         match module_text {
-            Some(text) => {
-                let relative = context
-                    .module_text_paths
-                    .get(file_name)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        PathBuf::from(format!("{}_module_text", context.table))
-                            .join(format!("{safe_name}.bsl"))
-                    });
-                let path = context.output_dir.join(&relative);
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .with_context(|| format!("failed to create {}", parent.display()))?;
-                }
-                fs::write(&path, text)
-                    .with_context(|| format!("failed to write {}", path.display()))?;
-                module_text_rows = 1;
+            Some(_)
+                if context
+                    .refused_output_paths
+                    .module_text
+                    .contains_key(file_name) =>
+            {
+                // Two rows resolved to the identical canonical module path
+                // (`colliding_reference_output_paths`); the platform writes
+                // neither, and picking a winner would be nondeterministic
+                // between runs of this same binary. Disclosed as an opaque
+                // entry in the top-level export report, not a written file.
                 timings.module_text_cpu_ms += elapsed_ms(started);
-                Some(relative.to_string_lossy().replace('\\', "/"))
+                None
+            }
+            Some(text) => {
+                let relative = match context.module_text_paths.get(file_name).cloned() {
+                    Some(relative) => Some(relative),
+                    // No canonical owner path. `write_binary_rows` is this
+                    // pipeline's existing signal for "raw/debug MSSQL storage
+                    // dump" (see `needs_source_layout_refs` above): that mode
+                    // keeps the historical `{table}_module_text/*.bsl`
+                    // fallback for forensic inspection. A strict source
+                    // export (`write_binary_rows == false`, i.e. `cf export`
+                    // and `infobase config export`) never takes it: the
+                    // platform does not have this path at all -- confirmed by
+                    // its absence from every native reference tree -- so
+                    // writing it here was always a debug-tool convenience
+                    // leaking into the parity-graded output, not a real
+                    // export path. Fail closed instead and disclose through
+                    // the opaque entry, matching the "not emitted" reasoning
+                    // recorded for the owning object's own metadata XML.
+                    None if context.write_binary_rows => Some(
+                        PathBuf::from(format!("{}_module_text", context.table))
+                            .join(format!("{safe_name}.bsl")),
+                    ),
+                    None => None,
+                };
+                match relative {
+                    Some(relative) => {
+                        let path = context.output_dir.join(&relative);
+                        if let Some(parent) = path.parent() {
+                            fs::create_dir_all(parent).with_context(|| {
+                                format!("failed to create {}", parent.display())
+                            })?;
+                        }
+                        fs::write(&path, text)
+                            .with_context(|| format!("failed to write {}", path.display()))?;
+                        module_text_rows = 1;
+                        timings.module_text_cpu_ms += elapsed_ms(started);
+                        Some(relative.to_string_lossy().replace('\\', "/"))
+                    }
+                    None => {
+                        timings.module_text_cpu_ms += elapsed_ms(started);
+                        None
+                    }
+                }
             }
             None => {
                 timings.module_text_cpu_ms += elapsed_ms(started);
@@ -4787,7 +4864,23 @@ fn dump_table_row_bytes(
     let mut metadata_xml_diagnostic = None;
     let metadata_xml_relative = if context.extract_metadata_xml {
         let started = Instant::now();
-        let extracted = if let Some(row) = context.metadata_texts_by_file_name.get(file_name) {
+        let extracted = if context
+            .refused_output_paths
+            .metadata_xml
+            .contains_key(file_name)
+        {
+            // Two rows resolved to the identical canonical descriptor path
+            // (`colliding_reference_output_paths` -- a form, template, or
+            // subsystem whose own XML lands on a path another row also
+            // claims). The platform writes neither, so this exporter must
+            // not pick a nondeterministic winner between runs either: fail
+            // closed instead of computing and writing either row's XML.
+            Err(MetadataSourceExtractionDiagnostic::legacy_option_none(
+                MetadataSourceFailureClass::Unsupported,
+                "unknown",
+                "output_path_collision",
+            ))
+        } else if let Some(row) = context.metadata_texts_by_file_name.get(file_name) {
             extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions(
                 row,
                 context.type_index,
