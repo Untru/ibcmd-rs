@@ -23579,7 +23579,13 @@ pub(super) fn format_form_child_item_xml(
     }
     if !matches!(
         item.tag,
-        "Table" | "Button" | "LabelDecoration" | "PictureDecoration" | "CommandBar" | "Page"
+        "Table"
+            | "Button"
+            | "LabelDecoration"
+            | "PictureDecoration"
+            | "CommandBar"
+            | "Page"
+            | "Popup"
     ) && !pages_geometry_after_title
         && let Some(height) = &item.height
     {
@@ -24839,7 +24845,23 @@ pub(super) fn format_form_child_item_xml(
     // shares a popup with `Width`, `HorizontalStretch` or `Picture`, so it
     // stays beside the stretch it pairs with, as on every owner where the pair
     // is observed.  All three used to be written ahead of the title.
+    //
+    // `Height` joins the same behind-the-title run: SSL демо and SSL база's
+    // `DataProcessors/РаботаСРезультатамиОбмена` share the one native popup
+    // that carries it (`ГруппаУстановитьРешения`), and on both it trails
+    // `Title`, `TitleTextColor` and `TitleFont` and leads
+    // `ShapeRepresentation`, with no counter-example. Neither instance also
+    // carries `Width`/`HorizontalStretch`/`VerticalStretch`, so its order
+    // against that trio is unobserved; it is placed ahead of them; it used to
+    // be written ahead of the title, in the same early slot every other
+    // control kind uses.
     if item.tag == "Popup" {
+        if let Some(height) = &item.height {
+            xml.push_str(&format!(
+                "{tab}\t<Height>{}</Height>\r\n",
+                escape_xml_text(height)
+            ));
+        }
         if let Some(width) = &item.width {
             xml.push_str(&format!(
                 "{tab}\t<Width>{}</Width>\r\n",
