@@ -688,13 +688,21 @@ pub(super) fn source_asset_paths_with_indexes(
             let is_selected_header = rows_by_file_name
                 .get(interface_id.as_str())
                 .is_some_and(|row| row.binary_hex.is_empty());
+            // A decoded-but-entirely-empty root command interface (wire
+            // shape `{7,0,0,0,0,0,0}`) is a record the platform tracks by
+            // identity without ever rendering a file for -- confirmed
+            // against WMS5's `МодульWebОбмена_ERP25.cf`, whose Configuration
+            // `.9`/`.a` records decode cleanly to zero sections and stay
+            // absent from the native export tree. `CommandInterface::is_empty`
+            // is the fail-closed line: it only suppresses emission when
+            // every section decoded to nothing, never on a decode failure.
             let is_command_interface = is_selected_header
                 || rows_by_file_name
                     .get(interface_id.as_str())
                     .and_then(|row| decode_hex(&row.binary_hex).ok())
                     .is_some_and(|bytes| {
                         parse_command_interface_blob(&bytes, &command_refs, &metadata_refs)
-                            .is_some()
+                            .is_some_and(|interface| !interface.is_empty())
                     });
             if is_command_interface {
                 paths.insert(

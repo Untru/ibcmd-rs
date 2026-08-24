@@ -182,6 +182,11 @@ pub(super) fn write_config_dump_info(
             configuration_reference.to_owned(),
         );
     }
+    add_configuration_root_command_interface_references(
+        &mut canonical_refs,
+        inventory.metadata_texts,
+        inventory.object_refs,
+    );
 
     let version_ids = versions
         .iter()
@@ -432,6 +437,62 @@ fn configuration_top_level_reference(object_refs: &BTreeMap<String, String>) -> 
                 .is_some_and(|suffix| !suffix.is_empty() && !suffix.contains('.'))
         })
         .map(String::as_str)
+}
+
+/// Registers `Configuration.<Name>.CommandInterface` /
+/// `.MainSectionCommandInterface` for the Configuration record's own
+/// embedded self-header identity, when that identity is a real uuid
+/// distinct from the Configuration's storage key.
+///
+/// The Configuration object's own metadata text embeds a `{1,0,<uuid>}`
+/// self-header. For an uncustomized configuration that uuid is the fixed
+/// sentinel [`CONFIGURATION_COMMAND_INTERFACE_UUID`] (handled above), but
+/// the platform allocates a real, per-configuration uuid there once the
+/// Configuration-root command interface pair (`.9`/`.a`) has its own
+/// storage records — confirmed against WMS5's `МодульWebОбмена_ERP25.cf`:
+/// embedded self-header uuid `11a420f7-edda-47e2-bb56-c76b400a0bf6`,
+/// carrying real `.9`/`.a` records that decode cleanly (to an all-empty
+/// command interface, see [`CommandInterface::is_empty`]), and versioned
+/// as their own top-level `versions` entries `11a420f7-....9` / `.a`.
+/// Native `ConfigDumpInfo.xml` still names both
+/// `Configuration.WebОбменERP25.MainSectionCommandInterface` /
+/// `.CommandInterface` even though the export tree never materializes
+/// their (empty) `Ext/*.xml` file — so the canonical name is derived here,
+/// directly from the fixed suffix-to-role route, rather than depending on
+/// a written/emitted source asset that may not exist for an empty record.
+///
+/// Harmless when the self-header identity never appears as its own
+/// `versions` entry (confirmed for ERP УХ's `Web_Service`/`MDM_Management`,
+/// whose analogous identity carries no `.9`/`.a` storage at all): the
+/// alias is simply never looked up. Redundant-but-consistent when a full
+/// application (confirmed for БСП demo, УТ) already resolves the same
+/// entries through [`config_dump_top_name`]'s role-path fallback, since
+/// both paths derive the identical route-based role name.
+fn add_configuration_root_command_interface_references(
+    canonical_refs: &mut BTreeMap<String, String>,
+    metadata_texts: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+) {
+    let Some(configuration_reference) = configuration_top_level_reference(object_refs) else {
+        return;
+    };
+    for row in metadata_texts {
+        let Some(identity) = parse_configuration_header_uuid(&row.text) else {
+            continue;
+        };
+        for suffix in ["9", "a"] {
+            let Some(role) = crate::compiler::families::assets::SourceAssetRegistry
+                .route_by_suffix("Configuration", suffix)
+                .and_then(|route| Path::new(route.relative_path()).file_stem())
+                .and_then(|role| role.to_str())
+            else {
+                continue;
+            };
+            canonical_refs
+                .entry(format!("{identity}.{suffix}"))
+                .or_insert_with(|| format!("{configuration_reference}.{role}"));
+        }
+    }
 }
 
 fn config_dump_top_name(
