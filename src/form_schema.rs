@@ -4523,7 +4523,20 @@ impl FormConditionalGroupSchema {
             // the state the platform writes no `<UserVisible>` for -- rather
             // than the only value the `Page` census saw. Without this arm the
             // reader lost the `ContextMenu`/`AutoCommandBar` item whole.
-            ("22", 30, Some(false) | Some(true), Some("8" | "9")) => Some(Self { prefix_slot: 5 }),
+            // The 30-member base layout above is itself the *childless*
+            // shape: a root `AutoCommandBar` that carries its own
+            // `<ChildItems>` (e.g. ERP УХ MDM_Management's
+            // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`, whose
+            // root command bar holds one `<Button name="Справка">`) appends
+            // the same trailing `count,(uuid,value)*count` pairs the
+            // `Page`/group items already run 31+2k on, so admitting the same
+            // `+2k` progression here rather than the bare `30` reproduces it
+            // instead of losing the whole `<AutoCommandBar>` a second time.
+            ("22", field_count, Some(false) | Some(true), Some("8" | "9"))
+                if field_count >= 30 && (field_count - 30) % 2 == 0 =>
+            {
+                Some(Self { prefix_slot: 5 })
+            }
             // A decoration takes the very same prefix in the very same slot.
             // UT 11.5.27.75 spells exactly one: a 37-member wrapper-`12`
             // record -- the 36-member decoration layout plus the tuple
@@ -5271,6 +5284,21 @@ impl FormRootVerticalScrollSchema {
                 mode_slot: 15,
             }),
             (Some("49"), 24) => Some(Self {
+                qualifier_slot: 6,
+                mode_slot: 16,
+            }),
+            // ERP УХ MDM_Management's *item*/*common* forms (root `49` or
+            // `50`) carry one further trailing member after the same
+            // 24-shape the dynamic-list forms above end on -- see
+            // `form_root_child_items_tail_start_49_or_50`. The qualifier and
+            // mode still sit at the same slots 6/16 counted from the start
+            // of that trailer: `CommonForms/ФормаИзмененияРеквизитовНСИ`
+            // (no native `<VerticalScroll>`, both `0`) and
+            // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+            // (native `<VerticalScroll>useIfNecessary</VerticalScroll>`,
+            // both `2`) agree with the 24-member forms above at every other
+            // position.
+            (Some("49") | Some("50"), 25) => Some(Self {
                 qualifier_slot: 6,
                 mode_slot: 16,
             }),

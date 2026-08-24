@@ -2493,8 +2493,22 @@ pub(super) fn extract_form_custom_settings_folder(
 }
 
 pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
-    match fields.get(tail_start + 17).map(|field| field.trim())? {
+    // Same 24-vs-25-member trailer split `FormRootVerticalScrollSchema`
+    // documents: ERP УХ MDM_Management's `CommonForms/ФормаИзмененияРеквизитовНСИ`
+    // roots at `50` with the 25-member trailer (`form_root_child_items_tail_start_49_or_50`),
+    // one slot further out than the 24-member shape's own slot 17, and reads
+    // `0` there for the corpus's only root-level `<ShowTitle>false</ShowTitle>`.
+    // Neither MDM_Management dynamic-list form (24-member trailer, root
+    // `49`) carries a root `<ShowTitle>` at all, and both read something
+    // other than `0` at slot 17, so admitting root `49` here does not turn
+    // up a false positive on the samples available.
+    let tail_start = form_root_child_items_tail_start_49_or_50(fields)?;
+    let slot = match fields.len().checked_sub(tail_start)? {
+        24 => 17,
+        25 => 18,
+        _ => return None,
+    };
+    match fields.get(tail_start + slot).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
@@ -8904,12 +8918,13 @@ pub(super) fn parse_form_child_item_count(value: &str) -> Option<usize> {
 }
 
 pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
-    form_root_child_items_tail_start_for(fields, &["50"])
+    form_root_child_items_tail_start_for(fields, &["50"], &[24])
 }
 
 /// Same trailer search as `form_root_child_items_tail_start`, but also
 /// admitting root discriminator `49` (ERP УХ MDM_Management's own form root,
-/// alongside UT/БСП's `50`).
+/// alongside UT/БСП's `50`) and a 25-member trailer alongside the classic
+/// 24-member one.
 ///
 /// This is a *separate* entry point rather than a broadened gate on the
 /// shared function above on purpose: `form_root_child_items_tail_start` has
@@ -8921,17 +8936,27 @@ pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize>
 /// has no `<HorizontalAlign>` -- promptly grew a wrong
 /// `<HorizontalAlign>Left</HorizontalAlign>` from trailer slot 11 reading
 /// `0`. Only callers that have separately verified their own slot meaning
-/// for root `49` (so far: `FormRootVerticalScrollSchema`) should call this
-/// one instead.
+/// for root `49` and for the 25-member trailer (so far:
+/// `FormRootVerticalScrollSchema`) should call this one instead.
+///
+/// The 25-member trailer itself: ERP УХ MDM_Management's dynamic-list forms
+/// (root `49`) end in exactly the same 24-member trailer
+/// `form_root_child_items_tail_start` already finds for root `50`, but its
+/// *item* and *common* forms (root `49` or `50` -- `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
+/// and `CommonForms/ФормаИзмененияРеквизитовНСИ`) carry one further trailing
+/// member after that same 24-shape. Trying 24 then 25 and keeping whichever
+/// alone validates is unambiguous on all four forms checked: the 24-member
+/// search validates only for the two dynamic-list forms and the 25-member
+/// one only for the two item/common forms, never both.
 pub(super) fn form_root_child_items_tail_start_49_or_50(fields: &[&str]) -> Option<usize> {
-    form_root_child_items_tail_start_for(fields, &["49", "50"])
+    form_root_child_items_tail_start_for(fields, &["49", "50"], &[24, 25])
 }
 
 fn form_root_child_items_tail_start_for(
     fields: &[&str],
     allowed_root_discriminators: &[&str],
+    root_trailer_field_counts: &[usize],
 ) -> Option<usize> {
-    const ROOT_TRAILER_FIELDS: usize = 24;
     if !fields
         .first()
         .map(|field| field.trim())
@@ -8939,7 +8964,18 @@ fn form_root_child_items_tail_start_for(
     {
         return None;
     }
-    let tail_start = fields.len().checked_sub(ROOT_TRAILER_FIELDS)?;
+    root_trailer_field_counts
+        .iter()
+        .find_map(|&root_trailer_fields| {
+            form_root_child_items_tail_start_at(fields, root_trailer_fields)
+        })
+}
+
+fn form_root_child_items_tail_start_at(
+    fields: &[&str],
+    root_trailer_fields: usize,
+) -> Option<usize> {
+    let tail_start = fields.len().checked_sub(root_trailer_fields)?;
     let mut matched_tail = None;
     let max_count = tail_start.saturating_sub(1) / 2;
     for count in 0usize..=max_count {
