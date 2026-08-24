@@ -10147,8 +10147,29 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        // Key 20 (`AllowGettingCurrentRowUrl`) is the property bag's own
+        // *unwritten default*, not an absent property: ERP УХ
+        // MDM_Management's `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка`
+        // carries a 12-pair bag that stops at key 19, while its sibling
+        // `Catalogs/СправочникиБД/Forms/ФормаСписка` carries a 13-pair bag
+        // with key 20 spelled out as `{"B",1}` -- and both write the native
+        // `<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>`.
+        // Across the whole MDM_Management tree the six files carrying the
+        // element are exactly the six carrying a dynamic-list `Table`
+        // (`xsi:type="DynamicList"`), and no occurrence ever reads `false`;
+        // the two tabular-part `Table`s of `Catalogs/СправочникиБД/Forms/ФормаЭлемента`
+        // have no counted bag at all (no key in 1..=25 resolves), confirming
+        // the bag itself -- not just key 20 -- is dynamic-list-only. Key 5
+        // (`AutoRefresh`) is present on every dynamic-list bag observed, so
+        // its presence stands in for "this table carries the bag and simply
+        // didn't write key 20", which reads as the default `true`.
         allow_getting_current_row_url: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, TableBagKey::AllowGettingCurrentRowUrl)
+                .or_else(|| {
+                    form_table_property_bag_value(&fields, TableBagKey::AutoRefresh)
+                        .is_some()
+                        .then_some(true)
+                })
         } else {
             None
         },
