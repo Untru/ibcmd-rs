@@ -2129,13 +2129,15 @@ pub(super) fn parse_configuration_properties_from_text(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<ConfigurationProperties> {
     let fields = configuration_root_fields(text)?;
+    let configuration_extension_compatibility_mode = fields
+        .get(26)
+        .and_then(|field| configuration_compatibility_mode_xml(field.trim()));
     Some(ConfigurationProperties {
         name_prefix: fields
             .get(2)
             .and_then(|field| parse_1c_quoted_string(field.trim())),
-        configuration_extension_compatibility_mode: fields
-            .get(26)
-            .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
+        configuration_extension_compatibility_mode: configuration_extension_compatibility_mode
+            .clone(),
         default_run_mode: fields
             .get(3)
             .and_then(|field| configuration_default_run_mode_xml(field.trim())),
@@ -2192,9 +2194,21 @@ pub(super) fn parse_configuration_properties_from_text(
         default_report_variant_form: None,
         default_report_settings_form: None,
         used_mobile_application_functionalities: Vec::new(),
-        compatibility_mode: fields
-            .get(43)
-            .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
+        // `configuration_root_fields` only ever finds the `{68,` (61-field)
+        // tuple shape, and on that shape `CompatibilityMode` (tuple field
+        // 43) mirrors `ConfigurationExtensionCompatibilityMode` (field 26)
+        // rather than being independently readable through field 43 itself.
+        // Confirmed identically on three corpora: ERP УХ's `Web_Service.cf`
+        // and `MDM_Management.cf` (both field 43 = `80307`, native
+        // `Version8_3_27` -- not the `Version8_3_7` field 43's own value
+        // would format to) and the independent vendor sitec's
+        // `МодульWebОбмена_ERP25.cf` (field 43 = `80501`, a different raw
+        // value, same native `Version8_3_27`) -- all three match field 26
+        // exactly and none match their own field 43 under
+        // `configuration_compatibility_mode_xml`'s formula. No `{68,`-shape
+        // corpus has ever shown field 43 and field 26 disagreeing in native
+        // output, so mirroring is the proven reading here, not field 43.
+        compatibility_mode: configuration_extension_compatibility_mode,
         configuration_properties_evidenced_default_block: None,
     })
 }
@@ -2275,8 +2289,14 @@ pub(super) fn parse_configuration_localized_properties_from_root(
 ) -> Option<ConfigurationLocalizedProperties> {
     let fields = configuration_root_property_fields(text, uuid)?;
     Some(ConfigurationLocalizedProperties {
-        brief_information: parse_configuration_localized_property_field(fields.get(4)?)?,
-        detailed_information: parse_configuration_localized_property_field(fields.get(5)?)?,
+        // WMS5's `МодульWebОбмена_ERP25.cf` proves the pairing: field 4
+        // carries the longer, multi-line "for these configurations: - ..."
+        // text, and native `Configuration.xml` renders that one under
+        // `<DetailedInformation>`, not `<BriefInformation>` -- the two were
+        // swapped here (field 5 is the short one-line text, matching
+        // `<BriefInformation>`'s native content byte for byte).
+        detailed_information: parse_configuration_localized_property_field(fields.get(4)?)?,
+        brief_information: parse_configuration_localized_property_field(fields.get(5)?)?,
         copyright: parse_configuration_localized_property_field(fields.get(6)?)?,
         vendor_information_address: parse_configuration_localized_property_field(fields.get(7)?)?,
         configuration_information_address: parse_configuration_localized_property_field(
@@ -2445,6 +2465,18 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
 fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
     parse_configuration_root_layout(text, uuid)?;
     let envelope = parse_configuration_root_envelope(text)?;
+    // Both footer variants reach this 60/61/77-length tuple shape and feed
+    // `configuration_properties_evidenced_default_block_policy`'s "matches
+    // the evidenced all-default reference outside six proven bytes" claim.
+    // WMS5's `МодульWebОбмена_ERP25.cf` (Bare footer) proved that claim can
+    // hold for Bare data too, once genuinely new evidence is accounted for:
+    // its `InterfaceCompatibilityMode` byte (`'3'`) was a not-yet-seen enum
+    // member (now mapped to `Taxi`, matching its native `Configuration.xml`),
+    // and once that was fixed, every other verbatim-compared field matched
+    // the reference exactly. So the earlier Checksummed-only restriction was
+    // evidence the *policy* wasn't ready yet, not evidence the footer
+    // variant itself mattered -- `envelope.footer` needs no check here
+    // beyond what `parse_configuration_root_layout` already required.
     let first_section = envelope.sections.first()?.trim();
     let contained_fields = split_1c_braced_fields(first_section, 0)?;
     if contained_fields.len() != 2 {
@@ -2620,9 +2652,23 @@ fn parse_configuration_root_envelope(text: &str) -> Option<ConfigurationRootEnve
 
 fn parse_configuration_root_layout(text: &str, uuid: &str) -> Option<ConfigurationRootLayout> {
     let envelope = parse_configuration_root_envelope(text)?;
+    // Both evidenced footer variants carry the identical
+    // `{ClassId,{1,{payload}}}` section shape the loop below decodes.
+    // Confirmed against ERP УХ's `Web_Service.cf` and WMS5's
+    // `МодульWebОбмена_ERP25.cf`: both carry a `{{0,"",""}}` (Bare) root
+    // footer, and both native reference trees still emit the full
+    // `InternalInfo`/`ChildObjects` shape for their Configuration.xml --
+    // requiring `Checksummed` here silently dropped ~2/3 of Configuration.xml
+    // (no InternalInfo, no ChildObjects, ~15 Properties fields) for every
+    // configuration whose root record happens to carry the Bare footer.
+    // Any *other* footer shape already fails closed inside
+    // `classify_configuration_root_footer`, which built this envelope.
     if envelope.identity != uuid
         || envelope.sections.len() != CONFIGURATION_CONTAINED_OBJECT_COUNT
-        || envelope.footer != ConfigurationRootFooter::Checksummed
+        || !matches!(
+            envelope.footer,
+            ConfigurationRootFooter::Bare | ConfigurationRootFooter::Checksummed
+        )
     {
         return None;
     }
@@ -2924,12 +2970,25 @@ pub(super) fn configuration_script_variant_xml(value: &str) -> Option<&'static s
     }
 }
 
+/// The highest packed platform-version value this reader has direct
+/// evidence for: `80327` = `Version8_3_27`, this platform's own build
+/// (`ibcmd` 8.3.27.2214). WMS5's `МодульWebОбмена_ERP25.cf` carries `80501`
+/// at the `CompatibilityMode` coordinate (tuple field 43) while its native
+/// `Configuration.xml` prints `Version8_3_27` -- the same value this
+/// platform's own version formats to, not `Version8_5_1`. A config cannot
+/// prove compatibility with a platform edition newer than the one reading
+/// it, so a value above this ceiling is evidence of a still-unproven
+/// spelling (e.g. a not-yet-observed clamping/rounding rule), not proof
+/// that the naive `major*10000+minor*100+patch` unpacking is the right
+/// reading for it. Fail closed rather than print the arithmetic guess.
+const MAX_EVIDENCED_PACKED_PLATFORM_VERSION: u32 = 80327;
+
 pub(super) fn configuration_compatibility_mode_xml(value: &str) -> Option<String> {
     if let Some(value) = parse_1c_quoted_string(value) {
         return if value.is_empty() { None } else { Some(value) };
     }
     let version = value.parse::<u32>().ok()?;
-    if version < 80000 {
+    if version < 80000 || version > MAX_EVIDENCED_PACKED_PLATFORM_VERSION {
         return None;
     }
     Some(format!(

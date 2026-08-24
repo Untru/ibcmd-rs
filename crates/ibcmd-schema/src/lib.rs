@@ -1713,6 +1713,19 @@ where
             }
             let typed = braced_fields_bounded(typed, 2)?;
             let value = match (mode.trim(), typed.as_slice()) {
+                // Both ids nil is not an unresolved reference: it is the
+                // fixed array's own blank slot, with no type constraint at
+                // all. WMS5's `МодульWebОбмена_ERP25.cf`,
+                // `ExchangePlans/axОбменПоWebСервису/Forms/ФормаПоУмолчанию`,
+                // InputField `СкладГруппа`: both `v8:Value` entries of its
+                // `ChoiceParameters` fixed array carry `{"U"}` with a nil
+                // type id *and* nil value id, and native still writes
+                // `<Value xsi:type="xr:DesignTimeRef"/>` for each -- so this
+                // is a third, typeless shape of the same `{"U"}` member,
+                // not a `typed_pair` that failed to resolve.
+                ("0", [kind]) if kind.trim() == r#""U""# && exact_nil_pair(type_id, value_id) => {
+                    FormChoiceParameterArrayItemValue::DesignTimeRef(String::new())
+                }
                 ("0", [kind]) if kind.trim() == r#""U""# && typed_pair(type_id, value_id) => {
                     FormChoiceParameterArrayItemValue::DesignTimeRef(resolve(
                         type_id.trim(),
@@ -4753,12 +4766,15 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
 
     /// `InterfaceCompatibilityMode` (offset 906): single ASCII digit, `'2'`
     /// = `TaxiEnableVersion8_2` (platform default), `'0'` =
-    /// `Version8_2`. No other index value has been observed; any other byte
-    /// must fail closed.
+    /// `Version8_2`. `'3'` is observed: WMS5's
+    /// `МодульWebОбмена_ERP25.cf` carries it at tuple field 38 and its
+    /// native `Configuration.xml` prints `Taxi` there -- no other index
+    /// value has been observed; any other byte must fail closed.
     pub fn interface_compatibility_mode_xml(&self, digit: u8) -> Option<&'static str> {
         match digit {
             b'2' => Some("TaxiEnableVersion8_2"),
             b'0' => Some("Version8_2"),
+            b'3' => Some("Taxi"),
             _ => None,
         }
     }
@@ -13313,6 +13329,9 @@ mod configuration_properties_evidenced_default_block_policy_tests {
             policy.interface_compatibility_mode_xml(b'0'),
             Some("Version8_2")
         );
+        // `'3'` is observed: WMS5's `МодульWebОбмена_ERP25.cf` carries it and
+        // prints `Taxi`.
+        assert_eq!(policy.interface_compatibility_mode_xml(b'3'), Some("Taxi"));
         assert_eq!(policy.interface_compatibility_mode_xml(b'1'), None);
     }
 

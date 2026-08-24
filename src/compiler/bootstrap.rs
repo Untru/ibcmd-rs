@@ -2772,11 +2772,16 @@ mod tests {
                 "ModalityUseMode",
                 "Auto",
             ),
+            // `Taxi` used to be this row's lexeme. It is now observed --
+            // WMS5's `МодульWebОбмена_ERP25.cf` writes `3` in this tuple
+            // field and prints it -- so it is a proven map member, not a
+            // refusal case. `Version8_1` is not in the proven map and stays
+            // refused.
             (
                 "<InterfaceCompatibilityMode>TaxiEnableVersion8_2</InterfaceCompatibilityMode>",
-                "<InterfaceCompatibilityMode>Taxi</InterfaceCompatibilityMode>",
+                "<InterfaceCompatibilityMode>Version8_1</InterfaceCompatibilityMode>",
                 "InterfaceCompatibilityMode",
-                "Taxi",
+                "Version8_1",
             ),
             (
                 "<SynchronousPlatformExtensionAndAddInCallUseMode>DontUse</SynchronousPlatformExtensionAndAddInCallUseMode>",

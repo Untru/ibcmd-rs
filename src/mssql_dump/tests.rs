@@ -42596,20 +42596,37 @@ fn extracts_flat_configuration_internal_info_and_reference_children() {
 }
 
 #[test]
-fn flat_configuration_root_footer_requires_the_evidenced_marker_and_checksum() {
-    // The CF root-control tail is `{1,"",""}` plus an opaque signed body
-    // checksum (see `classify_configuration_root_footer`), confirmed
-    // identically across all 19 retained 8.3.27.2214 CF corpora under
-    // tests/fixtures/native-evidence. The bare `{0,"",""}` tail (db-resident
-    // cohort) stays a valid root envelope but must keep being insufficient
-    // for InternalInfo/ChildObjects emission, and every other tail shape must
-    // keep being rejected so none can silently regress back in.
+fn flat_configuration_root_footer_accepts_both_evidenced_variants() {
+    // The CF root-control tail has two evidenced shapes (see
+    // `classify_configuration_root_footer`): `{1,"",""}` plus an opaque
+    // signed body checksum (Checksummed), and the bare `{0,"",""}` tail
+    // (Bare, "the db-resident tail... emitted by the clean-room bootstrap
+    // writer"). Both were originally believed to need Checksummed for
+    // InternalInfo/ChildObjects, but ERP УХ's `Web_Service.cf` and WMS5's
+    // `МодульWebОбмена_ERP25.cf` both carry the Bare tail at their
+    // Configuration root *and* both native reference trees still emit the
+    // full InternalInfo/ChildObjects shape -- so Bare must be accepted here
+    // too (`docs/evidence/configuration-body-8.3.27.md`). Every other tail
+    // shape stays rejected so none can silently regress back in.
     let (uuid, text, object_refs) = flat_configuration_fixture();
     const GOOD_FOOTER: &str = r#"{{1,"",""},{-1648891888}}"#;
     assert!(text.ends_with(&format!("{GOOD_FOOTER}}}")));
 
+    let accepted_footers = [("checksummed", GOOD_FOOTER), ("bare", r#"{{0,"",""}}"#)];
+    for (case, footer) in accepted_footers {
+        let variant = text.replacen(GOOD_FOOTER, footer, 1);
+        let xml = extract_configuration_source_xml(
+            &variant,
+            &uuid,
+            &object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert!(xml.contains("<InternalInfo>"), "{case}: {xml}");
+        assert!(xml.contains("<ChildObjects"), "{case}: {xml}");
+    }
+
     let malformed_footers = [
-        ("disproven zero marker, no checksum", r#"{{0,"",""}}"#),
         ("zero marker with checksum", r#"{{0,"",""},{-1648891888}}"#),
         ("non-numeric checksum", r#"{{1,"",""},{"x"}}"#),
         ("missing checksum", r#"{{1,"",""}}"#),
@@ -43108,8 +43125,12 @@ fn extracts_atomic_configuration_localized_properties_for_proven_layouts() {
         (53, mobile.as_str()),
     ];
     let expected = ConfigurationLocalizedProperties {
-        brief_information: vec![("en".to_string(), "Brief info".to_string())],
-        detailed_information: vec![("en".to_string(), "Detailed & \"quoted\" info".to_string())],
+        // Tuple field 4 carries the text placed under `<DetailedInformation>`
+        // natively, and field 5 the text placed under `<BriefInformation>`
+        // -- see the swap fix and its evidence (WMS5's
+        // `МодульWebОбмена_ERP25.cf`) in `parse_configuration_localized_properties_from_root`.
+        brief_information: vec![("en".to_string(), "Detailed & \"quoted\" info".to_string())],
+        detailed_information: vec![("en".to_string(), "Brief info".to_string())],
         copyright: vec![
             ("en".to_string(), "Copyright Vendor".to_string()),
             ("ru".to_string(), "Vendor rights".to_string()),
@@ -43683,7 +43704,11 @@ fn extracts_configuration_xml_with_native_scalar_properties() {
         assert!(xml.contains(
             "<UpdateCatalogAddress>https://updates.example.invalid/</UpdateCatalogAddress>"
         ));
-        assert!(xml.contains("<CompatibilityMode>Version8_3_20</CompatibilityMode>"));
+        // `CompatibilityMode` (tuple field 43, `80320` in this fixture)
+        // mirrors `ConfigurationExtensionCompatibilityMode` (field 26,
+        // `80327`) on this `{68,` shape rather than reading its own field --
+        // see the evidence in `parse_configuration_properties_from_text`.
+        assert!(xml.contains("<CompatibilityMode>Version8_3_27</CompatibilityMode>"));
         assert!(!xml.contains("ConfigDumpInfo"));
     }
 }
@@ -43827,10 +43852,14 @@ fn extracts_configuration_xml_with_localized_info_properties() {
             xml.find("<DefaultStyle>Style.Main</DefaultStyle>").unwrap()
                 < xml.find("<BriefInformation>").unwrap()
         );
+        // `CompatibilityMode` (tuple field 43, `80320` in this fixture)
+        // mirrors `ConfigurationExtensionCompatibilityMode` (field 26,
+        // `80327`) on this `{68,` shape rather than reading its own field --
+        // see the evidence in `parse_configuration_properties_from_text`.
         assert!(
             xml.find("</ConfigurationInformationAddress>").unwrap()
                 < xml
-                    .find("<CompatibilityMode>Version8_3_20</CompatibilityMode>")
+                    .find("<CompatibilityMode>Version8_3_27</CompatibilityMode>")
                     .unwrap()
         );
         assert!(!xml.contains(style_uuid));

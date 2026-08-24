@@ -11,6 +11,28 @@ pub(super) struct CommandInterface {
     pub(super) subsystems_order: Vec<String>,
 }
 
+impl CommandInterface {
+    /// True when every section decoded to zero entries: the wire shape
+    /// `{7,0,0,0,0,0,0}` (a bare presence header followed by five empty
+    /// section markers). Confirmed against WMS5's
+    /// `МодульWebОбмена_ERP25.cf`: the Configuration-root `.9`/`.a` records
+    /// physically exist and decode successfully to exactly this shape, yet
+    /// the platform's own export tree never materializes
+    /// `Ext/CommandInterface.xml` / `Ext/MainSectionCommandInterface.xml`
+    /// for them (confirmed absent in the native reference tree at
+    /// `cap/wms/src/Ext/`) even though `ConfigDumpInfo.xml` still lists
+    /// both by name. A record that decodes but says nothing is evidence the
+    /// platform tracks the identity without ever rendering a file for it,
+    /// not evidence a file belongs on disk.
+    pub(super) fn is_empty(&self) -> bool {
+        self.commands_order.is_empty()
+            && self.commands_placement.is_empty()
+            && self.groups_order.is_empty()
+            && self.commands_visibility.is_empty()
+            && self.subsystems_order.is_empty()
+    }
+}
+
 pub(super) struct CommandInterfacePlacementEntry {
     pub(super) name: String,
     pub(super) command_group: String,

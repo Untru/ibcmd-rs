@@ -17433,7 +17433,17 @@ fn parse_information_register_common_child_properties(
             type_index,
             object_refs,
         )?),
-        self_close_empty_choice_parameter_refs: false,
+        // WMS5's `МодульWebОбмена_ERP25.cf` InformationRegister
+        // `ШтрихкодыНоменклатуры`, resource `Номенклатура`: native emits
+        // `<v8:Value xsi:type="xr:DesignTimeRef"/>` (self-closed) for each
+        // empty entry of a `ChoiceParameters` `FixedArray`, matching
+        // `parse_document_child_properties`'s already-proven `true` -- not
+        // the open/close form. Neither retained native-evidence corpus
+        // (БСП demo, УТ) has an InformationRegister with an empty
+        // DesignTimeRef inside a FixedArray choice parameter at all (zero
+        // matches either way), so this was never evidenced either way
+        // before; it just inherited the open/close default.
+        self_close_empty_choice_parameter_refs: true,
         quick_choice: Some(match fields.get(12)?.trim() {
             "0" => "DontUse",
             "1" => "Use",

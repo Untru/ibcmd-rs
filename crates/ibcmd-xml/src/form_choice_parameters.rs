@@ -450,8 +450,17 @@ fn emit_value(
                             // tree a `<Value xsi:type="xs:string">` with no
                             // text occurs 49 times and always self-closed,
                             // and the open/close spelling with empty text
-                            // never occurs.
-                            if xsi_type == XML_SCHEMA_STRING_TYPE && value.is_empty() {
+                            // never occurs. An empty design-time reference
+                            // (both ids nil, see `exact_nil_pair` in
+                            // ibcmd-schema) self-closes the same way: WMS5's
+                            // `МодульWebОбмена_ERP25.cf` writes
+                            // `<Value xsi:type="xr:DesignTimeRef"/>` for
+                            // both blank entries of the `СкладГруппа`
+                            // InputField's `ChoiceParameters` fixed array.
+                            if (xsi_type == XML_SCHEMA_STRING_TYPE
+                                || xsi_type == policy.design_time_ref_xsi_type)
+                                && value.is_empty()
+                            {
                                 sink.push("\"/>\r\n")?;
                             } else {
                                 sink.push("\">")?;
