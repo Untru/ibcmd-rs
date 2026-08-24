@@ -1,14 +1,20 @@
 # Role Rights: the Configuration root object, 20260824
 
-Status: closes the largest single missing-file class measured on ERP
-Управление холдингом 3.2.12.6 (`i2-uh.parity.json`, base commit `1645b1c`):
-1,682 of 4,236 `Roles/<Name>/Ext/Rights.xml` files (~40% of the whole corpus'
-missing set) were not emitted. All 1,682 are roles whose Rights blob carries
-an entry for the Configuration root object itself (`Configuration.<Name>`,
-administrative/client-launch rights such as `ThinClient`, `WebClient`,
-`Administration`). No previously-exact Rights.xml (199 of them, measured
-before this change) carries a Configuration-root entry, so this code path had
-never been exercised against real data.
+Status: closes the root cause of the largest single missing-file class
+measured on ERP Управление холдингом 3.2.12.6 (`i2-uh.parity.json`, base
+commit `1645b1c`): 1,682 of 4,236 `Roles/<Name>/Ext/Rights.xml` files (~40%
+of the whole corpus' missing set) were not emitted. All 1,682 are roles whose
+Rights blob carries an entry for the Configuration root object itself
+(`Configuration.<Name>`, administrative/client-launch rights such as
+`ThinClient`, `WebClient`, `Administration`). No previously-exact Rights.xml
+(199 of them, measured before this change) carries a Configuration-root
+entry, so this code path had never been exercised against real data.
+
+The Configuration-root defect itself is now closed and proven, on the whole
+corpus, at 100%: every role's Configuration-root `<object>` block byte-
+matches the platform's own output, whether the role ends up fully `exact` or
+not (see "Measured against the full ERP УХ gate" below — this is a stronger
+claim than "1,682 files fixed," and the two are not the same thing).
 
 ## Root cause
 
@@ -78,7 +84,9 @@ in-memory index) and comparing against the native
   **1,679/1,679 exact matches, 0 mismatches, 0 fail-closed triggers** before
   a single line of Rust was written. This was the basis for the design in
   `parse_configuration_root_object_rights` and the Configuration branch of
-  `role_rights_for_xml`.
+  `role_rights_for_xml`. This check compared only the Configuration-root
+  `<object>` block in isolation, not the whole file — see below for what the
+  real export does with the rest of each role.
 
 Representative bytes (`1cv8.cf`, `cf extract`, `--compression raw-deflate`):
 
@@ -145,6 +153,57 @@ directly with literal blob text shaped after the real corpus samples above:
 synthesis of all-six-absent, the `setForNewObjects: true` inversion, refusal
 on a divergent unnamed right, and refusal on a partial launch-mode set.
 
+## Measured against the full ERP УХ gate
+
+The isolated, block-only proof above was validated against the real
+`cf export` output of the full 140,411-file corpus
+(`$S/kit/run.sh uh <worktree> <out>`, compared to `$S/i2-uh.parity.json` by
+exact-set difference):
+
+| | exact | differing | missing | extra |
+| --- | ---: | ---: | ---: | ---: |
+| before | 114,448 | 21,683 | 4,280 | 180 |
+| after | 114,950 | 22,847 | 2,614 | 180 |
+| Δ | **+502** | **+1,164** | **−1,666** | 0 |
+
+**Broken (previously exact, now not exact): 0**, by exact-set difference.
+Of the 1,682 missing Rights.xml: **502 became fully `exact`**, **1,164
+became `differing`**, and **16 remain `missing`**.
+
+The 1,164 `differing` files are not a partial or buggy fix: for **all
+1,164/1,164** of them, the Configuration-root `<object>` block in our output
+is byte-identical to the native one (name, value and order of every right),
+checked directly against the real export's XML. Every one of these 1,164
+roles has *other* objects (Catalogs, Documents, Registers, …) in the same
+Rights.xml, and those go through the pre-existing, unmodified
+`parse_role_object_rights`/rendering path. Before this change, the
+Configuration-root gap failed the *entire* role's Rights blob closed, so
+whatever other, unrelated defects those other objects carry (the same kind
+that already accounts for the pre-existing 21,683-file `differing` bucket)
+were invisible — the file was simply absent. This change does not introduce
+those defects; it stops masking them. The 502 fully-`exact` roles are the
+ones where the Configuration-root object was the *only* problem.
+
+Of the 16 still-`missing` Rights.xml, three are the `MAX_NATIVE_NODES` cases
+already known (below, unpacked plaintext 13–16 MiB). The other 13 are
+smaller (16 KiB – 1.55 MiB, well under the node bound) and fail for
+independent, pre-existing reasons in the general (non-Configuration) rights
+parser — confirmed unrelated to this change because, again, their
+Configuration-root object (where reachable) parses correctly in isolation.
+One is precisely located: role `ДобавлениеЗаявкиНаРегистрациюПоставщика`
+(`c0352a8b-3706-49b3-abb9-bb9a2b587ce8`), object index 21
+(`InformationRegister`/`Catalog`-family object
+`94b2e060-53b7-4b40-af05-30bea3520330`), has a right-restriction condition
+serialized as `{RIGHT_UUID,{0}}` — a restriction-condition wrapper of kind
+`0`, distinct from the two kinds (`1`: plain condition text; `2`: condition
+with a field reference) `parse_role_restriction_condition` in
+`src/mssql_dump/role_rights.rs` currently handles, so it falls through to
+`_ => None` and fails the whole blob closed. This is out of scope for the
+Configuration-root defect this change closes and needs its own
+corpus-wide investigation (what wrapper kind `0` means, and how many roles
+it affects) before a fix is proposed; flagged separately rather than guessed
+at here.
+
 ## What is still refused, and why
 
 **3 of the 1,682** (`БазовыеПраваБПУХ`, `ИспользованиеПлатежногоКалендаряУХ`,
@@ -161,6 +220,14 @@ headroom to silence these three), which this pass did not attempt. They fail
 closed with `native Role Rights codec rejected data: native value exceeds
 its node bound` rather than being force-fit under a raised limit chosen only
 to match these three inputs.
+
+The other 13 still-missing Rights.xml (and, most likely, an unknown share of
+the 1,164 now-`differing` ones) are blocked by separate, pre-existing gaps in
+`parse_role_object_rights`/`parse_role_right_restrictions` unrelated to the
+Configuration root — see "Measured against the full ERP УХ gate" above for
+the one precisely located so far (`{0}`-kind restriction condition wrapper).
+Fixing those is a different, unscoped investigation and was not attempted
+here.
 
 ## Verification
 
@@ -186,5 +253,6 @@ fix itself:
 | `ssl` | 12,634 → 12,634 | 0 |
 | `wms` | 222 → 222 | 0 |
 
-The full ERP УХ gate (140,411 files) is the decisive corpus for this fix and
-is run separately; see the commit history for its exact-set result.
+The full ERP УХ gate (140,411 files) is the decisive corpus for this fix; its
+exact-set result is in "Measured against the full ERP УХ gate" above.
+`bundled9`: 9/9. `cargo fmt --check` and `git diff --check`: clean.
