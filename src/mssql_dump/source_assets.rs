@@ -1430,6 +1430,7 @@ pub(super) fn write_source_asset(
                 owner_reference.as_deref(),
             )
             .with_form_reference_index(context.role_rights_object_refs)
+            .with_metadata_command_refs(context.metadata_refs)
             .with_dcs_profiles(adapter.provider_id().clone(), dcs_target_profile);
             let extraction =
                 extract_form_body_xml_from_body_detailed_timed(body, &form_context, Some(timings))
