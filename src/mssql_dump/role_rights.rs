@@ -50,6 +50,16 @@ pub(super) fn parse_role_rights_blob(
         return None;
     }
 
+    // Parsed ahead of the objects loop: the Configuration root's own rights
+    // (see `parse_configuration_root_object_rights`) resolve two right UUIDs
+    // that carry no recoverable name by checking their value against this
+    // role's own `setForNewObjects` flag, so the flag must already be known
+    // by the time that object is reached.
+    let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
+    let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
+    let set_for_attributes_by_default = parse_role_bool_field_or_default(&fields, 4, true)?;
+    let independent_rights_of_child_objects = parse_role_bool_field_or_default(&fields, 5, false)?;
+
     let mut objects = Vec::with_capacity(count);
     for (serialized_index, object_field) in object_fields.iter().skip(1).enumerate() {
         let entry = split_1c_braced_fields(object_field, 0)?;
@@ -64,7 +74,11 @@ pub(super) fn parse_role_rights_blob(
         }
         let object_name = role_object_ref_name(&object_ref, object_refs)?;
 
-        let rights = parse_role_object_rights(entry[1], field_refs)?;
+        let rights = if is_configuration_root_rights_object(&object_name) {
+            parse_configuration_root_object_rights(entry[1], set_for_new_objects)?
+        } else {
+            parse_role_object_rights(entry[1], field_refs)?
+        };
         let intra_uuid_order =
             role_rights_object_intra_uuid_order(&object_ref, &object_name).unwrap_or(0);
         objects.push((
@@ -85,10 +99,6 @@ pub(super) fn parse_role_rights_blob(
         .map(|(_, _, _, object)| object)
         .collect::<Vec<_>>();
 
-    let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
-    let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
-    let set_for_attributes_by_default = parse_role_bool_field_or_default(&fields, 4, true)?;
-    let independent_rights_of_child_objects = parse_role_bool_field_or_default(&fields, 5, false)?;
     Some(RoleRights {
         set_for_new_objects,
         set_for_attributes_by_default,
@@ -276,6 +286,126 @@ pub(super) fn role_standard_attribute_descriptor(
         },
         _ => None,
     }
+}
+
+/// Right UUIDs the platform writes on the Configuration root that carry no
+/// name in `ROLE_RIGHT_NAMES`.
+///
+/// Measured over the ERP УХ role corpus (2026-08-24, 1,679 roles whose Rights
+/// blob has a Configuration-object entry): both UUIDs occur in every one of
+/// them, and in every occurrence the value equals that role's own
+/// `setForNewObjects` flag — which is exactly the condition under which
+/// `role_rights_for_xml` never prints a Configuration-root right at all (see
+/// its doc comment). They are therefore structurally invisible in every
+/// observed byte of output, on any value they take. Parsing tolerates them
+/// only while the equality holds, because no observed byte proves what name
+/// the platform would print if it ever didn't: a role where either value
+/// diverges from the flag is refused rather than guessed.
+const CONFIGURATION_ROOT_TOLERATED_UNNAMED_RIGHT_UUIDS: [&str; 2] = [
+    "3762abec-3836-446a-83ce-3e05001bca8b",
+    "4df6d046-3bf8-4dda-991c-53ba664296a5",
+];
+
+/// True for the six Configuration-root rights that pick the client's launch
+/// mode (thin/thick client window mode, analytics client). Unlike every
+/// other Configuration-root right, their type default is `true`, not the
+/// role's own `setForNewObjects` flag.
+pub(super) fn is_configuration_mode_right(name: &str) -> bool {
+    CONFIGURATION_MODE_RIGHT_NAMES.contains(&name)
+}
+
+const CONFIGURATION_MODE_RIGHT_NAMES: [&str; 6] = [
+    "MainWindowModeNormal",
+    "MainWindowModeWorkplace",
+    "MainWindowModeEmbeddedWorkplace",
+    "MainWindowModeFullscreenWorkplace",
+    "MainWindowModeKiosk",
+    "AnalyticsSystemClient",
+];
+
+/// True for the Configuration root's own name (`Configuration.<Name>`), the
+/// one object every role's Rights blob may carry administrative (client
+/// launch, admin console, `Automation`, …) rights on.
+pub(super) fn is_configuration_root_rights_object(name: &str) -> bool {
+    name.starts_with("Configuration.")
+}
+
+/// Parses the rights list for the Configuration root object.
+///
+/// This differs from `parse_role_object_rights` in two ways proven over the
+/// ERP УХ corpus (2026-08-24, see `role_rights_for_xml` and
+/// `CONFIGURATION_ROOT_TOLERATED_UNNAMED_RIGHT_UUIDS`): the six
+/// `CONFIGURATION_MODE_RIGHT_NAMES` rights default to `true` and are omitted
+/// from the blob entirely (not written as an explicit `false`) whenever a
+/// role leaves all six at that default, and two right UUIDs are tolerated
+/// without a recoverable name. Administrative rights carry no row-level
+/// restriction in any sampled role, so only the plain-pairs blob shape
+/// (`{0, uuid, value, uuid, value, …}`) is accepted; the restrictions shape
+/// `parse_role_object_rights` also handles is refused here as unproven.
+pub(super) fn parse_configuration_root_object_rights(
+    value: &str,
+    set_for_new_objects: bool,
+) -> Option<Vec<RoleRight>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let pairs = &fields[1..];
+    if pairs.len() % 2 != 0 {
+        return None;
+    }
+    let pair_count = pairs.len() / 2;
+
+    let mut entries = Vec::with_capacity(pair_count);
+    let mut mode_rights_seen = 0usize;
+    let mut save_user_data_index = None;
+    for index in 0..pair_count {
+        let right_uuid = pairs[index * 2].trim();
+        if !is_uuid_text(right_uuid) {
+            return None;
+        }
+        let value = parse_role_right_value(pairs[index * 2 + 1].trim())?;
+        if CONFIGURATION_ROOT_TOLERATED_UNNAMED_RIGHT_UUIDS.contains(&right_uuid) {
+            if value != set_for_new_objects {
+                return None;
+            }
+            continue;
+        }
+        let name = role_right_name(right_uuid)?;
+        if is_configuration_mode_right(name) {
+            mode_rights_seen += 1;
+        }
+        if name == "SaveUserData" {
+            save_user_data_index = Some(entries.len());
+        }
+        entries.push(RoleRight {
+            name: name.to_string(),
+            value,
+            restriction_by_condition: None,
+        });
+    }
+
+    match mode_rights_seen {
+        0 => {
+            // Omitted entirely rather than written `false`: insert the type
+            // default (`true`) at the position the platform's own canonical
+            // order puts them, immediately before `SaveUserData`. Measured
+            // over ERP УХ: 13/13 roles whose blob omits these six show all
+            // six as `true` natively, always in this position relative to
+            // the rights that are present.
+            let insert_at = save_user_data_index?;
+            let synthesized = CONFIGURATION_MODE_RIGHT_NAMES.iter().map(|name| RoleRight {
+                name: (*name).to_string(),
+                value: true,
+                restriction_by_condition: None,
+            });
+            entries.splice(insert_at..insert_at, synthesized);
+        }
+        6 => {}
+        _ => return None, // partial presence: an unproven shape
+    }
+
+    Some(entries)
 }
 
 pub(super) fn parse_role_object_rights(
@@ -690,7 +820,7 @@ pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
         xml_bool(rights.independent_rights_of_child_objects)
     );
     for object in &rights.objects {
-        let object_rights = role_rights_for_xml(object);
+        let object_rights = role_rights_for_xml(rights, object);
         xml.push_str("\t<object>\r\n\t\t<name>");
         xml.push_str(&escape_xml_element_text(&object.name));
         xml.push_str("</name>\r\n");
@@ -730,21 +860,38 @@ pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
     xml
 }
 
-pub(super) fn role_rights_for_xml(object: &RoleObjectRights) -> Vec<&RoleRight> {
+pub(super) fn role_rights_for_xml<'a>(
+    rights: &RoleRights,
+    object: &'a RoleObjectRights,
+) -> Vec<&'a RoleRight> {
+    if is_configuration_root_rights_object(&object.name) {
+        // The Configuration root has its own convention, proven over the
+        // whole ERP УХ role corpus (2026-08-24, 1,679/1,679 Configuration-
+        // scoped Rights blobs matched exactly): a right renders exactly when
+        // its value differs from this role's own `setForNewObjects` flag.
+        // Ordinary roles leave `setForNewObjects` false, default every
+        // administrative right to `false`, and show the explicit grants; the
+        // platform's one "full access" role sets `setForNewObjects` true,
+        // defaults every right to `true`, and shows the explicit denials
+        // instead. Row-level restriction is not a native concept for
+        // administrative rights in any sampled role, but the check is kept
+        // for symmetry with every other object kind.
+        return object
+            .rights
+            .iter()
+            .filter(|right| {
+                right.restriction_by_condition.is_some()
+                    || right.value != rights.set_for_new_objects
+            })
+            .collect();
+    }
+
     let suppress_plain_false_when_restricted = should_suppress_plain_false_role_rights(object);
-    let suppress_configuration_modes = should_omit_default_configuration_mode_rights(object);
 
     object
         .rights
         .iter()
         .filter(|right| {
-            if suppress_configuration_modes
-                && right.value
-                && right.restriction_by_condition.is_none()
-                && is_configuration_mode_right(&right.name)
-            {
-                return false;
-            }
             if right.value || right.restriction_by_condition.is_some() {
                 return true;
             }
@@ -836,30 +983,4 @@ pub(super) fn is_top_level_role_object_kind(name: &str, kind: &str) -> bool {
         return false;
     };
     !rest.contains('.')
-}
-
-pub(super) fn should_omit_default_configuration_mode_rights(object: &RoleObjectRights) -> bool {
-    object.name.starts_with("Configuration.")
-        && object.rights.iter().any(|right| {
-            !is_configuration_mode_right(&right.name)
-                && !right.value
-                && right.restriction_by_condition.is_none()
-        })
-        && object.rights.iter().all(|right| {
-            !right.value
-                || right.restriction_by_condition.is_some()
-                || is_configuration_mode_right(&right.name)
-        })
-}
-
-pub(super) fn is_configuration_mode_right(name: &str) -> bool {
-    matches!(
-        name,
-        "MainWindowModeNormal"
-            | "MainWindowModeWorkplace"
-            | "MainWindowModeEmbeddedWorkplace"
-            | "MainWindowModeFullscreenWorkplace"
-            | "MainWindowModeKiosk"
-            | "AnalyticsSystemClient"
-    )
 }

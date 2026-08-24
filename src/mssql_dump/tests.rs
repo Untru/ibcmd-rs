@@ -34285,7 +34285,7 @@ fn writes_role_rights_to_source_layout() {
         );
     let rights_text = r##"{10,{4,
 {{1,@catalog_uuid@,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}},
-{{1,@configuration_uuid@,0,0},{0,d066966a-ff6a-4a41-bd68-6191cab083bc,1}},
+{{1,@configuration_uuid@,0,0},{0,3c00c6ee-844e-4620-85e4-671e72f114d9,0,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,0}},
 {{1,@operation_uuid@,0,0},{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}},
 {{1,@register_uuid@,0,0},{1,4,1c87578f-9e09-4ec0-a991-5629c87b1588,1,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1,c0028105-4cc1-41ca-aef1-bfbd8fc8f8c4,-1,3,
 {{1c87578f-9e09-4ec0-a991-5629c87b1588,{1,{1,"#Если &Allowed #Тогда ""OK""",0}}},
@@ -34360,7 +34360,15 @@ fn writes_role_rights_to_source_layout() {
             < xml.find("<name>Configuration.DemoApp</name>").unwrap()
     );
     assert!(xml.contains("<name>Configuration.DemoApp</name>"));
-    assert!(xml.contains("<name>MainWindowModeNormal</name>"));
+    assert!(xml.contains("<name>ThinClient</name>"));
+    assert!(xml.contains("<name>SaveUserData</name>"));
+    // `setForNewObjects` is true in this fixture, so the Configuration root's
+    // six launch-mode rights default to `true` (see
+    // `parse_configuration_root_object_rights`) and are omitted from the
+    // blob entirely; the parser synthesizes them at their canonical position
+    // and `role_rights_for_xml` then hides them because their value equals
+    // the role default, the same as every other true right here.
+    assert!(!xml.contains("<name>MainWindowModeNormal</name>"));
     assert!(xml.contains("<name>WebService.RemoteApi.Operation.Ping</name>"));
     assert_eq!(
         role_right_name("3b869658-ebc9-49ff-9bb3-e7c59686f538"),
@@ -34567,10 +34575,57 @@ fn format_role_rights_omits_non_native_top_level_accumulation_register_false_rig
     assert!(!xml.contains("<name>Update</name>"));
 }
 
+// Replaces the former
+// `format_role_rights_omits_default_configuration_mode_rights_when_only_admin_flags_remain`:
+// that test assumed configuration-mode rights are hidden whenever *any*
+// other admin right is false, independent of `setForNewObjects`. Measured
+// over the ERP УХ role corpus (2026-08-24, 1,679 Configuration-scoped Rights
+// blobs, 0 exceptions), the real rule is simpler and does not special-case
+// configuration-mode rights at all: a Configuration-root right renders
+// exactly when its value differs from the role's own `setForNewObjects`
+// flag. These two tests cover both directions of that rule directly.
 #[test]
-fn format_role_rights_omits_default_configuration_mode_rights_when_only_admin_flags_remain() {
+fn format_role_rights_configuration_root_shows_rights_that_differ_from_set_for_new_objects_false() {
     let xml = format_role_rights_xml(&RoleRights {
         set_for_new_objects: false,
+        set_for_attributes_by_default: true,
+        independent_rights_of_child_objects: false,
+        objects: vec![RoleObjectRights {
+            name: "Configuration.DemoApp".to_string(),
+            rights: vec![
+                RoleRight {
+                    name: "MainWindowModeNormal".to_string(),
+                    value: true,
+                    restriction_by_condition: None,
+                },
+                RoleRight {
+                    name: "AnalyticsSystemClient".to_string(),
+                    value: true,
+                    restriction_by_condition: None,
+                },
+                RoleRight {
+                    name: "Administration".to_string(),
+                    value: false,
+                    restriction_by_condition: None,
+                },
+            ],
+        }],
+        restriction_templates: Vec::new(),
+    });
+
+    assert!(xml.contains("<name>MainWindowModeNormal</name>"));
+    assert!(xml.contains("<name>AnalyticsSystemClient</name>"));
+    assert!(!xml.contains("<name>Administration</name>"));
+}
+
+#[test]
+fn format_role_rights_configuration_root_inverts_when_set_for_new_objects_true() {
+    // Mirrors the one role observed with `setForNewObjects: true` in the ERP
+    // УХ corpus (built-in "ПолныеПрава" / full-access role): every right
+    // defaults to `true` for that role, so the blob spells out the false
+    // exceptions instead of the true grants.
+    let xml = format_role_rights_xml(&RoleRights {
+        set_for_new_objects: true,
         set_for_attributes_by_default: true,
         independent_rights_of_child_objects: false,
         objects: vec![RoleObjectRights {
@@ -34619,6 +34674,114 @@ fn role_rights_blob_formats_disabled_attribute_rights() {
     assert!(xml.contains("<name>InformationRegister.Prices.Attribute.Comment</name>"));
     assert!(xml.contains("<name>View</name>\r\n\t\t\t<value>false</value>"));
     assert!(xml.contains("<name>Edit</name>\r\n\t\t\t<value>false</value>"));
+}
+
+#[test]
+fn role_rights_blob_configuration_root_synthesizes_absent_mode_rights_as_true() {
+    let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    // Shaped after ERP УХ role Roles/АдминистраторПроцесса/Ext/Rights.xml
+    // (measured 2026-08-24): plain pairs on the Configuration root, the two
+    // unnamed right UUIDs each matching this role's own `setForNewObjects:
+    // false` default, and all six launch-mode rights (`d066966a…` etc.)
+    // omitted from the blob entirely rather than written `false`.
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,3762abec-3836-446a-83ce-3e05001bca8b,-1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,4df6d046-3bf8-4dda-991c-53ba664296a5,-1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
+
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    let xml = format_role_rights_xml(&rights);
+
+    // Administration is false, matching the role's own default, and is
+    // dropped; the two unnamed right UUIDs are also false (matching the
+    // default) and are silently tolerated rather than named.
+    assert!(!xml.contains("<name>Administration</name>"));
+    assert!(!xml.contains("3762abec"));
+    assert!(!xml.contains("4df6d046"));
+    // ThinClient, SaveUserData and Output are explicit true grants.
+    assert!(xml.contains("<name>ThinClient</name>"));
+    assert!(xml.contains("<name>SaveUserData</name>"));
+    assert!(xml.contains("<name>Output</name>"));
+    // The six launch-mode rights default to `true` (unlike every other
+    // Configuration-root right) and render even though absent from the blob,
+    // inserted immediately before `SaveUserData` in the platform's own
+    // canonical order.
+    for name in [
+        "MainWindowModeNormal",
+        "MainWindowModeWorkplace",
+        "MainWindowModeEmbeddedWorkplace",
+        "MainWindowModeFullscreenWorkplace",
+        "MainWindowModeKiosk",
+        "AnalyticsSystemClient",
+    ] {
+        assert!(
+            xml.contains(&format!("<name>{name}</name>")),
+            "missing {name}"
+        );
+    }
+    assert!(
+        xml.find("<name>ThinClient</name>").unwrap()
+            < xml.find("<name>MainWindowModeNormal</name>").unwrap()
+    );
+    assert!(
+        xml.find("<name>AnalyticsSystemClient</name>").unwrap()
+            < xml.find("<name>SaveUserData</name>").unwrap()
+    );
+}
+
+#[test]
+fn role_rights_blob_configuration_root_inverts_when_set_for_new_objects_true() {
+    let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    // Same pairs as the synthesis case with every value flipped and
+    // `setForNewObjects` set true, mirroring the one role observed with that
+    // flag in the ERP УХ corpus (built-in "ПолныеПрава" / full-access role).
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,1,3c00c6ee-844e-4620-85e4-671e72f114d9,-1,3762abec-3836-446a-83ce-3e05001bca8b,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,-1,4df6d046-3bf8-4dda-991c-53ba664296a5,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,-1}}},{0},1,1,0,4294967295}";
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
+
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    assert!(rights.set_for_new_objects);
+    let xml = format_role_rights_xml(&rights);
+
+    // Administration is true, matching `setForNewObjects: true`, and is
+    // dropped; ThinClient, SaveUserData and Output are false exceptions and
+    // render.
+    assert!(!xml.contains("<name>Administration</name>"));
+    assert!(xml.contains("<name>ThinClient</name>"));
+    assert!(xml.contains("<name>SaveUserData</name>"));
+    assert!(xml.contains("<name>Output</name>"));
+    // The six launch-mode rights are absent from the blob, so the type
+    // default (`true`) is synthesized for them — which equals this role's
+    // own default, so none of the six render.
+    assert!(!xml.contains("<name>MainWindowModeNormal</name>"));
+    assert!(!xml.contains("<name>AnalyticsSystemClient</name>"));
+}
+
+#[test]
+fn role_rights_blob_configuration_root_refuses_unnamed_right_diverging_from_default() {
+    let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    // Identical to the always-tolerated shape except the first unnamed right
+    // (`3762abec…`) is true while `setForNewObjects` is false. Every
+    // occurrence of that UUID in the ERP УХ corpus matched the role's own
+    // default (2026-08-24, 1,679/1,679), so a value that doesn't is an
+    // unproven shape: the whole blob is refused rather than guessing a name.
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,3762abec-3836-446a-83ce-3e05001bca8b,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
+
+    assert!(parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).is_none());
+}
+
+#[test]
+fn role_rights_blob_configuration_root_refuses_partial_mode_rights_presence() {
+    let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    // Only 2 of the 6 launch-mode rights are explicit. The ERP УХ corpus
+    // never showed a role with some-but-not-all of them present (always 0 or
+    // 6 of 6), so this shape is refused rather than guessed at.
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,d066966a-ff6a-4a41-bd68-6191cab083bc,1,f6168734-8b8d-4a88-ab39-ef6b51758e83,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1}}},{0},0,1,0,4294967295}";
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
+
+    assert!(parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).is_none());
 }
 
 #[test]
