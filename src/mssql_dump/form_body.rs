@@ -10067,7 +10067,7 @@ fn parse_form_child_item_with_metadata_owners(
             fields
                 .get(13 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_show_title(field))
-        } else if matches!(wrapper, "37" | "48")
+        } else if matches!(wrapper, "35" | "37" | "48")
             && matches!(
                 tag,
                 "InputField"
