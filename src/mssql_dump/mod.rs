@@ -10683,8 +10683,35 @@ fn parse_subsystem_content(
         .iter()
         .skip(2)
         .take(count)
-        .filter_map(|field| parse_design_time_reference(field, object_refs))
+        .filter_map(|field| {
+            parse_design_time_reference(field, object_refs)
+                .or_else(|| parse_subsystem_content_fallback_reference(field))
+        })
         .collect()
+}
+
+/// A content item whose object the running index cannot name at all --
+/// distinct from one it names *incorrectly* -- is still written by the
+/// platform, as the bare uuid its own `{1,<uuid>}` payload carries. ERP УХ
+/// MDM_Management's `Subsystems/.../УправлениеНСИ` carries
+/// `{"#",157fa490-4ce9-11d4-9415-008048da11f9,{1,0d42eb0e-3e08-41e6-9bf4-3baa79b2d641}}`
+/// as one content item; `0d42eb0e-...` resolves through no index this
+/// export builds, and the native `<Content>` still writes
+/// `<xr:Item xsi:type="xr:MDObjectRef">0d42eb0e-3e08-41e6-9bf4-3baa79b2d641</xr:Item>`
+/// verbatim rather than omitting the item. `parse_design_time_reference`
+/// already covers every content item this export *can* name; this only
+/// backstops the ones it cannot, and only for this one evidenced shape --
+/// it does not guess at any other.
+fn parse_subsystem_content_fallback_reference(field: &str) -> Option<String> {
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 3 || outer.first().map(|value| value.trim()) != Some(r##""#""##) {
+        return None;
+    }
+    let inner = split_1c_braced_fields(outer[2].trim(), 0)?;
+    if inner.len() != 2 || inner.first().map(|value| value.trim()) != Some("1") {
+        return None;
+    }
+    parse_uuid_field(inner[1].trim())
 }
 
 fn parse_subsystem_child_references(
