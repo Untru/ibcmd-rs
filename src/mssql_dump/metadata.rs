@@ -242,6 +242,29 @@ pub(super) fn metadata_source_for_object_fields(
         }
         3 if header_index == Some(6) => Some(("CommandGroup", "CommandGroups")),
         3 if header_index == Some(3) => Some(("StyleItem", "StyleItems")),
+        // Code 3 with a lone header field is shared between `Style` and a
+        // `CommonPicture` written in the older of the two layouts the platform
+        // has used. They part on the header block's own leading member, the
+        // one that states how many members the block carries:
+        //
+        // * `{3,{3,{1,0,<uuid>},<Name>,<Synonym>,<Comment>,0,0,<nil uuid>,0}}`
+        //   -- eight-member block -- is a `Style`. ERP УХ 3.2.12.6 carries
+        //   exactly two, `Основной` among them.
+        // * `{3,{2,{1,0,<uuid>},<Name>,<Synonym>,<Comment>,0,0,<nil uuid>}}`
+        //   -- seven members, no trailing `0` -- is a `CommonPicture`.
+        //
+        // The same picture re-imported through the platform comes back as
+        // code 4 with the eight-member block, so only a distribution written
+        // before that change carries the code-3 spelling; УТ 11.5.27.75 and
+        // БСП демо 3.1.12.297 have none. ERP УХ has 673, and all 673 were
+        // routed to `Styles/` while the very same 673 `CommonPictures/` went
+        // unwritten -- the two sets coincide exactly.
+        3 if header_index == Some(1)
+            && fields.len() == 2
+            && field_starts_with(fields.get(1), "{2,") =>
+        {
+            Some(("CommonPicture", "CommonPictures"))
+        }
         3 if header_index == Some(1) && fields.len() == 2 => Some(("Style", "Styles")),
         3 if header_index == Some(1) => Some(("DocumentNumerator", "DocumentNumerators")),
         2 if header_index == Some(1)
