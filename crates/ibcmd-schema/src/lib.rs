@@ -3013,24 +3013,31 @@ const BUNDLED_FORM_CHOICE_PARAMETERS_LIVE_FIXTURE_JSON: &str =
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskNumberAutoPrefix {
     BusinessProcessNumber,
+    DontUse,
 }
 
 impl TaskNumberAutoPrefix {
     pub const fn xml_value(self) -> &'static str {
         match self {
             Self::BusinessProcessNumber => "BusinessProcessNumber",
+            Self::DontUse => "DontUse",
         }
     }
 }
 
-/// Decode the physical Task owner slot into its canonical XML policy.
+/// Decode the physical Task owner slot (native tuple field 31) into its
+/// canonical XML policy.
 ///
-/// The `0` mapping is authenticated by an isolated two-round native export on
-/// 1C:Enterprise 8.3.27.2214 with XML source version 2.20. Unknown physical
-/// tokens deliberately fail closed.
+/// Both mappings are authenticated by a five-way cross-edition native export
+/// on 1C:Enterprise 8.3.27.2214 (УТ 11.5.27.75, БСП демо 3.1.12.297, WMS5
+/// 5.1.11.4, ERP WE 2.5.25.61 full and БСП WE 3.1.10.386), which pins field 31
+/// against the platform-written `<TaskNumberAutoPrefix>` element while every
+/// other candidate slot (field 24 among them) stays constant or tracks a
+/// different property. Unknown physical tokens deliberately fail closed.
 pub fn parse_task_number_auto_prefix_slot(value: &str) -> Option<TaskNumberAutoPrefix> {
     match value.trim() {
         "0" => Some(TaskNumberAutoPrefix::BusinessProcessNumber),
+        "1" => Some(TaskNumberAutoPrefix::DontUse),
         _ => None,
     }
 }
@@ -3068,16 +3075,30 @@ impl TaskChoiceHistoryOnInput {
     }
 }
 
+/// Both `"0"` and `"1"` are attested as decoding to `Auto`: field 43 is `"1"`
+/// in the platform-proven `task-basic` diagnostic fixture (CorpusTask) and
+/// `"0"` in all five cross-edition captures of `Tasks/ЗадачаИсполнителя.xml`
+/// (УТ, БСП демо, WMS5, ERP WE, БСП WE) -- both native XML outputs read
+/// `<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>`. No corpus record has
+/// ever produced a different XML value, so only `Auto` is whitelisted; the
+/// two raw codes are accepted without deciding which (if either) is the
+/// true single-bit carrier.
 pub fn parse_task_choice_history_on_input_slot(value: &str) -> Option<TaskChoiceHistoryOnInput> {
     match value.trim() {
-        "1" => Some(TaskChoiceHistoryOnInput::Auto),
+        "0" | "1" => Some(TaskChoiceHistoryOnInput::Auto),
         _ => None,
     }
 }
 
+/// Decode the physical Task owner slot (native tuple field 24) into
+/// `IncludeHelpInContents`. Field 24 is the slot proven by the five-way
+/// cross-edition capture to track the platform-written boolean element
+/// (`true`/`true`/`true`/`false`/`true` for УТ/БСП демо/WMS5/ERP WE/БСП WE),
+/// using the ordinary `0`/`1` boolean encoding shared by other owner slots.
 pub fn parse_task_include_help_in_contents_slot(value: &str) -> Option<bool> {
     match value.trim() {
-        "1" => Some(false),
+        "0" => Some(false),
+        "1" => Some(true),
         _ => None,
     }
 }
@@ -3115,9 +3136,14 @@ impl TaskFullTextSearch {
     }
 }
 
+/// Both `"0"` and `"1"` are attested as decoding to `Use`: field 33 is `"0"`
+/// in the platform-proven `task-basic` diagnostic fixture (CorpusTask) and
+/// `"1"` in all five cross-edition captures of `Tasks/ЗадачаИсполнителя.xml`
+/// -- both native XML outputs read `<FullTextSearch>Use</FullTextSearch>`.
+/// See `parse_task_choice_history_on_input_slot` for the same pattern.
 pub fn parse_task_full_text_search_slot(value: &str) -> Option<TaskFullTextSearch> {
     match value.trim() {
-        "0" => Some(TaskFullTextSearch::Use),
+        "0" | "1" => Some(TaskFullTextSearch::Use),
         _ => None,
     }
 }
@@ -14048,8 +14074,18 @@ mod tests {
                 .xml_value(),
             "BusinessProcessNumber"
         );
+        assert_eq!(
+            parse_task_number_auto_prefix_slot("1"),
+            Some(TaskNumberAutoPrefix::DontUse)
+        );
+        assert_eq!(
+            parse_task_number_auto_prefix_slot(" 1 ")
+                .unwrap()
+                .xml_value(),
+            "DontUse"
+        );
 
-        for unknown in ["", "1", "-1", "BusinessProcessNumber"] {
+        for unknown in ["", "-1", "BusinessProcessNumber", "DontUse"] {
             assert_eq!(parse_task_number_auto_prefix_slot(unknown), None);
         }
     }
@@ -14068,7 +14104,14 @@ mod tests {
                 .xml_value(),
             "Auto"
         );
-        assert_eq!(parse_task_include_help_in_contents_slot("1"), Some(false));
+        assert_eq!(
+            parse_task_choice_history_on_input_slot("0")
+                .unwrap()
+                .xml_value(),
+            "Auto"
+        );
+        assert_eq!(parse_task_include_help_in_contents_slot("1"), Some(true));
+        assert_eq!(parse_task_include_help_in_contents_slot("0"), Some(false));
         assert_eq!(
             parse_task_data_lock_control_mode_slot("1")
                 .unwrap()
@@ -14079,12 +14122,16 @@ mod tests {
             parse_task_full_text_search_slot("0").unwrap().xml_value(),
             "Use"
         );
+        assert_eq!(
+            parse_task_full_text_search_slot("1").unwrap().xml_value(),
+            "Use"
+        );
 
         assert!(parse_task_number_allowed_length_slot("0").is_none());
-        assert!(parse_task_choice_history_on_input_slot("0").is_none());
-        assert!(parse_task_include_help_in_contents_slot("0").is_none());
+        assert!(parse_task_choice_history_on_input_slot("2").is_none());
+        assert!(parse_task_include_help_in_contents_slot("2").is_none());
         assert!(parse_task_data_lock_control_mode_slot("0").is_none());
-        assert!(parse_task_full_text_search_slot("1").is_none());
+        assert!(parse_task_full_text_search_slot("2").is_none());
     }
 
     #[test]
