@@ -2445,6 +2445,25 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
 fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
     parse_configuration_root_layout(text, uuid)?;
     let envelope = parse_configuration_root_envelope(text)?;
+    // Unlike `parse_configuration_root_layout`, this function stays
+    // Checksummed-only: it feeds `configuration_properties_evidenced_default_block_policy`,
+    // whose "everything but six proven bytes matches the evidenced
+    // all-default reference" claim was only ever established against
+    // Checksummed-footer evidence. WMS5's `МодульWebОбмена_ERP25.cf` (Bare
+    // footer) reaches this same 60/61/77-length tuple shape but fails that
+    // claim (`UnrecognizedDigit`/`UnprovenFieldMismatch` in
+    // `parse_configuration_properties_evidenced_default_block`), which is
+    // the correct fail-closed outcome for an unproven byte layout -- but
+    // `extract_configuration_source_xml` currently treats that specific
+    // failure as "fail the whole Configuration.xml", not "fall back to the
+    // older per-field reading" (see the `UnrecognizedDigit |
+    // UnprovenFieldMismatch => return None` arm there). Keeping this
+    // function Checksummed-only avoids reaching that arm on Bare-footer
+    // data entirely, leaving `InternalInfo`/`ChildObjects` (which do not
+    // depend on this function) as the proven win.
+    if envelope.footer != ConfigurationRootFooter::Checksummed {
+        return None;
+    }
     let first_section = envelope.sections.first()?.trim();
     let contained_fields = split_1c_braced_fields(first_section, 0)?;
     if contained_fields.len() != 2 {
@@ -2620,9 +2639,23 @@ fn parse_configuration_root_envelope(text: &str) -> Option<ConfigurationRootEnve
 
 fn parse_configuration_root_layout(text: &str, uuid: &str) -> Option<ConfigurationRootLayout> {
     let envelope = parse_configuration_root_envelope(text)?;
+    // Both evidenced footer variants carry the identical
+    // `{ClassId,{1,{payload}}}` section shape the loop below decodes.
+    // Confirmed against ERP УХ's `Web_Service.cf` and WMS5's
+    // `МодульWebОбмена_ERP25.cf`: both carry a `{{0,"",""}}` (Bare) root
+    // footer, and both native reference trees still emit the full
+    // `InternalInfo`/`ChildObjects` shape for their Configuration.xml --
+    // requiring `Checksummed` here silently dropped ~2/3 of Configuration.xml
+    // (no InternalInfo, no ChildObjects, ~15 Properties fields) for every
+    // configuration whose root record happens to carry the Bare footer.
+    // Any *other* footer shape already fails closed inside
+    // `classify_configuration_root_footer`, which built this envelope.
     if envelope.identity != uuid
         || envelope.sections.len() != CONFIGURATION_CONTAINED_OBJECT_COUNT
-        || envelope.footer != ConfigurationRootFooter::Checksummed
+        || !matches!(
+            envelope.footer,
+            ConfigurationRootFooter::Bare | ConfigurationRootFooter::Checksummed
+        )
     {
         return None;
     }

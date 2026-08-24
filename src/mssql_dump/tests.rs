@@ -42362,20 +42362,37 @@ fn extracts_flat_configuration_internal_info_and_reference_children() {
 }
 
 #[test]
-fn flat_configuration_root_footer_requires_the_evidenced_marker_and_checksum() {
-    // The CF root-control tail is `{1,"",""}` plus an opaque signed body
-    // checksum (see `classify_configuration_root_footer`), confirmed
-    // identically across all 19 retained 8.3.27.2214 CF corpora under
-    // tests/fixtures/native-evidence. The bare `{0,"",""}` tail (db-resident
-    // cohort) stays a valid root envelope but must keep being insufficient
-    // for InternalInfo/ChildObjects emission, and every other tail shape must
-    // keep being rejected so none can silently regress back in.
+fn flat_configuration_root_footer_accepts_both_evidenced_variants() {
+    // The CF root-control tail has two evidenced shapes (see
+    // `classify_configuration_root_footer`): `{1,"",""}` plus an opaque
+    // signed body checksum (Checksummed), and the bare `{0,"",""}` tail
+    // (Bare, "the db-resident tail... emitted by the clean-room bootstrap
+    // writer"). Both were originally believed to need Checksummed for
+    // InternalInfo/ChildObjects, but ERP УХ's `Web_Service.cf` and WMS5's
+    // `МодульWebОбмена_ERP25.cf` both carry the Bare tail at their
+    // Configuration root *and* both native reference trees still emit the
+    // full InternalInfo/ChildObjects shape -- so Bare must be accepted here
+    // too (`docs/evidence/configuration-body-8.3.27.md`). Every other tail
+    // shape stays rejected so none can silently regress back in.
     let (uuid, text, object_refs) = flat_configuration_fixture();
     const GOOD_FOOTER: &str = r#"{{1,"",""},{-1648891888}}"#;
     assert!(text.ends_with(&format!("{GOOD_FOOTER}}}")));
 
+    let accepted_footers = [("checksummed", GOOD_FOOTER), ("bare", r#"{{0,"",""}}"#)];
+    for (case, footer) in accepted_footers {
+        let variant = text.replacen(GOOD_FOOTER, footer, 1);
+        let xml = extract_configuration_source_xml(
+            &variant,
+            &uuid,
+            &object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert!(xml.contains("<InternalInfo>"), "{case}: {xml}");
+        assert!(xml.contains("<ChildObjects"), "{case}: {xml}");
+    }
+
     let malformed_footers = [
-        ("disproven zero marker, no checksum", r#"{{0,"",""}}"#),
         ("zero marker with checksum", r#"{{0,"",""},{-1648891888}}"#),
         ("non-numeric checksum", r#"{{1,"",""},{"x"}}"#),
         ("missing checksum", r#"{{1,"",""}}"#),
