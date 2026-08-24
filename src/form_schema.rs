@@ -4379,8 +4379,8 @@ impl FormChildItemUserVisibleSchema {
             | (
                 "37",
                 60,
-                "PictureField" | "LabelField" | "InputField" | "CheckBoxField"
-                | "RadioButtonField" | "TextDocumentField",
+                "PictureField" | "LabelField" | "InputField" | "CheckBoxField" | "RadioButtonField"
+                | "TextDocumentField",
                 1,
                 Some("1"),
             ) => user_visible_common,

@@ -9090,15 +9090,13 @@ fn parse_form_child_item_with_metadata_owners(
     // only recognizes the slot; the value written through has to be the one
     // actually carried, not a constant, or a default-valued table would come
     // out marked non-default.
-    let conditional_user_visible_common = conditional_group_schema
-        .map(|_| false)
-        .or_else(|| {
-            conditional_table_schema.and_then(|_| {
-                raw_fields
-                    .get(5)
-                    .and_then(|field| parse_form_conditional_user_visible_common(field))
-            })
-        });
+    let conditional_user_visible_common = conditional_group_schema.map(|_| false).or_else(|| {
+        conditional_table_schema.and_then(|_| {
+            raw_fields
+                .get(5)
+                .and_then(|field| parse_form_conditional_user_visible_common(field))
+        })
+    });
     let conditional_prefix_slot = conditional_group_schema
         .map(|schema| schema.prefix_slot())
         .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()));
