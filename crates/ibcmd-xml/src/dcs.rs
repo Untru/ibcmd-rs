@@ -3450,6 +3450,33 @@ fn constrain_form_attributes_conditional_appearance(
     DcsChildParseOutcome::Typed(value)
 }
 
+/// True for a settings-namespace `outputParameters` element that carries no
+/// attributes and no content of its own -- the empty `<outputParameters/>`
+/// sibling the platform writes next to (or instead of) `conditionalAppearance`
+/// in a Form Attributes storage document. Evidenced in both the ERP UH MDM
+/// and Web_Service corpora: an inactive tail can carry this sibling instead
+/// of a bare `<Settings/>`, and an active tail can carry it alongside
+/// `conditionalAppearance`. Only this exact empty shape is recognized here --
+/// an `outputParameters` element with any content stays unaccounted for,
+/// since no evidence shows one appearing in this particular tail.
+fn form_attributes_storage_output_parameters_is_empty(
+    element: &XmlElement,
+    root: &XmlElement,
+    settings_namespace_uri: &str,
+) -> bool {
+    element.name().local() == "outputParameters"
+        && xml_element_uses_namespace(element, root, settings_namespace_uri)
+        && !element
+            .attributes()
+            .iter()
+            .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+        && element.children().iter().all(|node| match node {
+            XmlNode::Text(text) => text.value().trim().is_empty(),
+            XmlNode::CData(text) => text.value().trim().is_empty(),
+            _ => false,
+        })
+}
+
 /// Parses the exact BOM `<Settings>/<conditionalAppearance>` document kept in
 /// the unkeyed Form Attributes tail field.
 pub fn parse_form_attributes_conditional_appearance_storage_document(
@@ -3494,6 +3521,11 @@ pub fn parse_form_attributes_empty_storage_document(
         || root.children().iter().any(|node| match node {
             XmlNode::Text(text) => !text.value().trim().is_empty(),
             XmlNode::CData(text) => !text.value().trim().is_empty(),
+            XmlNode::Element(element) => !form_attributes_storage_output_parameters_is_empty(
+                element,
+                root,
+                policy.settings_namespace_uri(),
+            ),
             _ => true,
         })
     {
@@ -3543,7 +3575,13 @@ pub fn parse_form_attributes_conditional_appearance_storage_candidate_document(
         if element.name().local() != "conditionalAppearance"
             || !xml_element_uses_namespace(element, root, policy.settings_namespace_uri())
         {
-            unexpected_content = true;
+            if !form_attributes_storage_output_parameters_is_empty(
+                element,
+                root,
+                policy.settings_namespace_uri(),
+            ) {
+                unexpected_content = true;
+            }
             continue;
         }
         if child.replace(element).is_some() {

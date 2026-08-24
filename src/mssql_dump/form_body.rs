@@ -9082,9 +9082,23 @@ fn parse_form_child_item_with_metadata_owners(
     let wrapper = raw_fields.first()?.trim();
     let conditional_group_schema = form_conditional_group_schema(wrapper, &raw_fields);
     let conditional_table_schema = form_conditional_table_schema(wrapper, &raw_fields);
+    // A `Table`'s conditional prefix carries the flag both ways: `false` is the
+    // non-default state the platform writes `<UserVisible>` for, and `true` is
+    // the default state it writes nothing for (ERP UH MDM_Management's
+    // `Список` dynamic-list tables carry the prefix at its default value, a
+    // shape the `Some(false)`-only census never saw). The schema match itself
+    // only recognizes the slot; the value written through has to be the one
+    // actually carried, not a constant, or a default-valued table would come
+    // out marked non-default.
     let conditional_user_visible_common = conditional_group_schema
         .map(|_| false)
-        .or_else(|| conditional_table_schema.map(|_| false));
+        .or_else(|| {
+            conditional_table_schema.and_then(|_| {
+                raw_fields
+                    .get(5)
+                    .and_then(|field| parse_form_conditional_user_visible_common(field))
+            })
+        });
     let conditional_prefix_slot = conditional_group_schema
         .map(|schema| schema.prefix_slot())
         .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()));
@@ -9328,7 +9342,15 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(4)
                 .and_then(|field| parse_form_conditional_user_visible_common(field)),
         )
-    } else if tag == "PictureField" {
+    } else if matches!(
+        tag,
+        "PictureField"
+            | "LabelField"
+            | "InputField"
+            | "CheckBoxField"
+            | "RadioButtonField"
+            | "TextDocumentField"
+    ) {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,
             fields.len(),
@@ -10255,7 +10277,7 @@ fn parse_form_child_item_with_metadata_owners(
                 })
         },
         user_visible_common: conditional_user_visible_common
-            .or_else(|| user_visible_schema.map(|_| false))
+            .or(user_visible_schema)
             .or_else(|| {
                 (matches!(
                     tag,
