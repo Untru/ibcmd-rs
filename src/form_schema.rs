@@ -5250,14 +5250,32 @@ pub(crate) struct FormRootVerticalScrollSchema {
 }
 
 impl FormRootVerticalScrollSchema {
+    /// `50`-rooted forms (UT 11.5.27.75) carry the qualifier/mode pair at
+    /// trailer slots 5/15. ERP УХ MDM_Management's forms root at `49`
+    /// instead, and their otherwise byte-identical 24-member trailer carries
+    /// the same pair one slot later, at 6/16: `Catalogs/СправочникиБД/Forms/ФормаСписка`
+    /// (no native `<VerticalScroll>`) and `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка`
+    /// (native `<VerticalScroll>useIfNecessary</VerticalScroll>`) share an
+    /// identical trailer at every one of the other 22 positions and differ
+    /// only at slots 6 and 16 -- `0`/`0` on the first, `2`/`2` on the second --
+    /// exactly where the `50` reader's own slots 5/15 read `2`/`2` for
+    /// `useIfNecessary`. Reading root `49` at the `50` offsets found only the
+    /// empty string both trees carry at slot 5 and dropped the property.
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
         trailer_field_count: usize,
     ) -> Option<Self> {
-        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
-            qualifier_slot: 5,
-            mode_slot: 15,
-        })
+        match (root_discriminator, trailer_field_count) {
+            (Some("50"), 24) => Some(Self {
+                qualifier_slot: 5,
+                mode_slot: 15,
+            }),
+            (Some("49"), 24) => Some(Self {
+                qualifier_slot: 6,
+                mode_slot: 16,
+            }),
+            _ => None,
+        }
     }
 
     pub(crate) fn vertical_scroll(self, trailer: &[&str]) -> Option<&'static str> {

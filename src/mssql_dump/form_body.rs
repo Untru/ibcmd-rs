@@ -2408,7 +2408,7 @@ pub(super) fn extract_form_children_align(fields: &[&str]) -> Option<&'static st
 }
 
 pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
+    let tail_start = form_root_child_items_tail_start_49_or_50(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootVerticalScrollSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
@@ -2777,9 +2777,33 @@ pub(super) fn parse_form_auto_command_bar_fields(
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
 ) -> Option<FormAutoCommandBar> {
-    let wrapper = fields.first()?.trim();
-    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let raw_fields = fields;
+    let wrapper = raw_fields.first()?.trim();
+    let identity = split_1c_braced_fields(raw_fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
+    // The same optional `UserVisible`-common prefix tuple
+    // (`form_conditional_group_schema`) that the general child-item reader
+    // already strips before reading a nested `AutoCommandBar`/`ContextMenu`
+    // also precedes the *root* auto command bar on ERP УХ MDM_Management's
+    // list forms: `{22,{-1,<uuid>},0,0,1,{0,{0,{"B",1},0}},9,"Name",…}`
+    // carries the tuple at slot 5, one field ahead of where every other
+    // field below assumed the `9` discriminator and the name sit. Without
+    // normalizing it away first, `FormRootAutoCommandBarSchema` read the
+    // tuple itself as the marker slot and refused the whole record, and the
+    // form's own `<AutoCommandBar>` (and any child items it carried) went
+    // unwritten -- confirmed on `Catalogs/ВнешниеИнформационныеБазы` and
+    // `Catalogs/ТипыБазДанных`'s list/item forms, whose id`-1` bar is this
+    // exact 30-member shape.
+    let conditional_group_schema = form_conditional_group_schema(wrapper, raw_fields);
+    let normalized_fields = conditional_group_schema.map(|schema| {
+        let prefix_slot = schema.prefix_slot();
+        raw_fields
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| (index != prefix_slot).then_some(*field))
+            .collect::<Vec<_>>()
+    });
+    let fields = normalized_fields.as_deref().unwrap_or(raw_fields);
     let schema = FormRootAutoCommandBarSchema::from_raw_layout(wrapper, id, fields)?;
     let (name, _) = parse_1c_quoted_string_with_len(fields.get(6)?.trim())?;
     if name.trim().is_empty() {
@@ -8880,8 +8904,39 @@ pub(super) fn parse_form_child_item_count(value: &str) -> Option<usize> {
 }
 
 pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
+    form_root_child_items_tail_start_for(fields, &["50"])
+}
+
+/// Same trailer search as `form_root_child_items_tail_start`, but also
+/// admitting root discriminator `49` (ERP УХ MDM_Management's own form root,
+/// alongside UT/БСП's `50`).
+///
+/// This is a *separate* entry point rather than a broadened gate on the
+/// shared function above on purpose: `form_root_child_items_tail_start` has
+/// over a dozen callers, and most read a fixed trailer slot directly with no
+/// per-property discriminator re-check of their own (e.g.
+/// `extract_form_horizontal_align`'s `tail_start + 11`). Admitting `49`
+/// there activated every one of them for `49`-rooted forms at once, and
+/// `Catalogs/СправочникиБД/Forms/ФормаСписка` -- a form whose native output
+/// has no `<HorizontalAlign>` -- promptly grew a wrong
+/// `<HorizontalAlign>Left</HorizontalAlign>` from trailer slot 11 reading
+/// `0`. Only callers that have separately verified their own slot meaning
+/// for root `49` (so far: `FormRootVerticalScrollSchema`) should call this
+/// one instead.
+pub(super) fn form_root_child_items_tail_start_49_or_50(fields: &[&str]) -> Option<usize> {
+    form_root_child_items_tail_start_for(fields, &["49", "50"])
+}
+
+fn form_root_child_items_tail_start_for(
+    fields: &[&str],
+    allowed_root_discriminators: &[&str],
+) -> Option<usize> {
     const ROOT_TRAILER_FIELDS: usize = 24;
-    if fields.first().map(|field| field.trim()) != Some("50") {
+    if !fields
+        .first()
+        .map(|field| field.trim())
+        .is_some_and(|value| allowed_root_discriminators.contains(&value))
+    {
         return None;
     }
     let tail_start = fields.len().checked_sub(ROOT_TRAILER_FIELDS)?;
