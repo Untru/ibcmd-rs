@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-graphical-schema-field-leftwidest-page",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-24",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "A minimal synthetic DataProcessor+Form built from scratch (not copied from a real distribution, which failed to round-trip on unrelated XDTO schema mismatches -- RowsPicture/Type properties on unrelated controls the source form also carried). One Page (Group=Horizontal, ChildItemsWidth=LeftWidest) wraps one GraphicalSchemaField (ReadOnly=true, no Title, Width=50, Height=10). Imported and re-exported by ibcmd 8.3.27.2214 itself."
+  },
+  "objects": [
+    {
+      "kind": "Form",
+      "owner": "DataProcessor.GSFTest",
+      "name": "Форма",
+      "raw_entry": {
+        "path": "raw/gsftest-form-body.txt",
+        "note": "form body (uuid f6c2875c-e67f-4b80-8387-1ff298e1fc13, storage key <uuid>.0)"
+      },
+      "native_outputs": [
+        { "path": "native/DataProcessors/GSFTest/Forms/Форма/Ext/Form.xml" }
+      ]
+    }
+  ],
+  "proven_claims": [
+    "A GraphicalSchemaField nested directly in a Page whose own Group is Horizontal and ChildItemsWidth is LeftWidest publishes neither Width nor Height, confirming the same suppression observed on native UT 11.5.27.75's DataProcessors/ИнтеграцияС1СОблачнаяКартаПрикладныхРешений.",
+    "The raw options tuple (fields[39] of the field's own tuple) still stores the same nonzero width/height numbers (50, 10) regardless -- the suppression is a platform XML-write-time decision keyed on the parent Page's ChildItemsWidth, not a different raw value."
+  ],
+  "non_claims": [
+    "This minimal reproduction also suppresses Edit (unlike native UT's own broken field, which keeps writing Edit=false even when nested the same way). The two cases differ in more than nesting -- the real field also carries a ContextMenu, ExtendedTooltip and Events the minimal one doesn't -- and this fixture does not establish which difference (if any single one) is responsible. The writer deliberately does NOT suppress Edit based on parent_child_items_width; only Width/Height do. See the comment on the Edit branch in format_form_child_item_xml.",
+    "Only ChildItemsWidth=LeftWidest is proven to suppress geometry. Other non-default ChildItemsWidth values, or a UsualGroup (rather than Page) parent, are untested."
+  ]
+}

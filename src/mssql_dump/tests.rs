@@ -69454,3 +69454,47 @@ fn extracts_non_predefined_bot_with_picture_to_platform_proven_xml() {
         Some("StdPicture.Information"),
     );
 }
+
+/// Evidence: fixture `graphical-schema-field-leftwidest-page`, a minimal
+/// synthetic Form seeded on the Web_Service skeleton and round-tripped
+/// through platform 8.3.27.2214: one `Page` (`Group=Horizontal`,
+/// `ChildItemsWidth=LeftWidest`) wraps one `GraphicalSchemaField`
+/// (`ReadOnly=true`, `Width=50`, `Height=10`). Native publishes neither
+/// `Width` nor `Height` for the field (see
+/// `native/DataProcessors/GSFTest/Forms/Форма/Ext/Form.xml` in the fixture),
+/// confirmed against native UT 11.5.27.75's own
+/// `ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`, which carries the same
+/// nesting and the same suppression. Asserts on the `ChildItems` snippet
+/// only, not the whole document: the fixture's `Attributes` block needs a
+/// real `type_index` (built from the whole configuration's rows during a
+/// real `cf export`) to resolve correctly, which is orthogonal to this
+/// fix and not worth reproducing here. See
+/// `FormChildItem::parent_child_items_width` and the `GraphicalSchemaField`
+/// branch of `format_form_child_item_xml`.
+#[test]
+fn suppresses_graphical_schema_field_geometry_under_leftwidest_page() {
+    let raw = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/graphical-schema-field-leftwidest-page/raw/gsftest-form-body.txt"
+    );
+    let form_body = deflate_for_test(raw.as_bytes());
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new())
+        .expect("platform-proven minimal Form must decode");
+
+    assert!(form_xml.contains("<ChildItemsWidth>LeftWidest</ChildItemsWidth>"));
+    let field_start = form_xml
+        .find(r#"<GraphicalSchemaField name="Схема" id="1">"#)
+        .expect("GraphicalSchemaField must be present");
+    let field_end = form_xml[field_start..]
+        .find("</GraphicalSchemaField>")
+        .expect("GraphicalSchemaField must close");
+    let field_xml = &form_xml[field_start..field_start + field_end];
+    assert!(!field_xml.contains("<Width>"));
+    assert!(!field_xml.contains("<Height>"));
+    // `Edit` deliberately does not gate on the parent page's
+    // `ChildItemsWidth`: this minimal reproduction's own native XML has no
+    // `Edit` either, but native UT's real, richer field (which additionally
+    // carries a `ContextMenu`/`ExtendedTooltip`/`Events`) keeps publishing
+    // it even when nested the same way -- see the manifest's `non_claims`
+    // and the comment on this branch.
+    assert!(field_xml.contains("<Edit>false</Edit>"));
+}
