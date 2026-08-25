@@ -4249,6 +4249,50 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
     assert_eq!(reordered_diagnostic.collection_index, Some(1));
 }
 
+/// `parse_owner_graph_command_identity_slot` hardcoded `properties.len() !=
+/// 13 || properties.first() != "9"` for the owned-command's own outer
+/// properties block -- shared by every owner-graph family that routes
+/// through `parse_owner_graph_command_identity_slots_indexed` (Catalog,
+/// Document, BusinessProcess), and hand-duplicated (not shared) by
+/// `parse_task_commands` and `parse_document_journal_commands`. The
+/// omitted-trailing-default-field defect this pass keeps finding: the
+/// platform drops `OnMainServerUnavailableBehavior` (index 12), not
+/// writing it as `0`, whenever a command leaves it at default -- the same
+/// omission `parse_common_command_properties_from_text` and
+/// `parse_information_register_child_command_properties_from_fields`'s
+/// outer command block already document on real bytes. Mechanical
+/// transformation of this file's own `command_properties` fixture shape
+/// (see the BusinessProcess/malformed-command test above): drop the
+/// trailing `0` (13 -> 12 members, tag `"9"` -> `"8"`).
+#[test]
+fn accepts_short_owner_graph_command_properties_block() {
+    let identity_uuid = "55555555-5555-4555-8555-555555555555";
+    let value_uuid = "66666666-6666-4666-8666-666666666666";
+    let command_header = format!(
+        "{{3,{{1,0,{identity_uuid}}},\"Run\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}"
+    );
+    let full_properties = format!("{{9,0,0,0,0,0,0,0,0,{command_header},0,0,0}}");
+    let short_properties = format!("{{8,0,0,0,0,0,0,0,0,{command_header},0,0}}");
+    for properties in [&full_properties, &short_properties] {
+        let body = format!("{{1,{{2,{identity_uuid},{value_uuid}}},{properties}}}");
+        let nested = format!("{{0,0,0,{body}}}");
+        let wrapper = format!("{{0,{nested}}}");
+        let command = format!("{{{wrapper},0}}");
+        let outer = split_information_register_braced_fields(&command).unwrap();
+        assert_eq!(outer.len(), 2, "{command}");
+        let slots = parse_owner_graph_command_identity_slots_indexed(&[command.as_str()])
+            .unwrap_or_else(|_| panic!("must accept this properties block: {command}"));
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].identity_uuid, identity_uuid);
+        assert_eq!(slots[0].header.name, "Run");
+    }
+    // Negative control: the pre-fix code required exactly 13 members with a
+    // `"9"` tag, which `short_properties` (12 members, `"8"`) never carries.
+    let short_fields = split_information_register_braced_fields(&short_properties).unwrap();
+    assert_eq!(short_fields.len(), 12);
+    assert_eq!(short_fields.first().copied(), Some("8"));
+}
+
 fn owner_graph_nested_attribute_for_test(
     family: owner_graph::OwnerGraphFamily,
     wrapper_code: u32,

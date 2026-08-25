@@ -26321,7 +26321,25 @@ fn parse_task_commands(
         let identity_uuid = parse_information_register_non_zero_uuid(identity.get(1)?)?;
         let value_uuid = parse_information_register_non_zero_uuid(identity.get(2)?)?;
         let properties = split_information_register_braced_fields(body.get(2)?)?;
-        if properties.len() != 13 || properties.first()?.trim() != "9" {
+        // Same recurring omitted-trailing-default-field defect this pass
+        // already fixed for the shared `parse_owner_graph_command_
+        // identity_slot` (Catalog/Document/BusinessProcess) and
+        // `parse_information_register_child_command_properties_from_
+        // fields`'s outer command block: this function hand-duplicates
+        // the same 13/12-member, `"9"`/`"8"`-tagged shape instead of
+        // reusing either.
+        let properties_has_trailing_default = match properties.len() {
+            13 => true,
+            12 => false,
+            _ => return None,
+        };
+        if properties.first().map(|field| field.trim())
+            != Some(if properties_has_trailing_default {
+                "9"
+            } else {
+                "8"
+            })
+        {
             return None;
         }
         let header = parse_information_register_owner_header(properties.get(9)?)?;
@@ -26367,6 +26385,7 @@ const OWNER_GRAPH_COMMAND_ZERO: &str = "0";
 const OWNER_GRAPH_COMMAND_BODY_TAG: &str = "1";
 const OWNER_GRAPH_COMMAND_IDENTITY_TAG: &str = "2";
 const OWNER_GRAPH_COMMAND_PROPERTIES_TAG: &str = "9";
+const OWNER_GRAPH_COMMAND_PROPERTIES_TAG_SHORT: &str = "8";
 
 fn parse_owner_graph_command_identity_slot(value: &str) -> Option<OwnerGraphCommandIdentitySlot> {
     let item = split_information_register_braced_fields(value)?;
@@ -26396,7 +26415,27 @@ fn parse_owner_graph_command_identity_slot(value: &str) -> Option<OwnerGraphComm
     let identity_uuid = parse_information_register_non_zero_uuid(identity.get(1)?)?;
     let value_uuid = parse_information_register_non_zero_uuid(identity.get(2)?)?;
     let properties = split_information_register_braced_fields(body.get(2)?)?;
-    if properties.len() != 13 || properties.first()?.trim() != OWNER_GRAPH_COMMAND_PROPERTIES_TAG {
+    // Same recurring omitted-trailing-default-field defect
+    // `parse_information_register_child_command_properties_from_fields`'s
+    // outer command block documents (this pass) and
+    // `parse_common_command_properties_from_text` already established on
+    // real bytes (`OnMainServerUnavailableBehavior` omitted, not written
+    // `0`, when left at default): shared by every owner-graph family that
+    // routes through this function (Catalog, Document, BusinessProcess via
+    // `parse_owner_graph_command_identity_slots_indexed`'s three call
+    // sites).
+    let properties_has_trailing_default = match properties.len() {
+        13 => true,
+        12 => false,
+        _ => return None,
+    };
+    if properties.first().map(|field| field.trim())
+        != Some(if properties_has_trailing_default {
+            OWNER_GRAPH_COMMAND_PROPERTIES_TAG
+        } else {
+            OWNER_GRAPH_COMMAND_PROPERTIES_TAG_SHORT
+        })
+    {
         return None;
     }
     let header = parse_information_register_owner_header(properties.get(9)?)?;
@@ -26921,7 +26960,25 @@ fn parse_document_journal_commands(
             return None;
         }
         let properties = split_information_register_braced_fields(body.get(2)?)?;
-        if properties.len() != 13 || properties.first()?.trim() != "9" {
+        // Same recurring omitted-trailing-default-field defect this pass
+        // already fixed for the shared `parse_owner_graph_command_
+        // identity_slot` (Catalog/Document/BusinessProcess) and
+        // `parse_information_register_child_command_properties_from_
+        // fields`'s outer command block: this function hand-duplicates
+        // the same 13/12-member, `"9"`/`"8"`-tagged shape instead of
+        // reusing either.
+        let properties_has_trailing_default = match properties.len() {
+            13 => true,
+            12 => false,
+            _ => return None,
+        };
+        if properties.first().map(|field| field.trim())
+            != Some(if properties_has_trailing_default {
+                "9"
+            } else {
+                "8"
+            })
+        {
             return None;
         }
         let header = parse_information_register_owner_header(properties.get(9)?)?;
