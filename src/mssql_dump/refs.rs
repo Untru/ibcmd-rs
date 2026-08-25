@@ -39,6 +39,20 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
 /// pre-existing `true` assumption rather than a guessed offset, per the
 /// project's fail-closed rule on unevidenced field positions.
 fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeader) -> Option<bool> {
+    if kind == "InformationRegister" {
+        // Same slot `parse_information_register_owner_properties` already
+        // reads for the register's own `InformationRegisters/<name>.xml`
+        // (`UseStandardCommands`, logical field 7). Confirmed missing here
+        // specifically on ERP УХ 3.2.12.6,
+        // `InformationRegisters/СоответствиеВнутригрупповыхПоказателей`
+        // (`UseStandardCommands=false`): every `Subsystems/.../Ext/
+        // CommandInterface.xml` referencing its `StandardCommand.OpenList`
+        // synthesized the name instead of keeping the platform's own
+        // `0:<uuid>` sentinel, because this function returned `None` (falling
+        // back to the default `true`) for every kind but `Catalog`.
+        let fields = parse_information_register_owner_fields(text, header)?;
+        return information_register_bool(fields.logical.get(7)?);
+    }
     if kind != "Catalog" {
         return None;
     }
