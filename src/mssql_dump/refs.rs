@@ -889,6 +889,24 @@ pub(super) fn standalone_child_reference(
             child.name
         ));
     }
+    if owner_kind == "CalculationRegister"
+        && is_offset_inside_calculation_register_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "CalculationRegister.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "ChartOfCalculationTypes"
+        && is_offset_inside_chart_of_calculation_types_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "ChartOfCalculationTypes.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
     if owner_kind == "ChartOfAccounts"
         && is_offset_inside_chart_of_accounts_accounting_flag_list(text, marker_start)
         && is_offset_inside_metadata_object_code(text, marker_start, 6)
@@ -1173,6 +1191,36 @@ pub(super) fn is_offset_inside_accumulation_register_attribute_list(
     offset: usize,
 ) -> bool {
     is_offset_inside_any_list_marker(text, offset, &["{b64d9a42-1642-11d6-a3c7-0050bae0a776,"])
+}
+
+/// True inside a calculation register's attribute list.
+///
+/// Measured on ERP УХ 3.2.12.6 (2026-08-25) over both extracted
+/// `CalculationRegisters/*` storage elements: the headers inside this family's
+/// spans are exactly the 25 and 9 `Attribute` uuids their native XML declares
+/// -- none missing, no `Dimension` or `Resource` among them -- and all of them
+/// satisfy the code-2 containment too. The kind's attributes were previously
+/// read through `metadata_kind_uses_code4_attributes`, which also demands code
+/// 4; none of the 34 carries it, so none was indexed.
+pub(super) fn is_offset_inside_calculation_register_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{1b304502-2216-440b-960f-60decd04bb5d,"])
+}
+
+/// True inside a chart of calculation types' own attribute list.
+///
+/// Measured the same way on `ChartsOfCalculationTypes/Начисления` and
+/// `.../Удержания`: 95 and 33 headers inside this family's spans, all of them
+/// `Attribute` and nothing else, all inside code 2. The remaining 20 and 9
+/// attributes those charts declare belong to their tabular sections and sit in
+/// a different family, which already resolves.
+pub(super) fn is_offset_inside_chart_of_calculation_types_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{0dc22ad2-476a-4794-afae-cfa7ed251752,"])
 }
 
 fn is_offset_inside_chart_of_accounts_accounting_flag_list(text: &str, offset: usize) -> bool {
