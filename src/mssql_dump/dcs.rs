@@ -1550,6 +1550,35 @@ struct DcsDynamicNamespace {
     uri: String,
 }
 
+/// What to do with a `Start`/`End` pair that turns out, once its matching
+/// `End` is reached, to have written no content in between (no text, no
+/// child elements): the native platform does not always leave such an
+/// element as an open/close pair with nothing inside.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum DcsEmptyElementAction {
+    /// Omit the element -- both its opening and closing tags -- entirely.
+    ///
+    /// Evidenced on real ERP УХ 3.2.12.6 bytes: a `settingsVariant`'s
+    /// `dcsset:outputParameters` is present in *storage* as an empty
+    /// placeholder even when unset (unlike its sibling optional children
+    /// `selection`/`filter`/`order`/`conditionalAppearance`, which storage
+    /// omits outright when unset), but the platform's own decompiled
+    /// source XML never carries an empty `<dcsset:outputParameters/>` --
+    /// the element is missing altogether, matching doctrine point 6
+    /// (default is not absence) applied in the other direction: an
+    /// evidenced default omission must not be rendered as an explicit
+    /// empty marker.
+    OmitIfEmpty,
+    /// Collapse `<name ...></name>` into a self-closed `<name .../>`.
+    ///
+    /// Evidenced alongside `OmitIfEmpty`: once the only child a
+    /// `dcsset:settings`/inline `settings` element carried was an
+    /// `outputParameters` placeholder that itself gets omitted, the
+    /// platform's own source XML self-closes the now-empty settings
+    /// element rather than leaving a separate open/close pair.
+    SelfCloseIfEmpty,
+}
+
 #[derive(Debug)]
 struct DcsElementFrame {
     namespace: Option<Vec<u8>>,
@@ -1563,6 +1592,15 @@ struct DcsElementFrame {
     /// a type this way, where the element's own name says nothing about it.
     is_data_core_type_value: bool,
     output_namespace_offset: usize,
+    /// See [`DcsEmptyElementAction`]. `None` for the vast majority of
+    /// elements, which always keep whatever content (or lack of it) the
+    /// storage document itself carried.
+    empty_element_action: Option<DcsEmptyElementAction>,
+    /// Output offset right before this element's opening `<` was written.
+    start_tag_begin_offset: usize,
+    /// Output offset right after this element's opening tag's own closing
+    /// `>` was written (i.e., before any content).
+    start_tag_end_offset: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -1624,6 +1662,7 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     let (namespace, local) = reader.resolve_element(event.name());
                     let local = local.as_ref();
                     if self.skip_depth == 0 {
+                        let start_tag_begin_offset = self.output.len();
                         let written_start = self.write_start_tag(
                             &reader,
                             &event,
@@ -1632,26 +1671,48 @@ impl<'a> DataCompositionXmlWriter<'a> {
                             false,
                             &mode,
                         )?;
-                        self.element_stack.push(data_composition_element_frame(
+                        let start_tag_end_offset = self.output.len();
+                        let empty_element_action = if event_has_ordinary_attributes(&event)? {
+                            None
+                        } else {
+                            dcs_empty_element_action(&written_start.rendered_name)
+                        };
+                        let mut frame = data_composition_element_frame(
                             &reader,
                             &event,
                             namespace_ref(&namespace),
                             local,
                             written_start,
-                        )?);
+                        )?;
+                        frame.empty_element_action = empty_element_action;
+                        frame.start_tag_begin_offset = start_tag_begin_offset;
+                        frame.start_tag_end_offset = start_tag_end_offset;
+                        self.element_stack.push(frame);
                     }
                 }
                 Event::Empty(event) => {
                     let (namespace, local) = reader.resolve_element(event.name());
                     if self.skip_depth == 0 {
-                        self.write_start_tag(
-                            &reader,
-                            &event,
-                            namespace_ref(&namespace),
-                            local.as_ref(),
-                            true,
-                            &mode,
-                        )?;
+                        // The platform's own decompiled source XML omits an
+                        // empty `outputParameters` placeholder entirely
+                        // rather than spelling it as a self-closed element;
+                        // see `DcsEmptyElementAction::OmitIfEmpty`. Storage
+                        // carries this shape whenever the element's source
+                        // form was already self-closed instead of an
+                        // open/close pair with nothing in between.
+                        let omit = namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
+                            && local.as_ref() == b"outputParameters"
+                            && !event_has_ordinary_attributes(&event)?;
+                        if !omit {
+                            self.write_start_tag(
+                                &reader,
+                                &event,
+                                namespace_ref(&namespace),
+                                local.as_ref(),
+                                true,
+                                &mode,
+                            )?;
+                        }
                     }
                 }
                 Event::End(event) => {
@@ -1663,9 +1724,35 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     {
                         return None;
                     }
-                    self.output.push_str("</");
-                    self.output.push_str(&frame.rendered_name);
-                    self.output.push('>');
+                    // Whitespace-only, not strictly zero-length: the storage
+                    // document's own pretty-printing writes indentation text
+                    // nodes as siblings around a now-omitted child (or inside
+                    // a childless element), and the platform's own source
+                    // XML does not preserve that indentation once there is
+                    // nothing left for it to indent.
+                    let is_empty = frame.empty_element_action.is_some()
+                        && self.output[frame.start_tag_end_offset..]
+                            .bytes()
+                            .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
+                    match frame.empty_element_action {
+                        Some(DcsEmptyElementAction::OmitIfEmpty) if is_empty => {
+                            self.output.truncate(frame.start_tag_begin_offset);
+                        }
+                        Some(DcsEmptyElementAction::SelfCloseIfEmpty) if is_empty => {
+                            // Drop any whitespace-only interior, then rewrite
+                            // the already-written opening tag's trailing `>`
+                            // into `/>` instead of appending a separate
+                            // closing tag.
+                            self.output.truncate(frame.start_tag_end_offset);
+                            self.output.truncate(self.output.len() - 1);
+                            self.output.push_str("/>");
+                        }
+                        _ => {
+                            self.output.push_str("</");
+                            self.output.push_str(&frame.rendered_name);
+                            self.output.push('>');
+                        }
+                    }
                 }
                 Event::Text(event) => {
                     if self.skip_depth == 0 {
@@ -2496,7 +2583,42 @@ fn data_composition_element_frame(
         is_data_ui_color_value,
         is_data_core_type_value,
         output_namespace_offset: written_start.output_namespace_offset,
+        // Set by `write_document`'s `Event::Start` arm, the only caller
+        // that needs this; every other caller leaves it at the neutral
+        // default (never collapsed on close).
+        empty_element_action: None,
+        start_tag_begin_offset: 0,
+        start_tag_end_offset: 0,
     })
+}
+
+/// Whether this element's `Start`/`End` pair, if it turns out to hold no
+/// content once its matching `End` is reached, should be omitted or
+/// self-closed instead of left as an empty open/close pair -- see
+/// [`DcsEmptyElementAction`]. Keyed off the already-rendered name so it
+/// shares the exact same identity the platform's own `dcsset`/`dcscor`
+/// prefix resolution already settled on, rather than re-deriving it from
+/// the source spelling.
+fn dcs_empty_element_action(rendered_name: &str) -> Option<DcsEmptyElementAction> {
+    match rendered_name {
+        "dcsset:outputParameters" => Some(DcsEmptyElementAction::OmitIfEmpty),
+        "dcsset:settings" => Some(DcsEmptyElementAction::SelfCloseIfEmpty),
+        _ => None,
+    }
+}
+
+/// Whether this start event carries any attribute other than a namespace
+/// declaration. `OmitIfEmpty`/`SelfCloseIfEmpty` apply only to the
+/// evidenced attribute-free shape; an element carrying an attribute is left
+/// exactly as storage spelled it.
+fn event_has_ordinary_attributes(event: &quick_xml::events::BytesStart<'_>) -> Option<bool> {
+    for attribute in event.attributes().with_checks(false) {
+        let attribute = attribute.ok()?;
+        if !is_xmlns_attribute(attribute.key.as_ref()) {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 fn resolve_data_composition_qname(
