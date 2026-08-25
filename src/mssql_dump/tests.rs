@@ -36250,15 +36250,15 @@ fn format_role_rights_top_level_object_hides_plain_false_rights_matching_set_for
                 RoleRight {
                     name: "Read".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "Update".to_string(),
                     value: false,
-                    restriction_by_condition: Some(RoleRightRestriction {
+                    restrictions: vec![RoleRightRestriction {
                         field: None,
                         condition: "ГДЕ\r\nЛОЖЬ".to_string(),
-                    }),
+                    }],
                 },
                 RoleRight {
                     // Plain false, unrestricted, and not one of the old
@@ -36266,7 +36266,7 @@ fn format_role_rights_top_level_object_hides_plain_false_rights_matching_set_for
                     // this role's `setForNewObjects: false` default.
                     name: "CustomRight".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
             ],
         }],
@@ -36302,12 +36302,12 @@ fn format_role_rights_top_level_object_inverts_when_set_for_new_objects_true() {
                 RoleRight {
                     name: "Read".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "Delete".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
             ],
         }],
@@ -36334,20 +36334,20 @@ fn format_role_rights_omits_plain_false_rights_for_restriction_only_top_level_ob
                 RoleRight {
                     name: "Read".to_string(),
                     value: false,
-                    restriction_by_condition: Some(RoleRightRestriction {
+                    restrictions: vec![RoleRightRestriction {
                         field: None,
                         condition: "ГДЕ ИСТИНА".to_string(),
-                    }),
+                    }],
                 },
                 RoleRight {
                     name: "Edit".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "InteractiveDelete".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
             ],
         }],
@@ -36372,25 +36372,25 @@ fn format_role_rights_omits_plain_false_rights_when_only_view_input_by_string_ar
                 RoleRight {
                     name: "Read".to_string(),
                     value: false,
-                    restriction_by_condition: Some(RoleRightRestriction {
+                    restrictions: vec![RoleRightRestriction {
                         field: None,
                         condition: "ГДЕ ИСТИНА".to_string(),
-                    }),
+                    }],
                 },
                 RoleRight {
                     name: "View".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "InputByString".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "InteractiveDelete".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
             ],
         }],
@@ -36415,22 +36415,22 @@ fn format_role_rights_omits_non_native_top_level_accumulation_register_false_rig
                 RoleRight {
                     name: "Read".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "Edit".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "View".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "Update".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
             ],
         }],
@@ -36465,17 +36465,17 @@ fn format_role_rights_configuration_root_shows_rights_that_differ_from_set_for_n
                 RoleRight {
                     name: "MainWindowModeNormal".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "AnalyticsSystemClient".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "Administration".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
             ],
         }],
@@ -36504,17 +36504,17 @@ fn format_role_rights_configuration_root_inverts_when_set_for_new_objects_true()
                 RoleRight {
                     name: "MainWindowModeNormal".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "AnalyticsSystemClient".to_string(),
                     value: true,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
                 RoleRight {
                     name: "Administration".to_string(),
                     value: false,
-                    restriction_by_condition: None,
+                    restrictions: Vec::new(),
                 },
             ],
         }],

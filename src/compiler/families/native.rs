@@ -11,9 +11,13 @@ const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const MAX_PLAIN_BYTES: usize = 64 * 1_048_576;
 const MAX_NATIVE_DEPTH: usize = 64;
 // A valid, shallow 2.27 MiB enterprise MXL is evidenced at 564,948
-// scalar/list nodes. Keep fixed headroom for such dense documents while the
-// independent 64 MiB plaintext and depth bounds continue to cap resources.
-const MAX_NATIVE_NODES: usize = 1_000_000;
+// scalar/list nodes, and ERP УХ 3.2.12.6's largest role Rights payload
+// (`Roles/БазовыеПраваБПУХ`, 16.2 MiB inflated) at 1,355,230 -- the three
+// role payloads that used to trip the old 1,000,000 bound measure 1,355,230,
+// 1,165,170 and 1,164,734. Keep the same fixed headroom over the evidenced
+// maximum the previous bound carried (~1.8x) while the independent 64 MiB
+// plaintext and depth bounds continue to cap resources.
+const MAX_NATIVE_NODES: usize = 2_500_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NativeValue {
@@ -850,7 +854,7 @@ mod tests {
         const EVIDENCED_NATIVE_DEPTH: usize = 4;
         const EVIDENCED_NATIVE_NODES: usize = 564_948;
 
-        assert_eq!(MAX_NATIVE_NODES, 1_000_000);
+        assert_eq!(MAX_NATIVE_NODES, 2_500_000);
         assert!(EVIDENCED_PLAIN_BYTES <= MAX_PLAIN_BYTES);
         assert!(EVIDENCED_NATIVE_DEPTH <= MAX_NATIVE_DEPTH);
         assert!(EVIDENCED_NATIVE_NODES <= MAX_NATIVE_NODES);
@@ -864,6 +868,23 @@ mod tests {
             "the evidenced MXL node count must remain accepted"
         );
         assert_eq!(parser.nodes, EVIDENCED_NATIVE_NODES);
+    }
+
+    #[test]
+    fn parser_accepts_evidenced_large_role_rights_node_count() {
+        // `Roles/БазовыеПраваБПУХ`'s Rights payload on ERP УХ 3.2.12.6:
+        // 16,198,940 inflated bytes, 1,355,230 scalar/list nodes -- the
+        // largest role Rights payload on the stand, and the one that used to
+        // trip the old 1,000,000 bound.
+        const EVIDENCED_ROLE_RIGHTS_NODES: usize = 1_355_230;
+
+        assert!(EVIDENCED_ROLE_RIGHTS_NODES <= MAX_NATIVE_NODES);
+
+        let mut parser = NativeParser::new(b"\xef\xbb\xbf0");
+        parser.offset = UTF8_BOM.len();
+        parser.nodes = EVIDENCED_ROLE_RIGHTS_NODES - 1;
+        assert_eq!(parser.value(0), Ok(token("0")));
+        assert_eq!(parser.nodes, EVIDENCED_ROLE_RIGHTS_NODES);
     }
 
     #[test]
