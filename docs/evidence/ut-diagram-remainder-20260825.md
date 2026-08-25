@@ -90,48 +90,66 @@ Reports/ДлительностьОтложенногоОбновления/Templ
 отрисовке (`_ => return None`), роняя блок `<drawing>` целиком (299 и 292
 строки соответственно).
 
-Структура найдена частично (сырые байты обеих записей были в
-`$D/ut-agent-priv/gantt1`, `gantt2` в этой волне, не сохранены как
-фикстура -- переснять через `cf extract <cf> <uuid>.0` по storage-ключам из
-`report.json`, uuid объектов -- `beb44b02-5d5e-4127-aee7-e184a43a4210` и
-`3c2c192e-4869-4cc6-ba47-1fadac5b9678`):
+**ИСПРАВЛЕНИЕ (волна 2026-08-25, вторая половина дня)**: сырые байты обеих
+записей ПЕРЕСНЯТЫ и на этот раз СОХРАНЕНЫ фикстурой --
+`tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/`
+(`raw/*-object-payload.txt` + `native/*-object.xml`, `manifest.json` с
+разбором). Прежняя формула обёртки была НЕПОЛНОЙ:
 
 ```
-fields[12] = {19, {0, {11}, {74, ...обычный chart payload...}}}
+fields[12] = {19, field1..field32}   -- 33 ВЕРХНЕУРОВНЕВЫХ поля, не 3
+field1 = {0, {11}, {74, ...обычный chart payload...}}   -- это ТОЛЬКО field1
 ```
 
-То есть `object`-слот GanttChart -- это НЕ прямой `{11},{74,...}` (как у
-обычного Chart), а обёртка кода `19` вокруг тройки `{0, {11}, {74,...}}`;
-сам `{74,...}` -- **тот же payload**, что `parse_moxel_chart` уже умеет
-разбирать (seriesCurId/pointsCurId/isSeriesDesign/realSeriesCount/...,
-включая случай 0 серий: обе записи тоже пустые, `realSeriesCount=0`,
-`realPointCount=0`, `curSeries=-1`). `chartType` у одной записи -- код,
-дающий `Column3D` (нативно: `<d3p1:chartType>Column3D</d3p1:chartType>`) --
-**новый код**, не входящий в текущую таблицу `moxel_chart_type` (`0`/`9`/
-`38`); нужно вычислить сырое значение (`tail.get(2)`) и добавить строку.
+То есть `object`-слот GanttChart -- код `19`, за которым следуют **32
+дополнительных верхнеуровневых поля** (не одна тройка, как думала прошлая
+волна); `field1` -- уже знакомая тройка `{0,{11},{74,...}}`, тот же
+payload, что `parse_moxel_chart` умеет разбирать. `chartType` у одной
+записи даёт `Column3D` -- новый код, не входящий в `moxel_chart_type`
+(`0`/`9`/`38`); нужно вычислить сырое значение (`tail.get(2)`) и добавить
+строку.
+
+**Новое в этой волне** (прямое сопоставление с native XML, без семян):
+
+* `field[2]` и `field[3]` -- "cache template" для `<d3p1:points>` и
+  `<d3p1:series>` соответственно: вложенное число `baseData` совпадает
+  побайтово (`4294927473`/`4294901761` в первой записи,
+  `4294901761`/`4294901761` во второй) с `<d3p1:points><d3p1:value>
+  <d3p1:baseData>` / `<d3p1:series><d3p1:value><d3p1:baseData>`. Остальные
+  под-поля (`testMode`, `contentCacheItem`'s цвета, `autoText`,
+  `useValuesReverseBehavior`) НЕ разобраны.
+* `field[12]`, `field[13]`, `field[14]` -- ДАТЫ в чистом 14-значном формате
+  `ГГГГММДДЧЧММСС` (без разделителей), совпадают побайтово (после удаления
+  дефисов/двоеточий/`T`) с `<d3p1:fullIntervalBegin>`/`<d3p1:fullIntervalEnd>`/
+  `<d3p1:visualBegin>` в ОБЕИХ записях -- формат даты найден и прост
+  (просто вставить `-`/`-`/`T`/`:`/`:` на фиксированные позиции).
+* `field[7]` -- похоже на `timeScale`/`level` (вложенный `{3,0,1,{8,...}}`,
+  сидит прямо перед тремя датами; `field[8]`/`field[9]` выглядят как
+  коды `measure`/`interval`) -- НЕ проверено вторым независимым способом.
+* `field[4..12)` и `field[15..33)` -- НЕ тронуты вообще, только existence
+  проверен.
 
 Нативный XML доказывает: `<object xsi:type="d3p1:GanttChart">` = ровно
 `<d3p1:chart>` (все поля обычного Chart, 1:1 с `<object xsi:type=
 "d3p1:Chart">`), а ЗА ним ещё **~55 дополнительных элементов**, специфичных
-для Ганта: `<d3p1:points>`, `<d3p1:series>` (each -- "cache template" с
-testMode/value/contentCacheItem), `<d3p1:drawEmpty>`, `<d3p1:timeScale>`
-(с вложенным `<d3p1:level>` -- measure/interval/show/line/scaleColor/...),
-`<d3p1:keepScaleVariant>`, `<d3p1:fixedVariantMeasure/Interval>`,
-`<d3p1:autoFullInterval>`, `<d3p1:fullIntervalBegin/End>` (ДАТЫ -- ещё один
-формат для разбора), `<d3p1:visualBegin>`, `<d3p1:intervalDrawType>`,
-`<d3p1:backIntervals>`, `<d3p1:linksColor/Line>`, `<d3p1:showPointsText>`,
-`<d3p1:showData>`, `<d3p1:textPlacement>`, `<d3p1:intervalTextRepresentation>`
-и другие -- смотри полный список прямо в `$D/cap/ut-r1/src/Reports/
-АнализЖурналаРегистрации/Templates/.../Ext/Template.xml`, строки 2939-3039
-(после `</d3p1:chart>` до `</object>`).
+для Ганта: `<d3p1:points>`, `<d3p1:series>`, `<d3p1:drawEmpty>`,
+`<d3p1:timeScale>` (с вложенным `<d3p1:level>` --
+measure/interval/show/line/scaleColor/...), `<d3p1:keepScaleVariant>`,
+`<d3p1:fixedVariantMeasure/Interval>`, `<d3p1:autoFullInterval>`,
+`<d3p1:fullIntervalBegin/End>`, `<d3p1:visualBegin>`,
+`<d3p1:intervalDrawType>`, `<d3p1:backIntervals>`, `<d3p1:linksColor/Line>`,
+`<d3p1:showPointsText>`, `<d3p1:showData>`, `<d3p1:textPlacement>`,
+`<d3p1:intervalTextRepresentation>` и другие -- полный список теперь прямо
+в фикстуре (`native/*-object.xml`), не только в `$D`.
 
-**Объём**: это отдельный, большой декодер (~55 членов, включая вложенные
-структуры и минимум один новый формат даты), а не точечная правка. Всего
-2 нативных примера в УТ -- по доктрине этого мало для 200-членной записи;
-нужны семена с вариациями (пустой Гант уже есть -- оба текущих примера
-пустые; нужен минимум один НЕпустой семпл, если такой найдётся в
-sslbase/ssl/uh, и/или семена с рукописным `Ext/Template.xml`, аналогично
-плану для пункта 3 выше).
+**Объём**: это отдельный, большой декодер (33 верхнеуровневых поля обёртки
+плюс ~55 XML-элементов с вложенными структурами и минимум один формат
+даты, теперь известный), а не точечная правка. Всего 2 нативных примера в
+УТ -- по доктрине этого мало для полной 33-членной записи; нужны семена с
+вариациями (пустой Гант уже есть -- оба текущих примера пустые; нужен
+минимум один НЕпустой семпл, если такой найдётся в sslbase/ssl/uh, и/или
+семена с рукописным `Ext/Template.xml`, аналогично плану для пункта 3
+выше).
 
 ## 4. Форма с диаграммой и сериями: `ПроверкаКонтрагента/Forms/Форма`
 
@@ -174,12 +192,18 @@ elements (`realSeriesData`, `seriesScale`, `titleAreaPlacement`,
 `valuesToolTipShowMode`, …) no second observation pins." То есть: слот
 найден, формат частично разобран, но `realSeriesCount=4` (реальные, не
 пустые серии) требует РАСШИРИТЬ этот СУЩЕСТВУЮЩИЙ декодер, а не писать
-новый с нуля. Дополнительно неясно, ЯВЛЯЕТСЯ ли `ПроверкаКонтрагента/Forms/
-Форма`'s `ДиаграммаПоказателей` формным АТРИБУТОМ (как оба доказанных
-примера) или именно `ChartField`-полем формы (см. `FORM_DOCUMENT_FIELD_GEOMETRY`
-в `form_body.rs`, запись `"ChartField"`, geometry-only, не про `<Settings>`)
--- эти два пути могут оказаться одним и тем же слотом или разными; не
-проверено.
+новый с нуля.
+
+**ПРОВЕРЕНО этой волной**: `ДиаграммаПоказателей` -- ИМЕННО формный
+АТРИБУТ (`<Attribute name="ДиаграммаПоказателей" id="34">` с `<v8:Type
+xmlns:d5p1="...">d5p1:Chart</v8:Type>` и `<Settings xsi:type="d4p1:Chart">`
+внутри него), как оба доказанных примера -- НЕ отдельный слот
+`ChartField`-поля. Поле `ChartField name="ДиаграммаПоказателей"` в той же
+форме -- просто UI-контрол с `<DataPath>ДиаграммаПоказателей</DataPath>`,
+привязанный к этому атрибуту; его СОБСТВЕННЫЙ 11-членный кортеж (геометрия
+extent/stretch) уже разобран `FORM_DOCUMENT_FIELD_GEOMETRY`/`"ChartField"`
+и НЕ содержит `<Settings>` -- это отдельная, уже закрытая часть, к пункту 4
+отношения не имеет.
 
 **Метод пункта 3 переносится сюда напрямую**: семя на скелете `Web_Service`
 с вручную заданными 4 сериями (скопировать `<d4p1:realSeriesData>` из
