@@ -27909,7 +27909,11 @@ fn form_chart_localized_xml(name: &str, field: &str, indent: usize) -> Option<St
     ))
 }
 
-/// `{4,0,{0},1,<width>,0,<solid line uuid>,0}`.
+/// `{4,0,{0},<style>,<width>,0,<line uuid>,0}`. Every prior observation of
+/// this shape (scaleLine, multiStageLinkLine, a series' own line) held
+/// `style="1"` (Solid); `chart-form-pointsscale` -- a `chart-form-4series`
+/// control plus only `<d4p1:pointsScale>`'s `<d4p1:gridLine>` set to
+/// `Dotted` -- is the first record with `style="2"`.
 fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String> {
     let tab = "\t".repeat(indent);
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -27917,7 +27921,6 @@ fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String>
         || fields.first()?.trim() != "4"
         || fields.get(1)?.trim() != "0"
         || form_chart_compact(fields.get(2)?) != "{0}"
-        || fields.get(3)?.trim() != "1"
         || fields.get(5)?.trim() != "0"
         || !fields
             .get(6)?
@@ -27927,10 +27930,15 @@ fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String>
     {
         return None;
     }
+    let style = match fields.get(3)?.trim() {
+        "1" => "Solid",
+        "2" => "Dotted",
+        _ => return None,
+    };
     let width = form_chart_integer(fields.get(4)?)?;
     Some(format!(
         "{tab}<d4p1:{name} width=\"{width}\" gap=\"false\">\r\n\
-{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">Solid</v8ui:style>\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">{style}</v8ui:style>\r\n\
 {tab}</d4p1:{name}>\r\n"
     ))
 }
@@ -27962,6 +27970,57 @@ fn form_chart_border_xml(name: &str, field: &str, indent: usize) -> Option<Strin
 {tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
 {tab}</d4p1:{name}>\r\n"
     ))
+}
+
+/// `{1,4,0.5,0.5,<font>,<textColor>,<backColor>,1,<border>,<borderColor>,
+/// 4,2,0}` -- the `titleArea` a scale block (`pointsScale`, and by
+/// hypothesis `valuesScale`/`seriesScale`) carries. `[0..4)` and
+/// `[7]`/`[10..13)` are unclaimed; every observation so far (`chart-form-
+/// pointsscale`, `chart-form-pointsscale-min`, `chart-form-pointsscale-
+/// labelcolor` -- three seeds, three different `pointsScale` bodies, same
+/// `titleArea`, still present at its platform-written default even in the
+/// `chart-form-4series` control where `pointsScale` itself is entirely
+/// absent from the XML) agrees on them, so they are validated as literals
+/// rather than approximated.
+fn form_chart_scale_title_area_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 13
+        || fields.first()?.trim() != "1"
+        || fields.get(1)?.trim() != "4"
+        || fields.get(2)?.trim() != "0.5"
+        || fields.get(3)?.trim() != "0.5"
+        || form_chart_compact(fields.get(4)?) != "{7,3,0,1,100}"
+        || fields.get(7)?.trim() != "1"
+        || fields.get(10)?.trim() != "4"
+        || fields.get(11)?.trim() != "2"
+        || fields.get(12)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut xml = format!("{tab}<d4p1:titleArea>\r\n");
+    xml.push_str(&format!("{inner_tab}<d4p1:font kind=\"AutoFont\"/>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:textColor>{}</d4p1:textColor>\r\n",
+        form_chart_color(fields.get(5)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:backColor>{}</d4p1:backColor>\r\n",
+        form_chart_color(fields.get(6)?, object_refs)?
+    ));
+    xml.push_str(&form_chart_border_xml("border", fields.get(8)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:borderColor>{}</d4p1:borderColor>\r\n",
+        form_chart_color(fields.get(9)?, object_refs)?
+    ));
+    xml.push_str(&format!("{tab}</d4p1:titleArea>\r\n"));
+    Some(xml)
 }
 
 /// A stored decimal, written the way the platform writes it. The two records
@@ -28394,6 +28453,70 @@ fn format_form_chart_settings_xml(
             return None;
         }
         xml.push_str(&format!("{child_tab}<d4p1:{name}/>\r\n"));
+    }
+    // `tidx(139)` holds `pointsScale`'s own tuple:
+    // `2,0,0,2,{1,0},<titleArea>,<state>,0,<hasGridLine>,[<gridLine>],
+    // <unclaimed>,<unclaimed>,[<labelColor>],2,<unclaimed>*9` -- proven by
+    // three single-element `chart-form-4series` seed diffs (`chart-form-
+    // pointsscale`: gridLinesShowMode=Show, gridLine=Dotted/width1,
+    // labelColor=#B4B4B4; `chart-form-pointsscale-min`: gridLinesShowMode=
+    // DontShow, gridLine=Solid/width1 -- the platform default -- labelColor
+    // omitted; `chart-form-pointsscale-labelcolor`: same as -min but
+    // labelColor=#B4B4B4, isolating labelColor's own slot from
+    // gridLinesShowMode/gridLine's). `<state>` is a tri-state (`"2"` =
+    // `pointsScale` entirely absent -- 22 sub-fields total, no gridLine
+    // record at all; `"1"` = `DontShow`; `"0"` = `Show`); the gridLine
+    // record only exists when `<state>!="2"`, which is what shifts the
+    // sub-field count from 22 to 23. The two slots right after gridLine
+    // stay constant across every observation (unclaimed).
+    let points_scale = split_1c_braced_fields(t.get(tidx(139))?, 0)?;
+    if points_scale.first()?.trim() != "2"
+        || points_scale.get(1)?.trim() != "0"
+        || points_scale.get(2)?.trim() != "0"
+        || points_scale.get(3)?.trim() != "2"
+        || form_chart_compact(points_scale.get(4)?) != "{1,0}"
+    {
+        return None;
+    }
+    let points_title_area =
+        form_chart_scale_title_area_xml(points_scale.get(5)?, object_refs, child + 1)?;
+    match points_scale.get(6)?.trim() {
+        "2" => {
+            if points_scale.len() != 22 {
+                return None;
+            }
+        }
+        state @ ("0" | "1") => {
+            if points_scale.len() != 23
+                || points_scale.get(7)?.trim() != "0"
+                || points_scale.get(8)?.trim() != "1"
+                || form_chart_compact(points_scale.get(10)?) != "{3,4,{0}}"
+                || form_chart_compact(points_scale.get(11)?) != "{7,3,0,1,100}"
+                || points_scale.get(13)?.trim() != "2"
+            {
+                return None;
+            }
+            let inner_tab = "\t".repeat(child + 1);
+            xml.push_str(&format!("{child_tab}<d4p1:pointsScale>\r\n"));
+            xml.push_str(&points_title_area);
+            xml.push_str(&format!(
+                "{inner_tab}<d4p1:gridLinesShowMode>{}</d4p1:gridLinesShowMode>\r\n",
+                if state == "0" { "Show" } else { "DontShow" }
+            ));
+            xml.push_str(&form_chart_line_xml(
+                "gridLine",
+                points_scale.get(9)?,
+                child + 1,
+            )?);
+            let label_color = form_chart_color(points_scale.get(12)?, object_refs)?;
+            if label_color != "auto" {
+                xml.push_str(&format!(
+                    "{inner_tab}<d4p1:labelColor>{label_color}</d4p1:labelColor>\r\n"
+                ));
+            }
+            xml.push_str(&format!("{child_tab}</d4p1:pointsScale>\r\n"));
+        }
+        _ => return None,
     }
     // The legend placement is written only when its slot names one: the two
     // original records read `0` and `6`, and the platform writes nothing on

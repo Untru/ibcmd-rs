@@ -71314,3 +71314,41 @@ fn renders_form_chart_settings_with_values_drop_lines_show_mode_to_platform_prov
         ),
     );
 }
+
+/// Evidence: fixture `form-chart-points-scale`, three seeds triangulating
+/// `pointsScale`'s raw layout on top of the `chart-form-4series` control.
+#[test]
+fn renders_form_chart_settings_with_points_scale_full_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/full.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/full-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_points_scale_minimal_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/minimal.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/minimal-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_points_scale_label_color_only_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/label-color-only.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/label-color-only-settings.xml"
+        ),
+    );
+}
