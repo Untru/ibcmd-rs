@@ -23080,17 +23080,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(data_path)
         ));
     }
-    // Both native fields that carry `TitleBackColor` write it immediately
-    // behind `DataPath` and ahead of `TitleLocation`, `EditMode`,
-    // `ShowInFooter`, `AutoCellHeight`, `FooterHorizontalAlign`, `MultiLine`,
-    // `OpenButton`, `TextEdit`, `ValuesPicture`, `ContextMenu`,
-    // `ExtendedTooltip` and `Events`; nothing else shares a field with it.
-    if let Some(title_back_color) = &item.title_back_color {
-        xml.push_str(&format!(
-            "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
-            escape_xml_text(title_back_color)
-        ));
-    }
     if !matches!(
         item.tag,
         "Button"
@@ -23419,6 +23408,19 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(horizontal_align)
             ));
         }
+    }
+    // `TitleBackColor` trails the title block (not `DataPath` directly) and
+    // leads `EditMode`: SSL demo/base 3.1.12.297 share one native form,
+    // `DataProcessors/РаботаСРезультатамиОбмена/ОбъектыКПоискуИУстановкеСоответствий`,
+    // whose four fields that carry it -- two `InputField`, one `LabelField`,
+    // one `PictureField` -- all write it directly ahead of `EditMode`, with
+    // no counter-example anywhere in five corpora. It used to be placed
+    // right behind `DataPath`, ahead of the title block.
+    if let Some(title_back_color) = &item.title_back_color {
+        xml.push_str(&format!(
+            "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
+            escape_xml_text(title_back_color)
+        ));
     }
     if let Some(edit_mode) = item.edit_mode {
         xml.push_str(&format!(

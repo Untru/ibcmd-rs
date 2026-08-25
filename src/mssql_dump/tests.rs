@@ -26224,6 +26224,134 @@ fn popup_writes_height_behind_the_title_block_not_ahead_of_it() {
 }
 
 #[test]
+fn title_back_color_trails_the_title_block_and_leads_edit_mode() {
+    // Real bytes: DataProcessors/РаботаСРезультатамиОбмена/Forms/
+    // ОбъектыКПоискуИУстановкеСоответствий/Ext/Form.xml, SSL demo
+    // 3.1.12.297 (storage element
+    // `5ff50c4c-ca12-4d6b-9be0-6220b5c8bb13.0`). SSL demo and SSL base
+    // share this exact form byte-for-byte; it is the only native form in
+    // five corpora that carries `<TitleBackColor>` at all -- on four
+    // fields (two `InputField`, one `LabelField`, one `PictureField`), all
+    // four trailing the title block and leading `EditMode`, not trailing
+    // `DataPath` directly as this writer used to assume.
+    let object_refs = BTreeMap::from([(
+        "6af83b53-6000-496a-bfc7-2e196ee9de0f".to_string(),
+        "StyleItem.ЦветФонаШапкиТаблицыБежевый".to_string(),
+    )]);
+    let item = parse_form_child_item(
+        r#"{37,
+{95,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"ТипыОбъектовОбъектыБезСоответствий",1,0,
+{1,1,
+{"ru","К установке"}
+},
+{1,0},
+{2,
+{8},
+{3}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,1,3,0,3,2,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,3,
+{0,6af83b53-6000-496a-bfc7-2e196ee9de0f}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{11,0,0,0,2,2,
+{1,0},0,
+{3,3,
+{0,757b547b-b79c-459a-a64a-eef19a09a38f}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},2,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},
+{0,1,0},1,
+{22,
+{96,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ТипыОбъектовОбъектыБезСоответствийКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{97,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ТипыОбъектовОбъектыБезСоответствийРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(item.tag, "LabelField");
+    assert_eq!(
+        item.title_back_color.as_deref(),
+        Some("style:ЦветФонаШапкиТаблицыБежевый")
+    );
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    let title = xml.find("<Title>").unwrap();
+    let title_back_color = xml
+        .find("<TitleBackColor>style:ЦветФонаШапкиТаблицыБежевый</TitleBackColor>")
+        .unwrap();
+    let edit_mode = xml.find("<EditMode>EnterOnInput</EditMode>").unwrap();
+    assert!(
+        title < title_back_color,
+        "TitleBackColor trails Title: {xml}"
+    );
+    assert!(
+        title_back_color < edit_mode,
+        "TitleBackColor leads EditMode: {xml}"
+    );
+}
+
+#[test]
 fn text_document_field_writes_its_system_font_by_the_code_at_slot_three() {
     // Real bytes: DataProcessors/КонсольЗапросов/Forms/ПланВыполненияЗапроса/
     // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
