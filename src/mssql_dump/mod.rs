@@ -35164,6 +35164,18 @@ fn push_metadata_child_object_xml_with_tail_order(
             push_nested_metadata_child_object_xml(xml, nested_child, 5, indexing_before_use);
         }
         xml.push_str("\t\t\t\t</ChildObjects>\r\n");
+    } else if child.tag == "TabularSection" {
+        // A TabularSection is the one child kind that can itself own
+        // children (its own Attribute list); native always writes the
+        // element, self-closed when that list is empty, the way it does for
+        // every other native-evidenced empty collection. Dimension/
+        // Resource/Attribute children never carry a ChildObjects element in
+        // native XML at all, so the omission stays scoped to this tag.
+        // Confirmed on ERP УХ 3.2.12.6,
+        // DataProcessors/АктуализацияБюджетов.xml: an empty TabularSection
+        // (uuid unlisted, no Attribute children) still gets
+        // `<ChildObjects/>` right after `</Properties>`.
+        xml.push_str("\t\t\t\t<ChildObjects/>\r\n");
     }
     xml.push_str(&format!("\t\t\t</{}>\r\n", child.tag));
 }
