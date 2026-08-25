@@ -2982,13 +2982,26 @@ const MOXCEL_CELL_KNOWN_MASK: usize = (1 << MOXCEL_CELL_CONTROL_BIT)
 
 /// One typed value stored in a cell member.
 ///
-/// Evidence: the corpus stores five spellings — `{"U"}`, `{"S",text}`,
-/// `{"N",number}`, `{"D",yyyymmddhhmmss}` and `{"#",type,{index}}` — and the
-/// platform publishes them as `xsi:nil`, `xs:string`, `xs:decimal`,
-/// `xs:dateTime` and a bare `<r>` reference respectively.
+/// Evidence: the corpus stores `{"U"}`, `{"B",0|1}`, `{"S",text}`,
+/// `{"N",number}`, `{"D",yyyymmddhhmmss}` and `{"#",type,{index}}`, and the
+/// platform publishes them as `xsi:nil`, `xs:boolean`, `xs:string`,
+/// `xs:decimal`, `xs:dateTime` and a bare `<r>` reference respectively.
+///
+/// `"B"` was missing, and its cost was not one cell: a cell this reader
+/// refuses fails its row, and a failed row truncates the whole anchored row
+/// stream from that point on. `Report.
+/// РегламентированноеУведомлениеВозвратНДФЛНПДБиоресурсы.Template.
+/// Титульная_2026` declares 41 rows and published 21 -- it stops on
+/// `{2,32,{"B",0}}` at row 21, and native publishes exactly
+/// `<v xsi:type="xs:boolean">false</v>` there. ERP УХ 3.2.12.6 publishes 1,346
+/// booleans, every one of them `false`; `1` is unobserved on the stand, and is
+/// read as `true` because that is the same `0`/`1` spelling every other
+/// boolean in this format uses -- refusing it would truncate a row stream over
+/// a value the format plainly allows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum MoxelCellValue {
     Nil,
+    Boolean(bool),
     Text(String),
     Number(String),
     DateTime(String),
@@ -2999,6 +3012,11 @@ pub(super) fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
     let fields = split_1c_braced_fields(text, 0)?;
     match (parse_1c_string(fields.first()?)?.as_str(), fields.len()) {
         ("U", 1) => Some(MoxelCellValue::Nil),
+        ("B", 2) => match fields.get(1)?.trim() {
+            "0" => Some(MoxelCellValue::Boolean(false)),
+            "1" => Some(MoxelCellValue::Boolean(true)),
+            _ => None,
+        },
         ("S", 2) => Some(MoxelCellValue::Text(parse_1c_string(fields.get(1)?)?)),
         ("N", 2) => {
             let number = fields.get(1)?.trim();
@@ -12290,6 +12308,12 @@ fn push_moxel_cell_value_xml(xml: &mut String, element: &str, value: &MoxelCellV
     match value {
         MoxelCellValue::Nil => {
             xml.push_str(&format!("\t\t\t\t\t<{element} xsi:nil=\"true\"/>\r\n"));
+        }
+        MoxelCellValue::Boolean(value) => {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<{element} xsi:type=\"xs:boolean\">{}</{element}>\r\n",
+                if *value { "true" } else { "false" }
+            ));
         }
         MoxelCellValue::Text(text) if text.is_empty() => {
             xml.push_str(&format!(
