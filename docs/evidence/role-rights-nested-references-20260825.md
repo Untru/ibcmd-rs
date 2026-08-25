@@ -5,37 +5,42 @@ Status: closes the three residual defect classes left by
 холдингом 3.2.12.6, plus two more found while measuring them. Branch base
 `e60c978` (itself on `41808c3`).
 
-**`Roles/*/Ext/Rights.xml` differing on the `uh` gate: 27 → 0.** Five role
-Rights files remain `missing` for an unrelated reason (see the end).
+**`Roles/*/Ext/Rights.xml` on the `uh` gate: 27 differing and 5 missing → 0
+and 0.** Every role's rights file now byte-matches the platform on all seven
+stand corpora.
 
 After the two `setForNewObjects` / `setForAttributesByDefault` suppression
 rules landed, 27 `Roles/<Name>/Ext/Rights.xml` files still differed on the
-`uh` gate and 5 more were `missing`. All 27 are closed here, by five rules —
-four found from the role diffs themselves, the fifth (§6) turning out to be
-a command-indexing defect well outside roles.
+`uh` gate and 5 more were `missing`. All 32 are closed here, by nine rules. Four came out of the role diffs
+themselves; §6 turned out to be a command-indexing defect well outside roles;
+and §7–§9 came from the five files that were not being written at all.
 
 ## Measured result
 
 `zsh $D/kit/run.sh uh <worktree> <out>`, exact-set difference against the same
 tree exported from the branch base:
 
-| | exact | differing | missing | extra | differing `Roles/*/Ext/Rights.xml` |
+| | exact | differing | missing | extra | `Roles/*/Ext/Rights.xml` differing + missing |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| base `e60c978` | 120,434 | 18,475 | 1,502 | 64 | 27 |
-| after §1–§5 | 120,453 | 18,456 | 1,502 | 64 | 10 |
-| after §6 | 120,492 | 18,434 | 1,485 | 64 | **0** |
-| Δ | **+58** | **−41** | **−17** | 0 | **−27** |
+| base `e60c978` | 120,434 | 18,475 | 1,502 | 64 | 27 + 5 |
+| after §1–§5 | 120,453 | 18,456 | 1,502 | 64 | 10 + 5 |
+| after §6 | 120,492 | 18,434 | 1,485 | 64 | 0 + 5 |
+| after §7–§9 | 120,504 | 18,429 | 1,478 | 64 | **0 + 0** |
+| Δ | **+70** | **−46** | **−24** | 0 | **−32** |
 
 The 58 files that became exact are not all roles — §2 and §6 both reach
 outside `Roles/`:
 
 | what | count |
 | --- | ---: |
-| `Roles/*/Ext/Rights.xml` | 27 |
+| `Roles/*/Ext/Rights.xml` | 32 |
 | `*/Commands/<Name>/Ext/CommandModule.bsl` (were `missing`, §6) | 17 |
 | `Subsystems/**/Ext/CommandInterface.xml` (§6) | 10 |
 | `Documents/ПрограммаЗакупок/Forms/{ФормаВыбора,ФормаСписка}/Ext/Form.xml` (§6) | 2 |
 | `AccumulationRegisters/{ОперацииБюджетов,ПланированиеПотребностей}/Forms/ФормаСписка/Ext/Form.xml` (§2) | 2 |
+| `FunctionalOptions/*.xml` (§9) | 5 |
+| `ChartsOfCalculationTypes/Удержания/Forms/ФормаСписка/Ext/Form.xml` (§9) | 1 |
+| `Catalogs/КлассификаторОКПД2/Templates/ОблачныйКлассификатор/Ext/Template.xml` (§7) | 1 |
 
 **Broken: 0** on every step, measured as `base.exact − new.exact`, never as a
 counter.
@@ -292,34 +297,139 @@ write its module into.
 
 Commit `3075b4e`.
 
+## The five files that were never written
+
+Five roles produced no `Ext/Rights.xml` at all — their storage entries came
+back `opaque`. That bucket only means "no output was produced for this
+entry", so it hid two unrelated causes and, behind them, three more gaps.
+
+### 7. The native node bound was below the largest role
+
+`Roles/БазовыеПраваБПУХ`, `Roles/ЧтениеВекселей` and
+`Roles/ИспользованиеПлатежногоКалендаряУХ` failed in the decoder itself with
+`native value exceeds its node bound`. Counted over their inflated bytes:
+
+| role | inflated bytes | nodes |
+| --- | ---: | ---: |
+| `БазовыеПраваБПУХ` | 16,198,940 | 1,355,230 |
+| `ЧтениеВекселей` | 14,223,665 | 1,165,170 |
+| `ИспользованиеПлатежногоКалендаряУХ` | 13,651,373 | 1,164,734 |
+
+All three sit just above the old 1,000,000 bound; everything else on the
+stand is under it. The bound moved to 2,500,000 — the same headroom over the
+evidenced maximum that the previous value carried (1,000,000 against a dense
+MXL's 564,948, ~1.8×). The independent 64 MiB plaintext and depth-64 bounds
+still cap resources, and raising this one can only admit documents that were
+refused, never change a document that already parsed.
+
+### 8. A right can carry more than one `restrictionByCondition`
+
+The other two — `Roles/ЧтениеБюджетированиеИОтчетность` and
+`Roles/ДобавлениеИзменениеБюджетированиеИОтчетность` — decoded fine and were
+refused by the rights parser.
+
+**The wrapper's first field is a count of blocks, not a payload kind.**
+Across the role trees of all seven corpora exactly **six** rights print two
+`<restrictionByCondition>` blocks and **10,439** print one; all six two-block
+rights are in those two roles, whose blobs carry a count of 2 with two blocks
+after it. The old reading took `2` to mean "condition with a field", used
+only the second block, and dropped the first.
+
+A block is `{1, "<condition>"[, 0]}` without a field or
+`{1, "<condition>", 1, <payload>}` with one. **A block whose condition is
+empty is not printed**: `{1,"",0}` is the first block of the
+`InformationRegister.ВерсииОбъектов` `Read` restriction in
+`Roles/ЧтениеИнформацииОВерсияхОбъектов`, present in four corpora, and all
+four print a single block — the second. No `<restrictionByCondition>`
+anywhere on the stand has an empty `<condition>`.
+
+### The field payload, and what it settles about `Document`
+
+A block's field is named either by uuid (`{{0},{0,<uuid>}}`, through
+`field_refs`) or **by standard-attribute slot** (`{{0},{<slot>}}`). The
+second form was unhandled, and it is what refused the blob. The stand has six
+of them:
+
+| owner kind | payload | native prints |
+| --- | --- | --- |
+| `Document` ×4 | `{{0},{-5}}` | `<field>Ref</field>` |
+| `Catalog` ×2 | `{{0},{-8}}` | `<field>Ref</field>` |
+
+`Catalog` slot `-8` already carried `Ref` in the corpus-hardened table. For
+`Document`, `-5` carried `Date` — and the platform says `Ref`.
+
+That closes the question §4 left open. Every `Document` standard-attribute
+group prints all five members with identical right lists, so the slot↔name
+pairing was unobservable *through the objects*; it is observable **through
+the restriction field**, and the answer is the positional pairing (`-7 -5 -4
+-3 -2` against Posted, Ref, DeletionMark, Date, Number), not the reversed
+rows that were there. The print order is unaffected either way, because the
+order values follow the names — which is exactly why the mis-pairing had
+stayed invisible.
+
+### 9. Three more kinds had no slot table, and two had no attribute list
+
+With those two fixed, `Roles/БазовыеПраваБПУХ` — at 106,943 objects the
+broadest role on the stand, and the only one that reaches these kinds — was
+written for the first time, and exposed the rest:
+
+| gap | objects |
+| --- | ---: |
+| `BusinessProcess` standard attributes (no table) | 112 |
+| `ChartOfCalculationTypes` standard attributes + its three standard tabular sections (no table) | 160 |
+| `CalculationRegister` standard attributes (wrong table) | 50, plus 2 printed that native does not |
+| `ChartOfCalculationTypes.<X>.Attribute.<Name>` (no list family) | 122 |
+| `CalculationRegister.<X>.Attribute.<Name>` (no list family) | 34 |
+
+The slot tables came from the same method as §4 — `BusinessProcess` 9/9,
+`ChartOfCalculationTypes` 23/23 and 19/19, `CalculationRegister` 11/11 on
+both registers — with the order read from that role's print sequence. The
+chart of calculation types has three standard tabular sections
+(`-30` Leading, `-20` Displacing, `-10` Base, in the order its
+`<StandardTabularSections>` block declares them, each introduced by its slot
+in the element), which native interleaves with the main attributes:
+Leading + its three, Displacing + its three, `PredefinedDataName`, Base + its
+three, then the rest. A section attribute's order is its section's order plus
+its position inside the section, which is how both this kind and the chart of
+accounts lay out.
+
+`CalculationRegister` had to leave the shared register arm: it has eleven
+standard attributes and **no `Period` at all**, so the four rows it used to
+share were wrong in both directions — naming `-2` `Period` (printing two
+objects native does not print) and leaving the other seven unnamed. The
+shared rows were re-confirmed positionally for the kinds that keep them:
+`InformationRegisters/ВерсииОбъектов` and `AccumulationRegisters/ДанныеМСФО`
+both yield `-5` Active, `-4` LineNumber, `-3` Recorder, `-2` Period, 4/4.
+
+The two attribute list families are `1b304502-2216-440b-960f-60decd04bb5d`
+(calculation register) and `0dc22ad2-476a-4794-afae-cfa7ed251752` (a chart of
+calculation types' own attributes), measured exactly as §2 was: 25 and 9,
+95 and 33 headers inside their spans, every one an `Attribute` its native XML
+declares, nothing else inside, all inside code 2. Calculation-register
+attributes were being read through `metadata_kind_uses_code4_attributes`,
+which also demands code 4 — none of the 34 carries it.
+
 ## What is left
 
-**No `Roles/*/Ext/Rights.xml` differs on the `uh` gate.** What remains in this
-area is a decoder gap upstream of everything in this document: **5 role Rights
-files never reach the exporter** — `БазовыеПраваБПУХ`,
-`ДобавлениеИзменениеБюджетированиеИОтчетность`,
-`ИспользованиеПлатежногоКалендаряУХ`, `ЧтениеБюджетированиеИОтчетность`,
-`ЧтениеВекселей`. Their storage entries are reported `opaque` with "no legacy
-family decoder recognized this storage entry", so nothing about role rights
-is even attempted for them. Their packed sizes (21 KB … 2.2 MB) span two
-orders of magnitude, so it is unlikely to be one size-related cause.
+Nothing on `Roles/*/Ext/Rights.xml`: 0 differing and 0 missing on `uh`, and
+no role file broken on any of the other six corpora.
 
 ## Gates
 
 | gate | result |
 | --- | --- |
-| `uh`, exact-set vs branch base | broken 0 (+58 exact) |
+| `uh`, exact-set vs branch base | broken 0 (+70 exact) |
 | `ws` / `wms` / `mdm` / `sslbase` / `ssl`, measured before → after every step | broken 0 each, new 0 |
-| `ut`, measured before → after §6 | broken 0, new 0 |
+| `ut`, measured before → after §6 and again after §7–§9 | broken 0, new 0 |
 | `bundled9` | 9/9 |
-| `cargo test --lib` | 2,237 passed / 33 failed, names identical to `$D/fail-base.txt` |
+| `cargo test --lib` | 2,238 passed / 33 failed (one test added, for the new node bound), failing names identical to `$D/fail-base.txt` |
 | `cargo fmt --check`, `git diff --check` | clean |
 | instrumentation | removed; only the pre-existing `TEMPORARY_ATTEMPTS`, `IBCMD_DCS_CANDIDATE_OUT`, `dcs_schema` constants remain |
 
 ### The two reference-tree caveats
 
 `$D/base789/*.parity.json` was refreshed by the concurrent wave while this
-pass ran (`uh`'s reference `exact` moved 120,592 → 127,753 mid-session), so
+pass ran (`uh`'s reference `exact` moved 120,592 → 127,753 mid-session, and `ut`'s gap grew from 1 file to 2), so
 it reflects work this branch does not carry. On `uh` that shows as
 `reference.exact − ours.exact` = 7,369 files — `.bsl` modules and MXL
 `Ext/Template.xml`, no role among them — and the *same 7,369 files, as a set*,
@@ -331,9 +441,9 @@ base.
 `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/
 СравнительныйАнализМенеджеров/Ext/Template.xml`, an MXL spreadsheet of the
 same class as the single pre-existing MXL-template gaps on `ws`, `mdm` and
-`ssl`. It is the *same file* before and after §6 — `ut` was exported twice on
-this branch, and `reference.exact − ours.exact` is that one file in both runs
-— so it is pre-existing here, not this pass's doing. (`ws`, `mdm` and `ssl`
+`ssl`. `ut` was exported three times on this branch and
+`reference.exact − ours.exact` is the identical set in every run, so those
+files are pre-existing here, not this pass's doing. (`ws`, `mdm` and `ssl`
 were likewise measured before and after every step and never moved.)
 
 The temporary `IBCMD_ROLE_SLOT_PROBE` used to recover the slot codes (it
