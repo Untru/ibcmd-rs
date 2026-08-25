@@ -29,7 +29,10 @@ pub(super) struct RoleObjectRights {
 pub(super) struct RoleRight {
     pub(super) name: String,
     pub(super) value: bool,
-    pub(super) restriction_by_condition: Option<RoleRightRestriction>,
+    /// Every `<restrictionByCondition>` block the platform prints for this
+    /// right, in blob order. Usually zero or one; two occurs on exactly six
+    /// rights across the whole stand (see `parse_role_restriction_condition`).
+    pub(super) restrictions: Vec<RoleRightRestriction>,
 }
 
 #[derive(Clone)]
@@ -39,10 +42,11 @@ pub(super) struct RoleRightRestriction {
 }
 
 /// One parsed entry of an object's right-restrictions table
-/// (`{RIGHT_UUID,{…}}`): the wrapper's first field selects the payload kind.
+/// (`{RIGHT_UUID,{…}}`): the wrapper's first field is the number of
+/// `<restrictionByCondition>` blocks that follow it (see
+/// `parse_role_restriction_condition`).
 ///
-/// Kinds `1` (plain condition text) and `2` (condition with a field
-/// reference) carry a real condition. Kind `0` carries no condition at all
+/// A count of `0` carries no condition at all
 /// and is accepted only as the exact one-field wrapper `{0}` — measured over
 /// every restriction entry of eight corpora (2026-08-24: ERP УХ 3.2.12.6,
 /// УТ 11.5.27.75, БСП 3.1.12.297 базовая/демо/international, БСП WE
@@ -55,13 +59,13 @@ pub(super) struct RoleRightRestriction {
 /// arity is unobserved and refused.
 pub(super) enum RoleRestrictionEntry {
     Conditionless,
-    Condition(RoleRightRestriction),
+    Conditions(Vec<RoleRightRestriction>),
 }
 
 /// An object's parsed right-restrictions table: real conditions by right
 /// UUID, plus whether any conditionless `{0}` entry was present.
 pub(super) struct RoleRightRestrictions {
-    pub(super) by_right: BTreeMap<String, RoleRightRestriction>,
+    pub(super) by_right: BTreeMap<String, Vec<RoleRightRestriction>>,
     pub(super) has_conditionless: bool,
 }
 
@@ -134,7 +138,7 @@ pub(super) fn parse_role_rights_blob(
                     false,
                 )
             } else {
-                parse_role_object_rights(entry[1], field_refs)?
+                parse_role_object_rights(entry[1], field_refs, &object_name)?
             };
         let intra_uuid_order =
             role_rights_object_intra_uuid_order(&object_ref, &object_name).unwrap_or(0);
@@ -268,11 +272,12 @@ fn role_nested_ref_suffix(kind: &str, fields: &[&str]) -> Option<(String, usize)
         "2" => {
             let inner = role_nested_slot(fields.get(4)?)?;
             if outer.family == Some(STANDARD_TABULAR_SECTION_FAMILY) {
-                let (section, _) = role_standard_tabular_section(kind, outer.slot)?;
-                let (attribute, order) = role_standard_tabular_section_attribute(kind, inner.slot)?;
+                let (section, section_order) = role_standard_tabular_section(kind, outer.slot)?;
+                let (attribute, position) =
+                    role_standard_tabular_section_attribute(kind, inner.slot)?;
                 return Some((
                     format!("StandardTabularSection.{section}.StandardAttribute.{attribute}"),
-                    order,
+                    section_order.checked_add(position)?,
                 ));
             }
             role_ext_dimension_descriptor(kind, outer, inner)
@@ -303,35 +308,47 @@ fn role_nested_slot(slot_code: &str) -> Option<RoleNestedSlot<'_>> {
     Some(RoleNestedSlot { slot, family })
 }
 
-/// The one standard tabular section any role Rights blob refers to: the
-/// chart of accounts' `ExtDimensionTypes`, slot `-12` in
-/// `STANDARD_TABULAR_SECTION_FAMILY`. Its order sits between `Order` (2) and
-/// its own four attributes (4..=7), exactly as native prints the group -- see
-/// `Roles/БазовыеПраваУХ`, `ChartOfAccounts.Хозрасчетный`. No other kind is
-/// observed carrying a standard tabular section, so no other kind is named.
+/// The standard tabular sections a role's rights can name, with the print
+/// order of the section's own entry.
+///
+/// Section slots come from the owner's storage element, where each section
+/// block is introduced by its slot: the chart of accounts' single
+/// `ExtDimensionTypes` is `-12`, and a chart of calculation types' three are
+/// `-30`, `-20`, `-10` in the order its `<StandardTabularSections>` block
+/// declares them -- Leading, Displacing, Base
+/// (`ChartsOfCalculationTypes/Начисления` and `.../Удержания` agree).
+/// Orders are read from the native Rights print sequence
+/// (`Roles/БазовыеПраваУХ`, `Roles/БазовыеПраваБПУХ`), where a section prints
+/// immediately before its own attributes.
 fn role_standard_tabular_section(kind: &str, slot: isize) -> Option<(&'static str, usize)> {
     match (kind, slot) {
         ("ChartOfAccounts", -12) => Some(("ExtDimensionTypes", 3)),
+        ("ChartOfCalculationTypes", -30) => Some(("LeadingCalculationTypes", 1)),
+        ("ChartOfCalculationTypes", -20) => Some(("DisplacingCalculationTypes", 5)),
+        ("ChartOfCalculationTypes", -10) => Some(("BaseCalculationTypes", 10)),
         _ => None,
     }
 }
 
-/// Standard attributes of the chart of accounts' `ExtDimensionTypes` section.
-/// Slots from the chart's own storage element (`-15`, `-14`, `-13`, `-12`,
-/// paired positionally with the tail of its `<StandardAttributes>` block);
-/// order from the native Rights print sequence.
+/// Standard attributes of a standard tabular section, with their position
+/// inside it. Slots come from the tail of the owner element's
+/// `<StandardAttributes>` list, paired positionally as everywhere else. The
+/// printed order is the section's own order plus this position, which is how
+/// native lays both kinds out: chart of accounts section 3, attributes 4..=7;
+/// chart of calculation types sections 1/5/10, attributes 2..=4, 6..=8 and
+/// 11..=13.
 fn role_standard_tabular_section_attribute(
     kind: &str,
     slot: isize,
 ) -> Option<(&'static str, usize)> {
-    if kind != "ChartOfAccounts" {
-        return None;
-    }
-    match slot {
-        -15 => Some(("TurnoversOnly", 4)),
-        -14 => Some(("Predefined", 5)),
-        -13 => Some(("ExtDimensionType", 6)),
-        -12 => Some(("LineNumber", 7)),
+    match (kind, slot) {
+        ("ChartOfAccounts", -15) => Some(("TurnoversOnly", 1)),
+        ("ChartOfAccounts", -14) => Some(("Predefined", 2)),
+        ("ChartOfAccounts", -13) => Some(("ExtDimensionType", 3)),
+        ("ChartOfAccounts", -12) => Some(("LineNumber", 4)),
+        ("ChartOfCalculationTypes", -102) => Some(("Predefined", 1)),
+        ("ChartOfCalculationTypes", -101) => Some(("CalculationType", 2)),
+        ("ChartOfCalculationTypes", -100) => Some(("LineNumber", 3)),
         _ => None,
     }
 }
@@ -435,11 +452,27 @@ pub(super) fn role_standard_attribute_descriptor(
                 .copied()
             })
             .or(match slot {
-                -7 => Some(("Number", 5)),
-                -5 => Some(("Date", 4)),
+                // Paired positionally, like every other kind here:
+                // `Documents/ЗаказКлиента`'s element declares `-7 -5 -4 -3 -2`
+                // in the order its `<StandardAttributes>` block lists Posted,
+                // Ref, DeletionMark, Date, Number. The pairing is directly
+                // observable for `-5`: the restriction field payload
+                // `{{0},{-5}}` on `Document.КорректировкаЗначенийПоказателей`
+                // and `Document.НастраиваемыйОтчет` prints as
+                // `<field>Ref</field>` in
+                // `Roles/ЧтениеБюджетированиеИОтчетность` and
+                // `Roles/ДобавлениеИзменениеБюджетированиеИОтчетность` (4
+                // occurrences, 0 counterexamples), and the same payload form
+                // `{{0},{-8}}` on two `Catalog` owners prints `Ref` too --
+                // which is what `-8` already carries in the Catalog rows.
+                // These slots previously ran the other way round; the print
+                // order is unaffected either way, because the order values
+                // follow the names.
+                -7 => Some(("Posted", 1)),
+                -5 => Some(("Ref", 2)),
                 -4 => Some(("DeletionMark", 3)),
-                -3 => Some(("Ref", 2)),
-                -2 => Some(("Posted", 1)),
+                -3 => Some(("Date", 4)),
+                -2 => Some(("Number", 5)),
                 _ => None,
             }),
         "ExchangePlan" => match slot {
@@ -490,11 +523,69 @@ pub(super) fn role_standard_attribute_descriptor(
             1 | -2 => Some(("Period", 6)),
             _ => None,
         },
-        "CalculationRegister" | "InformationRegister" => match slot {
+        "InformationRegister" => match slot {
+            // Confirmed positionally against
+            // `InformationRegisters/ВерсииОбъектов`: its element declares
+            // `-5 -4 -3 -2` in the order its `<StandardAttributes>` block
+            // lists Active, LineNumber, Recorder, Period (4/4).
             0 | -5 => Some(("Active", 1)),
             1 | -2 => Some(("Period", 4)),
             2 | -3 => Some(("Recorder", 3)),
             3 | -4 => Some(("LineNumber", 2)),
+            _ => None,
+        },
+        "CalculationRegister" => match slot {
+            // A calculation register shares none of the other registers'
+            // layout: eleven standard attributes, no `Period` at all.
+            // `CalculationRegisters/Начисления` and `.../Удержания` both
+            // declare these eleven slots in exactly the order their
+            // `<StandardAttributes>` blocks list the names (11/11 each), and
+            // `Roles/БазовыеПраваБПУХ` prints the group in that same order.
+            // The four rows this kind used to share with the other registers
+            // were wrong in both directions: they named `-2` `Period` (a name
+            // the kind does not have -- two such objects were printed that
+            // native does not print) and left the other seven unnamed.
+            -13 => Some(("RegistrationPeriod", 1)),
+            -11 => Some(("ReversingEntry", 2)),
+            -10 => Some(("Active", 3)),
+            -9 => Some(("EndOfBasePeriod", 4)),
+            -8 => Some(("BegOfBasePeriod", 5)),
+            -7 => Some(("EndOfActionPeriod", 6)),
+            -6 => Some(("BegOfActionPeriod", 7)),
+            -5 => Some(("ActionPeriod", 8)),
+            -4 => Some(("CalculationType", 9)),
+            -3 => Some(("LineNumber", 10)),
+            -2 => Some(("Recorder", 11)),
+            _ => None,
+        },
+        "BusinessProcess" => match slot {
+            // `BusinessProcesses/ЗаявкаСотрудникаНалоговыйВычет`, 9/9 against
+            // its `<StandardAttributes>` block; order confirmed against the
+            // sixteen business-process groups `Roles/БазовыеПраваБПУХ`
+            // prints, all in this sequence.
+            -9 => Some(("Started", 1)),
+            -8 => Some(("HeadTask", 2)),
+            -7 => Some(("Completed", 3)),
+            -5 => Some(("Ref", 4)),
+            -4 => Some(("DeletionMark", 5)),
+            -3 => Some(("Date", 6)),
+            -2 => Some(("Number", 7)),
+            _ => None,
+        },
+        "ChartOfCalculationTypes" => match slot {
+            // `ChartsOfCalculationTypes/Начисления` (23/23) and
+            // `.../Удержания` (19/19). Orders 1..=13 belong to the three
+            // standard tabular sections and their attributes (see
+            // `role_standard_tabular_section`), which native interleaves with
+            // these: the group prints Leading + its three, Displacing + its
+            // three, `PredefinedDataName`, Base + its three, then the rest.
+            -11 => Some(("PredefinedDataName", 9)),
+            -8 => Some(("Predefined", 14)),
+            -6 => Some(("Ref", 15)),
+            -5 => Some(("DeletionMark", 16)),
+            -4 => Some(("ActionPeriodIsBasic", 17)),
+            -3 => Some(("Description", 18)),
+            -2 => Some(("Code", 19)),
             _ => None,
         },
         "DocumentJournal" => match slot {
@@ -641,7 +732,7 @@ pub(super) fn parse_configuration_root_object_rights(
         entries.push(RoleRight {
             name: name.to_string(),
             value,
-            restriction_by_condition: None,
+            restrictions: Vec::new(),
         });
     }
 
@@ -657,7 +748,7 @@ pub(super) fn parse_configuration_root_object_rights(
             let synthesized = CONFIGURATION_MODE_RIGHT_NAMES.iter().map(|name| RoleRight {
                 name: (*name).to_string(),
                 value: true,
-                restriction_by_condition: None,
+                restrictions: Vec::new(),
             });
             entries.splice(insert_at..insert_at, synthesized);
         }
@@ -671,6 +762,7 @@ pub(super) fn parse_configuration_root_object_rights(
 pub(super) fn parse_role_object_rights(
     value: &str,
     field_refs: &BTreeMap<String, String>,
+    object_name: &str,
 ) -> Option<(Vec<RoleRight>, bool)> {
     let fields = split_1c_braced_fields(value, 0)?;
     match fields.first()?.trim() {
@@ -690,6 +782,7 @@ pub(super) fn parse_role_object_rights(
                 fields.get(restrictions_count_index)?.trim(),
                 &fields[restrictions_count_index + 1..],
                 field_refs,
+                object_name,
             )?;
             parse_role_right_pairs(&fields, pairs_start, count, &restrictions.by_right)
                 .map(|rights| (rights, restrictions.has_conditionless))
@@ -702,7 +795,7 @@ pub(super) fn parse_role_right_pairs(
     fields: &[&str],
     start: usize,
     count: usize,
-    restrictions: &BTreeMap<String, RoleRightRestriction>,
+    restrictions: &BTreeMap<String, Vec<RoleRightRestriction>>,
 ) -> Option<Vec<RoleRight>> {
     let mut rights = Vec::with_capacity(count);
     for index in 0..count {
@@ -715,7 +808,7 @@ pub(super) fn parse_role_right_pairs(
         rights.push(RoleRight {
             name: role_right_name(right_uuid)?.to_string(),
             value,
-            restriction_by_condition: restrictions.get(right_uuid).cloned(),
+            restrictions: restrictions.get(right_uuid).cloned().unwrap_or_default(),
         });
     }
     Some(rights)
@@ -751,6 +844,7 @@ pub(super) fn parse_role_right_restrictions(
     count_text: &str,
     values: &[&str],
     field_refs: &BTreeMap<String, String>,
+    object_name: &str,
 ) -> Option<RoleRightRestrictions> {
     let count = count_text.parse::<usize>().ok()?;
     let mut restrictions = RoleRightRestrictions {
@@ -761,10 +855,12 @@ pub(super) fn parse_role_right_restrictions(
                   right_uuid: &str,
                   entry: RoleRestrictionEntry| match entry {
         RoleRestrictionEntry::Conditionless => restrictions.has_conditionless = true,
-        RoleRestrictionEntry::Condition(condition) => {
-            restrictions
-                .by_right
-                .insert(right_uuid.to_string(), condition);
+        RoleRestrictionEntry::Conditions(conditions) => {
+            if !conditions.is_empty() {
+                restrictions
+                    .by_right
+                    .insert(right_uuid.to_string(), conditions);
+            }
         }
     };
     if count == 0 {
@@ -783,7 +879,8 @@ pub(super) fn parse_role_right_restrictions(
             if !is_uuid_text(right_uuid) {
                 return None;
             }
-            let condition = parse_role_restriction_condition(pair.get(1)?, field_refs)?;
+            let condition =
+                parse_role_restriction_condition(pair.get(1)?, field_refs, object_name)?;
             record(&mut restrictions, right_uuid, condition);
         }
         return Some(restrictions);
@@ -799,7 +896,8 @@ pub(super) fn parse_role_right_restrictions(
     {
         for entry in entries.chunks(2) {
             let right_uuid = entry.first()?.trim();
-            let condition = parse_role_restriction_condition(entry.get(1)?, field_refs)?;
+            let condition =
+                parse_role_restriction_condition(entry.get(1)?, field_refs, object_name)?;
             record(&mut restrictions, right_uuid, condition);
         }
         return Some(restrictions);
@@ -816,50 +914,98 @@ pub(super) fn parse_role_right_restrictions(
         if !is_uuid_text(right_uuid) {
             return None;
         }
-        let condition = parse_role_restriction_condition(pair.get(1)?, field_refs)?;
+        let condition = parse_role_restriction_condition(pair.get(1)?, field_refs, object_name)?;
         record(&mut restrictions, right_uuid, condition);
     }
     Some(restrictions)
 }
 
+/// A right's restriction entry: `{N, block_1, …, block_N}`, where `N` counts
+/// the `<restrictionByCondition>` blocks the platform prints for that right.
+///
+/// The leading field is a count, not a payload kind. Measured on the stand
+/// (2026-08-25): across the role trees of all seven corpora exactly six
+/// rights print two `<restrictionByCondition>` blocks and 10,439 print one;
+/// all six two-block rights live in `Roles/ЧтениеБюджетированиеИОтчетность`
+/// and `Roles/ДобавлениеИзменениеБюджетированиеИОтчетность`, whose blobs
+/// carry an `N` of 2 with two blocks after it. The earlier reading treated
+/// `2` as "condition with a field" and took only the second block, which
+/// silently dropped the first -- and refused the whole blob whenever the
+/// second block's field payload was a standard-attribute slot rather than a
+/// uuid, which is why those two roles produced no `Ext/Rights.xml` at all.
+///
+/// A block whose condition text is empty is not printed. `{1,"",0}` occurs as
+/// the first block of the `InformationRegister.ВерсииОбъектов` `Read`
+/// restriction in `Roles/ЧтениеИнформацииОВерсияхОбъектов` -- present in four
+/// corpora (ERP УХ, УТ, БСП демо, БСП базовая), and in all four native prints
+/// a single block, the second one. No `<restrictionByCondition>` anywhere on
+/// the stand carries an empty `<condition>`.
 pub(super) fn parse_role_restriction_condition(
     value: &str,
     field_refs: &BTreeMap<String, String>,
+    object_name: &str,
 ) -> Option<RoleRestrictionEntry> {
     let wrapper = split_1c_braced_fields(value, 0)?;
-    match wrapper.first()?.trim() {
-        // Exactly `{0}`: an entry with no condition payload (see
-        // `RoleRestrictionEntry`). A kind-0 wrapper with more fields is
-        // unobserved in any corpus and stays refused.
-        "0" if wrapper.len() == 1 => Some(RoleRestrictionEntry::Conditionless),
-        "1" => parse_role_restriction_condition_body(wrapper.get(1)?)
-            .map(RoleRestrictionEntry::Condition),
-        "2" => {
-            let mut restriction = parse_role_restriction_condition_body(wrapper.get(2)?)?;
-            let field = parse_role_restriction_field(wrapper.get(2)?, field_refs)?;
-            restriction.field = Some(field);
-            Some(RoleRestrictionEntry::Condition(restriction))
-        }
-        _ => None,
+    let count_text = wrapper.first()?.trim();
+    // Exactly `{0}`: an entry with no condition payload (see
+    // `RoleRestrictionEntry`). A zero-count wrapper with more fields is
+    // unobserved in any corpus and stays refused.
+    if count_text == "0" {
+        return (wrapper.len() == 1).then_some(RoleRestrictionEntry::Conditionless);
     }
-}
-
-pub(super) fn parse_role_restriction_condition_body(value: &str) -> Option<RoleRightRestriction> {
-    let condition_fields = split_1c_braced_fields(value, 0)?;
-    if condition_fields.first()?.trim() != "1" {
+    let count = count_text.parse::<usize>().ok()?;
+    if wrapper.len() != count.checked_add(1)? {
         return None;
     }
-    parse_1c_quoted_string_with_len(condition_fields.get(1)?.trim()).map(|(condition, _)| {
-        RoleRightRestriction {
-            field: None,
-            condition,
+    let mut blocks = Vec::with_capacity(count);
+    for block in wrapper.iter().skip(1) {
+        let restriction = parse_role_restriction_block(block, field_refs, object_name)?;
+        if restriction.condition.is_empty() {
+            continue;
         }
-    })
+        blocks.push(restriction);
+    }
+    Some(RoleRestrictionEntry::Conditions(blocks))
 }
 
+/// One `<restrictionByCondition>` block: `{1, "<condition>"[, 0]}` without a
+/// field, `{1, "<condition>", 1, <field payload>}` with one.
+pub(super) fn parse_role_restriction_block(
+    value: &str,
+    field_refs: &BTreeMap<String, String>,
+    object_name: &str,
+) -> Option<RoleRightRestriction> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let (condition, _) = parse_1c_quoted_string_with_len(fields.get(1)?.trim())?;
+    let field = match fields.get(2).map(|field| field.trim()) {
+        None | Some("0") => None,
+        Some("1") => Some(parse_role_restriction_field(
+            fields.get(3)?,
+            field_refs,
+            object_name,
+        )?),
+        Some(_) => return None,
+    };
+    Some(RoleRightRestriction { field, condition })
+}
+
+/// Resolves a restriction block's field payload to the field's name.
+///
+/// The payload names either a declared field by uuid (`{{0},{0,<uuid>}}`,
+/// resolved through `field_refs`) or one of the owner's standard attributes
+/// by slot (`{{0},{<slot>}}`). The slot form is read through the same
+/// per-kind table the nested-object names use: measured on ERP УХ 3.2.12.6
+/// (2026-08-25), the six slot-form payloads on the stand are `{-5}` on four
+/// `Document` owners and `{-8}` on two `Catalog` owners, and native prints
+/// `<field>Ref</field>` for all six -- which is what those two slots carry in
+/// the tables (see `role_standard_attribute_descriptor`).
 pub(super) fn parse_role_restriction_field(
     value: &str,
     field_refs: &BTreeMap<String, String>,
+    object_name: &str,
 ) -> Option<String> {
     if let Some((_, name)) = field_refs
         .iter()
@@ -867,27 +1013,29 @@ pub(super) fn parse_role_restriction_field(
     {
         return Some(name.clone());
     }
-    if let Some(field) = parse_role_restriction_condition_body_field(value) {
-        return Some(field);
+    if let Some(name) = role_restriction_standard_attribute_field(value, object_name) {
+        return Some(name);
     }
-    let field_wrapper = split_1c_braced_fields(value, 0)?;
-    if field_wrapper.first()?.trim() != "0" {
-        return None;
-    }
-    let field_fields = split_1c_braced_fields(field_wrapper.get(1)?, 0)?;
-    if field_fields.first()?.trim() != "1" {
-        return None;
-    }
-    parse_1c_quoted_string_with_len(field_fields.get(1)?.trim()).map(|(value, _)| value)
+    parse_role_restriction_field_payload(value)
 }
 
-pub(super) fn parse_role_restriction_condition_body_field(value: &str) -> Option<String> {
-    let condition_fields = split_1c_braced_fields(value, 0)?;
-    if condition_fields.first()?.trim() != "1" {
+/// The `{{0},{<slot>}}` payload form: a standard attribute of the restricted
+/// object, named by its slot.
+fn role_restriction_standard_attribute_field(value: &str, object_name: &str) -> Option<String> {
+    let (kind, _) = object_name.split_once('.')?;
+    let fields = split_1c_braced_fields(value, 0)?;
+    let slot_field = fields.iter().rev().find_map(|field| {
+        let inner = split_1c_braced_fields(field.trim(), 0)?;
+        if inner.len() != 1 {
+            return None;
+        }
+        inner.first()?.trim().parse::<isize>().ok()
+    })?;
+    if slot_field >= 0 {
         return None;
     }
-    let field_payload = condition_fields.get(3)?;
-    parse_role_restriction_field_payload(field_payload)
+    let (attribute, _) = role_standard_attribute_descriptor(kind, slot_field, None)?;
+    Some(attribute.to_string())
 }
 
 pub(super) fn parse_role_restriction_field_payload(value: &str) -> Option<String> {
@@ -1118,7 +1266,7 @@ pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
             xml.push_str("</name>\r\n\t\t\t<value>");
             xml.push_str(xml_bool(right.value));
             xml.push_str("</value>\r\n");
-            if let Some(restriction) = &right.restriction_by_condition {
+            for restriction in &right.restrictions {
                 xml.push_str("\t\t\t<restrictionByCondition>\r\n");
                 if let Some(field) = &restriction.field {
                     xml.push_str("\t\t\t\t<field>");
@@ -1197,8 +1345,7 @@ pub(super) fn role_rights_for_xml<'a>(
             .rights
             .iter()
             .filter(|right| {
-                right.restriction_by_condition.is_some()
-                    || right.value != rights.set_for_new_objects
+                !right.restrictions.is_empty() || right.value != rights.set_for_new_objects
             })
             .collect();
     }
@@ -1216,7 +1363,7 @@ pub(super) fn role_rights_for_xml<'a>(
         return object
             .rights
             .iter()
-            .filter(|right| right.value || right.restriction_by_condition.is_some())
+            .filter(|right| right.value || !right.restrictions.is_empty())
             .collect();
     }
 
@@ -1247,8 +1394,7 @@ pub(super) fn role_rights_for_xml<'a>(
             .rights
             .iter()
             .filter(|right| {
-                right.restriction_by_condition.is_some()
-                    || right.value != rights.set_for_new_objects
+                !right.restrictions.is_empty() || right.value != rights.set_for_new_objects
             })
             .collect();
     }
@@ -1290,8 +1436,7 @@ pub(super) fn role_rights_for_xml<'a>(
             if action_like_category || !matches!(right.name.as_str(), "View" | "Edit") {
                 return true;
             }
-            right.restriction_by_condition.is_some()
-                || right.value != rights.set_for_attributes_by_default
+            !right.restrictions.is_empty() || right.value != rights.set_for_attributes_by_default
         })
         .collect()
 }
