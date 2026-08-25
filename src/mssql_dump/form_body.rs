@@ -12802,6 +12802,13 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
         },
     ),
     (
+        // SSL demo 3.1.12.297, `DataProcessors/КонсольЗапросов`'s
+        // `ПланВыполненияЗапроса` form: both native `TextDocumentField`
+        // items that carry a `<Font>` read `{5,50,10,1,1,0,{3,4,{0}},
+        // {3,4,{0}},{3,4,{0}},{7,1,2,{2},140,1,100},...}` -- the font tuple
+        // sits at options slot 9, the same relative position
+        // `FormattedDocumentField` and `PictureField` keep theirs at (9 and
+        // 12 respectively, out of their own shorter/longer option runs).
         "TextDocumentField",
         FormDocumentFieldGeometry {
             discriminator: "5",
@@ -12814,7 +12821,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(13),
             horizontal_stretch: None,
             vertical_stretch: None,
-            font: None,
+            font: Some(9),
         },
     ),
     (
@@ -14223,13 +14230,41 @@ impl FormFontMember {
     }
 }
 
+/// The system-font identifier a `kind == "1"` form font tuple carries at its
+/// own slot 3, wrapped in a single-element tuple (`{0}`, `{2}`, ...).
+///
+/// Evidence: three independent already-proven fixtures for the structurally
+/// identical `{7,1,<mask>,{0},...}` tuple this same project decodes
+/// elsewhere (a DCS font `Value`, an MXL cell font, and a style's own font)
+/// all carry `{0}` and all three write `sys:DefaultGUIFont`, matching every
+/// one of 227 native `<Font ref="sys:DefaultGUIFont".../>` elements this
+/// crate's own output already reproduces correctly. SSL demo 3.1.12.297 adds
+/// the corpus's only other code:
+/// `DataProcessors/КонсольЗапросов`'s `ПланВыполненияЗапроса` form carries
+/// two `TextDocumentField`s whose tuple reads `{2}` there and whose native
+/// `<Font>` is `ref="sys:ANSIFixedFont"`, on both, byte for byte. No other
+/// code occurs in either corpus, so an unrecognized one is a refusal rather
+/// than a guessed name.
+fn parse_form_font_system_name_ref(field: &str) -> Option<&'static str> {
+    let wrapped = split_1c_braced_fields(field, 0)?;
+    if wrapped.len() != 1 {
+        return None;
+    }
+    match wrapped.first()?.trim() {
+        "0" => Some("sys:DefaultGUIFont"),
+        "2" => Some("sys:ANSIFixedFont"),
+        _ => None,
+    }
+}
+
 /// Decodes a form font tuple into the element the platform writes for it.
 ///
 /// `None` means the platform writes no element at all: an `AutoFont` tuple
 /// with an empty mask (the ubiquitous `{7,3,0,1,100}` default), a slot that
 /// does not hold a font tuple at all, a member count that disagrees with the
-/// mask, or a `StyleItem` kind whose style reference cannot be resolved --
-/// every native `StyleItem` font carries a `ref`, so an unresolved one is a
+/// mask, a `WindowsFont` kind whose system-font code is not recognized, or a
+/// `StyleItem` kind whose style reference cannot be resolved -- every native
+/// `WindowsFont`/`StyleItem` font carries a `ref`, so an unresolved one is a
 /// refusal rather than a `ref`-less guess.
 fn parse_form_font_mask_tuple_xml(
     field: &str,
@@ -14277,7 +14312,8 @@ fn parse_form_font_mask_tuple_xml(
             return Some(format!("<{tag_name}{rendered}/>"));
         }
         "1" => {
-            attributes.push(("ref", "sys:DefaultGUIFont".to_string()));
+            let name = parse_form_font_system_name_ref(fields.get(3)?.trim())?;
+            attributes.push(("ref", name.to_string()));
             ("WindowsFont", 4)
         }
         "2" => {
@@ -21610,16 +21646,23 @@ fn format_form_body_xml_with_dcs_profiles(
     // (2), `Width` (2), `AutoURL` (2), `ConversationsRepresentation` (1),
     // `HorizontalAlign` (1), `AutoFillCheck` (1) and `SaveWindowSettings` (1);
     // it leads `UseForFoldersAndItems` (1) and every collection section, and no
-    // pair is observed in both directions.
+    // pair is observed in both directions in that (UT 11.5.27.75) corpus.
+    //
+    // SSL demo 3.1.12.297 is the only native form across five corpora that
+    // also carries `MobileDeviceCommandBarContent`
+    // (`Documents/_ДемоЗаказПокупателя`'s list form), and there it trails it
+    // rather than leading it -- the first observation of this particular
+    // pair, so it moves out from under the general "leads every collection"
+    // claim rather than contradicting an actually-measured direction.
+    xml.push_str(&format_form_mobile_device_command_bar_content_xml(
+        &properties.mobile_device_command_bar_content,
+    ));
     if let Some(value) = properties.collapse_items_by_importance_variant {
         xml.push_str(&format!(
             "\t<CollapseItemsByImportanceVariant>{}</CollapseItemsByImportanceVariant>\r\n",
             escape_xml_text(value)
         ));
     }
-    xml.push_str(&format_form_mobile_device_command_bar_content_xml(
-        &properties.mobile_device_command_bar_content,
-    ));
     if !properties.command_set_excluded_commands.is_empty() {
         xml.push_str("\t<CommandSet>\r\n");
         for command in &properties.command_set_excluded_commands {

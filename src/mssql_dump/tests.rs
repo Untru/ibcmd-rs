@@ -26224,6 +26224,172 @@ fn popup_writes_height_behind_the_title_block_not_ahead_of_it() {
 }
 
 #[test]
+fn text_document_field_writes_its_system_font_by_the_code_at_slot_three() {
+    // Real bytes: DataProcessors/КонсольЗапросов/Forms/ПланВыполненияЗапроса/
+    // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
+    // `678b6e32-e032-47b0-b70c-961b2859b6e5.0`). `ПланВыполненияЗапросаТекстовоеПредставление`
+    // is one of two native `TextDocumentField`s in this form -- the only
+    // `<Font ref="sys:ANSIFixedFont".../>` in the corpus -- whose options
+    // tuple carries `{7,1,2,{2},140,1,100}` at slot 9: kind `1`, height mask
+    // bit set (`140` -> `14`), and the previously-unread slot-3 code `{2}`.
+    let item = parse_form_child_item(
+        r#"{37,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"ПланВыполненияЗапросаТекстовоеПредставление",0,0,
+{1,1,
+{"ru","План выполнения запроса"}
+},
+{1,0},
+{1,
+{2}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,50,10,1,1,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,1,2,
+{2},140,1,100},1,0,0,1,0,
+{0,1,0}
+},
+{0,1,0},1,
+{22,
+{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПланВыполненияЗапросаТекстовоеПредставлениеКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПланВыполненияЗапросаТекстовоеПредставлениеРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "TextDocumentField");
+    assert_eq!(
+        item.font_xml.as_deref(),
+        Some(r#"<Font ref="sys:ANSIFixedFont" height="14" kind="WindowsFont"/>"#)
+    );
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    assert!(
+        xml.contains(r#"<Font ref="sys:ANSIFixedFont" height="14" kind="WindowsFont"/>"#),
+        "{xml}"
+    );
+
+    // The ubiquitous code, real bytes from the same options-tuple family
+    // (`{7,1,2,{0},140,1,100}` -- only the slot-3 code changed): the platform
+    // writes `sys:DefaultGUIFont` on all 227 native `<Font ref="sys:...">`
+    // elements this crate's own output already reproduces, none of which is
+    // `ANSIFixedFont`.
+    assert_eq!(
+        parse_form_font_tuple_xml("{7,1,2,{0},140,1,100}", &BTreeMap::new()).as_deref(),
+        Some(r#"<Font ref="sys:DefaultGUIFont" height="14" kind="WindowsFont"/>"#)
+    );
+
+    // An unrecognized slot-3 code is a refusal, not a guessed name: no third
+    // code is observed in either corpus.
+    assert_eq!(
+        parse_form_font_tuple_xml("{7,1,2,{9},140,1,100}", &BTreeMap::new()),
+        None
+    );
+}
+
+#[test]
+fn form_body_writes_collapse_items_by_importance_variant_behind_mobile_device_command_bar_content()
+{
+    // SSL demo 3.1.12.297's `Documents/_ДемоЗаказПокупателя` list form is the
+    // only native form across five corpora (12 701 + 9 617 + 29 + 164 + 226
+    // files) that carries both `<CollapseItemsByImportanceVariant>` and
+    // `<MobileDeviceCommandBarContent>`; there the former trails the latter,
+    // not the reverse this writer used to assume for want of a
+    // counter-example.
+    let properties = FormBodyProperties {
+        collapse_items_by_importance_variant: Some("Use"),
+        mobile_device_command_bar_content: vec!["КоманднаяПанель".to_string()],
+        ..FormBodyProperties::default()
+    };
+    let xml = format_form_body_xml(
+        &properties,
+        None,
+        &[],
+        &[],
+        &[],
+        &FormAttributesSection::default(),
+        &[],
+        &[],
+        &None,
+    )
+    .unwrap();
+    let mobile_start = xml.find("<MobileDeviceCommandBarContent>").unwrap();
+    let mobile_end = xml.find("</MobileDeviceCommandBarContent>").unwrap();
+    let collapse = xml
+        .find("<CollapseItemsByImportanceVariant>Use</CollapseItemsByImportanceVariant>")
+        .unwrap();
+    assert!(mobile_start < mobile_end, "{xml}");
+    assert!(
+        mobile_end < collapse,
+        "CollapseItemsByImportanceVariant trails MobileDeviceCommandBarContent: {xml}"
+    );
+}
+
+#[test]
 fn preserves_fixed_allowed_length_in_form_type_xml() {
     let value_types = normalize_form_type_pattern(vec![ConstantValueType::String {
         length: Some(12),
