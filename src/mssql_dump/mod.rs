@@ -5318,18 +5318,23 @@ fn parse_business_process_flowchart_text(
     )
 }
 
-fn parse_business_process_flowchart_text_with_types(
-    text: &str,
-    object_refs: &BTreeMap<String, String>,
-    metadata_object_refs: &BTreeMap<String, String>,
-    type_index: &BTreeMap<String, String>,
-    type_index_collisions: &BTreeSet<String>,
-) -> Option<BusinessProcessFlowchart> {
+/// Structural, object-ref-free proof that raw-deflated text is a graphical-
+/// scheme blob in the brace-tuple grammar `parse_business_process_
+/// flowchart_text_with_types` decodes (shared by `BusinessProcess.
+/// Flowchart` and, per the misclassification this function's caller in
+/// `refs.rs` exists to fix, standalone `GraphicalSchema` Template bodies
+/// too): the leading `"5"` discriminator plus a declared item count whose
+/// implied record length exactly matches the text's own top-level field
+/// count -- the same length check the real parser performs, factored out
+/// so type-inference time (before the owning family's reference indexes
+/// exist) and parse time can never drift apart. Returns the split fields
+/// and declared item count on success so callers that go on to do the full
+/// parse do not have to re-split the text.
+fn flowchart_grammar_fields(text: &str) -> Option<(Vec<&str>, usize)> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "5" {
         return None;
     }
-    let scheme = parse_flowchart_scheme(fields.get(1)?, object_refs)?;
     let item_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     // The record closes with one numeric field after the item pairs -- the
     // scheme's id counter; all seven evidenced flowcharts carry it and it is
@@ -5338,6 +5343,36 @@ fn parse_business_process_flowchart_text_with_types(
     if fields.len() != trailer_index.checked_add(1)? {
         return None;
     }
+    Some((fields, item_count))
+}
+
+/// Cheap, object-ref-free type-inference check: does this raw-deflated
+/// template body look like a graphical-scheme blob in the flowchart
+/// grammar? Used by `refs::infer_template_type_from_body` to recognize the
+/// non-XML representation of a `GraphicalSchema` Template body (evidenced
+/// on real ERP UH bytes -- see `output-path-collisions-and-module-text-
+/// fallback-20260825.md` -- as the cause of every one of that corpus's
+/// `extra` Template.txt files: the body defaulted to `TextDocument`
+/// because none of `infer_template_type_from_body`'s three positive
+/// markers recognized this shape). Does not attempt the full parse -- no
+/// object refs are available yet at this point in the pipeline -- so a
+/// body that passes this check can still fail to decode at write time,
+/// which is a typed failure (fail-closed), not a silent wrong-content
+/// default.
+pub(super) fn looks_like_graphical_scheme_blob_text(text: &str) -> bool {
+    flowchart_grammar_fields(text).is_some()
+}
+
+fn parse_business_process_flowchart_text_with_types(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+) -> Option<BusinessProcessFlowchart> {
+    let (fields, item_count) = flowchart_grammar_fields(text)?;
+    let scheme = parse_flowchart_scheme(fields.get(1)?, object_refs)?;
+    let trailer_index = item_count.checked_mul(2)?.checked_add(3)?;
     parse_flowchart_number(fields.get(trailer_index)?)?;
     let mut raw_items = Vec::<(String, String)>::with_capacity(item_count);
     let mut names = BTreeMap::<String, String>::new();
@@ -13543,11 +13578,36 @@ fn parse_register_standard_attribute_with_comment<'a>(
             expected_type_reduction_mode,
             None,
         )?;
-    information_register_standard_attribute_nested_values_are(
+    // The empty `ChoiceParameterLinks` record's own leading kind tag is not
+    // pinned at `"5006"` platform-wide: real ERP УХ 3.2.12.6 bytes write
+    // `"5004"` instead, evidenced on two unrelated families sharing this
+    // helper -- `AccumulationRegisters/ВыработкаВНА` (uuid
+    // `d0cb999a-42d7-4f4f-9160-fa23808dc40d`) standard attribute `Recorder`,
+    // and every standard attribute of `Catalogs/ВариантыЗначенийПоказателей`
+    // (uuid `b9cae7bf-ed0e-442b-b5de-d455c3fa1fc5`, 9 occurrences, all
+    // `{5004,0}`). Both are otherwise-well-formed, real bytes with no other
+    // fault: `parse_register_standard_attribute_with_comment_and_choice_
+    // parameter_links` succeeds on both, and this final shape check was the
+    // only rejection point. Before this, one unrecognized kind tag on any
+    // standard attribute aborted the whole owning object's export (`?`
+    // chains up through `parse_exact_register_standard_attributes` and
+    // similar), surfacing as "no legacy family decoder recognized this
+    // storage entry" -- the corpus's largest still-`missing` root-cause
+    // bucket (151 opaque roots at 2ccd98f, Catalogs alone accounting for
+    // 72). Not treated as "accept any kind tag with a zero count": only the
+    // two values actually observed on real bytes are accepted, per this
+    // project's fail-closed doctrine (see `docs/evidence/arity-literal-
+    // audit-20260825.md`) -- a third value should be evidenced before being
+    // added here, not assumed safe by pattern alone.
+    (information_register_standard_attribute_nested_values_are(
         choice_parameter_links,
         INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
         &["5006", "0"],
-    )
+    ) || information_register_standard_attribute_nested_values_are(
+        choice_parameter_links,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+        &["5004", "0"],
+    ))
     .then_some((attribute, comment))
 }
 
@@ -14731,6 +14791,22 @@ fn parse_exact_register_standard_attributes(
     definitions: &[(&'static str, &'static str)],
 ) -> Option<Vec<RegisterStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
+    // `{0}` is the platform's "nothing about this register's standard
+    // attributes is customized" default, the same shape its sibling
+    // `parse_information_register_standard_attributes` already treats as an
+    // empty list rather than a parse failure. Confirmed on real ERP УХ
+    // 3.2.12.6 bytes: `AccumulationRegisters/ВыпускПродукции` (uuid
+    // `f23afba0-c51a-45d0-a3a9-f123fa4744a2`) carries `{0}` here, and the
+    // platform's own exported XML has zero `<StandardAttribute>` elements
+    // anywhere in the file. Before this, treating `{0}` as a hard refusal
+    // (falling through to the generic `!= 2` branch below) aborted the
+    // *entire* owning register's export via this function's `?` call sites
+    // (`parse_exact_accumulation_register_owner_properties` and friends),
+    // one instance of the "default is not absence" class this project keeps
+    // rediscovering (see `docs/evidence/arity-literal-audit-20260825.md`).
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(Vec::new());
+    }
     if outer.len() != 2 || outer.first()?.trim() != "1" {
         return None;
     }
@@ -30562,6 +30638,20 @@ fn parse_style_border_value_xml(value: &str) -> Option<String> {
     ))
 }
 
+/// Codes 49/61/78/110/115/117/123/127/129/131 (GhostWhite/Lavender/
+/// LightSteelBlue/PaleTurquoise/Pink/PowderBlue/Salmon/Sienna/SkyBlue/
+/// SlateGray) are evidenced on all 10 `StyleItems` real ERP УХ 3.2.12.6
+/// bytes leave `missing` at 2ccd98f for exactly this reason: `parse_style_
+/// item_properties_from_text` -> `parse_style_color_value` -> here returns
+/// `None` for any code this function does not recognize, which refuses the
+/// *entire* StyleItem (not a partial result) -- one unmapped color code is
+/// indistinguishable from "no legacy family decoder recognized this
+/// storage entry" in the export report. Each value here was read directly
+/// off the platform's own native `<Value xsi:type="v8ui:Color">web:
+/// <Name></Value>` for that exact object (not inferred from .NET's
+/// KnownColor numbering, which this table's existing gaps/duplicates --
+/// e.g. `27`/`31` both `DarkGreen`, `94`/`105` both `Orange` -- already show
+/// does not hold platform-wide).
 fn style_web_color_name(code: i32) -> Option<&'static str> {
     match code {
         8 => Some("web:Black"),
@@ -30580,9 +30670,11 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         50 => Some("web:Gold"),
         51 => Some("web:Goldenrod"),
         48 => Some("web:Gainsboro"),
+        49 => Some("web:GhostWhite"),
         52 => Some("web:Gray"),
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
+        61 => Some("web:Lavender"),
         64 => Some("web:LightCoral"),
         65 => Some("web:LightBlue"),
         66 => Some("web:LightCoral"),
@@ -30591,6 +30683,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         69 => Some("web:LightGoldenRodYellow"),
         71 => Some("web:LightGray"),
         72 => Some("web:LightPink"),
+        78 => Some("web:LightSteelBlue"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
         86 => Some("web:MediumBlue"),
@@ -30601,11 +30694,18 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         98 => Some("web:MistyRose"),
         96 => Some("web:Moccasin"),
         99 => Some("web:Moccasin"),
+        110 => Some("web:PaleTurquoise"),
+        115 => Some("web:Pink"),
+        117 => Some("web:PowderBlue"),
         119 => Some("web:Red"),
         120 => Some("web:RosyBrown"),
         121 => Some("web:RoyalBlue"),
+        123 => Some("web:Salmon"),
+        127 => Some("web:Sienna"),
         128 => Some("web:Silver"),
+        129 => Some("web:SkyBlue"),
         130 => Some("web:SlateBlue"),
+        131 => Some("web:SlateGray"),
         134 => Some("web:SteelBlue"),
         140 => Some("web:Violet"),
         141 => Some("web:VioletRed"),

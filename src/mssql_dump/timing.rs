@@ -446,7 +446,8 @@ impl MssqlDumpTimingReport {
             SourceAssetKind::ExchangePlanContent => {
                 self.source_asset_exchange_plan_cpu_ms += elapsed_ms;
             }
-            SourceAssetKind::BusinessProcessFlowchart => {
+            SourceAssetKind::BusinessProcessFlowchart
+            | SourceAssetKind::TemplateGraphicalScheme => {
                 self.source_asset_business_process_cpu_ms += elapsed_ms;
             }
             SourceAssetKind::Schedule => self.source_asset_schedule_cpu_ms += elapsed_ms,

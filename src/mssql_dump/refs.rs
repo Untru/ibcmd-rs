@@ -2056,6 +2056,24 @@ pub(super) fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str
         || text.starts_with("<?xml") && text.contains("<html")
     {
         Some("HTMLDocument")
+    } else if looks_like_graphical_scheme_blob_text(text) {
+        // Real ERP UH bytes: a `GraphicalSchema` Template body is not
+        // always pre-serialized XML (the three markers above cover that
+        // case) -- the platform also stores it in the same brace-tuple
+        // grammar `BusinessProcess.Flowchart`'s `Ext/Flowchart.xml` decodes
+        // from (`parse_business_process_flowchart_text_with_types`; see
+        // `flowchart_grammar_fields`'s doc comment). Falling through to
+        // `TextDocument` here (the previous behavior) wrote every one of
+        // these at `Templates/<name>/Ext/Template.txt` -- a path the
+        // platform never produces -- while the platform's own
+        // `Templates/<name>/Ext/Template.xml` sat unwritten: the entire
+        // evidenced `extra` class documented in `output-path-collisions-
+        // and-module-text-fallback-20260825.md` section 4. Recognizing the
+        // shape here only fixes the *type* (and so the output path); the
+        // write-time decode can still fail on an item shape this project's
+        // flowchart parser does not yet model (e.g. a `Decoration` with a
+        // `Picture`), which is a typed failure, not a second wrong default.
+        Some("GraphicalSchema")
     } else {
         Some("TextDocument")
     }

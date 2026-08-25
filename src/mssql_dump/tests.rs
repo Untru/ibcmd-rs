@@ -27490,6 +27490,41 @@ fn formats_style_item_native_color_and_font_attrs() {
     );
 }
 
+/// `style_web_color_name` used to be missing 10 codes, one per real ERP УХ
+/// 3.2.12.6 `StyleItems` object left `missing` at 2ccd98f: `parse_style_
+/// color_value` returning `None` for an unmapped code refuses the *whole*
+/// owning StyleItem (not a partial color), surfacing as "no legacy family
+/// decoder recognized this storage entry" like any other unclassified
+/// object. Each `(code, name)` pair here is the object's own real raw
+/// braced color value paired with the exact `web:<Name>` the platform's own
+/// exported XML carries for that object (`cf extract` against the real
+/// `.cf`, cross-referenced with `$D/cap/uh-r1/src/StyleItems/*.xml`), not
+/// inferred from any general color-numbering scheme.
+#[test]
+fn detects_previously_unmapped_style_web_colors_from_real_objects() {
+    let cases: &[(&str, i32, &str)] = &[
+        ("ОбъединенныеЭлементыФормыФон", 49, "web:GhostWhite"),
+        ("ЦветФонаПанелиСогласования", 61, "web:Lavender"),
+        ("ЦветФонаПозицииВРеестреПлатежей", 78, "web:LightSteelBlue"),
+        ("ЦветКритичногоИзлишкаСредств", 110, "web:PaleTurquoise"),
+        ("ЦветНекритичногоНедостаткаСредств", 115, "web:Pink"),
+        ("ЦветФонаПозицииНаИсполнении", 117, "web:PowderBlue"),
+        ("ЦветКритичногоНедостаткаСредств", 123, "web:Salmon"),
+        ("ЦветАльтернативногоВидаРабочихЦентров", 127, "web:Sienna"),
+        ("ЦветФонаТекущейДатыВГрафикеУХ", 129, "web:SkyBlue"),
+        ("СерыйЦветТекста2", 131, "web:SlateGray"),
+    ];
+    for (name, code, expected) in cases {
+        let value =
+            format!(r##"{{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{{3,2,{{{code}}}}}}}"##);
+        assert_eq!(
+            parse_style_color_value(&value).as_deref(),
+            Some(*expected),
+            "object {name} (code {code})"
+        );
+    }
+}
+
 #[test]
 fn writes_style_item_metadata_xml_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
@@ -28693,6 +28728,101 @@ fn writes_template_metadata_xml_to_owner_or_common_template_layout() {
     let _ = fs::remove_dir_all(root);
 }
 
+/// End-to-end regression for the `extra` Template.txt defect (`output-
+/// path-collisions-and-module-text-fallback-20260825.md` section 4, real
+/// ERP UH bytes): an owned Template whose body is the brace-tuple
+/// `GraphicalSchema` grammar (not pre-serialized XML) must land at
+/// `Templates/<name>/Ext/Template.xml` with real decoded content -- the
+/// platform's own path and format -- not at `Templates/<name>/Ext/
+/// Template.txt` as raw undecoded text, which is a path the platform never
+/// produces and was every one of that corpus's 64 `extra` files.
+#[test]
+fn writes_graphical_scheme_template_body_to_ext_template_xml() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let template_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let start_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+    let catalog_metadata = deflate_for_test(
+        catalog_metadata_text_for_test("57", catalog_uuid, "Products", &[], &[template_uuid])
+            .as_bytes(),
+    );
+    // The `template_type_code` slot (the "5" below) is deliberately a value
+    // `template_type_from_code` does not map (`refs.rs`'s only mapped codes
+    // are 0/1/3/4/6/7/9): this test is about body-content sniffing picking
+    // `GraphicalSchema` for the brace-tuple body, which only runs when the
+    // header carries no recognized type hint.
+    let template_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{2,5,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Scheme\",{{1,\"en\",\"Scheme\"}},\"\"}}\r\n,0}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let scheme_header = r#"{1,{3,3,{-10}},0,20,20,3,6,6,{"N",10},7,{"N",10},8,{"N",10},9,{"N",10},13,{"N",0},16,{"N",0}}"#;
+    // The same evidenced Start-item shape `writes_business_process_
+    // flowchart_to_source_layout` uses (real `BusinessProcess.Flowchart`
+    // grammar, proven to parse): style/geometry/shape unchanged, just one
+    // item instead of three.
+    let style = "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
+    let border = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
+    let picture = "{4,0,{0},\"\",-1,-1,1,0,\"\"}";
+    let start_head = format!(r#"{{{{4,1,{{1,0}},"Start",1}},4,{start_uuid},0}}"#);
+    let start_geometry =
+        format!("{{{style},5,10,20,50,60,4,10,20,49,20,49,59,10,59,4,{picture},{border}}}");
+    let start_shape = format!("{{{{{start_geometry},1}}}}");
+    let start_item = format!("{{{start_head},2,{start_shape},{{0}}}}");
+    let plain_text = format!("{{5,{{{scheme_header}}},1,2,{start_item},4}}");
+    let template_body = deflate_for_test(plain_text.as_bytes());
+    let rows = vec![
+        ConfigRow {
+            file_name: catalog_uuid.to_string(),
+            part_no: 0,
+            data_size: catalog_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&catalog_metadata),
+        },
+        ConfigRow {
+            file_name: template_uuid.to_string(),
+            part_no: 0,
+            data_size: template_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&template_metadata),
+        },
+        ConfigRow {
+            file_name: format!("{template_uuid}.0"),
+            part_no: 0,
+            data_size: template_body.len() as i64,
+            binary_hex: encode_hex_for_test(&template_body),
+        },
+    ];
+
+    let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+    assert!(
+        !root
+            .join("Catalogs/Products/Templates/Scheme/Ext/Template.txt")
+            .exists(),
+        "must not fall back to the TextDocument path the platform never produces"
+    );
+    let template_xml =
+        fs::read_to_string(root.join("Catalogs/Products/Templates/Scheme/Ext/Template.xml"))
+            .unwrap();
+    assert!(template_xml.contains(r#"<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/scheme""#));
+    assert!(template_xml.contains(&format!(r#"<Start id="1" uuid="{start_uuid}">"#)));
+    let body_row = dumped
+        .rows
+        .iter()
+        .find(|row| row.file_name == format!("{template_uuid}.0"))
+        .unwrap();
+    assert_eq!(
+        body_row.source_asset_path.as_deref(),
+        Some("Catalogs/Products/Templates/Scheme/Ext/Template.xml")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn formats_template_metadata_xml_with_source_version() {
     let xml = format_template_source_xml(
@@ -29345,7 +29475,50 @@ fn detects_graphical_schema_template_body() {
     );
     let (path, kind) = template_body_source_asset("GraphicalSchema").unwrap();
     assert_eq!(path, "Template.xml");
-    assert!(matches!(kind, SourceAssetKind::InflatedBinary));
+    assert!(matches!(kind, SourceAssetKind::TemplateGraphicalScheme));
+}
+
+/// Real ERP UH bytes (`output-path-collisions-and-module-text-fallback-
+/// 20260825.md` section 4) showed a `GraphicalSchema` Template body is not
+/// always pre-serialized XML after raw-deflate: the platform also stores it
+/// in the same brace-tuple grammar `BusinessProcess.Flowchart`'s `Ext/
+/// Flowchart.xml` decodes from (`{5, <scheme>, <count>, <code>, <item>,
+/// ..., <trailer>}`). Every one of that corpus's 64 `extra` files was this
+/// shape defaulting to `TextDocument` because none of `infer_template_type_
+/// from_body`'s three XML markers matched non-XML content. This is the
+/// positive-marker regression test for that default: a body with no
+/// `template_type_code` hint and no XML markers, but that does structurally
+/// match the flowchart grammar (declared item count implies the record's
+/// own length), must be recognized as `GraphicalSchema`, not fall through
+/// to `TextDocument`.
+#[test]
+fn detects_graphical_scheme_template_body_in_brace_tuple_grammar() {
+    let scheme_header = r#"{1,{3,3,{-10}},0,20,20,3,6,6,{"N",10},7,{"N",10},8,{"N",10},9,{"N",10},13,{"N",0},16,{"N",0}}"#;
+    let start_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let start_head = format!(r#"{{{{4,1,{{1,0}},"Start",1}},4,{start_uuid},0}}"#);
+    let start_item = format!("{{{start_head},2,{{0}},{{0}}}}");
+    let body = deflate_for_test(format!("{{5,{scheme_header},1,2,{start_item},4}}").as_bytes());
+
+    assert!(looks_like_graphical_scheme_blob_text(
+        std::str::from_utf8(&inflate_raw_deflate(&body).unwrap()).unwrap()
+    ));
+    assert_eq!(
+        infer_template_type_from_body(&body),
+        Some("GraphicalSchema")
+    );
+
+    // A near-miss must not false-positive: same leading discriminator, but
+    // the declared item count does not imply the record's actual length
+    // (here: 0 items claimed, but one item pair still present). Free-form
+    // `TextDocument` prose could never coincidentally satisfy the full
+    // structural check above, but this confirms the check is the exact
+    // declared-length match doctrine calls for, not a bare prefix sniff.
+    let miscounted =
+        deflate_for_test(format!("{{5,{scheme_header},0,2,{start_item},4}}").as_bytes());
+    assert_eq!(
+        infer_template_type_from_body(&miscounted),
+        Some("TextDocument")
+    );
 }
 
 #[test]
@@ -62167,6 +62340,34 @@ impl AccumulationRegisterTotalsFixture {
         Self { fields }
     }
 
+    /// Real ERP УХ 3.2.12.6 bytes (`AccumulationRegisters/ВыпускПродукции`,
+    /// uuid `f23afba0-c51a-45d0-a3a9-f123fa4744a2`): the platform writes
+    /// `{0}` at this slot, not the `{1,{1,<count>,...}}` triplet list
+    /// `exact()` builds above, whenever none of the register's standard
+    /// attributes are customized -- and the platform's own exported XML has
+    /// zero `<StandardAttribute>` elements to match.
+    fn exact_without_standard_attributes(flag: &str) -> Self {
+        let mut fields = vec!["28".to_string()];
+        fields.extend(register_generated_type_fields(12));
+        fields.extend([
+            register_owner_header(ACCUMULATION_TOTALS_TEST_UUID, "Totals"),
+            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "0".to_string(),
+            "1".to_string(),
+            "0".to_string(),
+            "1".to_string(),
+            "0".to_string(),
+            flag.to_string(),
+            "{0}".to_string(),
+            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "{0}".to_string(),
+            "{0}".to_string(),
+            "{0}".to_string(),
+        ]);
+        assert_eq!(fields.len(), 26);
+        Self { fields }
+    }
+
     fn extract(&self) -> Option<ExtractedMetadataSourceXml> {
         extract_register_fields(&self.fields, ACCUMULATION_TOTALS_TEST_UUID)
     }
@@ -62390,6 +62591,56 @@ fn accumulation_totals_extracts_exact_true_and_false() {
                 < xml.find(&totals).unwrap()
         );
     }
+}
+
+/// Real ERP УХ 3.2.12.6 evidence (`AccumulationRegisters/ВыпускПродукции`):
+/// `parse_exact_register_standard_attributes` used to hard-refuse the
+/// platform's `{0}` "nothing customized" shorthand -- `outer.len() != 2`
+/// fell straight through to `return None`, which aborted the *whole*
+/// register's export via this function's callers (`no legacy family
+/// decoder recognized this storage entry`, not just a missing detail). The
+/// object exists, its own header/kind/folder all resolve fine; only the
+/// standard-attributes shorthand was unhandled. Negative control: reverting
+/// the `{0}`-handling branch in `parse_exact_register_standard_attributes`
+/// makes this fail (confirmed by hand).
+#[test]
+fn accumulation_register_exports_with_no_customized_standard_attributes() {
+    let source = AccumulationRegisterTotalsFixture::exact_without_standard_attributes("1")
+        .extract()
+        .expect("a register with no standard-attribute customization must still export");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert_eq!(
+        source.relative_path,
+        PathBuf::from("AccumulationRegisters/Totals.xml")
+    );
+    assert!(!xml.contains("<StandardAttribute"));
+}
+
+/// Real ERP УХ 3.2.12.6 bytes write kind tag `5004` for an empty
+/// `ChoiceParameterLinks` record (`AccumulationRegisters/ВыработкаВНА`'s
+/// `Recorder` standard attribute, and every standard attribute of
+/// `Catalogs/ВариантыЗначенийПоказателей`), not only the `5006` this
+/// fixture helper's default value uses. Before this, that one unrecognized
+/// kind tag on any standard attribute refused the whole register/Catalog/
+/// etc. export via `parse_register_standard_attribute`'s callers, not just
+/// this one detail. Negative control: reverting the second `||` branch in
+/// `parse_register_standard_attribute_with_comment` makes this fail
+/// (confirmed by hand).
+#[test]
+fn register_standard_attribute_accepts_choice_parameter_links_kind_5004() {
+    let mut values = information_register_standard_attribute_values_for_test("Active", false);
+    values[21] = format!(
+        "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5004,0}}}}"
+    );
+    let bag_text = information_register_standard_attribute_bag_from_values_for_test(&values, false);
+    let bag = parse_information_register_standard_attribute_bag(&bag_text)
+        .expect("bag with a 5004 choice-parameter-links kind tag must still parse");
+    let attribute = parse_register_standard_attribute("Active", &bag, MetadataChildFillValue::Nil);
+    assert!(
+        attribute.is_some(),
+        "a standard attribute whose empty ChoiceParameterLinks carries kind tag 5004 \
+         must not be refused"
+    );
 }
 
 #[test]
