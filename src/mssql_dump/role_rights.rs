@@ -11,6 +11,19 @@ pub(super) struct RoleRights {
 pub(super) struct RoleObjectRights {
     pub(super) name: String,
     pub(super) rights: Vec<RoleRight>,
+    /// True when this object's right-restrictions table carries at least one
+    /// conditionless `{RIGHT_UUID,{0}}` entry (see
+    /// `RoleRestrictionEntry::Conditionless`). The platform renders such
+    /// objects in value-only mode: a right prints exactly when its value is
+    /// `true` or it carries a real condition, and an object where nothing
+    /// prints is omitted from Rights.xml entirely. Measured over every role
+    /// of ERP УХ 3.2.12.6 (2026-08-24): 84/84 objects carrying such an entry
+    /// match this rule byte-for-byte, 15/15 all-false ones are absent from
+    /// the native file, and no native tree in any of the eight measured
+    /// corpora contains an empty `<object>` block. Whether the same rule
+    /// extends to objects without such an entry is not proven, so it is
+    /// applied only where the marker was observed.
+    pub(super) has_conditionless_restrictions: bool,
 }
 
 pub(super) struct RoleRight {
@@ -23,6 +36,33 @@ pub(super) struct RoleRight {
 pub(super) struct RoleRightRestriction {
     pub(super) field: Option<String>,
     pub(super) condition: String,
+}
+
+/// One parsed entry of an object's right-restrictions table
+/// (`{RIGHT_UUID,{…}}`): the wrapper's first field selects the payload kind.
+///
+/// Kinds `1` (plain condition text) and `2` (condition with a field
+/// reference) carry a real condition. Kind `0` carries no condition at all
+/// and is accepted only as the exact one-field wrapper `{0}` — measured over
+/// every restriction entry of eight corpora (2026-08-24: ERP УХ 3.2.12.6,
+/// УТ 11.5.27.75, БСП 3.1.12.297 базовая/демо/international, БСП WE
+/// 3.1.10.386 базовая/демо, WMS5 Модуль Web-обмена; 11,149 entries total),
+/// kind `0` occurs 161 times, all in ERP УХ, always exactly `{0}`, never on
+/// a right that also has a real condition. The native XML never prints a
+/// `<restrictionByCondition>` for such an entry; its only observable effect
+/// is the object-level value-only rendering mode recorded in
+/// `RoleObjectRights::has_conditionless_restrictions`. Any other kind-0
+/// arity is unobserved and refused.
+pub(super) enum RoleRestrictionEntry {
+    Conditionless,
+    Condition(RoleRightRestriction),
+}
+
+/// An object's parsed right-restrictions table: real conditions by right
+/// UUID, plus whether any conditionless `{0}` entry was present.
+pub(super) struct RoleRightRestrictions {
+    pub(super) by_right: BTreeMap<String, RoleRightRestriction>,
+    pub(super) has_conditionless: bool,
 }
 
 pub(super) struct RoleRestrictionTemplate {
@@ -74,11 +114,15 @@ pub(super) fn parse_role_rights_blob(
         }
         let object_name = role_object_ref_name(&object_ref, object_refs)?;
 
-        let rights = if is_configuration_root_rights_object(&object_name) {
-            parse_configuration_root_object_rights(entry[1], set_for_new_objects)?
-        } else {
-            parse_role_object_rights(entry[1], field_refs)?
-        };
+        let (rights, has_conditionless_restrictions) =
+            if is_configuration_root_rights_object(&object_name) {
+                (
+                    parse_configuration_root_object_rights(entry[1], set_for_new_objects)?,
+                    false,
+                )
+            } else {
+                parse_role_object_rights(entry[1], field_refs)?
+            };
         let intra_uuid_order =
             role_rights_object_intra_uuid_order(&object_ref, &object_name).unwrap_or(0);
         objects.push((
@@ -88,6 +132,7 @@ pub(super) fn parse_role_rights_blob(
             RoleObjectRights {
                 name: object_name,
                 rights,
+                has_conditionless_restrictions,
             },
         ));
     }
@@ -411,11 +456,12 @@ pub(super) fn parse_configuration_root_object_rights(
 pub(super) fn parse_role_object_rights(
     value: &str,
     field_refs: &BTreeMap<String, String>,
-) -> Option<Vec<RoleRight>> {
+) -> Option<(Vec<RoleRight>, bool)> {
     let fields = split_1c_braced_fields(value, 0)?;
     match fields.first()?.trim() {
         "0" if (fields.len() - 1) % 2 == 0 => {
             parse_role_right_pairs(&fields, 1, (fields.len() - 1) / 2, &BTreeMap::new())
+                .map(|rights| (rights, false))
         }
         "0" => None,
         "1" => {
@@ -430,7 +476,8 @@ pub(super) fn parse_role_object_rights(
                 &fields[restrictions_count_index + 1..],
                 field_refs,
             )?;
-            parse_role_right_pairs(&fields, pairs_start, count, &restrictions)
+            parse_role_right_pairs(&fields, pairs_start, count, &restrictions.by_right)
+                .map(|rights| (rights, restrictions.has_conditionless))
         }
         _ => None,
     }
@@ -489,9 +536,22 @@ pub(super) fn parse_role_right_restrictions(
     count_text: &str,
     values: &[&str],
     field_refs: &BTreeMap<String, String>,
-) -> Option<BTreeMap<String, RoleRightRestriction>> {
+) -> Option<RoleRightRestrictions> {
     let count = count_text.parse::<usize>().ok()?;
-    let mut restrictions = BTreeMap::new();
+    let mut restrictions = RoleRightRestrictions {
+        by_right: BTreeMap::new(),
+        has_conditionless: false,
+    };
+    let record = |restrictions: &mut RoleRightRestrictions,
+                  right_uuid: &str,
+                  entry: RoleRestrictionEntry| match entry {
+        RoleRestrictionEntry::Conditionless => restrictions.has_conditionless = true,
+        RoleRestrictionEntry::Condition(condition) => {
+            restrictions
+                .by_right
+                .insert(right_uuid.to_string(), condition);
+        }
+    };
     if count == 0 {
         if !values.is_empty() {
             return None;
@@ -509,7 +569,7 @@ pub(super) fn parse_role_right_restrictions(
                 return None;
             }
             let condition = parse_role_restriction_condition(pair.get(1)?, field_refs)?;
-            restrictions.insert(right_uuid.to_string(), condition);
+            record(&mut restrictions, right_uuid, condition);
         }
         return Some(restrictions);
     }
@@ -525,7 +585,7 @@ pub(super) fn parse_role_right_restrictions(
         for entry in entries.chunks(2) {
             let right_uuid = entry.first()?.trim();
             let condition = parse_role_restriction_condition(entry.get(1)?, field_refs)?;
-            restrictions.insert(right_uuid.to_string(), condition);
+            record(&mut restrictions, right_uuid, condition);
         }
         return Some(restrictions);
     }
@@ -542,7 +602,7 @@ pub(super) fn parse_role_right_restrictions(
             return None;
         }
         let condition = parse_role_restriction_condition(pair.get(1)?, field_refs)?;
-        restrictions.insert(right_uuid.to_string(), condition);
+        record(&mut restrictions, right_uuid, condition);
     }
     Some(restrictions)
 }
@@ -550,15 +610,20 @@ pub(super) fn parse_role_right_restrictions(
 pub(super) fn parse_role_restriction_condition(
     value: &str,
     field_refs: &BTreeMap<String, String>,
-) -> Option<RoleRightRestriction> {
+) -> Option<RoleRestrictionEntry> {
     let wrapper = split_1c_braced_fields(value, 0)?;
     match wrapper.first()?.trim() {
-        "1" => parse_role_restriction_condition_body(wrapper.get(1)?),
+        // Exactly `{0}`: an entry with no condition payload (see
+        // `RoleRestrictionEntry`). A kind-0 wrapper with more fields is
+        // unobserved in any corpus and stays refused.
+        "0" if wrapper.len() == 1 => Some(RoleRestrictionEntry::Conditionless),
+        "1" => parse_role_restriction_condition_body(wrapper.get(1)?)
+            .map(RoleRestrictionEntry::Condition),
         "2" => {
             let mut restriction = parse_role_restriction_condition_body(wrapper.get(2)?)?;
             let field = parse_role_restriction_field(wrapper.get(2)?, field_refs)?;
             restriction.field = Some(field);
-            Some(restriction)
+            Some(RoleRestrictionEntry::Condition(restriction))
         }
         _ => None,
     }
@@ -821,6 +886,18 @@ pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
     );
     for object in &rights.objects {
         let object_rights = role_rights_for_xml(rights, object);
+        if object_rights.is_empty() {
+            // The platform never prints an empty `<object>` block, for any
+            // object kind or reason: 0/0 across a direct scan of every
+            // `<object>` in the full ERP УХ 3.2.12.6 native corpus
+            // (2026-08-25, all 2,118 roles). Originally proven narrower (for
+            // the conditionless-restriction value-only mode: 15/15 such
+            // objects absent from the native file); generalized here because
+            // the same absence-of-counterexamples now holds unconditionally,
+            // and the top-level `setForNewObjects`-default rule above can
+            // itself empty an object's right list with no marker involved.
+            continue;
+        }
         xml.push_str("\t<object>\r\n\t\t<name>");
         xml.push_str(&escape_xml_element_text(&object.name));
         xml.push_str("</name>\r\n");
@@ -886,101 +963,68 @@ pub(super) fn role_rights_for_xml<'a>(
             .collect();
     }
 
-    let suppress_plain_false_when_restricted = should_suppress_plain_false_role_rights(object);
-
-    object
-        .rights
-        .iter()
-        .filter(|right| {
-            if right.value || right.restriction_by_condition.is_some() {
-                return true;
-            }
-            if suppress_plain_false_when_restricted {
-                return false;
-            }
-            if is_top_level_document_object(&object.name)
-                && matches!(
-                    right.name.as_str(),
-                    "Posting"
-                        | "UndoPosting"
-                        | "InteractiveInsert"
-                        | "Edit"
-                        | "InteractiveSetDeletionMark"
-                        | "InteractiveClearDeletionMark"
-                        | "InteractivePosting"
-                        | "InteractivePostingRegular"
-                        | "InteractiveUndoPosting"
-                        | "InteractiveChangeOfPosted"
-                        | "Delete"
-                        | "Insert"
-                        | "Update"
-                        | "View"
-                        | "InputByString"
-                        | "ReadDataHistory"
-                        | "ReadDataHistoryOfMissingData"
-                        | "UpdateDataHistory"
-                        | "UpdateDataHistoryOfMissingData"
-                        | "UpdateDataHistoryVersionComment"
-                        | "ViewDataHistory"
-                        | "EditDataHistoryVersionComment"
-                        | "SwitchToDataHistoryVersion"
-                )
-            {
-                return false;
-            }
-            if is_top_level_accumulation_register_object(&object.name)
-                && matches!(right.name.as_str(), "Edit" | "Update" | "View")
-            {
-                return false;
-            }
-            true
-        })
-        .collect()
-}
-
-pub(super) fn is_top_level_role_rights_restriction_object(name: &str) -> bool {
-    [
-        "Catalog",
-        "Document",
-        "InformationRegister",
-        "AccumulationRegister",
-    ]
-    .iter()
-    .any(|kind| is_top_level_role_object_kind(name, kind))
-}
-
-pub(super) fn is_top_level_document_object(name: &str) -> bool {
-    is_top_level_role_object_kind(name, "Document")
-}
-
-pub(super) fn is_top_level_accumulation_register_object(name: &str) -> bool {
-    is_top_level_role_object_kind(name, "AccumulationRegister")
-}
-
-pub(super) fn should_suppress_plain_false_role_rights(object: &RoleObjectRights) -> bool {
-    if !is_top_level_role_rights_restriction_object(&object.name) {
-        return false;
+    if object.has_conditionless_restrictions {
+        // Value-only mode, switched on by a conditionless `{0}` restriction
+        // entry (see `RoleObjectRights::has_conditionless_restrictions`): a
+        // right prints exactly when its value is `true` or it carries a real
+        // condition, regardless of the object kind's usual plain-false
+        // conventions. Measured over ERP УХ 3.2.12.6 (2026-08-24): 84/84
+        // objects, spanning Catalog, Document, DocumentJournal, Information-,
+        // Accumulation- and AccountingRegister, match this rule with 0
+        // counterexamples (47 true-valued marker rights print bare, 114
+        // false-valued ones are hidden, real conditions keep printing).
+        return object
+            .rights
+            .iter()
+            .filter(|right| right.value || right.restriction_by_condition.is_some())
+            .collect();
     }
-    let has_restricted = object
-        .rights
-        .iter()
-        .any(|right| right.restriction_by_condition.is_some());
-    if !has_restricted {
-        return false;
+
+    if is_top_level_rights_object_name(&object.name) {
+        // Every top-level object (`Kind.Name`, exactly one dot; not the
+        // Configuration root, handled above) follows the *same* rule proven
+        // for the Configuration root: a right renders exactly when its value
+        // differs from this role's own `setForNewObjects` flag, or it
+        // carries a real restriction condition. Proven directly against the
+        // full ERP УХ 3.2.12.6 native corpus (2026-08-25): every one of
+        // 95,124 printed top-level rights across all 2,118 roles satisfies
+        // `restricted || value != setForNewObjects` (0 counterexamples, one
+        // direction), and re-deriving the missing side from our own parsed
+        // right list against the same corpus's 1,401 then-differing
+        // Rights.xml files gives 274,936 confirms and 0 violations (the
+        // other direction). The one role that sets `setForNewObjects: true`
+        // (`ПолныеПрава`) is the sole source of every "plain `false` shown,
+        // no restriction" occurrence anywhere in the corpus (10,532/10,532),
+        // confirming the rule inverts there exactly as it does for the
+        // Configuration root, not just on it. This replaces the former
+        // per-kind, per-name suppression lists (Document's ~20-name list,
+        // AccumulationRegister's Edit/Update/View list, and the
+        // restriction-gated `should_suppress_plain_false_role_rights`
+        // heuristic), none of which extended to Catalog, InformationRegister,
+        // Constant or any other top-level kind, and all of which the corpus
+        // now shows were special cases of this one rule.
+        return object
+            .rights
+            .iter()
+            .filter(|right| {
+                right.restriction_by_condition.is_some()
+                    || right.value != rights.set_for_new_objects
+            })
+            .collect();
     }
-    object.rights.iter().all(|right| {
-        !right.value
-            || right.restriction_by_condition.is_some()
-            || matches!(right.name.as_str(), "View" | "InputByString")
-    })
+
+    // Nested objects (attributes, standard attributes, tabular-section
+    // attributes, commands, resources, addressing attributes, …) are left at
+    // the pre-existing "print every right regardless of value" behavior:
+    // measured over the same corpus, `Edit`/`View` rights on 366,965/354,209
+    // nested objects show both `true` and `false` freely, under both
+    // `setForNewObjects` values, with no value-based suppression pattern like
+    // the top-level rule above (unlike the top-level case, this is not a
+    // 0-counterexample proof — a residual ~137-file gap on nested `View`
+    // rights, unrelated to this change, is not addressed here).
+    object.rights.iter().collect()
 }
 
-pub(super) fn is_top_level_role_object_kind(name: &str, kind: &str) -> bool {
-    let Some(rest) = name.strip_prefix(kind) else {
-        return false;
-    };
-    let Some(rest) = rest.strip_prefix('.') else {
-        return false;
-    };
-    !rest.contains('.')
+pub(super) fn is_top_level_rights_object_name(name: &str) -> bool {
+    name.matches('.').count() == 1
 }
