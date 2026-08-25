@@ -2687,16 +2687,25 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
                 if row.index - expected_row_index > MAX_MOXEL_ROW_GAP {
                     break;
                 }
-                for gap_index in expected_row_index..row.index {
-                    rows.push(MoxelRow {
-                        index: gap_index,
-                        index_to: None,
-                        format_index: 1,
-                        source_format_index: None,
-                        columns_id: None,
-                        cells: Vec::new(),
-                    });
-                }
+                // The whole gap is one published item, not one per index: the
+                // platform writes `<index>first</index><indexTo>last</indexTo>`
+                // over a run the stream skips. Measured over every
+                // `<rowsItem>` of the ERP УХ 3.2.12.6 native tree -- 3,739,968
+                // of them, 1,240 carrying an `<indexTo>` -- **no item has
+                // `indexTo` equal to its `index`**, so a one-wide gap carries
+                // none. Filling one item per index published, e.g.,
+                // `Catalog.ГорячиеКлавиши.Template.ПФ_MXL_ГорячиеКлавиши` with
+                // ten rows against the platform's nine, where rows 3..=4 are a
+                // single `<index>3</index><indexTo>4</indexTo>` item.
+                let last_gap_index = row.index - 1;
+                rows.push(MoxelRow {
+                    index: expected_row_index,
+                    index_to: (last_gap_index > expected_row_index).then_some(last_gap_index),
+                    format_index: 1,
+                    source_format_index: None,
+                    columns_id: None,
+                    cells: Vec::new(),
+                });
             }
             expected_row_index = row.index + 1;
             rows.push(row);
