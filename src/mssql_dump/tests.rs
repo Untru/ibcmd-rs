@@ -72495,3 +72495,91 @@ fn renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven
         ),
     );
 }
+
+/// `Button` under its short revision `30`.
+///
+/// Real ERP УХ 3.2.12.6 bytes:
+/// `Documents/НастраиваемыйОтчет/Forms/ФормаВводаУсловияНаЧисловойПоказательНО`'s
+/// `ОК`, 52 members under leading member `30`, which native ibcmd writes as
+/// `<Button name="ОК" id="1">` with `<Type>UsualButton</Type>`,
+/// `<DefaultButton>true</DefaultButton>` and
+/// `<CommandName>Form.Command.ОК</CommandName>`.
+///
+/// Every (leading member, length) pair of the `Button` class has exactly one
+/// slot shape corpus-wide, and `30`/51 and `30`/52 are `31`/52 and `31`/53
+/// minus one trailing scalar on all 111 records, trailing run 18 -> 17. The
+/// assertions below go past mere recognition on purpose: `item_type` and
+/// `default_button` are read from slots the extended-button layout owns, so
+/// they only come out right if the record was normalized rather than guessed
+/// at.
+///
+/// The arity guard keeps this clear of the only other `{30,...}` in the
+/// codebase -- `compiler::families::business_object`'s 49-field
+/// `BusinessProcess` metadata descriptor, which shares the leading member and
+/// nothing else.
+#[test]
+fn short_button_revision_is_read_with_its_extended_layout() {
+    const BUTTON_30: &str = r#"{30,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,
+{0,
+{0,
+{"B",1},0}
+},1,"ОК",
+{1,0},1,
+{1,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,1,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{11,
+{12,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОКРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,1,0,0,0,1}"#;
+
+    let item = parse_form_child_item(
+        BUTTON_30,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("a short-revision button must be readable");
+
+    assert_eq!(item.tag, "Button");
+    assert_eq!(item.name, "ОК");
+    assert_eq!(item.id, "1");
+    assert_eq!(item.item_type, Some("UsualButton"));
+    assert_eq!(item.default_button, Some(true));
+}
