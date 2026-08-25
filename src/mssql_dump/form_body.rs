@@ -23181,6 +23181,22 @@ pub(super) fn format_form_child_item_xml(
         ));
         xml.push_str(&format_form_title_section(item, indent + 1));
         xml.push_str(&format_form_title_text_color_xml(item, indent + 1));
+        // `TitleBackColor` sits inside the title run: after `Title`, before
+        // `TitleLocation`. The two native corpora that carry it show the two
+        // halves of that one order -- SSL demo/base 3.1.12.297
+        // (`РаботаСРезультатамиОбмена/ОбъектыКПоискуИУстановкеСоответствий`,
+        // four fields: `Title` present, no `TitleLocation`, so it lands
+        // behind the title and ahead of `EditMode`) and УТ 11.5.27.75
+        // (`СервисShare/ВыборФайловКПубликации`, a `PictureField` with no
+        // `Title` but a `TitleLocation`, so it lands behind `DataPath` and
+        // ahead of `TitleLocation`). Reading either half as a whole-block
+        // rule breaks the other corpus; the between-position satisfies both.
+        if let Some(title_back_color) = &item.title_back_color {
+            xml.push_str(&format!(
+                "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
+                escape_xml_text(title_back_color)
+            ));
+        }
         if title_location_follows_title && let Some(title_location) = item.title_location {
             xml.push_str(&format!(
                 "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
@@ -23409,14 +23425,11 @@ pub(super) fn format_form_child_item_xml(
             ));
         }
     }
-    // `TitleBackColor` trails the title block (not `DataPath` directly) and
-    // leads `EditMode`: SSL demo/base 3.1.12.297 share one native form,
-    // `DataProcessors/РаботаСРезультатамиОбмена/ОбъектыКПоискуИУстановкеСоответствий`,
-    // whose four fields that carry it -- two `InputField`, one `LabelField`,
-    // one `PictureField` -- all write it directly ahead of `EditMode`, with
-    // no counter-example anywhere in five corpora. It used to be placed
-    // right behind `DataPath`, ahead of the title block.
-    if let Some(title_back_color) = &item.title_back_color {
+    // Fallback for owners whose title run is written elsewhere: the early
+    // title block above is the evidenced home of `TitleBackColor` (see the
+    // comment there); no native owner outside that block carries it, so this
+    // arm only preserves the value for shapes no corpus has spelled yet.
+    if !early_title_for_field && let Some(title_back_color) = &item.title_back_color {
         xml.push_str(&format!(
             "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
             escape_xml_text(title_back_color)
