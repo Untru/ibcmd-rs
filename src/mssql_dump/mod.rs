@@ -14766,6 +14766,22 @@ fn parse_exact_register_standard_attributes(
     definitions: &[(&'static str, &'static str)],
 ) -> Option<Vec<RegisterStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
+    // `{0}` is the platform's "nothing about this register's standard
+    // attributes is customized" default, the same shape its sibling
+    // `parse_information_register_standard_attributes` already treats as an
+    // empty list rather than a parse failure. Confirmed on real ERP УХ
+    // 3.2.12.6 bytes: `AccumulationRegisters/ВыпускПродукции` (uuid
+    // `f23afba0-c51a-45d0-a3a9-f123fa4744a2`) carries `{0}` here, and the
+    // platform's own exported XML has zero `<StandardAttribute>` elements
+    // anywhere in the file. Before this, treating `{0}` as a hard refusal
+    // (falling through to the generic `!= 2` branch below) aborted the
+    // *entire* owning register's export via this function's `?` call sites
+    // (`parse_exact_accumulation_register_owner_properties` and friends),
+    // one instance of the "default is not absence" class this project keeps
+    // rediscovering (see `docs/evidence/arity-literal-audit-20260825.md`).
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(Vec::new());
+    }
     if outer.len() != 2 || outer.first()?.trim() != "1" {
         return None;
     }

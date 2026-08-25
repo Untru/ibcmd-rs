@@ -62305,6 +62305,34 @@ impl AccumulationRegisterTotalsFixture {
         Self { fields }
     }
 
+    /// Real ERP УХ 3.2.12.6 bytes (`AccumulationRegisters/ВыпускПродукции`,
+    /// uuid `f23afba0-c51a-45d0-a3a9-f123fa4744a2`): the platform writes
+    /// `{0}` at this slot, not the `{1,{1,<count>,...}}` triplet list
+    /// `exact()` builds above, whenever none of the register's standard
+    /// attributes are customized -- and the platform's own exported XML has
+    /// zero `<StandardAttribute>` elements to match.
+    fn exact_without_standard_attributes(flag: &str) -> Self {
+        let mut fields = vec!["28".to_string()];
+        fields.extend(register_generated_type_fields(12));
+        fields.extend([
+            register_owner_header(ACCUMULATION_TOTALS_TEST_UUID, "Totals"),
+            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "0".to_string(),
+            "1".to_string(),
+            "0".to_string(),
+            "1".to_string(),
+            "0".to_string(),
+            flag.to_string(),
+            "{0}".to_string(),
+            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "{0}".to_string(),
+            "{0}".to_string(),
+            "{0}".to_string(),
+        ]);
+        assert_eq!(fields.len(), 26);
+        Self { fields }
+    }
+
     fn extract(&self) -> Option<ExtractedMetadataSourceXml> {
         extract_register_fields(&self.fields, ACCUMULATION_TOTALS_TEST_UUID)
     }
@@ -62528,6 +62556,29 @@ fn accumulation_totals_extracts_exact_true_and_false() {
                 < xml.find(&totals).unwrap()
         );
     }
+}
+
+/// Real ERP УХ 3.2.12.6 evidence (`AccumulationRegisters/ВыпускПродукции`):
+/// `parse_exact_register_standard_attributes` used to hard-refuse the
+/// platform's `{0}` "nothing customized" shorthand -- `outer.len() != 2`
+/// fell straight through to `return None`, which aborted the *whole*
+/// register's export via this function's callers (`no legacy family
+/// decoder recognized this storage entry`, not just a missing detail). The
+/// object exists, its own header/kind/folder all resolve fine; only the
+/// standard-attributes shorthand was unhandled. Negative control: reverting
+/// the `{0}`-handling branch in `parse_exact_register_standard_attributes`
+/// makes this fail (confirmed by hand).
+#[test]
+fn accumulation_register_exports_with_no_customized_standard_attributes() {
+    let source = AccumulationRegisterTotalsFixture::exact_without_standard_attributes("1")
+        .extract()
+        .expect("a register with no standard-attribute customization must still export");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert_eq!(
+        source.relative_path,
+        PathBuf::from("AccumulationRegisters/Totals.xml")
+    );
+    assert!(!xml.contains("<StandardAttribute"));
 }
 
 #[test]
