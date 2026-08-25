@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-command-interface-mdm-use-standard-commands-false",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "ERP UH 3.2.12.6 MDM_Management.cf",
+    "storage_element": "27dc282e-77c4-462a-b827-a3616c7f11b4.1",
+    "source_path": "Subsystems/ИнтеграцияСВнешнимиИсточникамиДанных/Subsystems/ВнешниеИнформационныеБазы/Ext/CommandInterface.xml",
+    "capture": "`ibcmd infobase create --load=MDM_Management.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body."
+  },
+  "notes": "Catalog.ТабличныеЧастиБД (uuid 04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47) declares UseStandardCommands=false in its own Catalogs/ТабличныеЧастиБД.xml. The platform keeps both its CommandsVisibility and CommandsOrder entries as the raw sentinel `0:04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47` rather than resolving Catalog.ТабличныеЧастиБД.StandardCommand.OpenList, because that standard command does not exist on this target.",
+  "retained": {
+    "packed_body": {
+      "size": 430,
+      "sha256": "a094aa5d41a51d21de0e729f7697de723c342fac493dfa9df2f1a80de2496c2f"
+    },
+    "unpacked_body": {
+      "size": 1713,
+      "sha256": "61f678ae5668394a5c0145ad10281807816b0204fc13cb87fc2fd04eeb03ef85"
+    },
+    "native_command_interface": {
+      "size": 3487,
+      "sha256": "7312e882df239654049d21ae922f9433bc5b9ab375105f905a877b0639613550"
+    }
+  }
+}

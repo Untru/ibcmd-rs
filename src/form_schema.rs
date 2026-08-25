@@ -3447,13 +3447,60 @@ impl FormFieldSchema {
         } else {
             59
         };
+        // `top_level_offset == 1` was accepted for four kinds, then a fifth
+        // (`RadioButtonField`), even though the offset itself
+        // (`input_field_top_level_offset` at the one call site) is already
+        // computed uniformly across every kind this schema serves -- the same
+        // shift is already used to locate each kind's own discriminator and
+        // options slot before a record ever reaches this guard. Rejecting the
+        // schema here does not drop the item; each caller that depends on it
+        // has its own unshifted-assuming fallback:
+        //
+        // - `parse_form_child_item_title`/`_tooltip` fall back to a
+        //   positional guess (`&[9, 10]` / `&[10, 11]`) that assumes offset
+        //   0. A shifted `RadioButtonField` had its title read correctly
+        //   from slot 10 (the title fallback's second candidate, since slot
+        //   9 is empty at this offset) while the tooltip fallback picked
+        //   slot 10 too -- the same title text, read a second time -- instead
+        //   of slot 11, the truly empty tooltip slot. Evidence: ERP UH
+        //   MDM_Management `Catalogs/СправочникиБД/Forms/ФормаЭлемента`, item
+        //   `СогласованиеСвязанныхОбъектов` -- wrapper `37`, 60 fields
+        //   (offset 1), discriminator `5`, a 12-member option tuple headed
+        //   `8` -- has its title at slot 10 and an empty `{1,0}` at slot 11;
+        //   native writes `<Title>` and no `<ToolTip>` at all.
+        // - `parse_form_schema_backed_child_item_events` has no fallback at
+        //   all for `SpreadSheetDocumentField`: its only route to the
+        //   field's own event collection is `options.get(schema
+        //   .collection_slot())`, gated on this same schema matching. A
+        //   rejected schema means every event on the field goes unwritten,
+        //   `DetailProcessing` included, not just misread. Evidence: ERP UH
+        //   MDM_Management `CommonForms/ИсторияСогласованияЦентрализованнаяБаза`,
+        //   item `ИсторияСогласования` -- wrapper `37`, 60 fields (offset 1),
+        //   discriminator `6`, a 32-member option tuple headed `13` (all
+        //   exactly what `FormSpreadsheetDocumentFieldProperties` already
+        //   requires of an unshifted `SpreadSheetDocumentField`) -- carries
+        //   its event collection at option slot 18: `{1,
+        //   2988b2a5-c887-4928-94ae-5d0c9c31e999 (the platform's
+        //   `DetailProcessing` event id),
+        //   "ИсторияСогласованияОбработкаРасшифровки", 1, 0,
+        //   2988b2a5-c887-4928-94ae-5d0c9c31e999, 0, 1}` -- the exact shape
+        //   `parse_form_schema_backed_event_record` already parses
+        //   correctly for every *unshifted* `SpreadSheetDocumentField` (70
+        //   native `DetailProcessing` occurrences across ssl/sslbase/ut/mdm/
+        //   ws, none of them previously offset 1). Native writes `<Events>`
+        //   with this one `DetailProcessing` entry.
         if wrapper != "37"
             || field_count != field_count_base + top_level_offset
             || top_level_offset > 1
             || (top_level_offset == 1
                 && !matches!(
                     item_tag,
-                    "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
+                    "LabelField"
+                        | "InputField"
+                        | "CheckBoxField"
+                        | "PictureField"
+                        | "RadioButtonField"
+                        | "SpreadSheetDocumentField"
                 ))
             || direct_discriminator != Some(discriminator)
             || options.len() != options_len
@@ -5014,6 +5061,13 @@ impl FormChildItemShowTitleSchema {
             ) {
                 ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None, None),
                 ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9), Some(23)),
+                // The compact/legacy 28-member bag keeps `ShowTitle` at the
+                // same slot 4 the wide bag uses; see
+                // `parse_form_usual_group_extended_options`'s `"28"` arm for
+                // the evidence (five native records, two configurations).
+                // No colour has been observed at any slot of this bag, so
+                // neither colour coordinate is claimed.
+                ("UsualGroup", Some("5"), 28, Some("28")) => (4, None, None),
                 _ => return None,
             };
         Some(Self {

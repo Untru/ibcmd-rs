@@ -597,13 +597,14 @@ pub(super) fn command_interface_command_name(
     if let Some(name) = command_refs.get(uuid) {
         return name.clone();
     }
-    if let Some(metadata) = metadata_refs.get(uuid) {
-        if let Some(standard) = command_interface_standard_command_for_code(&metadata.kind, code) {
-            return format!(
-                "{}.{}.StandardCommand.{standard}",
-                metadata.kind, metadata.name
-            );
-        }
+    if let Some(metadata) = metadata_refs.get(uuid)
+        && metadata.use_standard_commands
+        && let Some(standard) = command_interface_standard_command_for_code(&metadata.kind, code)
+    {
+        return format!(
+            "{}.{}.StandardCommand.{standard}",
+            metadata.kind, metadata.name
+        );
     }
 
     format!("{code}:{uuid}")

@@ -16,15 +16,40 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
         let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
             continue;
         };
+        let use_standard_commands =
+            metadata_use_standard_commands(kind, &row.text, header).unwrap_or(true);
         index.insert(
             row.file_name.clone(),
             MetadataCommandReference {
                 kind: kind.to_string(),
                 name: header.name.clone(),
+                use_standard_commands,
             },
         );
     }
     index
+}
+
+/// The target's own `<UseStandardCommands>`, read through the same owner-graph
+/// decoder its full properties parser uses -- offset 31 of the normalized
+/// owner fields for `Catalog`, the one kind this is evidenced for (see
+/// `parse_strict_catalog_properties_from_text`, which reads the identical
+/// slot for the object's own `Catalogs/<name>.xml`). `None` for every other
+/// kind, or when the graph does not decode: the caller then keeps the
+/// pre-existing `true` assumption rather than a guessed offset, per the
+/// project's fail-closed rule on unevidenced field positions.
+fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeader) -> Option<bool> {
+    if kind != "Catalog" {
+        return None;
+    }
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        text,
+        header,
+        &mut diagnostic,
+    )?;
+    information_register_bool(graph.owner_fields.get(31)?)
 }
 
 #[allow(dead_code)]

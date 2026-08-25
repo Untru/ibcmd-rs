@@ -130,6 +130,13 @@ pub(super) struct FormParseContext<'a> {
     /// owning object, so a form named through it comes out under the wrong
     /// owner; the caller passes the index that does.
     form_reference_index: Option<&'a BTreeMap<String, String>>,
+    /// The same per-object index the standalone `Ext/CommandInterface.xml`
+    /// reader uses, threaded here so the form's own embedded
+    /// `<CommandInterface>` can decline a `.StandardCommand.X` name when the
+    /// target declares `UseStandardCommands=false` -- see
+    /// `MetadataCommandReference::use_standard_commands`. `None` (the default)
+    /// behaves as an empty index: every target resolves as before.
+    metadata_command_refs: Option<&'a BTreeMap<String, MetadataCommandReference>>,
     dcs_source_profile: ProfileId,
     dcs_target_profile: ProfileId,
     trace_sink: Option<&'a dyn FormItemTraceSink>,
@@ -182,6 +189,7 @@ impl<'a> FormParseContext<'a> {
             information_register_master_dimensions,
             form_owner_reference,
             form_reference_index: None,
+            metadata_command_refs: None,
             dcs_source_profile: ProfileId::parse("provider:mssql-legacy")
                 .expect("static MSSQL provider profile is valid"),
             dcs_target_profile: ProfileId::parse("xml-2.20").expect("static XML profile is valid"),
@@ -194,6 +202,14 @@ impl<'a> FormParseContext<'a> {
         form_reference_index: &'a BTreeMap<String, String>,
     ) -> Self {
         self.form_reference_index = Some(form_reference_index);
+        self
+    }
+
+    pub(super) fn with_metadata_command_refs(
+        mut self,
+        metadata_command_refs: &'a BTreeMap<String, MetadataCommandReference>,
+    ) -> Self {
+        self.metadata_command_refs = Some(metadata_command_refs);
         self
     }
 
@@ -465,6 +481,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         context.form_owner_reference,
         &attributes,
         &child_item_indexes,
+        context.metadata_command_refs,
     );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_command_interface_cpu_ms += elapsed_ms(started);
@@ -13100,6 +13117,72 @@ pub(super) fn parse_form_usual_group_extended_options(
                 show_left_margin: properties.show_left_margin(),
             })
         }
+        // The compact/legacy 28-member option bag: one member shorter than
+        // the wide `29`-bag, but `Group` and `ShowTitle` sit at the exact
+        // same relative slots as they do there (1/27 and 4), which is
+        // exactly what a `29`-bag with one *later* member removed would
+        // look like from the front.
+        //
+        // Evidence, five native records across two independent
+        // configurations (ERP UH `MDM_Management.cf`, three items, and the
+        // ERP UH main `1cv8.cf`, two items found by an exhaustive scan of
+        // every `UsualGroup` in the 140 411-file native export tree whose
+        // `Group`/`Behavior`/`ShowTitle` we currently get wrong):
+        //
+        // - `Group`: slot 1 `"0"` with slot 27 not `"1"`/`"3"`/`"4"` writes
+        //   `Vertical` (`MDM_Management`
+        //   `Catalogs/ТипыБазДанных/Forms/ФормаЭлемента` item
+        //   `ГруппаНастройкиПодключения`, and
+        //   `InformationRegisters/.../ФормаСписка` item
+        //   `СписокКомпоновщикНастроекПользовательскиеНастройки`); slot 1
+        //   `"1"` with slot 27 not in that set writes nothing (`ГруппаОбменДаннымиКонтроляНСИ`
+        //   in the same form as the first); slot 27 `"1"` writes `Horizontal`
+        //   regardless of slot 1 (`1cv8.cf`
+        //   `Catalogs/БланкиОтчетов/Forms/ВыборДействияВолшебнойПалочки`
+        //   item `Группа1`, slot 1 `"1"`, slot 27 `"1"`) -- the exact rule
+        //   `parse_form_usual_group_property_bag_group` already proved for
+        //   the `29`-bag, reused verbatim rather than re-derived.
+        // - `ShowTitle`: slot 4 `"0"` writes `false` (`Группа1` above, and
+        //   `СписокКомпоновщикНастроекПользовательскиеНастройки`); slot 4
+        //   `"1"` writes nothing (the other three) -- wired through
+        //   `FormChildItemShowTitleSchema`, not this struct, at the same
+        //   slot 4 the `29`-bag already uses.
+        // - `Behavior`: `Usual` on four of the five records, slots 10, 12 and
+        //   24 all `"0"`; `Collapsible` on the fifth (`1cv8.cf`
+        //   `Documents/НастраиваемыйОтчет/Forms/ФормаИзмененияПоказателейНО`
+        //   item `ГруппаАналитики`, also natively `<Collapsed>true</Collapsed>`),
+        //   all three slots `"1"`. No record disagreeing between the three
+        //   slots, and no record of `PopUp`, has been found in either
+        //   configuration; `parse_form_usual_group_compact_bag_behavior`
+        //   requires the three slots to agree and declines outright rather
+        //   than guess at the value a disagreement or an unobserved code
+        //   would mean.
+        "28" => Some(FormUsualGroupExtendedOptions {
+            group: parse_form_usual_group_property_bag_group(&options),
+            behavior: parse_form_usual_group_compact_bag_behavior(&options),
+            representation: None,
+            horizontal_stretch: None,
+            enabled: None,
+            read_only: None,
+            height: None,
+            shortcut: None,
+            enable_content_change: None,
+            group_horizontal_align: None,
+            group_vertical_align: None,
+            children_align: None,
+            horizontal_spacing: None,
+            vertical_spacing: None,
+            child_items_width: None,
+            control_representation: None,
+            collapsed: None,
+            collapsed_representation_title: Vec::new(),
+            horizontal_align: None,
+            vertical_align: None,
+            format: Vec::new(),
+            through_align: None,
+            united: None,
+            show_left_margin: None,
+        }),
         "38" => {
             let group = parse_form_extended_group(
                 options.get(1)?.trim(),
@@ -13169,6 +13252,42 @@ pub(super) fn parse_form_usual_group_property_bag_behavior(
         "1" => Some("Collapsible"),
         "2" => Some("PopUp"),
         "3" => None,
+        _ => None,
+    }
+}
+
+/// `Behavior` of a compact-bag (`28`) `UsualGroup`. Unlike the wide `29`-bag,
+/// which carries it at one dedicated slot, every native record this reader
+/// has seen echoes the same code at two slots -- 10 and 24 -- rather than
+/// one: five records read `"0","0"` and write `<Behavior>Usual</Behavior>`
+/// explicitly (this bag never leaves it unwritten, unlike the wide `29`-bag's
+/// default-omits-`Usual` convention), and one reads `"1","1"` and writes
+/// `<Behavior>Collapsible</Behavior>`. None has shown `PopUp` (code `2` on
+/// the wide bag) at all, in either configuration this was checked against.
+///
+/// A third slot, 12, sits between them and echoes the *same* two values on
+/// six of these seven records, which first read as a triple-redundant
+/// `Behavior`; the seventh disproves that (ERP UH `1cv8.cf`
+/// `Documents/ЗаявкиНаЛьготныйКредит/Forms/ФормаДокумента` item
+/// `ГруппаРеквизитовОрганизации`: slots 10/24 both `"0"`, `Behavior=Usual`
+/// natively, but slot 12 is `"1"`) -- natively this same record also carries
+/// `<CollapsedRepresentationTitle>` and `<Collapsed>true</Collapsed>`, so
+/// slot 12 is that `Collapsed` flag (storable, and stored, independently of
+/// `Behavior`), not a third echo. Requiring slots 10 and 24 to agree is a
+/// validity check the reader gets for free from having two copies rather
+/// than one; a record where they disagree, or where they agree on a code
+/// besides `0`/`1`, declines rather than guesses, exactly as an
+/// unrecognised option-bag discriminator already does one level up.
+pub(super) fn parse_form_usual_group_compact_bag_behavior(
+    options: &[&str],
+) -> Option<&'static str> {
+    let value = options.get(10).map(|value| value.trim())?;
+    if options.get(24).map(|field| field.trim()) != Some(value) {
+        return None;
+    }
+    match value {
+        "0" => Some("Usual"),
+        "1" => Some("Collapsible"),
         _ => None,
     }
 }
@@ -20246,6 +20365,41 @@ fn form_object_family_standard_command_name(
     Some(format!("{reference}.StandardCommand.{standard}"))
 }
 
+/// Whether `uuid` -- already resolved to a metadata object reference by the
+/// caller -- has standard commands at all
+/// (`MetadataCommandReference::use_standard_commands`). A uuid absent from the
+/// index (every kind but `Catalog`, today) is treated as enabled, matching
+/// every reader's behaviour before this index existed.
+///
+/// This is a distinct question from "does the family table have a rule for
+/// this particular kind against this particular reference": `false` here
+/// means the target has *no* standard command, so nothing --
+/// `form_object_family_standard_command_name` included -- can ever resolve
+/// through it and the caller must fall back to the raw sentinel outright,
+/// without asking the family table at all. A family-table miss on an
+/// *enabled* target is a different, already-proven negative (e.g. a catalog
+/// asked for kind `1`'s command-interface reading, which the family table
+/// answers `None` for on 27 773 evidenced button records, none of them
+/// naming a disabled catalog) and must keep falling through to `None`
+/// (dropping the item, not a sentinel) exactly as before this index existed.
+///
+/// Evidence: ERP UH MDM_Management `Catalog.СправочникиБД`
+/// (`UseStandardCommands=false`) is target `4:67b8886f-f30d-480c-abb8-e3712f3c169c`
+/// in `Catalogs/ТипыБазДанных/Forms/ФормаЭлемента/Ext/Form.xml`'s
+/// `<NavigationPanel>`; the platform keeps the raw sentinel rather than
+/// writing `Catalog.СправочникиБД.StandardCommand.OpenByValue`, the name
+/// `form_object_family_standard_command_name` would otherwise construct for
+/// kind `4` unconditionally.
+fn form_command_interface_target_use_standard_commands(
+    uuid: &str,
+    context: &FormCommandInterfaceParseContext<'_>,
+) -> bool {
+    context
+        .metadata_command_refs
+        .get(uuid)
+        .is_none_or(|metadata| metadata.use_standard_commands)
+}
+
 pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
         FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
@@ -20834,6 +20988,7 @@ pub(super) fn extract_form_command_interface_with_commands(
         None,
         &[],
         &FormChildItemIndexes::default(),
+        None,
     )
 }
 
@@ -20847,11 +21002,13 @@ pub(super) fn extract_form_command_interface_with_context(
     form_owner_reference: Option<&str>,
     attributes: &[FormAttribute],
     child_item_indexes: &FormChildItemIndexes,
+    metadata_command_refs: Option<&BTreeMap<String, MetadataCommandReference>>,
 ) -> Option<FormCommandInterface> {
     let attribute_names_by_id = attributes
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
+    let empty_metadata_command_refs = BTreeMap::new();
     let context = FormCommandInterfaceParseContext {
         commands,
         object_refs,
@@ -20860,6 +21017,7 @@ pub(super) fn extract_form_command_interface_with_context(
         form_owner_reference,
         attribute_names_by_id: &attribute_names_by_id,
         child_item_indexes,
+        metadata_command_refs: metadata_command_refs.unwrap_or(&empty_metadata_command_refs),
     };
     let mut command_bar = Vec::new();
     let mut navigation_panel = Vec::new();
@@ -20886,6 +21044,10 @@ pub(super) struct FormCommandInterfaceParseContext<'a> {
     form_owner_reference: Option<&'a str>,
     attribute_names_by_id: &'a BTreeMap<String, String>,
     child_item_indexes: &'a FormChildItemIndexes,
+    /// Whether each target metadata object declares
+    /// `<UseStandardCommands>`. Empty behaves as "unknown, assume true"
+    /// (today's behaviour) for every uuid it does not carry.
+    metadata_command_refs: &'a BTreeMap<String, MetadataCommandReference>,
 }
 
 pub(super) fn parse_form_command_interface_container(
@@ -20958,6 +21120,23 @@ pub(super) fn parse_form_command_interface_item(
         _ => None,
     }
     .filter(|visible| !*visible);
+    // Slot 8 is always shaped like a rights tuple (validated above), but the
+    // platform only surfaces it as `<Visible>` when slot 7 itself was written
+    // `false`: across mdm/ws/ssl/sslbase/ut/uh (14 000+ items) every item whose
+    // `<DefaultVisible>` is unwritten also carries no `<Visible>`, even when
+    // slot 8 decodes to a non-default `common=false` -- e.g. MDM_Management
+    // `Catalogs/ТипыБазДанных/Forms/ФормаЭлемента`, whose `Catalog.СправочникиБД`
+    // item has slot 7 `1` (default_visible unwritten) and slot 8
+    // `{0,{0,{"B",0},0}}` (common=false) yet native writes no `<Visible>` at
+    // all. A slot-7 `0` sibling with the identical slot-8 shape in the same
+    // form (`Task.ЗадачаИсполнителя.Command.Выполнено`, sslbase corpus) does
+    // get `<Visible><xr:Common>false</xr:Common></Visible>`, so the gate is on
+    // slot 7, not a coincidence of slot 8's bits.
+    let visible = if default_visible.is_some() {
+        parse_form_command_interface_visibility(fields.get(8)?, context.object_refs)?
+    } else {
+        None
+    };
     Some(FormCommandInterfaceItem {
         command,
         item_type,
@@ -20965,7 +21144,7 @@ pub(super) fn parse_form_command_interface_item(
         command_group,
         index,
         default_visible,
-        visible: parse_form_command_interface_visibility(fields.get(8)?, context.object_refs)?,
+        visible,
     })
 }
 
@@ -21169,49 +21348,81 @@ pub(super) fn parse_form_command_interface_command(
                             .or_else(|| form_standard_command_name(&uuid))
                             .map(ToOwned::to_owned)
                     })
+                    // Nothing named this target: the platform still writes the
+                    // item, as the raw `kind:uuid` sentinel rather than a name it
+                    // cannot construct -- the object-level
+                    // `command_interface_command_name` sibling this mirrors has
+                    // always done the same. UT
+                    // `Documents/ЗаявкаНаИзменениеНСИ/Forms/ФормаВыбора`:
+                    // `0:1d3cba0d-8887-4564-a9a2-6df75e80e775` is not any
+                    // metadata object, command or button uuid this reader
+                    // knows, and native keeps it literal; before this fallback
+                    // the whole `<CommandBar>` (both its items) went unwritten
+                    // because every item in it failed to resolve.
+                    .or_else(|| Some(format!("0:{uuid}")))
             }
         }
         // Slots 1 and 2 are pure family rules, read through the one shared
         // grammar so this reader and the button reader cannot disagree about the
-        // same `{kind, uuid}` record again.
+        // same `{kind, uuid}` record again. An unresolved uuid still hard-fails
+        // here (unlike kind `0`): every evidenced record of this shape names a
+        // real metadata object of the current configuration, never a raw
+        // platform constant, so a miss is unproven rather than the target
+        // simply lacking a name.
         "1" | "2" => {
             let uuid = parse_non_zero_uuid(target?)?;
             let reference = context.object_refs.get(&uuid)?;
+            if !form_command_interface_target_use_standard_commands(&uuid, context) {
+                return Some(format!("{kind}:{uuid}"));
+            }
             form_object_family_standard_command_name(
                 kind,
                 reference,
                 FormCommandRecordReader::CommandInterfaceItem,
             )
         }
-        "3" => resolve_information_register_open_by_value_command(kind, target?, context).or_else(
-            || {
-                let uuid = parse_non_zero_uuid(target?)?;
-                let reference = context.object_refs.get(&uuid)?;
-                // A catalog names its "create based on" command from slot 3, where a
-                // document or business process names the same command from slot 2.
-                form_object_family_standard_command_name(
-                    kind,
-                    reference,
-                    FormCommandRecordReader::CommandInterfaceItem,
-                )
-                .or_else(|| {
-                    (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
-                        .then(|| reference.clone())
-                })
-            },
-        ),
-        "4" => {
-            let uuid = parse_non_zero_uuid(target?)?;
+        "3" => {
+            let target = target?;
+            if let Some(name) =
+                resolve_information_register_open_by_value_command(kind, target, context)
+            {
+                return Some(name);
+            }
+            let uuid = parse_non_zero_uuid(target)?;
             let reference = context.object_refs.get(&uuid)?;
+            if !form_command_interface_target_use_standard_commands(&uuid, context) {
+                return Some(format!("{kind}:{uuid}"));
+            }
+            // A catalog names its "create based on" command from slot 3, where a
+            // document or business process names the same command from slot 2.
             form_object_family_standard_command_name(
                 kind,
                 reference,
                 FormCommandRecordReader::CommandInterfaceItem,
             )
-            .or_else(|| resolve_information_register_open_by_value_command(kind, target?, context))
+            .or_else(|| {
+                (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
+                    .then(|| reference.clone())
+            })
+        }
+        "4" => {
+            let target = target?;
+            let uuid = parse_non_zero_uuid(target)?;
+            let reference = context.object_refs.get(&uuid)?;
+            if !form_command_interface_target_use_standard_commands(&uuid, context) {
+                return Some(format!("{kind}:{uuid}"));
+            }
+            form_object_family_standard_command_name(
+                kind,
+                reference,
+                FormCommandRecordReader::CommandInterfaceItem,
+            )
+            .or_else(|| resolve_information_register_open_by_value_command(kind, target, context))
         }
         // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
-        // theirs with the object commands handled above.
+        // theirs with the object commands handled above. Unlike those, this
+        // grammar never touches `object_refs`, so `UseStandardCommands` has no
+        // uuid to gate here.
         "5" | "6" | "7" => {
             resolve_information_register_open_by_value_command(kind, target?, context)
         }
@@ -21227,6 +21438,26 @@ pub(super) fn parse_form_command_interface_command_for_test(
     information_register_master_dimensions: &InformationRegisterMasterDimensionIndex,
     form_owner_reference: &str,
 ) -> Option<String> {
+    parse_form_command_interface_command_for_test_with_metadata_refs(
+        field,
+        object_refs,
+        information_register_field_refs,
+        information_register_master_dimensions,
+        form_owner_reference,
+        &BTreeMap::new(),
+    )
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn parse_form_command_interface_command_for_test_with_metadata_refs(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    information_register_master_dimensions: &InformationRegisterMasterDimensionIndex,
+    form_owner_reference: &str,
+    metadata_command_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<String> {
     let attribute_names_by_id = BTreeMap::new();
     let child_item_indexes = FormChildItemIndexes::default();
     parse_form_command_interface_command(
@@ -21239,6 +21470,7 @@ pub(super) fn parse_form_command_interface_command_for_test(
             form_owner_reference: Some(form_owner_reference),
             attribute_names_by_id: &attribute_names_by_id,
             child_item_indexes: &child_item_indexes,
+            metadata_command_refs,
         },
     )
 }

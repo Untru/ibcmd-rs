@@ -5204,6 +5204,21 @@ struct FlowchartBase {
 struct MetadataCommandReference {
     kind: String,
     name: String,
+    /// Whether the target metadata object itself declares
+    /// `<UseStandardCommands>true</UseStandardCommands>`. Both command-interface
+    /// readers (this object's own `Ext/CommandInterface.xml` and a form's
+    /// embedded `<CommandInterface>`) must decline to synthesize a
+    /// `.StandardCommand.X` name when this is `false`: the platform keeps the
+    /// raw `code:uuid` sentinel instead, because the standard command does not
+    /// exist on that target. Evidence: ERP UH `MDM_Management`,
+    /// `Catalog.ТабличныеЧастиБД` (`UseStandardCommands=false`) is kept as
+    /// `0:04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47` in
+    /// `Subsystems/.../Ext/CommandInterface.xml`, and `Catalog.СправочникиБД`
+    /// (also `false`) is kept as `4:67b8886f-f30d-480c-abb8-e3712f3c169c` in
+    /// `Catalogs/ТипыБазДанных/Forms/ФормаЭлемента/Ext/Form.xml`. Defaults to
+    /// `true` (today's behaviour) for every kind the index cannot yet prove a
+    /// value for -- only `Catalog` is evidenced so far.
+    use_standard_commands: bool,
 }
 
 fn parse_exchange_plan_content_blob(

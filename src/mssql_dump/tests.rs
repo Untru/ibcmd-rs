@@ -5928,6 +5928,7 @@ fn extracts_command_interface_subsystems_order() {
             MetadataCommandReference {
                 kind: "Subsystem".to_string(),
                 name: "Sales".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -5935,6 +5936,7 @@ fn extracts_command_interface_subsystems_order() {
             MetadataCommandReference {
                 kind: "Subsystem".to_string(),
                 name: "Purchases".to_string(),
+                use_standard_commands: true,
             },
         ),
     ]);
@@ -6027,6 +6029,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "DocumentJournal".to_string(),
                 name: "РеестрТорговыхДокументов".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6034,6 +6037,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Report".to_string(),
                 name: "КонтактнаяИнформация".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6041,6 +6045,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Role".to_string(),
                 name: "ОтчетыМаркетолога".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6048,6 +6053,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Role".to_string(),
                 name: "ОтчетыРуководителяОтделаПродаж".to_string(),
+                use_standard_commands: true,
             },
         ),
         (
@@ -6055,6 +6061,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
             MetadataCommandReference {
                 kind: "Role".to_string(),
                 name: "ПолныеПрава".to_string(),
+                use_standard_commands: true,
             },
         ),
     ]);
@@ -6073,6 +6080,147 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
         .expect("native CommandsVisibility end")
         + CLOSE.len();
     assert!(xml.contains(&native_xml[start..end]), "{xml}");
+}
+
+/// `Catalog.ТабличныеЧастиБД` declares `UseStandardCommands=false`, so the
+/// platform keeps its command-interface entries as the raw `0:<uuid>` sentinel
+/// rather than resolving `Catalog.ТабличныеЧастиБД.StandardCommand.OpenList`
+/// (a standard command that does not exist on this target), while a sibling
+/// entry for `Catalog.ТипыБазДанных` (`UseStandardCommands=true`) resolves
+/// normally. Before the `use_standard_commands` gate on `MetadataCommandReference`,
+/// the reader resolved both alike -- wrong for the disabled one.
+///
+/// Provenance (`manifest.json` in the fixture directory): storage element
+/// `27dc282e-77c4-462a-b827-a3616c7f11b4.1` of ERP UH 3.2.12.6's
+/// `MDM_Management.cf`, packed body sha256
+/// `a094aa5d41a51d21de0e729f7697de723c342fac493dfa9df2f1a80de2496c2f`; the
+/// expectation is the platform's own
+/// `Subsystems/ИнтеграцияСВнешнимиИсточникамиДанных/Subsystems/ВнешниеИнформационныеБазы/Ext/CommandInterface.xml`
+/// from an `ibcmd config export` capture with 1C:Enterprise 8.3.27.2214, sha256
+/// `7312e882df239654049d21ae922f9433bc5b9ab375105f905a877b0639613550`.
+#[test]
+fn platform_command_interface_declines_standard_command_when_use_standard_commands_false() {
+    let packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "command-interface-mdm-use-standard-commands-false/raw-packed.bin.b64"
+    )))
+    .expect("platform-attested command interface payload");
+    let native = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "command-interface-mdm-use-standard-commands-false/native-command-interface.xml.b64"
+    )))
+    .expect("platform-attested command interface export");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&packed)),
+        "a094aa5d41a51d21de0e729f7697de723c342fac493dfa9df2f1a80de2496c2f"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&native)),
+        "7312e882df239654049d21ae922f9433bc5b9ab375105f905a877b0639613550"
+    );
+
+    let metadata_refs = BTreeMap::from([
+        (
+            "04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47".to_string(),
+            MetadataCommandReference {
+                kind: "Catalog".to_string(),
+                name: "ТабличныеЧастиБД".to_string(),
+                use_standard_commands: false,
+            },
+        ),
+        (
+            "858c9634-d409-4b3c-940a-1597db774e56".to_string(),
+            MetadataCommandReference {
+                kind: "Catalog".to_string(),
+                name: "ТипыБазДанных".to_string(),
+                use_standard_commands: true,
+            },
+        ),
+        (
+            "c92b8991-fc53-416b-8505-f0493559e7fd".to_string(),
+            MetadataCommandReference {
+                kind: "Catalog".to_string(),
+                name: "ВнешниеИнформационныеБазы".to_string(),
+                use_standard_commands: true,
+            },
+        ),
+    ]);
+
+    let command_interface = parse_command_interface_blob(&packed, &BTreeMap::new(), &metadata_refs)
+        .expect("platform-attested command interface body must decode");
+    let xml = format_command_interface_xml(&command_interface);
+
+    let native_xml = std::str::from_utf8(&native).expect("native command interface is UTF-8");
+    for (open, close) in [
+        ("\t<CommandsVisibility>\r\n", "\t</CommandsVisibility>\r\n"),
+        ("\t<CommandsOrder>\r\n", "\t</CommandsOrder>\r\n"),
+    ] {
+        let start = native_xml
+            .find(open)
+            .unwrap_or_else(|| panic!("native {open} section"));
+        let end = native_xml
+            .find(close)
+            .unwrap_or_else(|| panic!("native {open} end"))
+            + close.len();
+        assert!(xml.contains(&native_xml[start..end]), "{xml}");
+    }
+    // The disabled catalog's own standard-command name never appears: every
+    // occurrence of its uuid stayed the raw sentinel, in both sections.
+    assert!(!xml.contains("ТабличныеЧастиБД.StandardCommand"));
+    assert_eq!(
+        xml.matches("0:04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47")
+            .count(),
+        2
+    );
+}
+
+/// The `use_standard_commands` field the previous test's fixed `metadata_refs`
+/// stood in for is itself read off the Catalog's own metadata row, not
+/// invented: offset 31 of the owner-graph-normalized fields, the same slot
+/// `parse_strict_catalog_properties_from_text` reads for the object's own
+/// `<UseStandardCommands>`. Two real ERP UH MDM_Management catalogs, one of
+/// each value, prove the extractor and the index built from it agree with
+/// what each catalog's own XML says.
+///
+/// Provenance (`manifest.json` in the fixture directory): metadata-text CF
+/// elements `04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47` (Catalog.ТабличныеЧастиБД)
+/// and `858c9634-d409-4b3c-940a-1597db774e56` (Catalog.ТипыБазДанных) of
+/// `MDM_Management.cf`.
+#[test]
+fn metadata_command_reference_index_reads_catalog_use_standard_commands_from_real_rows() {
+    let false_packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "catalog-mdm-use-standard-commands/catalog-false-packed.bin.b64"
+    )))
+    .expect("platform-attested catalog payload");
+    let true_packed = decode_base64_mime(include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "catalog-mdm-use-standard-commands/catalog-true-packed.bin.b64"
+    )))
+    .expect("platform-attested catalog payload");
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&false_packed)),
+        "1e435f2b6941e44316a166b27c5f36a19905de18623951f348aedf2eaf732ebf"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&true_packed)),
+        "774420280c788c0da678ba3918b64aca5d61619a1e248899dc688ef04d698f1f"
+    );
+
+    let false_uuid = "04c1ab92-f4fc-40e9-b0d6-a1c57a5a8b47";
+    let true_uuid = "858c9634-d409-4b3c-940a-1597db774e56";
+    let rows = vec![
+        metadata_text_row_from_blob(false_uuid, &false_packed)
+            .expect("Catalog.ТабличныеЧастиБД metadata row must decode"),
+        metadata_text_row_from_blob(true_uuid, &true_packed)
+            .expect("Catalog.ТипыБазДанных metadata row must decode"),
+    ];
+    assert_eq!(rows[0].kind.as_deref(), Some("Catalog"));
+    assert_eq!(rows[1].kind.as_deref(), Some("Catalog"));
+
+    let index = build_metadata_command_reference_index_from_texts(&rows);
+    assert!(!index[false_uuid].use_standard_commands);
+    assert!(index[true_uuid].use_standard_commands);
 }
 
 #[test]
@@ -17449,6 +17597,99 @@ fn extracts_radio_button_field_with_choice_list_from_layout_code() {
     assert!(xml.contains(r#"<ContextMenu name="ВариантОбработкиКонтекстноеМеню" id="39"/>"#));
 }
 
+/// A shifted (`top_level_offset == 1`) `RadioButtonField` used to lose its
+/// `FormFieldSchema` match outright -- the guard allowed the offset only for
+/// `LabelField`/`InputField`/`CheckBoxField`/`PictureField` -- and fall back to
+/// the unshifted-assuming positional readers instead. Title fell back
+/// correctly (its `&[9, 10]` candidate list still finds the real title at
+/// slot 10, one past the empty slot 9), but tooltip's `&[10, 11]` candidate
+/// list picked slot 10 first too: the same title text, read a second time as
+/// if it were the tooltip.
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `64cdce18-0812-4f5e-9caf-33459239e2b9.0`
+/// (`Catalogs/СправочникиБД/Forms/ФормаЭлемента`), item id 72
+/// `СогласованиеСвязанныхОбъектов` -- wrapper `37`, 60 top-level fields (the
+/// unshifted base is 59), discriminator `5`. Native writes `<Title>` and no
+/// `<ToolTip>` at all for this item.
+#[test]
+fn extracts_shifted_radio_button_field_title_without_duplicating_into_tooltip() {
+    let item = parse_form_child_item(
+            r##"{37,{72,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},5,"СогласованиеСвязанныхОбъектов",3,0,{1,1,{"ru","Утверждение связанных заявок на регистрацию используемых неактивных элементов других справочников"}},{1,0},{2,{1},{0,144efa7e-feae-4008-8582-d30937446e25}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{3,0},0,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2},{0,1,0},1,{22,{73,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СогласованиеСвязанныхОбъектовКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{74,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СогласованиеСвязанныхОбъектовРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##,
+            Some("Объект"),
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(item.tag, "RadioButtonField");
+    assert_eq!(
+        item.title,
+        vec![(
+            "ru".to_string(),
+            "Утверждение связанных заявок на регистрацию используемых неактивных элементов других справочников".to_string()
+        )]
+    );
+    assert!(
+        item.tooltip.is_empty(),
+        "tooltip must stay empty, not duplicate the title: {:?}",
+        item.tooltip
+    );
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Title>"));
+    assert!(
+        !xml.contains("<ToolTip>"),
+        "must not write a spurious ToolTip: {xml}"
+    );
+}
+
+/// The same `top_level_offset == 1` gap `FormFieldSchema::from_raw_layout`
+/// had for `RadioButtonField` also blocked every event of a shifted
+/// `SpreadSheetDocumentField`, `DetailProcessing` included:
+/// `parse_form_schema_backed_child_item_events`'s only route to the field's
+/// event collection is `options.get(schema.collection_slot())`, gated on
+/// this same schema matching, and there is no positional fallback the way
+/// title/tooltip have one -- a rejected schema means the whole `<Events>`
+/// block goes unwritten, not just one event misread.
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `074f9be4-aec8-49d5-b17f-56997fe8782a.0`
+/// (`CommonForms/ИсторияСогласованияЦентрализованнаяБаза`), item id 1
+/// `ИсторияСогласования` -- wrapper `37`, 60 top-level fields (the unshifted
+/// base is 59), discriminator `6`, a 32-member option tuple headed `13`.
+/// Native writes one `<Events>` entry, `DetailProcessing`.
+#[test]
+fn extracts_detail_processing_event_from_shifted_spreadsheet_document_field() {
+    let item = parse_form_child_item(
+            r##"{37,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},6,"ИсторияСогласования",0,0,{1,0},{1,0},{1,{1}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{13,50,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{1,2988b2a5-c887-4928-94ae-5d0c9c31e999,"ИсторияСогласованияОбработкаРасшифровки",1,0,2988b2a5-c887-4928-94ae-5d0c9c31e999,0,1},0,1,0,0,1,0,0,0,0,2,2,1,2},{0,1,0},1,{22,{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ИсторияСогласованияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИсторияСогласованияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(item.tag, "SpreadSheetDocumentField");
+    assert_eq!(item.events.len(), 1, "events: {:?}", item.events);
+    assert_eq!(item.events[0].name, "DetailProcessing");
+    assert_eq!(
+        item.events[0].handler,
+        "ИсторияСогласованияОбработкаРасшифровки"
+    );
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Events>"));
+    assert!(xml.contains(
+        r#"<Event name="DetailProcessing">ИсторияСогласованияОбработкаРасшифровки</Event>"#
+    ));
+}
+
 #[test]
 fn parses_radio_button_type_and_columns_count_from_options() {
     for (code, expected) in [("0", "Auto"), ("1", "RadioButtons"), ("2", "Tumbler")] {
@@ -20852,6 +21093,89 @@ fn parses_extended_usual_group_properties() {
     assert!(xml.contains("<ShowTitle>false</ShowTitle>"));
 }
 
+/// The compact/legacy 28-member `UsualGroup` option bag -- one member
+/// shorter than the wide `29`-bag `parses_extended_usual_group_properties`
+/// exercises above, and previously matched by no arm at all
+/// (`parse_form_usual_group_extended_options` fell through to `_ => None`
+/// and `FormChildItemShowTitleSchema::from_raw_layout` had no `28` arm
+/// either), so `Group`, `Behavior` and `ShowTitle` all went unwritten.
+///
+/// This record proves `Group` from slot 27 (`Horizontal`, before slot 1 is
+/// ever consulted), `Behavior` from slots 10/12/24 all `"0"` (`Usual`, which
+/// this bag always writes explicitly -- unlike the wide `29`-bag, no native
+/// record of this bag has been found that omits it) and `ShowTitle` from
+/// slot 4 (`"0"` -> `false`); the sibling test below proves the
+/// `Vertical`-from-slot-1 `Group` fallback and the `Collapsible` `Behavior`
+/// value.
+///
+/// Provenance: ERP UH `1cv8.cf`, storage element
+/// `88593e1f-ae85-48a2-9219-e511e162372e.0`
+/// (`Catalogs/БланкиОтчетов/Forms/ВыборДействияВолшебнойПалочки`), item id 27
+/// `Группа1`. Native writes `<Group>Horizontal</Group>`,
+/// `<Behavior>Usual</Behavior>` and `<ShowTitle>false</ShowTitle>`.
+#[test]
+fn extracts_compact_usual_group_horizontal_and_show_title_false() {
+    let field = r#"{22,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},5,"Группа1",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{28,1,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,1,{3,4,{0}},0,2,0,1},2,a9f3b1ac-f51b-431e-b102-55a69acdecad,{30,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,{0,{0,{"B",1},0}},1,"СоздатьНовыйБланк",{1,0},1,{1,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},3,0,0,0,2,2,22,2,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{11,{33,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СоздатьНовыйБланкExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,1,0,0,0,1},3d3cb80c-508b-41fa-8a18-680cdf5f1712,{11,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},0,"Декорация1",{1,1,{"ru","Будет открыт диалог для выбора параметров создания нового бланка.Вы сможете заменить текущий или создать новый бланк."}},{1,0},1,50,0,2,2,{3,3,{0,ad87bd29-0ad1-4da4-ac62-38e714e0cb9f}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},8,"Декорация1КонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Будет открыт диалог для выбора параметров создания нового бланка.Вы сможете заменить текущий или создать новый бланк."}},0},0,1,{11,{34,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"Декорация1ExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},1,0,0,1,0,3,3,0},1,0,1,{11,{32,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"Группа1ExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},0,3,3,0}"#;
+    let item = parse_form_child_item(
+        field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(item.tag, "UsualGroup");
+    assert_eq!(item.group, Some("Horizontal"));
+    // Parsed as `Usual` (slots 10/12/24 all agree on `"0"`); the writer
+    // separately treats `Usual` as the unwritten default, same as it does
+    // for the wide `29`-bag.
+    assert_eq!(item.behavior, Some("Usual"));
+    assert_eq!(item.show_title, Some(false));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Group>Horizontal</Group>"));
+    assert!(xml.contains("<Behavior>Usual</Behavior>"));
+    assert!(xml.contains("<ShowTitle>false</ShowTitle>"));
+}
+
+/// The same compact 28-bag, proving `Behavior` (`Collapsible`, the one
+/// non-`Usual` value found in either evidenced configuration) and the
+/// `Vertical`-from-slot-1 `Group` fallback (slot 27 here is `"0"`, not the
+/// `"1"`/`"3"`/`"4"` the sibling test's `Horizontal` used, so
+/// `parse_form_usual_group_property_bag_group` falls through to slot 1).
+///
+/// Provenance: ERP UH `1cv8.cf`, storage element
+/// `6ef5e7a5-ba84-4045-97ba-f70d108cc626.0`
+/// (`Documents/НастраиваемыйОтчет/Forms/ФормаИзмененияПоказателейНО`), item
+/// id 3 `ГруппаАналитики`. Native writes `<Group>Vertical</Group>` and
+/// `<Behavior>Collapsible</Behavior>` (`<Collapsed>true</Collapsed>` is also
+/// native but out of scope: this bag's `Collapsed` slot is unproven).
+#[test]
+fn extracts_compact_usual_group_collapsible_behavior() {
+    let field = r#"{22,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},5,"ГруппаАналитики",{1,1,{"ru","Аналитические измерения..."}},{1,1,{"ru","Группа аналитики"}},0,1,0,0,6,2,0,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{28,0,0,2,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},1,0,1,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},1,2,0,0},1,143c00f7-a42d-4cd7-9189-88e4467dc768,{54,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},"Аналитики",0,0,1,{1,0},{1,0},{1,{5}},0,1,1,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,0,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,1,13,{"U"},{0,1,0},{0},1,{22,{28,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"АналитикиКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{29,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"АналитикиКоманднаяПанель",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{34,{46,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},2,"АналитикиАналитика",1,0,{1,0},{1,0},{2,{5},{1}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{32,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5004,0},{0,0},2,{1,0},{1,0},2,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0},{0,1,0},1,{22,{47,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"АналитикиАналитикаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{11,{48,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"АналитикиАналитикаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},3,3,0},2,2,1,0,{"Pattern"},"","",2,2,0,1,{11,{30,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"АналитикиРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},0,0,0,1,{5,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"АналитикиСтрокаПоиска",{1,0},{1,0},1,1,0,1,{1,0,2,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0},1,{22,{34,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"АналитикиСтрокаПоискаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{11,{35,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"АналитикиСтрокаПоискаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},2,{27,0},0,3,3,0},1,{5,{36,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"АналитикиСостояниеПросмотра",{1,0},{1,0},1,1,0,1,{1,0,2,{3,4,{0}},{3,4,{0}},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{7,3,0,1,100},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},3,{0,1,0},1,0,0},1,{22,{39,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"АналитикиСостояниеПросмотраКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{11,{40,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"АналитикиСостояниеПросмотраРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},2,{27,1},0,3,3,0},1,{5,{41,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"АналитикиУправлениеПоиском",{1,0},{1,0},1,1,0,1,{1,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0,2},1,{22,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"АналитикиУправлениеПоискомКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{11,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"АналитикиУправлениеПоискомРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},2,{27,2},0,3,3,0},0,1,0,0,1,0,3,3,0,1,0,0,0,0,0},1,0,1,{11,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаАналитикиРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0},0,3,3,0}"#;
+    let item = parse_form_child_item(
+        field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(item.tag, "UsualGroup");
+    assert_eq!(item.group, Some("Vertical"));
+    assert_eq!(item.behavior, Some("Collapsible"));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Group>Vertical</Group>"));
+    assert!(xml.contains("<Behavior>Collapsible</Behavior>"));
+}
+
 #[test]
 fn maps_usual_group_title_color_platform_codes_in_form_context() {
     let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
@@ -21441,6 +21765,161 @@ fn extracts_form_command_interface_command_bar() {
         2
     );
     assert_eq!(form_xml.matches("<xr:Common>false</xr:Common>").count(), 2);
+}
+
+/// The three sub-fixes of f8b3251 on one real record:
+/// `parse_form_command_interface_command`'s `UseStandardCommands` gate (item
+/// 3, target `Catalog.СправочникиБД`, `UseStandardCommands=false`, must stay
+/// the raw sentinel `4:67b8886f-...` rather than resolve to
+/// `Catalog.СправочникиБД.StandardCommand.OpenByValue`) and the
+/// `default_visible`-gates-`Visible` rule (all five items carry slot 7 `1`
+/// and an identical slot-8 `{0,{0,{"B",0},0}}`, which used to be
+/// misread as an explicit `common=false` override on every one of them; none
+/// should carry `<Visible>` at all).
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `516a577c-80f7-4ea7-9ba7-b68c0b6ab64a.0`
+/// (`Catalogs/ТипыБазДанных/Forms/ФормаЭлемента`), `body.trailing` slot 3 (the
+/// `<NavigationPanel>` container). Native writes five `<Item>`s, none with
+/// `<DefaultVisible>` or `<Visible>`, and the fourth (index absent) as
+/// `<Command>4:67b8886f-f30d-480c-abb8-e3712f3c169c</Command>`.
+#[test]
+fn extracts_real_world_navigation_panel_declines_disabled_standard_command_and_stray_visible() {
+    let trailing = vec![
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        concat!(
+            r#"{0,5,{3,0,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},2,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,1,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},3,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,2,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},4,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,3,{4,67b8886f-f30d-480c-abb8-e3712f3c169c},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,4,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},1,1,{0,{0,{"B",0},0}}}}"#,
+        )
+        .to_string(),
+    ];
+    let object_refs = BTreeMap::from([(
+        "67b8886f-f30d-480c-abb8-e3712f3c169c".to_string(),
+        "Catalog.СправочникиБД".to_string(),
+    )]);
+    let metadata_command_refs = BTreeMap::from([(
+        "67b8886f-f30d-480c-abb8-e3712f3c169c".to_string(),
+        MetadataCommandReference {
+            kind: "Catalog".to_string(),
+            name: "СправочникиБД".to_string(),
+            use_standard_commands: false,
+        },
+    )]);
+
+    let command_interface = extract_form_command_interface_with_context(
+        &trailing,
+        &[],
+        &object_refs,
+        &BTreeMap::new(),
+        &InformationRegisterMasterDimensionIndex::new(),
+        None,
+        &[],
+        &FormChildItemIndexes::default(),
+        Some(&metadata_command_refs),
+    )
+    .expect("platform-attested navigation panel must decode");
+
+    assert_eq!(command_interface.navigation_panel.len(), 5);
+    assert!(command_interface.command_bar.is_empty());
+    assert!(
+        command_interface
+            .navigation_panel
+            .iter()
+            .all(|item| item.visible.is_none()),
+        "no item should carry an explicit Visible override: {:?}",
+        command_interface
+            .navigation_panel
+            .iter()
+            .map(|item| &item.visible)
+            .collect::<Vec<_>>()
+    );
+    let commands = command_interface
+        .navigation_panel
+        .iter()
+        .map(|item| item.command.as_str())
+        .collect::<Vec<_>>();
+    assert!(commands.contains(&"4:67b8886f-f30d-480c-abb8-e3712f3c169c"));
+    assert!(
+        !commands
+            .iter()
+            .any(|command| command.contains("StandardCommand"))
+    );
+
+    let xml = format_form_command_interface_xml(&command_interface);
+    assert!(xml.contains("<Command>4:67b8886f-f30d-480c-abb8-e3712f3c169c</Command>"));
+    assert!(!xml.contains("<Visible>"), "{xml}");
+}
+
+/// The sentinel-fallback sub-fix of f8b3251: before it, an unresolvable
+/// `{kind,uuid}` target (not a metadata object, form command or known
+/// platform constant) made `parse_form_command_interface_command` return
+/// `None`, dropping the whole item -- and since both items of this
+/// `<CommandBar>` name such targets, the entire container, and with it the
+/// whole `<CommandInterface>`, went unwritten.
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `337d501c-eb4e-41b1-9d0d-45d87e3bfcf7.0`
+/// (`Documents/ЗаявкаНаИзменениеНСИ/Forms/ФормаВыбора`), `body.trailing` slot
+/// 4 (the `<CommandBar>` container). Native writes two `<Item>`s, each
+/// `<Command>0:<uuid></Command>` verbatim, `<DefaultVisible>false</DefaultVisible>`
+/// and `<Visible><xr:Common>false</xr:Common></Visible>`.
+#[test]
+fn extracts_real_world_command_bar_keeps_unresolvable_targets_as_sentinels() {
+    let trailing = vec![
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        concat!(
+            r#"{0,2,{3,0,{0,1d3cba0d-8887-4564-a9a2-6df75e80e775},{0},0,{0},0,0,{0,{0,{"B",0},0}}},"#,
+            r#"{3,1,{0,100e850f-cadc-4255-b561-8339e92ff395},{0},0,{0},0,0,{0,{0,{"B",0},0}}}}"#,
+        )
+        .to_string(),
+    ];
+
+    let command_interface = extract_form_command_interface_with_context(
+        &trailing,
+        &[],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &InformationRegisterMasterDimensionIndex::new(),
+        None,
+        &[],
+        &FormChildItemIndexes::default(),
+        None,
+    )
+    .expect("platform-attested command bar must decode");
+
+    assert!(command_interface.navigation_panel.is_empty());
+    assert_eq!(command_interface.command_bar.len(), 2);
+    let commands = command_interface
+        .command_bar
+        .iter()
+        .map(|item| item.command.as_str())
+        .collect::<Vec<_>>();
+    assert!(commands.contains(&"0:1d3cba0d-8887-4564-a9a2-6df75e80e775"));
+    assert!(commands.contains(&"0:100e850f-cadc-4255-b561-8339e92ff395"));
+    assert!(
+        command_interface
+            .command_bar
+            .iter()
+            .all(|item| item.default_visible == Some(false))
+    );
+
+    let xml = format_form_command_interface_xml(&command_interface);
+    assert!(xml.contains("<CommandBar>"));
+    assert!(xml.contains("<Command>0:1d3cba0d-8887-4564-a9a2-6df75e80e775</Command>"));
+    assert!(xml.contains("<Command>0:100e850f-cadc-4255-b561-8339e92ff395</Command>"));
+    assert_eq!(
+        xml.matches("<Visible>\r\n\t\t\t\t\t<xr:Common>false</xr:Common>")
+            .count(),
+        2
+    );
 }
 
 #[test]
