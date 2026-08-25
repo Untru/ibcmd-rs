@@ -6908,19 +6908,47 @@ fn parse_information_register_child_command_properties_from_fields(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<CommonCommandProperties> {
-    if fields.len() != 13
-        || fields.first()?.trim() != "9"
+    // Two independent instances of the same recurring omitted-trailing-
+    // default-field defect in this one function: the outer command block
+    // itself (mirrors `parse_common_command_properties_from_text`'s
+    // already-evidenced `{9,`/`{8,` pair -- the trailing
+    // `OnMainServerUnavailableBehavior` slot at index 12 is omitted, not
+    // written `0`, whenever left at default), and the nested header at
+    // index 9 (the same code27-adjacent short-wrapper omission
+    // `register_common_child_header_matches` just above and `06249bd`
+    // document). This function is InformationRegister-child-command-only,
+    // so smaller blast radius than either sibling, but the same class.
+    let command_has_trailing_default = match fields.len() {
+        13 => true,
+        12 => false,
+        _ => return None,
+    };
+    if fields.first()?.trim()
+        != (if command_has_trailing_default {
+            "9"
+        } else {
+            "8"
+        })
         || fields.get(4)?.trim() != "1"
         || fields.get(6)?.trim() != "0"
-        || fields.get(12)?.trim() != "0"
+        || (command_has_trailing_default && fields.get(12)?.trim() != "0")
     {
         return None;
     }
     let (picture_ref, picture_load_transparent) =
         parse_information_register_command_picture_descriptor(fields.get(1)?, object_refs)?;
     let header_fields = split_1c_braced_fields(fields.get(9)?, 0)?;
-    if header_fields.len() != 9
-        || header_fields.first()?.trim() != "3"
+    let header_has_trailing_default = match header_fields.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if header_fields.first()?.trim()
+        != (if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
         || metadata_header_field_index(&header_fields, &header.uuid) != Some(1)
     {
         return None;
@@ -17283,8 +17311,22 @@ fn register_common_child_header_matches(
     else {
         return false;
     };
-    if header_fields.len() != 9
-        || header_fields.first().map(|field| field.trim()) != Some("3")
+    // Same code27 attribute-header short-wrapper omission `06249bd`
+    // documents for `parse_metadata_code27_payload_fields`: this is a hand
+    // reimplementation of that exact `{27,{2,header,{"Pattern",...}}}`
+    // shape for InformationRegister-owned children specifically, so it
+    // needs the same 9/8-member branch instead of hard-requiring 9.
+    let header_has_trailing_default = match header_fields.len() {
+        9 => true,
+        8 => false,
+        _ => return false,
+    };
+    if header_fields.first().map(|field| field.trim())
+        != Some(if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
         || metadata_header_field_index(&header_fields, &child_header.uuid) != Some(1)
     {
         return false;
@@ -17462,8 +17504,22 @@ fn parse_information_register_child_value_types_from_fields(
         return None;
     }
     let header_fields = split_1c_braced_fields(typed_header.get(1)?, 0)?;
-    if header_fields.len() != 9
-        || header_fields.first()?.trim() != "3"
+    // Same code27 short-wrapper omission as `register_common_child_header_
+    // matches` just above and `parse_metadata_code27_payload_fields`
+    // (`06249bd`) -- another hand reimplementation of the same
+    // `{27,{2,header,{"Pattern",...}}}` shape, this time for
+    // InformationRegister Resource/Attribute/Dimension value types.
+    let header_has_trailing_default = match header_fields.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if header_fields.first()?.trim()
+        != (if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
         || metadata_header_field_index(&header_fields, &child_header.uuid) != Some(1)
     {
         return None;
@@ -28720,13 +28776,28 @@ fn parse_web_service_xdto_type(value: &str) -> Option<WebServiceXdtoType> {
 
 fn parse_web_service_header(value: &str) -> Option<MetadataHeader> {
     let fields = split_web_service_braced_fields(value)?;
-    if fields.len() != 9
-        || fields.first()?.trim() != "3"
+    // Same short-wrapper omission `parse_information_register_owner_header`
+    // documents (`0575505`) and `innermost_metadata_object_fields_around_
+    // header` documents (this pass): the platform drops the trailing
+    // default `0` (and the wrapper's own leading count from `3` to `2`)
+    // whenever the WebService's own header leaves that slot at default.
+    // WebService uses its own field splitter
+    // (`split_web_service_braced_fields`), so it wasn't covered by either
+    // earlier fix even though it's the identical grammar production;
+    // `WebServices` is one of the families the missing-root-cause map's
+    // pre-`0575505` opaque-bucket table lists as still nonzero
+    // (docs/evidence/uh-missing-root-cause-map-20260825.md).
+    let has_trailing_default = match fields.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if fields.first()?.trim() != (if has_trailing_default { "3" } else { "2" })
         || fields.get(5)?.trim() != "0"
         || fields.get(6)?.trim() != "0"
         || !parse_uuid_field(fields.get(7)?.trim())
             .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
-        || fields.get(8)?.trim() != "0"
+        || (has_trailing_default && fields.get(8)?.trim() != "0")
     {
         return None;
     }

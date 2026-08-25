@@ -2539,8 +2539,27 @@ fn is_configuration_root_property_header(field: &str, object_id: &str) -> bool {
     else {
         return false;
     };
-    if header.len() != 9
-        || header.first().map(|field| field.trim()) != Some("3")
+    // Same short-wrapper omission `parse_information_register_owner_header`
+    // (`0575505`) and `innermost_metadata_object_fields_around_header`
+    // (this pass) document for this exact generic
+    // `{1,0,<uuid>},Name,Synonym,Comment,0,0,NilUuid,0` header shape: the
+    // platform drops the trailing default `0` (and the wrapper's own
+    // leading count from `3` to `2`) whenever the Configuration root's own
+    // header leaves that slot at default. One object per config, so a
+    // small blast radius, but a total-parse failure if hit (the whole
+    // Configuration.xml's default roles/use-purposes/localized properties
+    // read depends on this header resolving).
+    let header_has_trailing_default = match header.len() {
+        9 => true,
+        8 => false,
+        _ => return false,
+    };
+    if header.first().map(|field| field.trim())
+        != Some(if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
         || header
             .get(2)
             .and_then(|field| parse_1c_quoted_string(field.trim()))
@@ -2553,7 +2572,7 @@ fn is_configuration_root_property_header(field: &str, object_id: &str) -> bool {
         || header.get(5).map(|field| field.trim()) != Some("0")
         || header.get(6).map(|field| field.trim()) != Some("0")
         || header.get(7).map(|field| field.trim()) != Some("00000000-0000-0000-0000-000000000000")
-        || header.get(8).map(|field| field.trim()) != Some("0")
+        || (header_has_trailing_default && header.get(8).map(|field| field.trim()) != Some("0"))
     {
         return false;
     }
