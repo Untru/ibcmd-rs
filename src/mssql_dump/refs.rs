@@ -2075,6 +2075,20 @@ pub(super) fn template_type_from_code(code: u32) -> Option<&'static str> {
         4 => Some("TextDocument"),
         6 => Some("DataCompositionSchema"),
         7 => Some("DataCompositionAppearanceTemplate"),
+        // Confirmed on real ERP УХ 3.2.12.6 raw metadata via `cf extract` on
+        // two owned templates whose native XML declares
+        // `<TemplateType>GraphicalSchema</TemplateType>`:
+        // `DataProcessors/ВыполнениеМаршрутныхЛистов/Templates/МетодикаББВ`
+        // (uuid b882ff8c-b85a-4c2a-bcd9-4321c2dbb154) and
+        // `Reports/АнализСостоянияНалоговогоУчетаПоНДС/Templates/УчетНДС`
+        // (uuid 325ac0f9-1bc2-49d9-8a62-c9fe1a988830) both carry raw code 8
+        // (`{2,8,{3,{1,0,<uuid>},...}}`). Neither БСП demo/base nor УТ
+        // 11.5.27.75 ever writes this code among their owned templates, so it
+        // was previously unmapped and every such template fell back through
+        // body content-sniffing to `BinaryData` -- wrong, since a
+        // GraphicalSchema body is not always distinguishable as such by
+        // sniffing raw bytes.
+        8 => Some("GraphicalSchema"),
         9 => Some("AddIn"),
         _ => None,
     }
