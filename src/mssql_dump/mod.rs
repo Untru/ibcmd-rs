@@ -28417,13 +28417,23 @@ fn parse_common_attribute_separation_properties(
     Some(CommonAttributeSeparationProperties {
         data_separation: common_attribute_reversed_separation_xml(fields.get(5)?.trim())?,
         separated_data_use: common_attribute_separated_data_use_xml(fields.get(12)?.trim())?,
-        users_separation: common_attribute_separation_xml(fields.get(13)?.trim())?,
+        // `UsersSeparation` and `ConfigurationExtensionsSeparation` were read
+        // from each other's slot. Confirmed on ERP УХ 3.2.12.6 via cf
+        // extract (CommonAttributes/ВидДокументаБД, uuid
+        // ca061382-6b1c-4f92-8fea-bbebac45e3c5): native writes
+        // UsersSeparation=DontUse, ConfigurationExtensionsSeparation=Separate,
+        // and the raw fields carry them as fields[10]="0" (DontUse) and
+        // fields[13]="1" (Separate) respectively -- the previous code read
+        // fields[13] for UsersSeparation and fields[10] for
+        // ConfigurationExtensionsSeparation, swapping both on every one of
+        // 11 differing CommonAttributes in the corpus.
+        users_separation: common_attribute_separation_xml(fields.get(10)?.trim())?,
         authentication_separation: common_attribute_reversed_separation_xml(fields.get(6)?.trim())?,
         data_separation_value: parse_common_attribute_optional_ref(fields.get(7)?, object_refs),
         data_separation_use: parse_common_attribute_optional_ref(fields.get(8)?, object_refs),
         conditional_separation: parse_common_attribute_optional_ref(fields.get(9)?, object_refs),
         configuration_extensions_separation: common_attribute_separation_xml(
-            fields.get(10)?.trim(),
+            fields.get(13)?.trim(),
         )?,
         indexing: common_attribute_indexing_xml(fields.get(3)?.trim())?,
         full_text_search: common_attribute_use_xml(fields.get(4)?.trim())?,
