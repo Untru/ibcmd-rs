@@ -10,8 +10,9 @@ same for files we do not write at all.
 | | exact | differing | missing | percent |
 | --- | ---: | ---: | ---: | ---: |
 | before | 120,504 | 18,429 | 1,478 | 85.82 % |
-| after | 128,104 | **10,829** | 1,478 | **91.24 %** |
-| Δ | **+7,600** | **−7,600** | 0 | +5.41 pp |
+| after the localized-text and mask fixes | 128,104 | 10,829 | 1,478 | 91.24 % |
+| after the row-table fixes | 131,584 | **7,349** | 1,478 | **93.71 %** |
+| Δ | **+11,080** | **−11,080** | 0 | +7.89 pp |
 
 **Broken: 0** on every step, on `uh`, `ut` and the five fast gates.
 
@@ -43,12 +44,11 @@ container is `{1, <count>, {<lang>,<content>}, …}`, the count was read and one
 pair consumed, and the writer stamped `ru` on the survivor. `v8:item` was
 native-only in **14,189 of the 18,429** differing files.
 
-## The remaining 10,829
+## The remaining 7,349
 
-By file role: `Ext/Template.xml` 7,628 (of which 6,208 MXL `<document>` and
+By file role: `Ext/Template.xml` 4,148 (of which 2,728 MXL `<document>` and
 1,420 `<DataCompositionSchema>`), `Ext/Form.xml` 2,776, top-level object XML
-288, the rest under 40 each. By owner: `Reports` 6,953, `DataProcessors`
-1,065, `Documents` 1,042, `Catalogs` 936, `InformationRegisters` 417.
+288, the rest under 40 each.
 
 Ranked by the number of differing files each element name appears in:
 
@@ -65,20 +65,50 @@ Ranked by the number of differing files each element name appears in:
 | `beginRow` / `endRow` / `beginColumn` / `endColumn` | 1,038 | 0 | 0 |
 | `Shortcut` | 737 | 713 | **634** |
 
-### 1. The MXL row table — ~3,700 files, the largest cluster
+### 1. The MXL row table — closed, 3,701 mismatches → 7
 
-3,701 templates publish a different number of `<rowsItem>` than native, and
-not by a constant: some publish far fewer (5 against 153, 4 against 43), some
-more (30 against 22). `columnsID`, `formatIndex`, `defaultFormatIndex`, and
-the cell children `c`/`f`/`i`/`v`/`tl` move with it, which is what makes this
-one cluster rather than several — e.g.
-`Reports/РегламентированноеУведомлениеВозвратНДФЛНПДБиоресурсы/Templates/
-Титульная_2026` drops 610 consecutive native lines from `<index>21</index>`
-onward and then disagrees on `<defaultFormatIndex>` (58 against 83).
+Three defects, all of them found by extracting the template's storage element
+and walking its declared row block by hand rather than by reading the XML.
 
-This is the next thing to work and it is a real investigation, not a rule:
-the row table's encoding has to be read out of extracted elements before
-anything is written.
+**A refused cell fails its row, and a failed row truncates the rest of the
+stream.** That is what made this look like one huge cluster: two small reader
+gaps cost thousands of files each.
+
+* **Cell value type `"B"`.** The reader knew `{"U"}`, `{"S"}`, `{"N"}`,
+  `{"D"}` and `{"#"}` but not the boolean.
+  `Report.РегламентированноеУведомлениеВозвратНДФЛНПДБиоресурсы.Template.
+  Титульная_2026` declares 41 rows and published 21 — it stops on
+  `{2,32,{"B",0}}` at row 21, where native publishes
+  `<v xsi:type="xs:boolean">false</v>`. ERP УХ publishes 1,346 booleans, all
+  `false`. **+445 files.**
+* **The trailing "formatted" flag is optional.** It is the cell record's last
+  member and a record may stop in front of it; requiring it refused every cell
+  of `Catalog.ВариантыНаладки.Template.Палитра`, whose stream then yielded one
+  row against the ten it declares. Native publishes those cells as plain
+  `<tl>` — the file carries ten `<tl>` and no `<tfl>`. **+2,751 files.**
+  (This overturned a unit test that asserted the strict arity; the corpus
+  decides — doctrine rule 8.)
+* **A skipped row is a row at the default format.** Rows the stream skips were
+  manufactured with no `source_format_index`, so
+  `compact_moxel_empty_row_ranges` — the corpus-proven rule that folds
+  adjacent equal cell-less rows into one `<indexTo>` item — never compared
+  them equal to the stored empty row in front of them, and the run was
+  published one item per index. Giving them the shape a stored `0` format
+  field means (`format_index` 1, `source_format_index` `Some(1)`) lets the
+  existing rule do it. **+284 files.**
+
+  Measured over every `<rowsItem>` in the native tree — 3,739,968 of them,
+  1,240 carrying an `<indexTo>` — **every one is an empty row** (1,117 without
+  a `<formatIndex>`, 123 with), and **none** has `indexTo` equal to its
+  `index`, so a one-wide run carries none. Where the row in front of a gap
+  does carry a format the run must stay separate, and the same comparison
+  keeps it separate: `Catalog.АналитическиеПанели.Template.ШаблонВиджета`
+  publishes its formatted empty row 7 alone and the gap 8 as its own item. An
+  earlier attempt that absorbed gaps into the preceding empty row directly,
+  bypassing that comparison, broke exactly those three files and was replaced.
+
+Row-count mismatches: **3,701 → 7**, and the seven remaining are all
+"ours fewer", i.e. a different refusal still to be found.
 
 ### 2. Remaining localized values — 4,786 files
 
@@ -110,5 +140,10 @@ line alone. This is the same host dependency already recorded for `ut` in
 settled that these are not ours to fix. Counting them as defects would mean
 making our output depend on the machine it runs on.
 
-**So the honest residual is 10,195 files**, with the row-table cluster the
-largest single piece of it.
+**So the honest residual is 6,715 files.** With the row table closed, the
+largest pieces are now forms (2,776 files — `ExtendedTooltip`, `DataPath`,
+`ChildItems`, `ContextMenu`, `Representation`, and a `Type` cluster), the
+1,420 DCS templates, and what is left of the MXL templates: the named-item /
+`area` block (`beginRow`/`endRow`/`beginColumn`/`endColumn`, ~1,038 files),
+the vertical-group block (`vg`/`vgLevels`, 486), and the localized containers
+that still drop translations.
