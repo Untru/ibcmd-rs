@@ -104,6 +104,44 @@ test is not clean -- 41 of 61 match, 20 at lengths 58/63 do not, so it is a
 third sub-shape and needs its own reading before anything is admitted), and
 the carrier forms whose residue is something other than a short revision.
 
+**Update -- the decoration sub-shape's `11` also ships (`83e3e68`), and the
+previous update's caution about it was a measurement error.** That note said
+the truncation test was "not clean -- 41 of 61 match, 20 at lengths 58/63 do
+not". The 20 were an artifact: that scan picked records out by a *name*
+heuristic and swept in records that are not decorations at all. Anchored on
+the class uuid the platform writes immediately before each record -- the same
+anchor the rest of this document uses -- ERP УХ's decorations under `11` are
+102 records in exactly two shapes, 61 at 35 members and 41 at 36, and each is
+its `12` counterpart minus its final member with **no exception**; the
+trailing scalar run falls 9 -> 8. Both kinds occur (94 `LabelDecoration`, 8
+`PictureDecoration`). The evidence is as clean as the other three; only the
+measurement was not.
+
+The decoration class ships two sub-shapes with different base arities, which
+is why one leading member covers two disjoint length bands: `ExtendedTooltip`
+is 34 members under `12` (35 with the conditional prefix), while
+`LabelDecoration`/`PictureDecoration` is 36 (37 with it). The short revision
+therefore appears at 33/34 for tooltips and 35/36 for decorations, and the
+guard now spans 33..36.
+
+Collision pre-flight before touching the guard: across all seven corpora
+there is no `{11,...}` record at 33..36 members that is anything other than a
+tooltip or a class-anchored decoration, and outside ERP УХ there are none at
+all. The arity guard is total over the measured corpus rather than a filter
+that merely happens to hold.
+
+Gated against a snapshot of this pass's own merge base: `uh` `130143 ->
+130145` (`gained=2`, `BROKEN=0`), the other six corpora byte-for-byte
+unchanged. The payoff is small and that is the honest shape of it: 102
+records live in only 38 forms, of which 2 became byte-exact, 33 stay
+`differing` for reasons that have nothing to do with record revisions, and 3
+are in the `missing` set and never reach the item reader at all.
+
+**With this, every short revision the census found is read.** What remains of
+the original 531-file bucket is not this defect class: the 33 carrier forms
+above, the ~270 flagged earlier whose residue is something else, the
+button/group trees of sub-bucket B, and sub-bucket C's property-level gaps.
+
 **Answer up front.** The bucket is *not* homogeneous, but it has one
 dominant, exactly-attributable cause, and that cause is a fourth
 occurrence of this codebase's most common defect class (doctrine point 7 --
