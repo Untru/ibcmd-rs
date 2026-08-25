@@ -2440,7 +2440,7 @@ pub(super) fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'sta
 }
 
 pub(super) fn extract_form_vertical_align(fields: &[&str]) -> Option<FormRootVerticalAlign> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
+    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootVerticalAlignSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
@@ -2450,7 +2450,7 @@ pub(super) fn extract_form_vertical_align(fields: &[&str]) -> Option<FormRootVer
 }
 
 pub(super) fn extract_form_children_align(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
+    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootVerticalAlignSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
@@ -2470,8 +2470,10 @@ pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static s
 }
 
 pub(super) fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_item_pairs_tail_start(fields)?;
-    match fields.get(tail_start + 6).map(|field| field.trim())? {
+    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
+    let trailer = fields.get(tail_start..)?;
+    let slot = form_root_trailer_slot_with_navigator_gap(trailer.len(), 6)?;
+    match trailer.get(slot).map(|field| field.trim())? {
         "1" => Some("Normal"),
         "2" => Some("Compact"),
         _ => None,
@@ -2479,8 +2481,10 @@ pub(super) fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str>
 }
 
 pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
-    match fields.get(tail_start + 11).map(|field| field.trim())? {
+    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
+    let trailer = fields.get(tail_start..)?;
+    let slot = form_root_trailer_slot_with_navigator_gap(trailer.len(), 11)?;
+    match trailer.get(slot).map(|field| field.trim())? {
         "0" => Some("Left"),
         "1" => Some("Center"),
         "2" => Some("Right"),
@@ -2522,7 +2526,7 @@ pub(super) fn extract_form_child_items_width(fields: &[&str]) -> Option<&'static
 }
 
 pub(super) fn extract_form_conversations_representation(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
+    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootConversationsRepresentationSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
@@ -2567,8 +2571,10 @@ pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
 }
 
 pub(super) fn extract_form_show_close_button(fields: &[&str]) -> Option<bool> {
-    let tail_start = form_root_child_items_tail_start(fields)?;
-    match fields.get(tail_start + 18).map(|field| field.trim())? {
+    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
+    let trailer = fields.get(tail_start..)?;
+    let slot = form_root_trailer_slot_with_navigator_gap(trailer.len(), 18)?;
+    match trailer.get(slot).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
@@ -9059,6 +9065,26 @@ pub(super) fn form_root_child_items_tail_start_50_with_navigator_gap(
     form_root_child_items_tail_start_for(fields, &["50"], &[24, 25])
 }
 
+/// Adjusts a trailer slot number given as counted from the classic
+/// 24-member trailer's own front for the one-field Navigator-gap shift: `+0`
+/// on the 24-shape, `+1` on the 25-shape, refused for any other length. See
+/// `form_root_child_items_tail_start_50_with_navigator_gap`'s doc comment
+/// for the shape and `FormRootGroupSchema`/`FormRootGroupingSchema`/
+/// `FormRootConversationsRepresentationSchema`/
+/// `FormRootVerticalAlignSchema`'s doc comments in `form_schema` for the
+/// independent real-byte confirmations that every front-counted slot shifts
+/// uniformly, not just the ones those schemas happen to read.
+fn form_root_trailer_slot_with_navigator_gap(
+    trailer_len: usize,
+    slot_in_24_shape: usize,
+) -> Option<usize> {
+    match trailer_len {
+        24 => Some(slot_in_24_shape),
+        25 => Some(slot_in_24_shape + 1),
+        _ => None,
+    }
+}
+
 fn form_root_child_items_tail_start_for(
     fields: &[&str],
     allowed_root_discriminators: &[&str],
@@ -9120,10 +9146,6 @@ fn form_root_child_items_tail_start_at(
         }
     }
     matched_tail
-}
-
-pub(super) fn form_root_child_item_pairs_tail_start(fields: &[&str]) -> Option<usize> {
-    form_root_child_items_tail_start(fields)
 }
 
 #[cfg(test)]

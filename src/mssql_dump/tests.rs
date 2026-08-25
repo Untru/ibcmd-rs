@@ -71305,3 +71305,79 @@ fn renders_vertical_spacing_one_and_half_for_form_with_navigator_gap() {
         "<VerticalSpacing>OneAndHalf</VerticalSpacing>",
     );
 }
+
+/// The remaining form-root trailer readers that shared the same strict
+/// `[24]`-only tail-start search as `Group`/`VerticalSpacing`: before this
+/// fix, forms with a built-in Navigator/quick-search child item (a
+/// 25-member trailer, not 24 -- see
+/// `form_root_child_items_tail_start_50_with_navigator_gap`'s doc comment)
+/// found no valid count-list at all and silently dropped each property. See
+/// this fixture's `manifest.json` for the full evidence trail.
+fn assert_platform_proven_form_root_alignment_tag(raw_deflate: &[u8], expected_tag: &str) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_tag),
+        "expected {expected_tag:?} to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_conversations_representation_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/595e5752-36a7-4bba-8a40-26920acae01d.deflate"
+        ),
+        "<ConversationsRepresentation>Show</ConversationsRepresentation>",
+    );
+}
+
+#[test]
+fn renders_vertical_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/826c2821-147d-4aaf-910c-acfbdb58a29f.deflate"
+        ),
+        "<VerticalAlign>Bottom</VerticalAlign>",
+    );
+}
+
+#[test]
+fn renders_children_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/36454dc5-ab04-4773-85cf-f634b17dfc4f.deflate"
+        ),
+        "<ChildrenAlign>None</ChildrenAlign>",
+    );
+}
+
+#[test]
+fn renders_scaling_mode_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/79a77da6-ce40-4cd8-ab79-f70d5b5aa7b0.deflate"
+        ),
+        "<ScalingMode>Normal</ScalingMode>",
+    );
+}
+
+#[test]
+fn renders_horizontal_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/beed4e3c-4d47-4881-82f0-2f57f9d2bc7b.deflate"
+        ),
+        "<HorizontalAlign>Center</HorizontalAlign>",
+    );
+}
+
+#[test]
+fn renders_show_close_button_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/f30b88e9-919b-45bc-ba99-a2c32ca399e7.deflate"
+        ),
+        "<ShowCloseButton>false</ShowCloseButton>",
+    );
+}

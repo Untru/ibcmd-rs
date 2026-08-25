@@ -5282,13 +5282,34 @@ pub(crate) struct FormRootConversationsRepresentationSchema {
 impl FormRootConversationsRepresentationSchema {
     const TRAILER_SLOT: usize = 19;
 
+    /// Forms carrying a built-in Navigator/quick-search child item write one
+    /// extra field ahead of the classic 24-member trailer's own start,
+    /// pushing every slot counted from the front out by one -- a 25-member
+    /// trailer whose slot 20 holds what slot 19 holds in the 24-shape.
+    /// Evidence: ERP УХ 3.2.12.6, `Catalogs/ВариантыОтчетов/Forms/ФормаЭлемента`
+    /// (native `<ConversationsRepresentation>Show</ConversationsRepresentation>`):
+    /// the 25-member reading of slot 20 finds `1` (`Show`, correct) where the
+    /// 24-member reading of the same slot finds `0` (would read as no
+    /// property) -- the same one-slot shift `Group`/`VerticalSpacing`
+    /// (`FormRootGroupSchema`, `FormRootGroupingSchema`) and
+    /// `SaveWindowSettings`/`MobileDeviceCommandBarContent`
+    /// (`form_root_child_items_tail_start_50_with_navigator_gap`'s doc
+    /// comment in `mssql_dump::form_body`) independently confirm.
+    const TRAILER_SLOT_WITH_NAVIGATOR_GAP: usize = Self::TRAILER_SLOT + 1;
+
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
         trailer_field_count: usize,
     ) -> Option<Self> {
-        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
-            trailer_slot: Self::TRAILER_SLOT,
-        })
+        if root_discriminator != Some("50") {
+            return None;
+        }
+        let trailer_slot = match trailer_field_count {
+            24 => Self::TRAILER_SLOT,
+            25 => Self::TRAILER_SLOT_WITH_NAVIGATOR_GAP,
+            _ => return None,
+        };
+        Some(Self { trailer_slot })
     }
 
     pub(crate) fn conversations_representation(self, trailer: &[&str]) -> Option<&'static str> {
@@ -5506,19 +5527,11 @@ impl FormRootVerticalAlign {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormRootVerticalAlignSchema {
     trailer_slot: usize,
+    children_align_trailer_slot: usize,
 }
 
 impl FormRootVerticalAlignSchema {
     const TRAILER_SLOT: usize = 12;
-
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        trailer_field_count: usize,
-    ) -> Option<Self> {
-        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
-            trailer_slot: Self::TRAILER_SLOT,
-        })
-    }
 
     /// `ChildrenAlign` sits one member behind the vertical alignment in the
     /// same trailer, under the six-code table the grouping controls use.  Over
@@ -5528,12 +5541,49 @@ impl FormRootVerticalAlignSchema {
     /// off their own tuples, so the roots share one table rather than a second.
     const CHILDREN_ALIGN_TRAILER_SLOT: usize = 13;
 
+    /// Forms carrying a built-in Navigator/quick-search child item write one
+    /// extra field ahead of the classic 24-member trailer's own start,
+    /// pushing every slot counted from the front out by one -- a 25-member
+    /// trailer whose slot 13 holds what slot 12 holds in the 24-shape (and
+    /// slot 14 what slot 13 holds). Evidence: ERP УХ 3.2.12.6,
+    /// `Catalogs/ВидыКонтактнойИнформации/Forms/ИсправлениеВидовКонтактнойИнформации`
+    /// (native `<VerticalAlign>Bottom</VerticalAlign>`, raw code `2`): the
+    /// 25-member reading of slot 13 finds `2` where the 24-member search
+    /// finds no valid count-list at all -- the same one-slot shift `Group`/
+    /// `VerticalSpacing`/`ConversationsRepresentation` independently confirm
+    /// (see `form_root_child_items_tail_start_50_with_navigator_gap`'s doc
+    /// comment in `mssql_dump::form_body`).
+    const TRAILER_SLOT_WITH_NAVIGATOR_GAP: usize = Self::TRAILER_SLOT + 1;
+    const CHILDREN_ALIGN_TRAILER_SLOT_WITH_NAVIGATOR_GAP: usize =
+        Self::CHILDREN_ALIGN_TRAILER_SLOT + 1;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        trailer_field_count: usize,
+    ) -> Option<Self> {
+        if root_discriminator != Some("50") {
+            return None;
+        }
+        let (trailer_slot, children_align_trailer_slot) = match trailer_field_count {
+            24 => (Self::TRAILER_SLOT, Self::CHILDREN_ALIGN_TRAILER_SLOT),
+            25 => (
+                Self::TRAILER_SLOT_WITH_NAVIGATOR_GAP,
+                Self::CHILDREN_ALIGN_TRAILER_SLOT_WITH_NAVIGATOR_GAP,
+            ),
+            _ => return None,
+        };
+        Some(Self {
+            trailer_slot,
+            children_align_trailer_slot,
+        })
+    }
+
     pub(crate) fn vertical_align(self, trailer: &[&str]) -> Option<FormRootVerticalAlign> {
         FormRootVerticalAlign::from_raw_value(trailer.get(self.trailer_slot)?.trim())
     }
 
     pub(crate) fn children_align(self, trailer: &[&str]) -> Option<&'static str> {
-        match trailer.get(Self::CHILDREN_ALIGN_TRAILER_SLOT)?.trim() {
+        match trailer.get(self.children_align_trailer_slot)?.trim() {
             "1" => Some("None"),
             "2" => Some("ItemsLeftTitlesLeft"),
             "3" => Some("ItemsRightTitlesLeft"),
