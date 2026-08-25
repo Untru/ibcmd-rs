@@ -13529,6 +13529,42 @@ fn parse_information_register_standard_attribute_fill_value(
     }
 }
 
+/// True when a standard attribute's `ChoiceParameterLinks` slot carries zero
+/// links: `{"#", <link-list type uuid>, {<container-kind code>, 0}}`, where
+/// the trailing `0` is the platform's own declared item count.
+///
+/// The container-kind code (first member of the nested pair) is not itself
+/// evidence of emptiness -- it names which collection representation the
+/// platform picked, and ERP УХ 3.2.12.6 has now been observed writing `5004`
+/// there (`InformationRegisters/АктуальныеСтадииМероприятий`, standard
+/// attribute `Active`, all four standard attributes of that register
+/// identically) where every previously-evidenced corpus (БСП demo/base,
+/// Управление торговлей) only ever wrote `5006`. Gating on the declared count
+/// instead of a single hardcoded code follows doctrine rule 7 -- reading the
+/// declared counter, not a fixed arity/value whitelist -- and does not widen
+/// what a *non-empty* list is accepted: a real `ChoiceParameterLinks` entry
+/// still fails here (no parser below decodes contents), so this only ever
+/// changes an already-`None` outcome into recognizing a legitimately empty
+/// list.
+fn information_register_standard_attribute_choice_parameter_links_is_empty(value: &str) -> bool {
+    let Some(fields) = split_information_register_braced_fields(value) else {
+        return false;
+    };
+    if fields.len() != 3
+        || fields.first().map(|field| field.trim()) != Some(r##""#""##)
+        || !fields.get(1).is_some_and(|field| {
+            information_register_uuid_matches(
+                field,
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+            )
+        })
+    {
+        return false;
+    }
+    split_information_register_braced_fields(fields[2])
+        .is_some_and(|nested| nested.len() == 2 && nested[1].trim() == "0")
+}
+
 fn parse_register_standard_attribute_with_comment<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
@@ -13543,12 +13579,8 @@ fn parse_register_standard_attribute_with_comment<'a>(
             expected_type_reduction_mode,
             None,
         )?;
-    information_register_standard_attribute_nested_values_are(
-        choice_parameter_links,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
-        &["5006", "0"],
-    )
-    .then_some((attribute, comment))
+    information_register_standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
+        .then_some((attribute, comment))
 }
 
 fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>(
