@@ -35861,9 +35861,9 @@ fn writes_role_rights_to_source_layout() {
             .as_bytes(),
         );
     let rights_text = r##"{10,{4,
-{{1,@catalog_uuid@,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}},
+{{1,@catalog_uuid@,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,0}},
 {{1,@configuration_uuid@,0,0},{0,3c00c6ee-844e-4620-85e4-671e72f114d9,0,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,0}},
-{{1,@operation_uuid@,0,0},{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}},
+{{1,@operation_uuid@,0,0},{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,0}},
 {{1,@register_uuid@,0,0},{1,4,1c87578f-9e09-4ec0-a991-5629c87b1588,1,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1,c0028105-4cc1-41ca-aef1-bfbd8fc8f8c4,-1,3,
 {{1c87578f-9e09-4ec0-a991-5629c87b1588,{1,{1,"#Если &Allowed #Тогда ""OK""",0}}},
 {287b74b8-3a66-4a76-ba27-4f1f6a93770e,{1,{1,"ГДЕ Owner = &User",0}}},
@@ -35959,6 +35959,9 @@ fn writes_role_rights_to_source_layout() {
         role_right_name("84487e82-eb6c-4c51-ae16-3a6db17e886d"),
         Some("InteractiveStart")
     );
+    // Register rights (Read/Update/TotalsControl) all carry a restriction
+    // condition, so they render regardless of value or the role's
+    // `setForNewObjects` default (see `role_rights_for_xml`).
     assert!(xml.contains("<name>Read</name>"));
     assert!(xml.contains("<setForNewObjects>true</setForNewObjects>"));
     assert!(xml.contains("<restrictionByCondition>"));
@@ -35968,10 +35971,15 @@ fn writes_role_rights_to_source_layout() {
     assert!(xml.contains("<name>TotalsControl</name>"));
     assert!(xml.contains("<field>ВерсияОбъекта</field>"));
     assert!(xml.contains("ГДЕ ЛОЖЬ"));
-    // The plain-false Delete right is omitted for restriction-only top-level
-    // objects (see
-    // `format_role_rights_omits_plain_false_rights_for_restriction_only_top_level_objects`).
-    assert!(!xml.contains("<name>Delete</name>"));
+    // Register's plain `Delete` right is unrestricted and `false`, which
+    // *differs* from this role's `setForNewObjects: true` default, so it
+    // renders (the corpus-proven top-level rule in `role_rights_for_xml`
+    // applies uniformly, not just to the Configuration root). Catalog's
+    // `Insert`/`View` are likewise unrestricted `false`, differing from the
+    // same `true` default, so they render too; Catalog's `Read` is `true`
+    // (matching the default) and stays hidden, unasserted here since
+    // Register's restricted `Read` already satisfies the assertion above.
+    assert!(xml.contains("<name>Delete</name>"));
     assert!(xml.contains("<name>Insert</name>"));
     assert!(xml.contains("<name>View</name>"));
     assert!(xml.contains("<restrictionTemplate>"));
@@ -35991,12 +35999,23 @@ fn writes_role_rights_to_source_layout() {
 }
 
 #[test]
-fn format_role_rights_preserves_false_rights_without_restrictions() {
+fn format_role_rights_top_level_object_hides_plain_false_rights_matching_set_for_new_objects_default()
+ {
+    // Replaces the former `format_role_rights_preserves_false_rights_without_restrictions`,
+    // which asserted a plain-false, unrestricted, unlisted right ("CustomRight")
+    // still rendered — codifying the old per-kind/per-name suppression lists
+    // (Document's ~20-name list, AccumulationRegister's Edit/Update/View list).
+    // Proven wrong by a direct scan of the full ERP УХ 3.2.12.6 native corpus
+    // (2026-08-25, see `role_rights_for_xml`): every top-level object follows
+    // the same rule as the Configuration root — a right renders iff it is
+    // restricted or its value differs from the role's own `setForNewObjects`
+    // flag — regardless of the right's name or the object's kind.
     let xml = format_role_rights_xml(&RoleRights {
         set_for_new_objects: false,
         set_for_attributes_by_default: true,
         independent_rights_of_child_objects: false,
         objects: vec![RoleObjectRights {
+            has_conditionless_restrictions: false,
             name: "Document.Invoice".to_string(),
             rights: vec![
                 RoleRight {
@@ -36013,9 +36032,9 @@ fn format_role_rights_preserves_false_rights_without_restrictions() {
                     }),
                 },
                 RoleRight {
-                    // `Edit` is intentionally omitted for top-level Documents even when
-                    // restriction-only suppression is inactive.  Use a non-policy right
-                    // here to exercise the latter case.
+                    // Plain false, unrestricted, and not one of the old
+                    // per-kind name lists: still hidden, because it matches
+                    // this role's `setForNewObjects: false` default.
                     name: "CustomRight".to_string(),
                     value: false,
                     restriction_by_condition: None,
@@ -36030,7 +36049,47 @@ fn format_role_rights_preserves_false_rights_without_restrictions() {
     assert!(xml.contains("<value>false</value>"));
     assert!(xml.contains("<condition>ГДЕ\nЛОЖЬ</condition>"));
     assert!(!xml.contains("<condition>ГДЕ\r\nЛОЖЬ</condition>"));
-    assert!(xml.contains("<name>CustomRight</name>"));
+    assert!(!xml.contains("<name>CustomRight</name>"));
+}
+
+#[test]
+fn format_role_rights_top_level_object_inverts_when_set_for_new_objects_true() {
+    // Mirrors `format_role_rights_configuration_root_inverts_when_set_for_new_objects_true`
+    // for an ordinary (non-Configuration) top-level object: proven by the
+    // sole real-world instance of `setForNewObjects: true` in the whole ERP
+    // УХ corpus (role `ПолныеПрава`), where every plain `false` right shown
+    // anywhere in the native file (10,532/10,532 occurrences, 0 exceptions
+    // outside that one role) is unrestricted and simply differs from the
+    // role's own `true` default — the same rule already proven for the
+    // Configuration root, not a Configuration-specific special case.
+    let xml = format_role_rights_xml(&RoleRights {
+        set_for_new_objects: true,
+        set_for_attributes_by_default: true,
+        independent_rights_of_child_objects: false,
+        objects: vec![RoleObjectRights {
+            has_conditionless_restrictions: false,
+            name: "Catalog.Products".to_string(),
+            rights: vec![
+                RoleRight {
+                    name: "Read".to_string(),
+                    value: true,
+                    restriction_by_condition: None,
+                },
+                RoleRight {
+                    name: "Delete".to_string(),
+                    value: false,
+                    restriction_by_condition: None,
+                },
+            ],
+        }],
+        restriction_templates: Vec::new(),
+    });
+
+    // `Read` matches the role default (`true`) and is unrestricted: hidden.
+    assert!(!xml.contains("<name>Read</name>"));
+    // `Delete` differs from the default: shown, explicit `false`.
+    assert!(xml.contains("<name>Delete</name>"));
+    assert!(xml.contains("<value>false</value>"));
 }
 
 #[test]
@@ -36040,6 +36099,7 @@ fn format_role_rights_omits_plain_false_rights_for_restriction_only_top_level_ob
         set_for_attributes_by_default: true,
         independent_rights_of_child_objects: false,
         objects: vec![RoleObjectRights {
+            has_conditionless_restrictions: false,
             name: "Catalog.Products".to_string(),
             rights: vec![
                 RoleRight {
@@ -36077,6 +36137,7 @@ fn format_role_rights_omits_plain_false_rights_when_only_view_input_by_string_ar
         set_for_attributes_by_default: true,
         independent_rights_of_child_objects: false,
         objects: vec![RoleObjectRights {
+            has_conditionless_restrictions: false,
             name: "Document.Invoice".to_string(),
             rights: vec![
                 RoleRight {
@@ -36119,6 +36180,7 @@ fn format_role_rights_omits_non_native_top_level_accumulation_register_false_rig
         set_for_attributes_by_default: true,
         independent_rights_of_child_objects: false,
         objects: vec![RoleObjectRights {
+            has_conditionless_restrictions: false,
             name: "AccumulationRegister.Stock".to_string(),
             rights: vec![
                 RoleRight {
@@ -36168,6 +36230,7 @@ fn format_role_rights_configuration_root_shows_rights_that_differ_from_set_for_n
         set_for_attributes_by_default: true,
         independent_rights_of_child_objects: false,
         objects: vec![RoleObjectRights {
+            has_conditionless_restrictions: false,
             name: "Configuration.DemoApp".to_string(),
             rights: vec![
                 RoleRight {
@@ -36206,6 +36269,7 @@ fn format_role_rights_configuration_root_inverts_when_set_for_new_objects_true()
         set_for_attributes_by_default: true,
         independent_rights_of_child_objects: false,
         objects: vec![RoleObjectRights {
+            has_conditionless_restrictions: false,
             name: "Configuration.DemoApp".to_string(),
             rights: vec![
                 RoleRight {
@@ -36382,6 +36446,121 @@ fn role_rights_blob_formats_string_field_restrictions() {
 }
 
 #[test]
+fn role_rights_blob_conditionless_restriction_renders_true_right_without_condition() {
+    let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    // Shaped after ERP УХ role ДобавлениеЗаявкиНаРегистрациюПоставщика,
+    // object InformationRegister.НапоминанияПользователя: a `{RIGHT,{0}}`
+    // conditionless restriction entry on a true-valued Read with false-valued
+    // siblings. The true right prints bare, the false ones are hidden.
+    let rights_text = format!(
+        "{{10,{{1,{{{{1,{object_uuid},0,0}},{{1,3,\
+1c87578f-9e09-4ec0-a991-5629c87b1588,1,\
+287b74b8-3a66-4a76-ba27-4f1f6a93770e,-1,\
+aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1,1,\
+{{1c87578f-9e09-4ec0-a991-5629c87b1588,{{0}}}}}}}}}},{{0}},0,1,0,4294967295}}"
+    );
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(
+        object_uuid.to_string(),
+        "InformationRegister.Prices".to_string(),
+    )]);
+
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    let xml = format_role_rights_xml(&rights);
+
+    assert!(xml.contains("<name>InformationRegister.Prices</name>"));
+    assert!(xml.contains("<name>Read</name>"));
+    assert!(!xml.contains("restrictionByCondition"));
+    assert!(!xml.contains("<name>Update</name>"));
+    assert!(!xml.contains("<name>View</name>"));
+}
+
+#[test]
+fn role_rights_blob_conditionless_restriction_omits_object_with_no_printable_rights() {
+    let hidden_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let kept_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    // Shaped after ERP УХ role БазовыеПраваУХ, object Catalog.Организации:
+    // every right false and the only restriction entry conditionless. The
+    // platform omits the whole `<object>` block; ordinary objects keep
+    // rendering.
+    let rights_text = format!(
+        "{{10,{{2,{{{{1,{hidden_uuid},0,0}},{{1,2,\
+1c87578f-9e09-4ec0-a991-5629c87b1588,-1,\
+287b74b8-3a66-4a76-ba27-4f1f6a93770e,-1,1,\
+{{1c87578f-9e09-4ec0-a991-5629c87b1588,{{0}}}}}}}},\
+{{{{1,{kept_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}}}},\
+{{0}},0,1,0,4294967295}}"
+    );
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([
+        (hidden_uuid.to_string(), "Catalog.Hidden".to_string()),
+        (kept_uuid.to_string(), "Catalog.Kept".to_string()),
+    ]);
+
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    let xml = format_role_rights_xml(&rights);
+
+    assert!(!xml.contains("Catalog.Hidden"));
+    assert!(xml.contains("<name>Catalog.Kept</name>"));
+    assert!(xml.contains("<name>Read</name>"));
+}
+
+#[test]
+fn role_rights_blob_conditionless_restriction_keeps_sibling_real_conditions() {
+    let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    // Shaped after ERP УХ role ДобавлениеИзменениеТрансляции, object
+    // AccountingRegister.МСФО: a real kind-1 condition on Read next to a
+    // conditionless entry on a true-valued Update; the plain-false
+    // TotalsControl is hidden even though AccountingRegister has no
+    // plain-false suppression convention of its own.
+    let rights_text = format!(
+        "{{10,{{1,{{{{1,{object_uuid},0,0}},{{1,5,\
+1c87578f-9e09-4ec0-a991-5629c87b1588,1,\
+287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,\
+aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1,\
+b7bab52d-c1b1-4bd8-8276-02db08d42352,1,\
+24abfe06-289a-48c5-8bb4-032c733e45c5,-1,2,\
+{{1c87578f-9e09-4ec0-a991-5629c87b1588,{{1,{{1,\"WHERE TRUE\",0}}}}}},\
+{{287b74b8-3a66-4a76-ba27-4f1f6a93770e,{{0}}}}}}}}}},{{0}},0,1,0,4294967295}}"
+    );
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(
+        object_uuid.to_string(),
+        "AccountingRegister.Ledger".to_string(),
+    )]);
+
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    let xml = format_role_rights_xml(&rights);
+
+    assert!(xml.contains("<name>Read</name>"));
+    assert!(xml.contains("<condition>WHERE TRUE</condition>"));
+    assert_eq!(xml.matches("<restrictionByCondition>").count(), 1);
+    assert!(xml.contains("<name>Update</name>"));
+    assert!(xml.contains("<name>View</name>"));
+    assert!(xml.contains("<name>Edit</name>"));
+    assert!(!xml.contains("<name>TotalsControl</name>"));
+}
+
+#[test]
+fn role_rights_blob_refuses_conditionless_restriction_wrapper_with_payload() {
+    let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    // A kind-0 wrapper with any extra field (`{0,1}`) is unobserved in every
+    // measured corpus and fails the whole blob closed.
+    let rights_text = format!(
+        "{{10,{{1,{{{{1,{object_uuid},0,0}},{{1,1,\
+1c87578f-9e09-4ec0-a991-5629c87b1588,1,1,\
+{{1c87578f-9e09-4ec0-a991-5629c87b1588,{{0,1}}}}}}}}}},{{0}},0,1,0,4294967295}}"
+    );
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(
+        object_uuid.to_string(),
+        "InformationRegister.Prices".to_string(),
+    )]);
+
+    assert!(parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).is_none());
+}
+
+#[test]
 fn role_rights_blob_resolves_standard_attribute_refs() {
     let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let rights_text = format!(
@@ -36391,7 +36570,7 @@ fn role_rights_blob_resolves_standard_attribute_refs() {
 {{{{1,{object_uuid},1,1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
 {{{{1,{object_uuid},1,2}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
 {{{{1,{object_uuid},1,3}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
-}},{{0}},0,1,0,4294967295}}"
+}},{{0}},0,0,0,4294967295}}"
     );
     let rights_blob = deflate_for_test(rights_text.as_bytes());
     let object_refs = BTreeMap::from([(
@@ -36417,6 +36596,11 @@ fn role_rights_blob_resolves_standard_attribute_refs() {
         ]
     );
     let xml = format_role_rights_xml(&rights);
+    // `setForAttributesByDefault` is `false` in this fixture, so each nested
+    // object's `true`-valued `View` right differs from the default and
+    // renders (see `role_rights_for_xml`'s nested-object rule); this test's
+    // own purpose is StandardAttribute ref-name resolution, exercised via
+    // the `names` assertion above, not the suppression rule itself.
     assert!(xml.contains("<name>InformationRegister.Prices.StandardAttribute.Active</name>"));
     assert!(xml.contains("<name>InformationRegister.Prices.StandardAttribute.LineNumber</name>"));
 }
