@@ -11763,10 +11763,14 @@ mod moxel_exact_parity_tests {
         let mut xml = String::new();
         push_moxel_row_xml(&mut xml, &row, &BTreeMap::new(), false);
         assert_eq!(xml.matches("<v8:item>").count(), 2);
-        assert!(xml.contains("<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Добавить страницу</v8:content>"));
         assert!(xml.contains(
-            "<v8:lang>en</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Add page</v8:content>"
+            "<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Добавить страницу</v8:content>"
         ));
+        assert!(
+            xml.contains(
+                "<v8:lang>en</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Add page</v8:content>"
+            )
+        );
     }
 
     #[test]
