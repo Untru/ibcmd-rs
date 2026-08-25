@@ -10,6 +10,60 @@ byte-for-byte compare of the platform-native `uh` tree
 `$D/base789/uh.parity.json` exactly (`exact` sets identical, 120 592 /
 18 487 / 1 332 / 64).
 
+**Update -- the fix shipped (`6f8f86e`, `6c2adda`, test `1415b37`).** Three of
+the four short revisions are now read. Everything below this note was measured
+at base `d0457a6`; the fix was rebased onto `550ca0e` and gated against an
+immutable snapshot of *that* base taken for this pass
+(`$D/xeno/baseline-550ca0e/`, uh `exact=128110`) rather than against
+`$D/base789`, which is a moving pointer and had already advanced three code
+commits past it. Re-measured at `550ca0e`: all 449 carrier forms were still
+`differing`, so the defect was fully live.
+
+Mechanism: rather than adding `54`/`34`/`11` next to every `55`/`37`/`12`
+literal (35 arity comparisons in `src/form_schema.rs` alone), the record is
+normalized once at each of the seven places that open one --
+its leading member is rewritten to the canonical revision and the dropped
+trailing members are padded back with a placeholder that parses as neither
+scalar, string nor block. Because the short revision is a pure tail
+truncation, every forward slot keeps its index, every end-anchored offset
+keeps naming the same member, and a property the revision does not carry
+reads as absent rather than as a fabricated default.
+
+One thing the corpus census did not predict: leading member `34` is
+*overloaded*. This repository's own base-free packer
+(`module_blob::format_form_layout_new_button_item`) writes a synthetic
+ten-member short `Button` record under it, and `compiler::bodies::form`'s
+roundtrip tests read it back -- removing `"34"` from the `Button` arm broke
+ten tests. The declared-arity guard (`56 | 57` members for the platform's
+field record) separates the two, which is the doctrine-point-7 discriminator
+anyway.
+
+Gate result, all seven corpora `BROKEN=0`: `uh` `exact=128110 -> 128281`
+(`gained=171`); `ws`/`wms`/`mdm`/`sslbase`/`ssl`/`ut` byte-for-byte unchanged
+(`gained=0`), none of them carrying a short revision at all. `cargo test
+--lib` 2274/33, failing names identical to the base snapshot; `bundled9.sh`
+9/9.
+
+The `171` was predicted before it was measured, which is the useful part.
+With only `Table` `54` and field `34` read, `uh` gained *nothing*: all 441
+emitted carrier forms moved from "item tree lost" to "item tree present"
+(258 of them within 1-4 changed tags, down from 323 at 15 or more), but not
+one crossed the byte-exact line, because essentially every recovered item
+carries an `<ExtendedTooltip>` written under the decorations' short revision
+`11`, which `parse_form_child_item_extended_tooltip`'s `!= Some("12")` gate
+refused. On `Catalogs/БланкиОтчетов/Forms/ФормаФормулы` the entire remaining
+diff was one line. Stripping self-closing `<ExtendedTooltip/>` from both
+sides predicted exactly 171 forms would become exact; reading revision `11`
+delivered exactly 171.
+
+The tooltip turned out to be its own sub-shape of the decoration class, with
+its own base arity (34 members under `12`, 35 with the conditional prefix)
+distinct from `LabelDecoration`/`PictureDecoration`'s 36/37 -- so the arity
+guard admits `11` only at 33/34 members. **Still unread and still worth a
+pass:** `Button` `30` (111 records), the decoration sub-shape's own `11` at
+35/36 members, and the 270 carrier forms whose residue is something other
+than the tooltip.
+
 **Answer up front.** The bucket is *not* homogeneous, but it has one
 dominant, exactly-attributable cause, and that cause is a fourth
 occurrence of this codebase's most common defect class (doctrine point 7 --
