@@ -12786,13 +12786,26 @@ fn parse_information_register_owner_localized_value(value: &str) -> Option<Vec<(
 
 fn parse_information_register_owner_header(value: &str) -> Option<MetadataHeader> {
     let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 9
-        || fields.first()?.trim() != "3"
+    // Mirrors the header-wrapper shape `enclosing_counted_block_start`
+    // (mssql_dump::mod, `ab58c3f`) already closed for the marker/rfind
+    // parsers: the platform omits the trailing default `0` (and drops the
+    // wrapper's own leading count from `3` to `2`) whenever the object
+    // leaves this slot at default. Confirmed on real ERP УХ 3.2.12.6 data
+    // (`Catalogs/АлгоритмыОпределенияБазовойДаты`, uuid
+    // `0b69b382-479d-4709-bd5d-bc499e5b3bf5`, owner_header_slot 9 of the
+    // Catalog owner-graph layout): an 8-member wrapper with no counterpart
+    // to what used to be the hardcoded `fields.len() != 9` check below.
+    let has_trailing_default = match fields.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if fields.first()?.trim() != (if has_trailing_default { "3" } else { "2" })
         || fields.get(5)?.trim() != "0"
         || fields.get(6)?.trim() != "0"
         || !parse_information_register_uuid(fields.get(7)?)
             .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
-        || fields.get(8)?.trim() != "0"
+        || (has_trailing_default && fields.get(8)?.trim() != "0")
     {
         return None;
     }

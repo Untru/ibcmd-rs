@@ -55395,6 +55395,34 @@ fn rejects_malformed_exact_code56_description_length_atomically() {
 }
 
 #[test]
+fn accepts_short_owner_header_without_trailing_default_or_second_language() {
+    // Real shape (ERP УХ 3.2.12.6, `Catalogs/АлгоритмыОпределенияБазовойДаты`,
+    // uuid `0b69b382-479d-4709-bd5d-bc499e5b3bf5`): slot 9's owner-header
+    // wrapper is opened by `{2,` with a single-language synonym and no
+    // trailing default `0`, not the `{3,`/dual-language/trailing-`0` shape
+    // `catalog_default_presentation_fixture` (and every owner-graph fixture
+    // in this file) builds. `parse_information_register_owner_header` used
+    // to hardcode `fields.len() != 9` and discriminator `"3"`, silently
+    // dropping every object whose owner header took this shorter, equally
+    // legitimate form -- shared infrastructure at 19 call sites across the
+    // owner-graph system (Catalog, Document, BusinessProcess,
+    // ChartOfCharacteristicTypes, InformationRegister, ExchangePlan, ...).
+    let mut fixture = catalog_default_presentation_fixture("56", 61, "0", "ShortOwnerHeader");
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let owner_uuid = fixture.owner_uuid.clone();
+    fixture.fields[9] = format!(
+        "{{0,{{2,{{1,0,{owner_uuid}}},\"ShortOwnerHeader\",{{1,\"ru\",\"Short owner header\"}},\"\",0,0,{zero}}}}}"
+    );
+
+    let source = fixture
+        .extract()
+        .expect("short (8-member, no trailing default) owner header must still parse");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert!(xml.contains("<Name>ShortOwnerHeader</Name>"), "{xml}");
+    assert!(xml.contains("Short owner header"), "{xml}");
+}
+
+#[test]
 fn rejects_malformed_exact_code56_owner_header_atomically() {
     let mut fixture = catalog_default_presentation_fixture("56", 61, "0", "MalformedOwnerHeader");
     let insertion = fixture.fields[9].len() - 1;
