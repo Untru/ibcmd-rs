@@ -1,0 +1,16 @@
+			<ButtonGroup name="ГруппаСтандартные" id="28">
+				<Title>
+					<v8:item>
+						<v8:lang>ru</v8:lang>
+						<v8:content>Группа стандартные</v8:content>
+					</v8:item>
+				</Title>
+				<ToolTip>
+					<v8:item>
+						<v8:lang>ru</v8:lang>
+						<v8:content>Группа стандартные</v8:content>
+					</v8:item>
+				</ToolTip>
+				<CommandSource>Item.Список</CommandSource>
+				<ExtendedTooltip name="ГруппаСтандартныеРасширеннаяПодсказка" id="29"/>
+			</ButtonGroup>

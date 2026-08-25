@@ -4610,11 +4610,33 @@ impl FormConditionalGroupSchema {
             // `<UserVisible>` element. Requiring `false` dropped all four
             // groups, and with them the `LabelDecoration` sibling below and
             // the whole subtree each carried.
-            ("22", field_count, Some(false) | Some(true), Some("2" | "3" | "4" | "5"))
-                if field_count >= 31 && (field_count - 31) % 2 == 0 =>
-            {
-                Some(Self { prefix_slot: 5 })
-            }
+            //
+            // `CommandBar` (`0`), `Popup` (`1`) and `ButtonGroup` (`6`) carry
+            // the identical prefix tuple in the identical slot, on the
+            // identical `31 + 2k` progression -- confirmed directly on real
+            // ERP УХ 3.2.12.6 bytes at field count 35 (`k = 2`) for all
+            // three: `CommandBar` `ГруппаКоманднаяПанель`
+            // (`Documents/ВерсияДокументацииЗакупочныхПроцедур/Forms/ФормаРедактированияТекстаЗакупочнойПроцедуры`),
+            // `Popup` `ИзменитьДолюУчастия`
+            // (`DocumentJournals/ДвижениеИнвестиций/Forms/ФормаРеестраИнвестиций`)
+            // and `ButtonGroup` `ФормаГруппаВерсии`
+            // (`DataProcessors/ГрафикФИМСФО/Forms/ГрафикФИ`). Before this,
+            // `form_child_item_tag` read the shifted-discriminator slot
+            // without the shift (landing on the prefix tuple's own opening
+            // brace, never `"0"`..`"9"`) and `form_child_item_tag`/
+            // `parse_form_child_item_name` both refused, so the whole item
+            // -- and, when it was a container, everything nested inside it
+            // -- was dropped silently rather than just the `<UserVisible>`
+            // property this schema exists to read (doctrine point 2/6).
+            // `FormChildItemVisibleSchema` below already lists all seven
+            // wrapper-`22` kinds together for the very same prefix tuple;
+            // this arm had only ever grown the four grouping kinds.
+            (
+                "22",
+                field_count,
+                Some(false) | Some(true),
+                Some("0" | "1" | "2" | "3" | "4" | "5" | "6"),
+            ) if field_count >= 31 && (field_count - 31) % 2 == 0 => Some(Self { prefix_slot: 5 }),
             // A `Table`'s own service `ContextMenu` (discriminator `8`) and
             // `AutoCommandBar` (discriminator `9`) carry the identical
             // marker-and-tuple prefix at the identical slot, but at their own
@@ -7964,10 +7986,21 @@ mod unemitted_property_tests {
     /// A `Page` (discriminator `4`) carrying the conditional `UserVisible`
     /// prefix is a valid grouping layout; the discriminator whitelist used to
     /// drop it, and with it the whole page and its subtree.
+    ///
+    /// `CommandBar` (`0`), `Popup` (`1`) and `ButtonGroup` (`6`) were folded
+    /// into the admitted set alongside `ColumnGroup`/`Pages`/`Page`/
+    /// `UsualGroup` once real ERP УХ 3.2.12.6 bytes proved they carry the
+    /// identical prefix tuple on the identical `31 + 2k` progression --
+    /// see `docs/evidence` and this crate's
+    /// `form-conditional-group-command-bar-popup-buttongroup` fixture.
+    /// `ContextMenu`/`AutoCommandBar` (`8`/`9`) genuinely stay out *of this
+    /// arm*: they carry the same tuple on a different, one-shorter `30 + 2k`
+    /// floor (the arm below), so at these odd `31 + 2k` counts neither arm
+    /// admits them.
     #[test]
     fn conditional_group_prefix_admits_pages() {
         for count in [31usize, 33, 35, 37] {
-            for discriminator in ["2", "3", "4", "5"] {
+            for discriminator in ["0", "1", "2", "3", "4", "5", "6"] {
                 assert!(
                     FormConditionalGroupSchema::from_raw_layout(
                         "22",
@@ -7979,8 +8012,9 @@ mod unemitted_property_tests {
                     "count {count} discriminator {discriminator}"
                 );
             }
-            // The tags that never carry the prefix stay out.
-            for discriminator in ["0", "1", "6", "8", "9"] {
+            // `ContextMenu`/`AutoCommandBar` carry the prefix on the
+            // shorter `30 + 2k` floor (the arm below), never this one.
+            for discriminator in ["8", "9"] {
                 assert!(
                     FormConditionalGroupSchema::from_raw_layout(
                         "22",
