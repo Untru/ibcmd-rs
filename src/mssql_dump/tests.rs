@@ -70594,6 +70594,46 @@ fn assert_platform_proven_bot_predefined_and_picture(
     );
 }
 
+/// Real MOXCEL body captured from ERP UH 3.2.12.6 (`Web_Service.cf` and
+/// `MDM_Management.cf` carry the identical body), data processor
+/// `УниверсальнаяОтчетностьПоРегистрамУХ`, template `ОтчетПоПроводкам`.
+///
+/// Its line table has five entries and cites all five (full coverage), so
+/// `compact_moxel_line_table`'s coverage check alone would keep it in stored
+/// order: `[None/1, Solid/1, Solid/2, Dotted/1, ThinDashed/1]`. But the
+/// platform publishes `[None/1, Solid/2, Solid/1, ThinDashed/1, Dotted/1]` -
+/// confirmed against native ERP UH `Web_Service`/`MDM_Management` output
+/// (both went from the single differing file on `ws` to 29/29). The
+/// discriminator: this table's first *stored* entry is also the first entry
+/// any format *cites* (citation order starts `[0, ...]`), unlike the SSL
+/// demo and 1С:УТ full-coverage tables documented on
+/// `compact_moxel_line_table` (their citation order starts with a raw index
+/// other than 0, and reordering them breaks a byte-exact match) - see
+/// `docs/evidence/mxl-line-table-order-lead.md`.
+#[test]
+fn full_coverage_line_table_reorders_when_first_entry_is_first_cited() {
+    let text = include_str!("../../tests/fixtures/moxel_transaction_report_line_order_raw.txt");
+    let spreadsheet =
+        parse_moxel_spreadsheet_text(text, &BTreeMap::new()).expect("parse spreadsheet body");
+    let observed: Vec<(&str, usize)> = spreadsheet
+        .lines
+        .iter()
+        .map(|line| (line.style, line.width))
+        .collect();
+    assert_eq!(
+        observed,
+        vec![
+            ("None", 1),
+            ("Solid", 2),
+            ("Solid", 1),
+            ("ThinDashed", 1),
+            ("Dotted", 1),
+        ],
+        "a fully-covered line table must still reorder by citation when its \
+         own first stored entry is the first entry any format cites"
+    );
+}
+
 #[test]
 fn extracts_predefined_bot_without_picture_to_platform_proven_xml() {
     assert_platform_proven_bot_predefined_and_picture(
@@ -70666,4 +70706,44 @@ fn suppresses_graphical_schema_field_geometry_under_leftwidest_page() {
     // it even when nested the same way -- see the manifest's `non_claims`
     // and the comment on this branch.
     assert!(field_xml.contains("<Edit>false</Edit>"));
+}
+
+#[test]
+fn probe_verify_other_full_coverage_cases() {
+    let cases: &[(&str, &str)] = &[
+        (
+            "РеализацияТоваров(ssl)",
+            "/private/tmp/claude-501/-Users-untru-Documents-ChatGPT-ibcmd-rs/fae20f24-20d6-4ec5-923e-581c5733e236/scratchpad/out/mxldump-ssl/Documents___ДемоРеализацияТоваров__Templates__ПФ_MXL_РеализацияТоваров__Ext__Template.xml.txt",
+        ),
+        (
+            "КарточкаСчета(ws)",
+            "/private/tmp/claude-501/-Users-untru-Documents-ChatGPT-ibcmd-rs/fae20f24-20d6-4ec5-923e-581c5733e236/scratchpad/out/mxldump-ws/DataProcessors__УниверсальнаяОтчетностьПоРегистрамУХ__Templates__КарточкаСчета__Ext__Template.xml.txt",
+        ),
+        (
+            "ОстаткиИОбороты(ws)",
+            "/private/tmp/claude-501/-Users-untru-Documents-ChatGPT-ibcmd-rs/fae20f24-20d6-4ec5-923e-581c5733e236/scratchpad/out/mxldump-ws/DataProcessors__УниверсальнаяОтчетностьПоРегистрамУХ__Templates__ОстаткиИОбороты__Ext__Template.xml.txt",
+        ),
+        (
+            "ПриемкаТоваровНаХранение(ut)",
+            "/private/tmp/claude-501/-Users-untru-Documents-ChatGPT-ibcmd-rs/fae20f24-20d6-4ec5-923e-581c5733e236/scratchpad/out/mxldump-ut/Documents__ПриемкаТоваровНаХранение__Templates__ПФ_MXL_ПриемкаТоваровНаХранение__Ext__Template.xml.txt",
+        ),
+    ];
+    for (label, path) in cases {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            eprintln!("PROBE2 {label}: fixture not found at {path}, skipping");
+            continue;
+        };
+        let fields = split_1c_braced_fields(&text, 0).expect("split fields");
+        let lines_raw = parse_moxel_line_table(&fields);
+        let spreadsheet = parse_moxel_spreadsheet_text(&text, &BTreeMap::new());
+        eprintln!(
+            "PROBE2 {label}: raw={:?} final={:?}",
+            lines_raw
+                .as_ref()
+                .map(|ls| ls.iter().map(|l| (l.style, l.width)).collect::<Vec<_>>()),
+            spreadsheet
+                .as_ref()
+                .map(|s| s.lines.iter().map(|l| (l.style, l.width)).collect::<Vec<_>>()),
+        );
+    }
 }

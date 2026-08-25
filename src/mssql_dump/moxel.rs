@@ -4244,14 +4244,7 @@ fn compact_moxel_line_table(
     lines: Vec<MoxelLine>,
     formats: &[MoxelFormat],
 ) -> (Vec<MoxelLine>, Option<BTreeMap<usize, usize>>) {
-    // A table every entry is cited from publishes in its own stored order
-    // unchanged - re-measured against the SSL demo corpus's own two-entry
-    // tables, where reordering by citation instead flipped `width="1"`/`"2"`
-    // and every dependent border reference. Reordering only has evidence
-    // for the entries a table drops (below).
-    if moxel_used_line_indexes(formats).len() == lines.len() {
-        return (lines, None);
-    }
+    let full_coverage = moxel_used_line_indexes(formats).len() == lines.len();
     let mut order = Vec::new();
     let mut seen = BTreeSet::new();
     for format in formats {
@@ -4269,6 +4262,25 @@ fn compact_moxel_line_table(
                 order.push(index);
             }
         }
+    }
+    // A table every entry is cited from publishes in its own stored order
+    // unchanged - re-measured against the SSL demo corpus's own two-entry
+    // tables (and two 1С:УТ documents of the same shape), where reordering by
+    // citation instead flipped `width="1"`/`"2"` and every dependent border
+    // reference. All four share one signature: their first *stored* entry is
+    // not the first entry any format *cites* (`order[0] != 0`).
+    //
+    // That signature fails to cover every full-coverage table, though: ERP
+    // UH's `ОтчетПоПроводкам` (`Web_Service`/`MDM_Management`) has five
+    // stored entries, cites all five, and its first citation names stored
+    // index 0 first - same shape as the SSL/УТ documents above on that one
+    // axis - but the platform still does not publish it in stored order; it
+    // publishes `[0, 2, 1, 4, 3]`, exactly this function's own citation-order
+    // scan. So "first stored entry is first cited" (`order[0] == 0`), not
+    // coverage, is the axis that splits the two groups: full coverage keeps
+    // stored order only when that first-citation anchor fails to hold.
+    if full_coverage && (order.first() != Some(&0) || order.iter().copied().eq(0..lines.len())) {
+        return (lines, None);
     }
     let mut remap = BTreeMap::new();
     let mut kept = Vec::with_capacity(order.len());

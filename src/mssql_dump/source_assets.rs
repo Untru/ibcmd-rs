@@ -2027,6 +2027,24 @@ pub(super) fn write_source_asset(
             )?;
         }
         SourceAssetKind::MoxelSpreadsheet => {
+            // TEMPORARY: dump the exact inflated body the real pipeline sees,
+            // for direct offline re-verification. Gated by env var; removed
+            // before the package ships.
+            if let Ok(dir) = std::env::var("IBCMD_MXL_DUMP_DIR")
+                && let Ok(body) = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes)
+                    .or_else(|_| crate::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes))
+            {
+                let safe = asset
+                    .primary_path
+                    .display()
+                    .to_string()
+                    .replace(['/', '\\'], "__");
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::write(
+                    std::path::Path::new(&dir).join(format!("{safe}.txt")),
+                    body.native_body_text().trim_start_matches('\u{feff}'),
+                );
+            }
             let xml = extract_moxel_source_asset_xml(
                 bytes,
                 context.object_refs,
