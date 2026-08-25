@@ -5318,18 +5318,23 @@ fn parse_business_process_flowchart_text(
     )
 }
 
-fn parse_business_process_flowchart_text_with_types(
-    text: &str,
-    object_refs: &BTreeMap<String, String>,
-    metadata_object_refs: &BTreeMap<String, String>,
-    type_index: &BTreeMap<String, String>,
-    type_index_collisions: &BTreeSet<String>,
-) -> Option<BusinessProcessFlowchart> {
+/// Structural, object-ref-free proof that raw-deflated text is a graphical-
+/// scheme blob in the brace-tuple grammar `parse_business_process_
+/// flowchart_text_with_types` decodes (shared by `BusinessProcess.
+/// Flowchart` and, per the misclassification this function's caller in
+/// `refs.rs` exists to fix, standalone `GraphicalSchema` Template bodies
+/// too): the leading `"5"` discriminator plus a declared item count whose
+/// implied record length exactly matches the text's own top-level field
+/// count -- the same length check the real parser performs, factored out
+/// so type-inference time (before the owning family's reference indexes
+/// exist) and parse time can never drift apart. Returns the split fields
+/// and declared item count on success so callers that go on to do the full
+/// parse do not have to re-split the text.
+fn flowchart_grammar_fields(text: &str) -> Option<(Vec<&str>, usize)> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "5" {
         return None;
     }
-    let scheme = parse_flowchart_scheme(fields.get(1)?, object_refs)?;
     let item_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     // The record closes with one numeric field after the item pairs -- the
     // scheme's id counter; all seven evidenced flowcharts carry it and it is
@@ -5338,6 +5343,36 @@ fn parse_business_process_flowchart_text_with_types(
     if fields.len() != trailer_index.checked_add(1)? {
         return None;
     }
+    Some((fields, item_count))
+}
+
+/// Cheap, object-ref-free type-inference check: does this raw-deflated
+/// template body look like a graphical-scheme blob in the flowchart
+/// grammar? Used by `refs::infer_template_type_from_body` to recognize the
+/// non-XML representation of a `GraphicalSchema` Template body (evidenced
+/// on real ERP UH bytes -- see `output-path-collisions-and-module-text-
+/// fallback-20260825.md` -- as the cause of every one of that corpus's
+/// `extra` Template.txt files: the body defaulted to `TextDocument`
+/// because none of `infer_template_type_from_body`'s three positive
+/// markers recognized this shape). Does not attempt the full parse -- no
+/// object refs are available yet at this point in the pipeline -- so a
+/// body that passes this check can still fail to decode at write time,
+/// which is a typed failure (fail-closed), not a silent wrong-content
+/// default.
+pub(super) fn looks_like_graphical_scheme_blob_text(text: &str) -> bool {
+    flowchart_grammar_fields(text).is_some()
+}
+
+fn parse_business_process_flowchart_text_with_types(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+) -> Option<BusinessProcessFlowchart> {
+    let (fields, item_count) = flowchart_grammar_fields(text)?;
+    let scheme = parse_flowchart_scheme(fields.get(1)?, object_refs)?;
+    let trailer_index = item_count.checked_mul(2)?.checked_add(3)?;
     parse_flowchart_number(fields.get(trailer_index)?)?;
     let mut raw_items = Vec::<(String, String)>::with_capacity(item_count);
     let mut names = BTreeMap::<String, String>::new();

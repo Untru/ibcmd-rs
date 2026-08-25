@@ -713,6 +713,7 @@ pub(crate) enum SourceAssetKind {
     Schedule,
     StandaloneContent,
     StyleBody,
+    TemplateGraphicalScheme,
     WsDefinition,
 }
 
@@ -1019,7 +1020,7 @@ pub(super) fn template_body_source_asset(
             Some(("Template.xml", SourceAssetKind::InflatedBinary))
         }
         "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::DataCompositionSchema)),
-        "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
+        "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::TemplateGraphicalScheme)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
         "SpreadsheetDocument" => Some(("Template.xml", SourceAssetKind::MoxelSpreadsheet)),
@@ -2025,6 +2026,60 @@ pub(super) fn write_source_asset(
                 format_business_process_flowchart_xml(&flowchart),
                 context.source_version,
             )?;
+        }
+        SourceAssetKind::TemplateGraphicalScheme => {
+            // A standalone `GraphicalSchema` Template body comes in one of
+            // two representations: some are already pre-serialized XML
+            // after raw-deflate (the `8.3/xcf/scheme` marker `refs::
+            // infer_template_type_from_body` checks first), which just
+            // needs the same passthrough `InflatedBinary` uses. Others are
+            // the platform's brace-tuple grammar -- the exact same one
+            // `BusinessProcess.Flowchart`'s `Ext/Flowchart.xml` decodes via
+            // `parse_business_process_flowchart_blob` above; see `mod::
+            // flowchart_grammar_fields`'s doc comment for how the two
+            // classes were told apart on real ERP UH bytes. There is no
+            // third option: a body that is neither is a typed failure here,
+            // not a silent default -- the defect this asset kind exists to
+            // fix (`output-path-collisions-and-module-text-fallback-
+            // 20260825.md` section 4) was exactly a silent default in the
+            // other direction (misclassified as `TextDocument`).
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            let text = std::str::from_utf8(&inflated)
+                .ok()
+                .map(|text| text.trim_start_matches('\u{feff}').trim_start())
+                .filter(|text| looks_like_graphical_scheme_blob_text(text));
+            if let Some(text) = text {
+                let flowchart = parse_business_process_flowchart_text_with_types(
+                    text,
+                    context.object_refs,
+                    context.metadata_object_refs,
+                    context.type_index,
+                    context.type_index_collisions,
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to extract graphical scheme from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
+                write_source_xml_file(
+                    &path,
+                    format_business_process_flowchart_xml(&flowchart),
+                    context.source_version,
+                )?;
+            } else {
+                write_source_xml_file(&path, inflated, context.source_version)?;
+            }
         }
         SourceAssetKind::MoxelSpreadsheet => {
             let xml = extract_moxel_source_asset_xml(
