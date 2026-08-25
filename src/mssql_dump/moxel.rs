@@ -2687,37 +2687,36 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
                 if row.index - expected_row_index > MAX_MOXEL_ROW_GAP {
                     break;
                 }
-                // A skipped run is one published item, never one per index,
-                // and it does not stand on its own when the record in front of
-                // it is an empty row: that row's `<indexTo>` is what covers the
-                // run. Measured over every `<rowsItem>` of the ERP УХ 3.2.12.6
-                // native tree -- 3,739,968 of them, 1,240 carrying an
-                // `<indexTo>` -- **every single one is an empty row**
-                // (1,117 without a `<formatIndex>`, 123 with one), and **none**
-                // has `indexTo` equal to its `index`, so a one-wide run carries
-                // no `indexTo` at all.
+                // A row the stream skips is a row at the ambient default
+                // format, which is exactly what a stored `0` format field
+                // means -- so it is manufactured with the same shape a stored
+                // row would have (`format_index` 1, `source_format_index`
+                // `Some(1)`) rather than with no source index at all.
                 //
+                // That matters because `compact_moxel_empty_row_ranges` is
+                // what turns adjacent cell-less rows with the same payload
+                // into one `<indexTo>` item, and it compares the source index
+                // too: a gap row carrying `None` never compared equal to the
+                // stored empty row in front of it, so the run was published
+                // one item per index.
                 // `Catalog.ГорячиеКлавиши.Template.ПФ_MXL_ГорячиеКлавиши`
-                // stores nine records and its stream steps 3 -> 5: the platform
-                // publishes the empty record 3 as
-                // `<index>3</index><indexTo>4</indexTo>`, absorbing the skipped
-                // 4. Filling the run separately published ten rows against its
-                // nine. Rows 0 and 1 of that same table are both empty and stay
-                // separate items -- they are in the stream, and this rule is
-                // only about what the stream skips.
-                let last_gap_index = row.index - 1;
-                match rows.last_mut() {
-                    Some(previous) if previous.cells.is_empty() && previous.index_to.is_none() => {
-                        previous.index_to = Some(last_gap_index);
-                    }
-                    _ => rows.push(MoxelRow {
-                        index: expected_row_index,
-                        index_to: (last_gap_index > expected_row_index).then_some(last_gap_index),
+                // stores nine records and steps 3 -> 5; the platform publishes
+                // the empty record 3 as `<index>3</index><indexTo>4</indexTo>`
+                // and we published 3 and 4 separately. Where the row in front
+                // does carry a format the run must stay separate, and the same
+                // comparison keeps it separate -- see
+                // `Catalog.АналитическиеПанели.Template.ШаблонВиджета`, whose
+                // formatted empty row 7 is published alone and whose gap 8
+                // follows as its own item.
+                for gap_index in expected_row_index..row.index {
+                    rows.push(MoxelRow {
+                        index: gap_index,
+                        index_to: None,
                         format_index: 1,
-                        source_format_index: None,
+                        source_format_index: Some(1),
                         columns_id: None,
                         cells: Vec::new(),
-                    }),
+                    });
                 }
             }
             expected_row_index = row.index + 1;
