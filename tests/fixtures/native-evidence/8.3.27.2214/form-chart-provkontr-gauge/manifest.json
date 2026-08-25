@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-chart-provkontr-gauge",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "11.5.27.75",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "cf_archive",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "ibcmd-rs cf extract (this project's own subcommand, not /opt/1cv8's ibcmd)",
+    "skeleton": "none -- extracted directly from a real distribution's 1cv8.cf",
+    "authority": "native_distribution",
+    "note": "Two more native UT 11.5.27.75 chart attribute records on the SAME DataProcessors/ПроверкаКонтрагента/Forms/Форма as form-chart-provkontr-target's ДиаграммаПоказателей, discovered only after that fix still left the whole Form.xml file differing in the full ut gate: the file carries at least three Chart-typed attributes, and this pair (identical except for rebuildTime) uses chartType=Gauge, a code no earlier fixture exercised. Both are the realSeriesCount=0 shape (215-member data[]) with no scale blocks or show-mode fields -- chartType=Gauge was the only missing piece. Located as the second and third occurrences of the `{11},\\r\\n{74,` marker in the form body text (the first is form-chart-provkontr-target's own record)."
+  },
+  "objects": [
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ПроверкаКонтрагента",
+      "form": "Форма",
+      "variant": "chartType=Gauge, realSeriesCount=0, rebuildTime=3288609",
+      "raw_entry": { "path": "raw/gauge-1.txt" },
+      "native_outputs": [{ "path": "native/gauge-1-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ПроверкаКонтрагента",
+      "form": "Форма",
+      "variant": "chartType=Gauge, realSeriesCount=0, rebuildTime=3309792 (identical to gauge-1 otherwise)",
+      "raw_entry": { "path": "raw/gauge-2.txt" },
+      "native_outputs": [{ "path": "native/gauge-2-settings.xml" }]
+    }
+  ],
+  "proven_claims": [
+    "chartType code \"38\" is Gauge (a fourth code, alongside Line=0, Column3D=6, Pie=12), confirmed both by the isolated chart-form-gaugetype seed and directly on these two native records.",
+    "Closes DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml in the full ut gate: this was the last missing piece after form-chart-provkontr-target's fixes -- the file carries three Chart-typed attributes total, and all three now decode correctly."
+  ],
+  "non_claims": []
+}

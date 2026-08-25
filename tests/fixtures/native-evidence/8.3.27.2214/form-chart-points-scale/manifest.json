@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-chart-points-scale",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "Three seeds, each the chart-form-4series control tree with a <d4p1:pointsScale> element added, triangulating its raw layout: full (gridLinesShowMode=Show, gridLine width=1 Dotted, labelColor=#B4B4B4, matching native UT's own DataProcessors/ПроверкаКонтрагента/Forms/Форма record), minimal (gridLinesShowMode=DontShow, gridLine width=1 Solid -- the platform default -- labelColor omitted entirely), and label-color-only (same as minimal but labelColor=#B4B4B4 added) -- the last two isolate labelColor's own slot from gridLinesShowMode/gridLine's, since full alone could not tell whether the single Dotted/Show/#B4B4B4 seed's raw diff was one field or several."
+  },
+  "objects": [
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "pointsScale: gridLinesShowMode=Show, gridLine=Dotted/width1, labelColor=#B4B4B4",
+      "raw_entry": { "path": "raw/full.txt" },
+      "native_outputs": [{ "path": "native/full-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "pointsScale: gridLinesShowMode=DontShow, gridLine=Solid/width1 (default), labelColor omitted",
+      "raw_entry": { "path": "raw/minimal.txt" },
+      "native_outputs": [{ "path": "native/minimal-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "pointsScale: same as minimal but labelColor=#B4B4B4 added",
+      "raw_entry": { "path": "raw/label-color-only.txt" },
+      "native_outputs": [{ "path": "native/label-color-only-settings.xml" }]
+    }
+  ],
+  "proven_claims": [
+    "pointsScale lives at tidx(139), the first of three otherwise-unclaimed 'funnel-link'-shaped 30-member blocks pt.3's investigation left undecoded (tidx(140)/tidx(141) are hypothesized, unproven, to be valuesScale/seriesScale by the same pattern).",
+    "The block's shared prefix `2,0,0,2,{1,0}` plus a 13-member titleArea tuple (font/textColor/backColor/border/borderColor, form_chart_scale_title_area_xml) are present and default-valued even in the chart-form-4series control, where pointsScale itself is absent from the XML -- so titleArea's own encoding does not gate the element's presence.",
+    "A tri-state slot right after titleArea: \"2\"=pointsScale absent (22 sub-fields total), \"1\"=gridLinesShowMode DontShow, \"0\"=Show (23 sub-fields, since a gridLine record is inserted only when present).",
+    "gridLine reuses form_chart_line_xml's shape, extended here with a second style code: \"1\"=Solid (already known) and \"2\"=Dotted (new, single observation from the full seed).",
+    "labelColor is its own conditionally-written slot right after gridLine, using the shared form_chart_color auto/direct-RGB pattern: auto is omitted from the XML entirely (not written as the literal text 'auto', unlike every other colour field decoded so far), direct RGB is written -- isolated from gridLinesShowMode/gridLine by comparing minimal (labelColor omitted) against label-color-only (labelColor=#B4B4B4, otherwise identical raw record)."
+  ],
+  "non_claims": [
+    "valuesScale and seriesScale are not exercised by this fixture; their block positions (hypothesized tidx(140)/tidx(141)) and layouts are unconfirmed.",
+    "Only two gridLine style codes are proven (1=Solid, 2=Dotted); a second observation of Dotted (a different width/context) has not been taken.",
+    "The two slots between gridLine and labelColor, and the several slots after labelColor within the block, are validated only as literal constants matching every observation so far -- their semantics remain unclaimed."
+  ]
+}

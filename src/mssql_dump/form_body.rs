@@ -27890,6 +27890,23 @@ fn parse_form_chart_settings_xml(
     format_form_chart_settings_xml(&data, object_refs, indent)
 }
 
+/// Decodes a raw `{0,1,"Chart",{"#",<uuid>,{11},{74,...}}}` field -- the same
+/// shape a Chart-typed form attribute's whole `field` argument carries -- and
+/// renders it the way `parse_form_chart_settings_xml` would inside a real
+/// form body, at the indent a `<Settings>` element sits at three levels into
+/// `<Attribute>`. Exists so `tests.rs` can assert platform-proven raw records
+/// round-trip to byte-identical native `<Settings xsi:type="d4p1:Chart">`
+/// XML without exposing this module's private parsing functions, mirroring
+/// `moxel.rs`'s `parse_and_render_moxel_chart_for_test`.
+#[cfg(test)]
+pub(super) fn parse_and_render_form_chart_settings_for_test(text: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_CHART_TYPE_REFERENCE.to_string(),
+    }];
+    let object_refs = BTreeMap::new();
+    parse_form_chart_settings_xml(text, &value_types, &object_refs, 3)
+}
+
 const FORM_CHART_TYPE_REFERENCE: &str = "d5p1:Chart";
 const FORM_CHART_VALUE_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
 const FORM_CHART_BORDER_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
@@ -27897,8 +27914,13 @@ const FORM_CHART_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
 /// The one series record a chart with no series still carries, and the first
 /// slot of the tail behind it.
 const FORM_CHART_SERIES_FIELDS: usize = 11;
-const FORM_CHART_TAIL_START: usize = 18;
-const FORM_CHART_TAIL_FIELDS: usize = 197;
+/// The tail length at `series_count=0, point_count=0` -- the shape both
+/// original 197-tail proofs carried. `format_form_chart_settings_xml` grows
+/// this by the same formula `moxel.rs` uses for its own chart record.
+const FORM_CHART_TAIL_FIELDS_BASE: usize = 197;
+/// Mirrors `moxel.rs`'s own `MAX_MOXEL_CHART_SERIES` bound for the same
+/// spreadsheet-document chart record family.
+const MAX_FORM_CHART_SERIES: usize = 64;
 
 /// A stored member with its layout whitespace removed, for the members whose
 /// whole shape is compared against a fixed token: the record is line-broken and
@@ -27975,7 +27997,11 @@ fn form_chart_localized_xml(name: &str, field: &str, indent: usize) -> Option<St
     ))
 }
 
-/// `{4,0,{0},1,<width>,0,<solid line uuid>,0}`.
+/// `{4,0,{0},<style>,<width>,0,<line uuid>,0}`. Every prior observation of
+/// this shape (scaleLine, multiStageLinkLine, a series' own line) held
+/// `style="1"` (Solid); `chart-form-pointsscale` -- a `chart-form-4series`
+/// control plus only `<d4p1:pointsScale>`'s `<d4p1:gridLine>` set to
+/// `Dotted` -- is the first record with `style="2"`.
 fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String> {
     let tab = "\t".repeat(indent);
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -27983,7 +28009,6 @@ fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String>
         || fields.first()?.trim() != "4"
         || fields.get(1)?.trim() != "0"
         || form_chart_compact(fields.get(2)?) != "{0}"
-        || fields.get(3)?.trim() != "1"
         || fields.get(5)?.trim() != "0"
         || !fields
             .get(6)?
@@ -27993,10 +28018,15 @@ fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String>
     {
         return None;
     }
+    let style = match fields.get(3)?.trim() {
+        "1" => "Solid",
+        "2" => "Dotted",
+        _ => return None,
+    };
     let width = form_chart_integer(fields.get(4)?)?;
     Some(format!(
         "{tab}<d4p1:{name} width=\"{width}\" gap=\"false\">\r\n\
-{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">Solid</v8ui:style>\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">{style}</v8ui:style>\r\n\
 {tab}</d4p1:{name}>\r\n"
     ))
 }
@@ -28028,6 +28058,57 @@ fn form_chart_border_xml(name: &str, field: &str, indent: usize) -> Option<Strin
 {tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
 {tab}</d4p1:{name}>\r\n"
     ))
+}
+
+/// `{1,4,0.5,0.5,<font>,<textColor>,<backColor>,1,<border>,<borderColor>,
+/// 4,2,0}` -- the `titleArea` a scale block (`pointsScale`, and by
+/// hypothesis `valuesScale`/`seriesScale`) carries. `[0..4)` and
+/// `[7]`/`[10..13)` are unclaimed; every observation so far (`chart-form-
+/// pointsscale`, `chart-form-pointsscale-min`, `chart-form-pointsscale-
+/// labelcolor` -- three seeds, three different `pointsScale` bodies, same
+/// `titleArea`, still present at its platform-written default even in the
+/// `chart-form-4series` control where `pointsScale` itself is entirely
+/// absent from the XML) agrees on them, so they are validated as literals
+/// rather than approximated.
+fn form_chart_scale_title_area_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 13
+        || fields.first()?.trim() != "1"
+        || fields.get(1)?.trim() != "4"
+        || fields.get(2)?.trim() != "0.5"
+        || fields.get(3)?.trim() != "0.5"
+        || form_chart_compact(fields.get(4)?) != "{7,3,0,1,100}"
+        || fields.get(7)?.trim() != "1"
+        || fields.get(10)?.trim() != "4"
+        || fields.get(11)?.trim() != "2"
+        || fields.get(12)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut xml = format!("{tab}<d4p1:titleArea>\r\n");
+    xml.push_str(&format!("{inner_tab}<d4p1:font kind=\"AutoFont\"/>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:textColor>{}</d4p1:textColor>\r\n",
+        form_chart_color(fields.get(5)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:backColor>{}</d4p1:backColor>\r\n",
+        form_chart_color(fields.get(6)?, object_refs)?
+    ));
+    xml.push_str(&form_chart_border_xml("border", fields.get(8)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:borderColor>{}</d4p1:borderColor>\r\n",
+        form_chart_color(fields.get(9)?, object_refs)?
+    ));
+    xml.push_str(&format!("{tab}</d4p1:titleArea>\r\n"));
+    Some(xml)
 }
 
 /// A stored decimal, written the way the platform writes it. The two records
@@ -28082,6 +28163,15 @@ fn form_chart_rectangle_xml(name: &str, fields: &[&str], indent: usize) -> Optio
 /// The stored colour is not what the platform writes: both records hold an
 /// RGB there and both are written `auto`, with the colour-priority flag clear.
 /// A record with that flag set is refused rather than guessed at.
+///
+/// The stored marker is the same story: a `chart-form-1series` seed
+/// (`tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/`)
+/// carries a real `realSeriesData` record whose marker slot reads `3`
+/// alongside the always-present `realExSeriesData` placeholder's `1` --
+/// both platform-round-tripped to `<d4p1:marker>Auto</d4p1:marker>`. Neither
+/// code is `moxel_chart_marker`'s `0..3` shape enum (that table belongs to
+/// the spreadsheet-document chart drawing, a different record family); here
+/// the slot is only ever validated as an integer and never rendered.
 fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<String> {
     let tab = "\t".repeat(indent);
     let inner = indent + 1;
@@ -28094,14 +28184,12 @@ fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<S
         return None;
     }
     let id = form_chart_integer(fields.get(7)?)?;
-    let marker = form_chart_code(fields.get(2)?, &[("1", "Auto")])?;
+    form_chart_integer(fields.get(2)?)?;
     let mut xml = format!("{tab}<d4p1:{name}>\r\n");
     xml.push_str(&format!("{inner_tab}<d4p1:id>{id}</d4p1:id>\r\n"));
     xml.push_str(&format!("{inner_tab}<d4p1:color>auto</d4p1:color>\r\n"));
     xml.push_str(&form_chart_line_xml("line", fields.get(1)?, inner)?);
-    xml.push_str(&format!(
-        "{inner_tab}<d4p1:marker>{marker}</d4p1:marker>\r\n"
-    ));
+    xml.push_str(&format!("{inner_tab}<d4p1:marker>Auto</d4p1:marker>\r\n"));
     xml.push_str(&form_chart_localized_xml("text", fields.get(3)?, inner)?);
     xml.push_str(&format!(
         "{inner_tab}<d4p1:strIsChanged>{}</d4p1:strIsChanged>\r\n",
@@ -28127,6 +28215,20 @@ fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<S
 /// Every read below names the tail slot it comes from.  Six members are
 /// written as a literal instead: `circleExpandMode`, `chart3Dcrd`,
 /// `titleIsInit`, `legendIsInit`, `chartIsInit` and `transparentLabelsBkg`.
+/// `isTransposed`, `autoTransposition` and `legendScrollEnable` are a
+/// seventh, separate literal trio.  The two original 197-tail proofs agreed
+/// `t[82..85)` read `"0","0","0"` and `t[88..93)`'s 88/89/92 read `"1"`, and
+/// both trios were guarded on that agreement standing in for the (unproven)
+/// real slots. The `chart-form-1series` seed disproves the guard, not the
+/// literals: with a real, non-empty series present, `t[84]`, `t[88]` and
+/// `t[89]` hold design-time legend/plot-area coordinates instead (the same
+/// unclaimed-float family `docs/evidence/ut-diagram-remainder-20260825.md`
+/// records for the spreadsheet-document chart's own tail, e.g. its
+/// `tail[84]`/`tail[86]`/`tail[87]`) -- content-dependent, not the flag's
+/// storage. All three seed values (`series_count` 0, 1 and 4, the last read
+/// directly off native UT XML) still write `false`/`false`/`false` and
+/// `true`/`true`/`true`, so the guard is dropped rather than repointed at an
+/// still-unidentified real slot.
 /// The two records agree on all six and nothing in the pair tells their slots
 /// apart -- `transparentLabelsBkg` even reads `0` on both while the platform
 /// writes `true` -- so each is guarded on the slots that would have to move
@@ -28140,15 +28242,75 @@ fn format_form_chart_settings_xml(
     let tab = "\t".repeat(indent);
     let child = indent + 1;
     let child_tab = "\t".repeat(child);
-    if data.first()?.trim() != "74"
-        || data.get(4)?.trim() != "0"
-        || data.get(17)?.trim() != "0"
-        || data.len() != FORM_CHART_TAIL_START + FORM_CHART_TAIL_FIELDS
-    {
+    // `realSeriesCount` real `realSeriesData` records precede the one
+    // `realExSeriesData` placeholder every record carries (empty or not) --
+    // proven by `chart-form-1series` (one real series ahead of the
+    // placeholder, both 11-member records, ids 2 then 1) against the
+    // `chart-form-control` zero-series seed, which has only the placeholder.
+    // See `tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/`.
+    let series_count: usize = data.get(4)?.trim().parse().ok()?;
+    if series_count > MAX_FORM_CHART_SERIES || data.get(17 + 11 * series_count)?.trim() != "0" {
         return None;
     }
-    let series = data.get(5..5 + FORM_CHART_SERIES_FIELDS)?;
-    let t = data.get(FORM_CHART_TAIL_START..)?;
+    let real_series_end = 5 + FORM_CHART_SERIES_FIELDS * series_count;
+    let ex_series_start = real_series_end;
+    let tail_start = ex_series_start + FORM_CHART_SERIES_FIELDS + 2;
+    // The scale-id list right after `rebuildTime` grows the tail by three
+    // members per real series (a count field plus two `series_count+1`-long
+    // lists) -- the same `197 + 3*series_count + point_count*(1+4*
+    // series_count)` formula `moxel.rs`'s spreadsheet-document chart proved
+    // for `series_count`/`point_count`, cross-checked here at
+    // `series_count=1` and, directly against native UT XML with no seed, at
+    // `series_count=4`.
+    let point_count = 0usize; // not yet observed nonzero on a form chart
+    let expected_tail_fields =
+        FORM_CHART_TAIL_FIELDS_BASE + 3 * series_count + point_count * (1 + 4 * series_count);
+    if data.first()?.trim() != "74" || data.len() != tail_start + expected_tail_fields {
+        return None;
+    }
+    let real_series = data.get(5..real_series_end)?;
+    let series = data.get(ex_series_start..ex_series_start + FORM_CHART_SERIES_FIELDS)?;
+    let t = data.get(tail_start..)?;
+    // Positions in `t` from here on are given as the fixed (`series_count`
+    // `=` `0`) offset the two original 197-tail proofs established; `tidx`
+    // maps that fixed offset to its actual slot once the scale-id list and
+    // the per-series copy of the funnel-link-shaped record (both proven by
+    // the same seed) have grown the tail.
+    let n_scale = 1 + series_count;
+    let shift_a = 2 * series_count;
+    let shift_b = series_count;
+    let tidx = |fixed: usize| -> usize {
+        if fixed < 126 {
+            fixed
+        } else if fixed < 147 {
+            fixed + shift_a
+        } else {
+            fixed + shift_a + shift_b
+        }
+    };
+    if t.get(123)?.trim() != n_scale.to_string() {
+        return None;
+    }
+    let mut expected_ids = Vec::with_capacity(n_scale);
+    expected_ids.push(form_chart_integer(series.get(7)?)?.to_string());
+    for chunk in real_series.chunks(FORM_CHART_SERIES_FIELDS) {
+        expected_ids.push(form_chart_integer(chunk.get(7)?)?.to_string());
+    }
+    for (offset, expected_id) in expected_ids.iter().enumerate() {
+        let entry = split_1c_braced_fields(t.get(124 + offset)?, 0)?;
+        if entry.len() != 3
+            || entry.first()?.trim() != "0"
+            || entry.get(1)?.trim() != expected_id
+            || entry.get(2)?.trim() != "0"
+        {
+            return None;
+        }
+    }
+    for offset in 0..n_scale {
+        if form_chart_compact(t.get(124 + n_scale + offset)?) != "{0,0}" {
+            return None;
+        }
+    }
     let mut xml = format!(
         "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d4p1:Chart\">\r\n"
     );
@@ -28173,15 +28335,37 @@ fn format_form_chart_settings_xml(
     scalar!("seriesCurId", form_chart_integer(data.get(1)?)?);
     scalar!("pointsCurId", form_chart_integer(data.get(2)?)?);
     scalar!("isSeriesDesign", form_chart_bool(data.get(3)?)?);
-    scalar!("realSeriesCount", "0");
+    scalar!("realSeriesCount", series_count);
+    for chunk in real_series.chunks(FORM_CHART_SERIES_FIELDS) {
+        xml.push_str(&form_chart_series_xml("realSeriesData", chunk, child)?);
+    }
     xml.push_str(&form_chart_series_xml("realExSeriesData", series, child)?);
-    scalar!("isPointsDesign", form_chart_bool(data.get(16)?)?);
+    scalar!(
+        "isPointsDesign",
+        form_chart_bool(data.get(ex_series_start + FORM_CHART_SERIES_FIELDS)?)?
+    );
     scalar!("realPointCount", "0");
     scalar!("curSeries", form_chart_integer(t.first()?)?);
     scalar!("curPoint", form_chart_integer(t.get(1)?)?);
     scalar!(
         "chartType",
-        form_chart_code(t.get(2)?, &[("6", "Column3D"), ("12", "Pie")])?
+        // `"0"` proven by seed `chart-form-linetype`: the SAME `chart-form-
+        // 4series` control tree with only `<d4p1:chartType>` changed from
+        // `Column3D` to `Line` -- the single changed raw token. `"38"`
+        // (`Gauge`) is the same recipe, seed `chart-form-gaugetype`; native
+        // UT's own DataProcessors/ПроверкаКонтрагента/Forms/Форма carries
+        // two further chart attributes (not `ДиаграммаПоказателей`) with
+        // this exact code, otherwise entirely within the already-proven
+        // `realSeriesCount=0` shape.
+        form_chart_code(
+            t.get(2)?,
+            &[
+                ("0", "Line"),
+                ("6", "Column3D"),
+                ("12", "Pie"),
+                ("38", "Gauge")
+            ]
+        )?
     );
     scalar!(
         "circleLabelType",
@@ -28277,9 +28461,6 @@ fn format_form_chart_settings_xml(
     );
     scalar!("animation", form_chart_code(t.get(64)?, &[("0", "Auto")])?);
     scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
-    if t.get(82)?.trim() != "0" || t.get(83)?.trim() != "0" || t.get(84)?.trim() != "0" {
-        return None;
-    }
     scalar!("isTransposed", "false");
     scalar!("autoTransposition", "false");
     scalar!("legendScrollEnable", "false");
@@ -28313,25 +28494,22 @@ fn format_form_chart_settings_xml(
     scalar!("autoMinValue", form_chart_bool(t.get(79)?)?);
     scalar!("userMinValue", form_chart_decimal(t.get(80)?)?);
     scalar!("elementsIsInit", form_chart_bool(t.get(81)?)?);
-    if t.get(88)?.trim() != "1" || t.get(89)?.trim() != "1" || t.get(92)?.trim() != "1" {
-        return None;
-    }
     scalar!("titleIsInit", "true");
     scalar!("legendIsInit", "true");
     scalar!("chartIsInit", "true");
     xml.push_str(&form_chart_rectangle_xml(
         "elementsChart",
-        t.get(163..167)?,
+        t.get(tidx(163)..tidx(167))?,
         child,
     )?);
     xml.push_str(&form_chart_rectangle_xml(
         "elementsLegend",
-        t.get(167..171)?,
+        t.get(tidx(167)..tidx(171))?,
         child,
     )?);
     xml.push_str(&form_chart_rectangle_xml(
         "elementsTitle",
-        t.get(171..175)?,
+        t.get(tidx(171)..tidx(175))?,
         child,
     )?);
     color!("borderColor", 95);
@@ -28347,6 +28525,16 @@ fn format_form_chart_settings_xml(
     }
     scalar!("isDataSourceMode", form_chart_bool(t.get(98)?)?);
     scalar!("isRandomizedNewValues", form_chart_bool(t.get(99)?)?);
+    // Written only when its slot names a mode: seed `chart-form-splinemode`
+    // (`chart-form-4series` control plus only `<d4p1:splineMode>` added)
+    // flips exactly `t[110]` from `"0"` to `"1"`, the same
+    // present-only-when-nonzero shape `legendPlacement` already uses.
+    if t.get(110)?.trim() != "0" {
+        scalar!(
+            "splineMode",
+            form_chart_code(t.get(110)?, &[("1", "SmoothCurve")])?
+        );
+    }
     scalar!("splineStrain", form_chart_integer(t.get(112)?)?);
     scalar!("translucencePercent", form_chart_decimal(t.get(111)?)?);
     scalar!("funnelNeckHeightPercent", form_chart_percent(t.get(113)?)?);
@@ -28359,19 +28547,262 @@ fn format_form_chart_settings_xml(
     )?);
     color!("multiStageLinkColor", 117);
     for (name, slot) in [("valuesAxis", 127usize), ("pointsAxis", 128)] {
-        if form_chart_compact(t.get(slot)?) != "{0,0,{0,1,0,1,0},0,0}" {
+        if form_chart_compact(t.get(tidx(slot))?) != "{0,0,{0,1,0,1,0},0,0}" {
             return None;
         }
         xml.push_str(&format!("{child_tab}<d4p1:{name}/>\r\n"));
     }
+    // `tidx(139)` holds `pointsScale`'s own tuple:
+    // `2,0,0,2,{1,0},<titleArea>,<state>,0,<hasGridLine>,[<gridLine>],
+    // <unclaimed>,<unclaimed>,[<labelColor>],2,<unclaimed>*9` -- proven by
+    // three single-element `chart-form-4series` seed diffs (`chart-form-
+    // pointsscale`: gridLinesShowMode=Show, gridLine=Dotted/width1,
+    // labelColor=#B4B4B4; `chart-form-pointsscale-min`: gridLinesShowMode=
+    // DontShow, gridLine=Solid/width1 -- the platform default -- labelColor
+    // omitted; `chart-form-pointsscale-labelcolor`: same as -min but
+    // labelColor=#B4B4B4, isolating labelColor's own slot from
+    // gridLinesShowMode/gridLine's). `<state>` is a tri-state (`"2"` =
+    // `pointsScale` entirely absent -- 22 sub-fields total, no gridLine
+    // record at all; `"1"` = `DontShow`; `"0"` = `Show`); the gridLine
+    // record only exists when `<state>!="2"`, which is what shifts the
+    // sub-field count from 22 to 23. The two slots right after gridLine
+    // stay constant across every observation (unclaimed).
+    let points_scale = split_1c_braced_fields(t.get(tidx(139))?, 0)?;
+    if points_scale.first()?.trim() != "2"
+        || points_scale.get(1)?.trim() != "0"
+        || points_scale.get(2)?.trim() != "0"
+        || points_scale.get(3)?.trim() != "2"
+        || form_chart_compact(points_scale.get(4)?) != "{1,0}"
+    {
+        return None;
+    }
+    let points_title_area =
+        form_chart_scale_title_area_xml(points_scale.get(5)?, object_refs, child + 1)?;
+    match points_scale.get(6)?.trim() {
+        "2" => {
+            if points_scale.len() != 22 {
+                return None;
+            }
+        }
+        state @ ("0" | "1") => {
+            if points_scale.len() != 23
+                || points_scale.get(7)?.trim() != "0"
+                || points_scale.get(8)?.trim() != "1"
+                || form_chart_compact(points_scale.get(10)?) != "{3,4,{0}}"
+                || form_chart_compact(points_scale.get(11)?) != "{7,3,0,1,100}"
+                || points_scale.get(13)?.trim() != "2"
+            {
+                return None;
+            }
+            let inner_tab = "\t".repeat(child + 1);
+            xml.push_str(&format!("{child_tab}<d4p1:pointsScale>\r\n"));
+            xml.push_str(&points_title_area);
+            xml.push_str(&format!(
+                "{inner_tab}<d4p1:gridLinesShowMode>{}</d4p1:gridLinesShowMode>\r\n",
+                if state == "0" { "Show" } else { "DontShow" }
+            ));
+            xml.push_str(&form_chart_line_xml(
+                "gridLine",
+                points_scale.get(9)?,
+                child + 1,
+            )?);
+            let label_color = form_chart_color(points_scale.get(12)?, object_refs)?;
+            if label_color != "auto" {
+                xml.push_str(&format!(
+                    "{inner_tab}<d4p1:labelColor>{label_color}</d4p1:labelColor>\r\n"
+                ));
+            }
+            xml.push_str(&format!("{child_tab}</d4p1:pointsScale>\r\n"));
+        }
+        _ => return None,
+    }
+    // `tidx(140)`, right after `pointsScale`'s block, is `valuesScale`'s --
+    // same `2,?,0,2,{1,0},<titleArea>,...` wrapper shape, but WITHOUT a
+    // conditionally-inserted sub-record: seed `chart-form-valuesscale`
+    // (`chart-form-4series` control plus only `<d4p1:valuesScale>` with
+    // `showTitle=DontShow`, default `titleArea`, `labelFormat` set) changes
+    // exactly two of the 22 sub-fields relative to the (also 22-sub-field)
+    // absent baseline: `[1]` (`"0"`=absent, `"1"`=`showTitle=DontShow`;
+    // `Show` unobserved) and `[13]` (`labelFormat`, the same
+    // `form_chart_localized_xml` shape `lbFormat`/`lbpFormat`/`vsFormat`
+    // already use -- the platform mirrors this same text into the
+    // top-level `vsFormat` element, `t[39]`, on import, confirmed by the
+    // native re-export, but `labelFormat` reads its own slot here rather
+    // than cross-referencing `t[39]`).
+    let values_scale = split_1c_braced_fields(t.get(tidx(140))?, 0)?;
+    if values_scale.len() != 22
+        || values_scale.first()?.trim() != "2"
+        || values_scale.get(2)?.trim() != "0"
+        || values_scale.get(3)?.trim() != "2"
+        || form_chart_compact(values_scale.get(4)?) != "{1,0}"
+        || values_scale.get(6)?.trim() != "2"
+        || values_scale.get(7)?.trim() != "0"
+        || values_scale.get(8)?.trim() != "0"
+        || form_chart_compact(values_scale.get(9)?) != "{3,4,{0}}"
+        || form_chart_compact(values_scale.get(10)?) != "{7,3,0,1,100}"
+        || form_chart_compact(values_scale.get(11)?) != "{3,4,{0}}"
+        || values_scale.get(12)?.trim() != "2"
+        || values_scale.get(14)?.trim() != "0"
+        || form_chart_compact(values_scale.get(15)?) != "{3,4,{0}}"
+        || values_scale.get(16)?.trim() != "0"
+        || values_scale.get(17)?.trim() != "0"
+        || values_scale.get(18)?.trim() != "0"
+        || values_scale.get(19)?.trim() != "0"
+        || values_scale.get(20)?.trim() != "0"
+        || values_scale.get(21)?.trim() != "0"
+    {
+        return None;
+    }
+    let values_title_area =
+        form_chart_scale_title_area_xml(values_scale.get(5)?, object_refs, child + 1)?;
+    match values_scale.get(1)?.trim() {
+        "0" => {}
+        "1" => {
+            let inner_tab = "\t".repeat(child + 1);
+            xml.push_str(&format!("{child_tab}<d4p1:valuesScale>\r\n"));
+            xml.push_str(&format!(
+                "{inner_tab}<d4p1:showTitle>DontShow</d4p1:showTitle>\r\n"
+            ));
+            xml.push_str(&values_title_area);
+            xml.push_str(&form_chart_localized_xml(
+                "labelFormat",
+                values_scale.get(13)?,
+                child + 1,
+            )?);
+            xml.push_str(&format!("{child_tab}</d4p1:valuesScale>\r\n"));
+        }
+        _ => return None,
+    }
+    // `tidx(141)`, right after `valuesScale`'s block, is `seriesScale`'s --
+    // same shared wrapper+titleArea prefix as `pointsScale`/`valuesScale`.
+    // Seed `chart-form-seriesscale` (`chart-form-4series` control plus only
+    // `<d4p1:seriesScale>` with default `titleArea`, `gridLine` Dotted/
+    // width1, `showInChart=DontShow`) changes exactly two things relative
+    // to the (22-sub-field) absent baseline: `[8]` becomes `"1"` (a
+    // "has gridLine" presence flag, the same shape `pointsScale`'s own
+    // `[8]` uses) with a `gridLine` record inserted right after it
+    // (growing the block to 23 sub-fields -- confirming gridLine style
+    // code `"2"`=`Dotted` a second time, independent of `chart-form-
+    // pointsscale`'s), and the block's last slot becomes `"2"`
+    // (`showInChart=DontShow`; `Show`'s code is unobserved).
+    let series_scale = split_1c_braced_fields(t.get(tidx(141))?, 0)?;
+    if series_scale.first()?.trim() != "2"
+        || series_scale.get(1)?.trim() != "0"
+        || series_scale.get(2)?.trim() != "0"
+        || series_scale.get(3)?.trim() != "2"
+        || form_chart_compact(series_scale.get(4)?) != "{1,0}"
+        || series_scale.get(6)?.trim() != "2"
+        || series_scale.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let series_title_area =
+        form_chart_scale_title_area_xml(series_scale.get(5)?, object_refs, child + 1)?;
+    match series_scale.get(8)?.trim() {
+        "0" => {
+            if series_scale.len() != 22 || series_scale.get(21)?.trim() != "0" {
+                return None;
+            }
+        }
+        "1" => {
+            if series_scale.len() != 23
+                || form_chart_compact(series_scale.get(10)?) != "{3,4,{0}}"
+                || form_chart_compact(series_scale.get(11)?) != "{7,3,0,1,100}"
+                || form_chart_compact(series_scale.get(12)?) != "{3,4,{0}}"
+                || series_scale.get(13)?.trim() != "2"
+                || form_chart_compact(series_scale.get(14)?) != "{1,0}"
+                || series_scale.get(15)?.trim() != "0"
+                || form_chart_compact(series_scale.get(16)?) != "{3,4,{0}}"
+                || series_scale.get(17)?.trim() != "0"
+                || series_scale.get(18)?.trim() != "0"
+                || series_scale.get(19)?.trim() != "0"
+                || series_scale.get(20)?.trim() != "0"
+                || series_scale.get(21)?.trim() != "0"
+            {
+                return None;
+            }
+            let show_in_chart = match series_scale.get(22)?.trim() {
+                "2" => "DontShow",
+                _ => return None,
+            };
+            let inner_tab = "\t".repeat(child + 1);
+            xml.push_str(&format!("{child_tab}<d4p1:seriesScale>\r\n"));
+            xml.push_str(&series_title_area);
+            xml.push_str(&form_chart_line_xml(
+                "gridLine",
+                series_scale.get(9)?,
+                child + 1,
+            )?);
+            xml.push_str(&format!(
+                "{inner_tab}<d4p1:showInChart>{show_in_chart}</d4p1:showInChart>\r\n"
+            ));
+            xml.push_str(&format!("{child_tab}</d4p1:seriesScale>\r\n"));
+        }
+        _ => return None,
+    }
     // The legend placement is written only when its slot names one: the two
-    // records read `0` and `6`, and the platform writes nothing on the first
-    // and `None` on the second.
-    if t.get(161)?.trim() != "0" {
+    // original records read `0` and `6`, and the platform writes nothing on
+    // the first and `None` on the second. `"4"` (`Bottom`) is proven by seed
+    // `chart-form-legendbottom`, a `chart-form-4series` control with only
+    // `<d4p1:legendPlacement>Bottom</d4p1:legendPlacement>` added -- the
+    // same `tidx(161)` slot changes from `"0"` to `"4"`.
+    if t.get(tidx(161))?.trim() != "0" {
         scalar!(
             "legendPlacement",
-            form_chart_code(t.get(161)?, &[("6", "None")])?
+            form_chart_code(t.get(tidx(161))?, &[("4", "Bottom"), ("6", "None")])?
         );
+    }
+    // `tidx(162)`, right after legendPlacement's slot, is titleAreaPlacement
+    // -- same present-only-when-nonzero shape, proven by seed
+    // `chart-form-titleareaplacement` (`chart-form-4series` control plus
+    // only `<d4p1:titleAreaPlacement>None</d4p1:titleAreaPlacement>`
+    // added): the slot flips from `"0"` to `"8"`.
+    if t.get(tidx(162))?.trim() != "0" {
+        scalar!(
+            "titleAreaPlacement",
+            form_chart_code(t.get(tidx(162))?, &[("8", "None")])?
+        );
+    }
+    // `tidx(183)` holds a 5-member tuple carrying three independent,
+    // present-only-when-nonzero "show mode" slots at indices 1/3/4 (0/2
+    // stay `0` in every record seen so far, unclaimed). Proven by three
+    // single-element `chart-form-4series` seed diffs -- `chart-form-vttsm`
+    // (`{0,0,0,0,0}` -> `{0,2,0,0,0}` for `valuesToolTipShowMode=
+    // ShowOnHover`), `chart-form-pdlsm` (`{0,0,0,1,0}` for
+    // `pointsDropLinesShowMode=Show`) and `chart-form-vdlsm`
+    // (`{0,0,0,0,1}` for `valuesDropLinesShowMode=Show`) -- each changing
+    // exactly one element. Code `"2"` for the drop-lines pair is native UT
+    // DataProcessors/ПроверкаКонтрагента/Forms/Форма's own record, whose
+    // tuple reads `{0,2,0,2,2}` for `valuesToolTipShowMode=ShowOnHover`,
+    // `pointsDropLinesShowMode=DontShow`, `valuesDropLinesShowMode=
+    // DontShow` -- so `DontShow` is an explicit code, not the `0` omitted
+    // case.
+    let show_mode_tuple = split_1c_braced_fields(t.get(tidx(183))?, 0)?;
+    if show_mode_tuple.len() != 5
+        || show_mode_tuple.first()?.trim() != "0"
+        || show_mode_tuple.get(2)?.trim() != "0"
+    {
+        return None;
+    }
+    if show_mode_tuple.get(1)?.trim() != "0" {
+        scalar!(
+            "valuesToolTipShowMode",
+            form_chart_code(show_mode_tuple.get(1)?, &[("2", "ShowOnHover")])?
+        );
+    }
+    for (name, slot) in [
+        ("pointsDropLinesShowMode", 3usize),
+        ("valuesDropLinesShowMode", 4),
+    ] {
+        if show_mode_tuple.get(slot)?.trim() != "0" {
+            scalar!(
+                name,
+                form_chart_code(
+                    show_mode_tuple.get(slot)?,
+                    &[("1", "Show"), ("2", "DontShow")]
+                )?
+            );
+        }
     }
     xml.push_str(&format!("{tab}</Settings>\r\n"));
     Some(xml)
