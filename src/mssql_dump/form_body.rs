@@ -28202,7 +28202,13 @@ fn format_form_chart_settings_xml(
     scalar!("curPoint", form_chart_integer(t.get(1)?)?);
     scalar!(
         "chartType",
-        form_chart_code(t.get(2)?, &[("6", "Column3D"), ("12", "Pie")])?
+        // `"0"` proven by seed `chart-form-linetype`: the SAME `chart-form-
+        // 4series` control tree with only `<d4p1:chartType>` changed from
+        // `Column3D` to `Line` -- the single changed raw token.
+        form_chart_code(
+            t.get(2)?,
+            &[("0", "Line"), ("6", "Column3D"), ("12", "Pie")]
+        )?
     );
     scalar!(
         "circleLabelType",
@@ -28362,6 +28368,16 @@ fn format_form_chart_settings_xml(
     }
     scalar!("isDataSourceMode", form_chart_bool(t.get(98)?)?);
     scalar!("isRandomizedNewValues", form_chart_bool(t.get(99)?)?);
+    // Written only when its slot names a mode: seed `chart-form-splinemode`
+    // (`chart-form-4series` control plus only `<d4p1:splineMode>` added)
+    // flips exactly `t[110]` from `"0"` to `"1"`, the same
+    // present-only-when-nonzero shape `legendPlacement` already uses.
+    if t.get(110)?.trim() != "0" {
+        scalar!(
+            "splineMode",
+            form_chart_code(t.get(110)?, &[("1", "SmoothCurve")])?
+        );
+    }
     scalar!("splineStrain", form_chart_integer(t.get(112)?)?);
     scalar!("translucencePercent", form_chart_decimal(t.get(111)?)?);
     scalar!("funnelNeckHeightPercent", form_chart_percent(t.get(113)?)?);

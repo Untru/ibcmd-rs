@@ -71226,3 +71226,29 @@ fn renders_form_chart_settings_with_four_series_to_platform_proven_xml() {
         ),
     );
 }
+
+/// Evidence: fixture `form-chart-linetype-splinemode`, two seeds each
+/// changing exactly one XML element on the `chart-form-4series` control.
+#[test]
+fn renders_form_chart_settings_with_line_chart_type_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/line-type.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/line-type-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_spline_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/spline-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/spline-mode-settings.xml"
+        ),
+    );
+}
