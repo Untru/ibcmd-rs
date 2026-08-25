@@ -32168,6 +32168,54 @@ fn formats_moxel_remapped_explicit_row_format_one_is_preserved() {
 }
 
 #[test]
+fn formats_moxel_cell_value_precedes_detail_parameter_and_control() {
+    // Evidence (native ERP УХ 3.2.12.6, full-corpus scan of every `<c><c>...</c></c>`
+    // cell body carrying two or more of `control`/`text`/`parameter`/
+    // `detailParameter`/`pictureParameter`/`value`/`detail_value`/`note` -- 40,612
+    // multi-member cells across the whole `uh` corpus, zero contradictions): the
+    // platform always publishes `<v>` before `<detailParameter>` (1,700
+    // co-occurrences) and `<detailParameter>` before `<control>` (9
+    // co-occurrences, the only triple combo of these three members in the
+    // corpus) -- `<v>` immediately follows `<f>`, `<control>` is emitted last,
+    // the reverse of the previous (storage-slot) order.
+    let mut xml = String::new();
+    push_moxel_row_xml(
+        &mut xml,
+        &MoxelRow {
+            index: 1,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 0,
+                source_format_index: None,
+                text: Vec::new(),
+                parameter: None,
+                detail_parameter: Some("Сделка".to_string()),
+                note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: Some("QUJD".to_string()),
+                value: Some(MoxelCellValue::Text(String::new())),
+                detail_value: None,
+                empty_text: false,
+            }],
+        },
+        &BTreeMap::new(),
+        false,
+    );
+
+    assert!(xml.contains(concat!(
+        "\t\t\t\t\t<f>0</f>\r\n",
+        "\t\t\t\t\t<v xsi:type=\"xs:string\"/>\r\n",
+        "\t\t\t\t\t<detailParameter>Сделка</detailParameter>\r\n",
+        "\t\t\t\t\t<control xsi:type=\"xs:base64Binary\">QUJD</control>\r\n",
+    )));
+}
+
+#[test]
 fn formats_moxel_decodes_bottom_vertical_alignment() {
     let format = parse_moxel_format("{512,48}", &[], &[]).unwrap();
 

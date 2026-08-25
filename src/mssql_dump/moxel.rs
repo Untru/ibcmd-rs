@@ -11250,9 +11250,6 @@ pub(super) fn push_moxel_row_xml(
                 .unwrap_or(cell.format_index)
         };
         xml.push_str(&format!("\t\t\t\t\t<f>{cell_format_index}</f>\r\n"));
-        if let Some(control) = &cell.control {
-            push_moxel_cell_control_xml(xml, control);
-        }
         let text_element = if cell.formatted_text { "tfl" } else { "tl" };
         if !cell.text.is_empty() {
             xml.push_str(&format!("\t\t\t\t\t<{text_element}>\r\n"));
@@ -11278,6 +11275,28 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(parameter)
             ));
         }
+        // Member publication order below (value, detail_value, detailParameter,
+        // pictureParameter, note, control) is evidence-derived, not the storage
+        // record's own slot order (control, value, detail_value, detailParameter,
+        // pictureParameter, text, note) and not a simple reversal of it either.
+        // Full corpus scan (native ERP УХ 3.2.12.6, every `<c><c>...</c></c>` cell
+        // body carrying two or more of these members -- 40,612 multi-member cells
+        // across the whole `uh` corpus) found zero contradictions for this order:
+        // value always precedes detailParameter (1,700 co-occurrences), which
+        // always precedes control (9 co-occurrences, the only triple combo in the
+        // corpus); value always precedes control directly too (15,149
+        // co-occurrences); text/parameter always precede value (128), detailParameter
+        // (12,624 for text, 9,563 for parameter), pictureParameter (a handful) and
+        // note (1,429+); value/detail_value always precede note (32/24) and each
+        // other (value before detail_value, 5 co-occurrences). `control` was
+        // previously emitted first, ahead of every other member -- the reverse of
+        // where the platform actually places it.
+        if let Some(value) = &cell.value {
+            push_moxel_cell_value_xml(xml, "v", value);
+        }
+        if let Some(detail_value) = &cell.detail_value {
+            push_moxel_cell_value_xml(xml, "d", detail_value);
+        }
         if let Some(detail_parameter) = &cell.detail_parameter {
             xml.push_str(&format!(
                 "\t\t\t\t\t<detailParameter>{}</detailParameter>\r\n",
@@ -11290,14 +11309,11 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(picture_parameter)
             ));
         }
-        if let Some(value) = &cell.value {
-            push_moxel_cell_value_xml(xml, "v", value);
-        }
-        if let Some(detail_value) = &cell.detail_value {
-            push_moxel_cell_value_xml(xml, "d", detail_value);
-        }
         if let Some(note) = &cell.note {
             push_moxel_note_xml(xml, note, output_format_index_map);
+        }
+        if let Some(control) = &cell.control {
+            push_moxel_cell_control_xml(xml, control);
         }
         xml.push_str("\t\t\t\t</c>\r\n");
         xml.push_str("\t\t\t</c>\r\n");
