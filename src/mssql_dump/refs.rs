@@ -1122,6 +1122,52 @@ pub(super) fn is_offset_inside_accounting_register_attribute_list(
 /// elements: the headers inside `…a42` spans are exactly the 74 `Attribute`
 /// uuids their native XML declares -- none missing, and no `Dimension` or
 /// `Resource` header inside any such span.
+/// Every collection an owner's commands are serialized into, one family uuid
+/// per owner kind.
+///
+/// Measured on ERP УХ 3.2.12.6 (2026-08-25) by dumping, for every nested
+/// header of every metadata row, the innermost enclosing `{uuid,…}` span and
+/// cross-referencing the header against the native source tree's own
+/// inventory of declared children (139,868 of them, 1,097 `<Command>`):
+///
+/// * all **1,097/1,097** declared commands lie inside one of these fourteen
+///   spans, none outside;
+/// * the spans contain **nothing else** -- 0 `Attribute`, `Resource`,
+///   `Dimension`, `TabularSection` or any other declared child, in any of the
+///   fourteen;
+/// * each family belongs to exactly one owner kind, and its member count is
+///   that kind's command count exactly (DataProcessor 426, Catalog 208,
+///   Document 207, InformationRegister 115, Report 82, DocumentJournal 19,
+///   ExchangePlan 12, BusinessProcess 10, Task 8, ChartOfAccounts 3,
+///   FilterCriterion 2, ChartOfCharacteristicTypes 2, AccountingRegister 2,
+///   AccumulationRegister 1).
+///
+/// Re-measured the same way on the other five stand corpora: `mdm` 3/3,
+/// `sslbase` 102/102, `ssl` 153/153 declared commands inside these families,
+/// none outside, nothing else inside; `ws` and `wms` declare no command at
+/// all.
+const COMMAND_COLLECTION_LIST_MARKERS: [&str; 14] = [
+    "{45556acb-826a-4f73-898a-6025fc9536e1,", // DataProcessor
+    "{4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6,", // Catalog
+    "{b544fc6a-2ba3-4885-8fb2-cb289fb6d65e,", // Document
+    "{b44ba719-945c-445c-8aab-1088fa4df16e,", // InformationRegister
+    "{e7ff38c0-ec3c-47a0-ae90-20c73ca72246,", // Report
+    "{a49a35ce-120a-4c80-8eea-b0618479cd70,", // DocumentJournal
+    "{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,", // ExchangePlan
+    "{7a3e533c-f232-40d5-a932-6a311d2480bf,", // BusinessProcess
+    "{f27c2152-a2c9-4c30-adb1-130f5eb2590f,", // Task
+    "{0df30176-6865-4787-9fc8-609eb144174f,", // ChartOfAccounts
+    "{23fa3b84-220a-40e9-8331-e588bed87f7d,", // FilterCriterion
+    "{95b5e1d4-abfa-4a16-818d-a5b07b7d3f73,", // ChartOfCharacteristicTypes
+    "{7162da60-f7fe-4d78-ad5d-e31700f9af18,", // AccountingRegister
+    "{99f328af-a77f-4572-a2d8-80ed20c81890,", // AccumulationRegister
+];
+
+/// True inside any owner's command collection.
+pub(super) fn is_offset_inside_command_collection(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &COMMAND_COLLECTION_LIST_MARKERS)
+}
+
 pub(super) fn is_offset_inside_accumulation_register_attribute_list(
     text: &str,
     offset: usize,

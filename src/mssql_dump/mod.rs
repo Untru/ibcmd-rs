@@ -6781,8 +6781,23 @@ fn nested_command_headers_for_owner_from_text(
     owner_uuid: &str,
 ) -> Vec<MetadataHeader> {
     nested_headers_with_offsets_from_text(text, owner_uuid, |marker_start| {
-        is_offset_inside_metadata_object_code(text, marker_start, 9)
-            && register_child_object_tag(owner_kind, text, marker_start).is_none()
+        // A command entry comes in two shapes. The long one wraps its payload
+        // in `{9, …}` and its header in `{3, …}`; the short one uses `{8, …}`
+        // and `{2, …}` and was invisible to the code-9 test alone -- 19 of ERP
+        // УХ 3.2.12.6's 1,097 commands are written that way, among them every
+        // command of `DataProcessors/ЗакрытиеПериодаМСФО`,
+        // `Reports/АнализПоставок` and
+        // `InformationRegisters/ВерсииОбъектовДляЕИС`, whose owners' role
+        // rights therefore lost the object entirely.
+        //
+        // The shape is not what identifies a command; the collection it sits
+        // in is. `COMMAND_COLLECTION_LIST_MARKERS` carries that measurement:
+        // inside those spans there are only commands, and outside them there
+        // are none. The code-9 arm is kept exactly as it was so this can only
+        // add names, never move one.
+        (is_offset_inside_command_collection(text, marker_start)
+            || (is_offset_inside_metadata_object_code(text, marker_start, 9)
+                && register_child_object_tag(owner_kind, text, marker_start).is_none()))
     })
     .into_iter()
     .map(|(header, _)| header)
