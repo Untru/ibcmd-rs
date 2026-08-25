@@ -6737,6 +6737,19 @@ fn metadata_kind_can_own_forms(kind: &str) -> bool {
             | "DocumentJournal"
             | "Enum"
             | "ExchangePlan"
+            // Confirmed against native `Forms/` subdirectories across all
+            // seven gate corpora (uh-r1: 4 023 `Forms/` dirs by family, plus
+            // sslbase/ssl-r1/ut-r1/MDM_Management): every family the native
+            // tree actually nests forms under is listed here. `FilterCriterion`
+            // (metadata_source_for_text's code-14 kind, distinct from the
+            // `FilterCriteria` folder name) is the one gap this swept up --
+            // two ERP УХ forms (uuid 4db7c7f9-d81c-4a93-91b1-3f1eff5c57ae,
+            // 475fb3fb-ae3f-4375-a79d-87be89d68830) fell to the CommonForms
+            // fallback and collided there for want of it. No corpus's
+            // FilterCriteria objects own a Templates/ subdirectory, so
+            // metadata_kind_can_own_templates is left alone (see
+            // docs/evidence/output-path-collisions-and-module-text-fallback-20260825.md).
+            | "FilterCriterion"
             | "InformationRegister"
             | "Report"
             | "SettingsStorage"

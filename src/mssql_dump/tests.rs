@@ -6958,6 +6958,86 @@ fn does_not_treat_direct_code14_filter_criterion_as_form() {
 }
 
 #[test]
+fn filter_criterion_owned_forms_resolve_to_owner_paths_not_common_forms_collision() {
+    // Regression for the ERP УХ CommonForms/ФормаСписка.xml collision
+    // (docs/evidence/output-path-collisions-and-module-text-fallback-20260825.md
+    // §2, real uuids 4db7c7f9-d81c-4a93-91b1-3f1eff5c57ae /
+    // 475fb3fb-ae3f-4375-a79d-87be89d68830): two distinct FilterCriterion
+    // (code 14) owners, each owning a same-named form, must resolve to their
+    // own FilterCriteria/<owner>/Forms/<form>.xml -- not collide into one
+    // CommonForms/<form>.xml fallback for want of "FilterCriterion" in
+    // metadata_kind_can_own_forms (the whitelist keys off
+    // metadata_source_for_text's code-14 *kind* token, "FilterCriterion",
+    // not the "FilterCriteria" folder name).
+    let owner_a_uuid = "11111111-1111-4111-8111-111111111111";
+    let owner_b_uuid = "22222222-2222-4222-8222-222222222222";
+    let form_a_uuid = "33333333-3333-4333-8333-333333333333";
+    let form_b_uuid = "44444444-4444-4444-8444-444444444444";
+    let marker = "99999999-9999-4999-8999-999999999999";
+
+    let owner_text = |owner_uuid: &str, owner_name: &str, form_uuid: &str| {
+        format!(
+            "{{1,\r\n{{14,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\r\n{{2,\r\n{{3,\r\n{{1,0,{owner_uuid}}},\"{owner_name}\",{{1,\"en\",\"{owner_name} EN\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\"}},\r\n{{{marker},1,{form_uuid}}}\r\n}}\r\n}},0}}"
+        )
+    };
+    let form_text = |form_uuid: &str, form_name: &str| {
+        format!(
+            "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"{form_name}\",{{1,\"en\",\"{form_name} EN\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+        )
+    };
+
+    let rows = vec![
+        metadata_text_row_from_text(
+            owner_a_uuid,
+            owner_text(owner_a_uuid, "TasksByBudgetInstance", form_a_uuid),
+        )
+        .unwrap(),
+        metadata_text_row_from_text(
+            owner_b_uuid,
+            owner_text(
+                owner_b_uuid,
+                "AnalyticalSubscriptionDispatchLog",
+                form_b_uuid,
+            ),
+        )
+        .unwrap(),
+        metadata_text_row_from_text(form_a_uuid, form_text(form_a_uuid, "ФормаСписка")).unwrap(),
+        metadata_text_row_from_text(form_b_uuid, form_text(form_b_uuid, "ФормаСписка")).unwrap(),
+    ];
+
+    assert_eq!(rows[0].kind.as_deref(), Some("FilterCriterion"));
+    assert_eq!(rows[0].folder, Some("FilterCriteria"));
+    assert!(metadata_kind_can_own_forms(
+        rows[0].kind.as_deref().unwrap()
+    ));
+
+    let index = build_form_source_reference_index_from_texts(&rows);
+
+    let form_a_ref = index.get(form_a_uuid).expect("form A resolved");
+    let form_b_ref = index.get(form_b_uuid).expect("form B resolved");
+
+    assert_eq!(form_a_ref.kind, "Form");
+    assert_eq!(form_b_ref.kind, "Form");
+    assert_eq!(
+        form_a_ref.relative_path,
+        PathBuf::from("FilterCriteria")
+            .join("TasksByBudgetInstance")
+            .join("Forms")
+            .join("ФормаСписка")
+            .with_extension("xml")
+    );
+    assert_eq!(
+        form_b_ref.relative_path,
+        PathBuf::from("FilterCriteria")
+            .join("AnalyticalSubscriptionDispatchLog")
+            .join("Forms")
+            .join("ФормаСписка")
+            .with_extension("xml")
+    );
+    assert_ne!(form_a_ref.relative_path, form_b_ref.relative_path);
+}
+
+#[test]
 fn writes_code4_common_form_to_common_forms_layout() {
     let root = std::env::temp_dir().join(format!(
         "ibcmd-rs-mssql-dump-test-{}",
