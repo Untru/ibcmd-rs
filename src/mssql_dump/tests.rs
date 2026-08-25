@@ -30536,7 +30536,10 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
                 column_index: 0,
                 format_index: 5,
                 source_format_index: Some(5),
-                text: Some("Cell".to_string()),
+                text: vec![MoxelLocalizedValue {
+                    lang: "ru".to_string(),
+                    content: "Cell".to_string(),
+                }],
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -30926,7 +30929,10 @@ fn parses_and_formats_moxel_vertical_groups() {
                 column_index: 0,
                 format_index: 0,
                 source_format_index: None,
-                text: Some("Cell".to_string()),
+                text: vec![MoxelLocalizedValue {
+                    lang: "ru".to_string(),
+                    content: "Cell".to_string(),
+                }],
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31486,7 +31492,7 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     column_index: 0,
                     format_index: 3,
                     source_format_index: Some(3),
-                    text: None,
+                    text: Vec::new(),
                     parameter: None,
                     detail_parameter: None,
                     note: None,
@@ -31501,7 +31507,7 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     column_index: 1,
                     format_index: 0,
                     source_format_index: None,
-                    text: None,
+                    text: Vec::new(),
                     parameter: None,
                     detail_parameter: None,
                     note: None,
@@ -31549,7 +31555,7 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 column_index: 0,
                 format_index: 54,
                 source_format_index: Some(2),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31564,7 +31570,7 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 column_index: 1,
                 format_index: 55,
                 source_format_index: Some(5),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31708,7 +31714,10 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
                 column_index: 0,
                 format_index: 2,
                 source_format_index: None,
-                text: Some("x".to_string()),
+                text: vec![MoxelLocalizedValue {
+                    lang: "ru".to_string(),
+                    content: "x".to_string(),
+                }],
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31847,7 +31856,7 @@ fn formats_moxel_non_zero_column_slots_suppress_row_output_index_one() {
                 column_index: 0,
                 format_index: 25,
                 source_format_index: Some(25),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31882,7 +31891,7 @@ fn formats_moxel_leading_shared_default_suppresses_shifted_row_output_index_two(
                 column_index: 0,
                 format_index: 20,
                 source_format_index: Some(20),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -33276,7 +33285,7 @@ fn parses_moxel_detail_parameter_cell_variants() {
     assert_eq!(detail_only.column_index, 4);
     assert_eq!(detail_only.format_index, 28);
     assert_eq!(detail_only.detail_parameter.as_deref(), Some("Расшифровка"));
-    assert!(detail_only.text.is_none());
+    assert!(detail_only.text.is_empty());
     assert!(detail_only.parameter.is_none());
 
     let note_bearing = parse_moxel_cell(
@@ -33290,7 +33299,13 @@ fn parses_moxel_detail_parameter_cell_variants() {
         note_bearing.detail_parameter.as_deref(),
         Some("Расшифровка")
     );
-    assert_eq!(note_bearing.text.as_deref(), Some("Длинная тонна"));
+    assert_eq!(
+        note_bearing.text,
+        vec![MoxelLocalizedValue {
+            lang: "ru".to_string(),
+            content: "Длинная тонна".to_string(),
+        }]
+    );
 }
 
 #[test]
@@ -33510,7 +33525,7 @@ fn self_closes_empty_string_drawing_value() {
         auto_size: false,
         z_order: 4,
         members: MoxelDrawingMembers {
-            text: None,
+            text: Vec::new(),
             parameter: Some("ФИОРуководителя".to_string()),
             value: Some(String::new()),
             detail_parameter: None,
@@ -34130,7 +34145,7 @@ fn formats_moxel_sparse_body_refs_skip_reserved_source_slots() {
             column_index: 0,
             format_index: 99,
             source_format_index: Some(5),
-            text: None,
+            text: Vec::new(),
             parameter: None,
             detail_parameter: None,
             note: None,
