@@ -233,7 +233,7 @@ pub(super) fn dynamic_source_asset(
         })
         && matches!(suffix, "0" | "1")
         && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
-            .is_some()
+            .is_some_and(|interface| !interface.is_empty())
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join(route.relative_path()),
