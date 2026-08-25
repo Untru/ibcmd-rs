@@ -1,7 +1,8 @@
 # ERP УХ missing-file root-cause map, 20260825
 
 Status: measurement of the full 1,977-file `uh` missing set from
-`ab58c3f`'s report.json, and of the 1,594 remaining after it. Produced by
+`ab58c3f`'s report.json, of the 1,594 remaining after it, and of the 1,513
+remaining after the second fix (`0575505`, see below). Produced by
 cross-referencing `cf export`'s per-record `disposition`/`message` against
 the `missing` set from a byte-for-byte compare against a freshly-regenerated
 platform-native `uh` tree (140,411 files; the shared scratchpad tooling this
@@ -109,19 +110,63 @@ gap as `CommonModules`' remainder (`Ext/ManagerModule.bsl`,
 separate session owns the `{0}`-kind restriction-condition-wrapper subclass
 this bucket overlaps with.
 
+## After `0575505` (1,513 missing, −464 total, −81 from this fix)
+
+The `Catalogs`/`Documents`/`BusinessProcess`/`ChartOfCharacteristicTypes`
+owner-graph descriptor gap above *was* the same defect class after all --
+just in a third location. `parse_information_register_owner_header`
+(`src/mssql_dump/mod.rs`), the function `OwnerHeaderEncoding::Wrapped`
+resolves to for these four families' `owner_header_slot`, hardcoded
+`fields.len() != 9` and discriminator `"3"` exactly like the three
+functions `ab58c3f` fixed -- and, being shared plumbing, is called at 19
+sites total, reaching well past the four owner-graph families into
+`InformationRegister`, `ExchangePlan`, `DocumentJournal`, `Sequence`,
+`WSReference` and others. Confirmed on real bytes
+(`Catalogs/АлгоритмыОпределенияБазовойДаты`, uuid
+`0b69b382-479d-4709-bd5d-bc499e5b3bf5`: an 8-member, `"2"`-discriminator
+wrapper at slot 9, no counterpart to the hardcoded 9-member check). Fixed
+in `0575505`, gated behind the same declared-length read
+`enclosing_counted_block_start` already established for the marker/rfind
+parsers, plus a real-bytes regression test with a negative control (fails
+without the fix, passes with it).
+
+Verified on all seven gate corpora before shipping, given the 19-site blast
+radius: `ws`/`mdm`/`wms`/`sslbase`/`ssl`/`ut` all `BROKEN=0` against
+`$D/base789` (zero gains on any of the six -- none of them happen to
+exercise the short-wrapper shape). `uh`: `BROKEN=0` against both `ab58c3f`
+(`gained=74`) and the original 789b1ae baseline (`gained=500` total,
+`118,484 → 118,984` exact). `cargo test --lib`: 2213/33 (was 2212/33),
+33 failures still name-for-name identical to base789's `fail-base.txt`.
+
+Family effect, by comparing the opaque bucket before/after this fix:
+
+```
+        before  after
+Catalogs   119 -> 111   (partial -- remainder is a separate cause, see below)
+Reports     87 ->  15   (mostly this fix -- Report-owned child objects reuse
+                          the same shared header parser even though Report's
+                          own top-level dispatch does not go through
+                          OwnerHeaderEncoding::Wrapped)
+Documents   63 ->  63   (unaffected -- these roots hit a different cause)
+```
+
+`CommonModules` stays at 73 (the separate, unshipped plain-text
+module-body gap). The opaque bucket overall: 450/416 -> 362/329.
+
 ## What is still open
 
-- `Catalogs`/`Reports`/`Documents`/`AccumulationRegisters`/`FilterCriteria`/
-  `DataProcessors`/`ChartsOfCharacteristicTypes`/`StyleItems`/
-  `BusinessProcesses`/`DocumentJournals`/`InformationRegisters`/
-  `ChartsOfAccounts`/`SettingsStorages`/`CommonAttributes`/`Tasks`/
-  `WebServices`: descriptor-level opaque roots not yet individually traced.
-  Given the family split (owner-graph-dispatched vs the marker/rfind
-  parsers this pass fixed), these are very likely *not* the same root cause
-  as `ab58c3f`, and need their own byte-level investigation per family
-  before any fix is attempted -- guessing a shared cause across
-  differently-dispatched families would repeat exactly the mistake this
-  pass's own doctrine warns against.
+- `Catalogs` (111 remaining)/`Documents` (63)/`AccumulationRegisters`/
+  `Reports` (15)/`FilterCriteria`/`DataProcessors`/
+  `ChartsOfCharacteristicTypes`/`StyleItems`/`BusinessProcesses`/
+  `DocumentJournals`/`InformationRegisters`/`ChartsOfAccounts`/
+  `SettingsStorages`/`CommonAttributes`/`Tasks`/`WebServices`: descriptor-
+  or child-level opaque roots not yet individually traced past confirming
+  they are *not* explained by either fix in this pass (their counts did not
+  move, or only partially moved, when each fix landed). Each family needs
+  its own byte-level investigation before a fix is attempted -- two
+  different functions turning out to share one root cause in this pass is
+  a reason to check for a third, not a license to assume every remaining
+  family does too.
 - The plain-text module-body gap (`plain-text-module-body-lead-20260825.md`):
   evidenced, one fix attempt reverted after it regressed `sslbase`/`ssl`
   (spurious `Bots/.../Ext/Module.bsl` files from a `module_text_paths`
@@ -129,9 +174,15 @@ this bucket overlaps with.
   collision fixed at its source or a materially tighter content
   discriminator, verified against all seven gate corpora, not just the
   ones the fix targets.
-- The three `OpaqueDcsFormAttributesConditionalAppearance` reason variants
-  (495 + 102 + 59 + 34 + 20 = 710 files, unchanged by this pass) and the
-  `Form body does not start with type marker 4` class (179 files) remain
-  the two largest untouched buckets. Neither was in this pass's assigned
-  scope (`CommonModules`/`Reports`/`Constants`/`Catalogs`) and neither was
-  investigated here.
+- The `OpaqueDcsFormAttributesConditionalAppearance` reason variants (497 +
+  102 + 59 + 34 + 20 = 712 files after both fixes, essentially unchanged by
+  this pass -- the +2/+1 root drift on the largest variant is objects whose
+  *parent* descriptor now succeeds thanks to the second fix, exposing a
+  pre-existing, separate defect in one of the object's own forms that was
+  previously invisible behind the parent's failure, not a new regression;
+  confirmed via the rigorous exact-set `BROKEN=0` diff, which is unaffected
+  by which bucket a still-missing file is classified under) and the `Form
+  body does not start with type marker 4` class (179 files, fully
+  unchanged) remain the two largest untouched buckets. Neither was in this
+  pass's assigned scope (`CommonModules`/`Reports`/`Constants`/`Catalogs`)
+  and neither was investigated here.
