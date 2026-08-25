@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-moxel-ganttchart-remainder",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS",
+    "note": "Not a seed -- extracted directly from native UT 11.5.27.75's own 1cv8.cf via `ibcmd-rs cf extract`. Re-extraction of raw bytes a prior wave (2026-08-25, first half of the day) had captured in scratch and lost when /tmp was wiped (see docs/evidence/scratchpad-wipe-recovery-20260824.md); this time saved permanently as a fixture per that wave's own recommendation."
+  },
+  "objects": [
+    {
+      "kind": "MOXCEL GanttChart drawing (object payload only, not the whole <drawing> wrapper)",
+      "variant": "analiz-zhurnala-registratsii",
+      "description": "Reports/АнализЖурналаРегистрации/Templates/ПродолжительностьРаботыРегламентныхЗаданий, template uuid beb44b02-5d5e-4127-aee7-e184a43a4210, drawing type uuid e5fdc112-5c84-4a16-9728-72b85692b6e2 (GanttChart, not a3p1's plain Chart's a8b97779-...). Extracted via `ibcmd-rs cf extract 1cv8.cf beb44b02-5d5e-4127-aee7-e184a43a4210.0`.",
+      "raw_entry": { "path": "raw/analiz-zhurnala-registratsii-object-payload.txt" },
+      "native_object_fragment": { "path": "native/analiz-zhurnala-registratsii-object.xml" }
+    },
+    {
+      "kind": "MOXCEL GanttChart drawing",
+      "variant": "dlitelnost-otlozhennogo-obnovleniya",
+      "description": "Reports/ДлительностьОтложенногоОбновления/Templates/ДиаграммаГанта, template uuid 3c2c192e-4869-4cc6-ba47-1fadac5b9678. Extracted via `ibcmd-rs cf extract 1cv8.cf 3c2c192e-4869-4cc6-ba47-1fadac5b9678.0`.",
+      "raw_entry": { "path": "raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt" },
+      "native_object_fragment": { "path": "native/dlitelnost-otlozhennogo-obnovleniya-object.xml" }
+    }
+  ],
+  "proven_claims": [
+    "The GanttChart object payload's own top-level shape is `{19, <32 more top-level fields>}` -- 33 fields total, NOT the 3-field `{19,{0,{11},{74,...}}}` a prior wave's unsaved notes summarized. Field[1] is that `{0,{11},{74,...}}` triple (the plain-Chart `parse_moxel_chart`-compatible payload, confirmed identical shape to moxel.rs's own `{74,...}` tuple); fields[2..33) are GanttChart-specific and undecoded.",
+    "field[2] and field[3] each correlate with one of native XML's `<d3p1:points>`/`<d3p1:series>` cache-template blocks: field[2]'s nested `baseData`-shaped number (4294927473 in the first example, 4294901761 in the second) matches `<d3p1:points><d3p1:value><d3p1:baseData>` exactly; field[3]'s matches `<d3p1:series><d3p1:value><d3p1:baseData>` exactly. Field ORDER within the nested nested tuple, and which of the many other points/series sub-elements (testMode, contentCacheItem's colours, autoText, useValuesReverseBehavior) map to which slot, is NOT decoded.",
+    "field[12], field[13] and field[14] are dates in a fixed 14-digit `YYYYMMDDHHMMSS` numeric-string format (no separators), matching `<d3p1:fullIntervalBegin>`, `<d3p1:fullIntervalEnd>` and `<d3p1:visualBegin>` (ISO `YYYY-MM-DDTHH:MM:SS`) respectively in both examples -- confirmed by literal string equality once dashes/colons/`T` are stripped, e.g. `20160701000000` == `2016-07-01T00:00:00`."
+  ],
+  "non_claims": [
+    "Fields[4..12) and [15..33) of the wrapper are NOT decoded at all -- only spot-checked that they exist and are plausible types (small integers, one nested `{3,0,1,{8,...}}` tuple at field[7] that is probably `timeScale`/`level`, given field[8]/[9] look like `measure`/`interval` codes and field[7] sits right before the three dates). This is a first-pass read, not a proof.",
+    "The native XML carries roughly 55 elements after `</d3p1:chart>` (see docs/evidence/ut-diagram-remainder-20260825.md); this fixture's two examples are both template/placeholder Gantt charts (no real tasks/intervals) from the SAME UT distribution -- no seed variation has been attempted, so nothing here is proven independent of anything else that happens to differ between the two native examples (chartType differs: one native XML resolves to `Column3D`, matching a previously-unseen `moxel_chart_type` code that still needs adding).",
+    "No decoder exists yet for any of this. This fixture exists purely to preserve raw bytes + native XML so a future wave does not have to re-extract them, per the recommendation in docs/evidence/ut-diagram-remainder-20260825.md."
+  ]
+}

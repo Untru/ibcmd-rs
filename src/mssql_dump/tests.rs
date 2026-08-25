@@ -71080,3 +71080,93 @@ fn parses_code27_attribute_payload_with_short_and_long_header_wrapper() {
         .expect("long (9-member, discriminator \"3\") attribute header must still parse");
     assert_eq!(long_header_uuid, "616f2156-e77c-4956-9e7c-69ed1d06c9b0");
 }
+
+/// Evidence: fixture `moxel-chart-series-count-zero`, six seed variations of
+/// native UT 11.5.27.75's
+/// `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров`
+/// chart (`chartType == StackedBar`, `realSeriesCount == 0`), each changing
+/// exactly one XML element from the control. See the fixture's
+/// `manifest.json` for what each variant isolates. Asserts the whole
+/// `<object xsi:type="d3p1:Chart">...</object>` fragment comes back byte
+/// for byte -- not select fields -- since the point of this reader is exact
+/// reproduction, not merely successful parsing.
+fn assert_platform_proven_moxel_chart(raw_payload: &str, native_object_xml: &str) {
+    let rendered = parse_and_render_moxel_chart_for_test(raw_payload)
+        .expect("platform-proven chart payload must decode");
+    assert_eq!(
+        rendered, native_object_xml,
+        "rendered <object xsi:type=\"d3p1:Chart\"> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_empty_stacked_bar_chart_with_extended_scales_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-extended-scales.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-extended-scales-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_stacked_bar_chart_with_one_real_series_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/one-real-series-extended-scales.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/one-real-series-extended-scales-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_stacked_bar_chart_with_one_real_point_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/one-real-point-extended-scales.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/one-real-point-extended-scales-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_empty_stacked_bar_chart_with_legend_none_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-legend-none.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-legend-none-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_empty_stacked_bar_chart_with_design_init_flags_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-design-init.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-design-init-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_empty_stacked_bar_chart_without_extended_scales_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-no-extended-scales.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-no-extended-scales-object.xml"
+        ),
+    );
+}
