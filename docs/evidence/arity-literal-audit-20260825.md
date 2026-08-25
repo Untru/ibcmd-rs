@@ -89,6 +89,80 @@ methodology note: an empty/minimal fixture can't tell a silent rejection
 apart from a legitimate empty result for any of these gated-properties
 functions.
 
+## Second wave: targeted length-bucket search
+
+After the coordinator's baseline-refresh false alarm was resolved (see
+`uh-missing-root-cause-map-20260825.md`), continued the sweep with a more
+targeted method: instead of reading all ~505 `.len()` hits in file order,
+grouped them by their literal length (`grep -oE '\.len\(\) != [0-9]+|\.len\(\)
+== [0-9]+' | sort | uniq -c`) and reviewed every hit at the two lengths
+that exactly match this defect class's known signatures first -- 8/9 (the
+generic header) and 12/13 (the outer command-block pair
+`parse_common_command_properties_from_text` already evidenced). This found
+three more real instances, all sharing the identical 13/12-member,
+`"9"`/`"8"`-tagged outer command-properties block:
+
+- **`parse_owner_graph_command_identity_slot`** -- shared by
+  `parse_owner_graph_command_identity_slots_indexed`'s three call sites
+  (`parse_strict_catalog_properties_from_text`, `parse_document_properties_
+  from_text`, `parse_business_process_properties_from_text`): Catalog,
+  Document, and BusinessProcess owned commands.
+- **`parse_task_commands`** (Task) and **`parse_document_journal_commands`**
+  (DocumentJournal) -- hand-duplicate the identical logic instead of
+  reusing the shared function above.
+
+All three already correctly called the already-fixed
+`parse_information_register_owner_header` for the *nested* header: only
+the *outer* wrapper's own length/discriminator check was still hardcoded.
+Fixed the same way as every other instance this pass: branch on the two
+lengths, matching discriminator. Commit `2a3a382`. The shared function has
+a negative-control test (`accepts_short_owner_graph_command_properties_
+block`, fails without the fix, passes with it, verified by hand); the two
+hand-duplicated sites received a mechanically identical code change but no
+separate integration test (would need a `nested_child_commands_from_text`-
+compatible full record; out of scope for the time available this pass).
+`uh`: `BROKEN=0`, `gained=50` against `$D/baselines/d0457a6` -- identical
+to the count before this specific fix (which was already 50 from the
+first wave's six fixes), meaning this fix is confirmed non-regressive by
+the full corpus but not currently load-bearing there: no real Catalog/
+Document/BusinessProcess/Task/DocumentJournal command in `uh` happens to
+carry the short outer-block form today. Consistent with `is_configuration_
+root_property_header` and part of `parse_web_service_header`'s own outer
+wrapper earlier in this pass -- applied on the strength of the shared,
+now nine-times-independently-confirmed grammar production, not because
+this specific corpus exercises it.
+
+**Exhaustive real-corpus cross-check of every remaining caller.** Having
+found three genuine misses this way, went further and checked *every*
+caller of `parse_information_register_owner_header` (18 total) against
+real `uh` bytes for whichever family had a currently-`missing` specimen
+available, rather than trusting the length-bucket sample alone. Every
+single one checked out: the arity check itself matched the real bytes
+exactly (including several real short-8-member-header specimens), so the
+object's `missing` status has a *different*, unidentified cause in each
+case -- not an unfixed arity-omission bug. Confirmed this way, by family
+(uuid checked via `cf extract`, member count read back with a small
+Python brace-aware splitter mirroring `split_1c_braced_fields`):
+
+| family | function checked | real specimen | result |
+|---|---|---|---|
+| DocumentJournal | root/owner-wrapper length (7/17) | `ДокументыАккредитации` (missing) | 7 and 17 both matched exactly; header inside was the *short* 8-member form, already handled |
+| Report | strict root fields (8/18) | `ОтчетПоПоказателям` (missing) | 8 and 18 both matched; short header handled |
+| CommonAttribute | additional-order tail (15) + code27 (23) | `КлассВНА` (missing) | both matched exactly (full-form header this time) |
+| Task | properties block (9/52) | `БюджетнаяЗадача` (missing) | 9 and 52 both matched |
+| FilterCriterion | legacy/wrapped header (3-member wrappers) | `ДокументыВНАПоОснованию` (missing) | matched; short header handled |
+| ChartOfCalculationTypes | strict root (8) + typed block (63) | `Начисления`/`Удержания` (both `differing`, not `missing`) | matched on both real specimens available |
+| ExchangePlan, InformationRegisterOwnerFields, SettingsStorage, WebService(root wrapper) | various fixed-root/wrapper lengths | multiple, see "Checked and confirmed safe" and body of this doc | all already validated safe (0 missing in-family, or check matched real bytes) |
+
+This is a useful negative result in its own right: it means the
+arity-omission class this document tracks is very likely now *exhausted*
+as an explanation for `uh`'s remaining missing files in these particular
+families -- a future pass chasing `DocumentJournals`/`Reports`/
+`CommonAttributes`/`Tasks`/`FilterCriteria`'s remaining `missing` entries
+should look elsewhere (DCS, form/layout content, or other
+content-validation causes already flagged as out of scope for this pass),
+not re-suspect arity here without new evidence.
+
 ## Checked and confirmed safe: no fix needed
 
 - **`parse_constant_properties_from_text`'s `rfind("{16,")`** (mod.rs) --
