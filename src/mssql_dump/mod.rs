@@ -18470,7 +18470,30 @@ fn parse_metadata_code27_payload_fields(payload: Vec<&str>) -> Option<(Vec<&str>
         return None;
     }
     let header = split_1c_braced_fields(detail.get(1)?.trim(), 0)?;
-    if header.len() != 9 || header.first()?.trim() != "3" {
+    // Same short-wrapper omission `parse_information_register_owner_header`
+    // documents (`0575505`): the platform drops the trailing default `0` (and
+    // the wrapper's own leading count from `3` to `2`) whenever this
+    // attribute leaves Synonym/Comment at default. Confirmed on real ERP УХ
+    // 3.2.12.6 data (`Catalogs/ВариантыЗаполненияШаблонов`, uuid
+    // `996f1881-4ee2-4c39-bc39-e61dd7f42502`: a direct attribute with an
+    // 8-member, `"2"`-discriminator header here, no counterpart to the
+    // hardcoded `header.len() != 9` check this replaces). This wrapper shape
+    // is shared by every `code27` attribute-type-declaration payload
+    // (`Catalog`/`Document`/`DataProcessor`/`Report`/tabular-section
+    // attributes and more, via this function's several call sites), not
+    // Catalog direct attributes alone.
+    let header_has_trailing_default = match header.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if header.first()?.trim()
+        != (if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
+    {
         return None;
     }
     let identity = split_1c_braced_fields(header.get(1)?.trim(), 0)?;
