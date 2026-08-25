@@ -5061,6 +5061,13 @@ impl FormChildItemShowTitleSchema {
             ) {
                 ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None, None),
                 ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9), Some(23)),
+                // The compact/legacy 28-member bag keeps `ShowTitle` at the
+                // same slot 4 the wide bag uses; see
+                // `parse_form_usual_group_extended_options`'s `"28"` arm for
+                // the evidence (five native records, two configurations).
+                // No colour has been observed at any slot of this bag, so
+                // neither colour coordinate is claimed.
+                ("UsualGroup", Some("5"), 28, Some("28")) => (4, None, None),
                 _ => return None,
             };
         Some(Self {

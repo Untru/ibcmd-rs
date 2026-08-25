@@ -13089,6 +13089,72 @@ pub(super) fn parse_form_usual_group_extended_options(
                 show_left_margin: properties.show_left_margin(),
             })
         }
+        // The compact/legacy 28-member option bag: one member shorter than
+        // the wide `29`-bag, but `Group` and `ShowTitle` sit at the exact
+        // same relative slots as they do there (1/27 and 4), which is
+        // exactly what a `29`-bag with one *later* member removed would
+        // look like from the front.
+        //
+        // Evidence, five native records across two independent
+        // configurations (ERP UH `MDM_Management.cf`, three items, and the
+        // ERP UH main `1cv8.cf`, two items found by an exhaustive scan of
+        // every `UsualGroup` in the 140 411-file native export tree whose
+        // `Group`/`Behavior`/`ShowTitle` we currently get wrong):
+        //
+        // - `Group`: slot 1 `"0"` with slot 27 not `"1"`/`"3"`/`"4"` writes
+        //   `Vertical` (`MDM_Management`
+        //   `Catalogs/ТипыБазДанных/Forms/ФормаЭлемента` item
+        //   `ГруппаНастройкиПодключения`, and
+        //   `InformationRegisters/.../ФормаСписка` item
+        //   `СписокКомпоновщикНастроекПользовательскиеНастройки`); slot 1
+        //   `"1"` with slot 27 not in that set writes nothing (`ГруппаОбменДаннымиКонтроляНСИ`
+        //   in the same form as the first); slot 27 `"1"` writes `Horizontal`
+        //   regardless of slot 1 (`1cv8.cf`
+        //   `Catalogs/БланкиОтчетов/Forms/ВыборДействияВолшебнойПалочки`
+        //   item `Группа1`, slot 1 `"1"`, slot 27 `"1"`) -- the exact rule
+        //   `parse_form_usual_group_property_bag_group` already proved for
+        //   the `29`-bag, reused verbatim rather than re-derived.
+        // - `ShowTitle`: slot 4 `"0"` writes `false` (`Группа1` above, and
+        //   `СписокКомпоновщикНастроекПользовательскиеНастройки`); slot 4
+        //   `"1"` writes nothing (the other three) -- wired through
+        //   `FormChildItemShowTitleSchema`, not this struct, at the same
+        //   slot 4 the `29`-bag already uses.
+        // - `Behavior`: `Usual` on four of the five records, slots 10, 12 and
+        //   24 all `"0"`; `Collapsible` on the fifth (`1cv8.cf`
+        //   `Documents/НастраиваемыйОтчет/Forms/ФормаИзмененияПоказателейНО`
+        //   item `ГруппаАналитики`, also natively `<Collapsed>true</Collapsed>`),
+        //   all three slots `"1"`. No record disagreeing between the three
+        //   slots, and no record of `PopUp`, has been found in either
+        //   configuration; `parse_form_usual_group_compact_bag_behavior`
+        //   requires the three slots to agree and declines outright rather
+        //   than guess at the value a disagreement or an unobserved code
+        //   would mean.
+        "28" => Some(FormUsualGroupExtendedOptions {
+            group: parse_form_usual_group_property_bag_group(&options),
+            behavior: parse_form_usual_group_compact_bag_behavior(&options),
+            representation: None,
+            horizontal_stretch: None,
+            enabled: None,
+            read_only: None,
+            height: None,
+            shortcut: None,
+            enable_content_change: None,
+            group_horizontal_align: None,
+            group_vertical_align: None,
+            children_align: None,
+            horizontal_spacing: None,
+            vertical_spacing: None,
+            child_items_width: None,
+            control_representation: None,
+            collapsed: None,
+            collapsed_representation_title: Vec::new(),
+            horizontal_align: None,
+            vertical_align: None,
+            format: Vec::new(),
+            through_align: None,
+            united: None,
+            show_left_margin: None,
+        }),
         "38" => {
             let group = parse_form_extended_group(
                 options.get(1)?.trim(),
@@ -13158,6 +13224,42 @@ pub(super) fn parse_form_usual_group_property_bag_behavior(
         "1" => Some("Collapsible"),
         "2" => Some("PopUp"),
         "3" => None,
+        _ => None,
+    }
+}
+
+/// `Behavior` of a compact-bag (`28`) `UsualGroup`. Unlike the wide `29`-bag,
+/// which carries it at one dedicated slot, every native record this reader
+/// has seen echoes the same code at two slots -- 10 and 24 -- rather than
+/// one: five records read `"0","0"` and write `<Behavior>Usual</Behavior>`
+/// explicitly (this bag never leaves it unwritten, unlike the wide `29`-bag's
+/// default-omits-`Usual` convention), and one reads `"1","1"` and writes
+/// `<Behavior>Collapsible</Behavior>`. None has shown `PopUp` (code `2` on
+/// the wide bag) at all, in either configuration this was checked against.
+///
+/// A third slot, 12, sits between them and echoes the *same* two values on
+/// six of these seven records, which first read as a triple-redundant
+/// `Behavior`; the seventh disproves that (ERP UH `1cv8.cf`
+/// `Documents/ЗаявкиНаЛьготныйКредит/Forms/ФормаДокумента` item
+/// `ГруппаРеквизитовОрганизации`: slots 10/24 both `"0"`, `Behavior=Usual`
+/// natively, but slot 12 is `"1"`) -- natively this same record also carries
+/// `<CollapsedRepresentationTitle>` and `<Collapsed>true</Collapsed>`, so
+/// slot 12 is that `Collapsed` flag (storable, and stored, independently of
+/// `Behavior`), not a third echo. Requiring slots 10 and 24 to agree is a
+/// validity check the reader gets for free from having two copies rather
+/// than one; a record where they disagree, or where they agree on a code
+/// besides `0`/`1`, declines rather than guesses, exactly as an
+/// unrecognised option-bag discriminator already does one level up.
+pub(super) fn parse_form_usual_group_compact_bag_behavior(
+    options: &[&str],
+) -> Option<&'static str> {
+    let value = options.get(10).map(|value| value.trim())?;
+    if options.get(24).map(|field| field.trim()) != Some(value) {
+        return None;
+    }
+    match value {
+        "0" => Some("Usual"),
+        "1" => Some("Collapsible"),
         _ => None,
     }
 }
