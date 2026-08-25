@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-chart-placement-and-showmodes",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "Five seeds, each the chart-form-4series control tree with exactly one XML element added -- one construction per seed, all built to close native UT 11.5.27.75's DataProcessors/ПроверкаКонтрагента/Forms/Форма ДиаграммаПоказателей attribute's new lexicon without guessing at that five-variable-at-once record directly."
+  },
+  "objects": [
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "legendPlacement=Bottom added",
+      "raw_entry": { "path": "raw/legend-bottom.txt" },
+      "native_outputs": [{ "path": "native/legend-bottom-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "titleAreaPlacement=None added",
+      "raw_entry": { "path": "raw/title-area-placement.txt" },
+      "native_outputs": [{ "path": "native/title-area-placement-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "valuesToolTipShowMode=ShowOnHover added",
+      "raw_entry": { "path": "raw/values-tooltip-show-mode.txt" },
+      "native_outputs": [{ "path": "native/values-tooltip-show-mode-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "pointsDropLinesShowMode=Show added",
+      "raw_entry": { "path": "raw/points-drop-lines-show-mode.txt" },
+      "native_outputs": [{ "path": "native/points-drop-lines-show-mode-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "variant": "valuesDropLinesShowMode=Show added",
+      "raw_entry": { "path": "raw/values-drop-lines-show-mode.txt" },
+      "native_outputs": [{ "path": "native/values-drop-lines-show-mode-settings.xml" }]
+    }
+  ],
+  "proven_claims": [
+    "legendPlacement code \"4\" is Bottom (a third code alongside the two already proven: absent when \"0\", None when \"6\"), at the same tidx(161) slot the two original 197-tail proofs already located.",
+    "titleAreaPlacement occupies tidx(162), right after legendPlacement's slot, same present-only-when-nonzero shape; code \"8\" is None.",
+    "A 5-member tuple at tidx(183) carries three independent, present-only-when-nonzero show-mode slots at indices 1/3/4 (0/2 unclaimed, always \"0\"): valuesToolTipShowMode (index 1, code \"2\"=ShowOnHover proven here), pointsDropLinesShowMode (index 3, code \"1\"=Show proven here), valuesDropLinesShowMode (index 4, code \"1\"=Show proven here). Native UT's own record (see form-chart-series-count fixture's four-series variant for the base) separately proves code \"2\"=DontShow for the drop-lines pair, and reuses code \"2\"=ShowOnHover here for valuesToolTipShowMode -- so \"DontShow\" is an explicit stored value, not the tuple's \"0\" omitted-element case."
+  ],
+  "non_claims": [
+    "Only two codes each are claimed for the drop-lines pair (1=Show, 2=DontShow) and one for valuesToolTipShowMode (2=ShowOnHover); any further enum values are unclaimed.",
+    "pointsScale, valuesScale, seriesScale (the remaining new elements native UT's ДиаграммаПоказателей carries) are not exercised by this fixture."
+  ]
+}

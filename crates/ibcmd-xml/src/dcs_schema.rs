@@ -3049,6 +3049,23 @@ struct RewriteState {
     /// For a data-core `Type` element, where its own output began, so its
     /// closing tag can hand the finished element to the parent's run.
     literal_type_start: Option<usize>,
+    /// Output offset right before this element's opening `<` was written.
+    start_tag_begin_offset: usize,
+    /// Output offset right after this element's opening tag's own closing
+    /// `>` was written (i.e., before any content).
+    start_tag_end_offset: usize,
+    /// Whether a childless, attribute-free instance of this element should
+    /// be omitted entirely (both tags, and any whitespace-only interior)
+    /// rather than left as an empty open/close pair.
+    ///
+    /// Evidenced on real ERP УХ 3.2.12.6 bytes: a `DataSetFieldField`'s
+    /// `appearance` and a `parameter`'s `inputParameters` are present in
+    /// *storage* as empty placeholders even when unset, but the platform's
+    /// own decompiled source XML never carries an empty `<appearance/>` or
+    /// `<inputParameters/>` -- the element is missing altogether, matching
+    /// the same pattern `dcsset:outputParameters` has in the settings
+    /// document (see `DcsEmptyElementAction` in `src/mssql_dump/dcs.rs`).
+    omit_if_empty: bool,
 }
 
 impl RewriteState {
@@ -3063,6 +3080,9 @@ impl RewriteState {
             depth: 0,
             type_run: Vec::new(),
             literal_type_start: None,
+            start_tag_begin_offset: 0,
+            start_tag_end_offset: 0,
+            omit_if_empty: false,
         }
     }
 
@@ -3966,28 +3986,48 @@ fn rewrite_tokens(
                         }
                         RewriteFrame::TypeId | RewriteFrame::AppIndex => {}
                         RewriteFrame::Element(emitted) => {
-                            if mode == RewriteMode::PrimaryDocument
-                                && name.split_once(':').map_or(name, |(_, local)| local)
-                                    == "settingsVariant"
-                                && frames.len() == 2
-                            {
-                                let block = settings_blocks.get(variant).ok_or_else(|| {
-                                    DcsInnerSchemaError::UnsupportedSource(
-                                        "settingsVariant count exceeds the Settings document count"
-                                            .into(),
-                                    )
-                                })?;
-                                variant += 1;
-                                let tail =
-                                    out.len() - out.trim_end_matches(['\r', '\n', '\t']).len();
-                                let held = out.split_off(out.len() - tail);
-                                append_indented_fragment(&mut out, block.as_str(), 2);
-                                out.push_str(&held);
+                            // Whitespace-only, not strictly zero-length: the
+                            // storage document's own pretty-printing writes
+                            // indentation text nodes even inside a childless
+                            // element, and the platform's own source XML
+                            // does not preserve that indentation once there
+                            // is nothing left for it to indent.
+                            let omit = state.omit_if_empty
+                                && !state.saw_child
+                                && out[state.start_tag_end_offset..].trim().is_empty();
+                            if omit {
+                                // The pending text run flushed ahead of this
+                                // element's own opening tag is the
+                                // indentation that led up to it, trimmed too
+                                // so no orphaned blank line is left behind.
+                                out.truncate(state.start_tag_begin_offset);
+                                let trimmed_len =
+                                    out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                                out.truncate(trimmed_len);
+                            } else {
+                                if mode == RewriteMode::PrimaryDocument
+                                    && name.split_once(':').map_or(name, |(_, local)| local)
+                                        == "settingsVariant"
+                                    && frames.len() == 2
+                                {
+                                    let block = settings_blocks.get(variant).ok_or_else(|| {
+                                        DcsInnerSchemaError::UnsupportedSource(
+                                            "settingsVariant count exceeds the Settings document count"
+                                                .into(),
+                                        )
+                                    })?;
+                                    variant += 1;
+                                    let tail =
+                                        out.len() - out.trim_end_matches(['\r', '\n', '\t']).len();
+                                    let held = out.split_off(out.len() - tail);
+                                    append_indented_fragment(&mut out, block.as_str(), 2);
+                                    out.push_str(&held);
+                                }
+                                out.push('<');
+                                out.push('/');
+                                out.push_str(&emitted);
+                                out.push('>');
                             }
-                            out.push('<');
-                            out.push('/');
-                            out.push_str(&emitted);
-                            out.push('>');
                         }
                     }
                     if let Some(element_start) = state.literal_type_start {
@@ -4414,6 +4454,32 @@ fn rewrite_tokens(
                 if let Some(scope) = source_scopes.last_mut() {
                     *scope = declared_source;
                 }
+                // Evidenced only for the bare (unprefixed, DCS schema
+                // default-namespace) `appearance`/`inputParameters` shape
+                // with no attributes -- see `RewriteState::omit_if_empty`.
+                let omit_if_empty = element_prefix.is_empty()
+                    && matches!(local, "appearance" | "inputParameters")
+                    && start
+                        .attributes
+                        .iter()
+                        .all(|(key, _)| *key == "xmlns" || key.starts_with("xmlns:"));
+                if start.self_closing && omit_if_empty {
+                    // Storage already spells this element self-closed, so
+                    // there is no content run to wait on: the platform's own
+                    // source XML omits it outright, so nothing is written at
+                    // all (not even the opening `<` this branch would
+                    // otherwise start). The pending text run just flushed
+                    // ahead of this tag is the indentation that led up to
+                    // it -- pure whitespace, since anything else would have
+                    // already failed the unsupported-shape checks above --
+                    // and is trimmed too, so no orphaned blank line is left
+                    // behind for a sibling that no longer follows anything.
+                    scopes.pop();
+                    source_scopes.pop();
+                    let trimmed_len = out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                    out.truncate(trimmed_len);
+                    continue;
+                }
                 let element_start = out.len();
                 out.push('<');
                 out.push_str(&emitted_name);
@@ -4437,7 +4503,11 @@ fn rewrite_tokens(
                     }
                 } else {
                     out.push('>');
+                    let start_tag_end_offset = out.len();
                     let mut state = RewriteState::new(RewriteFrame::Element(emitted_name));
+                    state.start_tag_begin_offset = element_start;
+                    state.start_tag_end_offset = start_tag_end_offset;
+                    state.omit_if_empty = omit_if_empty;
                     // `v8:Type`/`v8:TypeSet` content is a QName, so it moves
                     // to the source document's prefixes exactly like an
                     // `xsi:type` attribute does: a storage `StandardPeriod`

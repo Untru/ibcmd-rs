@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-chart-linetype-splinemode",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "Two seeds, each the chart-form-4series control tree (four realSeriesData records, see fixture form-chart-series-count) with exactly one XML element changed -- one construction per seed. line-type: <d4p1:chartType> Column3D -> Line. spline-mode: adds <d4p1:splineMode>SmoothCurve</d4p1:splineMode> (absent in the control). Both were built to close two of native UT 11.5.27.75's DataProcessors/ПроверкаКонтрагента/Forms/Форма ДиаграммаПоказателей attribute's own new-lexicon members without guessing at them directly on that five-variable-at-once record."
+  },
+  "objects": [
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Диаграмма",
+      "variant": "chartType=Line (control otherwise chart-form-4series)",
+      "raw_entry": { "path": "raw/line-type.txt" },
+      "native_outputs": [{ "path": "native/line-type-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Диаграмма",
+      "variant": "splineMode=SmoothCurve added (control otherwise chart-form-4series)",
+      "raw_entry": { "path": "raw/spline-mode.txt" },
+      "native_outputs": [{ "path": "native/spline-mode-settings.xml" }]
+    }
+  ],
+  "proven_claims": [
+    "chartType code \"0\" is Line -- the single token chart-form-linetype's raw record changes relative to the chart-form-4series control (data[64], the fixed chartType slot t[2], unaffected by series-count growth).",
+    "splineMode occupies the fixed (series-count-independent) slot t[110] -- unclaimed at every prior fixture -- and is written only when that slot is nonzero, the same present-only-when-nonzero shape legendPlacement already uses; code \"1\" is SmoothCurve. chart-form-splinemode's raw record changes exactly that one token relative to the same chart-form-4series control."
+  ],
+  "non_claims": [
+    "Only chartType codes 0 (Line), 6 (Column3D) and 12 (Pie, from the earlier 197-tail proofs) are claimed; the full chartType enum is much larger and unexplored.",
+    "Only splineMode code 1 (SmoothCurve) is observed; other spline modes (e.g. a hypothetical explicit \"none\"/default distinct from the absent-element case) are unclaimed."
+  ]
+}

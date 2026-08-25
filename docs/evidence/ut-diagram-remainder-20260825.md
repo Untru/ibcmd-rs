@@ -8,6 +8,33 @@ GraphicalSchemaField и пункт 3 ниже (`СравнительныйАна
 {bot-predefined-picture,task-number-allowed-length-data-lock-mode,
 graphical-schema-field-leftwidest-page,moxel-chart-series-count-zero}`).
 
+**Статус после волны 2026-08-25 (вечер)**: пункт 4
+(`ПроверкаКонтрагента/Forms/Форма`) ЗАКРЫТ ЦЕЛИКОМ И ПОДТВЕРЖДЕНО ГЕЙТОМ:
+`ut`-прогон после всех фиксов этой волны даёт `exact=50456` против
+базового `50455` (было `443` расходящихся, стало `442`), разность
+exact-множеств против `$D/baselines/d0457a6/ut.parity.json` показывает
+РОВНО ОДИН новый exact-файл --
+`DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml` -- и
+СЛОМАНО=0. Остаток УТ теперь **2 реальных файла** (оба GanttChart-макета,
+пункты 1-2) + 439 host-dependent. GanttChart -- следующая цель.
+Гейты (`ws`/`mdm`/`wms`/`sslbase`/`ssl`/`ut`/`uh`) прогнаны целиком после
+каждого коммита, СЛОМАНО=0 на каждом -- сверено против **неизменяемого
+снимка `$D/baselines/d0457a6/*.parity.json`**, не `$D/base789`
+(координатор переприбивает `base789` после каждого слияния в основную
+ветку; он уже уехал вперёд на несвязанных пакетах вроде потери английских
+языковых элементов -- `uh` там 127753, а не 120592 как в зафиксированном
+`d0457a6`-снимке). По пути обнаружился двенадцатый пункт (не
+предполагавшийся заранее): та же форма несёт ЕЩЁ ДВА chart-атрибута
+(`chartType=Gauge`, `realSeriesCount=0`, иначе уже полностью разобранной
+формы) -- без них файл не закрывался целиком, несмотря на то, что целевой
+`ДиаграммаПоказателей`-атрибут уже декодировался верно. Коммиты этой
+волны: `fix(form-chart): decode realSeriesCount>0 on form Chart
+attributes`, `fix(form-chart): decode chartType=Line and splineMode`,
+`fix(form-chart): decode legendPlacement=Bottom, titleAreaPlacement, and
+three show-mode fields`, `fix(form-chart): decode pointsScale`,
+`fix(form-chart): decode valuesScale, seriesScale and Gauge chartType,
+close pt.4` (см. `git log` текущего worktree).
+
 ## Пункт 3 закрыт (коммит `292d807`) -- читай перед пунктами 1-2 и 4
 
 Зазор в 3 токена оказался НЕ одной причиной, а тремя независимыми, каждая
@@ -64,13 +91,16 @@ init,minimal}` (сырые деревья -- `$D/seeds/chart-src/chart*`).
 (`$D` ниже), а не `/private/tmp/...` -- чистильщик `/tmp` трижды стирал
 scratchpad за эту волну. `$D/kit/seed.sh` уже поправлен на `$D`.
 
-## Остаток: 3 файла, все диаграммные
+## Остаток: 2 файла (было 3 -- пункт 4 закрыт этой волной), оба GanttChart
 
 ```
-DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml            -- ChartField (форма)
 Reports/АнализЖурналаРегистрации/Templates/.../Ext/Template.xml         -- GanttChart (макет)
 Reports/ДлительностьОтложенногоОбновления/Templates/.../Ext/Template.xml -- GanttChart (макет)
 ```
+
+`DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml` (пункт 4,
+`ChartField`-форма) ЗАКРЫТ этой волной -- см. раздел "Пункт 4" ниже,
+подтверждено полным `ut`-гейтом (`exact` 50455→50456).
 
 Не путать с `DataProcessors/ПроверкаКонтрагента/Templates/ФинансовыйАнализ` и
 `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ` -- это host-зависимые
@@ -211,109 +241,213 @@ extent/stretch) уже разобран `FORM_DOCUMENT_FIELD_GEOMETRY`/`"ChartFi
 и фикстуру `moxel-chart-series-count-zero` этой волны как образец приёма
 "одно изменение XML -- один семя -- один raw-diff").
 
-### Разведка пункта 4 этой волны (не закрыт -- см. что доказано и что нет)
+### Пункт 4: большая часть закрыта семенами (волна 2026-08-25, вечер)
 
-Слот найден и извлечён напрямую из `1cv8.cf`
-(`cf extract 1cv8.cf acd13c5d-edf3-4c18-99d7-663ac866d5e8.0`, форма целиком
--- 946 КБ текста; искомый чарт -- третье по счёту вхождение маркера
-`{11},\r\n{74,` в тексте, byte-offset ~674788; НЕ обёрнут второй раз в
-`{11},{...}` как у MOXCEL -- сама обёртка это 4-элементный `holder =
-{"#", uuid, {11}, {74,...}}`, `data = holder[3]` берётся напрямую).
-`realSeriesCount=4` (id 2,3,4,6 -- id 5 не серия, пропущен), `data[]`
-length=271, `cursor(tail start)=62`, `tail_len=209`.
+**ИСПРАВЛЕНИЕ найденной ранее ошибки индексации**: искомый чарт --
+**ПЕРВОЕ**, не третье, вхождение маркера `{11},\r\n{74,` в тексте формы
+(byte-offset ~674789 в UTF-8-декодированной строке; предыдущая запись
+спутала `text.find` по кодовым точкам с байтовым смещением и взяла
+третье вхождение, которое оказалось ДРУГИМ, пустым чартом на той же
+форме -- отсюда ложное "`data[]` length=215" в старых заметках). `cf
+extract` -- это СВОЙ (`ibcmd-rs cf extract`) подкоманда, а не `/opt/1cv8`
+`ibcmd`; та печатает help на неизвестной команде и не извлекает ничего.
+Верно: `holder = {"#", uuid, {11}, {74,...}}`, `data = holder[3]`, БЕЗ
+второй обёртки как у MOXCEL. `realSeriesCount=4` (id 2,3,4,6), `data[]`
+length=271, `cursor(tail_start)=62`, что совпадает с формулой
+`18+11*series_count` (см. ниже) -- НЕ с зафиксированным ранее `62` по
+отдельной причине, это ровно то же число, что и вывод из семян.
 
-**Доказано этой волной (прямым сопоставлением сырых токенов с native XML,
-БЕЗ семян -- готовое дерево УТ само стало наблюдением)**:
+**Метод, который сработал**: семя `chart-form-control` (DataProcessor
+`ChartFormTest`, Web_Service-скелет, ОДИН атрибут `Диаграмма` типа
+`Chart`, `realSeriesCount=0`, скопирован байт-в-байт с уже доказанного
+`НастройкаДемоДанных`) дал **100% с первого раза** -- существующий
+декодер уже корректен для этого случая. Далее -- одно семя на один XML-
+элемент поверх `chart-form-4series` (control с `realSeriesCount=4`,
+id 2,3,4,6, ТОЧНО как у `ПроверкаКонтрагента`), т.е. натуральный target
+воспроизведён как control, а не разбирался вслепую с 5+ переменными
+разом. Все семена и raw/native пары -- в
+`tests/fixtures/native-evidence/8.3.27.2214/{form-chart-series-count,
+form-chart-linetype-splinemode,form-chart-placement-and-showmodes}/` с
+регрессионными тестами `renders_form_chart_settings_with_*` в
+`src/mssql_dump/tests.rs`.
 
-* Формула `expected_tail_len = 197 + 3*series_count + point_count*(1+4*
-  series_count)` из `moxel.rs` (пункт 3) даёт `197+12+0=209` -- ТОЧНОЕ
-  совпадение при `series_count=4`, впервые проверено за пределами
-  `series_count∈{0,1}`.
-* `N = 1+series_count = 5` в списке id шкал (`post[23]='5'`,
-  `post[24..29)={0,1,0}..{0,6,0}` -- обратите внимание, id идут `1,2,3,4,6`
-  не `1..5`, повторяя пропуск id=5 в самих сериях; `post[29..34)={0,0}`
-  пятикратно) -- формула `moxel.rs` подтверждена при N=5.
-* `axes_position = 25+2N = 35` (post-относительно) и `rectangle_start =
-  63+3*series_count+point_count = 75` -- ОБЕ формулы `moxel.rs`
-  подтверждены: `post[75..87)` побайтово совпадает с `elementsChart`
-  (0,0,0.17,0), `elementsLegend` (0.1497...,0.9615...,0.0621...,0) и
-  `elementsTitle` (0.83,0,0,0.92) из native XML, порядок left,top,right,
-  bottom.
-* `post[0]/post[1] = "14","2"` (не `"0","0"`) -- `has_extended_scales=false`
-  для ЭТОЙ записи, хотя `pointsScale`/`valuesScale`/`seriesScale`
-  присутствуют (см. ниже) -- **это ломает пункта-3 гипотезу**: наличие
-  `pointsScale`/`valuesScale` НЕ эквивалентно `has_extended_scales` в
-  контексте формного атрибута; либо `has_extended_scales`-триггер тут иной,
-  либо `post[0]/post[1]` кодируют что-то другое в этом корпусе. Не решено.
-* `tail[81]` (FRONT, не post) = `elementsIsInit` -- ПОДТВЕРЖДЕНО семенем
-  `chart-no-el-init` (`$D/seeds/chart-src/chartnoelinit`, правит ТОЛЬКО
-  `<d3p1:elementsIsInit>` с `true` на `false`): единственный сдвинутый
-  токен -- `tail[81]` `"1"→"0"`. Раньше это было зашито как литерал
-  `"1"` в `validate_moxel_chart_v74_front` -- корректно для всех текущих
-  13+6 примеров (`elementsIsInit` у них везде `true`), но у этой формной
-  записи `elementsIsInit=false` -- впервые. НЕ включено в `moxel.rs`,
-  т.к. ни один MOXCEL-пример его не использует; пригодится, если найдётся
-  такой макет.
+**Закрыто этой волной (доказано семенами, 100% байт-в-байт round-trip,
+уже в коде)**:
 
-**НЕ решено этой волной (пункт 4 всё ещё открыт)**:
+1. `realSeriesCount>0`: `N` реальных `realSeriesData` (11-членных, тот же
+   формат, что и `push_moxel_chart_series_text_xml`) идут ПЕРЕД
+   постоянным `realExSeriesData`-плейсхолдером, а не вместо него.
+   `tail_start = 18 + 11*series_count`. Хвост после `rebuildTime` растёт
+   на `3*series_count` членов -- ТА ЖЕ формула `moxel.rs`
+   (`197 + 3*series_count + point_count*(1+4*series_count)`), теперь
+   подтверждена семенами при `series_count=1` и `series_count=4` (не
+   только сопоставлением с native XML без семян, как раньше). Рост
+   раскладывается на (а) список из `1+series_count` `{0,<id>,0}`-записей
+   плюс `1+series_count` `{0,0}`-записей сразу после `rebuildTime`
+   (заменяет фиксированные 3 позиции `t[123..126)` базового случая) и
+   (б) ОДНУ лишнюю копию иначе непричастного "funnel-link"-подобного
+   30-членного блока позже в хвосте (было 1 копия, стало
+   `1+series_count`). `tidx()` в `format_form_chart_settings_xml`
+   транслирует старые фиксированные позиции в новые.
+2. `marker` в `form_chart_series_xml` -- НЕ moxel-совместимый enum
+   (`0..3`=None/Rect/Circle/Rhomb): семя `chart-form-1series` держит
+   `marker=3` у реальной серии и `marker=1` у плейсхолдера ОДНОВРЕМЕННО,
+   и ОБА платформа переэкспортирует как `<d4p1:marker>Auto</d4p1:marker>`.
+   Поле теперь только валидируется как целое и всегда пишется `Auto` --
+   та же трактовка, что уже была у цвета.
+3. Гварды `t[82..85)`/`t[88..93)`'s 88/89/92 (литералы isTransposed/
+   autoTransposition/legendScrollEnable и titleIsInit/legendIsInit/
+   chartIsInit) СНЯТЫ: `chart-form-1series` доказывает, что `t[84]`,
+   `t[88]`, `t[89]` при реальной серии несут те же непричастные
+   design-time float-координаты легенды/plot-area, что и `tail[84]`/
+   `tail[86]`/`tail[87]` у MOXCEL-чарта (см. пункт 1-2 ниже) -- НЕ
+   хранилище этих флагов. Литералы остаются теми же на всех трёх
+   `series_count` (0, 1, 4).
+4. `chartType` код `"0"` = `Line` (семя `chart-form-linetype`, единственный
+   изменённый токен против `chart-form-4series`).
+5. `splineMode` -- фиксированный (не растущий с `series_count`) слот
+   `t[110]`, ранее нигде не читаемый; пишется только когда `!= "0"`, код
+   `"1"` = `SmoothCurve` (семя `chart-form-splinemode`, единственный
+   изменённый токен).
+6. `legendPlacement` -- третий код `"4"` = `Bottom` (семя
+   `chart-form-legendbottom`, тот же `tidx(161)`, что и раньше).
+7. `titleAreaPlacement` -- новый элемент, слот `tidx(162)` (сразу после
+   `legendPlacement`), пишется только когда `!= "0"`, код `"8"` = `None`
+   (семя `chart-form-titleareaplacement`).
+8. `valuesToolTipShowMode`/`pointsDropLinesShowMode`/
+   `valuesDropLinesShowMode` -- три независимых, каждый
+   present-only-when-nonzero слота (индексы 1/3/4) внутри одного
+   5-членного кортежа `tidx(183)` (индексы 0/2 непричастны, везде `0`).
+   Коды: `valuesToolTipShowMode` `"2"`=`ShowOnHover` (семя
+   `chart-form-vttsm`); drop-lines-пара `"1"`=`Show` (семена
+   `chart-form-pdlsm`/`chart-form-vdlsm`) и `"2"`=`DontShow` (подтверждено
+   НАТИВНОЙ записью `ПроверкаКонтрагента` -- у неё оба drop-lines
+   явно `DontShow`, а не опущены, значит `DontShow` реальный код, а не
+   "нулевое" отсутствие элемента).
 
-* `post[10]` (в OLD/N=2-нумерации -- позиция, которую пункт 3 разметил как
-  "устойчиво `0`, причина не найдена") здесь читает `"1"`. Семя
-  `chart-no-el-init` ПРОВЕРИЛО и ОПРОВЕРГЛО связь с `elementsIsInit`
-  (единственный сдвиг там -- `tail[81]`, `post[10]` не тронут); семя
-  `chart-linetype` ПРОВЕРИЛО и ОПРОВЕРГЛО связь с `chartType`
-  (единственный сдвиг -- `tail[2]`). Кандидат, не проверенный: `splineMode`
-  -- новое поле (`<d4p1:splineMode>SmoothCurve</d4p1:splineMode>`),
-  которого НЕТ вообще ни в одном из 13+6 текущих примеров (0 вхождений в
-  native XML), и `post[10]` тоже везде `"0"` в этих примерах -- корреляция
-  правдоподобна, но всего одно наблюдение, второго значения `splineMode`
-  для сравнения нет.
-* Пятитокенная проверка перед `elementsChart` (`post[70..75)`) читает
-  `"1","1","0","4","8"`, а не `"1","1","1",X,"8"` -- ТРЕТИЙ токен тоже
-  флипнулся (`"1"→"0"`), и `X=4`, не `5`/`6` из пункта-3 формулы
-  (`isShowLegend=true` здесь, что по пункту-3 давало бы `X=5`). Причина
-  не найдена; `elementsIsInit` и `chartType` семенами исключены (те же два
-  семя выше это заодно проверили -- ни один не тронул `post[72..75)`).
-* Полностью новая лексика XML, для которой в `form_body.rs` нет вообще
-  никакого кода (не только неверных предположений, а отсутствия ветки):
-  `<d4p1:pointsScale>` (тут -- `titleArea`+`gridLinesShowMode`+`gridLine`+
-  `labelColor`, ДРУГАЯ форма, чем у MOXCEL-примера пункта 3, где
-  `pointsScale` -- `titleArea`+`labelOrientation`), `<d4p1:seriesScale>`
-  (новый верхнеуровневый элемент, `titleArea`? -- не проверено +
-  `gridLine`+`showInChart`), `<d4p1:valuesScale>` с `showTitle` (а не
-  `labelFormat`/`gridLinesShowMode` из пункта 3), `<d4p1:splineMode>`,
-  `<d4p1:valuesToolTipShowMode>`, `<d4p1:pointsDropLinesShowMode>`,
-  `<d4p1:valuesDropLinesShowMode>`, `<d4p1:legendPlacement>Bottom</...>`
-  (третье значение enum -- было только `None`/`UseCoordinates`).
-* Полный список elements-тегов записи (для быстрой сверки) --
-  `awk 'NR>=6720 && NR<=7030' .../ПроверкаКонтрагента/Forms/Форма/Ext/
-  Form.xml | grep -oE "<d4p1:[A-Za-z]+" | sort -u` в дереве
-  `$D/cap/ut-r1/src`.
+9. `pointsScale` -- ЗАКРЫТ. Живёт в `t(tidx(139))`, первом из трёх
+   otherwise-непричастных "funnel-link"-подобных 30-членных блоков
+   (`post[41..43]` в старой moxel-нумерации). ТРИ семени поверх
+   `chart-form-4series` control триангулировали раскладку: `chart-form-
+   pointsscale` (`gridLinesShowMode=Show`+`gridLine(width=1,Dotted)`+
+   `labelColor=#B4B4B4`, совпадает с native УТ), `chart-form-pointsscale-
+   min` (`gridLinesShowMode=DontShow`+`gridLine(width=1,Solid)`
+   default+`labelColor` опущен) и `chart-form-pointsscale-labelcolor`
+   (то же, что `-min`, но `labelColor=#B4B4B4` добавлен -- изолирует
+   `labelColor` от `gridLinesShowMode`/`gridLine`, поскольку ОДНОГО
+   `-min`-семени было недостаточно отличить их слоты). Раскладка блока
+   (22 подполя, когда `pointsScale` отсутствует из XML, → 23, когда
+   присутствует): `[0..5)="2,0,0,2,{1,0}"` (обёртка, константа); `[5]`
+   = `titleArea` (13-членный кортеж `{1,4,0.5,0.5,font,textColor,
+   backColor,1,border,borderColor,4,2,0}`, разобран через
+   `form_chart_scale_title_area_xml`, константа с default-значениями
+   ДАЖЕ когда `pointsScale` отсутствует -- присутствие элемента решается
+   не здесь); `[6]` = трёхзначное состояние (`"2"`=`pointsScale`
+   отсутствует, `"1"`=`DontShow`, `"0"`=`Show`); `[7]`=`"0"` (константа,
+   непричастно); `[8]`=`"1"` при присутствии (флаг "есть `gridLine`",
+   всегда `1` в обоих `pointsScale`-семенах); `[9]`=`gridLine`
+   (line-структура, ЦЕЛИКОМ отсутствует, не просто default, когда
+   `[6]="2"` -- отсюда сдвиг подполей на 1; переиспользует
+   `form_chart_line_xml`, расширенный вторым кодом стиля `"2"`=`Dotted`,
+   единственное наблюдение); `[10]`/`[11]`=`{3,4,{0}}`/`{7,3,0,1,100}`
+   (константы, непричастны -- возможно, второй, неиспользуемый пока
+   font/color-слот); `[12]`=`labelColor` (через `form_chart_color`,
+   `auto`-паттерн ОПУЩЕН из XML целиком, direct-RGB пишется --
+   ЕДИНСТВЕННОЕ поле во всём декодере, где `auto` не пишется буквально);
+   `[13]="2"` (константа). Все три семени + `chart-form-4series` дают
+   100% байт-в-байт; полный гейт-свип (`ws`/`mdm`/`wms`/`sslbase`/`ssl`/
+   `ut`) БЕЗ регрессий (новая безусловная проверка `titleArea` идёт по
+   ВСЕМ существующим чартам корпуса, не только по новым семенам).
+   Фикстура: `tests/fixtures/native-evidence/8.3.27.2214/
+   form-chart-points-scale/`.
 
-**Вывод**: пункт 4 -- НЕ точечная правка поверх пункта 3; это отдельный,
-сопоставимый по объёму довесок (минимум 6-8 новых элементов/веток плюс
-минимум 2 неопознанные позиции `post[10]`/`post[72..75)`), требующий
-семян уровня "1 реальная серия" → "4 реальные серии" → каждый новый
-XML-элемент по отдельности, ТОЧНО как пункт 3, но на форме, а не на
-`CommonTemplate` (метод форменных семян уже доказан
-`graphical-schema-field-leftwidest-page`). НЕ начато вслепую в этой волне
-умышленно -- слишком много одновременно варьирующихся переменных
-(`chartType=Line`, `elementsIsInit=false`, `splineMode` заданный,
-`legendPlacement=Bottom`, реальные серии) в единственном природном
-примере, чтобы разложить их по отдельности без семян.
+Пункты 1-9 подтверждены `cargo test --lib` (2264 passed / 33 failed,
+тот же список, что и `$D/baselines/d0457a6/fail-base.txt`, после
+`pointsScale`; см. пункты 10-11 ниже для `valuesScale`/`seriesScale`) и
+полным прогоном гейтов (`ws`/`mdm`/`wms`/`sslbase`/`ssl`/`ut`/`uh`) с
+проверкой разности exact-множеств против **`$D/baselines/d0457a6/
+*.parity.json`** (НЕ `$D/base789` -- это подвижный указатель,
+переприбивается координатором после каждого слияния и уже уехал вперёд
+на несвязанных пакетах; `$D/baselines/d0457a6/` закрыт на запись и
+зафиксирован на этой базе) -- СЛОМАНО=0 везде; остаток УТ на тот момент
+СЧЁТНО тот же (443 = 439 host-dep + оставшиеся реальные, т.к.
+`ПроверкаКонтрагента`/GanttChart ещё не закрыты целиком).
+
+10. `valuesScale` -- ЗАКРЫТ. Живёт в `t(tidx(140))`, соседнем блоке сразу
+    после `pointsScale`'s. Семя `chart-form-valuesscale` (`chart-form-
+    4series` control + ТОЛЬКО `<d4p1:valuesScale>` с `showTitle=
+    DontShow`+default `titleArea`+`labelFormat` заданным) меняет РОВНО
+    ДВА подполя из 22 (длина блока НЕ растёт, в отличие от `pointsScale`
+    -- у `valuesScale` нет условно вставляемой под-записи вроде
+    `gridLine`): `[1]` (`"0"`=отсутствует, `"1"`=`showTitle=DontShow`;
+    код `Show` не наблюдался) и `[13]` (`labelFormat`, тот же паттерн
+    `form_chart_localized_xml`, что `lbFormat`/`lbpFormat`/`vsFormat`).
+    Платформа зеркалит ТОТ ЖЕ текст в верхнеуровневый `vsFormat` (`t[39]`,
+    уже читаемый) при импорте -- подтверждено native-переэкспортом, но
+    `labelFormat` в коде читает СВОЙ слот, а не `t[39]`. Титул-область --
+    тот же 13-членный кортеж и `form_chart_scale_title_area_xml`, что и у
+    `pointsScale`. 100% с ПЕРВОГО семени.
+11. `seriesScale` -- ЗАКРЫТ. Живёт в `t(tidx(141))`, следующем блоке.
+    Семя `chart-form-seriesscale` (control + `<d4p1:seriesScale>` с
+    default `titleArea`+`gridLine(width=1,Dotted)`+`showInChart=
+    DontShow`) меняет `[8]` (флаг "есть `gridLine`", ТА ЖЕ форма, что
+    `pointsScale`'s собственный `[8]`) с вставкой `gridLine`-записи
+    (растит блок 22→23 подполей, ВТОРОЕ независимое подтверждение кода
+    стиля линии `"2"`=`Dotted`) и последний слот блока (`"0"`=отсутствует
+    → `"2"`=`showInChart=DontShow`; код `Show` не наблюдался). 100% с
+    ПЕРВОГО семени.
+
+Первая прямая проверка на РЕАЛЬНОЙ (не семенной) записи
+`DataProcessors/ПроверкаКонтрагента/Forms/Форма`'s `ДиаграммаПоказателей`
+(все пять переменных сразу: `realSeriesCount=4`, `chartType=Line`,
+`elementsIsInit=false`, `splineMode`, `legendPlacement=Bottom`, ТРИ
+scale-блока и show-mode-тройка одновременно -- та самая запись, которую
+предыдущая волна намеренно не трогала вслепую) декодировала и
+переэкспортировала байт-в-байт identично -- НО полный `ut`-гейт на этом
+шаге ВСЁ ЕЩЁ показывал файл расходящимся (443, не 442)! Извлечена
+НАПРЯМУЮ из `1cv8.cf` через `ibcmd-rs cf extract <cf> acd13c5d-
+edf3-4c18-99d7-663ac866d5e8.0 <out>` (СВОЯ подкоманда, не `/opt/1cv8`
+`ibcmd`) -- это ПЕРВОЕ, не третье вхождение маркера `{11},\r\n{74,` в
+декодированном тексте формы (см. исправление выше). Фикстура: `tests/
+fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/`.
+
+12. `chartType=Gauge` -- ЗАКРЫТ, найден `diff`-ом полного `ut`-вывода
+    против native: ТА ЖЕ форма `ПроверкаКонтрагента/Forms/Форма` несёт
+    ЕЩЁ ДВА (идентичных, кроме `rebuildTime`) chart-атрибута с
+    `chartType=Gauge` -- код, не входивший ни в один из уже известных
+    (`0`=Line, `6`=Column3D, `12`=Pie). Оба -- иначе полностью в уже
+    разобранной `realSeriesCount=0` форме (215-членный `data[]`, БЕЗ
+    scale-блоков и show-mode полей) -- единственным недостающим кодом был
+    именно `chartType`. Семя `chart-form-gaugetype` (control + ТОЛЬКО
+    `<d4p1:chartType>` на `Gauge`) даёт единственный изменённый токен:
+    `"38"`=`Gauge`. Фикстуры: `tests/fixtures/native-evidence/
+    8.3.27.2214/form-chart-linetype-splinemode/` (семя) и `tests/
+    fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/`
+    (обе настоящие записи, напрямую).
+
+**ПУНКТ 4 ЗАКРЫТ ЦЕЛИКОМ И ПОДТВЕРЖДЁН ГЕЙТОМ.** После добавления
+`chartType=Gauge` полный `ut`-прогон (`zsh $D/kit/run.sh ut <worktree>
+<выход>`) даёт `exact=50456` (было `50455`), разность exact-множеств
+против `$D/baselines/d0457a6/ut.parity.json` -- РОВНО ОДИН новый
+exact-файл, `DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml`,
+СЛОМАНО=0.
+
+**Вывод**: пункт 4 закрыт полностью, 12/12 отдельных находок подтвердились
+семенами (11/12 с первого-второго семени; `pointsScale`'s `labelColor`
+потребовала третьего для отделения от `gridLinesShowMode`/`gridLine`),
+плюс итоговая проверка на настоящих записях (три chart-атрибута на одной
+форме, не одна) и финальным гейтом. Метод семян по одному элементу поверх
+`chart-form-4series` полностью себя оправдал -- но НАПОМИНАНИЕ для
+следующей волны: проверка на изолированной фикстуре (пусть даже
+единственной "настоящей" записи) НЕ заменяет полный гейт на файл целиком
+-- в этом файле было ТРИ разных chart-атрибута, и фикс одного не закрыл
+файл, пока не нашёлся второй/третий через `diff` полного вывода.
+`chart-form-4series-src` (и его копии `chart-form-*-src`) остаются
+готовыми скелетами для будущих находок такого рода.
 
 ## Порядок атаки (рекомендация)
 
-1. Пункт 4 -- начать С СЕМЕНИ, не с прямого разбора: форма на скелете
-   `Web_Service` с ОДНИМ атрибутом типа `Chart`, `realSeriesCount=1`,
-   ВСЁ остальное -- ровно как один из двух уже доказанных 197-членных
-   примеров (не как `ПроверкаКонтрагента`, там сразу 5+ переменных разом).
-   Затем по одной переменной: 4 серии, `elementsIsInit=false` отдельно
-   (уже частично сделано -- `tail[81]` подтверждён), `splineMode` отдельно,
-   `pointsScale`/`seriesScale`/`valuesScale` отдельно, `legendPlacement=
-   Bottom` отдельно. Раскладка N-scale-id-list, `axes_position`,
-   `rectangle_start` из `moxel.rs`/пункта 3 УЖЕ подтверждены при N=5 --
-   не перепроверять, строить поверх них.
+1. ~~Пункт 4~~ ЗАКРЫТ И ПОДТВЕРЖДЁН -- см. раздел выше.
 2. Пункты 1-2 (GanttChart) -- самый большой объём, делать последним; начать
    с воспроизведения обёртки `{19,{0,{11},{74,...}}}` и код `chartType`
    `Column3D`, затем идти по XML сверху вниз, member за member, с семенами
