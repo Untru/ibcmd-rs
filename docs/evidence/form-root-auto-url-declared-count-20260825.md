@@ -202,3 +202,55 @@ carrying it natively, 73 are exact and the other 11 differ elsewhere.
 Still open, outside the trailer entirely: item-level properties (`Field`,
 `DataPath`, `AdditionSource`, button/command-bar shapes) and the 643
 `<Shortcut>` host-dependency files.
+
+---
+
+# Integration onto `b7aa538`
+
+These four commits were developed on `41808c3` and rebased onto `b7aa538`,
+where a parallel, narrower fix for the same blob shape had already landed
+(`fc9d418`, `68dc327`, `d70ef54`). That work named the extra member correctly:
+it is the form root's built-in **Navigator**/quick-search child item. What it
+did not identify is that the trailer *declares* how many such blocks it
+carries, so it enumerated the two observed arities (24 and 25) and keyed each
+slot off `trailer.len()`.
+
+The two readings agree wherever both apply, and the merge keeps the
+Navigator naming and every per-form observation that work recorded -- they are
+folded into `form_root_trailer_optional_blocks`'s doc comment as confirmations
+of the count. Removed as superseded: the `*_WITH_NAVIGATOR_GAP` slot
+constants, `form_root_child_items_tail_start_50_with_navigator_gap`,
+`form_root_trailer_slot_with_navigator_gap`, the now-unused 24-only
+`form_root_child_items_tail_start`, and the duplicate `from_raw_layout` the
+automatic merge left in `FormRootVerticalAlignSchema`.
+
+**The 14 `*_navigator_gap` fixture tests from `550ca0e` pass unmodified.**
+They exercise real ERP УХ bytes for `SaveWindowSettings`, `Group`,
+`VerticalSpacing`, `VerticalAlign`, `HorizontalAlign`, `ChildrenAlign`,
+`ScalingMode`, `ShowCloseButton`, `ConversationsRepresentation` and
+`MobileDeviceCommandBarContent`, and are the sharpest available check that the
+count-driven reading is a generalization of the arity-keyed one rather than a
+replacement for it.
+
+One place where the two genuinely differ, and the count is required:
+`MobileDeviceCommandBarContent`'s content tuple was read as
+`trailer.len() - 2` ("always two from the end"). That holds for root `50`,
+whose trailer carries one member after the tuple, but not for root `49`, whose
+trailer is root `50`'s minus exactly that trailing member -- there the tuple is
+the *last* field. `22 + count` is correct for both.
+
+## Gate on `b7aa538`
+
+| key | baseline exact | after | BROKEN | FIXED |
+|---|---:|---:|---:|---:|
+| ws | 29 | 29 | 0 | 0 |
+| mdm | 160 | 160 | 0 | 0 |
+| wms | 226 | 226 | 0 | 0 |
+| sslbase | 9 573 | 9 573 | 0 | 0 |
+| ssl | 12 644 | 12 644 | 0 | 0 |
+| ut | 50 456 | 50 456 | 0 | 0 |
+| **uh** | 129 866 | **130 127** | **0** | **+261** |
+
+`cargo test --lib` 2 301 passed / 33 failed (baseline 2 289 + 12 new tests),
+failing set identical to `baselines/b7aa538/fail-base.txt` by name.
+`bundled9` 9/9. `cargo fmt --check` and `git diff --check` clean.
