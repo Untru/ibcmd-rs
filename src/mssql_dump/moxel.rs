@@ -3069,8 +3069,9 @@ fn parse_moxel_cell_control(text: &str) -> Option<String> {
 /// Storage order is fixed and is not the publication order: the control blob,
 /// the value, the detail value, the detail parameter and the picture parameter
 /// come first, then the cell's text list, then the note triple, and the text
-/// list's own trailing "formatted" flag closes the record. All 2 025 751
-/// records of the corpus are consumed exactly by this walk.
+/// list's own trailing "formatted" flag closes the record -- when the record
+/// carries it at all; see the flag's own note below. All 2 025 751 records of
+/// the 1С:УТ 11.5.27.75 corpus are consumed exactly by this walk.
 pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
     let fields = split_1c_braced_fields(text, 0)?;
     let mask = fields.first()?.trim().parse::<usize>().ok()?;
@@ -3101,7 +3102,22 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     // The flag opens one more field, which carries the record's own formatted
     // rendering of the same text.
     let formatted_at = match formatted_flag_at.and_then(|at| fields.get(at)) {
-        None => None,
+        None => {
+            // The flag is the record's last member, and a record may simply
+            // stop in front of it. Measured on ERP УХ 3.2.12.6: the cells of
+            // `Catalog.ВариантыНаладки.Template.Палитра` are
+            // `{16,<format>,<text list>}` with no flag at all, and native
+            // publishes their text as plain `<tl>` -- the file carries ten
+            // `<tl>` and no `<tfl>`. Requiring the flag refused every one of
+            // those cells, which failed their rows and truncated the row
+            // stream to a single row against the ten the body declares.
+            // Only a record that stops exactly here is accepted; any other
+            // arity is still refused.
+            if formatted_flag_at.is_some() {
+                expected -= 1;
+            }
+            None
+        }
         Some(flag) => match flag.trim() {
             "0" => None,
             "1" => {
@@ -12718,7 +12734,25 @@ mod moxel_exact_parity_tests {
         // not match the mask, are both refusals rather than a shifted read.
         assert!(parse_moxel_cell("{128,3,\"Расшифровка\"}", 0).is_none());
         assert!(parse_moxel_cell("{8,3,\"Расшифровка\",\"Поставщик\"}", 0).is_none());
-        assert!(parse_moxel_cell("{16,2,{1,0}}", 0).is_none());
+        // Two fields short of the mask is still a refusal.
+        assert!(parse_moxel_cell("{16,2}", 0).is_none());
+        // One field short is not: the trailing "formatted" flag is the
+        // record's last member and a record may stop in front of it. This
+        // assertion used to run the other way; ERP УХ 3.2.12.6 overturned it
+        // (see `parse_moxel_cell`), and the shape below is what
+        // `Catalog.ВариантыНаладки.Template.Палитра` stores in every one of
+        // its cells -- native publishes them as plain `<tl>`.
+        let flagless = parse_moxel_cell("{16,2,{1,1,{\"ru\",\"text\"}}}", 0)
+            .expect("a text record without its trailing flag is a real record");
+        assert!(!flagless.formatted_text);
+        assert_eq!(
+            flagless
+                .text
+                .iter()
+                .map(|value| value.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["text"]
+        );
     }
 
     /// A bilingual configuration declares one `v8:item` per configured
