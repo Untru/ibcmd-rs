@@ -785,9 +785,17 @@ pub(super) struct MoxelChart {
     chart_type: &'static str,
     labels_location: &'static str,
     title: Vec<MoxelLocalizedValue>,
+    is_show_title: bool,
     is_show_legend: bool,
     has_extended_scales: bool,
     is_title_init: bool,
+    ttl_border: MoxelChartBorder,
+    lg_border: MoxelChartBorder,
+    ch_border: MoxelChartBorder,
+    transparent: bool,
+    ttl_font: MoxelFont,
+    leg_font: MoxelFont,
+    ch_font: MoxelFont,
     scale_color: String,
     values_scale_format: Vec<MoxelLocalizedValue>,
     is_auto_series_name: bool,
@@ -795,7 +803,9 @@ pub(super) struct MoxelChart {
     max_series: usize,
     base_val: usize,
     is_outline: bool,
+    animation: &'static str,
     rebuild_time: usize,
+    legend_scroll_enable: bool,
     gauge_bands: Vec<MoxelChartGaugeBand>,
     gauge_thickness: usize,
     gauge_bush_thickness: usize,
@@ -803,6 +813,7 @@ pub(super) struct MoxelChart {
     user_max_value: String,
     auto_min_value: bool,
     user_min_value: String,
+    elements_is_init: bool,
     real_data_items: Vec<MoxelChartDataItem>,
     spline_strain: usize,
     translucence_percent: String,
@@ -814,6 +825,22 @@ pub(super) struct MoxelChart {
     elements_title: MoxelChartRectangle,
     values_axis: MoxelChartAxis,
     points_axis: MoxelChartAxis,
+}
+
+/// `ttlBorder`/`lgBorder`/`chBorder`'s own width and style, decoded from the
+/// `{3,0,{0},<style>,<width>,0,48312c09-257f-4b29-b280-284dd89efc1e}` record
+/// each carries (`ttlBorderColor`/`lgBorderColor`/`chBorderColor` sit in the
+/// adjacent slot as a separate `{3,3,{-22}}` "style:BorderColor" token, not
+/// part of this record). Evidence: native UT 11.5.27.75's two `GanttChart`
+/// templates prove three independent values across the two records observed
+/// (`ttlBorder` `0`/`WithoutBorder` in both, `lgBorder` `0`/`WithoutBorder`
+/// then `1`/`WithoutBorder`, `chBorder` `1`/`Single` in both) against the
+/// pre-existing corpus's uniform `0`/`WithoutBorder` for all three -- a
+/// single hard-coded literal cannot spell all of these at once.
+#[derive(Clone, Copy)]
+pub(super) struct MoxelChartBorder {
+    width: usize,
+    style: &'static str,
 }
 
 pub(super) struct MoxelChartSeries {
@@ -3377,6 +3404,29 @@ pub(super) fn parse_moxel_font(
         return None;
     }
     match fields.get(1)?.trim() {
+        // `AutoFont`: no ref, no explicit member. Evidence: native UT
+        // 11.5.27.75's `GanttChart` template
+        // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` stores
+        // `ttlFont`/`legFont` as this exact five-field shape and publishes
+        // `<d3p1:ttlFont kind="AutoFont"/>` (no `ref`, no explicit member
+        // attribute) for both.
+        "3" if fields.len() == 5
+            && fields.get(2)?.trim() == "0"
+            && fields.get(3)?.trim() == "1"
+            && fields.get(4)?.trim() == "100" =>
+        {
+            Some(MoxelFont {
+                ref_name: None,
+                face_name: None,
+                height: None,
+                bold: None,
+                italic: None,
+                underline: None,
+                strikeout: None,
+                kind: "AutoFont",
+                scale: None,
+            })
+        }
         // An absolute descriptor writes every slot, so its members are read at
         // fixed offsets. Field 2 was gated on the one mask 1С:УТ ever showed
         // there (`MOXCEL_FONT_KNOWN_MASK`), but ERP UH `Web_Service`
@@ -4661,6 +4711,13 @@ fn moxel_chart_type(code: &str) -> Option<&'static str> {
         "0" => Some("Line"),
         "9" => Some("StackedBar"),
         "38" => Some("Gauge"),
+        // Evidence: both of native UT 11.5.27.75's `GanttChart` templates
+        // (`АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий`
+        // and `ДлительностьОтложенногоОбновления/ДиаграммаГанта`) embed this
+        // same `{74,...}` chart payload as their `field[1]`/`<d3p1:chart>`,
+        // and both spell `chartType` code `6`, matching
+        // `<d3p1:chartType>Column3D</d3p1:chartType>` in both native exports.
+        "6" => Some("Column3D"),
         _ => None,
     }
 }
@@ -4722,7 +4779,8 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         )?);
         cursor += 11;
     }
-    let real_extra_series = parse_moxel_chart_series(data.get(cursor..cursor.checked_add(11)?)?)?;
+    let mut real_extra_series =
+        parse_moxel_chart_series(data.get(cursor..cursor.checked_add(11)?)?)?;
     cursor += 11;
     let is_points_design = parse_moxel_chart_bool(data.get(cursor)?)?;
     // Same evidence as `series_count`: the same template chart also
@@ -4778,6 +4836,10 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         _ => return None,
     };
     let title = parse_moxel_chart_localized(tail.get(11)?)?;
+    // Evidence: native UT 11.5.27.75's two `GanttChart` templates both
+    // publish `<d3p1:isShowTitle>true</d3p1:isShowTitle>` where all 13
+    // pre-existing corpus records store `"0"`/`false` at `tail[12]`.
+    let is_show_title = parse_moxel_chart_bool(tail.get(12)?)?;
     // `isShowLegend` is a real, evidenced two-state field, not a constant:
     // the pre-existing 13 corpus records all store `"0"` (`false`) with
     // `legendPlacement == None`; the target record and a seed variation that
@@ -4785,7 +4847,90 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // `tail[13]` flips with it (`"1"`/`true` under `UseCoordinates`). See
     // `validate_moxel_chart_v74_front`'s use of the same flag below.
     let is_show_legend = parse_moxel_chart_bool(tail.get(13)?)?;
-    validate_moxel_chart_v74_front(tail, is_show_legend)?;
+    // `ttlBorder`/`lgBorder`/`chBorder` each carry their own width/style
+    // record right before their (still-literal) `...Color` slot -- see
+    // `parse_moxel_chart_border`. Evidence: the two `GanttChart` templates
+    // spell three independent combinations
+    // (`0`/`WithoutBorder`,`0`/`WithoutBorder`,`1`/`Single` and
+    // `0`/`WithoutBorder`,`1`/`WithoutBorder`,`1`/`Single`) against the
+    // pre-existing corpus's uniform `0`/`WithoutBorder` for all three.
+    let ttl_border = parse_moxel_chart_border(tail.get(14)?)?;
+    let lg_border = parse_moxel_chart_border(tail.get(16)?)?;
+    let ch_border = parse_moxel_chart_border(tail.get(18)?)?;
+    // Evidence: `АнализЖурналаРегистрации/...` publishes
+    // `<d3p1:transparent>true</d3p1:transparent>` at `tail[20]` where all 13
+    // corpus records (and `ДлительностьОтложенногоОбновления/...`) store
+    // `"0"`/`false`.
+    let transparent = parse_moxel_chart_bool(tail.get(20)?)?;
+    // `ttlFont`/`legFont`/`chFont` share the general font descriptor shape
+    // (`parse_moxel_font`, extended with an `AutoFont` arm for this corpus):
+    // both `GanttChart` templates diverge from the pre-existing corpus's
+    // uniform `ref="style:TextFont" kind="StyleItem"` -- one spells
+    // `AutoFont`/`AutoFont`/`ref="style:SmallTextFont"`, the other an
+    // identical explicit `faceName="Arial" height="8" ... kind="Absolute"`
+    // for all three.
+    let ttl_font = parse_moxel_font(tail.get(31)?, &BTreeMap::new())?;
+    let leg_font = parse_moxel_font(tail.get(32)?, &BTreeMap::new())?;
+    let ch_font = parse_moxel_font(tail.get(33)?, &BTreeMap::new())?;
+    // Evidence: `ДлительностьОтложенногоОбновления/...` is the only one of
+    // the two `GanttChart` templates (plus the 13-record corpus) whose
+    // `tail[65]`/`tail[81]` diverge from the shared default, matching its
+    // `<d3p1:legendScrollEnable>true</d3p1:legendScrollEnable>` (all other
+    // 14 records `false`) and `<d3p1:animation>DontUse</d3p1:animation>`
+    // (all other 14 records `Auto`) -- the only two content differences
+    // left unexplained in this region once title/border/font/transparent
+    // above are accounted for.
+    let legend_scroll_enable = parse_moxel_chart_bool(tail.get(65)?)?;
+    let animation = match tail.get(81)?.trim() {
+        "1" => "Auto",
+        "0" => "DontUse",
+        _ => return None,
+    };
+    // `elementsIsInit` gates a cluster of design-time-only cache slots
+    // (`tail[84]`, `[86]`, `[87]`, `[88]`, `[90]`, `[92]`, `[93]`) that carry
+    // real geometry when set and a uniform `"0"` when clear, none of which
+    // any observation ties to XML content -- see
+    // `validate_moxel_chart_v74_front`. The flag itself is `tail[84]`
+    // (not-`"0"` for `true`): all six pre-existing `series_count == 0`
+    // fixtures plus `АнализЖурналаРегистрации/...` (`elementsIsInit ==
+    // true`) store a nonzero value there (`"1.6875e-1"` on five of the six,
+    // a different populated value on `АнализЖурналаРегистрации/...`'s
+    // touched-layout record and on `empty-legend-none` -- see below),
+    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
+    // is the only observation storing `"0"`. `tail[89]` is a *different*
+    // flag this reader used to derive `elementsIsInit` from directly in an
+    // earlier revision -- wrong, because it is actually `isShowLegend &&
+    // elementsIsInit` (`"0"` only when both hold): `empty-legend-none`
+    // (`isShowLegend == false`, `elementsIsInit == true`) proves the two
+    // are independent, storing `"1"` at `tail[89]` despite `elementsIsInit
+    // == true`.
+    let elements_is_init = tail.get(84)?.trim() != "0";
+    if (tail.get(89)?.trim() == "0") != (is_show_legend && elements_is_init) {
+        return None;
+    }
+    // A series/point's own `color`/`marker` raw slots are a cache the
+    // platform ignores -- publishing `auto`/`Auto` instead -- whenever the
+    // record as a whole has never gone through the design pipeline.
+    // Evidence: `ДлительностьОтложенногоОбновления/...`
+    // (`elementsIsInit == false`) is the only observation of this: its
+    // mandatory `realExSeriesData` stores a real cached colour (`#B49EB4`)
+    // and marker (`Rect`) at the same raw slots the pre-existing corpus's
+    // `elementsIsInit == true` records use for genuine values, yet
+    // publishes `<d3p1:color>auto</d3p1:color>`/
+    // `<d3p1:marker>Auto</d3p1:marker>`. `АнализЖурналаРегистрации/...`
+    // (`elementsIsInit == true`, same `chartType`, same `strIsChanged ==
+    // false`) publishes its own real cached colour/marker unchanged,
+    // ruling out `chartType` or `strIsChanged` as the gate.
+    if !elements_is_init {
+        for series in real_series
+            .iter_mut()
+            .chain(std::iter::once(&mut real_extra_series))
+        {
+            series.color = "auto".to_string();
+            series.marker = "Auto";
+        }
+    }
+    validate_moxel_chart_v74_front(tail, elements_is_init)?;
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
     // Evidence: the same target record publishes
@@ -4854,7 +4999,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         series_count,
         has_extended_scales,
         is_title_init,
-        is_show_legend,
+        elements_is_init,
         axes_position,
         rectangle_start,
     )?;
@@ -4886,9 +5031,17 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         chart_type,
         labels_location,
         title,
+        is_show_title,
         is_show_legend,
         has_extended_scales,
         is_title_init,
+        ttl_border,
+        lg_border,
+        ch_border,
+        transparent,
+        ttl_font,
+        leg_font,
+        ch_font,
         scale_color,
         values_scale_format,
         is_auto_series_name,
@@ -4896,7 +5049,9 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         max_series,
         base_val,
         is_outline,
+        animation,
         rebuild_time,
+        legend_scroll_enable,
         gauge_bands,
         gauge_thickness,
         gauge_bush_thickness,
@@ -4904,6 +5059,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         user_max_value,
         auto_min_value,
         user_min_value,
+        elements_is_init,
         real_data_items,
         spline_strain,
         translucence_percent,
@@ -5030,6 +5186,36 @@ fn parse_moxel_chart_color(text: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// `ttlBorder`/`lgBorder`/`chBorder`'s own record: `{3,0,{0},<style>,<width>,
+/// 0,48312c09-257f-4b29-b280-284dd89efc1e}`, where `<style>` is `0` for
+/// `WithoutBorder` or `1` for `Single` and `<width>` is the plain integer the
+/// XML publishes as the `width` attribute. The trailing uuid is the same
+/// `parse_moxel_chart_color`'s 7-field branch already names
+/// `style:BorderColor`, but that is the *adjacent*
+/// `ttlBorderColor`/`lgBorderColor`/`chBorderColor` slot's own value, not
+/// this one's -- the two are independent tokens sitting next to each other.
+fn parse_moxel_chart_border(text: &str) -> Option<MoxelChartBorder> {
+    const BORDER_LINE_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
+
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 7
+        || fields.first()?.trim() != "3"
+        || fields.get(1)?.trim() != "0"
+        || compact_moxel_chart_token(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields.get(6)?.trim().eq_ignore_ascii_case(BORDER_LINE_UUID)
+    {
+        return None;
+    }
+    let style = match fields.get(3)?.trim() {
+        "0" => "WithoutBorder",
+        "1" => "Single",
+        _ => return None,
+    };
+    let width = parse_moxel_chart_usize(fields.get(4)?)?;
+    Some(MoxelChartBorder { width, style })
 }
 
 fn parse_moxel_chart_line(text: &str) -> Option<MoxelChartLine> {
@@ -5185,7 +5371,14 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
 /// `"0","0"` under `UseCoordinates`) and are asserted dynamically below,
 /// keyed off `is_show_legend` since every observation so far has the two
 /// moving together.
-fn validate_moxel_chart_v74_front(tail: &[&str], is_show_legend: bool) -> Option<()> {
+/// Indices `12`, `14`, `16`, `18`, `20`, `31..34` and `65`/`81` used to sit in
+/// this function's literal table too, before `isShowTitle`,
+/// `ttlBorder`/`lgBorder`/`chBorder`, `transparent`, `ttlFont`/`legFont`/
+/// `chFont` and `legendScrollEnable`/`animation` became real fields (see
+/// `parse_moxel_chart`) -- the two `GanttChart` templates each diverge from
+/// the pre-existing corpus's shared default at a different subset of them,
+/// which a single hard-coded literal cannot spell for both at once.
+fn validate_moxel_chart_v74_front(tail: &[&str], elements_is_init: bool) -> Option<()> {
     let expected = [
         (3, "0"),
         (4, "\", \""),
@@ -5194,14 +5387,9 @@ fn validate_moxel_chart_v74_front(tail: &[&str], is_show_legend: bool) -> Option
         (8, "{3,3,{-3}}"),
         (9, "0"),
         (10, "0"),
-        (12, "0"),
-        (14, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
         (15, "{3,3,{-22}}"),
-        (16, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
         (17, "{3,3,{-22}}"),
-        (18, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
         (19, "{3,3,{-22}}"),
-        (20, "0"),
         (21, "{3,3,{-1}}"),
         (22, "1"),
         (23, "{3,3,{-1}}"),
@@ -5212,9 +5400,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str], is_show_legend: bool) -> Option
         (28, "{3,3,{-3}}"),
         (29, "{3,3,{-3}}"),
         (30, "{3,3,{-3}}"),
-        (31, "{7,2,0,{-20},1,100}"),
-        (32, "{7,2,0,{-20},1,100}"),
-        (33, "{7,2,0,{-20},1,100}"),
         (34, "1"),
         (35, "1"),
         (36, "1"),
@@ -5239,7 +5424,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str], is_show_legend: bool) -> Option
         (62, "1"),
         (63, "0"),
         (64, "0"),
-        (65, "0"),
         (66, "{3,0,{169}}"),
         (67, "0"),
         (68, "0"),
@@ -5248,14 +5432,10 @@ fn validate_moxel_chart_v74_front(tail: &[&str], is_show_legend: bool) -> Option
         (73, "1"),
         (74, "0"),
         (76, "{3,0,{11119017}}"),
-        (81, "1"),
         (82, "0"),
         (83, "0"),
         (85, "0"),
-        (90, "0"),
         (91, "0"),
-        (92, "1"),
-        (93, "1"),
         (94, "0"),
         (95, "{3,3,{-22}}"),
         (96, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
@@ -5269,14 +5449,36 @@ fn validate_moxel_chart_v74_front(tail: &[&str], is_show_legend: bool) -> Option
     }) {
         return None;
     }
-    let show_legend_flag = if is_show_legend { "0" } else { "1" };
-    [88usize, 89]
-        .iter()
-        .all(|index| {
+    // `tail[84]`, `[86]`, `[87]`, `[88]`, `[90]`, `[92]`, `[93]` are a
+    // design-time-only cache cluster no observation ties to any XML content
+    // (same treatment as `post[41..43]`, see `parse_moxel_chart`'s doc
+    // comment): `elementsIsInit == true` (the pre-existing corpus and
+    // `АнализЖурналаРегистрации/...`) populates it with real, otherwise
+    // uninterpreted values, while `elementsIsInit == false`
+    // (`ДлительностьОтложенногоОбновления/...`, the only observation) resets
+    // it to this exact fixed pattern.
+    if !elements_is_init {
+        let reset_pattern = [
+            (84, "0"),
+            (86, "0"),
+            (87, "0"),
+            (88, "1"),
+            (90, "0"),
+            (92, "1"),
+            (93, "1"),
+        ];
+        if !reset_pattern.iter().all(|(index, value)| {
             tail.get(*index)
-                .is_some_and(|slot| compact_moxel_chart_token(slot) == show_legend_flag)
-        })
-        .then_some(())
+                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+        }) {
+            return None;
+        }
+    } else {
+        for index in [84, 86, 87, 88, 90, 92, 93] {
+            tail.get(index)?;
+        }
+    }
+    Some(())
 }
 
 /// `post`'s fixed prefix (indices `0..=22`, unaffected by `series_count` or
@@ -5305,10 +5507,18 @@ fn validate_moxel_chart_v74_post_prefix(
     post: &[&str],
     has_extended_scales: bool,
     is_title_init: bool,
+    elements_is_init: bool,
 ) -> Option<()> {
     let leading = if has_extended_scales { "0" } else { "14" };
     let following = if has_extended_scales { "0" } else { "2" };
     let trio = if is_title_init { "1" } else { "0" };
+    // `post[20]` is another member of the `elementsIsInit`-gated
+    // design-time-only cluster documented on `validate_moxel_chart_v74_front`
+    // -- the pre-existing corpus and `АнализЖурналаРегистрации/...`
+    // (`elementsIsInit == true`) both store `"0"`,
+    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
+    // stores `"2"`.
+    let elements_cache_20 = if elements_is_init { "0" } else { "2" };
     let expected = [
         (0, leading),
         (1, following),
@@ -5325,7 +5535,7 @@ fn validate_moxel_chart_v74_post_prefix(
         (17, "{3,0,{0}}"),
         (18, "2"),
         (19, "255"),
-        (20, "0"),
+        (20, elements_cache_20),
         (22, "00000000-0000-0000-0000-000000000000"),
     ];
     expected
@@ -5410,30 +5620,48 @@ fn validate_moxel_chart_v74_post_axes_tail(post: &[&str], axes_position: usize) 
         .then_some(())
 }
 
-/// The five-token check immediately before `elementsChart`
-/// (`rectangle_start - 5 .. rectangle_start`): `"1","1","1",X,"8"` where `X`
-/// is `"6"` on every pre-existing corpus record (all `isShowLegend ==
-/// false`, `legendPlacement == None`) and `"5"` on every `isShowLegend ==
-/// true` seed observation, independent of `series_count`/`point_count` --
-/// proven by a seed pair that holds series and point counts fixed and
-/// toggles only `<d3p1:legendPlacement>` (`X` moves; nothing else past this
-/// position does) and confirmed against the pre-existing corpus's
-/// `point_count == 3` records, which the old `series_count *
-/// point_count`-shaped guess would have mispredicted.
+/// The five-token window immediately before `elementsChart`
+/// (`rectangle_start - 5 .. rectangle_start`).
+///
+/// `elementsIsInit == false` (`ДлительностьОтложенногоОбновления/...`, the
+/// only observation) resets it to a fixed `1,1,1,0,0` -- one more member of
+/// the `elementsIsInit`-gated cache cluster documented on
+/// `validate_moxel_chart_v74_front`.
+///
+/// `elementsIsInit == true` does *not*, on its own, guarantee the
+/// pre-existing corpus's `"1","1","1",X,"8"` literal either (`X` `"6"` on
+/// every `isShowLegend == false` corpus record, `"5"` on the seed pair that
+/// isolated `isShowLegend`): `АнализЖурналаРегистрации/...`
+/// (`elementsIsInit == true`, a record whose design layout was actually
+/// touched -- non-default `elementsChart`/`elementsLegend`/`elementsTitle`
+/// rectangles) stores real, otherwise-uninterpreted cache values across all
+/// five slots instead, unlike the pre-existing corpus's untouched-layout
+/// records. Only existence is required in that case; no observation ties
+/// any of these five slots' *content* to XML once a record's layout has
+/// actually been designed.
 fn validate_moxel_chart_v74_rectangle_check(
     post: &[&str],
-    is_show_legend: bool,
+    elements_is_init: bool,
     rectangle_start: usize,
 ) -> Option<()> {
-    let x = if is_show_legend { "5" } else { "6" };
-    let expected = [(5usize, "1"), (4, "1"), (3, "1"), (2, x), (1, "8")];
-    expected
-        .iter()
-        .all(|(back_from, value)| {
+    if !elements_is_init {
+        let expected = [(5usize, "1"), (4, "1"), (3, "1"), (2, "0"), (1, "0")];
+        return expected
+            .iter()
+            .all(|(back_from, value)| {
+                rectangle_start
+                    .checked_sub(*back_from)
+                    .and_then(|index| post.get(index))
+                    .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+            })
+            .then_some(());
+    }
+    (1..=5usize)
+        .all(|back_from| {
             rectangle_start
-                .checked_sub(*back_from)
+                .checked_sub(back_from)
                 .and_then(|index| post.get(index))
-                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+                .is_some()
         })
         .then_some(())
 }
@@ -5444,14 +5672,19 @@ fn validate_moxel_chart_v74_post(
     series_count: usize,
     has_extended_scales: bool,
     is_title_init: bool,
-    is_show_legend: bool,
+    elements_is_init: bool,
     axes_position: usize,
     rectangle_start: usize,
 ) -> Option<()> {
-    validate_moxel_chart_v74_post_prefix(post, has_extended_scales, is_title_init)?;
+    validate_moxel_chart_v74_post_prefix(
+        post,
+        has_extended_scales,
+        is_title_init,
+        elements_is_init,
+    )?;
     validate_moxel_chart_v74_scale_id_list(post, series_count)?;
     validate_moxel_chart_v74_post_axes_tail(post, axes_position)?;
-    validate_moxel_chart_v74_rectangle_check(post, is_show_legend, rectangle_start)
+    validate_moxel_chart_v74_rectangle_check(post, elements_is_init, rectangle_start)
 }
 
 fn parse_moxel_chart_bool(text: &str) -> Option<bool> {
@@ -10509,15 +10742,30 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "circleExpandMode", "None");
     push_moxel_chart_literal(xml, "chart3Dcrd", "SouthWest");
     push_moxel_chart_localized_xml(xml, "title", &chart.title, 3);
-    push_moxel_chart_bool(xml, "isShowTitle", false);
+    push_moxel_chart_bool(xml, "isShowTitle", chart.is_show_title);
     push_moxel_chart_bool(xml, "isShowLegend", chart.is_show_legend);
-    push_moxel_chart_border_xml(xml, "ttlBorder", 0, "WithoutBorder");
+    push_moxel_chart_border_xml(
+        xml,
+        "ttlBorder",
+        chart.ttl_border.width,
+        chart.ttl_border.style,
+    );
     push_moxel_chart_literal(xml, "ttlBorderColor", "style:BorderColor");
-    push_moxel_chart_border_xml(xml, "lgBorder", 0, "WithoutBorder");
+    push_moxel_chart_border_xml(
+        xml,
+        "lgBorder",
+        chart.lg_border.width,
+        chart.lg_border.style,
+    );
     push_moxel_chart_literal(xml, "lgBorderColor", "style:BorderColor");
-    push_moxel_chart_border_xml(xml, "chBorder", 0, "WithoutBorder");
+    push_moxel_chart_border_xml(
+        xml,
+        "chBorder",
+        chart.ch_border.width,
+        chart.ch_border.style,
+    );
     push_moxel_chart_literal(xml, "chBorderColor", "style:BorderColor");
-    push_moxel_chart_bool(xml, "transparent", false);
+    push_moxel_chart_bool(xml, "transparent", chart.transparent);
     push_moxel_chart_literal(xml, "bkgColor", "style:FormBackColor");
     push_moxel_chart_bool(xml, "isTrnspTtl", true);
     push_moxel_chart_literal(xml, "ttlColor", "style:FormBackColor");
@@ -10528,9 +10776,9 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "ttlTxtColor", "style:FormTextColor");
     push_moxel_chart_literal(xml, "legTxtColor", "style:FormTextColor");
     push_moxel_chart_literal(xml, "chTxtColor", "style:FormTextColor");
-    push_moxel_chart_style_font(xml, "ttlFont");
-    push_moxel_chart_style_font(xml, "legFont");
-    push_moxel_chart_style_font(xml, "chFont");
+    push_moxel_chart_font_xml(xml, "ttlFont", &chart.ttl_font);
+    push_moxel_chart_font_xml(xml, "legFont", &chart.leg_font);
+    push_moxel_chart_font_xml(xml, "chFont", &chart.ch_font);
     push_moxel_chart_bool(xml, "isShowScale", true);
     push_moxel_chart_bool(xml, "isShowScaleVL", true);
     push_moxel_chart_bool(xml, "isShowSeriesScale", true);
@@ -10582,11 +10830,11 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
             "Auto"
         },
     );
-    push_moxel_chart_literal(xml, "animation", "Auto");
+    push_moxel_chart_literal(xml, "animation", chart.animation);
     push_moxel_chart_text(xml, "rebuildTime", chart.rebuild_time);
     push_moxel_chart_bool(xml, "isTransposed", false);
     push_moxel_chart_bool(xml, "autoTransposition", false);
-    push_moxel_chart_bool(xml, "legendScrollEnable", false);
+    push_moxel_chart_bool(xml, "legendScrollEnable", chart.legend_scroll_enable);
     push_moxel_chart_literal(xml, "surfaceColor", "#A90000");
     push_moxel_chart_literal(xml, "radarScaleType", "Circle");
     push_moxel_chart_literal(xml, "gaugeValuesPresentation", "Needle");
@@ -10602,7 +10850,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "userMaxValue", &chart.user_max_value);
     push_moxel_chart_bool(xml, "autoMinValue", chart.auto_min_value);
     push_moxel_chart_literal(xml, "userMinValue", &chart.user_min_value);
-    push_moxel_chart_bool(xml, "elementsIsInit", true);
+    push_moxel_chart_bool(xml, "elementsIsInit", chart.elements_is_init);
     // `post[7..10)` in `validate_moxel_chart_v74_post_prefix`, read as
     // `is_title_init`: proven independent of `isShowLegend`/
     // `legendPlacement` and of `has_extended_scales` by two separate seed
@@ -10649,38 +10897,71 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
         xml.push_str("\t\t\t\t<d3p1:labelOrientation>Horizontal</d3p1:labelOrientation>\r\n");
         xml.push_str("\t\t\t</d3p1:pointsScale>\r\n");
     }
-    // `valuesScale` has two independent triggers proven so far: non-empty
+    // `valuesScale` has three independent triggers proven so far: non-empty
     // `vsFormat` writes a `labelFormat` child (the pre-existing corpus
-    // shape, e.g. `ДосьеКонтрагента/ФинансовыйАнализ`'s Gauge charts) and
+    // shape, e.g. `ДосьеКонтрагента/ФинансовыйАнализ`'s Gauge charts);
     // `has_extended_scales` writes a `gridLinesShowMode` child instead (the
-    // target record, `vsFormat` empty). No record observed carries both at
-    // once, so that combination is not this writer's case.
+    // already-closed `СравнительныйАнализМенеджеров` target, `vsFormat`
+    // empty); and `isShowTitle && elementsIsInit` writes the same
+    // `gridLinesShowMode` shape even with `has_extended_scales` clear --
+    // evidenced by all three factorial combinations of those two flags the
+    // corpus spells: `АнализЖурналаРегистрации/...`
+    // (`isShowTitle==true,elementsIsInit==true`, `valuesScale` present),
+    // `ДлительностьОтложенногоОбновления/...`
+    // (`isShowTitle==true,elementsIsInit==false`, absent) and the
+    // pre-existing `empty-no-extended-scales` fixture
+    // (`isShowTitle==false,elementsIsInit==true`, absent) -- only the
+    // conjunction fits all three. No record observed carries both `vsFormat`
+    // and either extended trigger at once, so that combination is not this
+    // writer's case.
+    let values_scale_gridlines =
+        chart.has_extended_scales || (chart.is_show_title && chart.elements_is_init);
     if !chart.values_scale_format.is_empty() {
         xml.push_str("\t\t\t<d3p1:valuesScale>\r\n");
         push_moxel_chart_scale_title_area_xml(xml);
         push_moxel_chart_localized_xml(xml, "labelFormat", &chart.values_scale_format, 4);
         xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
-    } else if chart.has_extended_scales {
+    } else if values_scale_gridlines {
         xml.push_str("\t\t\t<d3p1:valuesScale>\r\n");
         push_moxel_chart_scale_title_area_xml(xml);
         xml.push_str("\t\t\t\t<d3p1:gridLinesShowMode>Show</d3p1:gridLinesShowMode>\r\n");
         xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
     }
-    // Evidence: same correlation as `titleIsInit`/`legendIsInit`/
-    // `chartIsInit` above -- every observation ties `legendPlacement` to
-    // `isShowLegend` (`None`/`false` on the corpus, `UseCoordinates`/`true`
-    // on the target record and the seed pair that isolated it).
-    push_moxel_chart_literal(
-        xml,
-        "legendPlacement",
-        if chart.is_show_legend {
-            "UseCoordinates"
-        } else {
-            "None"
-        },
-    );
+    // `legendPlacement`/`titleAreaPlacement` are themselves gated on
+    // `elementsIsInit`, not unconditionally written: the pre-existing corpus
+    // and `АнализЖурналаРегистрации/...` (`elementsIsInit == true`) both
+    // publish them, `ДлительностьОтложенногоОбновления/...`
+    // (`elementsIsInit == false`) publishes neither -- `plotAreaPlacement`
+    // between them is unaffected either way. Evidence: same correlation as
+    // `titleIsInit`/`legendIsInit`/`chartIsInit` above -- every observation
+    // ties `legendPlacement`'s own content to `isShowLegend` (`None`/`false`
+    // on the corpus, `UseCoordinates`/`true` on the target record and the
+    // seed pair that isolated it), and `titleAreaPlacement`'s to
+    // `isShowTitle` (`None`/`false` on the corpus,
+    // `UseCoordinates`/`true` on `АнализЖурналаРегистрации/...`).
+    if chart.elements_is_init {
+        push_moxel_chart_literal(
+            xml,
+            "legendPlacement",
+            if chart.is_show_legend {
+                "UseCoordinates"
+            } else {
+                "None"
+            },
+        );
+    }
     push_moxel_chart_literal(xml, "plotAreaPlacement", "UseCoordinates");
-    push_moxel_chart_literal(xml, "titleAreaPlacement", "None");
+    if chart.elements_is_init {
+        push_moxel_chart_literal(
+            xml,
+            "titleAreaPlacement",
+            if chart.is_show_title {
+                "UseCoordinates"
+            } else {
+                "None"
+            },
+        );
+    }
     // `colorPaletteDescription` is new, same trigger and same single
     // observation as `paletteKind` above.
     if chart.has_extended_scales {
@@ -10800,10 +11081,36 @@ fn push_moxel_chart_border_xml(xml: &mut String, tag: &str, width: usize, style:
     xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
 }
 
-fn push_moxel_chart_style_font(xml: &mut String, tag: &str) {
-    xml.push_str(&format!(
-        "\t\t\t<d3p1:{tag} ref=\"style:TextFont\" kind=\"StyleItem\"/>\r\n"
-    ));
+/// `ttlFont`/`legFont`/`chFont`: unlike the general `<font>` element
+/// (`push_moxel_font_xml`), these are `d3p1:`-namespaced, three-tab-indented
+/// and self-closing, so they get their own writer rather than sharing that
+/// one's tag/indent literals.
+fn push_moxel_chart_font_xml(xml: &mut String, tag: &str, font: &MoxelFont) {
+    xml.push_str(&format!("\t\t\t<d3p1:{tag}"));
+    if let Some(ref_name) = &font.ref_name {
+        xml.push_str(&format!(" ref=\"{}\"", escape_xml_text(ref_name)));
+    }
+    if let Some(face_name) = &font.face_name {
+        xml.push_str(&format!(" faceName=\"{}\"", escape_xml_text(face_name)));
+    }
+    if let Some(height) = &font.height {
+        xml.push_str(&format!(" height=\"{}\"", escape_xml_text(height)));
+    }
+    for (member, name) in [
+        (font.bold, "bold"),
+        (font.italic, "italic"),
+        (font.underline, "underline"),
+        (font.strikeout, "strikeout"),
+    ] {
+        if let Some(value) = member {
+            xml.push_str(&format!(" {name}=\"{value}\""));
+        }
+    }
+    xml.push_str(&format!(" kind=\"{}\"", font.kind));
+    if let Some(scale) = font.scale {
+        xml.push_str(&format!(" scale=\"{scale}\""));
+    }
+    xml.push_str("/>\r\n");
 }
 
 fn push_moxel_chart_localized_xml(

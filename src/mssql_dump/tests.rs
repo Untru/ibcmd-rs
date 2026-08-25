@@ -72665,3 +72665,57 @@ fn short_extended_tooltip_revision_is_read_as_its_canonical_shape() {
     assert_eq!(tooltip.name, "Реквизит1РасширеннаяПодсказка");
     assert_eq!(tooltip.id, "3");
 }
+
+/// Evidence: fixture `moxel-ganttchart-remainder`, `field[1]` of each of
+/// native UT 11.5.27.75's two `GanttChart` templates'
+/// `{19,field[1],...,field[32]}` wrapper (`АнализЖурналаРегистрации/
+/// ПродолжительностьРаботыРегламентныхЗаданий` and
+/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта`) -- the `{0,{11},
+/// {74,...}}` triple whose last two members are the exact
+/// `parse_moxel_chart`-compatible payload the plain `Chart` drawing kind
+/// already decodes, re-wrapped here as `<object xsi:type="d3p1:Chart">` (the
+/// two-tab indent `push_moxel_chart_xml` writes) rather than the
+/// three-tab-indented `<d3p1:chart>` the native GanttChart export nests it
+/// under. Both records needed the same five new real fields this wave adds
+/// (`isShowTitle`, `ttlBorder`/`lgBorder`/`chBorder`,
+/// `transparent`, `ttlFont`/`legFont`/`chFont`, `legendScrollEnable`/
+/// `animation`, `elementsIsInit`) plus one new `chartType` code
+/// (`6` = `Column3D`) and a new `elementsIsInit`-gated cache-cluster
+/// treatment in `validate_moxel_chart_v74_front` and
+/// `validate_moxel_chart_v74_post_prefix`/`_rectangle_check` -- see those
+/// functions' doc comments for exactly what each of the two records proved.
+fn assert_platform_proven_moxel_chart_from_gantt_wrapper(
+    raw_payload: &str,
+    native_object_xml: &str,
+) {
+    let rendered = parse_and_render_moxel_chart_for_test(raw_payload)
+        .expect("platform-proven GanttChart-embedded chart payload must decode");
+    assert_eq!(
+        rendered, native_object_xml,
+        "rendered <object xsi:type=\"d3p1:Chart\"> must remain byte-identical to the GanttChart's own native <d3p1:chart> content"
+    );
+}
+
+#[test]
+fn renders_gantt_chart_embedded_chart_with_elements_not_init_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart_from_gantt_wrapper(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-chart-only-payload.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-chart-only-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_gantt_chart_embedded_chart_with_elements_init_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart_from_gantt_wrapper(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-chart-only-payload.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-chart-only-object.xml"
+        ),
+    );
+}
