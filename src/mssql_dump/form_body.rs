@@ -2592,13 +2592,13 @@ pub(super) fn extract_form_mobile_device_command_bar_content(
     let Some(trailer) = fields.get(tail_start..) else {
         return Vec::new();
     };
-    let Some(content_slot) =
-        FormRootMobileDeviceCommandBarContentSchema::content_trailer_slot(trailer.len())
+    let Some(blocks) =
+        form_root_trailer_optional_blocks(fields.first().map(|field| field.trim()), trailer)
     else {
         return Vec::new();
     };
     let Some(content) = trailer
-        .get(content_slot)
+        .get(FormRootMobileDeviceCommandBarContentSchema::CONTENT_TRAILER_SLOT + blocks)
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))
     else {
         return Vec::new();
@@ -2627,7 +2627,7 @@ pub(super) fn extract_form_mobile_device_command_bar_content(
         .collect::<Vec<_>>();
     let Some(schema) = FormRootMobileDeviceCommandBarContentSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
-        trailer.len(),
+        trailer,
         content.first().map(|field| field.trim()),
         content.len(),
         declared_item_count,

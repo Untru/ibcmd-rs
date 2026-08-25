@@ -177,7 +177,28 @@ property at all; the largest remaining class is 643 files differing solely in
 `<Shortcut>` -- the documented macOS/Windows host dependency (`Cmd+T` vs
 `Ctrl+T`, see `host-dependent-export-2214-20260823.md`), not defects.
 
-Still open, outside the trailer: 73 files where the
-`MobileDeviceCommandBarContent` block is now emitted but its item contents do
-not yet match, and item-level properties (`Field`, `DataPath`,
-`AdditionSource`, button/command-bar shapes).
+## `MobileDeviceCommandBarContent`: the last arity gate
+
+`FormRootMobileDeviceCommandBarContentSchema::from_raw_layout` carried a
+second, independent `trailer_len == 24` gate of its own, so ERP УХ's count-1
+forms were rejected after the slot was already being read correctly -- the
+block was dropped entirely rather than read at a wrong offset.
+
+The property is not otherwise broken: on the count-0 corpora it is exact on
+every form that carries it (sslbase 64, ssl 82, ut 64). The ten sslbase and
+ten ssl forms with the block that do not match differ **only** in `<Shortcut>`
+-- the documented host dependency -- with no `MobileDeviceCommandBarContent`
+difference at all. That made the count-0 corpora a clean control: the gate,
+not the parse, was the whole defect.
+
+The block also leads with its own copy of the root discriminator (`{50,0}`
+under root `50`, `{49,0}` under root `49`), so `content_kind` is now checked
+against the root rather than a literal `50`.
+
+`uh` exact 119 536 -> **119 609** (+73, BROKEN = 0). All 73 of the forms whose
+only remaining difference was this block are byte-exact; of the 84 uh forms
+carrying it natively, 73 are exact and the other 11 differ elsewhere.
+
+Still open, outside the trailer entirely: item-level properties (`Field`,
+`DataPath`, `AdditionSource`, button/command-bar shapes) and the 643
+`<Shortcut>` host-dependency files.
