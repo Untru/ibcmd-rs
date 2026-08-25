@@ -2542,7 +2542,13 @@ fn dump_table_rows_with_options_mode(
             .with_context(|| format!("failed to create {}", inflated_dir.display()))?;
     }
     let module_text_dir = output_dir.join(format!("{table}_module_text"));
-    if extract_module_text {
+    // Only the legacy raw/debug fallback (see `dump_table_row_bytes`) ever
+    // writes directly under this root; every canonical module path creates
+    // its own parent directory lazily right before its own `fs::write`. A
+    // strict source export (`write_binary_rows == false`) never takes that
+    // fallback, so pre-creating an empty `{table}_module_text` directory
+    // here would be a stray artifact with no platform counterpart.
+    if extract_module_text && write_binary_rows {
         fs::create_dir_all(&module_text_dir)
             .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
     }
@@ -3104,7 +3110,10 @@ fn dump_table_rows_streamed(
             .with_context(|| format!("failed to create {}", inflated_dir.display()))?;
     }
     let module_text_dir = output_dir.join(format!("{table}_module_text"));
-    if extract_module_text {
+    // See the identical comment in `dump_table_rows_with_options_mode`: only
+    // the legacy raw/debug fallback ever writes here, and strict source
+    // exports never take it.
+    if extract_module_text && write_binary_rows {
         fs::create_dir_all(&module_text_dir)
             .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
     }
