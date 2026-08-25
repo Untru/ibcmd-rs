@@ -1152,11 +1152,26 @@ pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
     for template in &rights.restriction_templates {
         xml.push_str("\t<restrictionTemplate>\r\n\t\t<name>");
         xml.push_str(&escape_xml_element_text(&template.name));
-        xml.push_str("</name>\r\n\t\t<condition>");
-        // Verbatim, for the reason spelled out at the `restrictionByCondition`
-        // condition above.
-        xml.push_str(&escape_xml_element_text(&template.condition));
-        xml.push_str("</condition>\r\n\t</restrictionTemplate>\r\n");
+        xml.push_str("</name>\r\n\t\t");
+        if template.condition.is_empty() {
+            // An empty restriction-template condition is written as an empty
+            // element, not as an open/close pair. One occurrence in the whole
+            // stand -- `Roles/ЧтениеКовенантов`, template
+            // `ПоЗначениямРасширенный` -- and zero counterexamples: across the
+            // role trees of all seven configurations, `<condition/>` appears
+            // once and `<condition></condition>` never. The
+            // `restrictionByCondition` condition below is never empty in any
+            // of them, so nothing measures its empty form and it is left as
+            // it was.
+            xml.push_str("<condition/>");
+        } else {
+            xml.push_str("<condition>");
+            // Verbatim, for the reason spelled out at the
+            // `restrictionByCondition` condition above.
+            xml.push_str(&escape_xml_element_text(&template.condition));
+            xml.push_str("</condition>");
+        }
+        xml.push_str("\r\n\t</restrictionTemplate>\r\n");
     }
     xml.push_str("</Rights>");
     xml
