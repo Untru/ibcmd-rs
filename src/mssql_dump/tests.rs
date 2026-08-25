@@ -13330,13 +13330,15 @@ fn label_field_column_writes_the_four_properties_the_platform_keeps_in_its_own_s
     assert_eq!(item.tag, "LabelField");
     assert_eq!(item.enabled, Some(false));
     assert_eq!(item.header_horizontal_align, Some("Center"));
-    assert_eq!(item.item_shortcut.as_deref(), Some("Ctrl+S"));
+    assert_eq!(item.item_shortcut, Some(host_shortcut("Ctrl+S")));
     assert_eq!(item.mark_negatives, Some(true));
 
     let xml = format_form_child_items_xml(&[item], 1);
 
     let enabled = xml.find("<Enabled>false</Enabled>").unwrap();
-    let shortcut = xml.find("<Shortcut>Ctrl+S</Shortcut>").unwrap();
+    let shortcut = xml
+        .find(&format!("<Shortcut>{}</Shortcut>", host_shortcut("Ctrl+S")))
+        .unwrap();
     let header = xml
         .find("<HeaderHorizontalAlign>Center</HeaderHorizontalAlign>")
         .unwrap();
@@ -26300,8 +26302,19 @@ fn parses_common_command_input_field_pictures_and_shortcut() {
     assert_eq!(parse_common_command_shortcut_value("{0,0,0}"), None);
 }
 
+/// Renders a Windows-spelled shortcut the way this host's export will write
+/// it, so assertions on emitted XML stay correct on either host.
+fn host_shortcut(windows_spelling: &str) -> String {
+    windows_spelling
+        .replace("Ctrl", ShortcutModifierStyle::host().ctrl())
+        .replace("Alt", ShortcutModifierStyle::host().alt())
+}
+
 #[test]
 fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
+    // The bitmask is host-neutral; only the CTRL and ALT bits' spelling
+    // depends on the host the export runs on. Both spellings are pinned here
+    // so neither can drift with whichever machine runs the suite.
     for (raw, expected) in [
         ("{0,8,0}", "BackSpace"),
         ("{0,13,8}", "Ctrl+Enter"),
@@ -26321,7 +26334,29 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,70,28}", "Ctrl+Alt+Shift+F"),
     ] {
         assert_eq!(
-            parse_common_command_shortcut_value(raw).as_deref(),
+            parse_common_command_shortcut_value_with_style(raw, ShortcutModifierStyle::Windows)
+                .as_deref(),
+            Some(expected),
+            "{raw}"
+        );
+    }
+
+    for (raw, expected) in [
+        ("{0,8,0}", "BackSpace"),
+        ("{0,13,8}", "Cmd+Enter"),
+        ("{0,49,8}", "Cmd+1"),
+        ("{0,105,16}", "Option+Num 9"),
+        ("{0,112,0}", "F1"),
+        ("{0,83,4}", "Shift+S"),
+        ("{0,83,8}", "Cmd+S"),
+        ("{0,83,16}", "Option+S"),
+        ("{0,83,12}", "Cmd+Shift+S"),
+        ("{0,70,24}", "Cmd+Option+F"),
+        ("{0,70,28}", "Cmd+Option+Shift+F"),
+    ] {
+        assert_eq!(
+            parse_common_command_shortcut_value_with_style(raw, ShortcutModifierStyle::Macos)
+                .as_deref(),
             Some(expected),
             "{raw}"
         );
@@ -55806,7 +55841,10 @@ fn extracts_data_processor_child_command_properties_to_metadata_xml() {
     assert!(xml.contains("<Picture>"));
     assert!(xml.contains("<xr:Ref>StdPicture.SpreadsheetDeletePageBreak</xr:Ref>"));
     assert!(xml.contains("<xr:LoadTransparent>true</xr:LoadTransparent>"));
-    assert!(xml.contains("<Shortcut>Ctrl+Alt+F</Shortcut>"));
+    assert!(xml.contains(&format!(
+        "<Shortcut>{}</Shortcut>",
+        host_shortcut("Ctrl+Alt+F")
+    )));
     assert!(xml.contains("<OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>"));
     assert_eq!(xml.matches("<Command uuid=").count(), 1, "{xml}");
     assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());

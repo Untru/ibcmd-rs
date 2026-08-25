@@ -30003,7 +30003,61 @@ fn parse_common_command_picture_value(
     Some((None, load_transparent))
 }
 
+/// Names the platform writes for the shortcut bitmask's CTRL and ALT bits.
+///
+/// The bits themselves are host-neutral -- the same `.cf` carries the same
+/// `{0, virtual-key, modifier-mask}` tuple everywhere -- but `ibcmd` spells
+/// them for the host it runs on, and that is the only thing that changes:
+/// bit 8 is `Ctrl` on Windows and `Cmd` on macOS, bit 16 is `Alt` on Windows
+/// and `Option` on macOS. Bit 4 stays `Shift`, the key name never moves, and
+/// the modifier order is the same on both.
+///
+/// Measured on БСП базовая: of the 81 forms carrying `<Shortcut>`, 50 are
+/// already byte-identical to the macOS reference tree and the other 31 become
+/// byte-identical under exactly this substitution, with no residual
+/// difference anywhere. The stand's reference trees are macOS captures
+/// throughout -- 2 900 `Cmd` and 140 `Option` across uh/ut/ssl/sslbase, and
+/// not one `Ctrl` or `Alt` -- so on this host the macOS spelling is what the
+/// platform bytes say.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ShortcutModifierStyle {
+    Windows,
+    Macos,
+}
+
+impl ShortcutModifierStyle {
+    /// The spelling `ibcmd` uses on the host this export is running on.
+    pub(crate) const fn host() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Macos
+        } else {
+            Self::Windows
+        }
+    }
+
+    const fn ctrl(self) -> &'static str {
+        match self {
+            Self::Windows => "Ctrl",
+            Self::Macos => "Cmd",
+        }
+    }
+
+    const fn alt(self) -> &'static str {
+        match self {
+            Self::Windows => "Alt",
+            Self::Macos => "Option",
+        }
+    }
+}
+
 fn parse_common_command_shortcut_value(value: &str) -> Option<String> {
+    parse_common_command_shortcut_value_with_style(value, ShortcutModifierStyle::host())
+}
+
+fn parse_common_command_shortcut_value_with_style(
+    value: &str,
+    style: ShortcutModifierStyle,
+) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.len() != 3 || fields.first()?.trim() != "0" {
         return None;
@@ -30028,10 +30082,10 @@ fn parse_common_command_shortcut_value(value: &str) -> Option<String> {
     };
     let mut parts = Vec::with_capacity(4);
     if modifier_code & CTRL != 0 {
-        parts.push("Ctrl".to_string());
+        parts.push(style.ctrl().to_string());
     }
     if modifier_code & ALT != 0 {
-        parts.push("Alt".to_string());
+        parts.push(style.alt().to_string());
     }
     if modifier_code & SHIFT != 0 {
         parts.push("Shift".to_string());
