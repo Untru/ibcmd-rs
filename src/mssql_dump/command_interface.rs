@@ -319,11 +319,28 @@ fn parse_command_interface_adjustable_visibility(
     let mut values = Vec::with_capacity(count);
     for slot in 0..count {
         let uuid = parse_non_zero_uuid(inner.get(3 + slot * 2)?)?;
-        let reference = metadata_refs
+        // A visibility override's uuid does not always resolve to a role
+        // still present in the exported corpus: confirmed on ERP УХ
+        // 3.2.12.6, `Subsystems/БюджетированиеИОтчетность/Subsystems/
+        // БизнесАнализ/Subsystems/Настройка/Ext/CommandInterface.xml`
+        // carries eight such uuids (`8edfa490-...`, `117d14df-...`,
+        // `6c3d286e-...`, `f6bd2b83-...`, `cd7d2ace-...`, `84650453-...`,
+        // `977b429c-...`, `e9d97a4c-...`) that appear nowhere else in the
+        // tree, not even under `Roles/`. Native XML does not drop the
+        // override or the whole `Visibility` block over it -- it falls
+        // back to the bare uuid as `<xr:Value name="...">`, the same
+        // fallback `format_command_interface_xml` already writes for a
+        // `CommandInterfaceVisibilityValue` given one directly. Requiring
+        // resolution here previously failed the whole adjustable-visibility
+        // parse over a single unresolved override, discarding every proven
+        // per-role value in the same `Visibility` block.
+        let name = metadata_refs
             .get(&uuid)
-            .filter(|entry| entry.kind == "Role")?;
+            .filter(|entry| entry.kind == "Role")
+            .map(|entry| format!("Role.{}", entry.name))
+            .unwrap_or(uuid);
         values.push(CommandInterfaceVisibilityValue {
-            name: format!("Role.{}", reference.name),
+            name,
             value: parse_command_interface_boolean_atom(inner.get(4 + slot * 2)?)?,
         });
     }
