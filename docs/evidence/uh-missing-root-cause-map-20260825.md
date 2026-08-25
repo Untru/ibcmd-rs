@@ -22,6 +22,54 @@ is preserved as originally measured, i.e. still describes the 1,513-file
 state from before this fix; treat every count below as pre-`cce7b1c` unless
 this note says otherwise.
 
+**Update, `06249bd` (same pass):** a third occurrence of the `ab58c3f`/
+`0575505` short-wrapper-omission class, this time in
+`parse_metadata_code27_payload_fields` (the attribute-type-declaration
+payload shared by `Catalog`/`Document`/`DataProcessor`/`Report`/tabular-
+section attributes across several call sites) -- hardcoded
+`header.len() != 9 || header[0] != "3"` on the attribute's own nested
+`{1,0,<uuid>}`-based header, rejecting the same short (`"2"`, 8-member) form
+`0575505` already fixed elsewhere. One malformed direct attribute failed the
+*entire* owning object's direct-attribute collection, which failed the whole
+descriptor -- explaining a slice of the "Catalogs (111 remaining)" bucket
+this document's "What is still open" flagged as needing individual tracing.
+Confirmed on real ERP УХ 3.2.12.6 bytes: `Catalogs/ВариантыЗаполненияШаблонов`
+(uuid `996f1881-4ee2-4c39-bc39-e61dd7f42502`)'s `Комментарий` attribute
+(uuid `5c1b73cc-2842-4ca0-bc76-436456449e45`, 8-member header) against the
+working twin `Catalogs/АналитическаяПодписка`'s `КонтрольСостояния`
+attribute (uuid `616f2156-e77c-4956-9e7c-69ed1d06c9b0`, 9-member header).
+`BROKEN=0` on all seven gate corpora. `uh` missing: 1,363 -> 1,351 (-12: 10
+`Catalogs` + 2 `Documents` root descriptors, previously fully opaque).
+
+Found via a temporary diagnostic checkpoint macro placed inside
+`parse_strict_catalog_properties_from_text` (one `eprintln!` per major
+parse stage, gated on `IBCMD_DEBUG_CATALOG_UUID`), compiled in for one
+full `cf export` run against the real `uh` `1cv8.cf` on this specific
+uuid, then removed entirely before shipping (see `06249bd`'s diff --
+`grep -rn "eprintln!\|std::env::var" src` shows only pre-existing,
+unrelated uses after this pass). `decode_owner_graph` itself parsed the
+whole object fine; the diagnostic pinpointed the exact next call
+(`parse_catalog_attribute_collection_indexed` ->
+`parse_catalog_attribute_wrapper_fields` ->
+`parse_metadata_code27_payload_fields`) that failed, which manual byte
+comparison against a working twin then explained.
+
+**New lead exposed, not fixed:** the 12 objects this fix newly unblocked
+moved from `missing` to `differing`, not `exact`. Diffing one
+(`Catalogs/ВариантыЗаполненияШаблонов.xml`) against native shows three
+attributes -- all three with the short header form -- rendering an empty
+`<Type/>` where native declares the real value type (e.g.
+`<v8:Type>cfg:EnumRef.НазначенияШаблонов</v8:Type>` or a
+`StringQualifiers` block). The rest of each file (10,000+ lines) matches
+exactly; this is a narrow, contained, separate defect in how an
+attribute's `"Pattern"` payload becomes `<Type>` XML -- previously
+invisible because the whole object was opaque before this fix. Not
+investigated further here: needs its own byte-level trace of the
+type-pattern-to-XML path (distinct code from the header-wrapper parsing
+this fix touched) for attributes carrying the short header form,
+verified this fix's `<Type/>` correlation isn't coincidental to just
+these 12 objects.
+
 ## Method
 
 For each of the 1,977 (then 1,594) missing native paths, resolve its root
