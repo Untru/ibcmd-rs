@@ -10105,10 +10105,14 @@ pub(super) fn push_moxel_drawing_xml(
         ));
     }
     if let Some(value) = &drawing.members.value {
-        xml.push_str(&format!(
-            "\t\t<value xsi:type=\"xs:string\">{}</value>\r\n",
-            escape_xml_element_text(value)
-        ));
+        if value.is_empty() {
+            xml.push_str("\t\t<value xsi:type=\"xs:string\"/>\r\n");
+        } else {
+            xml.push_str(&format!(
+                "\t\t<value xsi:type=\"xs:string\">{}</value>\r\n",
+                escape_xml_element_text(value)
+            ));
+        }
     }
     if let Some(detail_parameter) = &drawing.members.detail_parameter {
         xml.push_str(&format!(

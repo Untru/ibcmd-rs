@@ -33405,6 +33405,47 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     );
 }
 
+/// Evidence (БСП демо 3.1.12.297, `_ДемоСчетНаОплатуПокупателю/.../
+/// ПФ_MXL_СчетЗаказ`): two `Text` drawings carry an explicitly empty
+/// `parameter` value (`ФИОРуководителя`, `ФИОБухгалтера`) and the platform
+/// self-closes it, `<value xsi:type="xs:string"/>`, the same spelling the
+/// cell `<v>`/`<d>` writer already used for an empty string. The drawing
+/// writer instead always wrote the open/close pair with empty content
+/// between, `<value xsi:type="xs:string"></value>` -- a real byte
+/// divergence, not a semantic no-op, since the platform never writes that
+/// second spelling for this element.
+#[test]
+fn self_closes_empty_string_drawing_value() {
+    let drawing = MoxelDrawing {
+        id: 12,
+        format_index: 58,
+        begin_row: 48,
+        begin_row_offset: 10,
+        end_row: 49,
+        end_row_offset: 0,
+        begin_column: 6,
+        begin_column_offset: 8,
+        end_column: 16,
+        end_column_offset: 26,
+        auto_size: false,
+        z_order: 4,
+        members: MoxelDrawingMembers {
+            text: None,
+            parameter: Some("ФИОРуководителя".to_string()),
+            value: Some(String::new()),
+            detail_parameter: None,
+        },
+        kind: MoxelDrawingKind::Shape("Text"),
+    };
+    let mut xml = String::new();
+    push_moxel_drawing_xml(&mut xml, &drawing, &BTreeMap::new());
+    assert!(
+        xml.contains("<value xsi:type=\"xs:string\"/>\r\n"),
+        "empty drawing value must self-close like the cell value writer does: {xml}"
+    );
+    assert!(!xml.contains("<value xsi:type=\"xs:string\"></value>"));
+}
+
 #[test]
 fn rejects_malformed_or_unbounded_moxel_chart_drawings() {
     let chart_type = "a8b97779-1a4b-4059-b09c-807f86d2a461";
