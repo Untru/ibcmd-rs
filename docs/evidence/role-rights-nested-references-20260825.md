@@ -2,14 +2,17 @@
 
 Status: closes the three residual defect classes left by
 `role-rights-top-level-default-suppression-20260825.md` on ERP Управление
-холдингом 3.2.12.6, plus one more found while measuring them. Branch base
+холдингом 3.2.12.6, plus two more found while measuring them. Branch base
 `e60c978` (itself on `41808c3`).
+
+**`Roles/*/Ext/Rights.xml` differing on the `uh` gate: 27 → 0.** Five role
+Rights files remain `missing` for an unrelated reason (see the end).
 
 After the two `setForNewObjects` / `setForAttributesByDefault` suppression
 rules landed, 27 `Roles/<Name>/Ext/Rights.xml` files still differed on the
-`uh` gate and 5 more were `missing`. This pass leaves **11 differing**, all of
-them on one newly-isolated cause that is *not* closed here (see "What is
-left").
+`uh` gate and 5 more were `missing`. All 27 are closed here, by five rules —
+four found from the role diffs themselves, the fifth (§6) turning out to be
+a command-indexing defect well outside roles.
 
 ## Measured result
 
@@ -19,14 +22,20 @@ tree exported from the branch base:
 | | exact | differing | missing | extra | differing `Roles/*/Ext/Rights.xml` |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | base `e60c978` | 120,434 | 18,475 | 1,502 | 64 | 27 |
-| after | 120,453 | 18,456 | 1,502 | 64 | **10** |
-| Δ | **+19** | **−19** | 0 | 0 | **−17** |
+| after §1–§5 | 120,453 | 18,456 | 1,502 | 64 | 10 |
+| after §6 | 120,492 | 18,434 | 1,485 | 64 | **0** |
+| Δ | **+58** | **−41** | **−17** | 0 | **−27** |
 
-The 19 files that became exact: 17 `Roles/*/Ext/Rights.xml`, plus
-`AccumulationRegisters/ОперацииБюджетов/Forms/ФормаСписка/Ext/Form.xml` and
-`AccumulationRegisters/ПланированиеПотребностей/Forms/ФормаСписка/Ext/Form.xml`,
-which fell out of §2 (the two forms name register attributes the index was
-missing).
+The 58 files that became exact are not all roles — §2 and §6 both reach
+outside `Roles/`:
+
+| what | count |
+| --- | ---: |
+| `Roles/*/Ext/Rights.xml` | 27 |
+| `*/Commands/<Name>/Ext/CommandModule.bsl` (were `missing`, §6) | 17 |
+| `Subsystems/**/Ext/CommandInterface.xml` (§6) | 10 |
+| `Documents/ПрограммаЗакупок/Forms/{ФормаВыбора,ФормаСписка}/Ext/Form.xml` (§6) | 2 |
+| `AccumulationRegisters/{ОперацииБюджетов,ПланированиеПотребностей}/Forms/ФормаСписка/Ext/Form.xml` (§2) | 2 |
 
 **Broken: 0** on every step, measured as `base.exact − new.exact`, never as a
 counter.
@@ -217,88 +226,91 @@ of all seven configurations `<condition/>` appears once and
 never empty in any of them, so nothing measures its empty form and it was
 left as it was.
 
+## 6. The short command entry, `{8, … {2, …}}`
+
+Every one of the ten role Rights files still differing after §1–§5 differed
+only by objects native prints and we did not — 0 extras, 0 value differences,
+0 ordering differences — and all of those objects were commands.
+
+`nested_command_headers_for_owner_from_text` accepted a nested header as a
+command only when `is_offset_inside_metadata_object_code(text, marker_start,
+9)` held. A command entry comes in two shapes:
+
+| shape | payload block | header wrapper | example |
+| --- | --- | --- | --- |
+| recognized | `{9, {4,0,…}, 3, {1,"ru",…}, 1, …, {3, {1,0,uuid}, "Name", …, 0}, 0,0,0}` | `{3,` | `DataProcessors/ПанельАдминистрированияУХ` |
+| missed | `{8, {4,0,…}, 3, {0}, 1, …, {2, {1,0,uuid}, "Name", …}, 0, 0}` | `{2,` | `DataProcessors/ЗакрытиеПериодаМСФО` |
+
+**The shape is not what identifies a command; the collection it sits in is.**
+Measured by dumping, for every nested header of every metadata row, the
+innermost enclosing `{uuid,…}` span, and cross-referencing each header against
+the native source tree's own inventory of declared children (139,868 of them,
+1,097 `<Command>`):
+
+* all **1,097/1,097** declared commands lie inside one of fourteen spans,
+  **none outside**;
+* those spans contain **nothing else** — 0 `Attribute`, `Resource`,
+  `Dimension`, `TabularSection` or any other declared child, across all
+  fourteen;
+* each family belongs to exactly one owner kind, and its member count equals
+  that kind's command count exactly.
+
+| family uuid | owner kind | commands |
+| --- | --- | ---: |
+| `45556acb-826a-4f73-898a-6025fc9536e1` | DataProcessor | 426 |
+| `4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6` | Catalog | 208 |
+| `b544fc6a-2ba3-4885-8fb2-cb289fb6d65e` | Document | 207 |
+| `b44ba719-945c-445c-8aab-1088fa4df16e` | InformationRegister | 115 |
+| `e7ff38c0-ec3c-47a0-ae90-20c73ca72246` | Report | 82 |
+| `a49a35ce-120a-4c80-8eea-b0618479cd70` | DocumentJournal | 19 |
+| `d5207c64-11d5-4d46-bba2-55b7b07ff4eb` | ExchangePlan | 12 |
+| `7a3e533c-f232-40d5-a932-6a311d2480bf` | BusinessProcess | 10 |
+| `f27c2152-a2c9-4c30-adb1-130f5eb2590f` | Task | 8 |
+| `0df30176-6865-4787-9fc8-609eb144174f` | ChartOfAccounts | 3 |
+| `23fa3b84-220a-40e9-8331-e588bed87f7d` | FilterCriterion | 2 |
+| `95b5e1d4-abfa-4a16-818d-a5b07b7d3f73` | ChartOfCharacteristicTypes | 2 |
+| `7162da60-f7fe-4d78-ad5d-e31700f9af18` | AccountingRegister | 2 |
+| `99f328af-a77f-4572-a2d8-80ed20c81890` | AccumulationRegister | 1 |
+
+Five of the fourteen (InformationRegister, ChartOfAccounts, FilterCriterion,
+AccountingRegister, AccumulationRegister) were not known to `mssql_dump` at
+all. Re-measured the same way on the rest of the stand: `mdm` 3/3, `sslbase`
+102/102, `ssl` 153/153 declared commands inside these families, none outside,
+nothing else inside; `ws` and `wms` declare no command.
+
+19 of the 1,097 carry the short shape — 8 DataProcessor, 5 Report, 5
+InformationRegister, 1 FilterCriterion. The code-9 arm is kept exactly as it
+was and the family gate added as a union, so the rule can only add a name,
+never move one.
+
+This turned out to reach well past roles. Besides the ten role files, it made
+exact 10 `Subsystems/**/Ext/CommandInterface.xml`, two
+`Documents/ПрограммаЗакупок/Forms/*/Ext/Form.xml`, and 17
+`*/Commands/<Name>/Ext/CommandModule.bsl` that were not being written at all
+(`missing` 1,502 → 1,485) — an unnamed command has no output directory to
+write its module into.
+
+Commit `3075b4e`.
+
 ## What is left
 
-**11 differing role Rights files, one cause, not closed here.** Every one of
-them differs only by objects native prints and we do not — 0 extras, 0 value
-differences, 0 ordering differences — and all of those objects are commands:
-
-```
-DataProcessor.ГенерацияМоделиОтчетностиКИК.Command.МодельОтчетностиКИК
-DataProcessor.ГенерацияМоделиОтчетностиКИК.Command.ФормыСбораДанныхИНалоговыеРегистрыКИК
-DataProcessor.ЗадачиИОповещенияТекущегоПользователя.Command.МоиЗадачи
-DataProcessor.ЗакрытиеПериодаМСФО.Command.ЗакрытиеПериодаМСФО
-DataProcessor.РасчетРасхожденийВГО.Command.РасчетРасхожденийВГО
-DataProcessor.ТрансформационнаяТаблица.Command.ТрансформационнаяТаблица
-FilterCriterion.ДокументыВНАПоОснованию.Command.ДокументыСобытияПоОснованию
-InformationRegister.ВерсииОбъектовДляЕИС.Command.РедактироватьВерсииДляЕИС
-Report.АнализПоставок.Command.АнализПоставок
-Report.ПланФактныйАнализЗакупок.Command.ПланФактныйАнализЗакупок
-```
-
-Root cause is an index gap of the same shape as §2, and the trail is already
-laid:
-
-* The right is in the blob. `Roles/ЧтениеДанныхМСФОУХ`'s blob carries
-  `{1, 303b322e-b0c5-4f51-b9bd-b6cd380652a8, 0, 0}` with `{0, aa6448f2-…(View), 1}`;
-  `303b322e-…` is `DataProcessor.ЗакрытиеПериодаМСФО.Command.ЗакрытиеПериодаМСФО`
-  per `DataProcessors/ЗакрытиеПериодаМСФО.xml`.
-* The uuid is missing from `object_refs`, so before §3 it printed as a bare
-  uuid and now it is dropped. Either way the object is absent; §3 did not
-  cause this and does not hide anything that was previously correct.
-* Once named, it renders: `role_rights_for_xml`'s nested branch treats
-  `…Command.<Name>` as an action-like category and always prints, which is
-  what native does (`View`/`true`).
-* **The gap is the command entry's own shape, not its owner kind.**
-  `nested_command_headers_for_owner_from_text` accepts a header only when
-  `is_offset_inside_metadata_object_code(text, marker_start, 9)` holds, i.e.
-  when the entry's payload block is `{9, …}`. Two shapes exist:
-
-  | shape | payload block | header wrapper | example |
-  | --- | --- | --- | --- |
-  | recognized | `{9, {4,0,…}, 3, {1,"ru",…}, 1, …, {3, {1,0,uuid}, "Name", {1,"ru",…}, "", 0, 0, 000…, 0}, 0,0,0}` | `{3,` | `DataProcessors/ПанельАдминистрированияУХ` (11 commands) |
-  | missed | `{8, {4,0,…}, 3, {0}, 1, …, {2, {1,0,uuid}, "Name", {1,"ru",…}, "", 0, 0, 000…}, 0, 0}` | `{2,` | `DataProcessors/ЗакрытиеПериодаМСФО` (1 command) |
-
-  Verified by replaying the containment check at the command header's offset:
-  `ПанельАдминистрированияУХ`'s first three commands are each inside a `{9,`
-  span (markers at 744/1094/1439, spans opening at 633/983/1328), while
-  `ЗакрытиеПериодаМСФО`'s single command header (marker at 6455) has **no
-  `{9,` anywhere in the element**.
-
-  Both shapes occur under the same collection families
-  (`45556acb-826a-4f73-898a-6025fc9536e1` for a data processor,
-  `e7ff38c0-ec3c-47a0-ae90-20c73ca72246` for a report — `Reports/АнализПоставок`
-  is the `{8,` shape and `Reports/ОСВМСФО` the `{9,` one), so the collection
-  uuid is not the discriminator either.
-
-  Do **not** simply add `8` alongside `9`: code 8 already means
-  `Resource` / `TabularSection.Attribute` in `standalone_child_reference`, and
-  one of the ten missing objects is on an `InformationRegister` owner, where
-  both readings are live. The measurement that would settle it is the one §2
-  used: gate the code-8 acceptance on the header being inside a *command
-  collection* span, identified by family uuid — `45556acb-…` (data
-  processor), `e7ff38c0-…` (report), `a49a35ce-120a-4c80-8eea-b0618479cd70`
-  (document journal), `4c7fec95-d1bd-4508-8a01-f1db090d9af8` (chart of
-  accounts), and whatever `FilterCriterion` and `InformationRegister` use,
-  which still has to be extracted. Then re-derive over the corpus that the
-  headers inside those spans are exactly the `<Command>` uuids the owners'
-  native XML declares, with no `Resource` or attribute among them.
-
-Also unresolved and untouched: **5 role Rights files never reach the
-exporter at all** — `БазовыеПраваБПУХ`,
+**No `Roles/*/Ext/Rights.xml` differs on the `uh` gate.** What remains in this
+area is a decoder gap upstream of everything in this document: **5 role Rights
+files never reach the exporter** — `БазовыеПраваБПУХ`,
 `ДобавлениеИзменениеБюджетированиеИОтчетность`,
 `ИспользованиеПлатежногоКалендаряУХ`, `ЧтениеБюджетированиеИОтчетность`,
 `ЧтениеВекселей`. Their storage entries are reported `opaque` with "no legacy
-family decoder recognized this storage entry", which is a decoder gap
-upstream of everything in this document.
+family decoder recognized this storage entry", so nothing about role rights
+is even attempted for them. Their packed sizes (21 KB … 2.2 MB) span two
+orders of magnitude, so it is unlikely to be one size-related cause.
 
 ## Gates
 
 | gate | result |
 | --- | --- |
-| `uh`, exact-set vs branch base | broken 0 (+19 exact) |
+| `uh`, exact-set vs branch base | broken 0 (+58 exact) |
 | `ws` / `wms` / `mdm` / `sslbase` / `ssl`, measured before → after every step | broken 0 each, new 0 |
-| `ut` | broken 1 vs the reference, see below |
+| `ut`, measured before → after §6 | broken 0, new 0 |
 | `bundled9` | 9/9 |
 | `cargo test --lib` | 2,237 passed / 33 failed, names identical to `$D/fail-base.txt` |
 | `cargo fmt --check`, `git diff --check` | clean |
@@ -319,13 +331,10 @@ base.
 `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/
 СравнительныйАнализМенеджеров/Ext/Template.xml`, an MXL spreadsheet of the
 same class as the single pre-existing MXL-template gaps on `ws`, `mdm` and
-`ssl` (those three were measured before and after every step in this pass and
-never moved). No `ut` baseline was exported from the branch base, so this one
-is reported by class rather than by before/after. It cannot be this pass's
-doing on the code either: the whole diff can change only (a) the bytes of
-`Roles/*/Ext/Rights.xml` and (b) names of the shape
-`AccumulationRegister.<X>.Attribute.<Y>` wherever `object_refs` is read — and
-that template contains zero `AccumulationRegister` references of any kind.
+`ssl`. It is the *same file* before and after §6 — `ut` was exported twice on
+this branch, and `reference.exact − ours.exact` is that one file in both runs
+— so it is pre-existing here, not this pass's doing. (`ws`, `mdm` and `ssl`
+were likewise measured before and after every step and never moved.)
 
 The temporary `IBCMD_ROLE_SLOT_PROBE` used to recover the slot codes (it
 renamed unresolved nested references to `<owner>.PROBE.k<kind>s<slot>` so the
