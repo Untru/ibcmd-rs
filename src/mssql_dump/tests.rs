@@ -72076,3 +72076,422 @@ fn renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven
         ),
     );
 }
+
+/// Short item-record revisions resolve to the class the platform declares.
+///
+/// Both constants below are the bytes ERP УХ 3.2.12.6 actually wrote. The
+/// record's leading member is its declared length, not a type code, so one
+/// class ships under more than one of them; over all seven gate corpora the
+/// short revision is a byte-for-byte tail truncation of the canonical one
+/// (`docs/evidence/uh-form-item-tree-revision-map-20260825.md`).
+///
+/// `TABLE_54` is `Catalogs/ФиксированныеГруппыАналитик/Forms/Форма`'s own
+/// `КомпоновщикСКДНастройки`, 99 members under leading member `54`; native
+/// ibcmd writes `<Table name="КомпоновщикСКДНастройки" id="1">`. Before the
+/// revision normalization `form_child_item_tag` had no arm for `54` at all,
+/// so the record -- and with it every child item, context menu, command bar
+/// and addition underneath -- was dropped whole.
+///
+/// `FIELD_34` is `DataProcessors/ПереносФайловВТомаУХ/Forms/ФормаОтчета`'s
+/// `Отчет`, 56 members under leading member `34`; native ibcmd writes
+/// `<SpreadSheetDocumentField name="Отчет" id="2">`. This one is the sharper
+/// control of the two: `SpreadSheetDocumentField` is reachable only through
+/// the field arm's `wrapper == "37"` guard, and `34` used to fall into the
+/// `Button` arm instead, so the item came out named as a `Button` -- a wrong
+/// element, not a missing one.
+///
+/// `PACKER_BUTTON_34` is the negative control. This repository's own
+/// base-free packer (`module_blob::format_form_layout_new_button_item`)
+/// writes a synthetic ten-member short `Button` record under the same
+/// leading member `34`, and `compiler::bodies::form`'s roundtrip tests read
+/// it back. Normalization is gated on the declared arity precisely so the
+/// two stay apart: 56 or 57 members is the platform's field record, anything
+/// else is not.
+#[test]
+fn short_item_record_revisions_resolve_to_the_class_the_platform_declares() {
+    const TABLE_54: &str = r#"{54,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,2,1,
+{0,
+{0,
+{"B",1},0}
+},"КомпоновщикСКДНастройки",0,0,1,
+{1,0},
+{1,0},
+{2,
+{1},
+{0}
+},1,1,0,0,0,1,1,0,0,0,0,0,1,0,1,1,0,1,2,2,0,1,0,0,1,0,2,2,0,1,1,
+{0},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,1,0,
+{0,1,0},
+{0},1,
+{22,
+{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КомпоновщикСКДНастройкиКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{22,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"КомпоновщикСКДНастройкиКоманднаяПанель",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{0,0,1},0,1,0,0,0,3,3,0},0,2,2,1,0,
+{"Pattern"},"","",2,2,0,1,
+{11,
+{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КомпоновщикСКДНастройкиРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},0,0,0,1,
+{5,
+{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КомпоновщикСКДНастройкиСтрокаПоиска",
+{1,0},
+{1,0},1,1,0,1,
+{1,0,2,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,1,0},1,0,0},1,
+{22,
+{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КомпоновщикСКДНастройкиСтрокаПоискаКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{11,
+{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КомпоновщикСКДНастройкиСтрокаПоискаРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},2,
+{1,0},0,3,3,0},1,
+{5,
+{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"КомпоновщикСКДНастройкиСостояниеПросмотра",
+{1,0},
+{1,0},1,1,0,1,
+{1,0,2,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{7,3,0,1,100},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},3,
+{0,1,0},1,0,0},1,
+{22,
+{13,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КомпоновщикСКДНастройкиСостояниеПросмотраКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{11,
+{14,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КомпоновщикСКДНастройкиСостояниеПросмотраРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},2,
+{1,1},0,3,3,0},1,
+{5,
+{15,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"КомпоновщикСКДНастройкиУправлениеПоиском",
+{1,0},
+{1,0},1,1,0,1,
+{1,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,1,0},1,0,0,2},1,
+{22,
+{18,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КомпоновщикСКДНастройкиУправлениеПоискомКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{11,
+{19,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КомпоновщикСКДНастройкиУправлениеПоискомРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},2,
+{1,2},0,3,3,0},0,1,0,0,1,0,3,3,0,1,0,0,0,0,0}"#;
+    const FIELD_34: &str = r#"{34,
+{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,6,"Отчет",0,0,
+{1,0},
+{1,0},
+{1,
+{1}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,0,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{12,50,10,1,1,1,1,1,1,0,0,0,0,0,1,
+{3,4,
+{0}
+},1,1,
+{0,1,0},0,1,0,0,1,0,0,0,0,1,1,0},
+{0,1,0},1,
+{22,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОтчетКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{11,
+{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОтчетExtendedTooltip",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},3,3,0}"#;
+    const PACKER_BUTTON_34: &str =
+        r#"{34,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Run",{1,0},1,{0},{0}}"#;
+
+    let read = |field: &str| {
+        parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .map(|item| (item.tag, item.name, item.id))
+    };
+
+    assert_eq!(
+        read(TABLE_54),
+        Some((
+            "Table",
+            "КомпоновщикСКДНастройки".to_string(),
+            "1".to_string()
+        ))
+    );
+    assert_eq!(
+        read(FIELD_34),
+        Some((
+            "SpreadSheetDocumentField",
+            "Отчет".to_string(),
+            "2".to_string()
+        ))
+    );
+    assert_eq!(
+        read(PACKER_BUTTON_34),
+        Some(("Button", "Run".to_string(), "44".to_string()))
+    );
+}
+
+/// The `ExtendedTooltip` sub-shape of the decoration class under its short
+/// revision `11`.
+///
+/// Real ERP УХ 3.2.12.6 bytes: `Catalogs/БланкиОтчетов/Forms/ФормаФормулы`'s
+/// `Реквизит1РасширеннаяПодсказка`, 33 members under leading member `11`,
+/// which native ibcmd writes as
+/// `<ExtendedTooltip name="Реквизит1РасширеннаяПодсказка" id="3"/>`. The
+/// tooltip sub-shape has its own base arity -- 34 members under `12`, 35 with
+/// the conditional `UserVisible`-common prefix -- distinct from the
+/// `LabelDecoration`/`PictureDecoration` sub-shape's 36/37, and all 1 813
+/// tooltips ERP УХ writes under `11` are a `12` tooltip minus its final
+/// member, trailing scalar run 11 -> 10.
+///
+/// Without the revision normalization the reader's `!= Some("12")` gate
+/// refuses the record and the item is written with no `<ExtendedTooltip>` at
+/// all. That single missing element was the whole remaining diff on 171 ERP
+/// УХ forms once the `Table`/field revisions were readable.
+#[test]
+fn short_extended_tooltip_revision_is_read_as_its_canonical_shape() {
+    const TOOLTIP_11: &str = r#"{11,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"Реквизит1РасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0}"#;
+
+    let tooltip = parse_form_child_item_extended_tooltip(&[TOOLTIP_11], &BTreeMap::new())
+        .expect("a short-revision extended tooltip must be readable");
+    assert_eq!(tooltip.name, "Реквизит1РасширеннаяПодсказка");
+    assert_eq!(tooltip.id, "3");
+}
