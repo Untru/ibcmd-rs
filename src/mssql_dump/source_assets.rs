@@ -1619,10 +1619,6 @@ pub(super) fn write_source_asset(
                         fs::create_dir_all(parent)
                             .with_context(|| format!("failed to create {}", parent.display()))?;
                     }
-                    // TEMPORARY PROBE -- form item-tree construction census.
-                    if let Ok(dir) = std::env::var("IBCMD_FORM_LAYOUT_DUMP") {
-                        probe_form_layout_shape(&asset.primary_path, &body.layout, &xml, &dir);
-                    }
                     write_source_xml_file(&path, xml, context.source_version)?;
 
                     let form_items_started = Instant::now();
@@ -4377,56 +4373,5 @@ pub(super) fn push_job_schedule_list_xml(
             "{indent}<ent:{name}>{}</ent:{name}>\r\n",
             values.join(" ")
         ));
-    }
-}
-
-// TEMPORARY PROBE -- removed before shipping.
-fn probe_form_layout_shape(primary_path: &std::path::Path, layout: &str, xml: &str, dir: &str) {
-    use std::io::Write;
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let Some(fields) = split_1c_braced_fields(layout.trim(), 0) else {
-        return;
-    };
-    let members = fields
-        .iter()
-        .map(|field| {
-            let field = field.trim();
-            match split_1c_braced_fields(field, 0) {
-                Some(sub) => format!(
-                    "{}:{}",
-                    sub.first().map(|value| value.trim()).unwrap_or("?"),
-                    sub.len()
-                ),
-                None => format!("#{}", field.chars().take(10).collect::<String>()),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let line = format!(
-        "{}\t{}\t{}\t{}\t{}\n",
-        primary_path.display(),
-        xml.contains("<ChildItems>"),
-        fields.first().map(|field| field.trim()).unwrap_or("?"),
-        fields.len(),
-        members
-    );
-    let _guard = LOCK.lock();
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(format!("{dir}/census.tsv"))
-    {
-        let _ = file.write_all(line.as_bytes());
-    }
-    if let Ok(want) = std::env::var("IBCMD_FORM_LAYOUT_PATHS") {
-        let key = primary_path.display().to_string();
-        if want == "*"
-            || want
-                .split(';')
-                .any(|needle| !needle.is_empty() && key.contains(needle))
-        {
-            let name = key.replace('/', "_");
-            let _ = std::fs::write(format!("{dir}/{name}.layout"), layout.as_bytes());
-        }
     }
 }
