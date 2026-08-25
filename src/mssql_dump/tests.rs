@@ -32216,6 +32216,104 @@ fn formats_moxel_cell_value_precedes_detail_parameter_and_control() {
 }
 
 #[test]
+fn formats_moxel_cell_referenced_value_follows_detail_parameter() {
+    // Evidence (native ERP УХ 3.2.12.6): unlike a literal/typed `<v>`, a
+    // *referenced* value (`MoxelCellValue::Reference`, published as bare `<r>`
+    // regardless of which member carries it) always follows detailParameter
+    // when both are present (3 co-occurrences, zero counter-examples) --
+    // real corpus shape, e.g.
+    // `Documents/ЗапросКоммерческихПредложенийПоставщиков/Templates/
+    // ПФ_MXL_СравнениеУсловийПредложений/Ext/Template.xml`:
+    // `<parameter>СрокПоставки</parameter><detailParameter>Расшифровка
+    // </detailParameter><r>15</r>`. An earlier version of this fix moved
+    // every `value` variant ahead of detailParameter alike and broke this
+    // exact file (and one other, DataProcessors/
+    // СверткаИнформационнойБазы/.../МакетОграниченияСвертки) by publishing
+    // `<r>`/`<d xsi:nil="true"/>` before detailParameter instead of after.
+    let mut xml = String::new();
+    push_moxel_row_xml(
+        &mut xml,
+        &MoxelRow {
+            index: 1,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 0,
+                source_format_index: None,
+                text: Vec::new(),
+                parameter: Some("СрокПоставки".to_string()),
+                detail_parameter: Some("Расшифровка".to_string()),
+                note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: Some(MoxelCellValue::Reference(15)),
+                detail_value: None,
+                empty_text: false,
+            }],
+        },
+        &BTreeMap::new(),
+        false,
+    );
+
+    assert!(xml.contains(concat!(
+        "\t\t\t\t\t<f>0</f>\r\n",
+        "\t\t\t\t\t<parameter>СрокПоставки</parameter>\r\n",
+        "\t\t\t\t\t<detailParameter>Расшифровка</detailParameter>\r\n",
+        "\t\t\t\t\t<r>15</r>\r\n",
+    )));
+}
+
+#[test]
+fn formats_moxel_cell_detail_value_follows_detail_parameter() {
+    // Evidence (native ERP УХ 3.2.12.6): `detail_value` in every observed
+    // form (typed and nil) always follows detailParameter when both are
+    // present (38 nil co-occurrences, zero counter-examples) -- real corpus
+    // shape, e.g. `DataProcessors/СверткаИнформационнойБазы/Templates/
+    // МакетОграниченияСвертки/Ext/Template.xml`: `<parameter>Организация
+    // </parameter><detailParameter>Организация</detailParameter>
+    // <d xsi:nil="true"/>`.
+    let mut xml = String::new();
+    push_moxel_row_xml(
+        &mut xml,
+        &MoxelRow {
+            index: 1,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 0,
+                source_format_index: None,
+                text: Vec::new(),
+                parameter: Some("Организация".to_string()),
+                detail_parameter: Some("Организация".to_string()),
+                note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: Some(MoxelCellValue::Nil),
+                empty_text: false,
+            }],
+        },
+        &BTreeMap::new(),
+        false,
+    );
+
+    assert!(xml.contains(concat!(
+        "\t\t\t\t\t<f>0</f>\r\n",
+        "\t\t\t\t\t<parameter>Организация</parameter>\r\n",
+        "\t\t\t\t\t<detailParameter>Организация</detailParameter>\r\n",
+        "\t\t\t\t\t<d xsi:nil=\"true\"/>\r\n",
+    )));
+}
+
+#[test]
 fn formats_moxel_decodes_bottom_vertical_alignment() {
     let format = parse_moxel_format("{512,48}", &[], &[]).unwrap();
 

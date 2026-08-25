@@ -11275,33 +11275,56 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(parameter)
             ));
         }
-        // Member publication order below (value, detail_value, detailParameter,
-        // pictureParameter, note, control) is evidence-derived, not the storage
+        // Member publication order below is evidence-derived, not the storage
         // record's own slot order (control, value, detail_value, detailParameter,
         // pictureParameter, text, note) and not a simple reversal of it either.
         // Full corpus scan (native ERP УХ 3.2.12.6, every `<c><c>...</c></c>` cell
-        // body carrying two or more of these members -- 40,612 multi-member cells
-        // across the whole `uh` corpus) found zero contradictions for this order:
-        // value always precedes detailParameter (1,700 co-occurrences), which
-        // always precedes control (9 co-occurrences, the only triple combo in the
-        // corpus); value always precedes control directly too (15,149
-        // co-occurrences); text/parameter always precede value (128), detailParameter
-        // (12,624 for text, 9,563 for parameter), pictureParameter (a handful) and
-        // note (1,429+); value/detail_value always precede note (32/24) and each
-        // other (value before detail_value, 5 co-occurrences). `control` was
+        // body carrying two or more of these members -- 40,632 multi-member cells
+        // across the whole `uh` corpus, every member form -- `xsi:type`, `xsi:nil`
+        // and the bare `<r>` a stored reference collapses to -- counted separately)
+        // found zero contradictions for this split:
+        //
+        // `value` is early ONLY when it is not a reference: a literal/typed or nil
+        // `<v>` always precedes detailParameter (1,700 co-occurrences) and control
+        // (15,149), and always follows text/parameter (128) when both are present.
+        // A *referenced* value (`<r>`, `MoxelCellValue::Reference`) behaves like
+        // `detail_value` instead: whenever it coexists with detailParameter or
+        // parameter, `<r>` is always the later element (3 and 9 co-occurrences,
+        // zero counter-examples) -- two previously-exact files broke when an
+        // earlier version of this fix treated every `value` variant alike and
+        // moved reference values ahead of detailParameter too.
+        //
+        // `detail_value` (any variant -- typed 113/24 co-occurrences with
+        // text/note, nil 42/38 with parameter/detailParameter) is always late:
+        // it always follows text/parameter/detailParameter, matching the
+        // referenced-value case above, and (from the 5 co-occurrences where a
+        // literal `value` and a `detail_value` both appear) always follows a
+        // literal `value` too.
+        //
+        // detailParameter always precedes control (9, the only triple combo in
+        // the corpus) and note (129); pictureParameter and note both follow
+        // detailParameter on the rare cases they coexist with it. `control` was
         // previously emitted first, ahead of every other member -- the reverse of
         // where the platform actually places it.
+        let value_is_reference = matches!(cell.value, Some(MoxelCellValue::Reference(_)));
         if let Some(value) = &cell.value {
-            push_moxel_cell_value_xml(xml, "v", value);
-        }
-        if let Some(detail_value) = &cell.detail_value {
-            push_moxel_cell_value_xml(xml, "d", detail_value);
+            if !value_is_reference {
+                push_moxel_cell_value_xml(xml, "v", value);
+            }
         }
         if let Some(detail_parameter) = &cell.detail_parameter {
             xml.push_str(&format!(
                 "\t\t\t\t\t<detailParameter>{}</detailParameter>\r\n",
                 escape_xml_element_text(detail_parameter)
             ));
+        }
+        if let Some(value) = &cell.value {
+            if value_is_reference {
+                push_moxel_cell_value_xml(xml, "v", value);
+            }
+        }
+        if let Some(detail_value) = &cell.detail_value {
+            push_moxel_cell_value_xml(xml, "d", detail_value);
         }
         if let Some(picture_parameter) = &cell.picture_parameter {
             xml.push_str(&format!(
