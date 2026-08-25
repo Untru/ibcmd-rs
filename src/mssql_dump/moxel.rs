@@ -11593,14 +11593,86 @@ fn push_moxel_gantt_chart_xml(xml: &mut String, gantt: &MoxelGanttChart) {
 /// No series in the corpus carries the flag set, so that branch is left
 /// publishing the stored name - what this writer already did - rather than
 /// being given a rule nothing evidences.
+///
+/// **The republication itself is host-dependent, and the derivation above was
+/// made against a Windows capture.** The stored name is the automatic name,
+/// cached in the configuration's own language, for exactly as long as
+/// `strIsChanged` stays clear; Windows re-derives it in English and publishes
+/// `Pivot` over the cache, macOS publishes the cache. See
+/// `MoxelChartSeriesAutomaticName`.
 const MOXEL_CHART_AUTOMATIC_SERIES_NAME: &str = "Pivot";
+
+/// Whether this host's platform republishes a chart series' automatic name
+/// over the cache the document stores.
+///
+/// The two conditions documented on `MOXEL_CHART_AUTOMATIC_SERIES_NAME` decide
+/// whether the *document* is in the republishing case at all; this decides
+/// what the platform then writes, and it depends on the host exactly as
+/// `<Shortcut>`'s modifier spelling does (see
+/// `docs/evidence/shortcut-host-spelling-20260825.md`).
+///
+/// Every reference tree on the stand is a macOS capture, and not one of them
+/// contains `Pivot` anywhere -- uh, ut, БСП демо, БСП базовая, WMS,
+/// MDM_Management and Web_Service alike -- while 28 of their `Template.xml`
+/// publish the stored `Сводная`. Neither does any native evidence fixture in
+/// this repository: every seed round-tripped through the platform here
+/// published the cache.
+///
+/// The decisive pair is УТ 11.5.27.75's
+/// `DataProcessors/ПроверкаКонтрагента/Templates/ФинансовыйАнализ` and
+/// `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ`. Both *are* in the
+/// republishing case -- `has_extended_scales` clear, real series present --
+/// and the macOS capture publishes `Сводная` for both, where the Windows
+/// round-2 capture the rule was derived from published `Pivot`.
+///
+/// That case is the one the three `moxel-chart-series-count-zero` seeds never
+/// reached: they hold `has_extended_scales` set, or clear it while leaving
+/// `realSeriesCount` at 0, so all three sit outside the republishing case and
+/// could only ever show the cache. They remain valid for what they do prove --
+/// that each condition is necessary -- and are untouched by this.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum MoxelChartSeriesAutomaticName {
+    /// Windows: the automatic name is re-derived in English and published
+    /// over the cache.
+    RepublishedInEnglish,
+    /// macOS: the cached name the document stores is published unchanged.
+    Stored,
+}
+
+impl MoxelChartSeriesAutomaticName {
+    /// What `ibcmd` itself publishes on the host this export is running on.
+    pub(super) const fn host() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Stored
+        } else {
+            Self::RepublishedInEnglish
+        }
+    }
+}
 
 fn push_moxel_chart_series_text_xml(
     xml: &mut String,
     series: &MoxelChartSeries,
     automatic_names_apply: bool,
 ) {
-    if series.str_is_changed || !automatic_names_apply {
+    push_moxel_chart_series_text_xml_with_host(
+        xml,
+        series,
+        automatic_names_apply,
+        MoxelChartSeriesAutomaticName::host(),
+    );
+}
+
+fn push_moxel_chart_series_text_xml_with_host(
+    xml: &mut String,
+    series: &MoxelChartSeries,
+    automatic_names_apply: bool,
+    automatic_name: MoxelChartSeriesAutomaticName,
+) {
+    if series.str_is_changed
+        || !automatic_names_apply
+        || automatic_name == MoxelChartSeriesAutomaticName::Stored
+    {
         push_moxel_chart_localized_xml(xml, "text", &series.text, 4);
         return;
     }
@@ -12399,6 +12471,60 @@ mod moxel_exact_parity_tests {
 
     fn reconciliation_report_headers() -> MoxelSpreadsheet {
         parse_moxel_spreadsheet_text(RECONCILIATION_REPORT_HEADERS_RAW, &BTreeMap::new()).unwrap()
+    }
+
+    #[test]
+    fn the_automatic_series_name_is_republished_only_where_the_host_does_it() {
+        // Both conditions on the document hold (`automatic_names_apply`) and
+        // the series never had its name changed, so this is exactly the case
+        // the two УТ `ФинансовыйАнализ` templates are in. Windows republishes
+        // the automatic name in English over the cache; macOS publishes the
+        // cache the document stores.
+        let series = MoxelChartSeries {
+            id: 0,
+            color: String::new(),
+            line: MoxelChartLine { width: 0 },
+            marker: "None",
+            text: vec![MoxelLocalizedValue {
+                lang: "ru".to_string(),
+                content: "Сводная".to_string(),
+            }],
+            str_is_changed: false,
+            is_expand: false,
+            is_indicator: false,
+            color_priority: false,
+        };
+
+        let mut stored = String::new();
+        push_moxel_chart_series_text_xml_with_host(
+            &mut stored,
+            &series,
+            true,
+            MoxelChartSeriesAutomaticName::Stored,
+        );
+        assert!(stored.contains("Сводная"), "{stored}");
+        assert!(!stored.contains("Pivot"), "{stored}");
+
+        let mut republished = String::new();
+        push_moxel_chart_series_text_xml_with_host(
+            &mut republished,
+            &series,
+            true,
+            MoxelChartSeriesAutomaticName::RepublishedInEnglish,
+        );
+        assert!(republished.contains("Pivot"), "{republished}");
+        assert!(!republished.contains("Сводная"), "{republished}");
+
+        // Outside the republishing case the cache is published on either host.
+        for host in [
+            MoxelChartSeriesAutomaticName::Stored,
+            MoxelChartSeriesAutomaticName::RepublishedInEnglish,
+        ] {
+            let mut suppressed = String::new();
+            push_moxel_chart_series_text_xml_with_host(&mut suppressed, &series, false, host);
+            assert!(suppressed.contains("Сводная"), "{suppressed}");
+            assert!(!suppressed.contains("Pivot"), "{suppressed}");
+        }
     }
 
     #[test]
