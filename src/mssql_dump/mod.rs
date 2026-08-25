@@ -25442,7 +25442,7 @@ fn parse_task_properties_from_text(
             _ => return None,
         },
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
-        number_allowed_length: parse_task_number_allowed_length_slot(fields.get(20)?)?.xml_value(),
+        number_allowed_length: parse_task_number_allowed_length_slot(fields.get(43)?)?.xml_value(),
         check_unique: information_register_bool(fields.get(21)?)?,
         autonumbering: information_register_bool(fields.get(23)?)?,
         task_number_auto_prefix: parse_task_number_auto_prefix_slot(fields.get(31)?)?.xml_value(),
@@ -25484,7 +25484,7 @@ fn parse_task_properties_from_text(
             .xml_value(),
         include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(24)?)?,
         data_lock_fields,
-        data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(32)?)?
+        data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(33)?)?
             .xml_value(),
         full_text_search: parse_task_full_text_search_slot(fields.get(33)?)?.xml_value(),
         object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,

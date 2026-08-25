@@ -3057,19 +3057,40 @@ pub fn parse_task_number_auto_prefix_slot(value: &str) -> Option<TaskNumberAutoP
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskNumberAllowedLength {
+    Fixed,
     Variable,
 }
 
 impl TaskNumberAllowedLength {
     pub const fn xml_value(self) -> &'static str {
         match self {
+            Self::Fixed => "Fixed",
             Self::Variable => "Variable",
         }
     }
 }
 
+/// Decode the physical Task owner slot (native tuple field 43, not field 20)
+/// into `NumberAllowedLength`.
+///
+/// Field 20 froze `"1" => Variable` from the single platform-proven
+/// `task-basic` diagnostic fixture (`CorpusTask`, a Unica-generated seed);
+/// applied to native UT 11.5.27.75's `Tasks/ЗадачаИсполнителя.xml` it
+/// disagreed with the platform (field 20 is `"1"` there too, but native
+/// writes `Fixed`, not `Variable`). Field 43 is the real carrier: five
+/// independent platform captures give an exact partition --
+/// `Tasks/ЗадачаИсполнителя.xml` (`Fixed`) and a seed task built by flipping
+/// only `DataLockControlMode` (`Fixed`) both store `"0"`; `CorpusTask`
+/// (`Variable`), a seed task built by flipping only `NumberAllowedLength`
+/// (`Variable`) and a seed reproducing `CorpusTask`'s pairing all store
+/// `"1"`. Field 43 is the same slot `parse_task_choice_history_on_input_slot`
+/// reads for `ChoiceHistoryOnInput`; that function's `"0"|"1" => Auto` never
+/// distinguishes its input, so the collision is silent there, not a
+/// contradiction -- but its own field attribution should be treated as
+/// unconfirmed now that this slot has a proven, unrelated meaning.
 pub fn parse_task_number_allowed_length_slot(value: &str) -> Option<TaskNumberAllowedLength> {
     match value.trim() {
+        "0" => Some(TaskNumberAllowedLength::Fixed),
         "1" => Some(TaskNumberAllowedLength::Variable),
         _ => None,
     }
@@ -3118,20 +3139,38 @@ pub fn parse_task_include_help_in_contents_slot(value: &str) -> Option<bool> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskDataLockControlMode {
+    Managed,
     Automatic,
 }
 
 impl TaskDataLockControlMode {
     pub const fn xml_value(self) -> &'static str {
         match self {
+            Self::Managed => "Managed",
             Self::Automatic => "Automatic",
         }
     }
 }
 
+/// Decode the physical Task owner slot (native tuple field 33, not field 32)
+/// into `DataLockControlMode`.
+///
+/// Same evidence shape as `parse_task_number_allowed_length_slot`: field 32
+/// (`"1" => Automatic`, from the single `task-basic` diagnostic fixture)
+/// disagrees with native UT 11.5.27.75, which stores `"1"` at field 32 but
+/// writes `Managed`. Field 33 is the real carrier, proven by the same
+/// five-way partition: `Tasks/ЗадачаИсполнителя.xml` (`Managed`) and a seed
+/// task built by flipping only `NumberAllowedLength` (`Managed`) both store
+/// `"1"`; `CorpusTask` (`Automatic`), a seed task built by flipping only
+/// `DataLockControlMode` (`Automatic`) and a seed reproducing `CorpusTask`'s
+/// pairing all store `"0"`. Field 33 is the same slot
+/// `parse_task_full_text_search_slot` reads for `FullTextSearch`; that
+/// function's `"0"|"1" => Use` never distinguishes its input either, so
+/// again no contradiction, but its own field attribution is unconfirmed now.
 pub fn parse_task_data_lock_control_mode_slot(value: &str) -> Option<TaskDataLockControlMode> {
     match value.trim() {
-        "1" => Some(TaskDataLockControlMode::Automatic),
+        "0" => Some(TaskDataLockControlMode::Automatic),
+        "1" => Some(TaskDataLockControlMode::Managed),
         _ => None,
     }
 }
