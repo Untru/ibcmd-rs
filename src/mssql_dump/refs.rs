@@ -877,6 +877,18 @@ pub(super) fn standalone_child_reference(
             child.name
         ));
     }
+    if owner_kind == "AccumulationRegister"
+        && is_offset_inside_accumulation_register_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        // Same shape as the AccountingRegister arm above, and all 74
+        // measured attribute headers satisfy the code-2 containment too
+        // (see `is_offset_inside_accumulation_register_attribute_list`).
+        return Some(format!(
+            "AccumulationRegister.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
     if owner_kind == "ChartOfAccounts"
         && is_offset_inside_chart_of_accounts_accounting_flag_list(text, marker_start)
         && is_offset_inside_metadata_object_code(text, marker_start, 6)
@@ -1098,6 +1110,23 @@ pub(super) fn is_offset_inside_accounting_register_attribute_list(
     offset: usize,
 ) -> bool {
     is_offset_inside_any_list_marker(text, offset, &["{9d28ee33-9c7e-4a1b-8f13-50aa9b36607b,"])
+}
+
+/// True inside an accumulation register's attribute list.
+///
+/// The register's three child families are adjacent UUIDs: `…a41` resources,
+/// `…a42` attributes, `…a43` dimensions (the latter two already named by
+/// `is_offset_inside_register_resource_list` /
+/// `is_offset_inside_register_dimension_list`). Measured on ERP УХ 3.2.12.6
+/// (2026-08-25) over nine extracted `AccumulationRegisters/*` storage
+/// elements: the headers inside `…a42` spans are exactly the 74 `Attribute`
+/// uuids their native XML declares -- none missing, and no `Dimension` or
+/// `Resource` header inside any such span.
+pub(super) fn is_offset_inside_accumulation_register_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{b64d9a42-1642-11d6-a3c7-0050bae0a776,"])
 }
 
 fn is_offset_inside_chart_of_accounts_accounting_flag_list(text: &str, offset: usize) -> bool {
