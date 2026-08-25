@@ -72583,3 +72583,167 @@ fn short_button_revision_is_read_with_its_extended_layout() {
     assert_eq!(item.item_type, Some("UsualButton"));
     assert_eq!(item.default_button, Some(true));
 }
+
+/// The `LabelDecoration`/`PictureDecoration` sub-shape of the decoration class
+/// under its short revision `11`.
+///
+/// This sub-shape has a different base arity from the `ExtendedTooltip` one
+/// the previous test covers -- 36 members under `12`, 37 with the conditional
+/// `UserVisible`-common prefix, against the tooltip's 34/35 -- so the short
+/// revision shows up at 35 and 36 members rather than 33 and 34. Anchored on
+/// the class uuid the platform writes before each record, ERP УХ's 102
+/// decorations under `11` are exactly two shapes, 61 at 35 members and 41 at
+/// 36, and each is its `12` counterpart minus its final member with no
+/// exception; the trailing scalar run falls 9 -> 8.
+///
+/// `LABEL_35` is `Catalogs/Контрагенты/Forms/ФормаПараметрыКлассификаторовУХ`'s
+/// `ОтступОКОПФ`, which native ibcmd writes as
+/// `<LabelDecoration name="ОтступОКОПФ" id="16">`; `PICTURE_36` is
+/// `Catalogs/УдалитьПанелиОтчетов/Forms/ФормаДлительнойОперации`'s
+/// `Декорация1`, written `<PictureDecoration name="Декорация1" id="1">` and
+/// carrying the prefix, so it is the 36-member shape. Both kinds occur under
+/// the short revision (94 label, 8 picture), which is why both are asserted.
+#[test]
+fn short_decoration_revision_resolves_both_of_its_kinds() {
+    const LABEL_35: &str = r#"{11,
+{16,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОтступОКОПФ",
+{1,0},
+{1,0},1,1,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},1,
+{22,
+{17,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОтступОКОПФКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,2,
+{1,
+{1,0},0},0,1,
+{11,
+{47,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОтступОКОПФExtendedTooltip",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},1,0,0,1,0,3,3,0}"#;
+    const PICTURE_36: &str = r#"{11,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,
+{0,
+{0,
+{"B",1},0}
+},1,"Декорация1",
+{1,0},
+{1,0},1,6,3,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{4,
+{4,1,
+{0,7fd570f8-f7f6-4b4c-8831-71b304be8c0f},"",-1,-1,1,0,""},0,0,0,
+{1,0},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,
+{0,1,0},0,100},1,
+{22,
+{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"Декорация1КонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,2,
+{1,
+{1,0},0},0,1,
+{11,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"Декорация1РасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},1,0,0,1,0,3,3,0}"#;
+
+    let read = |field: &str| {
+        parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .map(|item| (item.tag, item.name, item.id))
+    };
+
+    assert_eq!(
+        read(LABEL_35),
+        Some((
+            "LabelDecoration",
+            "ОтступОКОПФ".to_string(),
+            "16".to_string()
+        ))
+    );
+    assert_eq!(
+        read(PICTURE_36),
+        Some((
+            "PictureDecoration",
+            "Декорация1".to_string(),
+            "1".to_string()
+        ))
+    );
+}
