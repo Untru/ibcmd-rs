@@ -775,13 +775,20 @@ pub(super) struct MoxelChart {
     chart_type: &'static str,
     labels_location: &'static str,
     title: Vec<MoxelLocalizedValue>,
+    is_show_legend: bool,
+    has_extended_scales: bool,
+    is_title_init: bool,
+    scale_color: String,
     values_scale_format: Vec<MoxelLocalizedValue>,
     is_auto_series_name: bool,
+    is_auto_point_name: bool,
     max_series: usize,
     base_val: usize,
     is_outline: bool,
     rebuild_time: usize,
     gauge_bands: Vec<MoxelChartGaugeBand>,
+    gauge_thickness: usize,
+    gauge_bush_thickness: usize,
     auto_max_value: bool,
     user_max_value: String,
     auto_min_value: bool,
@@ -4627,15 +4634,27 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // chart whose series/points are populated at runtime) while still
     // carrying the one mandatory `realExSeriesData` this reader always parses
     // below, and a negative `<d3p1:curSeries>-1</d3p1:curSeries>` (see
-    // `cur_series` below). Admitting the count here is necessary but not yet
-    // sufficient to publish that template's `<drawing>` block: its `post`
-    // section (`validate_moxel_chart_v74_post` and everything past it) is
-    // three tokens shorter than `100 + point_count * 2` predicts, in the
-    // scale/axis-display region past index 40 -- not a simple function of
-    // `series_count` or `point_count` alone, so the record still refuses at
-    // the `tail.len() != expected_tail_len` check below rather than guess at
-    // the missing three slots. Whatever proves that gap can build on the
-    // count and `cur_series` groundwork here.
+    // `cur_series` below).
+    //
+    // `post`'s middle third (`validate_moxel_chart_v74_post`) is not a fixed
+    // offset table: past the fixed uuid literal at `post[22]` it opens a
+    // length-prefixed pair of scale-item id lists (`post[23]` is their shared
+    // count `N`), the values/points axes sit right after that pair, and the
+    // per-scale-item legend list much further down (`entries`, just before
+    // the `elements*` rectangles) carries one more record per real series.
+    // Evidence: `$D/kit/seed.sh` on a hand-built `CommonTemplate` carrying
+    // exactly this empty chart reproduces it byte for byte (round-trips
+    // through the platform unchanged), and three single-member variations of
+    // that same seed -- one real series added, one real point added, and
+    // both together -- each grow the raw tuple by exactly the tokens this
+    // reader now accounts for: adding one series inserts one `{0,K,0}`/`{0,0}`
+    // pair right after `post[24]` (so `N` reads `2`) and one legend record
+    // near the rectangles; adding one point (series still empty) inserts one
+    // smaller single-colour legend record in the same spot. `N = 1 +
+    // series_count` and the legend list carries `point_count + series_count
+    // + 1` records (points first, then real series, then the mandatory extra
+    // series) is what both seed pairs and the pre-existing 13-record corpus
+    // (all `series_count == 1`) agree on.
     let series_count = parse_moxel_chart_usize(data.get(4)?)?;
     if series_count > MAX_MOXEL_CHART_SERIES {
         return None;
@@ -4670,16 +4689,29 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let real_data_count = series_count.checked_mul(point_count)?;
     let real_data_slots = real_data_count.checked_mul(3)?;
     let post_start = 100usize.checked_add(real_data_slots)?;
-    let expected_tail_len = 200usize.checked_add(point_count.checked_mul(5)?)?;
     // `series_count` is proven at 0 (the empty template chart above) and 1
-    // (all thirteen populated charts the corpus otherwise carries); 2+ series
-    // is not this reader's case yet and refuses rather than guessing at a
-    // layout no observation has confirmed.
-    if series_count > 1 || tail.len() != expected_tail_len || post_start > tail.len() {
+    // (all thirteen populated charts the corpus otherwise carries, plus the
+    // seed pairs cited above); 2+ series is not this reader's case yet and
+    // refuses rather than guessing at a layout no observation has confirmed.
+    if series_count > 1 {
+        return None;
+    }
+    // `post.len()` and therefore `expected_tail_len` are not a function of
+    // `point_count` alone: the scale-item id-list pair (`N = 1 +
+    // series_count` records) and the per-scale legend list (`point_count +
+    // series_count + 1` records) both grow with `series_count` too, proven
+    // by the seed evidence above -- reducing to the pre-existing
+    // `200 + point_count * 5` at `series_count == 1`.
+    let series_point_product = series_count.checked_mul(point_count)?;
+    let post_len = 97usize
+        .checked_add(3usize.checked_mul(series_count)?)?
+        .checked_add(point_count)?
+        .checked_add(series_point_product)?;
+    let expected_tail_len = post_start.checked_add(post_len)?;
+    if tail.len() != expected_tail_len || post_start > tail.len() {
         return None;
     }
 
-    validate_moxel_chart_v74_front(tail)?;
     // A negative `curSeries` is native, not a parse failure: the empty-chart
     // template above publishes `<d3p1:curSeries>-1</d3p1:curSeries>` (no
     // series exists to be "current"), spelled `-1` in the raw tuple too.
@@ -4692,12 +4724,33 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         _ => return None,
     };
     let title = parse_moxel_chart_localized(tail.get(11)?)?;
+    // `isShowLegend` is a real, evidenced two-state field, not a constant:
+    // the pre-existing 13 corpus records all store `"0"` (`false`) with
+    // `legendPlacement == None`; the target record and a seed variation that
+    // clears its `<d3p1:legendPlacement>` back to `None` agree that
+    // `tail[13]` flips with it (`"1"`/`true` under `UseCoordinates`). See
+    // `validate_moxel_chart_v74_front`'s use of the same flag below.
+    let is_show_legend = parse_moxel_chart_bool(tail.get(13)?)?;
+    validate_moxel_chart_v74_front(tail, is_show_legend)?;
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
+    // Evidence: the same target record publishes
+    // `<d3p1:isAutoPointName>true</d3p1:isAutoPointName>` where all 13
+    // corpus records store `"0"`/`false` at `tail[44]`.
+    let is_auto_point_name = parse_moxel_chart_bool(tail.get(44)?)?;
     let max_series = parse_moxel_chart_usize(tail.get(46)?)?;
     let base_val = parse_moxel_chart_usize(tail.get(49)?)?;
     let is_outline = parse_moxel_chart_bool(tail.get(50)?)?;
     let gauge_bands = parse_moxel_chart_gauge_bands(tail.get(69)?)?;
+    // Evidence: the target record's `scaleColor` is `{3,4,{0}}` ("auto") at
+    // `tail[42]`, not the `{3,0,{11119017}}` (`#A9A9A9`) literal all 13
+    // corpus records share.
+    let scale_color = parse_moxel_chart_color(tail.get(42)?)?;
+    // Evidence: the target record's `gaugeThickness`/`gaugeBushThickness`
+    // read `5`/`4` at `tail[72]`/`tail[75]` where all 13 corpus records
+    // (chart type aside) store the `2`/`5` this reader used to hard-code.
+    let gauge_thickness = parse_moxel_chart_usize(tail.get(72)?)?;
+    let gauge_bush_thickness = parse_moxel_chart_usize(tail.get(75)?)?;
     let auto_max_value = parse_moxel_chart_bool(tail.get(77)?)?;
     let user_max_value = normalize_moxel_chart_decimal(tail.get(78)?)?;
     let auto_min_value = parse_moxel_chart_bool(tail.get(79)?)?;
@@ -4714,19 +4767,51 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     }
 
     let post = tail.get(post_start..)?;
-    if post.len() != 100 + point_count * 2 {
+    if post.len() != post_len {
         return None;
     }
-    validate_moxel_chart_v74_post(post, point_count)?;
+    // `axes_position` is the absolute `post` index of `valuesAxis`: right
+    // after the length-prefixed scale-item id-list pair described above
+    // (`N` itself, `N` `{0,K,0}` records, `N` `{0,0}` records and one
+    // trailing `"0"`), so `24 + 2*N + 1` with `N = 1 + series_count`.
+    // `rectangle_start` is the absolute `post` index of `elementsChart`,
+    // proven by the same seed evidence: `63 + 3*series_count + point_count`,
+    // reducing to the pre-existing `66 + point_count` at `series_count == 1`.
+    let axes_position = 27usize.checked_add(2usize.checked_mul(series_count)?)?;
+    let rectangle_start = 63usize
+        .checked_add(3usize.checked_mul(series_count)?)?
+        .checked_add(point_count)?;
+    // `has_extended_scales` (`post[0]`/`post[1]`) and `is_title_init`
+    // (`post[7..10)`) are two independent gates -- see
+    // `validate_moxel_chart_v74_post_prefix` for the seed pairs that pin
+    // each one down separately.
+    let has_extended_scales = match (post.get(0)?.trim(), post.get(1)?.trim()) {
+        ("0", "0") => true,
+        ("14", "2") => false,
+        _ => return None,
+    };
+    let is_title_init = match post.get(7)?.trim() {
+        "1" => true,
+        "0" => false,
+        _ => return None,
+    };
+    validate_moxel_chart_v74_post(
+        post,
+        series_count,
+        has_extended_scales,
+        is_title_init,
+        is_show_legend,
+        axes_position,
+        rectangle_start,
+    )?;
     let rebuild_time = parse_moxel_chart_usize(post.get(21)?)?;
     let spline_strain = parse_moxel_chart_usize(post.get(12)?)?;
     let translucence_percent = normalize_moxel_chart_decimal(post.get(11)?)?;
     let funnel_neck_height_percent = moxel_chart_fraction_to_percent(post.get(13)?)?;
     let funnel_neck_width_percent = moxel_chart_fraction_to_percent(post.get(14)?)?;
     let funnel_gap_sum_percent = moxel_chart_fraction_to_percent(post.get(15)?)?;
-    let values_axis = parse_moxel_chart_axis(post.get(29)?)?;
-    let points_axis = parse_moxel_chart_axis(post.get(30)?)?;
-    let rectangle_start = 66usize.checked_add(point_count)?;
+    let values_axis = parse_moxel_chart_axis(post.get(axes_position)?)?;
+    let points_axis = parse_moxel_chart_axis(post.get(axes_position.checked_add(1)?)?)?;
     let elements_chart =
         parse_moxel_chart_rectangle(post.get(rectangle_start..rectangle_start + 4)?)?;
     let elements_legend =
@@ -4747,13 +4832,20 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         chart_type,
         labels_location,
         title,
+        is_show_legend,
+        has_extended_scales,
+        is_title_init,
+        scale_color,
         values_scale_format,
         is_auto_series_name,
+        is_auto_point_name,
         max_series,
         base_val,
         is_outline,
         rebuild_time,
         gauge_bands,
+        gauge_thickness,
+        gauge_bush_thickness,
         auto_max_value,
         user_max_value,
         auto_min_value,
@@ -4770,6 +4862,22 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         values_axis,
         points_axis,
     })
+}
+
+/// Test-only entry point: parses a raw `{{11},{74,...}}` chart payload (the
+/// text `parse_moxel_drawing` would pass as `fields.get(12)` for a kind-`10`
+/// drawing whose type uuid is the plain `Chart`, not `GanttChart`) and
+/// renders it back to the `<object xsi:type="d3p1:Chart">...</object>`
+/// fragment `push_moxel_chart_xml` writes (the two-tab indent a `<drawing>`
+/// element's child sits at). Exists so `tests.rs` can assert platform-proven
+/// raw records round-trip to byte-identical native XML without exposing
+/// `MoxelChart`'s private fields.
+#[cfg(test)]
+pub(super) fn parse_and_render_moxel_chart_for_test(text: &str) -> Option<String> {
+    let chart = parse_moxel_chart(text)?;
+    let mut xml = String::new();
+    push_moxel_chart_xml(&mut xml, &chart);
+    Some(xml)
 }
 
 fn parse_moxel_chart_series(fields: &[&str]) -> Option<MoxelChartSeries> {
@@ -4839,10 +4947,16 @@ fn parse_moxel_chart_color(text: &str) -> Option<String> {
     let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
     match fields.get(1)?.trim() {
         "4" if fields.len() == 3 && payload.as_slice() == ["0"] => Some("auto".to_string()),
+        // `-23` is new: native UT 11.5.27.75's
+        // `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров`
+        // stores its mandatory `realExSeriesData`'s colour as `{3,3,{-23}}`
+        // and publishes `<d3p1:color>style:ToolTipBackColor</d3p1:color>` --
+        // none of the pre-existing 13 chart records use this style colour.
         "3" if fields.len() == 3 && payload.len() == 1 => match payload.first()?.trim() {
             "-1" => Some("style:FormBackColor".to_string()),
             "-3" => Some("style:FormTextColor".to_string()),
             "-22" => Some("style:BorderColor".to_string()),
+            "-23" => Some("style:ToolTipBackColor".to_string()),
             _ => None,
         },
         "0" if payload.len() == 1 => {
@@ -5000,7 +5114,24 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
     })
 }
 
-fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
+/// `tail[13]` (`isShowLegend`), `tail[42]` (`scaleColor`), `tail[44]`
+/// (`isAutoPointName`), `tail[72]`/`tail[75]` (`gaugeThickness`/
+/// `gaugeBushThickness`) are read dynamically by the caller, not asserted
+/// here as literals: they are the fields the target record (see
+/// `parse_moxel_chart`) diverges on from the 13 pre-existing corpus records.
+///
+/// `tail[84]`, `tail[86]` and `tail[87]` are left unvalidated (removed from
+/// the table below, not merely unread): a hand-built seed that clears
+/// `<d3p1:legendPlacement>` back to `None` (matching the corpus) reproduces
+/// every literal below unchanged **except** these three, which hold real
+/// decimal values under `UseCoordinates` and the corpus's `"0"` under
+/// `None` -- a design-time legend/plot-area rectangle no XML element
+/// publishes (`legendPlacement` is written as a bare enum, no coordinates).
+/// `tail[88]`/`tail[89]` do the same two-value flip (`"1","1"` under `None`,
+/// `"0","0"` under `UseCoordinates`) and are asserted dynamically below,
+/// keyed off `is_show_legend` since every observation so far has the two
+/// moving together.
+fn validate_moxel_chart_v74_front(tail: &[&str], is_show_legend: bool) -> Option<()> {
     let expected = [
         (3, "0"),
         (4, "\", \""),
@@ -5010,7 +5141,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (9, "0"),
         (10, "0"),
         (12, "0"),
-        (13, "0"),
         (14, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
         (15, "{3,3,{-22}}"),
         (16, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
@@ -5038,8 +5168,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (38, "1"),
         (40, "0"),
         (41, "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"),
-        (42, "{3,0,{11119017}}"),
-        (44, "0"),
         (45, "0"),
         (47, "30"),
         (48, "1"),
@@ -5063,20 +5191,13 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (68, "0"),
         (70, "0"),
         (71, "180"),
-        (72, "2"),
         (73, "1"),
         (74, "0"),
-        (75, "5"),
         (76, "{3,0,{11119017}}"),
         (81, "1"),
         (82, "0"),
         (83, "0"),
-        (84, "0"),
         (85, "0"),
-        (86, "0"),
-        (87, "0"),
-        (88, "1"),
-        (89, "1"),
         (90, "0"),
         (91, "0"),
         (92, "1"),
@@ -5088,27 +5209,63 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (98, "0"),
         (99, "1"),
     ];
-    expected
+    if !expected.iter().all(|(index, value)| {
+        tail.get(*index)
+            .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+    }) {
+        return None;
+    }
+    let show_legend_flag = if is_show_legend { "0" } else { "1" };
+    [88usize, 89]
         .iter()
-        .all(|(index, value)| {
+        .all(|index| {
             tail.get(*index)
-                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+                .is_some_and(|slot| compact_moxel_chart_token(slot) == show_legend_flag)
         })
         .then_some(())
 }
 
-fn validate_moxel_chart_v74_post(post: &[&str], point_count: usize) -> Option<()> {
+/// `post`'s fixed prefix (indices `0..=22`, unaffected by `series_count` or
+/// `point_count`: proven identical, slot for slot, by both the `series_count
+/// == 1` corpus and every `series_count == 0` seed observation).
+///
+/// `post[0]`/`post[1]` and `post[7..10)` are two independent, unrelated
+/// gates, both pinned down by controlled seed pairs that toggle exactly one
+/// XML element each against the same base record:
+///
+/// * `post[0]`/`post[1]` are `"0","0"` exactly when the record carries the
+///   `pointsScale`/`valuesScale`/`colorPaletteDescription` blocks and an
+///   explicit (non-`Auto`) `xLabelsOrientation`/`paletteKind` --
+///   `has_extended_scales` in `parse_moxel_chart` -- and `"14","2"`
+///   otherwise. A seed that strips those three blocks and resets
+///   `xLabelsOrientation`/`paletteKind` back to `Auto` (nothing else
+///   touched) flips `post[0]`/`post[1]` from `"0","0"` to `"14","2"`; the
+///   pre-existing 13-corpus records (none of which carry `pointsScale`) all
+///   read `"14","2"` too.
+/// * `post[7..10)` (`"1","1","1"` vs `"0","0","0"`) is
+///   `titleIsInit`/`legendIsInit`/`chartIsInit` -- see `is_title_init` et
+///   al. in `parse_moxel_chart`. A seed that only flips those three XML
+///   booleans to `true` (leaving `pointsScale` etc. untouched) flips
+///   `post[7..10)` to `"1","1","1"`.
+fn validate_moxel_chart_v74_post_prefix(
+    post: &[&str],
+    has_extended_scales: bool,
+    is_title_init: bool,
+) -> Option<()> {
+    let leading = if has_extended_scales { "0" } else { "14" };
+    let following = if has_extended_scales { "0" } else { "2" };
+    let trio = if is_title_init { "1" } else { "0" };
     let expected = [
-        (0, "14"),
-        (1, "2"),
+        (0, leading),
+        (1, following),
         (2, "{7,3,0,1,100}"),
         (3, "1"),
         (4, "{3,4,{0}}"),
         (5, "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
         (6, "{3,4,{0}}"),
-        (7, "1"),
-        (8, "1"),
-        (9, "1"),
+        (7, trio),
+        (8, trio),
+        (9, trio),
         (10, "0"),
         (16, "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"),
         (17, "{3,0,{0}}"),
@@ -5116,48 +5273,131 @@ fn validate_moxel_chart_v74_post(post: &[&str], point_count: usize) -> Option<()
         (19, "255"),
         (20, "0"),
         (22, "00000000-0000-0000-0000-000000000000"),
-        (23, "2"),
-        (24, "{0,1,0}"),
-        (25, "{0,2,0}"),
-        (26, "{0,0}"),
-        (27, "{0,0}"),
-        (28, "0"),
-        (31, "0"),
-        (32, "0"),
-        (33, "2"),
-        (34, "-2"),
-        (35, "1"),
-        (36, "10"),
-        (37, "1"),
-        (38, "20"),
-        (39, "0"),
-        (40, "0"),
-        (44, "0"),
-        (45, "0"),
-        (46, "{3,4,{0}}"),
-        (47, "{3,4,{0}}"),
-        (48, "0"),
     ];
-    if !expected.iter().all(|(index, value)| {
-        post.get(*index)
-            .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
-    }) {
+    expected
+        .iter()
+        .all(|(index, value)| {
+            post.get(*index)
+                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+        })
+        .then_some(())
+}
+
+/// The scale-item id-list pair right after `post[22]`: `post[23]` is their
+/// shared count `N`, followed by `N` records `{0,K,0}` (`K` = `1..=N`) naming
+/// each scale item, then `N` records `{0,0}` and one trailing `"0"`.
+///
+/// Evidence: a hand-built seed's empty chart (`series_count == 0`) reads `N
+/// == 1`; adding one real series (`series_count == 1`, matching the
+/// pre-existing 13-record corpus) inserts exactly one `{0,2,0}`/`{0,0}` pair
+/// here and nothing else changes at this position, so `N = 1 +
+/// series_count`. This reader does not attempt to name what `K` refers to:
+/// no observation ties it to anything the native XML publishes (the whole
+/// list sits between `multiStageLinkColor` and `valuesAxis`, both of which
+/// are unaffected by it), so it is read as a positional record, not
+/// interpreted.
+fn validate_moxel_chart_v74_scale_id_list(post: &[&str], series_count: usize) -> Option<()> {
+    let n = post.get(23)?.trim().parse::<usize>().ok()?;
+    if n != series_count.checked_add(1)? || n > MAX_MOXEL_CHART_SERIES {
         return None;
     }
-    let rectangle_start = 66usize.checked_add(point_count)?;
-    [
-        (rectangle_start - 5, "1"),
-        (rectangle_start - 4, "1"),
-        (rectangle_start - 3, "1"),
-        (rectangle_start - 2, "6"),
-        (rectangle_start - 1, "8"),
-    ]
-    .iter()
-    .all(|(index, value)| {
-        post.get(*index)
-            .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
-    })
-    .then_some(())
+    for k in 0..n {
+        let expected = format!("{{0,{},0}}", k.checked_add(1)?);
+        if compact_moxel_chart_token(post.get(24usize.checked_add(k)?)?) != expected {
+            return None;
+        }
+    }
+    for k in 0..n {
+        let index = 24usize.checked_add(n)?.checked_add(k)?;
+        if compact_moxel_chart_token(post.get(index)?) != "{0,0}" {
+            return None;
+        }
+    }
+    (post
+        .get(24usize.checked_add(2usize.checked_mul(n)?)?)?
+        .trim()
+        == "0")
+        .then_some(())
+}
+
+/// The fixed literals between the axes and the per-scale legend list,
+/// relative to `axes_position` (the `post` index of `valuesAxis`): ten
+/// literals, three unread blocks this reader does not interpret (no
+/// observation ties them to anything the native XML publishes either -- see
+/// `validate_moxel_chart_v74_scale_id_list`), then five more literals.
+/// Positions only, proven identical at every `series_count`/`point_count`
+/// combination observed so far.
+fn validate_moxel_chart_v74_post_axes_tail(post: &[&str], axes_position: usize) -> Option<()> {
+    let expected = [
+        (2usize, "0"),
+        (3, "0"),
+        (4, "2"),
+        (5, "-2"),
+        (6, "1"),
+        (7, "10"),
+        (8, "1"),
+        (9, "20"),
+        (10, "0"),
+        (11, "0"),
+        (15, "0"),
+        (16, "0"),
+        (17, "{3,4,{0}}"),
+        (18, "{3,4,{0}}"),
+        (19, "0"),
+    ];
+    expected
+        .iter()
+        .all(|(offset, value)| {
+            axes_position
+                .checked_add(*offset)
+                .and_then(|index| post.get(index))
+                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+        })
+        .then_some(())
+}
+
+/// The five-token check immediately before `elementsChart`
+/// (`rectangle_start - 5 .. rectangle_start`): `"1","1","1",X,"8"` where `X`
+/// is `"6"` on every pre-existing corpus record (all `isShowLegend ==
+/// false`, `legendPlacement == None`) and `"5"` on every `isShowLegend ==
+/// true` seed observation, independent of `series_count`/`point_count` --
+/// proven by a seed pair that holds series and point counts fixed and
+/// toggles only `<d3p1:legendPlacement>` (`X` moves; nothing else past this
+/// position does) and confirmed against the pre-existing corpus's
+/// `point_count == 3` records, which the old `series_count *
+/// point_count`-shaped guess would have mispredicted.
+fn validate_moxel_chart_v74_rectangle_check(
+    post: &[&str],
+    is_show_legend: bool,
+    rectangle_start: usize,
+) -> Option<()> {
+    let x = if is_show_legend { "5" } else { "6" };
+    let expected = [(5usize, "1"), (4, "1"), (3, "1"), (2, x), (1, "8")];
+    expected
+        .iter()
+        .all(|(back_from, value)| {
+            rectangle_start
+                .checked_sub(*back_from)
+                .and_then(|index| post.get(index))
+                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+        })
+        .then_some(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_moxel_chart_v74_post(
+    post: &[&str],
+    series_count: usize,
+    has_extended_scales: bool,
+    is_title_init: bool,
+    is_show_legend: bool,
+    axes_position: usize,
+    rectangle_start: usize,
+) -> Option<()> {
+    validate_moxel_chart_v74_post_prefix(post, has_extended_scales, is_title_init)?;
+    validate_moxel_chart_v74_scale_id_list(post, series_count)?;
+    validate_moxel_chart_v74_post_axes_tail(post, axes_position)?;
+    validate_moxel_chart_v74_rectangle_check(post, is_show_legend, rectangle_start)
 }
 
 fn parse_moxel_chart_bool(text: &str) -> Option<bool> {
@@ -10164,11 +10404,20 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_text(xml, "seriesCurId", chart.series_cur_id);
     push_moxel_chart_text(xml, "pointsCurId", chart.points_cur_id);
     push_moxel_chart_bool(xml, "isSeriesDesign", chart.is_series_design);
+    // Gated on both `has_extended_scales` being clear AND at least one real
+    // series existing -- see `push_moxel_chart_series_text_xml`'s doc
+    // comment.
+    let automatic_names_apply = !chart.has_extended_scales && !chart.real_series.is_empty();
     push_moxel_chart_text(xml, "realSeriesCount", chart.real_series.len());
     for series in &chart.real_series {
-        push_moxel_chart_series_xml(xml, "realSeriesData", series);
+        push_moxel_chart_series_xml(xml, "realSeriesData", series, automatic_names_apply);
     }
-    push_moxel_chart_series_xml(xml, "realExSeriesData", &chart.real_extra_series);
+    push_moxel_chart_series_xml(
+        xml,
+        "realExSeriesData",
+        &chart.real_extra_series,
+        automatic_names_apply,
+    );
     push_moxel_chart_bool(xml, "isPointsDesign", chart.is_points_design);
     push_moxel_chart_text(xml, "realPointCount", chart.real_points.len());
     for point in &chart.real_points {
@@ -10192,7 +10441,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "chart3Dcrd", "SouthWest");
     push_moxel_chart_localized_xml(xml, "title", &chart.title, 3);
     push_moxel_chart_bool(xml, "isShowTitle", false);
-    push_moxel_chart_bool(xml, "isShowLegend", false);
+    push_moxel_chart_bool(xml, "isShowLegend", chart.is_show_legend);
     push_moxel_chart_border_xml(xml, "ttlBorder", 0, "WithoutBorder");
     push_moxel_chart_literal(xml, "ttlBorderColor", "style:BorderColor");
     push_moxel_chart_border_xml(xml, "lgBorder", 0, "WithoutBorder");
@@ -10219,11 +10468,19 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_bool(xml, "isShowPointsScale", true);
     push_moxel_chart_bool(xml, "isShowValuesScale", true);
     push_moxel_chart_localized_xml(xml, "vsFormat", &chart.values_scale_format, 3);
-    push_moxel_chart_literal(xml, "xLabelsOrientation", "Auto");
+    push_moxel_chart_literal(
+        xml,
+        "xLabelsOrientation",
+        if chart.has_extended_scales {
+            "Horizontal"
+        } else {
+            "Auto"
+        },
+    );
     push_moxel_chart_line_xml(xml, "scaleLine", &MoxelChartLine { width: 1 }, 3);
-    push_moxel_chart_literal(xml, "scaleColor", "#A9A9A9");
+    push_moxel_chart_literal(xml, "scaleColor", &chart.scale_color);
     push_moxel_chart_bool(xml, "isAutoSeriesName", chart.is_auto_series_name);
-    push_moxel_chart_bool(xml, "isAutoPointName", false);
+    push_moxel_chart_bool(xml, "isAutoPointName", chart.is_auto_point_name);
     push_moxel_chart_literal(xml, "maxMode", "NotDefined");
     push_moxel_chart_text(xml, "maxSeries", chart.max_series);
     push_moxel_chart_text(xml, "maxSeriesPrc", 30);
@@ -10242,7 +10499,20 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "dtHAlign", "Right");
     push_moxel_chart_empty(xml, "dtFormat");
     push_moxel_chart_bool(xml, "dtKeys", true);
-    push_moxel_chart_literal(xml, "paletteKind", "Auto");
+    // Evidence: only one non-`Auto` example observed so far (the seed pair
+    // documented on `validate_moxel_chart_v74_post_prefix`), so this is not
+    // yet a general "read the palette name" decoder -- just the two states
+    // proven: `Auto` when `has_extended_scales` is clear, `Palette8` when it
+    // is set.
+    push_moxel_chart_literal(
+        xml,
+        "paletteKind",
+        if chart.has_extended_scales {
+            "Palette8"
+        } else {
+            "Auto"
+        },
+    );
     push_moxel_chart_literal(xml, "animation", "Auto");
     push_moxel_chart_text(xml, "rebuildTime", chart.rebuild_time);
     push_moxel_chart_bool(xml, "isTransposed", false);
@@ -10254,19 +10524,25 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_gauge_bands_xml(xml, &chart.gauge_bands);
     push_moxel_chart_text(xml, "beginGaugeAngle", 0);
     push_moxel_chart_text(xml, "endGaugeAngle", 180);
-    push_moxel_chart_text(xml, "gaugeThickness", 2);
+    push_moxel_chart_text(xml, "gaugeThickness", chart.gauge_thickness);
     push_moxel_chart_literal(xml, "gaugeLabelsLocation", "InsideScale");
     push_moxel_chart_bool(xml, "gaugeLabelsArcDirection", false);
-    push_moxel_chart_text(xml, "gaugeBushThickness", 5);
+    push_moxel_chart_text(xml, "gaugeBushThickness", chart.gauge_bush_thickness);
     push_moxel_chart_literal(xml, "gaugeBushColor", "#A9A9A9");
     push_moxel_chart_bool(xml, "autoMaxValue", chart.auto_max_value);
     push_moxel_chart_literal(xml, "userMaxValue", &chart.user_max_value);
     push_moxel_chart_bool(xml, "autoMinValue", chart.auto_min_value);
     push_moxel_chart_literal(xml, "userMinValue", &chart.user_min_value);
     push_moxel_chart_bool(xml, "elementsIsInit", true);
-    push_moxel_chart_bool(xml, "titleIsInit", true);
-    push_moxel_chart_bool(xml, "legendIsInit", true);
-    push_moxel_chart_bool(xml, "chartIsInit", true);
+    // `post[7..10)` in `validate_moxel_chart_v74_post_prefix`, read as
+    // `is_title_init`: proven independent of `isShowLegend`/
+    // `legendPlacement` and of `has_extended_scales` by two separate seed
+    // pairs that each toggle only one of those and leave this trio's raw
+    // slots unchanged. No record observed varies the three flags from each
+    // other, so this writer does not either.
+    push_moxel_chart_bool(xml, "titleIsInit", chart.is_title_init);
+    push_moxel_chart_bool(xml, "legendIsInit", chart.is_title_init);
+    push_moxel_chart_bool(xml, "chartIsInit", chart.is_title_init);
     push_moxel_chart_rectangle_xml(xml, "elementsChart", &chart.elements_chart);
     push_moxel_chart_rectangle_xml(xml, "elementsLegend", &chart.elements_legend);
     push_moxel_chart_rectangle_xml(xml, "elementsTitle", &chart.elements_title);
@@ -10293,52 +10569,101 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "multiStageLinkColor", "#000000");
     push_moxel_chart_axis_xml(xml, "valuesAxis", &chart.values_axis);
     push_moxel_chart_axis_xml(xml, "pointsAxis", &chart.points_axis);
+    // `pointsScale` is new: no pre-existing corpus record carries it (all
+    // 13 have `has_extended_scales == false`); the target record and the
+    // seed pair on `validate_moxel_chart_v74_post_prefix` that isolated
+    // `has_extended_scales` both carry it with this exact fixed content
+    // (`labelOrientation` always `Horizontal` in the one example seen).
+    if chart.has_extended_scales {
+        xml.push_str("\t\t\t<d3p1:pointsScale>\r\n");
+        push_moxel_chart_scale_title_area_xml(xml);
+        xml.push_str("\t\t\t\t<d3p1:labelOrientation>Horizontal</d3p1:labelOrientation>\r\n");
+        xml.push_str("\t\t\t</d3p1:pointsScale>\r\n");
+    }
+    // `valuesScale` has two independent triggers proven so far: non-empty
+    // `vsFormat` writes a `labelFormat` child (the pre-existing corpus
+    // shape, e.g. `ДосьеКонтрагента/ФинансовыйАнализ`'s Gauge charts) and
+    // `has_extended_scales` writes a `gridLinesShowMode` child instead (the
+    // target record, `vsFormat` empty). No record observed carries both at
+    // once, so that combination is not this writer's case.
     if !chart.values_scale_format.is_empty() {
         xml.push_str("\t\t\t<d3p1:valuesScale>\r\n");
-        xml.push_str("\t\t\t\t<d3p1:titleArea>\r\n");
-        xml.push_str("\t\t\t\t\t<d3p1:font kind=\"AutoFont\"/>\r\n");
-        xml.push_str("\t\t\t\t\t<d3p1:textColor>auto</d3p1:textColor>\r\n");
-        xml.push_str("\t\t\t\t\t<d3p1:backColor>auto</d3p1:backColor>\r\n");
-        xml.push_str("\t\t\t\t\t<d3p1:border width=\"1\">\r\n");
-        xml.push_str(
-            "\t\t\t\t\t\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">WithoutBorder</v8ui:style>\r\n",
-        );
-        xml.push_str("\t\t\t\t\t</d3p1:border>\r\n");
-        xml.push_str("\t\t\t\t\t<d3p1:borderColor>auto</d3p1:borderColor>\r\n");
-        xml.push_str("\t\t\t\t</d3p1:titleArea>\r\n");
+        push_moxel_chart_scale_title_area_xml(xml);
         push_moxel_chart_localized_xml(xml, "labelFormat", &chart.values_scale_format, 4);
         xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
+    } else if chart.has_extended_scales {
+        xml.push_str("\t\t\t<d3p1:valuesScale>\r\n");
+        push_moxel_chart_scale_title_area_xml(xml);
+        xml.push_str("\t\t\t\t<d3p1:gridLinesShowMode>Show</d3p1:gridLinesShowMode>\r\n");
+        xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
     }
-    push_moxel_chart_literal(xml, "legendPlacement", "None");
+    // Evidence: same correlation as `titleIsInit`/`legendIsInit`/
+    // `chartIsInit` above -- every observation ties `legendPlacement` to
+    // `isShowLegend` (`None`/`false` on the corpus, `UseCoordinates`/`true`
+    // on the target record and the seed pair that isolated it).
+    push_moxel_chart_literal(
+        xml,
+        "legendPlacement",
+        if chart.is_show_legend {
+            "UseCoordinates"
+        } else {
+            "None"
+        },
+    );
     push_moxel_chart_literal(xml, "plotAreaPlacement", "UseCoordinates");
     push_moxel_chart_literal(xml, "titleAreaPlacement", "None");
+    // `colorPaletteDescription` is new, same trigger and same single
+    // observation as `paletteKind` above.
+    if chart.has_extended_scales {
+        xml.push_str("\t\t\t<d3p1:colorPaletteDescription>\r\n");
+        xml.push_str("\t\t\t\t<d3p1:colorPalette>Palette8</d3p1:colorPalette>\r\n");
+        xml.push_str("\t\t\t</d3p1:colorPaletteDescription>\r\n");
+    }
     xml.push_str("\t\t</object>\r\n");
 }
 
 /// The name the platform writes for a series whose own name the user never
 /// changed.
 ///
-/// A series record stores its name beside a `strIsChanged` flag, and the stored
-/// name is a cache of the automatic one until that flag is set. Where the flag
-/// is clear the platform does not publish the cache: it publishes the automatic
-/// name, and the corpus spells it `Pivot` in every one of the 15 series blocks
-/// it contains - `ПроверкаКонтрагента/ФинансовыйАнализ` (6),
+/// A series record stores its name beside a `strIsChanged` flag, and the
+/// stored name is a cache of the automatic one until that flag is set.
+/// Where the flag is clear the platform publishes the automatic name only
+/// when **both** `has_extended_scales`
+/// (`pointsScale`/`valuesScale`/`colorPaletteDescription` etc., see
+/// `parse_moxel_chart`) is clear **and** the chart has at least one real
+/// series; the corpus spells the automatic name `Pivot` in every one of the
+/// 14 series blocks that meet both conditions -
+/// `ПроверкаКонтрагента/ФинансовыйАнализ` (6),
 /// `ДосьеКонтрагента/ФинансовыйАнализ` (6),
-/// `АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий`,
-/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта` and
-/// `СравнительныйАнализПоказателейРаботыМенеджеров` - across two drawing kinds,
-/// `Chart` and `GanttChart`, while all 15 store `Сводная`. Derived from the
-/// first document and confirmed on the other four, which the derivation never
-/// saw. The item's own language is the stored one; only the content is the
-/// platform's.
+/// `АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий` and
+/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта` - while all 14 store
+/// `Сводная`. Derived from the first document and confirmed on the other
+/// three, which the derivation never saw. The item's own language is the
+/// stored one; only the content is the platform's.
+///
+/// Both conditions are independently necessary, proven by three seeds built
+/// from native UT 11.5.27.75's
+/// `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров`
+/// (`has_extended_scales == true`, `realSeriesCount == 0`, publishes the
+/// stored `Сводная`): adding one real series (`realSeriesCount == 1`,
+/// `has_extended_scales` still `true`) still publishes `Сводная` -- ruling
+/// out "no real series to pivot against" as sufficient on its own; clearing
+/// `has_extended_scales` back to the corpus's shape while keeping
+/// `realSeriesCount == 0` *also* still publishes `Сводная` -- ruling out
+/// `has_extended_scales` alone too. All three round-trip through the
+/// platform byte for byte.
 ///
 /// No series in the corpus carries the flag set, so that branch is left
 /// publishing the stored name - what this writer already did - rather than
 /// being given a rule nothing evidences.
 const MOXEL_CHART_AUTOMATIC_SERIES_NAME: &str = "Pivot";
 
-fn push_moxel_chart_series_text_xml(xml: &mut String, series: &MoxelChartSeries) {
-    if series.str_is_changed {
+fn push_moxel_chart_series_text_xml(
+    xml: &mut String,
+    series: &MoxelChartSeries,
+    automatic_names_apply: bool,
+) {
+    if series.str_is_changed || !automatic_names_apply {
         push_moxel_chart_localized_xml(xml, "text", &series.text, 4);
         return;
     }
@@ -10353,13 +10678,18 @@ fn push_moxel_chart_series_text_xml(xml: &mut String, series: &MoxelChartSeries)
     push_moxel_chart_localized_xml(xml, "text", &automatic, 4);
 }
 
-fn push_moxel_chart_series_xml(xml: &mut String, tag: &str, series: &MoxelChartSeries) {
+fn push_moxel_chart_series_xml(
+    xml: &mut String,
+    tag: &str,
+    series: &MoxelChartSeries,
+    automatic_names_apply: bool,
+) {
     xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
     push_moxel_chart_text_indented(xml, "id", series.id, 4);
     push_moxel_chart_literal_indented(xml, "color", &series.color, 4);
     push_moxel_chart_line_xml(xml, "line", &series.line, 4);
     push_moxel_chart_literal_indented(xml, "marker", series.marker, 4);
-    push_moxel_chart_series_text_xml(xml, series);
+    push_moxel_chart_series_text_xml(xml, series, automatic_names_apply);
     push_moxel_chart_bool_indented(xml, "strIsChanged", series.str_is_changed, 4);
     push_moxel_chart_bool_indented(xml, "isExpand", series.is_expand, 4);
     push_moxel_chart_bool_indented(xml, "isIndicator", series.is_indicator, 4);
@@ -10435,6 +10765,16 @@ fn push_moxel_chart_localized_xml(
 }
 
 fn push_moxel_chart_gauge_bands_xml(xml: &mut String, bands: &[MoxelChartGaugeBand]) {
+    // Evidence: the target record (no bands: `chartType == StackedBar`, not
+    // `Gauge`) self-closes the element; every pre-existing corpus band
+    // record (all `Gauge`) has at least one band and never exercised the
+    // empty case.
+    if bands.is_empty() {
+        xml.push_str(
+            "\t\t\t<d3p1:gaugeQualityBands useTextStr=\"false\" useTooltipStr=\"false\"/>\r\n",
+        );
+        return;
+    }
     xml.push_str("\t\t\t<d3p1:gaugeQualityBands useTextStr=\"false\" useTooltipStr=\"false\">\r\n");
     for band in bands {
         xml.push_str("\t\t\t\t<v8ui:item>\r\n");
@@ -10477,6 +10817,14 @@ fn push_moxel_chart_namespaced_localized_xml(
 }
 
 fn push_moxel_chart_data_items_xml(xml: &mut String, items: &[MoxelChartDataItem]) {
+    // Evidence: the target record (`realDataCount == 0`, since
+    // `series_count == 0`) publishes no `<d3p1:realDataItems>` element at
+    // all, not an empty one -- every pre-existing corpus record has at
+    // least one real series and real point, so this case was never
+    // exercised before.
+    if items.is_empty() {
+        return;
+    }
     xml.push_str("\t\t\t<d3p1:realDataItems>\r\n");
     for item in items {
         xml.push_str("\t\t\t\t<d3p1:item>\r\n");
@@ -10496,6 +10844,22 @@ fn push_moxel_chart_data_items_xml(xml: &mut String, items: &[MoxelChartDataItem
         xml.push_str("\t\t\t\t</d3p1:item>\r\n");
     }
     xml.push_str("\t\t\t</d3p1:realDataItems>\r\n");
+}
+
+/// The fixed `titleArea` block `pointsScale` and `valuesScale` both open
+/// with, identical in the one example of each seen so far.
+fn push_moxel_chart_scale_title_area_xml(xml: &mut String) {
+    xml.push_str("\t\t\t\t<d3p1:titleArea>\r\n");
+    xml.push_str("\t\t\t\t\t<d3p1:font kind=\"AutoFont\"/>\r\n");
+    xml.push_str("\t\t\t\t\t<d3p1:textColor>auto</d3p1:textColor>\r\n");
+    xml.push_str("\t\t\t\t\t<d3p1:backColor>auto</d3p1:backColor>\r\n");
+    xml.push_str("\t\t\t\t\t<d3p1:border width=\"1\">\r\n");
+    xml.push_str(
+        "\t\t\t\t\t\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">WithoutBorder</v8ui:style>\r\n",
+    );
+    xml.push_str("\t\t\t\t\t</d3p1:border>\r\n");
+    xml.push_str("\t\t\t\t\t<d3p1:borderColor>auto</d3p1:borderColor>\r\n");
+    xml.push_str("\t\t\t\t</d3p1:titleArea>\r\n");
 }
 
 fn push_moxel_chart_rectangle_xml(xml: &mut String, tag: &str, rect: &MoxelChartRectangle) {
