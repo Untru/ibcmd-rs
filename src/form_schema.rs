@@ -1686,7 +1686,25 @@ pub(crate) struct FormRootMobileDeviceCommandBarContentSchema {
 
 impl FormRootMobileDeviceCommandBarContentSchema {
     pub(crate) const ROOT_TRAILER_FIELDS: usize = 24;
-    pub(crate) const CONTENT_TRAILER_SLOT: usize = 22;
+
+    /// Forms whose root carries a built-in Navigator/quick-search item write
+    /// one extra field between the child-items count-list and the classic
+    /// 24-member trailer, shifting every trailer slot out by one -- a
+    /// 25-member trailer. Evidence: ERP УХ 3.2.12.6, four native forms
+    /// spanning `BusinessProcesses`/`Catalogs`/`CommonForms`
+    /// (`Задание/Forms/ФормаСписка`, `Валюты/Forms/ФормаСписка`,
+    /// `ВерсииФайлов/Forms/ФормаВыбора`, `ФормаОтчета`): the shared
+    /// count-list scan (`form_root_child_items_tail_start_at`,
+    /// `mssql_dump::form_body`) validates cleanly at `fields.len() - 25` on
+    /// all four where `fields.len() - 24` finds no valid count-list at all,
+    /// and in every case the resulting trailer's *second-to-last* field is a
+    /// `{50,1,...}`-shaped content tuple identical in shape to the
+    /// already-working 24-trailer case -- never at a fixed absolute slot,
+    /// always two from the end. 84 native ERP УХ forms carry
+    /// `<MobileDeviceCommandBarContent>`; the 24-only trailer this schema
+    /// previously required alone matched none of the 25-trailer forms among
+    /// them (all silently dropped the whole block).
+    pub(crate) const ROOT_TRAILER_FIELDS_WITH_NAVIGATOR_GAP: usize = 25;
 
     pub(crate) fn from_raw_layout(
         root_marker: Option<&str>,
@@ -1698,13 +1716,22 @@ impl FormRootMobileDeviceCommandBarContentSchema {
     ) -> Option<Self> {
         let expected_field_count = declared_item_count.checked_mul(2)?.checked_add(2)?;
         (root_marker == Some("50")
-            && trailer_len == Self::ROOT_TRAILER_FIELDS
+            && (trailer_len == Self::ROOT_TRAILER_FIELDS
+                || trailer_len == Self::ROOT_TRAILER_FIELDS_WITH_NAVIGATOR_GAP)
             && content_kind == Some("50")
             && content_field_count == expected_field_count
             && typed_item_count == declared_item_count)
             .then_some(Self {
                 item_count: declared_item_count,
             })
+    }
+
+    /// The content tuple always sits two fields from the end of the
+    /// trailer, whichever of the two trailer shapes matched -- see
+    /// `ROOT_TRAILER_FIELDS_WITH_NAVIGATOR_GAP`'s doc comment for the
+    /// evidence that this holds across both shapes.
+    pub(crate) fn content_trailer_slot(trailer_len: usize) -> Option<usize> {
+        trailer_len.checked_sub(2)
     }
 
     pub(crate) const fn item_count(self) -> usize {

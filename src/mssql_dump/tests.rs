@@ -71170,3 +71170,83 @@ fn renders_empty_stacked_bar_chart_without_extended_scales_to_platform_proven_xm
         ),
     );
 }
+
+/// Forms carrying a built-in Navigator/quick-search child item write one
+/// extra field between the root child-items count-list and the classic
+/// 24-member form-root trailer -- a 25-member trailer, not 24. Before this
+/// fix, `extract_form_mobile_device_command_bar_content` located the
+/// trailer via `form_root_child_items_tail_start` (root `50` + `[24]`
+/// only), which found no valid count-list at all for such forms and
+/// silently returned an empty `Vec` -- dropping the whole
+/// `<MobileDeviceCommandBarContent>` block with no error (doctrine point
+/// 2/6: a silent default, not a typed refusal). See this fixture's
+/// `manifest.json` for the full evidence trail across four independent
+/// native ERP УХ 3.2.12.6 forms (two are fixtures here, two more confirmed
+/// but not embedded).
+fn assert_platform_proven_mobile_device_command_bar_content(
+    raw_deflate: &[u8],
+    expected_block: &str,
+) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_block),
+        "expected the MobileDeviceCommandBarContent block to render byte-identical to the \
+native export; block missing or different in:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_mobile_device_command_bar_content_for_business_process_list_form_with_navigator_gap() {
+    assert_platform_proven_mobile_device_command_bar_content(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/1a7c7427-bead-4655-9dd6-df6e722663c5.deflate"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_mobile_device_command_bar_content_for_catalog_list_form_with_navigator_gap() {
+    assert_platform_proven_mobile_device_command_bar_content(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/5f91b00f-d8fc-4d63-8486-66339357ab22.deflate"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+        ),
+    );
+}
+
+
+/// `SaveWindowSettings` sits in the trailer's own last slot. Before this
+/// fix, `extract_form_save_window_settings` located it via a fixed absolute
+/// offset (`tail_start + 23`) off the strict `[24]`-only
+/// `form_root_child_items_tail_start`, which found no valid count-list at
+/// all for forms with a built-in Navigator/quick-search item (a 25-member
+/// trailer, not 24) and silently dropped the whole property. See this
+/// fixture's `manifest.json` for the full evidence trail.
+fn assert_platform_proven_save_window_settings_false(raw_deflate: &[u8]) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains("<SaveWindowSettings>false</SaveWindowSettings>"),
+        "expected <SaveWindowSettings>false</SaveWindowSettings> to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_save_window_settings_for_catalog_list_form_with_navigator_gap() {
+    assert_platform_proven_save_window_settings_false(include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/085702c9-6d28-441d-b4ee-3319c23b2fef.deflate"
+    ));
+}
+
+#[test]
+fn renders_save_window_settings_for_document_list_form_with_navigator_gap() {
+    assert_platform_proven_save_window_settings_false(include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/ffbe920e-f47c-495e-8d96-bedbc0a631e2.deflate"
+    ));
+}
