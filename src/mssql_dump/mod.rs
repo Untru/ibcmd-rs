@@ -17,7 +17,7 @@ use ibcmd_schema::{
     GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner,
     parse_task_choice_history_on_input_slot, parse_task_data_lock_control_mode_slot,
     parse_task_full_text_search_slot, parse_task_include_help_in_contents_slot,
-    parse_task_number_auto_prefix_slot, task_number_allowed_length_from_auto_prefix,
+    parse_task_number_allowed_length_slot, parse_task_number_auto_prefix_slot,
 };
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{
@@ -8327,6 +8327,23 @@ struct CommandGroupProperties {
     category: &'static str,
 }
 
+/// Evidence: seed `bots` (two synthetic `Bot` objects atop the `Web_Service`
+/// skeleton, platform 8.3.27.2214). The record is
+/// `{1,{1,<header>,<predefined 0|1>,<picture 4-tuple>},0}`: `Predefined` is
+/// the bare flag right after the header block, and the trailing `{4,...}`
+/// block is byte-identical in shape to `CommonCommand`/`CommandGroup`'s own
+/// `Picture` descriptor -- same leading `4`, same `picture_kind` at index 1,
+/// same reference sub-tuple at index 2, same `LoadTransparent` at index 6 --
+/// confirmed by round-tripping `БотА` (`Predefined=true`, no picture) and
+/// `БотБ` (`Predefined=false`, `StdPicture.Information`, `LoadTransparent=true`)
+/// through the platform and comparing against the native UT bot
+/// (`Predefined=false`, no picture, tuple `{4,0,{0},"",-1,-1,1,0,""}`).
+struct BotProperties {
+    predefined: bool,
+    picture_ref: Option<String>,
+    picture_load_transparent: bool,
+}
+
 struct StyleItemProperties {
     item_type: &'static str,
     value_xml: String,
@@ -10099,6 +10116,22 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     let mut xml = if kind == "CommonPicture" {
         let picture = parse_common_picture_properties_from_text(text, uuid)?;
         format_common_picture_source_xml(&header, &picture, source_version).into_bytes()
+    } else if kind == "Bot" {
+        // Must run here, after `is_form_metadata_text`/`is_template_metadata_text`
+        // and the other structural (shape-based) checks above, not among the
+        // early object_code-gated special cases: `metadata.rs`'s code==1
+        // `header_index==Some(1)` fallback that yields `("Bot", "Bots")` is a
+        // last-resort bucket that ALSO catches owned `Form` records the more
+        // specific EventSubscription/SessionParameter/XDTOPackage patterns
+        // don't -- confirmed on native UT 11.5.27.75, where 1387 `Forms/*.xml`
+        // shells (code 1, header_index 1, tail shape
+        // `{<header>,0,1,{2,{"#",owner,1},{"#",owner,2}}}`, no picture tuple)
+        // carry `row.kind == "Bot"` too. Placing the check this late means the
+        // structural form/template detectors above already claimed every one
+        // of those before `kind` is ever consulted, so only the one true Bot
+        // reaches `parse_bot_properties_from_text`.
+        let bot = parse_bot_properties_from_text(text, uuid, object_refs)?;
+        format_bot_source_xml(&header, &bot, source_version).into_bytes()
     } else if kind == "Role" {
         format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
     } else if kind == "Catalog" {
@@ -25505,25 +25538,6 @@ fn parse_task_properties_from_text(
         &attribute_references,
         &[("-7", "BusinessProcess")],
     )?;
-    // `DataLockControlMode` is not an independent slot either: field 32,
-    // the slot this used to read (`"1"` -> `Automatic`, unconditionally),
-    // is `"1"` on both `ЗадачаИсполнителя` (`<DataLockControlMode>Managed`)
-    // and the synthetic `CorpusTask` fixture
-    // (`<DataLockControlMode>Automatic`) -- it does not move either. What
-    // does move between them is `DataLockFields` itself:
-    // `ЗадачаИсполнителя` carries one (`BusinessProcess`) and is `Managed`;
-    // `CorpusTask` carries none (`<DataLockFields/>`) and is `Automatic`.
-    // Field 32 is kept as a validated reserved constant, the same way field
-    // 20 and field 45 are: a future record where it varies fails closed
-    // instead of silently reusing this derivation.
-    if parse_task_data_lock_control_mode_slot(fields.get(32)?).is_none() {
-        return None;
-    }
-    let task_data_lock_control_mode = if data_lock_fields.is_empty() {
-        "Automatic"
-    } else {
-        "Managed"
-    };
 
     let default_object_form =
         parse_task_form_ref(fields.get(15)?, &form_uuids, &header.name, form_refs)?;
@@ -25607,8 +25621,7 @@ fn parse_task_properties_from_text(
             _ => return None,
         },
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
-        number_allowed_length: task_number_allowed_length_from_auto_prefix(task_number_auto_prefix)
-            .xml_value(),
+        number_allowed_length: parse_task_number_allowed_length_slot(fields.get(43)?)?.xml_value(),
         check_unique: information_register_bool(fields.get(21)?)?,
         autonumbering: information_register_bool(fields.get(23)?)?,
         task_number_auto_prefix: task_number_auto_prefix.xml_value(),
@@ -25650,7 +25663,8 @@ fn parse_task_properties_from_text(
             .xml_value(),
         include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(24)?)?,
         data_lock_fields,
-        data_lock_control_mode: task_data_lock_control_mode,
+        data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(33)?)?
+            .xml_value(),
         full_text_search: parse_task_full_text_search_slot(fields.get(33)?)?.xml_value(),
         object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
@@ -29271,6 +29285,42 @@ fn parse_defined_type_properties_from_text(
     Some(DefinedTypeProperties {
         generated_types,
         value_types,
+    })
+}
+
+/// Parses `Bot.Predefined` and `Bot.Picture` from the record's own text. See
+/// `BotProperties` for the evidence (seed `bots`). The header block is the
+/// generic `{3,{1,0,uuid},Name,Synonym,Comment,0,0,NilUuid,0}` shape already
+/// used by `parse_metadata_header_from_text`; `Predefined` is the bare digit
+/// immediately after it, and the picture descriptor is the trailing `{4,...}`
+/// block, decoded by the same reader `CommonCommand.Picture` uses since the
+/// two tuples share their shape byte for byte.
+fn parse_bot_properties_from_text(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<BotProperties> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let header_start = text[..marker_start].rfind("{3,")?;
+    let header_end = scan_1c_braced_value(text, header_start)?;
+    let mut offset = expect_comma_at(text, header_end)?;
+    offset = skip_ascii_ws_at(text, offset);
+    let digit_end = offset
+        + text[offset..]
+            .find(|ch: char| !ch.is_ascii_digit())
+            .unwrap_or(text.len() - offset);
+    let predefined = parse_1c_bool_flag(text[offset..digit_end].trim())?;
+    offset = expect_comma_at(text, digit_end)?;
+    offset = skip_ascii_ws_at(text, offset);
+    let tail_end = scan_1c_braced_value(text, offset)?;
+    let (picture_ref, picture_load_transparent) =
+        parse_common_command_picture_value(&text[offset..tail_end], object_refs)?;
+
+    Some(BotProperties {
+        predefined,
+        picture_ref,
+        picture_load_transparent,
     })
 }
 
@@ -35512,6 +35562,35 @@ fn format_common_command_parameter_type_xml_with_indent(
         ));
     }
     xml.push_str(&format!("{indent}</CommandParameterType>\r\n"));
+}
+
+fn format_bot_source_xml(
+    header: &MetadataHeader,
+    properties: &BotProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Bot", header, source_version);
+    let mut insert = format!(
+        "\t\t\t<Predefined>{}</Predefined>\r\n",
+        xml_bool(properties.predefined)
+    );
+    match &properties.picture_ref {
+        Some(reference) => {
+            insert.push_str("\t\t\t<Picture>\r\n");
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:Ref>{}</xr:Ref>\r\n",
+                escape_xml_text(reference)
+            ));
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+\t\t\t</Picture>\r\n",
+                xml_bool(properties.picture_load_transparent)
+            ));
+        }
+        None => insert.push_str("\t\t\t<Picture/>\r\n"),
+    }
+    xml = xml.replace("\t\t</Properties>", &format!("{insert}\t\t</Properties>"));
+    xml
 }
 
 fn format_command_group_source_xml(

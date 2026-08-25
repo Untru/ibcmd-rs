@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-bot-predefined-picture",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-24",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "Two synthetic Bot objects added to the Web_Service skeleton's Configuration.xml, each combining Predefined and Picture the opposite way, so the two properties can be told apart. Imported and re-exported by ibcmd 8.3.27.2214 itself -- the platform is the authority."
+  },
+  "objects": [
+    {
+      "kind": "Bot",
+      "name": "БотА",
+      "raw_entry": {
+        "path": "raw/bot-a-predefined-no-picture.txt",
+        "note": "Predefined=true, Picture unset"
+      },
+      "native_outputs": [
+        { "path": "native/Bots/БотА.xml" }
+      ]
+    },
+    {
+      "kind": "Bot",
+      "name": "БотБ",
+      "raw_entry": {
+        "path": "raw/bot-b-not-predefined-with-picture.txt",
+        "note": "Predefined=false, Picture=StdPicture.Information, LoadTransparent=true"
+      },
+      "native_outputs": [
+        { "path": "native/Bots/БотБ.xml" }
+      ]
+    }
+  ],
+  "proven_claims": [
+    "Bot record shape is {1,{1,<header>,<predefined 0|1>,<picture 4-tuple>},0}: Predefined is the bare flag right after the generic header block.",
+    "The picture 4-tuple is byte-identical in shape to CommonCommand/CommandGroup's own Picture descriptor: leading '4', picture_kind at index 1, reference sub-tuple at index 2 (bare '0' plus a StdPicture/CommonPicture uuid, or a bare '{0}' when unset), LoadTransparent at index 6.",
+    "Combined with the native UT 11.5.27.75 sample (Tasks/Bots/ОповещенияПользователейОСобытиях.xml: Predefined=false, no picture), these round-trips gave the full Predefined true/false and Picture set/unset partition needed to extend parse_common_command_picture_value to Bot.Picture."
+  ],
+  "non_claims": [
+    "LoadTransparent=false was not independently observed; only LoadTransparent=true (БотБ) and the no-picture case (БотА, native UT bot) are proven. The reused parse_common_command_picture_value reads it from the same slot CommonCommand/CommandGroup already proved for LoadTransparent, not a Bot-specific observation of the false case."
+  ]
+}

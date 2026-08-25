@@ -20337,6 +20337,7 @@ fn formats_table_search_additions_as_direct_sections() {
         usual_group_shortcut: None,
         enable_content_change: None,
         child_items_width: None,
+        parent_child_items_width: None,
         control_representation: None,
         collapsed: None,
         usual_group_horizontal_align: None,
@@ -20584,6 +20585,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 usual_group_shortcut: None,
                 enable_content_change: None,
                 child_items_width: None,
+                parent_child_items_width: None,
                 control_representation: None,
                 collapsed: None,
                 usual_group_horizontal_align: None,
@@ -20832,6 +20834,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 usual_group_shortcut: None,
                 enable_content_change: None,
                 child_items_width: None,
+                parent_child_items_width: None,
                 control_representation: None,
                 collapsed: None,
                 usual_group_horizontal_align: None,
@@ -54173,6 +54176,95 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
     }
 }
 
+/// Evidence: fixture `task-number-allowed-length-data-lock-mode`, two
+/// minimal synthetic Task objects seeded on the Web_Service skeleton and
+/// round-tripped through platform 8.3.27.2214. `ЗадачаА` flips only
+/// `NumberAllowedLength` away from its default (`Variable`, `Managed`
+/// left default); `ЗадачаБ` flips only `DataLockControlMode` (`Fixed` left
+/// default, `Automatic`). Together with native UT 11.5.27.75's
+/// `Tasks/ЗадачаИсполнителя.xml` (`Fixed`+`Managed`) and the pre-existing
+/// `task-basic` fixture's `CorpusTask` (`Variable`+`Automatic`), the four
+/// combinations pin the carriers at field 43 (not field 20) and field 33
+/// (not field 32) with an exact partition -- see
+/// `parse_task_number_allowed_length_slot` and
+/// `parse_task_data_lock_control_mode_slot`.
+fn assert_platform_proven_task_number_allowed_length_and_data_lock_mode(
+    task_uuid: &str,
+    task_text: &str,
+    native_xml: &[u8],
+    expected_number_allowed_length: &str,
+    expected_data_lock_control_mode: &str,
+) {
+    let root = split_information_register_braced_fields(task_text.trim_start_matches('\u{feff}'))
+        .expect("platform-proven Task root");
+    let fields =
+        split_information_register_braced_fields(root[1]).expect("platform-proven Task fields");
+    assert_eq!(fields.len(), 52);
+    assert_eq!(
+        parse_task_number_allowed_length_slot(fields[43])
+            .expect("field 43 decodes")
+            .xml_value(),
+        expected_number_allowed_length,
+        "field 43 (not field 20) carries NumberAllowedLength"
+    );
+    assert_eq!(
+        parse_task_data_lock_control_mode_slot(fields[33])
+            .expect("field 33 decodes")
+            .xml_value(),
+        expected_data_lock_control_mode,
+        "field 33 (not field 32) carries DataLockControlMode"
+    );
+
+    let task_blob = deflate_for_test(task_text.as_bytes());
+    let extracted = extract_metadata_source_xml_with_refs(
+        &task_blob,
+        task_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .expect("minimal platform-proven Task must decode");
+    assert_eq!(
+        extracted.xml.as_slice(),
+        native_xml,
+        "extracted Task XML must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn extracts_task_variable_number_allowed_length_to_platform_proven_xml() {
+    assert_platform_proven_task_number_allowed_length_and_data_lock_mode(
+        "d4ee4506-4005-40fe-be44-ef91da738ecc",
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/raw/task-a-variable-managed.txt"
+        ),
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/native/Tasks/ЗадачаА.xml"
+        ),
+        "Variable",
+        "Managed",
+    );
+}
+
+#[test]
+fn extracts_task_automatic_data_lock_control_mode_to_platform_proven_xml() {
+    assert_platform_proven_task_number_allowed_length_and_data_lock_mode(
+        "46d1466e-126b-4442-96c4-040b4728c17d",
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/raw/task-b-fixed-automatic.txt"
+        ),
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/native/Tasks/ЗадачаБ.xml"
+        ),
+        "Fixed",
+        "Automatic",
+    );
+}
+
 #[test]
 fn validates_platform_proven_task_assignee_native_shape() {
     let task_uuid = "3ad08f4a-6202-4099-b6cc-bc116e6731a0";
@@ -70458,4 +70550,120 @@ fn code21_subsystem_classifies_and_extracts_like_code22() {
         }
         MetadataTextRowAudit::Miss(miss) => panic!("expected extraction, got miss {miss:?}"),
     }
+}
+
+/// Evidence: fixture `bot-predefined-picture`, two synthetic Bot objects
+/// seeded on the Web_Service skeleton and round-tripped through platform
+/// 8.3.27.2214. `БотА` has `Predefined=true` and no picture; `БотБ` has
+/// `Predefined=false` and `Picture=StdPicture.Information` with
+/// `LoadTransparent=true`. Combined with native UT 11.5.27.75's
+/// `Bots/ОповещенияПользователейОСобытиях.xml` (`Predefined=false`, no
+/// picture), the three round-trips gave the `Predefined` true/false and
+/// `Picture` set/unset partition needed to extend
+/// `parse_common_command_picture_value` to `Bot.Picture` -- see
+/// `parse_bot_properties_from_text`.
+fn assert_platform_proven_bot_predefined_and_picture(
+    bot_uuid: &str,
+    bot_text: &str,
+    native_xml: &[u8],
+    expected_predefined: bool,
+    expected_picture_ref: Option<&str>,
+) {
+    let properties = parse_bot_properties_from_text(bot_text, bot_uuid, &BTreeMap::new())
+        .expect("platform-proven Bot properties must decode");
+    assert_eq!(properties.predefined, expected_predefined);
+    assert_eq!(properties.picture_ref.as_deref(), expected_picture_ref);
+
+    let bot_blob = deflate_for_test(bot_text.as_bytes());
+    let extracted = extract_metadata_source_xml_with_refs(
+        &bot_blob,
+        bot_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .expect("platform-proven Bot must decode");
+    assert_eq!(
+        extracted.xml.as_slice(),
+        native_xml,
+        "extracted Bot XML must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn extracts_predefined_bot_without_picture_to_platform_proven_xml() {
+    assert_platform_proven_bot_predefined_and_picture(
+        "4c9fe47d-8f20-4d84-9df8-a7276405f4e0",
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/raw/bot-a-predefined-no-picture.txt"
+        ),
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/native/Bots/БотА.xml"
+        ),
+        true,
+        None,
+    );
+}
+
+#[test]
+fn extracts_non_predefined_bot_with_picture_to_platform_proven_xml() {
+    assert_platform_proven_bot_predefined_and_picture(
+        "e4fa25c0-8b8e-4848-83a4-3dda8fe1918d",
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/raw/bot-b-not-predefined-with-picture.txt"
+        ),
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/native/Bots/БотБ.xml"
+        ),
+        false,
+        Some("StdPicture.Information"),
+    );
+}
+
+/// Evidence: fixture `graphical-schema-field-leftwidest-page`, a minimal
+/// synthetic Form seeded on the Web_Service skeleton and round-tripped
+/// through platform 8.3.27.2214: one `Page` (`Group=Horizontal`,
+/// `ChildItemsWidth=LeftWidest`) wraps one `GraphicalSchemaField`
+/// (`ReadOnly=true`, `Width=50`, `Height=10`). Native publishes neither
+/// `Width` nor `Height` for the field (see
+/// `native/DataProcessors/GSFTest/Forms/Форма/Ext/Form.xml` in the fixture),
+/// confirmed against native UT 11.5.27.75's own
+/// `ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`, which carries the same
+/// nesting and the same suppression. Asserts on the `ChildItems` snippet
+/// only, not the whole document: the fixture's `Attributes` block needs a
+/// real `type_index` (built from the whole configuration's rows during a
+/// real `cf export`) to resolve correctly, which is orthogonal to this
+/// fix and not worth reproducing here. See
+/// `FormChildItem::parent_child_items_width` and the `GraphicalSchemaField`
+/// branch of `format_form_child_item_xml`.
+#[test]
+fn suppresses_graphical_schema_field_geometry_under_leftwidest_page() {
+    let raw = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/graphical-schema-field-leftwidest-page/raw/gsftest-form-body.txt"
+    );
+    let form_body = deflate_for_test(raw.as_bytes());
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new())
+        .expect("platform-proven minimal Form must decode");
+
+    assert!(form_xml.contains("<ChildItemsWidth>LeftWidest</ChildItemsWidth>"));
+    let field_start = form_xml
+        .find(r#"<GraphicalSchemaField name="Схема" id="1">"#)
+        .expect("GraphicalSchemaField must be present");
+    let field_end = form_xml[field_start..]
+        .find("</GraphicalSchemaField>")
+        .expect("GraphicalSchemaField must close");
+    let field_xml = &form_xml[field_start..field_start + field_end];
+    assert!(!field_xml.contains("<Width>"));
+    assert!(!field_xml.contains("<Height>"));
+    // `Edit` deliberately does not gate on the parent page's
+    // `ChildItemsWidth`: this minimal reproduction's own native XML has no
+    // `Edit` either, but native UT's real, richer field (which additionally
+    // carries a `ContextMenu`/`ExtendedTooltip`/`Events`) keeps publishing
+    // it even when nested the same way -- see the manifest's `non_claims`
+    // and the comment on this branch.
+    assert!(field_xml.contains("<Edit>false</Edit>"));
 }
