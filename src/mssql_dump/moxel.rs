@@ -6458,11 +6458,6 @@ fn moxel_config_type_ref(uuid: &str, generated_types: &BTreeMap<String, String>)
     generated_types.get(&uuid.to_ascii_lowercase()).cloned()
 }
 
-/// Fixed root trailer every MOXCEL body ends with: `0, 0, 1, 0, 0, 0`.
-/// Constant across all 683 spreadsheet templates, which is what makes the
-/// variable-length table in front of it addressable from the end.
-const MOXEL_ROOT_TRAILER_FIELDS: usize = 6;
-
 /// Decodes the document's input-mask table - a count-prefixed run of localized
 /// values sitting directly in front of the fixed root trailer.
 ///
@@ -6471,8 +6466,33 @@ const MOXEL_ROOT_TRAILER_FIELDS: usize = 6;
 /// count that equals the run length, and resolving format member 34 through
 /// the run reproduces every published `<mask>` - 1416 references over 683
 /// documents, zero mismatches. 618 documents declare the empty table (`0`).
+/// Where the root's variable-length tail table ends: right after the last
+/// braced root field, i.e. in front of the run of plain scalars the body ends
+/// with.
+///
+/// That run is not a fixed length. It was measured at six on
+/// 1С:УТ 11.5.27.75 (`0, 0, 1, 0, 0, 0`) and hardcoded as such; ERP УХ
+/// 3.2.12.6 writes five -- e.g. `Document.ЗаявлениеОВвозеТоваров.Template.
+/// СтатФормаУчетаПеремещенияТоваров2016Кв1` ends
+/// `…,1,{1,2,{"ru","999"},{"en","999"}},0,0,1,0,0`. Subtracting a fixed six
+/// there lands one field short of the table, the count check fails, and the
+/// whole mask table is dropped: across the ERP УХ templates still differing on
+/// the gate, native publishes 2,094 non-empty `<mask>` and 2,190 `<mask/>`
+/// against our 606 and 535.
+///
+/// Anchoring on the last braced field instead reads both shapes and needs no
+/// constant. A table whose count is `0` has no braced entry of its own, so the
+/// anchor lands in front of some earlier field and the count check below
+/// rejects it -- which is the same empty result the fixed offset produced.
+fn moxel_root_table_end(fields: &[&str]) -> Option<usize> {
+    fields
+        .iter()
+        .rposition(|field| field.trim_start().starts_with('{'))
+        .map(|index| index + 1)
+}
+
 pub(super) fn parse_moxel_mask_refs(fields: &[&str]) -> Vec<Vec<MoxelLocalizedValue>> {
-    let Some(end) = fields.len().checked_sub(MOXEL_ROOT_TRAILER_FIELDS) else {
+    let Some(end) = moxel_root_table_end(fields) else {
         return Vec::new();
     };
     let mut start = end;
