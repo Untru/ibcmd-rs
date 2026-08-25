@@ -17091,24 +17091,50 @@ fn parse_accumulation_register_attribute_payload(
         metadata_object_field_candidates_around_header(text, marker_start, &child_header.uuid)
             .into_iter()
             .filter_map(|fields| {
-                if fields.len() != 6 || fields.first().map(|field| field.trim()) != Some("4") {
-                    return None;
-                }
-                let indexing = metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
-                let full_text_search = register_child_full_text_search_xml(fields.get(3)?.trim())?;
-                if fields.get(4).map(|field| field.trim()) != Some("0") {
-                    return None;
-                }
-                let data_history = split_1c_braced_fields(fields.get(5)?.trim(), 0)?;
-                if data_history.len() != 2
-                    || data_history.first().map(|field| field.trim()) != Some("1")
-                    || !information_register_uuid_is_zero(&parse_uuid_field(
-                        data_history.get(1)?.trim(),
-                    )?)
-                {
-                    return None;
-                }
-                let common_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+                // The platform writes the full six-member wrapper --
+                // `{4, <body>, <indexing>, <full-text-search>, 0, <data
+                // history>}` -- only when `Indexing`/`FullTextSearch` deviate
+                // from their defaults (`DontIndex`/`Use`); at default it
+                // drops all four trailing members to a bare
+                // `{3, <body>, 0, 1}`. Native XML never writes `DataHistory`
+                // for this family regardless, so the short form loses
+                // nothing the long form's tail actually feeds into
+                // `properties` below. Confirmed via `cf extract` on ERP УХ
+                // 3.2.12.6: 14 short-form attributes across
+                // `AccumulationRegisters/ДанныеМСФО` and
+                // `.../ЗаказыМатериаловВПроизводство` (`DontIndex`/`Use`)
+                // against the long form on
+                // `.../СтруктураОстатковАктивовМСФО` (`Index`/`Use`) and
+                // `.../ЗначенияОперативныхПоказателейРасчетаЗарплатыОрганизаций`
+                // (`DontIndex`/`DontUse`).
+                let (indexing, full_text_search, body_field) =
+                    if fields.len() == 6 && fields.first().map(|field| field.trim()) == Some("4") {
+                        let indexing = metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
+                        let full_text_search =
+                            register_child_full_text_search_xml(fields.get(3)?.trim())?;
+                        if fields.get(4).map(|field| field.trim()) != Some("0") {
+                            return None;
+                        }
+                        let data_history = split_1c_braced_fields(fields.get(5)?.trim(), 0)?;
+                        if data_history.len() != 2
+                            || data_history.first().map(|field| field.trim()) != Some("1")
+                            || !information_register_uuid_is_zero(&parse_uuid_field(
+                                data_history.get(1)?.trim(),
+                            )?)
+                        {
+                            return None;
+                        }
+                        (indexing, full_text_search, fields.get(1)?)
+                    } else if fields.len() == 4
+                        && fields.first().map(|field| field.trim()) == Some("3")
+                        && fields.get(2).map(|field| field.trim()) == Some("0")
+                        && fields.get(3).map(|field| field.trim()) == Some("1")
+                    {
+                        ("DontIndex", "Use", fields.get(1)?)
+                    } else {
+                        return None;
+                    };
+                let common_fields = split_1c_braced_fields(body_field, 0)?;
                 let value_types = parse_register_common_child_value_types(
                     &common_fields,
                     child_header,
