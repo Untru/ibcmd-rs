@@ -72983,3 +72983,163 @@ root's own AutoCommandBar, so losing it emptied that AutoCommandBar's \
 <ChildItems> entirely; block missing or different in:\n{xml}"
     );
 }
+
+/// Evidence: fixture `moxel-ganttchart-remainder`, `field[1]` of each of
+/// native UT 11.5.27.75's two `GanttChart` templates'
+/// `{19,field[1],...,field[32]}` wrapper (`АнализЖурналаРегистрации/
+/// ПродолжительностьРаботыРегламентныхЗаданий` and
+/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта`) -- the `{0,{11},
+/// {74,...}}` triple whose last two members are the exact
+/// `parse_moxel_chart`-compatible payload the plain `Chart` drawing kind
+/// already decodes, re-wrapped here as `<object xsi:type="d3p1:Chart">` (the
+/// two-tab indent `push_moxel_chart_xml` writes) rather than the
+/// three-tab-indented `<d3p1:chart>` the native GanttChart export nests it
+/// under. Both records needed the same five new real fields this wave adds
+/// (`isShowTitle`, `ttlBorder`/`lgBorder`/`chBorder`,
+/// `transparent`, `ttlFont`/`legFont`/`chFont`, `legendScrollEnable`/
+/// `animation`, `elementsIsInit`) plus one new `chartType` code
+/// (`6` = `Column3D`) and a new `elementsIsInit`-gated cache-cluster
+/// treatment in `validate_moxel_chart_v74_front` and
+/// `validate_moxel_chart_v74_post_prefix`/`_rectangle_check` -- see those
+/// functions' doc comments for exactly what each of the two records proved.
+fn assert_platform_proven_moxel_chart_from_gantt_wrapper(
+    raw_payload: &str,
+    native_object_xml: &str,
+) {
+    let rendered = parse_and_render_moxel_chart_for_test(raw_payload)
+        .expect("platform-proven GanttChart-embedded chart payload must decode");
+    assert_eq!(
+        rendered, native_object_xml,
+        "rendered <object xsi:type=\"d3p1:Chart\"> must remain byte-identical to the GanttChart's own native <d3p1:chart> content"
+    );
+}
+
+#[test]
+fn renders_gantt_chart_embedded_chart_with_elements_not_init_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart_from_gantt_wrapper(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-chart-only-payload.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-chart-only-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_gantt_chart_embedded_chart_with_elements_init_to_platform_proven_xml() {
+    assert_platform_proven_moxel_chart_from_gantt_wrapper(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-chart-only-payload.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-chart-only-object.xml"
+        ),
+    );
+}
+
+/// Evidence: fixture `moxel-ganttchart-remainder` -- the whole
+/// `{19,field[1..33)}` wrapper, both of native UT 11.5.27.75's two
+/// `GanttChart` templates (`АнализЖурналаРегистрации/
+/// ПродолжительностьРаботыРегламентныхЗаданий`, the corpus's only
+/// `elementsIsInit == true` GanttChart, and
+/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта`, `elementsIsInit ==
+/// false`). Closes both of УТ 11.5.27.75's last two real remaining diagram
+/// files -- see `docs/evidence/ut-diagram-remainder-20260825.md`.
+fn assert_platform_proven_moxel_gantt_chart(raw_payload: &str, native_object_xml: &str) {
+    let rendered = parse_and_render_moxel_gantt_chart_for_test(raw_payload)
+        .expect("platform-proven GanttChart wrapper payload must decode");
+    assert_eq!(
+        rendered, native_object_xml,
+        "rendered <object xsi:type=\"d3p1:GanttChart\"> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_gantt_chart_with_elements_not_init_to_platform_proven_xml() {
+    assert_platform_proven_moxel_gantt_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-object.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_gantt_chart_with_elements_init_to_platform_proven_xml() {
+    assert_platform_proven_moxel_gantt_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-object-payload.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-object.xml"
+        ),
+    );
+}
+
+/// Evidence: this is the ONE test in this whole wave that goes through
+/// `parse_moxel_drawings`/`push_moxel_drawing_xml` -- the real
+/// `<drawing>...</drawing>` entry point `parse_moxel_spreadsheet_text` calls
+/// -- rather than the isolated `{19,...}` object payload the other GanttChart
+/// tests above exercise directly. It exists because that gap is exactly what
+/// let a real bug through undetected: `parse_moxel_drawing`'s own
+/// `fields[12]` (the raw object slot, as split from the real `<drawing>`
+/// record) carries ONE EXTRA WRAPPING BRACE around the `{19,...}` object for
+/// `GanttChart` (`{ {19,...} }`, a single member with no top-level comma)
+/// that the isolated raw fixtures above -- sliced by hand around the
+/// `{19,...}` marker, not through `parse_moxel_drawing` itself -- never
+/// carried. The isolated tests passed while native UT 11.5.27.75's real
+/// `1cv8.cf` still produced zero `<drawing>` elements for both GanttChart
+/// templates (`ut` gate stayed at `exact=50456`, the pre-wave count,
+/// unchanged, on the first attempt this wave) until this was found by
+/// decoding the real `1cv8.cf` through the full pipeline and observing
+/// `parse_moxel_drawing` return `None` where the isolated test returned
+/// `Some`. Fixtures here are `field[25]`/`field[24]` of the two GanttChart
+/// templates' own whole spreadsheet-document root field lists (extracted via
+/// `ibcmd-rs cf extract 1cv8.cf <template-uuid>.0`, then split on the
+/// document's root fields and picked out by containing the GanttChart type
+/// uuid `e5fdc112-...` -- NOT re-sliced by hand the way the object-only
+/// fixtures above were), and the native `<drawing>...</drawing>` block
+/// (not just its `<object>` child) `ut`'s own `cf export` confirms is
+/// byte-identical against these two files
+/// (`docs/evidence/ut-diagram-remainder-20260825.md`).
+fn assert_platform_proven_moxel_gantt_drawing(raw_drawing_field: &str, native_drawing_xml: &str) {
+    let drawings = parse_moxel_drawings(&[raw_drawing_field]);
+    assert_eq!(
+        drawings.len(),
+        1,
+        "the real, wrapped GanttChart drawing field must decode through parse_moxel_drawings"
+    );
+    let mut xml = String::new();
+    push_moxel_drawing_xml(&mut xml, &drawings[0], &BTreeMap::new());
+    assert_eq!(
+        xml, native_drawing_xml,
+        "rendered <drawing>...</drawing> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_gantt_chart_drawing_with_elements_not_init_from_real_wrapped_field() {
+    assert_platform_proven_moxel_gantt_drawing(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-full-drawing-field.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-drawing.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_gantt_chart_drawing_with_elements_init_from_real_wrapped_field() {
+    assert_platform_proven_moxel_gantt_drawing(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-full-drawing-field.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-drawing.xml"
+        ),
+    );
+}
