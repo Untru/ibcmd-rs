@@ -7,6 +7,44 @@ class one level deeper -- in the property-bag blocks *inside* an item record.
 Measured at `2ccd98f` + this branch's four revisions, against
 `$D/baselines/2ccd98f/` (`uh` `exact=130419`, `BROKEN=0`, `gained=45`).
 
+**Update -- the field block shipped (`6ed3d4e`); the group block did not, and
+this document's claim about it was wrong.** The section below says both blocks
+are "pure tail truncations of their canonical form". For the `InputField` bag
+that is true in meaning as well as in shape, and it now ships. For the
+`UsualGroup` bag it is true only in *shape*: the `28` bag's `Behavior` sits at
+slots 10 and 24, not at the `29` bag's slot 28, so normalizing it to `29`
+reads the wrong slots. The codebase already knew this and already reads the
+compact bag through dedicated readers
+(`parse_form_usual_group_property_bag_behavior`'s compact sibling), with real
+ERP УХ bytes behind them; my normalization broke
+`extracts_compact_usual_group_collapsible_behavior` and
+`extracts_compact_usual_group_horizontal_and_show_title_false`, which is how
+the error surfaced. Those tests were right and the change was wrong; the
+group half was dropped.
+
+**The correction that matters beyond this document:** a matching slot *shape*
+(`b`/`q`/`s` per member) is necessary evidence for a truncation and is not
+sufficient. Every short revision in the sibling map
+(`uh-form-item-tree-revision-map-20260825.md`) was additionally confirmed by
+its own byte-level reading, and that is what earns the claim -- not the shape
+comparison on its own. For this fix the confirmation is
+`Reports/РегламентированныйОтчетСтатистикаФорма1Т/Forms/ОсновнаяФорма`'s
+`InputField` `ПолеРедакцияФормы` id 44, whose eight boolean options come out
+of the short bag exactly as native ibcmd writes them, two of them `true`.
+
+Gate against `$D/baselines/999565e/`: `uh` `130419 -> 130514` (`gained=95`,
+`BROKEN=0`), the other six corpora byte-for-byte unchanged. `BROKEN=0` is
+substantive here rather than merely reassuring: 145 already-byte-exact forms
+carry a `32` bag, and a wrong slot mapping would have broken them by emitting
+properties native omits.
+
+Still open in this family, each needing its own reading rather than a shape
+argument: the `UsualGroup` `28` bag's remaining properties (`Representation`
+among them, which `parse_form_usual_group_extended_options` supplies only for
+`29`), `Page`'s `17`/18 bag against its canonical `18`/20 (73 records, and its
+`len - lead` is not constant, so it is a different shape rather than a
+truncation), and `Pages`' `3`/5 against `4`/6 (25 records).
+
 **Answer up front.** All 33 are explained, and by one construction. An item
 record carries its properties in a nested block whose own leading member is,
 again, that block's declared length -- and the readers again whitelist the
