@@ -10,6 +10,18 @@ project normally reads from `$S` was wiped twice by host `/tmp` cleanup
 during this pass and has since moved to `/Users/untru/Documents/ChatGPT/
 ibcmd-stand`, referenced below as `$D`).
 
+**Update, second UH pass (`cce7b1c`):** the plain-text module-body gap this
+map's "What is still open" flagged as evidenced-but-reverted is now fixed --
+see `plain-text-module-body-lead-20260825.md`'s "The fix that shipped"
+section. `uh` missing: 1,513 -> 1,363 (`BROKEN=0` on all seven gate corpora,
+exact-set diff against `$D/base789`). By family: `CommonModules` fully
+closed (73 -> 0), `Documents` -44, `Catalogs` -19, `DataProcessors` -5,
+`InformationRegisters` -4, `Constants` -2, `ChartsOfCharacteristicTypes` -2,
+`Ext` -1. The rest of this document (counts, tables, "What is still open")
+is preserved as originally measured, i.e. still describes the 1,513-file
+state from before this fix; treat every count below as pre-`cce7b1c` unless
+this note says otherwise.
+
 ## Method
 
 For each of the 1,977 (then 1,594) missing native paths, resolve its root
@@ -167,13 +179,14 @@ module-body gap). The opaque bucket overall: 450/416 -> 362/329.
   different functions turning out to share one root cause in this pass is
   a reason to check for a third, not a license to assume every remaining
   family does too.
-- The plain-text module-body gap (`plain-text-module-body-lead-20260825.md`):
-  evidenced, one fix attempt reverted after it regressed `sslbase`/`ssl`
-  (spurious `Bots/.../Ext/Module.bsl` files from a `module_text_paths`
-  collision the permissive content check exposed). Needs either the
-  collision fixed at its source or a materially tighter content
-  discriminator, verified against all seven gate corpora, not just the
-  ones the fix targets.
+- ~~The plain-text module-body gap~~ -- **fixed in `cce7b1c`**, see the
+  update note at the top of this document and
+  `plain-text-module-body-lead-20260825.md`'s "The fix that shipped". Closed
+  via the tighter-content-discriminator option, verified `BROKEN=0` on all
+  seven gate corpora including `sslbase`/`ssl` (the two the reverted attempt
+  broke). The `module_text_paths` collision itself (option 1, the more
+  correct fix) is still open -- it lives in form-classification territory,
+  not touched here.
 - The `OpaqueDcsFormAttributesConditionalAppearance` reason variants (497 +
   102 + 59 + 34 + 20 = 712 files after both fixes, essentially unchanged by
   this pass -- the +2/+1 root drift on the largest variant is objects whose
