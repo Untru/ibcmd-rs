@@ -73609,3 +73609,149 @@ fn renders_gantt_chart_drawing_with_elements_init_from_real_wrapped_field() {
         ),
     );
 }
+
+/// The `InputField` extended-options block under its short revision `32`.
+///
+/// A property bag is the same construction as an item record one level in: its
+/// own leading member is its declared length, so it gains trailing properties
+/// across schema revisions and a reader keyed on the leading member goes blind
+/// on the older shape. Over every field-class record of the six gate corpora
+/// that have forms this block is `36` at 66 members (105 917) or `32` at 62
+/// (4 720, ERP УХ plus three in MDM_Management) and never anything else; a
+/// record carries one or the other or none, never both, so admitting `32`
+/// cannot change which block the reader's scan settles on.
+///
+/// Shape alone would not license this. The sibling `UsualGroup` bag is also a
+/// clean prefix of its canonical form and is nonetheless *not* a truncation
+/// semantically -- its `Behavior` sits at slots 10/24 rather than slot 28, as
+/// `extracts_compact_usual_group_collapsible_behavior` proves on real bytes.
+/// So this test checks meaning, not shape: the eight boolean options below are
+/// exactly what native ibcmd writes for this item, two of them `true`, and
+/// they only come out right if the short bag's slots carry the same properties
+/// as the canonical bag's.
+///
+/// Provenance: ERP УХ 3.2.12.6,
+/// `Reports/РегламентированныйОтчетСтатистикаФорма1Т/Forms/ОсновнаяФорма`,
+/// `InputField` `ПолеРедакцияФормы` id 44 (a field record itself written under
+/// the short `34` revision, 56 members, whose options bag is `32` at 62).
+#[test]
+fn short_input_field_options_revision_reads_its_properties() {
+    const FIELD_WITH_SHORT_OPTIONS: &str = r#"{34,
+{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"ПолеРедакцияФормы",0,0,
+{1,2,
+{"ru","Редакция Формы"},
+{"en","Редакция Формы"}
+},
+{1,0},
+{1,
+{19}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{32,
+{3,0},0,0,2,2,1,0,2,0,2,2,0,0,2,2,
+{"U"},
+{"U"},"",1,
+{4,0,
+{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,
+{5004,0},
+{0,0},2,
+{1,0},
+{1,0},2,1,0,
+{"Pattern"},1,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},0,
+{3,0,0},0,
+{1,0},2,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0},
+{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ПолеРедакцияФормыПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,
+{22,
+{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПолеРедакцияФормыКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{11,
+{46,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПолеРедакцияФормыРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},3,3,0}"#;
+
+    let item = parse_form_child_item(
+        FIELD_WITH_SHORT_OPTIONS,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("a field record under the short revision must be readable");
+    assert_eq!(item.tag, "InputField");
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    for expected in [
+        "<AutoMaxWidth>false</AutoMaxWidth>",
+        "<PasswordMode>false</PasswordMode>",
+        "<ExtendedEdit>false</ExtendedEdit>",
+        "<DropListButton>true</DropListButton>",
+        "<ChoiceButton>false</ChoiceButton>",
+        "<ClearButton>false</ClearButton>",
+        "<ListChoiceMode>true</ListChoiceMode>",
+        "<TextEdit>false</TextEdit>",
+    ] {
+        assert!(xml.contains(expected), "missing {expected} in {xml}");
+    }
+}

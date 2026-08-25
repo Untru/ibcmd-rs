@@ -13587,7 +13587,8 @@ pub(super) fn form_input_field_layout_is_extended(fields: &[&str]) -> bool {
 pub(super) fn form_input_field_extended_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'a str>> {
     fields.iter().skip(39).find_map(|field| {
         let options = split_1c_braced_fields(field.trim(), 0)?;
-        matches!(options.first().copied(), Some("36" | "38")).then_some(options)
+        let options = normalize_form_property_bag_revision(&options).unwrap_or(options);
+        matches!(options.first().map(|field| field.trim()), Some("36" | "38")).then_some(options)
     })
 }
 
@@ -16486,6 +16487,52 @@ fn form_item_record_canonical_revision(
         "30" if matches!(field_count, 51 | 52) => Some(("31", 1)),
         _ => None,
     }
+}
+
+/// Canonical revision of a *property-bag* block whose leading member declares
+/// a shorter one, and how many trailing members that shorter revision drops.
+///
+/// The same construction as `form_item_record_canonical_revision`, one level
+/// in: an item record keeps its properties in a nested block whose own leading
+/// member is that block's declared length, so a block gains trailing
+/// properties across schema revisions exactly as the records do, and the
+/// readers that address it by leading member go blind on the older shape.
+///
+/// Two are evidenced. Over every field-class record of all six gate corpora
+/// that have forms, the `InputField` extended-options block occurs as `36` at
+/// 66 members (105 917 records) or as `32` at 62 (4 720, ERP УХ and three in
+/// MDM_Management) and never as anything else; a record carries exactly one of
+/// them or none, never both, so admitting `32` cannot change which block the
+/// reader's scan settles on. The `32` shape reproduces the `36` shape for all
+/// 62 of its members, with `36` adding four (`{...},s,{...},s`). The
+/// `UsualGroup` extended-options block is `29` at 29 members (97 347) or `28`
+/// at 28 (765), one slot shape each, the short one the long one minus its
+/// final scalar. `len - lead` is 30 for both field shapes and 0 for both group
+/// shapes -- the leading member is the declared length, literally.
+///
+/// Not admitted here, for want of their own pass: `Page`'s options block at
+/// `17`/18 against its canonical `18`/20 (73 records -- and unlike every other
+/// pair in this family its `len - lead` is *not* constant, so it is a
+/// different shape, not a truncation), and `Pages`' `3`/5 against `4`/6 (25).
+fn form_property_bag_canonical_revision(lead: &str, len: usize) -> Option<(&'static str, usize)> {
+    match lead {
+        "32" if len == 62 => Some(("36", 4)),
+        _ => None,
+    }
+}
+
+/// Rewrite a short property-bag revision into its canonical one, or `None`
+/// when the block already declares the canonical revision.
+fn normalize_form_property_bag_revision<'a>(options: &[&'a str]) -> Option<Vec<&'a str>> {
+    let lead = options.first()?.trim();
+    let (canonical, dropped_trailing) = form_property_bag_canonical_revision(lead, options.len())?;
+    let mut normalized = Vec::with_capacity(options.len() + dropped_trailing);
+    normalized.push(canonical);
+    normalized.extend(options[1..].iter().copied());
+    for _ in 0..dropped_trailing {
+        normalized.push(FORM_ITEM_ABSENT_MEMBER);
+    }
+    Some(normalized)
 }
 
 /// Rewrite a short item-record revision into its canonical one, or `None` when
