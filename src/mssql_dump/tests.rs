@@ -42201,6 +42201,49 @@ fn extracts_common_module_xml_from_metadata_blob() {
 }
 
 #[test]
+fn extracts_common_module_xml_from_metadata_blob_with_short_header_wrapper() {
+    // Real shape (ERP УХ 3.2.12.6, `CommonModules/АккредитацияПоставщиковВызовСервераУХ`,
+    // uuid `8a6b88a6-b0d9-4bb8-a331-b6837bba4eeb`): the header-wrapper is
+    // opened by `{2,` with a single-language synonym and no trailing `0`,
+    // not the `{3,` / dual-language / trailing-`0` shape the test above
+    // covers. `parse_common_module_flags_from_text` used to locate this
+    // wrapper via a literal `rfind("{3,")`, which never matches here and
+    // silently dropped the whole module (232 such CommonModules on the
+    // full ERP УХ corpus).
+    let uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+    let template = "\u{feff}{1,\r\n{12,\r\n{2,\r\n{1,0,UUID},\"SalesModule\",\r\n{1,\"ru\",\"Модуль продаж\"},\"\",0,0,00000000-0000-0000-0000-000000000000},1,1,1,0,0,0,0,1}\r\n,0}";
+    let blob = deflate_for_test(template.replace("UUID", uuid).as_bytes());
+
+    let extracted = extract_metadata_source_xml(
+        &blob,
+        uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let properties = parse_common_module_xml_properties(&extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("CommonModules").join("SalesModule.xml")
+    );
+    assert_eq!(properties.uuid, uuid);
+    assert_eq!(properties.name, "SalesModule");
+    assert_eq!(properties.comment, "");
+    assert_eq!(properties.synonyms[0].content, "Модуль продаж");
+    assert_eq!(properties.synonyms.len(), 1);
+    assert!(properties.client_ordinary_application);
+    assert!(properties.server);
+    assert!(properties.external_connection);
+    assert!(!properties.privileged);
+    assert!(!properties.global);
+    assert!(!properties.client_managed_application);
+    assert!(properties.server_call);
+    assert_eq!(properties.return_values_reuse, ReturnValuesReuse::DontUse);
+}
+
+#[test]
 fn legacy_source_asset_bridge_normalizes_root_version_without_claiming_migration() {
     let v21 = MssqlLegacyAdapter::from_legacy_selector(InfobaseConfigSourceVersion::V2_21);
     assert_eq!(
@@ -55361,6 +55404,34 @@ fn rejects_malformed_exact_code56_description_length_atomically() {
             catalog_default_presentation_fixture("56", 61, malformed, "MalformedDescriptionLength");
         assert!(fixture.extract().is_none(), "accepted slot 19: {malformed}");
     }
+}
+
+#[test]
+fn accepts_short_owner_header_without_trailing_default_or_second_language() {
+    // Real shape (ERP УХ 3.2.12.6, `Catalogs/АлгоритмыОпределенияБазовойДаты`,
+    // uuid `0b69b382-479d-4709-bd5d-bc499e5b3bf5`): slot 9's owner-header
+    // wrapper is opened by `{2,` with a single-language synonym and no
+    // trailing default `0`, not the `{3,`/dual-language/trailing-`0` shape
+    // `catalog_default_presentation_fixture` (and every owner-graph fixture
+    // in this file) builds. `parse_information_register_owner_header` used
+    // to hardcode `fields.len() != 9` and discriminator `"3"`, silently
+    // dropping every object whose owner header took this shorter, equally
+    // legitimate form -- shared infrastructure at 19 call sites across the
+    // owner-graph system (Catalog, Document, BusinessProcess,
+    // ChartOfCharacteristicTypes, InformationRegister, ExchangePlan, ...).
+    let mut fixture = catalog_default_presentation_fixture("56", 61, "0", "ShortOwnerHeader");
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let owner_uuid = fixture.owner_uuid.clone();
+    fixture.fields[9] = format!(
+        "{{0,{{2,{{1,0,{owner_uuid}}},\"ShortOwnerHeader\",{{1,\"ru\",\"Short owner header\"}},\"\",0,0,{zero}}}}}"
+    );
+
+    let source = fixture
+        .extract()
+        .expect("short (8-member, no trailing default) owner header must still parse");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert!(xml.contains("<Name>ShortOwnerHeader</Name>"), "{xml}");
+    assert!(xml.contains("Short owner header"), "{xml}");
 }
 
 #[test]
