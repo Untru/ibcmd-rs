@@ -1191,6 +1191,19 @@ pub(super) struct FormChildItem {
     pub(super) usual_group_enabled: Option<bool>,
     pub(super) enable_content_change: Option<bool>,
     pub(super) child_items_width: Option<&'static str>,
+    /// The enclosing `Page`'s own `child_items_width`, not this item's own.
+    /// Evidence: native UT 11.5.27.75's
+    /// `DataProcessors/ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`, a
+    /// `GraphicalSchemaField` inside a `Page` whose own `Group` is
+    /// `Horizontal` and `ChildItemsWidth` is `LeftWidest` -- the platform
+    /// publishes neither `Width` nor `Height` for the field, even though the
+    /// raw options tuple still carries the same nonzero width/height numbers
+    /// a non-nested field of the same shape (native UT/SSL
+    /// `DataProcessors/КартаМаршрутаБизнесПроцесса`) publishes verbatim.
+    /// Reproduced synthetically by seed `gsf4`. `Edit` does *not* follow the
+    /// same rule -- see the comment on its own branch in
+    /// `format_form_child_item_xml`.
+    pub(super) parent_child_items_width: Option<&'static str>,
     pub(super) control_representation: Option<&'static str>,
     pub(super) collapsed: Option<bool>,
     pub(super) usual_group_collapsed_representation_title: Vec<(String, String)>,
@@ -2849,6 +2862,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
             &BTreeMap::new(),
             &BTreeSet::new(),
             object_refs,
+            None,
         )
         .unwrap_or_default(),
     })
@@ -7299,6 +7313,7 @@ pub(super) fn extract_form_child_items(
         type_index,
         type_index_collisions,
         object_refs,
+        None,
     )
     .unwrap_or_default();
     apply_form_table_user_settings_groups(&mut items, &indexes.user_settings_group_by_table_id);
@@ -8855,6 +8870,7 @@ pub(super) fn parse_form_child_item_pairs(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
+    parent_child_items_width: Option<&'static str>,
 ) -> Option<Vec<FormChildItem>> {
     let mut best = Vec::new();
     for index in 0..fields.len() {
@@ -8897,6 +8913,7 @@ pub(super) fn parse_form_child_item_pairs(
                 type_index,
                 type_index_collisions,
                 object_refs,
+                parent_child_items_width,
             ) {
                 items.push(item);
             }
@@ -9076,6 +9093,7 @@ pub(super) fn parse_form_child_item_with_attrs(
         &BTreeMap::new(),
         &BTreeSet::new(),
         object_refs,
+        None,
     )
 }
 
@@ -9116,6 +9134,7 @@ pub(super) fn parse_form_child_item_with_context(
         &BTreeMap::new(),
         &BTreeSet::new(),
         object_refs,
+        None,
     )
 }
 
@@ -9168,6 +9187,7 @@ fn parse_form_child_item_with_metadata_owners(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
+    parent_child_items_width: Option<&'static str>,
 ) -> Option<FormChildItem> {
     let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
     let wrapper = raw_fields.first()?.trim();
@@ -9565,6 +9585,15 @@ fn parse_form_child_item_with_metadata_owners(
         })
         .flatten()
         .and_then(|options| FormPopupColorSchema::from_raw_layout(wrapper, tag, &options));
+    // Only `Page`'s own `child_items_width` (via `page_properties`) is
+    // proven to suppress a child `GraphicalSchemaField`'s `Width`/`Height`
+    // (seed `gsf4`, native UT `ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`).
+    // `UsualGroup`'s `extended_group_options` isn't available this early in
+    // the function and untested for the same effect, so it deliberately
+    // isn't folded in here the way the item's own `child_items_width` field
+    // (below) combines both sources.
+    let child_items_width_for_children =
+        page_properties.and_then(|properties| properties.child_items_width());
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
@@ -9585,6 +9614,7 @@ fn parse_form_child_item_with_metadata_owners(
         type_index,
         type_index_collisions,
         object_refs,
+        child_items_width_for_children,
     )
     .unwrap_or_default();
     if tag == "Table" {
@@ -9916,6 +9946,7 @@ fn parse_form_child_item_with_metadata_owners(
                     .as_ref()
                     .and_then(|options| options.child_items_width)
             }),
+        parent_child_items_width,
         control_representation: extended_group_options
             .as_ref()
             .and_then(|options| options.control_representation),
@@ -12098,6 +12129,10 @@ pub(super) fn append_form_child_items_by_tag(
             type_index,
             type_index_collisions,
             object_refs,
+            // `ContextMenu`/`AutoCommandBar`/search-addition items, never a
+            // `GraphicalSchemaField`: no parent `ChildItemsWidth` observation
+            // applies here.
+            None,
         ) else {
             continue;
         };
@@ -12166,6 +12201,10 @@ pub(super) fn parse_form_text_document_context_menu(
             type_index,
             type_index_collisions,
             object_refs,
+            // A text-document context menu item, never a
+            // `GraphicalSchemaField`: no parent `ChildItemsWidth`
+            // observation applies here.
+            None,
         )
         .filter(|item| form_text_document_context_menu_child_is_valid(&item.tag))
     })? {
@@ -23539,6 +23578,20 @@ pub(super) fn format_form_child_item_xml(
         item,
         indent + 1,
     ));
+    // A `GraphicalSchemaField` inside a `Page` whose own `ChildItemsWidth` is
+    // `LeftWidest` publishes neither `Width`, `Height` nor `Edit`: the parent
+    // page's width-distribution mode manages the field's effective size, so
+    // the platform treats explicit geometry as moot even though the raw
+    // options tuple still stores the same nonzero width/height numbers a
+    // non-nested field of the same shape publishes verbatim. Evidence: seed
+    // `gsf4` (synthetic, same nesting) and native UT 11.5.27.75's own
+    // `DataProcessors/ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`, both
+    // against the non-nested, non-suppressed native UT/SSL
+    // `DataProcessors/КартаМаршрутаБизнесПроцесса` counter-example. Only
+    // `LeftWidest` is proven; any other or absent `ChildItemsWidth` leaves
+    // geometry untouched.
+    let graphical_schema_field_geometry_suppressed_by_parent_page =
+        item.tag == "GraphicalSchemaField" && item.parent_child_items_width == Some("LeftWidest");
     // `Page` and `Popup` write their width behind the title block, with the rest
     // of their geometry (see the page order table and the popup run below).
     if !matches!(
@@ -23551,6 +23604,7 @@ pub(super) fn format_form_child_item_xml(
             | "Page"
             | "Popup"
     ) && !pages_geometry_after_title
+        && !graphical_schema_field_geometry_suppressed_by_parent_page
         && let Some(width) = &item.width
     {
         xml.push_str(&format!(
@@ -23581,6 +23635,7 @@ pub(super) fn format_form_child_item_xml(
         item.tag,
         "Table" | "Button" | "LabelDecoration" | "PictureDecoration" | "CommandBar" | "Page"
     ) && !pages_geometry_after_title
+        && !graphical_schema_field_geometry_suppressed_by_parent_page
         && let Some(height) = &item.height
     {
         xml.push_str(&format!(
@@ -23594,7 +23649,15 @@ pub(super) fn format_form_child_item_xml(
     // 11.5.27.75 and ERP УХ 3.2.12.6 (14 native items, the construct's whole
     // population): the 9 that carry `<ReadOnly>true</ReadOnly>` all also
     // write `<Edit>false</Edit>` right there, and the other 5 -- `ReadOnly`
-    // false or absent -- write neither, with no counter-example.
+    // false or absent -- write neither, with no counter-example. Unlike
+    // `Width`/`Height` above, this holds even when the parent page's
+    // `ChildItemsWidth` is `LeftWidest`: native UT's own
+    // `ИнтеграцияС1СОблачнаяКартаПрикладныхРешений` sits in exactly that
+    // nesting and still publishes `Edit` -- seed `gsf4`'s minimal
+    // reproduction (no `ContextMenu`/`ExtendedTooltip`/`Events`, unlike the
+    // real field) suppressed it too, so whatever differs between the two
+    // is not `ChildItemsWidth`; `Edit` deliberately does not gate on
+    // `graphical_schema_field_geometry_suppressed_by_parent_page`.
     if item.tag == "GraphicalSchemaField" && item.read_only == Some(true) {
         xml.push_str(&format!("{tab}\t<Edit>false</Edit>\r\n"));
     }
