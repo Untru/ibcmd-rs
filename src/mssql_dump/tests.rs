@@ -8171,6 +8171,33 @@ fn extracts_form_scaling_mode_from_root_trailer_declaring_one_optional_block() {
 }
 
 #[test]
+fn extracts_form_auto_url_false_from_root_49_trailer() {
+    // Root `49`'s 24-member trailer declares a count of 1, so `AutoURL`'s base
+    // slot 3 is read at 4 -- the same `base + count` root `50` follows.
+    let form_body = deflate_for_test(
+            r##"{4,{49,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},0,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{49,0}},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
+}
+
+#[test]
+fn extracts_form_show_title_false_from_root_49_trailer() {
+    // Slot 17 holds the constant `100` on every root `49` form on the stand, so
+    // the older length-keyed reading never emitted this property for any of
+    // them; the declared count puts it at 18.
+    let form_body = deflate_for_test(
+            r##"{4,{49,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,0,1,0,0,0,{49,0}},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<ShowTitle>false</ShowTitle>"));
+}
+
+#[test]
 fn does_not_extract_form_auto_url_from_property_bag_layout() {
     let form_body = deflate_for_test(
             r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,0,1,1,0,1,4,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),

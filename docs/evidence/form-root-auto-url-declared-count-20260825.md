@@ -143,13 +143,41 @@ only in `<Shortcut>` (the documented macOS/Windows host dependency --
 `Cmd+T` vs `Ctrl+T`, not a defect), 3 root `49`, and 8 with unrelated
 item-level tags.
 
-## Root `49`: same rule, not yet applied
+## Root `49`: the same rule, applied
 
 Root `49`'s trailer is root `50`'s minus the trailing member: `23 + count`
-members, same `base + count` slots. Over its 1 548 forms (uh 1 543, mdm 5, all
-declaring count 1) the identical value tables hold with zero contradictions,
-and all 1 548 validate at 24 members only -- never 23 or 25. Applying it would
-correct ~48 more files. Also latent there: `extract_form_show_title` reads
-slot 17 on root `49`, which is the constant `100` on all 1 548 forms, so the
-property is silently always dropped; slot 18 separates `0` -> false from
-`1` -> absent exactly.
+members, the same `base + count` slots. Over its 1 548 forms (uh 1 543, mdm 5,
+all declaring count 1) the identical value tables hold with zero
+contradictions, and all 1 548 validate at 24 members only -- never 23 or 25.
+
+Applying it also closed a latent defect in `extract_form_show_title`, which
+keyed its slot off the trailer's length alone (24 -> 17, 25 -> 18). That is
+right for root `50` but wrong for root `49`, whose 24-member trailer declares
+a count of 1 and so keeps the flag at 18. Slot 17 holds the constant `100` on
+all 1 548 root `49` forms, so the property was silently dropped for every one
+of them; slot 18 separates `0` -> false from `1` -> absent with no
+counter-example.
+
+The three trailer searches (`_49_or_50`, the 24-only one, and the root `50`
+24-or-25 one) collapse into a single `form_root_trailer_start`: it tries the
+three arities those shapes take and keeps a candidate only when its declared
+count agrees with its own length, so the count -- not the arity list -- decides
+which reading is real. `FormRootVerticalScrollSchema`'s three special cases
+(`(50,24)` -> 5/15, `(49,24)` and `(49|50,25)` -> 6/16) turn out to be exactly
+`base + count` and collapse with them.
+
+## Final state
+
+`uh` exact 119 049 -> **119 536** (+487, BROKEN = 0) against the `41808c3`
+base. All other keys BROKEN = 0 against their own base-commit state.
+
+Of the 285 uh forms carrying a native `<AutoURL>`, 244 are byte-exact. Of the
+2 294 uh `Form.xml` still differing, only **10** mention any root trailer
+property at all; the largest remaining class is 643 files differing solely in
+`<Shortcut>` -- the documented macOS/Windows host dependency (`Cmd+T` vs
+`Ctrl+T`, see `host-dependent-export-2214-20260823.md`), not defects.
+
+Still open, outside the trailer: 73 files where the
+`MobileDeviceCommandBarContent` block is now emitted but its item contents do
+not yet match, and item-level properties (`Field`, `DataPath`,
+`AdditionSource`, button/command-bar shapes).

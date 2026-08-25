@@ -2079,8 +2079,11 @@ pub(super) fn extract_form_enter_key_behavior(fields: &[&str]) -> Option<&'stati
 /// this same form's trailer also carries (that form's own content tuple
 /// happens to declare zero items here, so it produced no separate diff).
 pub(super) fn extract_form_save_window_settings(fields: &[&str]) -> Option<bool> {
-    let tail_start = form_root_trailer_start_50(fields)?;
-    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    let tail_start = form_root_trailer_start(fields)?;
+    let blocks = form_root_trailer_optional_blocks(
+        fields.first().map(|field| field.trim()),
+        fields.get(tail_start..)?,
+    )?;
     match fields
         .get(tail_start + 23 + blocks)
         .map(|field| field.trim())?
@@ -2100,8 +2103,8 @@ pub(super) fn extract_form_auto_title(fields: &[&str]) -> Option<bool> {
 pub(super) fn extract_form_auto_url(fields: &[&str]) -> Option<bool> {
     let root_discriminator = fields.first().map(|field| field.trim());
     match root_discriminator {
-        Some("50") => {
-            let tail_start = form_root_trailer_start_50(fields)?;
+        Some("49") | Some("50") => {
+            let tail_start = form_root_trailer_start(fields)?;
             FormRootAutoUrlSchema::from_raw_layout(root_discriminator, fields.get(tail_start..)?)?
                 .auto_url()
         }
@@ -2142,8 +2145,8 @@ pub(super) fn extract_form_auto_save_data_in_settings(fields: &[&str]) -> Option
 pub(super) fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
     let root_discriminator = fields.first().map(|field| field.trim());
     match root_discriminator {
-        Some("50") => {
-            let tail_start = form_root_trailer_start_50(fields)?;
+        Some("49") | Some("50") => {
+            let tail_start = form_root_trailer_start(fields)?;
             FormRootGroupSchema::from_raw_layout(
                 root_discriminator,
                 fields.get(11).copied(),
@@ -2438,32 +2441,35 @@ pub(super) fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'sta
 }
 
 pub(super) fn extract_form_vertical_align(fields: &[&str]) -> Option<FormRootVerticalAlign> {
-    let tail_start = form_root_trailer_start_50(fields)?;
+    let tail_start = form_root_trailer_start(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootVerticalAlignSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
         .vertical_align(trailer)
 }
 
 pub(super) fn extract_form_children_align(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_trailer_start_50(fields)?;
+    let tail_start = form_root_trailer_start(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootVerticalAlignSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
         .children_align(trailer)
 }
 
 pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start_49_or_50(fields)?;
+    let tail_start = form_root_trailer_start(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootVerticalScrollSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
-        trailer.len(),
+        trailer,
     )?
     .vertical_scroll(trailer)
 }
 
 pub(super) fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_item_pairs_tail_start(fields)?;
-    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    let tail_start = form_root_trailer_start(fields)?;
+    let blocks = form_root_trailer_optional_blocks(
+        fields.first().map(|field| field.trim()),
+        fields.get(tail_start..)?,
+    )?;
     match fields
         .get(tail_start + 6 + blocks)
         .map(|field| field.trim())?
@@ -2475,8 +2481,11 @@ pub(super) fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str>
 }
 
 pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_trailer_start_50(fields)?;
-    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    let tail_start = form_root_trailer_start(fields)?;
+    let blocks = form_root_trailer_optional_blocks(
+        fields.first().map(|field| field.trim()),
+        fields.get(tail_start..)?,
+    )?;
     match fields
         .get(tail_start + 11 + blocks)
         .map(|field| field.trim())?
@@ -2489,13 +2498,13 @@ pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static 
 }
 
 pub(super) fn extract_form_horizontal_spacing(fields: &[&str]) -> Option<&'static str> {
-    let trailer = fields.get(form_root_trailer_start_50(fields)?..)?;
+    let trailer = fields.get(form_root_trailer_start(fields)?..)?;
     FormRootGroupingSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
         .horizontal_spacing(trailer)
 }
 
 pub(super) fn extract_form_vertical_spacing(fields: &[&str]) -> Option<&'static str> {
-    let trailer = fields.get(form_root_trailer_start_50(fields)?..)?;
+    let trailer = fields.get(form_root_trailer_start(fields)?..)?;
     FormRootGroupingSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
         .vertical_spacing(trailer)
 }
@@ -2503,7 +2512,7 @@ pub(super) fn extract_form_vertical_spacing(fields: &[&str]) -> Option<&'static 
 pub(super) fn extract_form_collapse_items_by_importance_variant(
     fields: &[&str],
 ) -> Option<&'static str> {
-    let trailer = fields.get(form_root_trailer_start_50(fields)?..)?;
+    let trailer = fields.get(form_root_trailer_start(fields)?..)?;
     FormRootGroupingSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
         .collapse_items_by_importance_variant(trailer)
 }
@@ -2513,7 +2522,7 @@ pub(super) fn extract_form_child_items_width(fields: &[&str]) -> Option<&'static
 }
 
 pub(super) fn extract_form_conversations_representation(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_trailer_start_50(fields)?;
+    let tail_start = form_root_trailer_start(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootConversationsRepresentationSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
@@ -2536,30 +2545,34 @@ pub(super) fn extract_form_custom_settings_folder(
 }
 
 pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
-    // Same 24-vs-25-member trailer split `FormRootVerticalScrollSchema`
-    // documents: ERP УХ MDM_Management's `CommonForms/ФормаИзмененияРеквизитовНСИ`
-    // roots at `50` with the 25-member trailer (`form_root_child_items_tail_start_49_or_50`),
-    // one slot further out than the 24-member shape's own slot 17, and reads
-    // `0` there for the corpus's only root-level `<ShowTitle>false</ShowTitle>`.
-    // Neither MDM_Management dynamic-list form (24-member trailer, root
-    // `49`) carries a root `<ShowTitle>` at all, and both read something
-    // other than `0` at slot 17, so admitting root `49` here does not turn
-    // up a false positive on the samples available.
-    let tail_start = form_root_child_items_tail_start_49_or_50(fields)?;
-    let slot = match fields.len().checked_sub(tail_start)? {
-        24 => 17,
-        25 => 18,
-        _ => return None,
-    };
-    match fields.get(tail_start + slot).map(|field| field.trim())? {
+    // Base slot 17 plus the trailer's declared optional-block count, the same
+    // rule every other root trailer property follows. The previous reading
+    // keyed the slot off the trailer's length alone -- 24 -> 17, 25 -> 18 --
+    // which is right for root `50` but silently wrong for root `49`, whose
+    // 24-member trailer declares a count of 1 and so keeps the flag at 18.
+    // Slot 17 holds the constant `100` on all 1 548 root `49` forms on the
+    // stand, so the property was never emitted for any of them; slot 18
+    // separates `0` -> false from `1` -> absent with no counter-example.
+    let tail_start = form_root_trailer_start(fields)?;
+    let blocks = form_root_trailer_optional_blocks(
+        fields.first().map(|field| field.trim()),
+        fields.get(tail_start..)?,
+    )?;
+    match fields
+        .get(tail_start + 17 + blocks)
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         _ => None,
     }
 }
 
 pub(super) fn extract_form_show_close_button(fields: &[&str]) -> Option<bool> {
-    let tail_start = form_root_trailer_start_50(fields)?;
-    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    let tail_start = form_root_trailer_start(fields)?;
+    let blocks = form_root_trailer_optional_blocks(
+        fields.first().map(|field| field.trim()),
+        fields.get(tail_start..)?,
+    )?;
     match fields
         .get(tail_start + 18 + blocks)
         .map(|field| field.trim())?
@@ -2573,7 +2586,7 @@ pub(super) fn extract_form_mobile_device_command_bar_content(
     fields: &[&str],
     item_name_by_id: &BTreeMap<String, String>,
 ) -> Vec<String> {
-    let Some(tail_start) = form_root_trailer_start_50(fields) else {
+    let Some(tail_start) = form_root_trailer_start(fields) else {
         return Vec::new();
     };
     let Some(trailer) = fields.get(tail_start..) else {
@@ -8993,61 +9006,39 @@ pub(super) fn parse_form_child_item_count(value: &str) -> Option<usize> {
     (1..=200).contains(&count).then_some(count)
 }
 
-/// Same trailer search as `form_root_child_items_tail_start`, but admitting
-/// the 25-member root `50` trailer alongside the classic 24-member one.
+/// Start of the form root's trailer, for both root discriminators.
 ///
-/// The root `50` trailer declares, in its own member 2, how many optional
-/// blocks it carries: БСП, БСП демо, УТ and WMS all declare `0` and end in the
-/// classic 24-member shape, while ERP УХ and its MDM_Management declare `1`
-/// and carry one further `{22,...}` block, for 25. Over all 18 634 root `50`
-/// forms on the stand that declared count equals `trailer.len() - 24` without
-/// exception, and no form validates a trailer at both lengths, so the search
-/// stays unambiguous and `FormRootAutoUrlSchema::from_raw_layout` re-checks
-/// the count against the length it was handed before reading anything.
-///
-/// This is a *separate* entry point rather than a broadened gate on the shared
-/// function above for the reason spelled out on
-/// `form_root_child_items_tail_start_49_or_50`: most callers of the shared
-/// function read a fixed trailer slot directly, counted from the start of the
-/// trailer, with no re-check of their own. Admitting the 25-member trailer
-/// there would shift every one of those reads by one member on ERP УХ at once.
-/// Only callers that have separately established what their own slot means in
-/// the 25-member trailer -- so far: `FormRootAutoUrlSchema`, which derives its
-/// slot from the declared count rather than assuming a fixed one -- should
-/// call this one.
-pub(super) fn form_root_trailer_start_50(fields: &[&str]) -> Option<usize> {
-    form_root_child_items_tail_start_for(fields, &["50"], &[24, 25])
-}
+/// The trailer runs to `23 + count` members on root `49` and `24 + count` on
+/// root `50`, where `count` is the optional-block count the trailer declares
+/// in its own member 2 (see `form_root_trailer_optional_blocks`). Only the
+/// three arities those shapes actually take on the stand are tried, and a
+/// candidate is kept only when its declared count agrees with its own length,
+/// so the count -- not the arity list -- decides which reading is real. Two
+/// candidates surviving that check would be ambiguous and refuse rather than
+/// guess; over all 20 182 form roots the export walks none ever does.
+pub(super) fn form_root_trailer_start(fields: &[&str]) -> Option<usize> {
+    const CANDIDATE_TRAILER_FIELD_COUNTS: [usize; 3] = [23, 24, 25];
 
-/// Same trailer search as `form_root_child_items_tail_start`, but also
-/// admitting root discriminator `49` (ERP УХ MDM_Management's own form root,
-/// alongside UT/БСП's `50`) and a 25-member trailer alongside the classic
-/// 24-member one.
-///
-/// This is a *separate* entry point rather than a broadened gate on the
-/// shared function above on purpose: `form_root_child_items_tail_start` has
-/// over a dozen callers, and most read a fixed trailer slot directly with no
-/// per-property discriminator re-check of their own (e.g.
-/// `extract_form_horizontal_align`'s `tail_start + 11`). Admitting `49`
-/// there activated every one of them for `49`-rooted forms at once, and
-/// `Catalogs/СправочникиБД/Forms/ФормаСписка` -- a form whose native output
-/// has no `<HorizontalAlign>` -- promptly grew a wrong
-/// `<HorizontalAlign>Left</HorizontalAlign>` from trailer slot 11 reading
-/// `0`. Only callers that have separately verified their own slot meaning
-/// for root `49` and for the 25-member trailer (so far:
-/// `FormRootVerticalScrollSchema`) should call this one instead.
-///
-/// The 25-member trailer itself: ERP УХ MDM_Management's dynamic-list forms
-/// (root `49`) end in exactly the same 24-member trailer
-/// `form_root_child_items_tail_start` already finds for root `50`, but its
-/// *item* and *common* forms (root `49` or `50` -- `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
-/// and `CommonForms/ФормаИзмененияРеквизитовНСИ`) carry one further trailing
-/// member after that same 24-shape. Trying 24 then 25 and keeping whichever
-/// alone validates is unambiguous on all four forms checked: the 24-member
-/// search validates only for the two dynamic-list forms and the 25-member
-/// one only for the two item/common forms, never both.
-pub(super) fn form_root_child_items_tail_start_49_or_50(fields: &[&str]) -> Option<usize> {
-    form_root_child_items_tail_start_for(fields, &["49", "50"], &[24, 25])
+    let root_discriminator = fields.first().map(|field| field.trim());
+    if !matches!(root_discriminator, Some("49") | Some("50")) {
+        return None;
+    }
+    let mut matched = None;
+    for trailer_fields in CANDIDATE_TRAILER_FIELD_COUNTS {
+        let Some(tail_start) = form_root_child_items_tail_start_at(fields, trailer_fields) else {
+            continue;
+        };
+        let Some(trailer) = fields.get(tail_start..) else {
+            continue;
+        };
+        if form_root_trailer_optional_blocks(root_discriminator, trailer).is_none() {
+            continue;
+        }
+        if matched.replace(tail_start).is_some() {
+            return None;
+        }
+    }
+    matched
 }
 
 fn form_root_child_items_tail_start_for(
@@ -9111,10 +9102,6 @@ fn form_root_child_items_tail_start_at(
         }
     }
     matched_tail
-}
-
-pub(super) fn form_root_child_item_pairs_tail_start(fields: &[&str]) -> Option<usize> {
-    form_root_trailer_start_50(fields)
 }
 
 #[cfg(test)]

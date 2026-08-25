@@ -5286,6 +5286,13 @@ impl FormRootCustomSettingsFolderSchema {
 /// two disagree is refused outright, and every reader that adds this offset to
 /// its own base slot is then reading a position the blob itself declared.
 ///
+/// Root `49` shares the layout exactly, minus root `50`'s one trailing member,
+/// so its trailer runs to `23 + count` and its slots are the same `base +
+/// count`. Its 1 548 forms (ERP УХ 1 543, MDM_Management 5) all declare a
+/// count of `1`, all validate at 24 members and never at 23 or 25, and
+/// reproduce root `50`'s value tables property for property with no
+/// contradiction.
+///
 /// The block the count introduces is the form root's built-in
 /// Navigator/quick-search child item, which is why the shift was first
 /// described as a "Navigator gap". Every per-property confirmation gathered
@@ -5304,16 +5311,23 @@ impl FormRootCustomSettingsFolderSchema {
 /// `extract_form_show_title` (slot 17 -> 18) each arrived at the same
 /// one-member offset independently, from ERP УХ MDM_Management, before the
 /// count behind it was identified.
-pub(crate) fn form_root_trailer_optional_blocks(trailer: &[&str]) -> Option<usize> {
-    const BASE_TRAILER_FIELDS: usize = 24;
+pub(crate) fn form_root_trailer_optional_blocks(
+    root_discriminator: Option<&str>,
+    trailer: &[&str],
+) -> Option<usize> {
     const OPTIONAL_BLOCK_COUNT_SLOT: usize = 2;
 
+    let base_trailer_fields = match root_discriminator {
+        Some("50") => 24usize,
+        Some("49") => 23,
+        _ => return None,
+    };
     let declared = trailer
         .get(OPTIONAL_BLOCK_COUNT_SLOT)?
         .trim()
         .parse::<usize>()
         .ok()?;
-    (trailer.len() == BASE_TRAILER_FIELDS.checked_add(declared)?).then_some(declared)
+    (trailer.len() == base_trailer_fields.checked_add(declared)?).then_some(declared)
 }
 
 /// `ConversationsRepresentation` lives in trailer slot 19 of the `50` layout,
@@ -5337,10 +5351,7 @@ impl FormRootConversationsRepresentationSchema {
         root_discriminator: Option<&str>,
         trailer: &[&str],
     ) -> Option<Self> {
-        if root_discriminator != Some("50") {
-            return None;
-        }
-        let blocks = form_root_trailer_optional_blocks(trailer)?;
+        let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         Some(Self {
             trailer_slot: Self::TRAILER_SLOT.checked_add(blocks)?,
         })
@@ -5384,10 +5395,7 @@ impl FormRootGroupingSchema {
         root_discriminator: Option<&str>,
         trailer: &[&str],
     ) -> Option<Self> {
-        if root_discriminator != Some("50") {
-            return None;
-        }
-        let blocks = form_root_trailer_optional_blocks(trailer)?;
+        let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         Some(Self {
             horizontal_spacing_trailer_slot: Self::HORIZONTAL_SPACING_SLOT.checked_add(blocks)?,
             vertical_spacing_trailer_slot: Self::VERTICAL_SPACING_SLOT.checked_add(blocks)?,
@@ -5438,47 +5446,28 @@ pub(crate) struct FormRootVerticalScrollSchema {
 }
 
 impl FormRootVerticalScrollSchema {
-    /// `50`-rooted forms (UT 11.5.27.75) carry the qualifier/mode pair at
-    /// trailer slots 5/15. ERP УХ MDM_Management's forms root at `49`
-    /// instead, and their otherwise byte-identical 24-member trailer carries
-    /// the same pair one slot later, at 6/16: `Catalogs/СправочникиБД/Forms/ФормаСписка`
-    /// (no native `<VerticalScroll>`) and `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаСписка`
-    /// (native `<VerticalScroll>useIfNecessary</VerticalScroll>`) share an
-    /// identical trailer at every one of the other 22 positions and differ
-    /// only at slots 6 and 16 -- `0`/`0` on the first, `2`/`2` on the second --
-    /// exactly where the `50` reader's own slots 5/15 read `2`/`2` for
-    /// `useIfNecessary`. Reading root `49` at the `50` offsets found only the
-    /// empty string both trees carry at slot 5 and dropped the property.
+    /// The qualifier/mode pair sits at trailer slots 5 and 15 plus whatever
+    /// count the trailer declares in its own member 2.
+    ///
+    /// This started as three separate cases -- `(50, 24)` at 5/15, `(49, 24)`
+    /// and `(49|50, 25)` at 6/16 -- each attributed one corpus at a time. They
+    /// are the same rule: root `50` with count 0 runs to 24 members and reads
+    /// 5/15; root `49` with count 1 also runs to 24 (it lacks root `50`'s
+    /// trailing member) and root `50` with count 1 runs to 25, and both read
+    /// 6/16. `form_root_trailer_optional_blocks` recovers the count, so the
+    /// offsets follow from it rather than from a table of shapes.
+    const QUALIFIER_SLOT: usize = 5;
+    const MODE_SLOT: usize = 15;
+
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
-        trailer_field_count: usize,
+        trailer: &[&str],
     ) -> Option<Self> {
-        match (root_discriminator, trailer_field_count) {
-            (Some("50"), 24) => Some(Self {
-                qualifier_slot: 5,
-                mode_slot: 15,
-            }),
-            (Some("49"), 24) => Some(Self {
-                qualifier_slot: 6,
-                mode_slot: 16,
-            }),
-            // ERP УХ MDM_Management's *item*/*common* forms (root `49` or
-            // `50`) carry one further trailing member after the same
-            // 24-shape the dynamic-list forms above end on -- see
-            // `form_root_child_items_tail_start_49_or_50`. The qualifier and
-            // mode still sit at the same slots 6/16 counted from the start
-            // of that trailer: `CommonForms/ФормаИзмененияРеквизитовНСИ`
-            // (no native `<VerticalScroll>`, both `0`) and
-            // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`
-            // (native `<VerticalScroll>useIfNecessary</VerticalScroll>`,
-            // both `2`) agree with the 24-member forms above at every other
-            // position.
-            (Some("49") | Some("50"), 25) => Some(Self {
-                qualifier_slot: 6,
-                mode_slot: 16,
-            }),
-            _ => None,
-        }
+        let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
+        Some(Self {
+            qualifier_slot: Self::QUALIFIER_SLOT.checked_add(blocks)?,
+            mode_slot: Self::MODE_SLOT.checked_add(blocks)?,
+        })
     }
 
     pub(crate) fn vertical_scroll(self, trailer: &[&str]) -> Option<&'static str> {
@@ -5555,10 +5544,7 @@ impl FormRootVerticalAlignSchema {
         root_discriminator: Option<&str>,
         trailer: &[&str],
     ) -> Option<Self> {
-        if root_discriminator != Some("50") {
-            return None;
-        }
-        let blocks = form_root_trailer_optional_blocks(trailer)?;
+        let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         Some(Self {
             trailer_slot: Self::TRAILER_SLOT.checked_add(blocks)?,
             children_align_trailer_slot: Self::CHILDREN_ALIGN_TRAILER_SLOT.checked_add(blocks)?,
@@ -5652,10 +5638,7 @@ impl FormRootAutoUrlSchema {
         root_discriminator: Option<&str>,
         trailer: &[&str],
     ) -> Option<Self> {
-        if root_discriminator != Some("50") {
-            return None;
-        }
-        let blocks = form_root_trailer_optional_blocks(trailer)?;
+        let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         let slot = Self::AUTO_URL_SLOT_WITHOUT_OPTIONAL_BLOCKS.checked_add(blocks)?;
         let auto_url = match trailer.get(slot)?.trim() {
             "0" => Some(false),
@@ -5703,10 +5686,7 @@ impl FormRootGroupSchema {
         header_group_marker: Option<&str>,
         trailer: &[&str],
     ) -> Option<Self> {
-        if root_discriminator != Some("50") {
-            return None;
-        }
-        let blocks = form_root_trailer_optional_blocks(trailer)?;
+        let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         let group = match (
             header_group_marker.map(str::trim),
             trailer
