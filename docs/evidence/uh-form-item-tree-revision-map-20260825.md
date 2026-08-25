@@ -64,6 +64,46 @@ pass:** `Button` `30` (111 records), the decoration sub-shape's own `11` at
 35/36 members, and the 270 carrier forms whose residue is something other
 than the tooltip.
 
+**Update -- all four short revisions now read (`8ea40ee`, rebased onto
+`b7aa538`).** `Button` `30` closes the set the census found. Its evidence is
+the cleanest of the four: every (leading member, length) pair of the `Button`
+class has exactly one slot shape corpus-wide, and `30`/51 and `30`/52 are
+`31`/52 and `31`/53 minus one trailing scalar, member for member on all 111
+records, trailing scalar run 18 -> 17. `field_count - wrapper` is 21 with the
+name at slot 5 and 22 with the conditional `UserVisible`-common tuple at slot
+4 pushing it to slot 6.
+
+Unlike `34`, leading member `30` is not overloaded in form records. The only
+other `{30,...}` this codebase knows is
+`compiler::families::business_object`'s 49-field `BusinessProcess` *metadata*
+descriptor, which never reaches a form record and which the arity guard
+(`51 | 52`) excludes anyway.
+
+Gated against `$D/baselines/b7aa538/` (the coordinator's snapshot of this
+pass's base, uh `exact=129866`). All seven corpora `BROKEN=0`:
+
+```
+                             uh exact   gained
+base b7aa538                  129 866        --
++ Table 54, field 34, tip 11   130 040      +174
++ Button 30                    130 083      +217   (Button 30 alone: +43)
+```
+
+`ws`/`wms`/`mdm`/`sslbase`/`ssl`/`ut` byte-for-byte unchanged. `cargo test
+--lib` 2292/33, failing names identical to the base snapshot (three real-byte
+regression tests added across the pass, each a negative control that fails
+without its own revision); `bundled9.sh` 9/9.
+
+The first three revisions were worth `171` at base `550ca0e` and `174` here --
+the pass's own chart/DCS fixes in between unblocked three more of the same
+forms.
+
+**What is left of this class:** the decoration sub-shape's own short revision
+`11` at 35/36 members (61 records; unlike the tooltip sub-shape its truncation
+test is not clean -- 41 of 61 match, 20 at lengths 58/63 do not, so it is a
+third sub-shape and needs its own reading before anything is admitted), and
+the carrier forms whose residue is something other than a short revision.
+
 **Answer up front.** The bucket is *not* homogeneous, but it has one
 dominant, exactly-attributable cause, and that cause is a fourth
 occurrence of this codebase's most common defect class (doctrine point 7 --
