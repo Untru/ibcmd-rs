@@ -112,6 +112,44 @@ tabular-section-property read and `http_service_child_candidates_from_text`
 also use it) -- any fix needs real-byte evidence from all four shapes, not
 just the Catalog-attribute one this note traced, before it should land.
 
+**Update, third UH pass (`ab3466d`):** the empty-`<Type/>` lead above is
+fixed. `innermost_metadata_object_fields_around_header`'s skip test now
+keys off both the discriminator digit *and* member count (`Some("1")` ||
+(`"3"`, unconditionally, unchanged) || (`"2"` && `len()==8`)) instead of a
+bare leading-digit match, so a short (8-member) child header is skipped
+just like the full (9-member) one, and the walk reaches the level the
+caller actually wants (`detail` for the code27 attribute-Pattern payload)
+instead of stopping one level too early. Confirmed pervasive on real ERP
+УХ 3.2.12.6 bytes: a temporary `IBCMD_DEBUG_SHORT_HEADER_SCAN`-gated
+survey (stripped before commit) hit over 3,000 short-header attributes at
+exactly this stop-too-early case in one partial `cf export` pass over
+`uh` before the fix, all through `parse_metadata_child_value_types_with_
+builtin` (the Catalog/DataProcessor attribute-Pattern call site this
+note's hypothesis targeted) -- none yet observed at the other two call
+sites (`parse_metadata_tabular_section_properties`'s non-`DataProcessor`
+branch, `http_service_child_candidates_from_text`) because the survey run
+was cut short by a host disk-space emergency before reaching those object
+kinds in the corpus traversal order; the fix is shared plumbing so it
+applies uniformly regardless, and a real-layout HTTPService regression
+test (`parses_http_service_url_templates_from_real_layout_text`) still
+passes unchanged, confirming no regression for the full-header case at
+that site. `uh`: `BROKEN=0` against `$D/base789` (exact-set diff),
+`gained=13` (`120,592 -> 120,605` exact) -- `Catalogs/
+ВариантыЗаполненияШаблонов.xml`, the exact object this note traced, is
+among them, now fully exact rather than merely `differing`. `ws`/`mdm`/
+`wms`/`sslbase`/`ssl`: `BROKEN=0`, `gained=0` (none of the five happen to
+exercise this shape). `cargo test --lib`: 2251/33 (was 2250/33), 33
+failures unchanged from `fail-base.txt`. New regression test:
+`innermost_metadata_object_fields_around_header_skips_short_attribute_
+header_to_reach_detail` (real bytes, same capture as `parses_code27_
+attribute_payload_with_short_and_long_header_wrapper`), negative-control
+verified (fails without the fix, passes with it).
+
+See `arity-literal-audit-20260825.md` for the companion sweep of every
+other hardcoded-arity/literal-header-search site in `src/mssql_dump/`
+this same pass did, which found and fixed five more independent instances
+of this recurring defect class beyond the one this document tracked.
+
 ## Method
 
 For each of the 1,977 (then 1,594) missing native paths, resolve its root
