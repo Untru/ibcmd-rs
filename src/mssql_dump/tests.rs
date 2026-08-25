@@ -21749,6 +21749,161 @@ fn extracts_form_command_interface_command_bar() {
     assert_eq!(form_xml.matches("<xr:Common>false</xr:Common>").count(), 2);
 }
 
+/// The three sub-fixes of f8b3251 on one real record:
+/// `parse_form_command_interface_command`'s `UseStandardCommands` gate (item
+/// 3, target `Catalog.СправочникиБД`, `UseStandardCommands=false`, must stay
+/// the raw sentinel `4:67b8886f-...` rather than resolve to
+/// `Catalog.СправочникиБД.StandardCommand.OpenByValue`) and the
+/// `default_visible`-gates-`Visible` rule (all five items carry slot 7 `1`
+/// and an identical slot-8 `{0,{0,{"B",0},0}}`, which used to be
+/// misread as an explicit `common=false` override on every one of them; none
+/// should carry `<Visible>` at all).
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `516a577c-80f7-4ea7-9ba7-b68c0b6ab64a.0`
+/// (`Catalogs/ТипыБазДанных/Forms/ФормаЭлемента`), `body.trailing` slot 3 (the
+/// `<NavigationPanel>` container). Native writes five `<Item>`s, none with
+/// `<DefaultVisible>` or `<Visible>`, and the fourth (index absent) as
+/// `<Command>4:67b8886f-f30d-480c-abb8-e3712f3c169c</Command>`.
+#[test]
+fn extracts_real_world_navigation_panel_declines_disabled_standard_command_and_stray_visible() {
+    let trailing = vec![
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        concat!(
+            r#"{0,5,{3,0,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},2,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,1,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},3,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,2,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},4,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,3,{4,67b8886f-f30d-480c-abb8-e3712f3c169c},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",0},0}}},"#,
+            r#"{3,4,{0},{0},0,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},1,1,{0,{0,{"B",0},0}}}}"#,
+        )
+        .to_string(),
+    ];
+    let object_refs = BTreeMap::from([(
+        "67b8886f-f30d-480c-abb8-e3712f3c169c".to_string(),
+        "Catalog.СправочникиБД".to_string(),
+    )]);
+    let metadata_command_refs = BTreeMap::from([(
+        "67b8886f-f30d-480c-abb8-e3712f3c169c".to_string(),
+        MetadataCommandReference {
+            kind: "Catalog".to_string(),
+            name: "СправочникиБД".to_string(),
+            use_standard_commands: false,
+        },
+    )]);
+
+    let command_interface = extract_form_command_interface_with_context(
+        &trailing,
+        &[],
+        &object_refs,
+        &BTreeMap::new(),
+        &InformationRegisterMasterDimensionIndex::new(),
+        None,
+        &[],
+        &FormChildItemIndexes::default(),
+        Some(&metadata_command_refs),
+    )
+    .expect("platform-attested navigation panel must decode");
+
+    assert_eq!(command_interface.navigation_panel.len(), 5);
+    assert!(command_interface.command_bar.is_empty());
+    assert!(
+        command_interface
+            .navigation_panel
+            .iter()
+            .all(|item| item.visible.is_none()),
+        "no item should carry an explicit Visible override: {:?}",
+        command_interface
+            .navigation_panel
+            .iter()
+            .map(|item| &item.visible)
+            .collect::<Vec<_>>()
+    );
+    let commands = command_interface
+        .navigation_panel
+        .iter()
+        .map(|item| item.command.as_str())
+        .collect::<Vec<_>>();
+    assert!(commands.contains(&"4:67b8886f-f30d-480c-abb8-e3712f3c169c"));
+    assert!(
+        !commands
+            .iter()
+            .any(|command| command.contains("StandardCommand"))
+    );
+
+    let xml = format_form_command_interface_xml(&command_interface);
+    assert!(xml.contains("<Command>4:67b8886f-f30d-480c-abb8-e3712f3c169c</Command>"));
+    assert!(!xml.contains("<Visible>"), "{xml}");
+}
+
+/// The sentinel-fallback sub-fix of f8b3251: before it, an unresolvable
+/// `{kind,uuid}` target (not a metadata object, form command or known
+/// platform constant) made `parse_form_command_interface_command` return
+/// `None`, dropping the whole item -- and since both items of this
+/// `<CommandBar>` name such targets, the entire container, and with it the
+/// whole `<CommandInterface>`, went unwritten.
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `337d501c-eb4e-41b1-9d0d-45d87e3bfcf7.0`
+/// (`Documents/ЗаявкаНаИзменениеНСИ/Forms/ФормаВыбора`), `body.trailing` slot
+/// 4 (the `<CommandBar>` container). Native writes two `<Item>`s, each
+/// `<Command>0:<uuid></Command>` verbatim, `<DefaultVisible>false</DefaultVisible>`
+/// and `<Visible><xr:Common>false</xr:Common></Visible>`.
+#[test]
+fn extracts_real_world_command_bar_keeps_unresolvable_targets_as_sentinels() {
+    let trailing = vec![
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        concat!(
+            r#"{0,2,{3,0,{0,1d3cba0d-8887-4564-a9a2-6df75e80e775},{0},0,{0},0,0,{0,{0,{"B",0},0}}},"#,
+            r#"{3,1,{0,100e850f-cadc-4255-b561-8339e92ff395},{0},0,{0},0,0,{0,{0,{"B",0},0}}}}"#,
+        )
+        .to_string(),
+    ];
+
+    let command_interface = extract_form_command_interface_with_context(
+        &trailing,
+        &[],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &InformationRegisterMasterDimensionIndex::new(),
+        None,
+        &[],
+        &FormChildItemIndexes::default(),
+        None,
+    )
+    .expect("platform-attested command bar must decode");
+
+    assert!(command_interface.navigation_panel.is_empty());
+    assert_eq!(command_interface.command_bar.len(), 2);
+    let commands = command_interface
+        .command_bar
+        .iter()
+        .map(|item| item.command.as_str())
+        .collect::<Vec<_>>();
+    assert!(commands.contains(&"0:1d3cba0d-8887-4564-a9a2-6df75e80e775"));
+    assert!(commands.contains(&"0:100e850f-cadc-4255-b561-8339e92ff395"));
+    assert!(
+        command_interface
+            .command_bar
+            .iter()
+            .all(|item| item.default_visible == Some(false))
+    );
+
+    let xml = format_form_command_interface_xml(&command_interface);
+    assert!(xml.contains("<CommandBar>"));
+    assert!(xml.contains("<Command>0:1d3cba0d-8887-4564-a9a2-6df75e80e775</Command>"));
+    assert!(xml.contains("<Command>0:100e850f-cadc-4255-b561-8339e92ff395</Command>"));
+    assert_eq!(
+        xml.matches("<Visible>\r\n\t\t\t\t\t<xr:Common>false</xr:Common>")
+            .count(),
+        2
+    );
+}
+
 #[test]
 fn extracts_real_world_form_command_interface_command_bar_variants() {
     let object_refs = BTreeMap::from([
