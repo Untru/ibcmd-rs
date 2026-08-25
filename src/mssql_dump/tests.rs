@@ -71252,3 +71252,65 @@ fn renders_form_chart_settings_with_spline_mode_to_platform_proven_xml() {
         ),
     );
 }
+
+/// Evidence: fixture `form-chart-placement-and-showmodes`, five seeds each
+/// changing exactly one XML element on the `chart-form-4series` control.
+#[test]
+fn renders_form_chart_settings_with_legend_placement_bottom_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/legend-bottom.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/legend-bottom-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_title_area_placement_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/title-area-placement.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/title-area-placement-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_values_tooltip_show_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/values-tooltip-show-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/values-tooltip-show-mode-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_points_drop_lines_show_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/points-drop-lines-show-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/points-drop-lines-show-mode-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_values_drop_lines_show_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/values-drop-lines-show-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/values-drop-lines-show-mode-settings.xml"
+        ),
+    );
+}

@@ -28396,13 +28396,68 @@ fn format_form_chart_settings_xml(
         xml.push_str(&format!("{child_tab}<d4p1:{name}/>\r\n"));
     }
     // The legend placement is written only when its slot names one: the two
-    // records read `0` and `6`, and the platform writes nothing on the first
-    // and `None` on the second.
+    // original records read `0` and `6`, and the platform writes nothing on
+    // the first and `None` on the second. `"4"` (`Bottom`) is proven by seed
+    // `chart-form-legendbottom`, a `chart-form-4series` control with only
+    // `<d4p1:legendPlacement>Bottom</d4p1:legendPlacement>` added -- the
+    // same `tidx(161)` slot changes from `"0"` to `"4"`.
     if t.get(tidx(161))?.trim() != "0" {
         scalar!(
             "legendPlacement",
-            form_chart_code(t.get(tidx(161))?, &[("6", "None")])?
+            form_chart_code(t.get(tidx(161))?, &[("4", "Bottom"), ("6", "None")])?
         );
+    }
+    // `tidx(162)`, right after legendPlacement's slot, is titleAreaPlacement
+    // -- same present-only-when-nonzero shape, proven by seed
+    // `chart-form-titleareaplacement` (`chart-form-4series` control plus
+    // only `<d4p1:titleAreaPlacement>None</d4p1:titleAreaPlacement>`
+    // added): the slot flips from `"0"` to `"8"`.
+    if t.get(tidx(162))?.trim() != "0" {
+        scalar!(
+            "titleAreaPlacement",
+            form_chart_code(t.get(tidx(162))?, &[("8", "None")])?
+        );
+    }
+    // `tidx(183)` holds a 5-member tuple carrying three independent,
+    // present-only-when-nonzero "show mode" slots at indices 1/3/4 (0/2
+    // stay `0` in every record seen so far, unclaimed). Proven by three
+    // single-element `chart-form-4series` seed diffs -- `chart-form-vttsm`
+    // (`{0,0,0,0,0}` -> `{0,2,0,0,0}` for `valuesToolTipShowMode=
+    // ShowOnHover`), `chart-form-pdlsm` (`{0,0,0,1,0}` for
+    // `pointsDropLinesShowMode=Show`) and `chart-form-vdlsm`
+    // (`{0,0,0,0,1}` for `valuesDropLinesShowMode=Show`) -- each changing
+    // exactly one element. Code `"2"` for the drop-lines pair is native UT
+    // DataProcessors/ПроверкаКонтрагента/Forms/Форма's own record, whose
+    // tuple reads `{0,2,0,2,2}` for `valuesToolTipShowMode=ShowOnHover`,
+    // `pointsDropLinesShowMode=DontShow`, `valuesDropLinesShowMode=
+    // DontShow` -- so `DontShow` is an explicit code, not the `0` omitted
+    // case.
+    let show_mode_tuple = split_1c_braced_fields(t.get(tidx(183))?, 0)?;
+    if show_mode_tuple.len() != 5
+        || show_mode_tuple.first()?.trim() != "0"
+        || show_mode_tuple.get(2)?.trim() != "0"
+    {
+        return None;
+    }
+    if show_mode_tuple.get(1)?.trim() != "0" {
+        scalar!(
+            "valuesToolTipShowMode",
+            form_chart_code(show_mode_tuple.get(1)?, &[("2", "ShowOnHover")])?
+        );
+    }
+    for (name, slot) in [
+        ("pointsDropLinesShowMode", 3usize),
+        ("valuesDropLinesShowMode", 4),
+    ] {
+        if show_mode_tuple.get(slot)?.trim() != "0" {
+            scalar!(
+                name,
+                form_chart_code(
+                    show_mode_tuple.get(slot)?,
+                    &[("1", "Show"), ("2", "DontShow")]
+                )?
+            );
+        }
     }
     xml.push_str(&format!("{tab}</Settings>\r\n"));
     Some(xml)
