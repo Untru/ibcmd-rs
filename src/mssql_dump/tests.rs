@@ -71081,6 +71081,83 @@ fn parses_code27_attribute_payload_with_short_and_long_header_wrapper() {
     assert_eq!(long_header_uuid, "616f2156-e77c-4956-9e7c-69ed1d06c9b0");
 }
 
+/// `06249bd` taught `parse_metadata_code27_payload_fields` to accept the
+/// short (8-member, `"2"`-discriminator) attribute header, which unblocked
+/// the 12 objects this test's real payload belongs to from `missing` to
+/// `differing` -- but a second, independent bug in
+/// `innermost_metadata_object_fields_around_header` (the walk that resolves
+/// an attribute's value-type pattern via its *own* production path, not
+/// `parse_metadata_code27_payload_fields`) kept rendering `<Type/>` empty
+/// for exactly these attributes: its skip test only recognized the full
+/// header (`"3"`, 9 members) as "keep walking outward past this", so a
+/// short header (`"2"`, 8 members) -- indistinguishable from the unrelated
+/// `detail` wrapper's own `"2"`, 3-member tag by leading digit alone -- got
+/// treated as the final answer instead of `detail`, whose `"Pattern"` field
+/// the caller actually needs. Real ERP УХ 3.2.12.6 bytes (same capture as
+/// `parses_code27_attribute_payload_with_short_and_long_header_wrapper`):
+/// `Catalogs/ВариантыЗаполненияШаблонов`'s `Комментарий` attribute, uuid
+/// `5c1b73cc-2842-4ca0-bc76-436456449e45`. Confirmed pervasive on the real
+/// `uh` corpus: over 3,000 short-header attributes hit this exact
+/// stop-too-early case in one full `cf export` pass (docs/evidence/
+/// uh-missing-root-cause-map-20260825.md).
+#[test]
+fn innermost_metadata_object_fields_around_header_skips_short_attribute_header_to_reach_detail() {
+    let uuid = "5c1b73cc-2842-4ca0-bc76-436456449e45";
+    let text = concat!(
+        "{27,\n",
+        "{2,\n",
+        "{2,\n",
+        "{1,0,5c1b73cc-2842-4ca0-bc76-436456449e45},\"Комментарий\",\n",
+        "{1,\"ru\",\"Комментарий\"},\"\",0,0,00000000-0000-0000-0000-000000000000},\n",
+        "{\"Pattern\",\n",
+        "{\"S\",300,1}\n",
+        "}\n",
+        "},0,\n",
+        "{0},\n",
+        "{0},0,\"\",0,\n",
+        "{\"U\"},\n",
+        "{\"U\"},0,00000000-0000-0000-0000-000000000000,2,0,\n",
+        "{5006,0},\n",
+        "{3,0,0},\n",
+        "{0,0},0,\n",
+        "{0},\n",
+        "{\"S\",\"\"},0,0,0}",
+    );
+    let marker_start = text.find(uuid).unwrap();
+
+    let (_, _, fields) =
+        super::innermost_metadata_object_fields_around_header(text, marker_start, uuid)
+            .expect("must resolve the enclosing `detail` wrapper, not fail outright");
+    assert_eq!(
+        fields.len(),
+        3,
+        "must land on `detail` (`{{2, header, {{\"Pattern\",...}}}}`, 3 members), \
+         not stop one level too early at the 8-member short header itself: {fields:?}"
+    );
+    assert_eq!(fields[0].trim(), "2");
+    assert!(
+        fields[2].contains(r#""Pattern""#),
+        "detail's third member must be the Pattern block: {:?}",
+        fields[2]
+    );
+
+    let value_types = super::parse_metadata_child_value_types_with_builtin(
+        text,
+        marker_start,
+        uuid,
+        &BTreeMap::new(),
+        super::platform_reference_family_type_reference,
+    );
+    assert_eq!(
+        value_types,
+        vec![super::ConstantValueType::String {
+            length: Some(300),
+            allowed_length_flag: 1,
+        }],
+        "the short header must not silently render an empty <Type/>"
+    );
+}
+
 /// Evidence: fixture `moxel-chart-series-count-zero`, six seed variations of
 /// native UT 11.5.27.75's
 /// `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров`

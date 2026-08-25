@@ -29139,7 +29139,35 @@ fn innermost_metadata_object_fields_around_header<'a>(
         let Some(fields) = split_1c_braced_fields(text, start) else {
             continue;
         };
-        if matches!(fields.first().map(|field| field.trim()), Some("1" | "3")) {
+        let discriminator = fields.first().map(|field| field.trim());
+        // Skip the identity marker (`"1"`, always `{1,0,<uuid>}`) and the
+        // child-object header wrapper itself -- full form (`"3"`, 9
+        // members: `{1,0,<uuid>},Name,Synonym,Comment,0,0,NilUuid,0`) or
+        // short form (`"2"`, 8 members: same shape minus the trailing
+        // default `0`, exactly the omission `parse_information_register_
+        // owner_header` and `parse_metadata_code27_payload_fields` already
+        // document for this grammar production) -- to reach the *next*
+        // enclosing wrapper the caller actually wants (`detail` for the
+        // code27 attribute-Pattern payload, or the analogous outer record
+        // for tabular-section/HTTPService candidates).
+        //
+        // Before this fix, only the full form was skipped: a short header
+        // also opens with `"2"`, indistinguishable by leading digit alone
+        // from `detail`'s own unrelated `"2"`-tagged 3-member wrapper, so
+        // the walk stopped one level too early at the header itself,
+        // leaving no `"Pattern"` field for the caller to find (rendering an
+        // empty `<Type/>`). Confirmed on real ERP УХ 3.2.12.6 bytes: over
+        // 3,000 short-header attributes hit exactly this stop-too-early
+        // case in one `uh` corpus pass (docs/evidence/
+        // uh-missing-root-cause-map-20260825.md). Length, not just the
+        // digit, is what makes the short header (8) and `detail` (3)
+        // distinguishable; the full header keeps its existing bare-digit
+        // skip (unchanged, already validated by the whole corpus) since no
+        // evidence has surfaced of a non-9-member `"3"` collision here.
+        if matches!(discriminator, Some("1"))
+            || discriminator == Some("3")
+            || (discriminator == Some("2") && fields.len() == 8)
+        {
             continue;
         }
         if metadata_header_field_index(&fields, uuid).is_none() {
