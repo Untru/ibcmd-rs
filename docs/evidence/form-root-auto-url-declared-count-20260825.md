@@ -82,3 +82,74 @@ worktree's own `41808c3` baseline. All other keys unchanged.
 
 `zsh $D/kit/run.sh <key> <worktree> <out>` on all seven keys, exact-set diff
 against `$D/base789/<key>.parity.json`.
+
+---
+
+# The same declared count governs every root trailer property
+
+Status: follow-up on the same day. `AutoURL` was not the only reader the
+25-member ERP УХ trailer blinded -- it was one of twelve.
+
+## Scope
+
+`form_root_child_items_tail_start` (arity 24, hardcoded) fed twelve root
+property readers, every one of which returned `None` on ERP УХ. `AutoURL` was
+simply the one visible in a clean single-tag bucket.
+
+## Measurement
+
+For each property, `trailer[base + count]` was cross-tabulated against the
+native document's own value, over all 18 634 root `50` forms on the stand
+(count 0: wms, sslbase, ssl, ut; count 1: mdm, uh). Every property produced an
+**identical value -> native mapping at count 0 and count 1**, with no value
+mapping to two different outcomes and no disagreement between the two
+populations -- zero contradictions across all twelve:
+
+| property | base slot | uh forms with a non-default value |
+|---|---:|---:|
+| SaveWindowSettings | 23 | 98 |
+| MobileDeviceCommandBarContent | 22 | 84 |
+| Group | 14 / 21 | 69 |
+| VerticalSpacing | 10 | 58 |
+| ScalingMode | 6 | 33 |
+| ShowCloseButton | 18 | 31 |
+| ConversationsRepresentation | 19 | 29 |
+| CollapseItemsByImportanceVariant | 20 | 28 |
+| HorizontalSpacing | 9 | 24 |
+| HorizontalAlign | 11 | 15 |
+| VerticalAlign | 12 | 14 |
+| ChildrenAlign | 13 | 5 |
+
+The shift had already been found twice, one property at a time, without the
+count behind it being identified: `FormRootVerticalScrollSchema` (slots 5/15
+at 24 members, 6/16 at 25) and `extract_form_show_title` (17 at 24, 18 at 25).
+Both are special cases of `base + count`.
+
+## Fix
+
+`form_root_trailer_optional_blocks` reads member 2 and verifies it against the
+trailer's own length; every reader adds it to its base slot. The tail search
+`form_root_trailer_start_50` admits 24 and 25.
+
+## Measured effect
+
+`uh` exact 119 256 -> 119 525 (**+269**, BROKEN = 0), i.e. **+476** against the
+original `41808c3` base. ws/mdm/wms/sslbase/ssl/ut all BROKEN = 0, FIXED = 0 --
+as predicted, since at count 0 the read is identical by construction.
+
+Of the 285 uh forms carrying a native `<AutoURL>`, 244 are now byte-exact. The
+41 remaining are: 14 never exported at all (separate root cause), 16 differing
+only in `<Shortcut>` (the documented macOS/Windows host dependency --
+`Cmd+T` vs `Ctrl+T`, not a defect), 3 root `49`, and 8 with unrelated
+item-level tags.
+
+## Root `49`: same rule, not yet applied
+
+Root `49`'s trailer is root `50`'s minus the trailing member: `23 + count`
+members, same `base + count` slots. Over its 1 548 forms (uh 1 543, mdm 5, all
+declaring count 1) the identical value tables hold with zero contradictions,
+and all 1 548 validate at 24 members only -- never 23 or 25. Applying it would
+correct ~48 more files. Also latent there: `extract_form_show_title` reads
+slot 17 on root `49`, which is the constant `100` on all 1 548 forms, so the
+property is silently always dropped; slot 18 separates `0` -> false from
+`1` -> absent exactly.

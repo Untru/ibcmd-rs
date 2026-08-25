@@ -8109,6 +8109,68 @@ fn does_not_extract_form_auto_url_from_root_trailer_declaring_one_optional_block
 }
 
 #[test]
+fn extracts_form_save_window_settings_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 23 is read at 24. Reading 23 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},0},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<SaveWindowSettings>false</SaveWindowSettings>"));
+}
+
+#[test]
+fn extracts_form_conversations_representation_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 19 is read at 20. Reading 19 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,2,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(
+        form_xml.contains("<ConversationsRepresentation>DontShow</ConversationsRepresentation>")
+    );
+}
+
+#[test]
+fn extracts_form_show_close_button_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 18 is read at 19. Reading 18 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,0,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<ShowCloseButton>false</ShowCloseButton>"));
+}
+
+#[test]
+fn extracts_form_scaling_mode_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 6 is read at 7. Reading 6 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,1,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<ScalingMode>Normal</ScalingMode>"));
+}
+
+#[test]
 fn does_not_extract_form_auto_url_from_property_bag_layout() {
     let form_body = deflate_for_test(
             r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,0,1,1,0,1,4,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),

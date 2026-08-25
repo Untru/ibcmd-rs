@@ -46,9 +46,9 @@ use crate::form_schema::{
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_extended_button_type_slot, form_table_counted_property_bag_bounds,
-    form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
-    form_tooltip_representation_xml_order,
+    form_extended_button_type_slot, form_root_trailer_optional_blocks,
+    form_table_counted_property_bag_bounds, form_text_document_context_menu_child_is_valid,
+    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 #[cfg(test)]
@@ -2079,12 +2079,10 @@ pub(super) fn extract_form_enter_key_behavior(fields: &[&str]) -> Option<&'stati
 /// this same form's trailer also carries (that form's own content tuple
 /// happens to declare zero items here, so it produced no separate diff).
 pub(super) fn extract_form_save_window_settings(fields: &[&str]) -> Option<bool> {
-    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
-    let trailer = fields.get(tail_start..)?;
-    match trailer
-        .len()
-        .checked_sub(1)
-        .and_then(|slot| trailer.get(slot))
+    let tail_start = form_root_trailer_start_50(fields)?;
+    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    match fields
+        .get(tail_start + 23 + blocks)
         .map(|field| field.trim())?
     {
         "0" => Some(false),
@@ -2103,7 +2101,7 @@ pub(super) fn extract_form_auto_url(fields: &[&str]) -> Option<bool> {
     let root_discriminator = fields.first().map(|field| field.trim());
     match root_discriminator {
         Some("50") => {
-            let tail_start = form_root_child_items_tail_start_50_24_or_25(fields)?;
+            let tail_start = form_root_trailer_start_50(fields)?;
             FormRootAutoUrlSchema::from_raw_layout(root_discriminator, fields.get(tail_start..)?)?
                 .auto_url()
         }
@@ -2145,7 +2143,7 @@ pub(super) fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
     let root_discriminator = fields.first().map(|field| field.trim());
     match root_discriminator {
         Some("50") => {
-            let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
+            let tail_start = form_root_trailer_start_50(fields)?;
             FormRootGroupSchema::from_raw_layout(
                 root_discriminator,
                 fields.get(11).copied(),
@@ -2440,23 +2438,17 @@ pub(super) fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'sta
 }
 
 pub(super) fn extract_form_vertical_align(fields: &[&str]) -> Option<FormRootVerticalAlign> {
-    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
+    let tail_start = form_root_trailer_start_50(fields)?;
     let trailer = fields.get(tail_start..)?;
-    FormRootVerticalAlignSchema::from_raw_layout(
-        fields.first().map(|field| field.trim()),
-        trailer.len(),
-    )?
-    .vertical_align(trailer)
+    FormRootVerticalAlignSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
+        .vertical_align(trailer)
 }
 
 pub(super) fn extract_form_children_align(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
+    let tail_start = form_root_trailer_start_50(fields)?;
     let trailer = fields.get(tail_start..)?;
-    FormRootVerticalAlignSchema::from_raw_layout(
-        fields.first().map(|field| field.trim()),
-        trailer.len(),
-    )?
-    .children_align(trailer)
+    FormRootVerticalAlignSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
+        .children_align(trailer)
 }
 
 pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
@@ -2470,10 +2462,12 @@ pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static s
 }
 
 pub(super) fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
-    let trailer = fields.get(tail_start..)?;
-    let slot = form_root_trailer_slot_with_navigator_gap(trailer.len(), 6)?;
-    match trailer.get(slot).map(|field| field.trim())? {
+    let tail_start = form_root_child_item_pairs_tail_start(fields)?;
+    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    match fields
+        .get(tail_start + 6 + blocks)
+        .map(|field| field.trim())?
+    {
         "1" => Some("Normal"),
         "2" => Some("Compact"),
         _ => None,
@@ -2481,10 +2475,12 @@ pub(super) fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str>
 }
 
 pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
-    let trailer = fields.get(tail_start..)?;
-    let slot = form_root_trailer_slot_with_navigator_gap(trailer.len(), 11)?;
-    match trailer.get(slot).map(|field| field.trim())? {
+    let tail_start = form_root_trailer_start_50(fields)?;
+    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    match fields
+        .get(tail_start + 11 + blocks)
+        .map(|field| field.trim())?
+    {
         "0" => Some("Left"),
         "1" => Some("Center"),
         "2" => Some("Right"),
@@ -2493,32 +2489,23 @@ pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static 
 }
 
 pub(super) fn extract_form_horizontal_spacing(fields: &[&str]) -> Option<&'static str> {
-    let trailer = fields.get(form_root_child_items_tail_start_50_with_navigator_gap(fields)?..)?;
-    FormRootGroupingSchema::from_raw_layout(
-        fields.first().map(|field| field.trim()),
-        trailer.len(),
-    )?
-    .horizontal_spacing(trailer)
+    let trailer = fields.get(form_root_trailer_start_50(fields)?..)?;
+    FormRootGroupingSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
+        .horizontal_spacing(trailer)
 }
 
 pub(super) fn extract_form_vertical_spacing(fields: &[&str]) -> Option<&'static str> {
-    let trailer = fields.get(form_root_child_items_tail_start_50_with_navigator_gap(fields)?..)?;
-    FormRootGroupingSchema::from_raw_layout(
-        fields.first().map(|field| field.trim()),
-        trailer.len(),
-    )?
-    .vertical_spacing(trailer)
+    let trailer = fields.get(form_root_trailer_start_50(fields)?..)?;
+    FormRootGroupingSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
+        .vertical_spacing(trailer)
 }
 
 pub(super) fn extract_form_collapse_items_by_importance_variant(
     fields: &[&str],
 ) -> Option<&'static str> {
-    let trailer = fields.get(form_root_child_items_tail_start_50_with_navigator_gap(fields)?..)?;
-    FormRootGroupingSchema::from_raw_layout(
-        fields.first().map(|field| field.trim()),
-        trailer.len(),
-    )?
-    .collapse_items_by_importance_variant(trailer)
+    let trailer = fields.get(form_root_trailer_start_50(fields)?..)?;
+    FormRootGroupingSchema::from_raw_layout(fields.first().map(|field| field.trim()), trailer)?
+        .collapse_items_by_importance_variant(trailer)
 }
 
 pub(super) fn extract_form_child_items_width(fields: &[&str]) -> Option<&'static str> {
@@ -2526,11 +2513,11 @@ pub(super) fn extract_form_child_items_width(fields: &[&str]) -> Option<&'static
 }
 
 pub(super) fn extract_form_conversations_representation(fields: &[&str]) -> Option<&'static str> {
-    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
+    let tail_start = form_root_trailer_start_50(fields)?;
     let trailer = fields.get(tail_start..)?;
     FormRootConversationsRepresentationSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
-        trailer.len(),
+        trailer,
     )?
     .conversations_representation(trailer)
 }
@@ -2571,10 +2558,12 @@ pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
 }
 
 pub(super) fn extract_form_show_close_button(fields: &[&str]) -> Option<bool> {
-    let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
-    let trailer = fields.get(tail_start..)?;
-    let slot = form_root_trailer_slot_with_navigator_gap(trailer.len(), 18)?;
-    match trailer.get(slot).map(|field| field.trim())? {
+    let tail_start = form_root_trailer_start_50(fields)?;
+    let blocks = form_root_trailer_optional_blocks(fields.get(tail_start..)?)?;
+    match fields
+        .get(tail_start + 18 + blocks)
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         _ => None,
     }
@@ -2584,7 +2573,7 @@ pub(super) fn extract_form_mobile_device_command_bar_content(
     fields: &[&str],
     item_name_by_id: &BTreeMap<String, String>,
 ) -> Vec<String> {
-    let Some(tail_start) = form_root_child_items_tail_start_50_with_navigator_gap(fields) else {
+    let Some(tail_start) = form_root_trailer_start_50(fields) else {
         return Vec::new();
     };
     let Some(trailer) = fields.get(tail_start..) else {
@@ -9004,10 +8993,6 @@ pub(super) fn parse_form_child_item_count(value: &str) -> Option<usize> {
     (1..=200).contains(&count).then_some(count)
 }
 
-pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
-    form_root_child_items_tail_start_for(fields, &["50"], &[24])
-}
-
 /// Same trailer search as `form_root_child_items_tail_start`, but admitting
 /// the 25-member root `50` trailer alongside the classic 24-member one.
 ///
@@ -9030,7 +9015,7 @@ pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize>
 /// the 25-member trailer -- so far: `FormRootAutoUrlSchema`, which derives its
 /// slot from the declared count rather than assuming a fixed one -- should
 /// call this one.
-pub(super) fn form_root_child_items_tail_start_50_24_or_25(fields: &[&str]) -> Option<usize> {
+pub(super) fn form_root_trailer_start_50(fields: &[&str]) -> Option<usize> {
     form_root_child_items_tail_start_for(fields, &["50"], &[24, 25])
 }
 
@@ -9063,52 +9048,6 @@ pub(super) fn form_root_child_items_tail_start_50_24_or_25(fields: &[&str]) -> O
 /// one only for the two item/common forms, never both.
 pub(super) fn form_root_child_items_tail_start_49_or_50(fields: &[&str]) -> Option<usize> {
     form_root_child_items_tail_start_for(fields, &["49", "50"], &[24, 25])
-}
-
-/// Same trailer search as `form_root_child_items_tail_start` (root `50`
-/// only, unlike `form_root_child_items_tail_start_49_or_50`'s `49`
-/// admission, which this deliberately does not carry), but also admitting a
-/// 25-member trailer -- a *different* 25-shape than the one that function's
-/// doc comment describes for root `49` item/common forms.
-///
-/// Evidence: ERP УХ 3.2.12.6, four native root-`50` forms spanning
-/// `BusinessProcesses`/`Catalogs`/`CommonForms` that all carry a built-in
-/// Navigator/quick-search child item (`Задание/Forms/ФормаСписка`,
-/// `Валюты/Forms/ФормаСписка`, `ВерсииФайлов/Forms/ФормаВыбора`,
-/// `ФормаОтчета`): each writes one extra field between the child-items
-/// count-list and the classic 24-member trailer, so the strict `[24]` search
-/// finds no valid count-list at all (`form_root_child_items_tail_start`
-/// returns `None`) while `fields.len() - 25` validates cleanly via the same
-/// shared count-list scan. Confined to this one caller
-/// (`extract_form_mobile_device_command_bar_content`) rather than folded
-/// into the base function for the same reason `_49_or_50` is separate: over
-/// a dozen other callers read a fixed trailer slot with no per-property
-/// re-check, and this 25-shape's slot layout has only been verified for the
-/// one property that needs it.
-pub(super) fn form_root_child_items_tail_start_50_with_navigator_gap(
-    fields: &[&str],
-) -> Option<usize> {
-    form_root_child_items_tail_start_for(fields, &["50"], &[24, 25])
-}
-
-/// Adjusts a trailer slot number given as counted from the classic
-/// 24-member trailer's own front for the one-field Navigator-gap shift: `+0`
-/// on the 24-shape, `+1` on the 25-shape, refused for any other length. See
-/// `form_root_child_items_tail_start_50_with_navigator_gap`'s doc comment
-/// for the shape and `FormRootGroupSchema`/`FormRootGroupingSchema`/
-/// `FormRootConversationsRepresentationSchema`/
-/// `FormRootVerticalAlignSchema`'s doc comments in `form_schema` for the
-/// independent real-byte confirmations that every front-counted slot shifts
-/// uniformly, not just the ones those schemas happen to read.
-fn form_root_trailer_slot_with_navigator_gap(
-    trailer_len: usize,
-    slot_in_24_shape: usize,
-) -> Option<usize> {
-    match trailer_len {
-        24 => Some(slot_in_24_shape),
-        25 => Some(slot_in_24_shape + 1),
-        _ => None,
-    }
 }
 
 fn form_root_child_items_tail_start_for(
@@ -9172,6 +9111,10 @@ fn form_root_child_items_tail_start_at(
         }
     }
     matched_tail
+}
+
+pub(super) fn form_root_child_item_pairs_tail_start(fields: &[&str]) -> Option<usize> {
+    form_root_trailer_start_50(fields)
 }
 
 #[cfg(test)]
