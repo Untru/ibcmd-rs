@@ -28263,10 +28263,20 @@ fn format_form_chart_settings_xml(
         "chartType",
         // `"0"` proven by seed `chart-form-linetype`: the SAME `chart-form-
         // 4series` control tree with only `<d4p1:chartType>` changed from
-        // `Column3D` to `Line` -- the single changed raw token.
+        // `Column3D` to `Line` -- the single changed raw token. `"38"`
+        // (`Gauge`) is the same recipe, seed `chart-form-gaugetype`; native
+        // UT's own DataProcessors/ПроверкаКонтрагента/Forms/Форма carries
+        // two further chart attributes (not `ДиаграммаПоказателей`) with
+        // this exact code, otherwise entirely within the already-proven
+        // `realSeriesCount=0` shape.
         form_chart_code(
             t.get(2)?,
-            &[("0", "Line"), ("6", "Column3D"), ("12", "Pie")]
+            &[
+                ("0", "Line"),
+                ("6", "Column3D"),
+                ("12", "Pie"),
+                ("38", "Gauge")
+            ]
         )?
     );
     scalar!(
@@ -28515,6 +28525,130 @@ fn format_form_chart_settings_xml(
                 ));
             }
             xml.push_str(&format!("{child_tab}</d4p1:pointsScale>\r\n"));
+        }
+        _ => return None,
+    }
+    // `tidx(140)`, right after `pointsScale`'s block, is `valuesScale`'s --
+    // same `2,?,0,2,{1,0},<titleArea>,...` wrapper shape, but WITHOUT a
+    // conditionally-inserted sub-record: seed `chart-form-valuesscale`
+    // (`chart-form-4series` control plus only `<d4p1:valuesScale>` with
+    // `showTitle=DontShow`, default `titleArea`, `labelFormat` set) changes
+    // exactly two of the 22 sub-fields relative to the (also 22-sub-field)
+    // absent baseline: `[1]` (`"0"`=absent, `"1"`=`showTitle=DontShow`;
+    // `Show` unobserved) and `[13]` (`labelFormat`, the same
+    // `form_chart_localized_xml` shape `lbFormat`/`lbpFormat`/`vsFormat`
+    // already use -- the platform mirrors this same text into the
+    // top-level `vsFormat` element, `t[39]`, on import, confirmed by the
+    // native re-export, but `labelFormat` reads its own slot here rather
+    // than cross-referencing `t[39]`).
+    let values_scale = split_1c_braced_fields(t.get(tidx(140))?, 0)?;
+    if values_scale.len() != 22
+        || values_scale.first()?.trim() != "2"
+        || values_scale.get(2)?.trim() != "0"
+        || values_scale.get(3)?.trim() != "2"
+        || form_chart_compact(values_scale.get(4)?) != "{1,0}"
+        || values_scale.get(6)?.trim() != "2"
+        || values_scale.get(7)?.trim() != "0"
+        || values_scale.get(8)?.trim() != "0"
+        || form_chart_compact(values_scale.get(9)?) != "{3,4,{0}}"
+        || form_chart_compact(values_scale.get(10)?) != "{7,3,0,1,100}"
+        || form_chart_compact(values_scale.get(11)?) != "{3,4,{0}}"
+        || values_scale.get(12)?.trim() != "2"
+        || values_scale.get(14)?.trim() != "0"
+        || form_chart_compact(values_scale.get(15)?) != "{3,4,{0}}"
+        || values_scale.get(16)?.trim() != "0"
+        || values_scale.get(17)?.trim() != "0"
+        || values_scale.get(18)?.trim() != "0"
+        || values_scale.get(19)?.trim() != "0"
+        || values_scale.get(20)?.trim() != "0"
+        || values_scale.get(21)?.trim() != "0"
+    {
+        return None;
+    }
+    let values_title_area =
+        form_chart_scale_title_area_xml(values_scale.get(5)?, object_refs, child + 1)?;
+    match values_scale.get(1)?.trim() {
+        "0" => {}
+        "1" => {
+            let inner_tab = "\t".repeat(child + 1);
+            xml.push_str(&format!("{child_tab}<d4p1:valuesScale>\r\n"));
+            xml.push_str(&format!(
+                "{inner_tab}<d4p1:showTitle>DontShow</d4p1:showTitle>\r\n"
+            ));
+            xml.push_str(&values_title_area);
+            xml.push_str(&form_chart_localized_xml(
+                "labelFormat",
+                values_scale.get(13)?,
+                child + 1,
+            )?);
+            xml.push_str(&format!("{child_tab}</d4p1:valuesScale>\r\n"));
+        }
+        _ => return None,
+    }
+    // `tidx(141)`, right after `valuesScale`'s block, is `seriesScale`'s --
+    // same shared wrapper+titleArea prefix as `pointsScale`/`valuesScale`.
+    // Seed `chart-form-seriesscale` (`chart-form-4series` control plus only
+    // `<d4p1:seriesScale>` with default `titleArea`, `gridLine` Dotted/
+    // width1, `showInChart=DontShow`) changes exactly two things relative
+    // to the (22-sub-field) absent baseline: `[8]` becomes `"1"` (a
+    // "has gridLine" presence flag, the same shape `pointsScale`'s own
+    // `[8]` uses) with a `gridLine` record inserted right after it
+    // (growing the block to 23 sub-fields -- confirming gridLine style
+    // code `"2"`=`Dotted` a second time, independent of `chart-form-
+    // pointsscale`'s), and the block's last slot becomes `"2"`
+    // (`showInChart=DontShow`; `Show`'s code is unobserved).
+    let series_scale = split_1c_braced_fields(t.get(tidx(141))?, 0)?;
+    if series_scale.first()?.trim() != "2"
+        || series_scale.get(1)?.trim() != "0"
+        || series_scale.get(2)?.trim() != "0"
+        || series_scale.get(3)?.trim() != "2"
+        || form_chart_compact(series_scale.get(4)?) != "{1,0}"
+        || series_scale.get(6)?.trim() != "2"
+        || series_scale.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let series_title_area =
+        form_chart_scale_title_area_xml(series_scale.get(5)?, object_refs, child + 1)?;
+    match series_scale.get(8)?.trim() {
+        "0" => {
+            if series_scale.len() != 22 || series_scale.get(21)?.trim() != "0" {
+                return None;
+            }
+        }
+        "1" => {
+            if series_scale.len() != 23
+                || form_chart_compact(series_scale.get(10)?) != "{3,4,{0}}"
+                || form_chart_compact(series_scale.get(11)?) != "{7,3,0,1,100}"
+                || form_chart_compact(series_scale.get(12)?) != "{3,4,{0}}"
+                || series_scale.get(13)?.trim() != "2"
+                || form_chart_compact(series_scale.get(14)?) != "{1,0}"
+                || series_scale.get(15)?.trim() != "0"
+                || form_chart_compact(series_scale.get(16)?) != "{3,4,{0}}"
+                || series_scale.get(17)?.trim() != "0"
+                || series_scale.get(18)?.trim() != "0"
+                || series_scale.get(19)?.trim() != "0"
+                || series_scale.get(20)?.trim() != "0"
+                || series_scale.get(21)?.trim() != "0"
+            {
+                return None;
+            }
+            let show_in_chart = match series_scale.get(22)?.trim() {
+                "2" => "DontShow",
+                _ => return None,
+            };
+            let inner_tab = "\t".repeat(child + 1);
+            xml.push_str(&format!("{child_tab}<d4p1:seriesScale>\r\n"));
+            xml.push_str(&series_title_area);
+            xml.push_str(&form_chart_line_xml(
+                "gridLine",
+                series_scale.get(9)?,
+                child + 1,
+            )?);
+            xml.push_str(&format!(
+                "{inner_tab}<d4p1:showInChart>{show_in_chart}</d4p1:showInChart>\r\n"
+            ));
+            xml.push_str(&format!("{child_tab}</d4p1:seriesScale>\r\n"));
         }
         _ => return None,
     }

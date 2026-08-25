@@ -71253,6 +71253,49 @@ fn renders_form_chart_settings_with_spline_mode_to_platform_proven_xml() {
     );
 }
 
+#[test]
+fn renders_form_chart_settings_with_gauge_chart_type_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/gauge-type.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/gauge-type-settings.xml"
+        ),
+    );
+}
+
+/// Evidence: fixture `form-chart-provkontr-gauge`, native UT 11.5.27.75's
+/// two other Chart-typed attributes on
+/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` (chartType=Gauge,
+/// realSeriesCount=0) -- discovered only because the full `ut` gate still
+/// showed the whole file differing after
+/// `renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven_xml`
+/// alone passed: the file carries three Chart-typed attributes, not one.
+#[test]
+fn renders_form_chart_settings_for_native_ut_provkontr_gauge_1_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/raw/gauge-1.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/native/gauge-1-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_for_native_ut_provkontr_gauge_2_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/raw/gauge-2.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/native/gauge-2-settings.xml"
+        ),
+    );
+}
+
 /// Evidence: fixture `form-chart-placement-and-showmodes`, five seeds each
 /// changing exactly one XML element on the `chart-form-4series` control.
 #[test]
@@ -71349,6 +71392,32 @@ fn renders_form_chart_settings_with_points_scale_label_color_only_to_platform_pr
         ),
         include_str!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/label-color-only-settings.xml"
+        ),
+    );
+}
+
+/// The real target this whole pt.4 investigation was for: native UT
+/// 11.5.27.75's own `DataProcessors/ПроверкаКонтрагента/Forms/Форма`
+/// `ДиаграммаПоказателей` attribute record (`realSeriesCount=4`,
+/// `chartType=Line`, `elementsIsInit=false`, `splineMode=SmoothCurve`,
+/// `legendPlacement=Bottom`, `pointsScale`/`valuesScale`/`seriesScale` all
+/// present) -- five variables at once, exactly the record the wave-
+/// 2026-08-25-afternoon notes said was too tangled to decode without
+/// isolating each one first via seed. Not a seed: `raw/target.txt` is the
+/// record's own bytes, extracted directly from `1cv8.cf` (`cf extract
+/// <ut 1cv8.cf> acd13c5d-edf3-4c18-99d7-663ac866d5e8.0`, the form body;
+/// this chart is the FIRST occurrence of the `{11},\r\n{74,` marker in the
+/// decoded text, not the third -- an earlier wave-note's `str.find` on
+/// decoded text was mistaken for a byte offset and landed on an unrelated
+/// empty chart on the same form).
+#[test]
+fn renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/raw/target.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/native/target-settings.xml"
         ),
     );
 }

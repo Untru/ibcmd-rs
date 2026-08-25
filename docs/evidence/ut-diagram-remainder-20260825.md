@@ -8,24 +8,32 @@ GraphicalSchemaField и пункт 3 ниже (`СравнительныйАна
 {bot-predefined-picture,task-number-allowed-length-data-lock-mode,
 graphical-schema-field-leftwidest-page,moxel-chart-series-count-zero}`).
 
-**Статус после волны 2026-08-25 (вечер)**: остаток всё ещё **3 файла**
-(закрытие любого из трёх требует ЦЕЛОГО байт-в-байт совпадения файла, а
-не частичного прогресса), но пункт 4 (`ПроверкаКонтрагента/Forms/Форма`)
-продвинут с "не начат вслепую" до "9 из ~10 отдельных находок закрыты
-семенами (включая `pointsScale` целиком), осталось `valuesScale`/
-`seriesScale`" -- см. раздел "Пункт 4" ниже. GanttChart (пункты 1-2) не
-тронут. Гейты (`ws`/`mdm`/`wms`/`sslbase`/`ssl`/`ut`/`uh`) прогнаны
-целиком после каждого коммита, СЛОМАНО=0 на каждом -- сверено против
-**неизменяемого снимка `$D/baselines/d0457a6/*.parity.json`**, не
-`$D/base789` (координатор переприбивает `base789` после каждого слияния
-в основную ветку; он уже уехал вперёд на несвязанных пакетах вроде
-потери английских языковых элементов -- `uh` там 127753, а не 120592
-как в зафиксированном `d0457a6`-снимке). Коммиты этой волны: `fix(form-
-chart): decode realSeriesCount>0 on form Chart attributes`, `fix(form-
-chart): decode chartType=Line and splineMode`, `fix(form-chart): decode
-legendPlacement=Bottom, titleAreaPlacement, and three show-mode fields`,
-`fix(form-chart): decode pointsScale` (см. `git log` текущего
-worktree).
+**Статус после волны 2026-08-25 (вечер)**: пункт 4
+(`ПроверкаКонтрагента/Forms/Форма`) ЗАКРЫТ ЦЕЛИКОМ И ПОДТВЕРЖДЕНО ГЕЙТОМ:
+`ut`-прогон после всех фиксов этой волны даёт `exact=50456` против
+базового `50455` (было `443` расходящихся, стало `442`), разность
+exact-множеств против `$D/baselines/d0457a6/ut.parity.json` показывает
+РОВНО ОДИН новый exact-файл --
+`DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml` -- и
+СЛОМАНО=0. Остаток УТ теперь **2 реальных файла** (оба GanttChart-макета,
+пункты 1-2) + 439 host-dependent. GanttChart -- следующая цель.
+Гейты (`ws`/`mdm`/`wms`/`sslbase`/`ssl`/`ut`/`uh`) прогнаны целиком после
+каждого коммита, СЛОМАНО=0 на каждом -- сверено против **неизменяемого
+снимка `$D/baselines/d0457a6/*.parity.json`**, не `$D/base789`
+(координатор переприбивает `base789` после каждого слияния в основную
+ветку; он уже уехал вперёд на несвязанных пакетах вроде потери английских
+языковых элементов -- `uh` там 127753, а не 120592 как в зафиксированном
+`d0457a6`-снимке). По пути обнаружился двенадцатый пункт (не
+предполагавшийся заранее): та же форма несёт ЕЩЁ ДВА chart-атрибута
+(`chartType=Gauge`, `realSeriesCount=0`, иначе уже полностью разобранной
+формы) -- без них файл не закрывался целиком, несмотря на то, что целевой
+`ДиаграммаПоказателей`-атрибут уже декодировался верно. Коммиты этой
+волны: `fix(form-chart): decode realSeriesCount>0 on form Chart
+attributes`, `fix(form-chart): decode chartType=Line and splineMode`,
+`fix(form-chart): decode legendPlacement=Bottom, titleAreaPlacement, and
+three show-mode fields`, `fix(form-chart): decode pointsScale`,
+`fix(form-chart): decode valuesScale, seriesScale and Gauge chartType,
+close pt.4` (см. `git log` текущего worktree).
 
 ## Пункт 3 закрыт (коммит `292d807`) -- читай перед пунктами 1-2 и 4
 
@@ -83,13 +91,16 @@ init,minimal}` (сырые деревья -- `$D/seeds/chart-src/chart*`).
 (`$D` ниже), а не `/private/tmp/...` -- чистильщик `/tmp` трижды стирал
 scratchpad за эту волну. `$D/kit/seed.sh` уже поправлен на `$D`.
 
-## Остаток: 3 файла, все диаграммные
+## Остаток: 2 файла (было 3 -- пункт 4 закрыт этой волной), оба GanttChart
 
 ```
-DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml            -- ChartField (форма)
 Reports/АнализЖурналаРегистрации/Templates/.../Ext/Template.xml         -- GanttChart (макет)
 Reports/ДлительностьОтложенногоОбновления/Templates/.../Ext/Template.xml -- GanttChart (макет)
 ```
+
+`DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml` (пункт 4,
+`ChartField`-форма) ЗАКРЫТ этой волной -- см. раздел "Пункт 4" ниже,
+подтверждено полным `ut`-гейтом (`exact` 50455→50456).
 
 Не путать с `DataProcessors/ПроверкаКонтрагента/Templates/ФинансовыйАнализ` и
 `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ` -- это host-зависимые
@@ -350,61 +361,93 @@ form-chart-linetype-splinemode,form-chart-placement-and-showmodes}/` с
    Фикстура: `tests/fixtures/native-evidence/8.3.27.2214/
    form-chart-points-scale/`.
 
-Все девять пунктов подтверждены `cargo test --lib` (2263 passed / 33
-failed, тот же список, что и `$D/baselines/d0457a6/fail-base.txt`) и
+Пункты 1-9 подтверждены `cargo test --lib` (2264 passed / 33 failed,
+тот же список, что и `$D/baselines/d0457a6/fail-base.txt`, после
+`pointsScale`; см. пункты 10-11 ниже для `valuesScale`/`seriesScale`) и
 полным прогоном гейтов (`ws`/`mdm`/`wms`/`sslbase`/`ssl`/`ut`/`uh`) с
 проверкой разности exact-множеств против **`$D/baselines/d0457a6/
 *.parity.json`** (НЕ `$D/base789` -- это подвижный указатель,
 переприбивается координатором после каждого слияния и уже уехал вперёд
 на несвязанных пакетах; `$D/baselines/d0457a6/` закрыт на запись и
-зафиксирован на этой базе) -- СЛОМАНО=0 везде; остаток УТ пока СЧЁТНО
-тот же (443 = 439 host-dep + оставшиеся реальные, т.к.
+зафиксирован на этой базе) -- СЛОМАНО=0 везде; остаток УТ на тот момент
+СЧЁТНО тот же (443 = 439 host-dep + оставшиеся реальные, т.к.
 `ПроверкаКонтрагента`/GanttChart ещё не закрыты целиком).
 
-**НЕ закрыто (пункт 4 всё ещё открыт, но сузился до одной пары структур)**:
+10. `valuesScale` -- ЗАКРЫТ. Живёт в `t(tidx(140))`, соседнем блоке сразу
+    после `pointsScale`'s. Семя `chart-form-valuesscale` (`chart-form-
+    4series` control + ТОЛЬКО `<d4p1:valuesScale>` с `showTitle=
+    DontShow`+default `titleArea`+`labelFormat` заданным) меняет РОВНО
+    ДВА подполя из 22 (длина блока НЕ растёт, в отличие от `pointsScale`
+    -- у `valuesScale` нет условно вставляемой под-записи вроде
+    `gridLine`): `[1]` (`"0"`=отсутствует, `"1"`=`showTitle=DontShow`;
+    код `Show` не наблюдался) и `[13]` (`labelFormat`, тот же паттерн
+    `form_chart_localized_xml`, что `lbFormat`/`lbpFormat`/`vsFormat`).
+    Платформа зеркалит ТОТ ЖЕ текст в верхнеуровневый `vsFormat` (`t[39]`,
+    уже читаемый) при импорте -- подтверждено native-переэкспортом, но
+    `labelFormat` в коде читает СВОЙ слот, а не `t[39]`. Титул-область --
+    тот же 13-членный кортеж и `form_chart_scale_title_area_xml`, что и у
+    `pointsScale`. 100% с ПЕРВОГО семени.
+11. `seriesScale` -- ЗАКРЫТ. Живёт в `t(tidx(141))`, следующем блоке.
+    Семя `chart-form-seriesscale` (control + `<d4p1:seriesScale>` с
+    default `titleArea`+`gridLine(width=1,Dotted)`+`showInChart=
+    DontShow`) меняет `[8]` (флаг "есть `gridLine`", ТА ЖЕ форма, что
+    `pointsScale`'s собственный `[8]`) с вставкой `gridLine`-записи
+    (растит блок 22→23 подполей, ВТОРОЕ независимое подтверждение кода
+    стиля линии `"2"`=`Dotted`) и последний слот блока (`"0"`=отсутствует
+    → `"2"`=`showInChart=DontShow`; код `Show` не наблюдался). 100% с
+    ПЕРВОГО семени.
 
-* `valuesScale`/`seriesScale` -- по аналогии должны жить в `t(tidx(140))`
-  и `t(tidx(141))` (соседние блоки, порядок совпадает с порядком в XML:
-  pointsScale, valuesScale, seriesScale) -- ГИПОТЕЗА, НЕ проверена ни
-  одним семенем. `valuesScale` несёт `showTitle`+`titleArea`+
-  `labelFormat` (локализованная строка, не голый цвет); `seriesScale` --
-  `titleArea`+`gridLine`+`showInChart`. Оба, вероятно, используют тот же
-  `titleArea`-кортеж и `form_chart_scale_title_area_xml`, но проверить
-  нужно семенами по одному элементу, ТОЧНО как для `pointsScale` выше
-  (control → добавить элемент с default-значениями → добавить по одной
-  нестандартной настройке). Готовые семена-скелеты `chart-form-4series-
-  src` и метод (см. `pointsScale`'s раздел выше и `git log` коммитов
-  `fix(form-chart): decode pointsScale` для точного рецепта) переносятся
-  напрямую.
-* Полный список elements-тегов записи (для быстрой сверки) --
-  `awk 'NR>=6720 && NR<=7030' .../ПроверкаКонтрагента/Forms/Форма/Ext/
-  Form.xml | grep -oE "<d4p1:[A-Za-z]+" | sort -u` в дереве
-  `$D/cap/ut-r1/src`.
+Первая прямая проверка на РЕАЛЬНОЙ (не семенной) записи
+`DataProcessors/ПроверкаКонтрагента/Forms/Форма`'s `ДиаграммаПоказателей`
+(все пять переменных сразу: `realSeriesCount=4`, `chartType=Line`,
+`elementsIsInit=false`, `splineMode`, `legendPlacement=Bottom`, ТРИ
+scale-блока и show-mode-тройка одновременно -- та самая запись, которую
+предыдущая волна намеренно не трогала вслепую) декодировала и
+переэкспортировала байт-в-байт identично -- НО полный `ut`-гейт на этом
+шаге ВСЁ ЕЩЁ показывал файл расходящимся (443, не 442)! Извлечена
+НАПРЯМУЮ из `1cv8.cf` через `ibcmd-rs cf extract <cf> acd13c5d-
+edf3-4c18-99d7-663ac866d5e8.0 <out>` (СВОЯ подкоманда, не `/opt/1cv8`
+`ibcmd`) -- это ПЕРВОЕ, не третье вхождение маркера `{11},\r\n{74,` в
+декодированном тексте формы (см. исправление выше). Фикстура: `tests/
+fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/`.
 
-**Вывод**: пункт 4 сузился с "6-8 новых элементов + 2 неопознанные
-позиции" до "2 похожих структуры (`valuesScale`/`seriesScale`)". Метод
-семян по одному элементу поверх `chart-form-4series` полностью себя
-оправдал (9/9 находок
-подтвердились с первого-второго семени, ни одной ложной гипотезы, кроме
-`pointsScale`'s `labelColor`, которую пришлось отделить от
-`gridLinesShowMode`/`gridLine` третьим семенем); продолжать им же.
-`chart-form-4series-src` (и его копии `chart-form-*-src` с одним
-изменённым элементом каждая) -- готовые скелеты, бери любой и меняй ОДИН
-элемент. `valuesScale`, `seriesScale` -- сравнимая по объёму работа для
-отдельной волны, но НЕ таких больших размеров, как GanttChart ниже.
+12. `chartType=Gauge` -- ЗАКРЫТ, найден `diff`-ом полного `ut`-вывода
+    против native: ТА ЖЕ форма `ПроверкаКонтрагента/Forms/Форма` несёт
+    ЕЩЁ ДВА (идентичных, кроме `rebuildTime`) chart-атрибута с
+    `chartType=Gauge` -- код, не входивший ни в один из уже известных
+    (`0`=Line, `6`=Column3D, `12`=Pie). Оба -- иначе полностью в уже
+    разобранной `realSeriesCount=0` форме (215-членный `data[]`, БЕЗ
+    scale-блоков и show-mode полей) -- единственным недостающим кодом был
+    именно `chartType`. Семя `chart-form-gaugetype` (control + ТОЛЬКО
+    `<d4p1:chartType>` на `Gauge`) даёт единственный изменённый токен:
+    `"38"`=`Gauge`. Фикстуры: `tests/fixtures/native-evidence/
+    8.3.27.2214/form-chart-linetype-splinemode/` (семя) и `tests/
+    fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/`
+    (обе настоящие записи, напрямую).
+
+**ПУНКТ 4 ЗАКРЫТ ЦЕЛИКОМ И ПОДТВЕРЖДЁН ГЕЙТОМ.** После добавления
+`chartType=Gauge` полный `ut`-прогон (`zsh $D/kit/run.sh ut <worktree>
+<выход>`) даёт `exact=50456` (было `50455`), разность exact-множеств
+против `$D/baselines/d0457a6/ut.parity.json` -- РОВНО ОДИН новый
+exact-файл, `DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml`,
+СЛОМАНО=0.
+
+**Вывод**: пункт 4 закрыт полностью, 12/12 отдельных находок подтвердились
+семенами (11/12 с первого-второго семени; `pointsScale`'s `labelColor`
+потребовала третьего для отделения от `gridLinesShowMode`/`gridLine`),
+плюс итоговая проверка на настоящих записях (три chart-атрибута на одной
+форме, не одна) и финальным гейтом. Метод семян по одному элементу поверх
+`chart-form-4series` полностью себя оправдал -- но НАПОМИНАНИЕ для
+следующей волны: проверка на изолированной фикстуре (пусть даже
+единственной "настоящей" записи) НЕ заменяет полный гейт на файл целиком
+-- в этом файле было ТРИ разных chart-атрибута, и фикс одного не закрыл
+файл, пока не нашёлся второй/третий через `diff` полного вывода.
+`chart-form-4series-src` (и его копии `chart-form-*-src`) остаются
+готовыми скелетами для будущих находок такого рода.
 
 ## Порядок атаки (рекомендация)
 
-1. Пункт 4, остаток -- семя на `seriesScale`/`valuesScale` по отдельности
-   поверх `chart-form-4series` (метод см. выше в разделе про
-   `pointsScale`: control → default-элемент → по одной нестандартной
-   настройке, дерево `chart-form-pointsscale-src` показывает рецепт --
-   скопировать `chart-form-4series-src`, добавить ОДИН элемент в нужную
-   XML-позицию между `pointsAxis`/`pointsScale` и `legendPlacement`).
-   `pointsScale` (`t(tidx(139))`) уже закрыт и закоммичен
-   (`form_chart_scale_title_area_xml` переиспользуем для их
-   `titleArea`). Дописать раскладку ДВУХ оставшихся блоков
-   (`t(tidx(140))`/`t(tidx(141))`) в `format_form_chart_settings_xml`.
+1. ~~Пункт 4~~ ЗАКРЫТ И ПОДТВЕРЖДЁН -- см. раздел выше.
 2. Пункты 1-2 (GanttChart) -- самый большой объём, делать последним; начать
    с воспроизведения обёртки `{19,{0,{11},{74,...}}}` и код `chartType`
    `Column3D`, затем идти по XML сверху вниз, member за member, с семенами
