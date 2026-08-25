@@ -770,7 +770,7 @@ pub(super) struct MoxelChart {
     real_extra_series: MoxelChartSeries,
     is_points_design: bool,
     real_points: Vec<MoxelChartPoint>,
-    cur_series: usize,
+    cur_series: isize,
     cur_point: usize,
     chart_type: &'static str,
     labels_location: &'static str,
@@ -4619,8 +4619,25 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let series_cur_id = parse_moxel_chart_usize(data.get(1)?)?;
     let points_cur_id = parse_moxel_chart_usize(data.get(2)?)?;
     let is_series_design = parse_moxel_chart_bool(data.get(3)?)?;
+    // `series_count == 0` is a real, native-published state, not an absence:
+    // native UT 11.5.27.75's
+    // `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров`
+    // publishes `<d3p1:realSeriesCount>0</d3p1:realSeriesCount>` with
+    // `<d3p1:realPointCount>0</d3p1:realPointCount>` alongside it (a template
+    // chart whose series/points are populated at runtime) while still
+    // carrying the one mandatory `realExSeriesData` this reader always parses
+    // below, and a negative `<d3p1:curSeries>-1</d3p1:curSeries>` (see
+    // `cur_series` below). Admitting the count here is necessary but not yet
+    // sufficient to publish that template's `<drawing>` block: its `post`
+    // section (`validate_moxel_chart_v74_post` and everything past it) is
+    // three tokens shorter than `100 + point_count * 2` predicts, in the
+    // scale/axis-display region past index 40 -- not a simple function of
+    // `series_count` or `point_count` alone, so the record still refuses at
+    // the `tail.len() != expected_tail_len` check below rather than guess at
+    // the missing three slots. Whatever proves that gap can build on the
+    // count and `cur_series` groundwork here.
     let series_count = parse_moxel_chart_usize(data.get(4)?)?;
-    if series_count == 0 || series_count > MAX_MOXEL_CHART_SERIES {
+    if series_count > MAX_MOXEL_CHART_SERIES {
         return None;
     }
 
@@ -4635,8 +4652,10 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let real_extra_series = parse_moxel_chart_series(data.get(cursor..cursor.checked_add(11)?)?)?;
     cursor += 11;
     let is_points_design = parse_moxel_chart_bool(data.get(cursor)?)?;
+    // Same evidence as `series_count`: the same template chart also
+    // publishes `realPointCount=0` rather than omitting the count.
     let point_count = parse_moxel_chart_usize(data.get(cursor + 1)?)?;
-    if point_count == 0 || point_count > MAX_MOXEL_CHART_POINTS {
+    if point_count > MAX_MOXEL_CHART_POINTS {
         return None;
     }
     cursor += 2;
@@ -4652,12 +4671,19 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let real_data_slots = real_data_count.checked_mul(3)?;
     let post_start = 100usize.checked_add(real_data_slots)?;
     let expected_tail_len = 200usize.checked_add(point_count.checked_mul(5)?)?;
-    if series_count != 1 || tail.len() != expected_tail_len || post_start > tail.len() {
+    // `series_count` is proven at 0 (the empty template chart above) and 1
+    // (all thirteen populated charts the corpus otherwise carries); 2+ series
+    // is not this reader's case yet and refuses rather than guessing at a
+    // layout no observation has confirmed.
+    if series_count > 1 || tail.len() != expected_tail_len || post_start > tail.len() {
         return None;
     }
 
     validate_moxel_chart_v74_front(tail)?;
-    let cur_series = parse_moxel_chart_usize(tail.first()?)?;
+    // A negative `curSeries` is native, not a parse failure: the empty-chart
+    // template above publishes `<d3p1:curSeries>-1</d3p1:curSeries>` (no
+    // series exists to be "current"), spelled `-1` in the raw tuple too.
+    let cur_series = tail.first()?.trim().parse::<isize>().ok()?;
     let cur_point = parse_moxel_chart_usize(tail.get(1)?)?;
     let chart_type = moxel_chart_type(tail.get(2)?)?;
     let labels_location = match tail.get(5)?.trim() {
