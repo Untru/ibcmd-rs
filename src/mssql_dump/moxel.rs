@@ -489,6 +489,10 @@ pub(super) struct MoxelVerticalGroup {
     /// the 10 publish `<o>false</o>` - the other 1693 publish no `<o>` at all
     /// and no record in the corpus publishes `<o>true</o>`.
     pub(super) open: bool,
+    /// The group's own label, published as `<t>`. Empty when the record's
+    /// own localized-value member (field 3) declares zero items -- see
+    /// `parse_moxel_vertical_group`.
+    pub(super) text: Vec<MoxelLocalizedValue>,
 }
 
 #[derive(Clone)]
@@ -2090,14 +2094,28 @@ pub(super) fn parse_moxel_vertical_groups(fields: &[&str]) -> Vec<MoxelVerticalG
 
 pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGroup> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 6 || fields.get(3).map(|field| field.trim()) != Some("{1,0}") {
+    if fields.len() != 6 {
         return None;
     }
+    // Evidence (native ERP УХ 3.2.12.6): member 3 is not the fixed marker
+    // `{1,0}` the previous reading demanded -- it is a localized-value list,
+    // exactly the same `{1,count,{lang,content},...}` shape used everywhere
+    // else in this file, whose empty (`count == 0`) form happens to render
+    // as `{1,0}`. Non-empty, it carries the group's own label, published as
+    // `<t>`, e.g. `{1,1,{"#","ГО"}}` for `Documents/
+    // ЭлектроннаяТранспортнаяНакладная/Templates/
+    // СоответствиеИменРеквизитов`'s first group (begin 0, end 813): the
+    // corpus's own convention here spells the pseudo-language `#`, never
+    // `ru`/`en`. Requiring the literal empty marker rejected every group in
+    // any document where even one group carried a label -- the whole
+    // `<vg>`/`<vgLevels>` construction, not just the labelled groups.
+    let text_items = parse_moxel_localized_values(fields.get(3)?)?;
     Some(MoxelVerticalGroup {
         begin_row: fields.first()?.trim().parse::<usize>().ok()?,
         end_row: fields.get(1)?.trim().parse::<usize>().ok()?,
         level: fields.get(2)?.trim().parse::<usize>().ok()?,
         open: fields.get(4)?.trim().parse::<usize>().ok()? == 0,
+        text: text_items,
     })
 }
 
@@ -11055,6 +11073,22 @@ pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerti
     xml.push_str(&format!("\t\t<b>{}</b>\r\n", group.begin_row));
     if group.end_row != group.begin_row {
         xml.push_str(&format!("\t\t<e>{}</e>\r\n", group.end_row));
+    }
+    if !group.text.is_empty() {
+        xml.push_str("\t\t<t>\r\n");
+        for item in &group.text {
+            xml.push_str("\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_element_text(&item.lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_element_text(&item.content)
+            ));
+            xml.push_str("\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t</t>\r\n");
     }
     if !group.open {
         xml.push_str("\t\t<o>false</o>\r\n");

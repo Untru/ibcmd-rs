@@ -31205,6 +31205,47 @@ fn parses_and_formats_moxel_vertical_groups() {
     assert!(xml.contains("\t<vg>\r\n\t\t<b>3</b>\r\n\t</vg>"));
 }
 
+/// Evidence (native ERP УХ 3.2.12.6): a vertical group's member 3 is a
+/// localized-value list, not the fixed marker `{1,0}` a previous reading
+/// demanded -- `{1,0}` is just that list's empty (`count == 0`) form. Real
+/// corpus shape, `Documents/ЭлектроннаяТранспортнаяНакладная/Templates/
+/// СоответствиеИменРеквизитов`'s first group: begin row 0, end row 813,
+/// label `{"#","ГО"}` (this corpus's own convention spells the pseudo-
+/// language `#`, never `ru`/`en`). Requiring the empty marker literally
+/// rejected the whole `<vg>`/`<vgLevels>` construction in any document
+/// where even one group carried a label, not merely that group.
+#[test]
+fn moxel_vertical_group_label_publishes_as_t() {
+    let groups = parse_moxel_vertical_groups(&[
+        "1",
+        "{0,813,0,{1,1,\r\n{\"#\",\"ГО\"}\r\n},0,0}",
+        "-1",
+        "0",
+        "0",
+        "0",
+    ]);
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].begin_row, 0);
+    assert_eq!(groups[0].end_row, 813);
+    assert_eq!(
+        groups[0].text,
+        vec![MoxelLocalizedValue {
+            lang: "#".to_string(),
+            content: "ГО".to_string(),
+        }]
+    );
+
+    let mut xml = String::new();
+    push_moxel_vertical_group_xml(&mut xml, &groups[0]);
+    assert_eq!(
+        xml,
+        "\t<vg>\r\n\t\t<b>0</b>\r\n\t\t<e>813</e>\r\n\t\t<t>\r\n\t\t\t<v8:item>\r\n\
+         \t\t\t\t<v8:lang>#</v8:lang>\r\n\t\t\t\t<v8:content>ГО</v8:content>\r\n\
+         \t\t\t</v8:item>\r\n\t\t</t>\r\n\t</vg>\r\n"
+    );
+}
+
 #[test]
 fn parses_moxel_named_area_list_with_drawing_items() {
     let areas = parse_moxel_area_list(
@@ -32005,6 +32046,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
             end_row: 0,
             level: 0,
             open: true,
+            text: Vec::new(),
         }],
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
