@@ -3057,21 +3057,39 @@ pub fn parse_task_number_auto_prefix_slot(value: &str) -> Option<TaskNumberAutoP
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskNumberAllowedLength {
+    Fixed,
     Variable,
 }
 
 impl TaskNumberAllowedLength {
     pub const fn xml_value(self) -> &'static str {
         match self {
+            Self::Fixed => "Fixed",
             Self::Variable => "Variable",
         }
     }
 }
 
-pub fn parse_task_number_allowed_length_slot(value: &str) -> Option<TaskNumberAllowedLength> {
-    match value.trim() {
-        "1" => Some(TaskNumberAllowedLength::Variable),
-        _ => None,
+/// `NumberAllowedLength` is not an independent slot: field 20, the slot this
+/// used to read (`"1"` -> `Variable`, unconditionally), is `"1"` on every
+/// native `Task` object this crate has ever traced and does not move --
+/// `Tasks/ЗадачаИсполнителя` (SSL demo/base 3.1.12.297, УТ 11.5.27.75, all
+/// three `<NumberAllowedLength>Fixed</NumberAllowedLength>`) and the
+/// synthetic `task-basic` corpus fixture `CorpusTask`
+/// (`<NumberAllowedLength>Variable</NumberAllowedLength>`) all carry `"1"`
+/// there. A full 52-member comparison between `ЗадачаИсполнителя` and
+/// `CorpusTask` leaves exactly one differing field not already claimed by a
+/// proven property: field 31, the same slot [`parse_task_number_auto_prefix_slot`]
+/// already reads for `TaskNumberAutoPrefix` -- `DontUse` pairs with `Fixed`
+/// and `BusinessProcessNumber` pairs with `Variable` on both objects, with
+/// no counter-example and no field left over to prefer a coincidence
+/// reading over it.
+pub const fn task_number_allowed_length_from_auto_prefix(
+    auto_prefix: TaskNumberAutoPrefix,
+) -> TaskNumberAllowedLength {
+    match auto_prefix {
+        TaskNumberAutoPrefix::DontUse => TaskNumberAllowedLength::Fixed,
+        TaskNumberAutoPrefix::BusinessProcessNumber => TaskNumberAllowedLength::Variable,
     }
 }
 
@@ -3116,22 +3134,35 @@ pub fn parse_task_include_help_in_contents_slot(value: &str) -> Option<bool> {
     }
 }
 
+/// Field 32 is not the `DataLockControlMode` signal: it reads `"1"` on
+/// every native `Task` object traced regardless of which
+/// `<DataLockControlMode>` the platform actually writes --
+/// `Tasks/ЗадачаИсполнителя` (SSL demo/base 3.1.12.297, УТ 11.5.27.75, all
+/// three `Managed`) and the synthetic `task-basic` corpus fixture
+/// `CorpusTask` (`Automatic`) all carry `"1"` there. The real signal is
+/// whether the object's own `DataLockFields` collection is empty
+/// (`ЗадачаИсполнителя` carries one field and is `Managed`; `CorpusTask`
+/// carries none and is `Automatic`) -- computed at this function's one call
+/// site in `mssql_dump::mod`, not here. This type and function survive only
+/// as the validated reserved-constant check on field 32 itself: a future
+/// `Task` record where it is not `"1"` fails closed rather than silently
+/// reusing the `DataLockFields` derivation for an unobserved shape.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskDataLockControlMode {
-    Automatic,
+    ReservedConstant,
 }
 
 impl TaskDataLockControlMode {
     pub const fn xml_value(self) -> &'static str {
         match self {
-            Self::Automatic => "Automatic",
+            Self::ReservedConstant => "1",
         }
     }
 }
 
 pub fn parse_task_data_lock_control_mode_slot(value: &str) -> Option<TaskDataLockControlMode> {
     match value.trim() {
-        "1" => Some(TaskDataLockControlMode::Automatic),
+        "1" => Some(TaskDataLockControlMode::ReservedConstant),
         _ => None,
     }
 }
@@ -14111,10 +14142,20 @@ mod tests {
 
     #[test]
     fn task_scalar_slots_use_platform_proven_xml_mappings() {
+        // `NumberAllowedLength` is not read off its own slot -- see
+        // `task_number_allowed_length_from_auto_prefix` -- it is derived
+        // from the already-proven `TaskNumberAutoPrefix` reading instead.
+        // `ЗадачаИсполнителя` (`DontUse`) and `CorpusTask`
+        // (`BusinessProcessNumber`) pin both directions.
         assert_eq!(
-            parse_task_number_allowed_length_slot("1")
-                .unwrap()
-                .xml_value(),
+            task_number_allowed_length_from_auto_prefix(TaskNumberAutoPrefix::DontUse).xml_value(),
+            "Fixed"
+        );
+        assert_eq!(
+            task_number_allowed_length_from_auto_prefix(
+                TaskNumberAutoPrefix::BusinessProcessNumber
+            )
+            .xml_value(),
             "Variable"
         );
         assert_eq!(
@@ -14131,12 +14172,12 @@ mod tests {
         );
         assert_eq!(parse_task_include_help_in_contents_slot("1"), Some(true));
         assert_eq!(parse_task_include_help_in_contents_slot("0"), Some(false));
-        assert_eq!(
-            parse_task_data_lock_control_mode_slot("1")
-                .unwrap()
-                .xml_value(),
-            "Automatic"
-        );
+        // `DataLockControlMode` is likewise derived, not read off its own
+        // slot -- see `parse_task_data_lock_control_mode_slot`'s doc comment
+        // and the `DataLockFields`-emptiness derivation at its one call
+        // site. This only checks the slot stays the validated reserved
+        // constant it is everywhere observed to be.
+        assert!(parse_task_data_lock_control_mode_slot("1").is_some());
         assert_eq!(
             parse_task_full_text_search_slot("0").unwrap().xml_value(),
             "Use"
@@ -14146,7 +14187,6 @@ mod tests {
             "Use"
         );
 
-        assert!(parse_task_number_allowed_length_slot("0").is_none());
         assert!(parse_task_choice_history_on_input_slot("2").is_none());
         assert!(parse_task_include_help_in_contents_slot("2").is_none());
         assert!(parse_task_data_lock_control_mode_slot("0").is_none());

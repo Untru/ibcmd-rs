@@ -17,7 +17,7 @@ use ibcmd_schema::{
     GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner,
     parse_task_choice_history_on_input_slot, parse_task_data_lock_control_mode_slot,
     parse_task_full_text_search_slot, parse_task_include_help_in_contents_slot,
-    parse_task_number_allowed_length_slot, parse_task_number_auto_prefix_slot,
+    parse_task_number_auto_prefix_slot, task_number_allowed_length_from_auto_prefix,
 };
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{
@@ -25490,6 +25490,25 @@ fn parse_task_properties_from_text(
         &attribute_references,
         &[("-7", "BusinessProcess")],
     )?;
+    // `DataLockControlMode` is not an independent slot either: field 32,
+    // the slot this used to read (`"1"` -> `Automatic`, unconditionally),
+    // is `"1"` on both `ЗадачаИсполнителя` (`<DataLockControlMode>Managed`)
+    // and the synthetic `CorpusTask` fixture
+    // (`<DataLockControlMode>Automatic`) -- it does not move either. What
+    // does move between them is `DataLockFields` itself:
+    // `ЗадачаИсполнителя` carries one (`BusinessProcess`) and is `Managed`;
+    // `CorpusTask` carries none (`<DataLockFields/>`) and is `Automatic`.
+    // Field 32 is kept as a validated reserved constant, the same way field
+    // 20 and field 45 are: a future record where it varies fails closed
+    // instead of silently reusing this derivation.
+    if parse_task_data_lock_control_mode_slot(fields.get(32)?).is_none() {
+        return None;
+    }
+    let task_data_lock_control_mode = if data_lock_fields.is_empty() {
+        "Automatic"
+    } else {
+        "Managed"
+    };
 
     let default_object_form =
         parse_task_form_ref(fields.get(15)?, &form_uuids, &header.name, form_refs)?;
@@ -25525,7 +25544,18 @@ fn parse_task_properties_from_text(
     // property discovered so far -- it is not `IncludeHelpInContents`,
     // which lives at field 24 (see below). Kept as a validated reserved
     // constant rather than invented XML: unknown values fail closed.
+    //
+    // Field 20 joins the same reserved-constant treatment: it used to be
+    // read directly as the `NumberAllowedLength` slot, but it is `"1"` on
+    // every native `Task` object traced (`ЗадачаИсполнителя` across three
+    // editions and the synthetic `CorpusTask` fixture alike) regardless of
+    // which `<NumberAllowedLength>` the platform actually writes -- see
+    // `task_number_allowed_length_from_auto_prefix` for the slot that
+    // really carries it. Kept validated rather than dropped, so a future
+    // corpus record where it varies fails closed instead of silently
+    // reusing a stale assumption.
     if fields.get(45)?.trim() != "1"
+        || fields.get(20)?.trim() != "1"
         || !task_characteristics_is_empty(fields.get(44)?)
         || !owner_graph::task_reserved_tail_is_zero(&fields)
     {
@@ -25547,6 +25577,8 @@ fn parse_task_properties_from_text(
         return None;
     }
 
+    let task_number_auto_prefix = parse_task_number_auto_prefix_slot(fields.get(31)?)?;
+
     Some(TaskProperties {
         generated_types,
         internal_uuid_slots: TaskInternalUuidSlots {
@@ -25560,10 +25592,11 @@ fn parse_task_properties_from_text(
             _ => return None,
         },
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
-        number_allowed_length: parse_task_number_allowed_length_slot(fields.get(20)?)?.xml_value(),
+        number_allowed_length: task_number_allowed_length_from_auto_prefix(task_number_auto_prefix)
+            .xml_value(),
         check_unique: information_register_bool(fields.get(21)?)?,
         autonumbering: information_register_bool(fields.get(23)?)?,
-        task_number_auto_prefix: parse_task_number_auto_prefix_slot(fields.get(31)?)?.xml_value(),
+        task_number_auto_prefix: task_number_auto_prefix.xml_value(),
         description_length: parse_exchange_plan_u32(fields.get(22)?)?,
         addressing,
         main_addressing_attribute,
@@ -25602,8 +25635,7 @@ fn parse_task_properties_from_text(
             .xml_value(),
         include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(24)?)?,
         data_lock_fields,
-        data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(32)?)?
-            .xml_value(),
+        data_lock_control_mode: task_data_lock_control_mode,
         full_text_search: parse_task_full_text_search_slot(fields.get(33)?)?.xml_value(),
         object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(

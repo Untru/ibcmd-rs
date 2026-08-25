@@ -9603,16 +9603,22 @@ fn restores_accumulation_register_balance_main_table_from_raw_category() {
     // carry across metadata kinds: UT 11.5.27.75 puts all 17 blocks whose
     // category is `{"N",3}` on `AccumulationRegister…Balance` (11) and
     // `InformationRegister…SliceLast` (6), and both blocks that reach
-    // `Task…TasksByExecutive` store `{"N",2}`, not `{"N",3}`. No
-    // accounting-register list occurs anywhere in the corpus, so the pair is
-    // unobserved and keeps the bare main table instead of a guessed suffix.
+    // `Task…TasksByExecutive` store `{"N",2}`, not `{"N",3}`.
+    //
+    // Second contract change: SSL demo/base 3.1.12.297 supply the
+    // accounting-register list this test used to call unobserved --
+    // `AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета` and its
+    // `...БезКорреспонденции` sibling both carry `{"N",3}` and both native
+    // `<MainTable>` write `.RecordsWithExtDimensions`, with no
+    // counter-example, so the pair now gets that suffix rather than the bare
+    // main table.
     assert_eq!(
         normalize_form_main_table_category(
             Some("AccountingRegister.RegisterB".to_string()),
             Some("3"),
         )
         .as_deref(),
-        Some("AccountingRegister.RegisterB")
+        Some("AccountingRegister.RegisterB.RecordsWithExtDimensions")
     );
     assert_eq!(
         parse_main_table(
@@ -25565,6 +25571,834 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
     ] {
         assert_eq!(parse_common_command_shortcut_value(raw), None, "{raw}");
     }
+}
+
+#[test]
+fn label_decoration_writes_shortcut_from_fixed_slot_sixteen() {
+    // Real bytes: DataProcessors/ОбновлениеВерсииИБ/Forms/ФормаВерсииИБ/
+    // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
+    // `30c55f12-6fa4-411e-a401-c15332430c9c.0`). `ИнструкцияРедактированияВерсий`
+    // is the only native `LabelDecoration` observed carrying `<Shortcut>`
+    // across SSL demo, SSL base and UT 11.5.27.75 (15 127 `LabelDecoration`
+    // items traced): raw slot 16 is `{0,118,0}`, the platform's own
+    // `{0,keycode,modifiers}` tuple for `F7`, and the platform writes
+    // `<Shortcut>F7</Shortcut>` behind `SkipOnInput` and ahead of `Title`.
+    let with_shortcut = parse_form_child_item(
+        r#"{12,
+{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнструкцияРедактированияВерсий",
+{1,1,
+{"ru","Для выполнения обработчиков обновления при запуске системы укажите версию ИБ до обновления
+или удалите информацию о версии ИБ для имитации запуска с ""пустой"" базы (при этом будут
+выполнены только обработчики первоначального заполнения). Затем перезапустите приложения."}
+},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,118,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},1,
+{22,
+{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ИнструкцияРедактированияВерсийКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,0,
+{1,
+{1,1,
+{"ru","Для выполнения обработчиков обновления при запуске системы укажите версию ИБ до обновления
+или удалите информацию о версии ИБ для имитации запуска с ""пустой"" базы (при этом будут
+выполнены только обработчики первоначального заполнения). Затем перезапустите приложения."}
+},0},0,1,
+{12,
+{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнструкцияРедактированияВерсийРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,1,0,3,3,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(with_shortcut.tag, "LabelDecoration");
+    assert_eq!(with_shortcut.item_shortcut.as_deref(), Some("F7"));
+    let xml = format_form_child_items_xml(std::slice::from_ref(&with_shortcut), 1);
+    let skip = xml.find("<SkipOnInput>false</SkipOnInput>").unwrap();
+    let shortcut = xml.find("<Shortcut>F7</Shortcut>").unwrap();
+    let title = xml.find("<Title").unwrap();
+    assert!(skip < shortcut, "Shortcut trails SkipOnInput: {xml}");
+    assert!(shortcut < title, "Shortcut leads Title: {xml}");
+
+    // Same form, real bytes for a titled `LabelDecoration` the platform
+    // writes no `<Shortcut>` on (`ДекорацияУточнение`): raw slot 16 reads
+    // `{0,0,0}`, which the shared decoder already turns into `None`.
+    let without_shortcut = parse_form_child_item(
+        r#"{12,
+{105,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияУточнение",
+{1,1,
+{"ru","секунд"}
+},
+{1,1,
+{"ru","Если установить паузу, то приостанавливает выполнение обработчика для просмотра ошибок в процессе обработки данных.
+см. Документ._ДемоЗаказПокупателя.ОбработатьДанныеДляПереходаНаНовуюВерсию"}
+},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},1,
+{22,
+{106,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ДекорацияУточнениеКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,2,
+{1,
+{1,1,
+{"ru","секунд"}
+},0},3,1,
+{12,
+{107,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияУточнениеРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},1,0,0,1,0,3,3,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(without_shortcut.tag, "LabelDecoration");
+    assert_eq!(without_shortcut.item_shortcut, None);
+    let xml_without = format_form_child_items_xml(std::slice::from_ref(&without_shortcut), 1);
+    assert!(
+        !xml_without.contains("<Shortcut>"),
+        "no Shortcut expected: {xml_without}"
+    );
+}
+
+#[test]
+fn graphical_schema_field_writes_edit_false_exactly_when_read_only() {
+    // Real bytes: DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма/
+    // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
+    // `2d885109-4c96-41c0-a996-785bfd793c2d.0`). Traced across SSL demo, SSL
+    // base, UT 11.5.27.75 and ERP УХ 3.2.12.6 -- 14 native
+    // `GraphicalSchemaField` items, the construct's whole population -- the 9
+    // that carry `<ReadOnly>true</ReadOnly>` all also write
+    // `<Edit>false</Edit>` immediately behind their geometry (`Width`/
+    // `Height`), and the other 5 write neither, with no counter-example.
+    let read_only_item = parse_form_child_item(
+        r#"{37,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,14,"КартаМаршрута",0,0,
+{1,1,
+{"ru","Карта маршрута"}
+},
+{1,0},
+{1,
+{3}
+},
+{0},1,1,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{3,80,25,0,0,
+{3,4,
+{0}
+},
+{1,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,"КартаМаршрутаВыбор",1,0,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,0,1},1,0,0,1,0,1,1},
+{0,1,0},1,
+{22,
+{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартаМаршрутаКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},1,a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Задачи",
+{1,1,
+{"ru","Показать задачи для точки маршрута"}
+},1,
+{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",0,0,1,
+{12,
+{47,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗадачиРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{48,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартаМаршрутаРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(read_only_item.tag, "GraphicalSchemaField");
+    assert_eq!(read_only_item.read_only, Some(true));
+    assert_eq!(read_only_item.width.as_deref(), Some("80"));
+    assert_eq!(read_only_item.height.as_deref(), Some("25"));
+    let xml = format_form_child_items_xml(std::slice::from_ref(&read_only_item), 1);
+    let height = xml.find("<Height>25</Height>").unwrap();
+    let edit = xml.find("<Edit>false</Edit>").unwrap();
+    let context_menu = xml.find("<ContextMenu").unwrap();
+    assert!(height < edit, "Edit trails Height: {xml}");
+    assert!(edit < context_menu, "Edit leads ContextMenu: {xml}");
+
+    // Negative control: the project's own synthetic document-field record
+    // (`document_field_record_for_test`, already used above and at
+    // `dispatches_wrapper_37_document_fields_without_owner_specific_conditions`
+    // and `parses_document_field_properties_from_common_and_typed_slots`)
+    // with slot 14 -- the `show_title`-shaped slot `GraphicalSchemaField`
+    // shares with `TextDocumentField`/`HTMLDocumentField`/`RadioButtonField`
+    // and the one this tag's `read_only` is actually read from, since
+    // `FormFieldSchema::read_only_slot` does not cover `GraphicalSchemaField`
+    // -- flipped from the template's default `"1"` to `"0"`. A native
+    // `GraphicalSchemaField` with `<ReadOnly>` absent behaves the same way:
+    // `DataProcessors/СтруктураВладения` and `DataProcessors/СхемыСправки` of
+    // ERP УХ 3.2.12.6 both carry it, but neither form round-trips through the
+    // single-item harness in isolation (both are rejected upstream by an
+    // unrelated DCS conditional-appearance gap, out of scope here), so the
+    // negative side is exercised through the existing synthetic record
+    // instead of real bytes.
+    let mut editable_fields: Vec<String> = split_1c_braced_fields(
+        &document_field_record_for_test("14", r#"{1,1,{"en","Schema"}}"#),
+        0,
+    )
+    .unwrap()
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    editable_fields[14] = "0".to_string();
+    let editable_record = format!("{{{}}}", editable_fields.join(","));
+    let editable_item = parse_form_child_item(
+        &editable_record,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(editable_item.tag, "GraphicalSchemaField");
+    assert_ne!(editable_item.read_only, Some(true));
+    let xml_editable = format_form_child_items_xml(std::slice::from_ref(&editable_item), 1);
+    assert!(
+        !xml_editable.contains("<Edit>"),
+        "no Edit expected: {xml_editable}"
+    );
+}
+
+#[test]
+fn popup_writes_height_behind_the_title_block_not_ahead_of_it() {
+    // Real bytes: DataProcessors/РаботаСРезультатамиОбмена/Forms/
+    // УстановкаСоответствий/Ext/Form.xml, SSL demo 3.1.12.297 (storage
+    // element `3a8a6019-3fd9-499f-8370-506d73f0a53c.0`). SSL demo and SSL
+    // base share this exact form byte-for-byte; `ГруппаУстановитьРешения` is
+    // the only native `Popup` observed carrying `<Height>` across all 487
+    // `Popup` items traced in SSL demo, SSL base, Web_Service,
+    // MDM_Management and WMS5's Exchange module: the platform writes it
+    // behind `Title`/`TitleTextColor`/`TitleFont` and ahead of
+    // `ShapeRepresentation`, not in the early geometry slot every other
+    // control kind uses.
+    let item = parse_form_child_item(
+        r#"{22,
+{115,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"ГруппаУстановитьРешения",
+{1,1,
+{"ru","Установить действие"}
+},
+{1,0},0,1,0,0,1,2,2,
+{3,3,
+{0,ad87bd29-0ad1-4da4-ac62-38e714e0cb9f}
+},
+{7,2,512,
+{-31},1,100},
+{0,0,0},1,
+{7,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{0},2,3,0,3,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+}
+},5,a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{117,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СоздатьНовый",
+{1,1,
+{"ru","Создать новый"}
+},1,
+{13,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{12,
+{118,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СоздатьНовыйРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{119,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СопоставитьИЗагрузить",
+{1,1,
+{"ru","Установить соответствие и загрузить"}
+},1,
+{12,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{12,
+{120,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СопоставитьИЗагрузитьРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{121,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СопоставитьНоНеЗагружать",
+{1,1,
+{"ru","Установить соответствие, но не загружать"}
+},1,
+{11,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{12,
+{122,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СопоставитьНоНеЗагружатьРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{123,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"НеЗагружать",
+{1,1,
+{"ru","Не загружать"}
+},1,
+{15,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{12,
+{124,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"НеЗагружатьРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{127,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ОчиститьСоответствиеДействиеНеопределено",
+{1,1,
+{"ru","Очистить соответствие и установить ""Действие неопределено"""}
+},1,
+{14,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{12,
+{128,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОчиститьСоответствиеДействиеНеопределеноРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},1,0,1,
+{12,
+{116,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаУстановитьРешенияРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,3,3,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "Popup");
+    assert_eq!(item.height.as_deref(), Some("1"));
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    let title_font = xml.find("<TitleFont").unwrap();
+    let height = xml.find("<Height>1</Height>").unwrap();
+    let shape_representation = xml.find("<ShapeRepresentation>").unwrap();
+    assert!(title_font < height, "Height trails TitleFont: {xml}");
+    assert!(
+        height < shape_representation,
+        "Height leads ShapeRepresentation: {xml}"
+    );
+}
+
+#[test]
+fn text_document_field_writes_its_system_font_by_the_code_at_slot_three() {
+    // Real bytes: DataProcessors/КонсольЗапросов/Forms/ПланВыполненияЗапроса/
+    // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
+    // `678b6e32-e032-47b0-b70c-961b2859b6e5.0`). `ПланВыполненияЗапросаТекстовоеПредставление`
+    // is one of two native `TextDocumentField`s in this form -- the only
+    // `<Font ref="sys:ANSIFixedFont".../>` in the corpus -- whose options
+    // tuple carries `{7,1,2,{2},140,1,100}` at slot 9: kind `1`, height mask
+    // bit set (`140` -> `14`), and the previously-unread slot-3 code `{2}`.
+    let item = parse_form_child_item(
+        r#"{37,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"ПланВыполненияЗапросаТекстовоеПредставление",0,0,
+{1,1,
+{"ru","План выполнения запроса"}
+},
+{1,0},
+{1,
+{2}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,50,10,1,1,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,1,2,
+{2},140,1,100},1,0,0,1,0,
+{0,1,0}
+},
+{0,1,0},1,
+{22,
+{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПланВыполненияЗапросаТекстовоеПредставлениеКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПланВыполненияЗапросаТекстовоеПредставлениеРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "TextDocumentField");
+    assert_eq!(
+        item.font_xml.as_deref(),
+        Some(r#"<Font ref="sys:ANSIFixedFont" height="14" kind="WindowsFont"/>"#)
+    );
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    assert!(
+        xml.contains(r#"<Font ref="sys:ANSIFixedFont" height="14" kind="WindowsFont"/>"#),
+        "{xml}"
+    );
+
+    // The ubiquitous code, real bytes from the same options-tuple family
+    // (`{7,1,2,{0},140,1,100}` -- only the slot-3 code changed): the platform
+    // writes `sys:DefaultGUIFont` on all 227 native `<Font ref="sys:...">`
+    // elements this crate's own output already reproduces, none of which is
+    // `ANSIFixedFont`.
+    assert_eq!(
+        parse_form_font_tuple_xml("{7,1,2,{0},140,1,100}", &BTreeMap::new()).as_deref(),
+        Some(r#"<Font ref="sys:DefaultGUIFont" height="14" kind="WindowsFont"/>"#)
+    );
+
+    // An unrecognized slot-3 code is a refusal, not a guessed name: no third
+    // code is observed in either corpus.
+    assert_eq!(
+        parse_form_font_tuple_xml("{7,1,2,{9},140,1,100}", &BTreeMap::new()),
+        None
+    );
+}
+
+#[test]
+fn form_body_writes_collapse_items_by_importance_variant_behind_mobile_device_command_bar_content()
+{
+    // SSL demo 3.1.12.297's `Documents/_ДемоЗаказПокупателя` list form is the
+    // only native form across five corpora (12 701 + 9 617 + 29 + 164 + 226
+    // files) that carries both `<CollapseItemsByImportanceVariant>` and
+    // `<MobileDeviceCommandBarContent>`; there the former trails the latter,
+    // not the reverse this writer used to assume for want of a
+    // counter-example.
+    let properties = FormBodyProperties {
+        collapse_items_by_importance_variant: Some("Use"),
+        mobile_device_command_bar_content: vec!["КоманднаяПанель".to_string()],
+        ..FormBodyProperties::default()
+    };
+    let xml = format_form_body_xml(
+        &properties,
+        None,
+        &[],
+        &[],
+        &[],
+        &FormAttributesSection::default(),
+        &[],
+        &[],
+        &None,
+    )
+    .unwrap();
+    let mobile_start = xml.find("<MobileDeviceCommandBarContent>").unwrap();
+    let mobile_end = xml.find("</MobileDeviceCommandBarContent>").unwrap();
+    let collapse = xml
+        .find("<CollapseItemsByImportanceVariant>Use</CollapseItemsByImportanceVariant>")
+        .unwrap();
+    assert!(mobile_start < mobile_end, "{xml}");
+    assert!(
+        mobile_end < collapse,
+        "CollapseItemsByImportanceVariant trails MobileDeviceCommandBarContent: {xml}"
+    );
 }
 
 #[test]
@@ -68873,7 +69707,10 @@ fn omits_key_type_and_key_fields_for_the_empty_stored_shapes() {
 /// `Task.<name>.TasksByExecutive` (2), `{"N",3}` writes
 /// `AccumulationRegister.<name>.Balance` (11) and
 /// `InformationRegister.<name>.SliceLast` (6), and `{"N",4}` writes
-/// `AccumulationRegister.<name>.Turnovers` (4).
+/// `AccumulationRegister.<name>.Turnovers` (4). SSL demo/base 3.1.12.297 add a
+/// fifth: `{"N",3}` on `AccountingRegister` writes
+/// `AccountingRegister.<name>.RecordsWithExtDimensions`, confirmed on both
+/// native list forms of an accounting register the corpus carries.
 #[test]
 fn appends_the_virtual_table_the_main_table_category_names() {
     for (category, main_table, expected) in [
@@ -68896,6 +69733,11 @@ fn appends_the_virtual_table_the_main_table_category_names() {
             "3",
             "InformationRegister.Цены",
             "InformationRegister.Цены.SliceLast",
+        ),
+        (
+            "3",
+            "AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета",
+            "AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.RecordsWithExtDimensions",
         ),
         (
             "4",

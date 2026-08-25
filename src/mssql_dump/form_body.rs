@@ -7008,11 +7008,18 @@ pub(super) fn normalize_form_main_table_category(
 /// `AccumulationRegister.<name>.Balance` (11) and
 /// `InformationRegister.<name>.SliceLast` (6); `{"N",4}` (4) writes
 /// `AccumulationRegister.<name>.Turnovers`. No other code occurs and no pair
-/// disagrees. A pair outside the table -- including every accounting-register
-/// code, none of which the corpus carries -- writes the bare main table rather
-/// than a guessed suffix.
+/// disagrees.
+///
+/// SSL demo/base 3.1.12.297 add a third table `{"N",3}` reaches:
+/// `AccountingRegister.<name>.RecordsWithExtDimensions`, on both native list
+/// forms of an accounting register the corpus carries
+/// (`_ДемоЖурналПроводокБухгалтерскогоУчета` and its
+/// `...БезКорреспонденции` sibling), with no counter-example. A pair still
+/// outside the table writes the bare main table rather than a guessed
+/// suffix.
 const FORM_MAIN_TABLE_CATEGORY_SUFFIXES: &[(&str, &str, &str)] = &[
     ("2", "Task", "TasksByExecutive"),
+    ("3", "AccountingRegister", "RecordsWithExtDimensions"),
     ("3", "AccumulationRegister", "Balance"),
     ("3", "InformationRegister", "SliceLast"),
     ("4", "AccumulationRegister", "Turnovers"),
@@ -10377,6 +10384,20 @@ fn parse_form_child_item_with_metadata_owners(
             "Table" => fields
                 .get(51)
                 .and_then(|field| parse_common_command_shortcut_value(field)),
+            // A `LabelDecoration` keeps the same tuple in fixed slot 16 of its
+            // own 36-member head -- not offset-corrected, because decorations
+            // never carry the extended-layout prefix that shifts it for
+            // fields. SSL demo's DataProcessors/ОбновлениеВерсииИБ carries the
+            // only native `<Shortcut>` (`F7`) found on a `LabelDecoration`
+            // across the SSL demo, SSL base and UT 11.5.27.75 corpora (15 127
+            // items traced); its raw slot 16 is `{0,118,0}` -- the exact
+            // shortcut tuple -- while four other traced items across two
+            // unrelated forms that carry no `<Shortcut>` all read `{0,0,0}`
+            // there, which the shared decoder already turns into `None`, with
+            // no counter-example.
+            "LabelDecoration" => fields
+                .get(16)
+                .and_then(|field| parse_common_command_shortcut_value(field)),
             _ => None,
         },
         choice_list_height: (tag == "InputField")
@@ -12781,6 +12802,13 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
         },
     ),
     (
+        // SSL demo 3.1.12.297, `DataProcessors/КонсольЗапросов`'s
+        // `ПланВыполненияЗапроса` form: both native `TextDocumentField`
+        // items that carry a `<Font>` read `{5,50,10,1,1,0,{3,4,{0}},
+        // {3,4,{0}},{3,4,{0}},{7,1,2,{2},140,1,100},...}` -- the font tuple
+        // sits at options slot 9, the same relative position
+        // `FormattedDocumentField` and `PictureField` keep theirs at (9 and
+        // 12 respectively, out of their own shorter/longer option runs).
         "TextDocumentField",
         FormDocumentFieldGeometry {
             discriminator: "5",
@@ -12793,7 +12821,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(13),
             horizontal_stretch: None,
             vertical_stretch: None,
-            font: None,
+            font: Some(9),
         },
     ),
     (
@@ -14202,13 +14230,41 @@ impl FormFontMember {
     }
 }
 
+/// The system-font identifier a `kind == "1"` form font tuple carries at its
+/// own slot 3, wrapped in a single-element tuple (`{0}`, `{2}`, ...).
+///
+/// Evidence: three independent already-proven fixtures for the structurally
+/// identical `{7,1,<mask>,{0},...}` tuple this same project decodes
+/// elsewhere (a DCS font `Value`, an MXL cell font, and a style's own font)
+/// all carry `{0}` and all three write `sys:DefaultGUIFont`, matching every
+/// one of 227 native `<Font ref="sys:DefaultGUIFont".../>` elements this
+/// crate's own output already reproduces correctly. SSL demo 3.1.12.297 adds
+/// the corpus's only other code:
+/// `DataProcessors/КонсольЗапросов`'s `ПланВыполненияЗапроса` form carries
+/// two `TextDocumentField`s whose tuple reads `{2}` there and whose native
+/// `<Font>` is `ref="sys:ANSIFixedFont"`, on both, byte for byte. No other
+/// code occurs in either corpus, so an unrecognized one is a refusal rather
+/// than a guessed name.
+fn parse_form_font_system_name_ref(field: &str) -> Option<&'static str> {
+    let wrapped = split_1c_braced_fields(field, 0)?;
+    if wrapped.len() != 1 {
+        return None;
+    }
+    match wrapped.first()?.trim() {
+        "0" => Some("sys:DefaultGUIFont"),
+        "2" => Some("sys:ANSIFixedFont"),
+        _ => None,
+    }
+}
+
 /// Decodes a form font tuple into the element the platform writes for it.
 ///
 /// `None` means the platform writes no element at all: an `AutoFont` tuple
 /// with an empty mask (the ubiquitous `{7,3,0,1,100}` default), a slot that
 /// does not hold a font tuple at all, a member count that disagrees with the
-/// mask, or a `StyleItem` kind whose style reference cannot be resolved --
-/// every native `StyleItem` font carries a `ref`, so an unresolved one is a
+/// mask, a `WindowsFont` kind whose system-font code is not recognized, or a
+/// `StyleItem` kind whose style reference cannot be resolved -- every native
+/// `WindowsFont`/`StyleItem` font carries a `ref`, so an unresolved one is a
 /// refusal rather than a `ref`-less guess.
 fn parse_form_font_mask_tuple_xml(
     field: &str,
@@ -14256,7 +14312,8 @@ fn parse_form_font_mask_tuple_xml(
             return Some(format!("<{tag_name}{rendered}/>"));
         }
         "1" => {
-            attributes.push(("ref", "sys:DefaultGUIFont".to_string()));
+            let name = parse_form_font_system_name_ref(fields.get(3)?.trim())?;
+            attributes.push(("ref", name.to_string()));
             ("WindowsFont", 4)
         }
         "2" => {
@@ -21589,16 +21646,23 @@ fn format_form_body_xml_with_dcs_profiles(
     // (2), `Width` (2), `AutoURL` (2), `ConversationsRepresentation` (1),
     // `HorizontalAlign` (1), `AutoFillCheck` (1) and `SaveWindowSettings` (1);
     // it leads `UseForFoldersAndItems` (1) and every collection section, and no
-    // pair is observed in both directions.
+    // pair is observed in both directions in that (UT 11.5.27.75) corpus.
+    //
+    // SSL demo 3.1.12.297 is the only native form across five corpora that
+    // also carries `MobileDeviceCommandBarContent`
+    // (`Documents/_ДемоЗаказПокупателя`'s list form), and there it trails it
+    // rather than leading it -- the first observation of this particular
+    // pair, so it moves out from under the general "leads every collection"
+    // claim rather than contradicting an actually-measured direction.
+    xml.push_str(&format_form_mobile_device_command_bar_content_xml(
+        &properties.mobile_device_command_bar_content,
+    ));
     if let Some(value) = properties.collapse_items_by_importance_variant {
         xml.push_str(&format!(
             "\t<CollapseItemsByImportanceVariant>{}</CollapseItemsByImportanceVariant>\r\n",
             escape_xml_text(value)
         ));
     }
-    xml.push_str(&format_form_mobile_device_command_bar_content_xml(
-        &properties.mobile_device_command_bar_content,
-    ));
     if !properties.command_set_excluded_commands.is_empty() {
         xml.push_str("\t<CommandSet>\r\n");
         for command in &properties.command_set_excluded_commands {
@@ -23565,7 +23629,13 @@ pub(super) fn format_form_child_item_xml(
     }
     if !matches!(
         item.tag,
-        "Table" | "Button" | "LabelDecoration" | "PictureDecoration" | "CommandBar" | "Page"
+        "Table"
+            | "Button"
+            | "LabelDecoration"
+            | "PictureDecoration"
+            | "CommandBar"
+            | "Page"
+            | "Popup"
     ) && !pages_geometry_after_title
         && let Some(height) = &item.height
     {
@@ -23573,6 +23643,16 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<Height>{}</Height>\r\n",
             escape_xml_text(height)
         ));
+    }
+    // A `GraphicalSchemaField` writes `Edit` immediately behind its geometry
+    // (`Width`/`Height` when set, else right behind `TitleLocation`) and
+    // ahead of everything else. Traced across SSL demo, SSL base, UT
+    // 11.5.27.75 and ERP УХ 3.2.12.6 (14 native items, the construct's whole
+    // population): the 9 that carry `<ReadOnly>true</ReadOnly>` all also
+    // write `<Edit>false</Edit>` right there, and the other 5 -- `ReadOnly`
+    // false or absent -- write neither, with no counter-example.
+    if item.tag == "GraphicalSchemaField" && item.read_only == Some(true) {
+        xml.push_str(&format!("{tab}\t<Edit>false</Edit>\r\n"));
     }
     // A calendar field writes its border behind the title block and ahead of
     // the calendar run: on the one native calendar that carries one,
@@ -23613,6 +23693,20 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
             if skip_on_input { "true" } else { "false" }
+        ));
+    }
+    // A `LabelDecoration`'s `Shortcut` trails its own `AutoMaxWidth`/
+    // `SkipOnInput` pair and leads the decoration's `Title` block (written
+    // next by `format_form_decoration_header_xml`), unlike the field family's
+    // `Shortcut`, which trails the title block instead. SSL demo's sole
+    // native example -- DataProcessors/ОбновлениеВерсииИБ -- writes it in
+    // exactly that slot.
+    if item.tag == "LabelDecoration"
+        && let Some(shortcut) = &item.item_shortcut
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Shortcut>{}</Shortcut>\r\n",
+            escape_xml_text(shortcut)
         ));
     }
     if item.tag == "Button" {
@@ -24801,7 +24895,23 @@ pub(super) fn format_form_child_item_xml(
     // shares a popup with `Width`, `HorizontalStretch` or `Picture`, so it
     // stays beside the stretch it pairs with, as on every owner where the pair
     // is observed.  All three used to be written ahead of the title.
+    //
+    // `Height` joins the same behind-the-title run: SSL демо and SSL база's
+    // `DataProcessors/РаботаСРезультатамиОбмена` share the one native popup
+    // that carries it (`ГруппаУстановитьРешения`), and on both it trails
+    // `Title`, `TitleTextColor` and `TitleFont` and leads
+    // `ShapeRepresentation`, with no counter-example. Neither instance also
+    // carries `Width`/`HorizontalStretch`/`VerticalStretch`, so its order
+    // against that trio is unobserved; it is placed ahead of them; it used to
+    // be written ahead of the title, in the same early slot every other
+    // control kind uses.
     if item.tag == "Popup" {
+        if let Some(height) = &item.height {
+            xml.push_str(&format!(
+                "{tab}\t<Height>{}</Height>\r\n",
+                escape_xml_text(height)
+            ));
+        }
         if let Some(width) = &item.width {
             xml.push_str(&format!(
                 "{tab}\t<Width>{}</Width>\r\n",
