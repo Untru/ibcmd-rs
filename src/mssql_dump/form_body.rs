@@ -16491,6 +16491,17 @@ fn form_item_record_canonical_revision(
         // field record normalizes, the packer's own button does not and stays
         // with the `Button` arm below.
         "34" if matches!(field_count, 56 | 57) => Some(("37", 3)),
+        // The `ExtendedTooltip` sub-shape of the decoration class, whose own
+        // base arity (34 members, 35 with the conditional `UserVisible`-common
+        // prefix) differs from the `LabelDecoration`/`PictureDecoration`
+        // sub-shape's 36/37 -- the tooltip reader already documents that split.
+        // All 1 813 tooltips ERP УХ writes under `11` reproduce a `12`
+        // tooltip's slot shape minus its final member, with the trailing scalar
+        // run falling 11 -> 10, and none of them mismatches. The arity guard
+        // keeps this away from the decoration sub-shape's own short revision
+        // (`11` at 35/36 members), which is a separate shape and has not had
+        // its own pass.
+        "11" if matches!(field_count, 33 | 34) => Some(("12", 1)),
         _ => None,
     }
 }
@@ -16859,7 +16870,9 @@ fn parse_form_extended_tooltip_option_events(fields: &[&str]) -> Option<Vec<Form
 /// the same shape test the tooltip reader itself uses.
 fn form_child_item_extended_tooltip_identity(fields: &[&str]) -> Option<(String, String)> {
     fields.iter().find_map(|field| {
-        let nested = split_1c_braced_fields(field.trim(), 0)?;
+        let split_nested = split_1c_braced_fields(field.trim(), 0)?;
+        let revision_nested = normalize_form_item_record_revision(&split_nested);
+        let nested = revision_nested.unwrap_or(split_nested);
         if nested.first().map(|value| value.trim()) != Some("12") {
             return None;
         }
@@ -16881,7 +16894,9 @@ pub(super) fn parse_form_child_item_extended_tooltip(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormExtendedTooltip> {
     fields.iter().find_map(|field| {
-        let raw_nested = split_1c_braced_fields(field.trim(), 0)?;
+        let split_nested = split_1c_braced_fields(field.trim(), 0)?;
+        let revision_nested = normalize_form_item_record_revision(&split_nested);
+        let raw_nested = revision_nested.unwrap_or(split_nested);
         if raw_nested.first().map(|value| value.trim()) != Some("12") {
             return None;
         }

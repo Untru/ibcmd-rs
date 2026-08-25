@@ -72196,3 +72196,51 @@ fn short_item_record_revisions_resolve_to_the_class_the_platform_declares() {
         Some(("Button", "Run".to_string(), "44".to_string()))
     );
 }
+
+/// The `ExtendedTooltip` sub-shape of the decoration class under its short
+/// revision `11`.
+///
+/// Real ERP УХ 3.2.12.6 bytes: `Catalogs/БланкиОтчетов/Forms/ФормаФормулы`'s
+/// `Реквизит1РасширеннаяПодсказка`, 33 members under leading member `11`,
+/// which native ibcmd writes as
+/// `<ExtendedTooltip name="Реквизит1РасширеннаяПодсказка" id="3"/>`. The
+/// tooltip sub-shape has its own base arity -- 34 members under `12`, 35 with
+/// the conditional `UserVisible`-common prefix -- distinct from the
+/// `LabelDecoration`/`PictureDecoration` sub-shape's 36/37, and all 1 813
+/// tooltips ERP УХ writes under `11` are a `12` tooltip minus its final
+/// member, trailing scalar run 11 -> 10.
+///
+/// Without the revision normalization the reader's `!= Some("12")` gate
+/// refuses the record and the item is written with no `<ExtendedTooltip>` at
+/// all. That single missing element was the whole remaining diff on 171 ERP
+/// УХ forms once the `Table`/field revisions were readable.
+#[test]
+fn short_extended_tooltip_revision_is_read_as_its_canonical_shape() {
+    const TOOLTIP_11: &str = r#"{11,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"Реквизит1РасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0}"#;
+
+    let tooltip = parse_form_child_item_extended_tooltip(&[TOOLTIP_11], &BTreeMap::new())
+        .expect("a short-revision extended tooltip must be readable");
+    assert_eq!(tooltip.name, "Реквизит1РасширеннаяПодсказка");
+    assert_eq!(tooltip.id, "3");
+}
