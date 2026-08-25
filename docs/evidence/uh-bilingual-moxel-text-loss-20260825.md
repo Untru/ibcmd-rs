@@ -203,8 +203,15 @@ it in the same function.
   expected for a defect specific to bilingual MOXCEL documents.
 - Full `uh` re-run after the fix (via the now-locked `$D/kit/run.sh uh`,
   serialized against the other seven parallel exporters sharing this
-  host): see the follow-up note below for the post-fix exact/differing
-  counts once that run and its parity diff complete.
+  host): `native_files 140411, exact 127753, differing 11326, missing 1332,
+  extra 64, percent 90.985` (was `exact 120592, differing 18487, percent
+  85.885`). Exact-set diff against `$D/base789/uh.parity.json`:
+  `BROKEN=0` (zero previously-exact files lost), `gained=7161` newly-exact
+  files -- matching the before/after differing delta exactly
+  (18487 − 11326 = 7161). `missing` (1332) and `extra` (64) are unchanged,
+  confirming this fix touches only files that were already present and
+  differing, nothing in the missing/extra buckets that a separate,
+  unrelated investigation (`uh-missing-root-cause-map-20260825.md`) owns.
 
 Instrumentation check (`grep -rn "PROBE\|std::env::var\|eprintln!" src
 crates | grep -v tests.rs`): only the four pre-existing, unrelated uses
@@ -232,17 +239,28 @@ crates | grep -v tests.rs`): only the four pre-existing, unrelated uses
 ## What is still open
 
 - The `Title`/`ToolTip`/`editFormat`/`Synonym`/`Presentation`/
-  `dcssch:title`/`InputHint`/`Format` buckets from the categorization above
-  are `escape_xml_element_text`/localized-property writers *outside*
-  moxel.rs (form properties, DCS schema titles, standard-attribute
-  synonyms, etc.) -- not touched by this fix. Each needs its own
-  byte-level trace; `parse_1c_synonyms` (the general metadata-object
-  Synonym reader in `src/mssql_dump/mod.rs`) was checked and is *not*
-  first-item-only -- it already collects every quoted-string pair via
-  `chunks(2)`, so the `Synonym`/`Presentation` losses in this list are a
-  different, not-yet-identified cause (possibly per-family localized
-  writers that filter to a preferred language rather than a parse bug).
-- Post-fix full `uh` exact/differing counts and the `BROKEN=0` exact-set
-  diff against `$D/base789/uh.parity.json` were still running against the
-  host's shared big-export lock when this document was written; append the
-  final numbers once that run's `parity.json` lands.
+  `dcssch:title`/`InputHint`/`Format`/`EditFormat` buckets from the
+  categorization above are **out of this fix's scope, confirmed by
+  location, not just by name**: `grep -rl` for these tags under a sampled
+  `Reports/РегламентированныйОтчетПрибыль/` shows every one of them lives
+  in `Forms/*.xml` or `Forms/*/Ext/Form.xml` (form descriptors and form
+  bodies) -- explicitly "исходники форм", owned by a different executor
+  per this wave's brief, not by this pass. `dcssch:title` is a DCS schema
+  element (`настройки СКД в макетах`), also explicitly out of scope.
+  `parse_1c_synonyms` (the general metadata-object Synonym reader in
+  `src/mssql_dump/mod.rs`) was checked and is *not* first-item-only -- it
+  already collects every quoted-string pair via `chunks(2)` -- consistent
+  with the `Synonym`/`Presentation` occurrences here being form-property
+  writers, not a second instance of this fix's defect class. After
+  excluding the forms/DCS buckets, the `mask` (3,960) + `text` (1,666) +
+  `tfl` (50) buckets -- all MOXCEL, all inside this fix's scope -- account
+  for the overwhelming majority of the *in-scope* English-item loss.
+- Post-fix full `uh` numbers landed (see Verification above):
+  `BROKEN=0`, 7,161 files moved from `differing` to `exact` -- accounting
+  for the whole of the in-scope `mask`/`text`/`tfl` bucket total (5,676)
+  plus more, since a single MOXCEL document can carry both a cell-text-list
+  loss and other, already-correct content, and the categorization counted
+  *occurrences* of a missing `<v8:lang>en</v8:lang>` rather than *files*
+  affected -- a file with several affected cells only needed counting
+  once here. `uh` remains at 11,326 differing (90.985%, up from 85.885%);
+  the still-open buckets above (forms, DCS) account for the remainder.
