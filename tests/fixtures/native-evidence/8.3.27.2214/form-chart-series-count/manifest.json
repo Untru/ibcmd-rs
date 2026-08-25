@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-chart-series-count",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "A minimal synthetic DataProcessor (ChartFormTest) with one Form carrying a single Chart-typed attribute (ChartField bound to it), built from the shape of two already-proven realSeriesCount=0 UT examples (Catalogs/ВариантыАнализаЦелевыхПоказателей/Forms/НастройкаДемоДанных, InformationRegisters/СезонныеКоэффициенты/Forms/СезонныеКоэффициенты). One control at realSeriesCount=0, one variant adding a single realSeriesData record ahead of the fixed realExSeriesData placeholder (realSeriesCount=1), one variant adding four (ids 2,3,4,6, mirroring native UT DataProcessors/ПроверкаКонтрагента/Forms/Форма's own ДиаграммаПоказателей attribute, id=5 skipped) -- each seed's whole tree round-tripped through ibcmd 8.3.27.2214 itself."
+  },
+  "objects": [
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Диаграмма",
+      "variant": "realSeriesCount=0 (control)",
+      "raw_entry": { "path": "raw/zero-series.txt" },
+      "native_outputs": [{ "path": "native/zero-series-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Диаграмма",
+      "variant": "realSeriesCount=1, one realSeriesData (id=2) ahead of realExSeriesData (id=1)",
+      "raw_entry": { "path": "raw/one-series.txt" },
+      "native_outputs": [{ "path": "native/one-series-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Диаграмма",
+      "variant": "realSeriesCount=4, four realSeriesData (ids 2,3,4,6) ahead of realExSeriesData (id=1)",
+      "raw_entry": { "path": "raw/four-series.txt" },
+      "native_outputs": [{ "path": "native/four-series-settings.xml" }]
+    }
+  ],
+  "proven_claims": [
+    "realSeriesCount real realSeriesData records (11 members each, same shape push_moxel_chart_series_text_xml already reads) precede the single, always-present realExSeriesData placeholder -- not the other way around, and not a replacement of it.",
+    "The tail past rebuildTime grows by exactly 3 members per real series when point_count=0, matching moxel.rs's own `197 + 3*series_count + point_count*(1+4*series_count)` formula for the spreadsheet-document chart's tail -- confirmed at series_count=1 and series_count=4 by exact byte round-trip (cf export produces the platform's own native XML unchanged), not merely by length arithmetic.",
+    "The growth splits into a count field (`1+series_count`) plus two `(1+series_count)`-long lists right after rebuildTime (a `{0,<id>,0}` id list -- ex-series id first, then each real series id in declared order -- and a `{0,0}` list), plus one extra copy of an otherwise-unclaimed funnel-link-shaped record appearing later in the tail.",
+    "The series record's marker slot is not moxel_chart_marker's 0..3 shape enum: chart-form-1series's real series reads marker=3 while its ex-series placeholder reads marker=1, and both round-trip to the literal <d4p1:marker>Auto</d4p1:marker> -- the slot is validated as an integer and never rendered, the same treatment the writer already gives the series colour.",
+    "The isTransposed/autoTransposition/legendScrollEnable and titleIsInit/legendIsInit/chartIsInit literal trios' old guard slots (t[82..85), t[88..93)'s 88/89/92) are not those flags' real storage: with a real series present they hold design-time legend/plot-area floats instead (same unclaimed family as the spreadsheet-document chart's own tail[84]/tail[86]/tail[87]), so the guard is dropped rather than repointed -- all three seeds still write the same literals regardless."
+  ],
+  "non_claims": [
+    "Point records (point_count>0) are not exercised by any variant here; the point_count*(1+4*series_count) term of the tail-growth formula is carried over unverified from moxel.rs, not independently proven for a form chart attribute.",
+    "chartType codes other than Column3D (6), splineMode, pointsScale/seriesScale/valuesScale, legendPlacement's third value (Bottom), titleAreaPlacement, valuesToolTipShowMode, pointsDropLinesShowMode and pointsDropLinesShowMode/valuesDropLinesShowMode remain unclaimed -- native UT's own DataProcessors/ПроверкаКонтрагента/Forms/Форма (realSeriesCount=4, chartType=Line) still does not round-trip; this fixture closes only the series-count/marker/guard defects, not the whole remainder item."
+  ]
+}

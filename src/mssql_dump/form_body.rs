@@ -27802,6 +27802,23 @@ fn parse_form_chart_settings_xml(
     format_form_chart_settings_xml(&data, object_refs, indent)
 }
 
+/// Decodes a raw `{0,1,"Chart",{"#",<uuid>,{11},{74,...}}}` field -- the same
+/// shape a Chart-typed form attribute's whole `field` argument carries -- and
+/// renders it the way `parse_form_chart_settings_xml` would inside a real
+/// form body, at the indent a `<Settings>` element sits at three levels into
+/// `<Attribute>`. Exists so `tests.rs` can assert platform-proven raw records
+/// round-trip to byte-identical native `<Settings xsi:type="d4p1:Chart">`
+/// XML without exposing this module's private parsing functions, mirroring
+/// `moxel.rs`'s `parse_and_render_moxel_chart_for_test`.
+#[cfg(test)]
+pub(super) fn parse_and_render_form_chart_settings_for_test(text: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_CHART_TYPE_REFERENCE.to_string(),
+    }];
+    let object_refs = BTreeMap::new();
+    parse_form_chart_settings_xml(text, &value_types, &object_refs, 3)
+}
+
 const FORM_CHART_TYPE_REFERENCE: &str = "d5p1:Chart";
 const FORM_CHART_VALUE_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
 const FORM_CHART_BORDER_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
@@ -27809,8 +27826,13 @@ const FORM_CHART_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
 /// The one series record a chart with no series still carries, and the first
 /// slot of the tail behind it.
 const FORM_CHART_SERIES_FIELDS: usize = 11;
-const FORM_CHART_TAIL_START: usize = 18;
-const FORM_CHART_TAIL_FIELDS: usize = 197;
+/// The tail length at `series_count=0, point_count=0` -- the shape both
+/// original 197-tail proofs carried. `format_form_chart_settings_xml` grows
+/// this by the same formula `moxel.rs` uses for its own chart record.
+const FORM_CHART_TAIL_FIELDS_BASE: usize = 197;
+/// Mirrors `moxel.rs`'s own `MAX_MOXEL_CHART_SERIES` bound for the same
+/// spreadsheet-document chart record family.
+const MAX_FORM_CHART_SERIES: usize = 64;
 
 /// A stored member with its layout whitespace removed, for the members whose
 /// whole shape is compared against a fixed token: the record is line-broken and
@@ -27994,6 +28016,15 @@ fn form_chart_rectangle_xml(name: &str, fields: &[&str], indent: usize) -> Optio
 /// The stored colour is not what the platform writes: both records hold an
 /// RGB there and both are written `auto`, with the colour-priority flag clear.
 /// A record with that flag set is refused rather than guessed at.
+///
+/// The stored marker is the same story: a `chart-form-1series` seed
+/// (`tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/`)
+/// carries a real `realSeriesData` record whose marker slot reads `3`
+/// alongside the always-present `realExSeriesData` placeholder's `1` --
+/// both platform-round-tripped to `<d4p1:marker>Auto</d4p1:marker>`. Neither
+/// code is `moxel_chart_marker`'s `0..3` shape enum (that table belongs to
+/// the spreadsheet-document chart drawing, a different record family); here
+/// the slot is only ever validated as an integer and never rendered.
 fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<String> {
     let tab = "\t".repeat(indent);
     let inner = indent + 1;
@@ -28006,14 +28037,12 @@ fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<S
         return None;
     }
     let id = form_chart_integer(fields.get(7)?)?;
-    let marker = form_chart_code(fields.get(2)?, &[("1", "Auto")])?;
+    form_chart_integer(fields.get(2)?)?;
     let mut xml = format!("{tab}<d4p1:{name}>\r\n");
     xml.push_str(&format!("{inner_tab}<d4p1:id>{id}</d4p1:id>\r\n"));
     xml.push_str(&format!("{inner_tab}<d4p1:color>auto</d4p1:color>\r\n"));
     xml.push_str(&form_chart_line_xml("line", fields.get(1)?, inner)?);
-    xml.push_str(&format!(
-        "{inner_tab}<d4p1:marker>{marker}</d4p1:marker>\r\n"
-    ));
+    xml.push_str(&format!("{inner_tab}<d4p1:marker>Auto</d4p1:marker>\r\n"));
     xml.push_str(&form_chart_localized_xml("text", fields.get(3)?, inner)?);
     xml.push_str(&format!(
         "{inner_tab}<d4p1:strIsChanged>{}</d4p1:strIsChanged>\r\n",
@@ -28039,6 +28068,20 @@ fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<S
 /// Every read below names the tail slot it comes from.  Six members are
 /// written as a literal instead: `circleExpandMode`, `chart3Dcrd`,
 /// `titleIsInit`, `legendIsInit`, `chartIsInit` and `transparentLabelsBkg`.
+/// `isTransposed`, `autoTransposition` and `legendScrollEnable` are a
+/// seventh, separate literal trio.  The two original 197-tail proofs agreed
+/// `t[82..85)` read `"0","0","0"` and `t[88..93)`'s 88/89/92 read `"1"`, and
+/// both trios were guarded on that agreement standing in for the (unproven)
+/// real slots. The `chart-form-1series` seed disproves the guard, not the
+/// literals: with a real, non-empty series present, `t[84]`, `t[88]` and
+/// `t[89]` hold design-time legend/plot-area coordinates instead (the same
+/// unclaimed-float family `docs/evidence/ut-diagram-remainder-20260825.md`
+/// records for the spreadsheet-document chart's own tail, e.g. its
+/// `tail[84]`/`tail[86]`/`tail[87]`) -- content-dependent, not the flag's
+/// storage. All three seed values (`series_count` 0, 1 and 4, the last read
+/// directly off native UT XML) still write `false`/`false`/`false` and
+/// `true`/`true`/`true`, so the guard is dropped rather than repointed at an
+/// still-unidentified real slot.
 /// The two records agree on all six and nothing in the pair tells their slots
 /// apart -- `transparentLabelsBkg` even reads `0` on both while the platform
 /// writes `true` -- so each is guarded on the slots that would have to move
@@ -28052,15 +28095,75 @@ fn format_form_chart_settings_xml(
     let tab = "\t".repeat(indent);
     let child = indent + 1;
     let child_tab = "\t".repeat(child);
-    if data.first()?.trim() != "74"
-        || data.get(4)?.trim() != "0"
-        || data.get(17)?.trim() != "0"
-        || data.len() != FORM_CHART_TAIL_START + FORM_CHART_TAIL_FIELDS
-    {
+    // `realSeriesCount` real `realSeriesData` records precede the one
+    // `realExSeriesData` placeholder every record carries (empty or not) --
+    // proven by `chart-form-1series` (one real series ahead of the
+    // placeholder, both 11-member records, ids 2 then 1) against the
+    // `chart-form-control` zero-series seed, which has only the placeholder.
+    // See `tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/`.
+    let series_count: usize = data.get(4)?.trim().parse().ok()?;
+    if series_count > MAX_FORM_CHART_SERIES || data.get(17 + 11 * series_count)?.trim() != "0" {
         return None;
     }
-    let series = data.get(5..5 + FORM_CHART_SERIES_FIELDS)?;
-    let t = data.get(FORM_CHART_TAIL_START..)?;
+    let real_series_end = 5 + FORM_CHART_SERIES_FIELDS * series_count;
+    let ex_series_start = real_series_end;
+    let tail_start = ex_series_start + FORM_CHART_SERIES_FIELDS + 2;
+    // The scale-id list right after `rebuildTime` grows the tail by three
+    // members per real series (a count field plus two `series_count+1`-long
+    // lists) -- the same `197 + 3*series_count + point_count*(1+4*
+    // series_count)` formula `moxel.rs`'s spreadsheet-document chart proved
+    // for `series_count`/`point_count`, cross-checked here at
+    // `series_count=1` and, directly against native UT XML with no seed, at
+    // `series_count=4`.
+    let point_count = 0usize; // not yet observed nonzero on a form chart
+    let expected_tail_fields =
+        FORM_CHART_TAIL_FIELDS_BASE + 3 * series_count + point_count * (1 + 4 * series_count);
+    if data.first()?.trim() != "74" || data.len() != tail_start + expected_tail_fields {
+        return None;
+    }
+    let real_series = data.get(5..real_series_end)?;
+    let series = data.get(ex_series_start..ex_series_start + FORM_CHART_SERIES_FIELDS)?;
+    let t = data.get(tail_start..)?;
+    // Positions in `t` from here on are given as the fixed (`series_count`
+    // `=` `0`) offset the two original 197-tail proofs established; `tidx`
+    // maps that fixed offset to its actual slot once the scale-id list and
+    // the per-series copy of the funnel-link-shaped record (both proven by
+    // the same seed) have grown the tail.
+    let n_scale = 1 + series_count;
+    let shift_a = 2 * series_count;
+    let shift_b = series_count;
+    let tidx = |fixed: usize| -> usize {
+        if fixed < 126 {
+            fixed
+        } else if fixed < 147 {
+            fixed + shift_a
+        } else {
+            fixed + shift_a + shift_b
+        }
+    };
+    if t.get(123)?.trim() != n_scale.to_string() {
+        return None;
+    }
+    let mut expected_ids = Vec::with_capacity(n_scale);
+    expected_ids.push(form_chart_integer(series.get(7)?)?.to_string());
+    for chunk in real_series.chunks(FORM_CHART_SERIES_FIELDS) {
+        expected_ids.push(form_chart_integer(chunk.get(7)?)?.to_string());
+    }
+    for (offset, expected_id) in expected_ids.iter().enumerate() {
+        let entry = split_1c_braced_fields(t.get(124 + offset)?, 0)?;
+        if entry.len() != 3
+            || entry.first()?.trim() != "0"
+            || entry.get(1)?.trim() != expected_id
+            || entry.get(2)?.trim() != "0"
+        {
+            return None;
+        }
+    }
+    for offset in 0..n_scale {
+        if form_chart_compact(t.get(124 + n_scale + offset)?) != "{0,0}" {
+            return None;
+        }
+    }
     let mut xml = format!(
         "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d4p1:Chart\">\r\n"
     );
@@ -28085,9 +28188,15 @@ fn format_form_chart_settings_xml(
     scalar!("seriesCurId", form_chart_integer(data.get(1)?)?);
     scalar!("pointsCurId", form_chart_integer(data.get(2)?)?);
     scalar!("isSeriesDesign", form_chart_bool(data.get(3)?)?);
-    scalar!("realSeriesCount", "0");
+    scalar!("realSeriesCount", series_count);
+    for chunk in real_series.chunks(FORM_CHART_SERIES_FIELDS) {
+        xml.push_str(&form_chart_series_xml("realSeriesData", chunk, child)?);
+    }
     xml.push_str(&form_chart_series_xml("realExSeriesData", series, child)?);
-    scalar!("isPointsDesign", form_chart_bool(data.get(16)?)?);
+    scalar!(
+        "isPointsDesign",
+        form_chart_bool(data.get(ex_series_start + FORM_CHART_SERIES_FIELDS)?)?
+    );
     scalar!("realPointCount", "0");
     scalar!("curSeries", form_chart_integer(t.first()?)?);
     scalar!("curPoint", form_chart_integer(t.get(1)?)?);
@@ -28189,9 +28298,6 @@ fn format_form_chart_settings_xml(
     );
     scalar!("animation", form_chart_code(t.get(64)?, &[("0", "Auto")])?);
     scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
-    if t.get(82)?.trim() != "0" || t.get(83)?.trim() != "0" || t.get(84)?.trim() != "0" {
-        return None;
-    }
     scalar!("isTransposed", "false");
     scalar!("autoTransposition", "false");
     scalar!("legendScrollEnable", "false");
@@ -28225,25 +28331,22 @@ fn format_form_chart_settings_xml(
     scalar!("autoMinValue", form_chart_bool(t.get(79)?)?);
     scalar!("userMinValue", form_chart_decimal(t.get(80)?)?);
     scalar!("elementsIsInit", form_chart_bool(t.get(81)?)?);
-    if t.get(88)?.trim() != "1" || t.get(89)?.trim() != "1" || t.get(92)?.trim() != "1" {
-        return None;
-    }
     scalar!("titleIsInit", "true");
     scalar!("legendIsInit", "true");
     scalar!("chartIsInit", "true");
     xml.push_str(&form_chart_rectangle_xml(
         "elementsChart",
-        t.get(163..167)?,
+        t.get(tidx(163)..tidx(167))?,
         child,
     )?);
     xml.push_str(&form_chart_rectangle_xml(
         "elementsLegend",
-        t.get(167..171)?,
+        t.get(tidx(167)..tidx(171))?,
         child,
     )?);
     xml.push_str(&form_chart_rectangle_xml(
         "elementsTitle",
-        t.get(171..175)?,
+        t.get(tidx(171)..tidx(175))?,
         child,
     )?);
     color!("borderColor", 95);
@@ -28271,7 +28374,7 @@ fn format_form_chart_settings_xml(
     )?);
     color!("multiStageLinkColor", 117);
     for (name, slot) in [("valuesAxis", 127usize), ("pointsAxis", 128)] {
-        if form_chart_compact(t.get(slot)?) != "{0,0,{0,1,0,1,0},0,0}" {
+        if form_chart_compact(t.get(tidx(slot))?) != "{0,0,{0,1,0,1,0},0,0}" {
             return None;
         }
         xml.push_str(&format!("{child_tab}<d4p1:{name}/>\r\n"));
@@ -28279,10 +28382,10 @@ fn format_form_chart_settings_xml(
     // The legend placement is written only when its slot names one: the two
     // records read `0` and `6`, and the platform writes nothing on the first
     // and `None` on the second.
-    if t.get(161)?.trim() != "0" {
+    if t.get(tidx(161))?.trim() != "0" {
         scalar!(
             "legendPlacement",
-            form_chart_code(t.get(161)?, &[("6", "None")])?
+            form_chart_code(t.get(tidx(161))?, &[("6", "None")])?
         );
     }
     xml.push_str(&format!("{tab}</Settings>\r\n"));

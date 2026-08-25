@@ -71170,3 +71170,59 @@ fn renders_empty_stacked_bar_chart_without_extended_scales_to_platform_proven_xm
         ),
     );
 }
+
+/// Evidence: fixture `form-chart-series-count`, three `chart-form-*` seeds on
+/// the `Web_Service` skeleton (a synthetic `DataProcessor.ChartFormTest` with
+/// one `Диаграмма` attribute of type `Chart`) at `realSeriesCount` 0, 1 and
+/// 4 -- the last matching native UT 11.5.27.75's
+/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` `ДиаграммаПоказателей`
+/// attribute's own series count (ids 2,3,4,6). Asserts the whole `<Settings
+/// xsi:type="d4p1:Chart">...</Settings>` fragment comes back byte for byte,
+/// proving the `realSeriesCount` real `realSeriesData` records precede the
+/// fixed `realExSeriesData` placeholder and the tail grows by exactly three
+/// members per series -- see the fixture's `manifest.json` for the full
+/// claim list.
+fn assert_platform_proven_form_chart_settings(raw_field: &str, native_settings_xml: &str) {
+    let rendered = parse_and_render_form_chart_settings_for_test(raw_field)
+        .expect("platform-proven form chart settings field must decode");
+    assert_eq!(
+        rendered, native_settings_xml,
+        "rendered <Settings xsi:type=\"d4p1:Chart\"> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_zero_series_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/zero-series.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/zero-series-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_one_series_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/one-series.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/one-series-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_four_series_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/four-series.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/four-series-settings.xml"
+        ),
+    );
+}
