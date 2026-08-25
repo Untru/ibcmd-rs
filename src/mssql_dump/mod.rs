@@ -10500,6 +10500,42 @@ fn metadata_header_field_index(fields: &[&str], uuid: &str) -> Option<usize> {
     position(format!("{{1,0,{uuid}}}")).or_else(|| position(format!("{{0,0,{uuid}}}")))
 }
 
+/// Locates the opening `{` of the counted 1C record block whose first
+/// member's own content begins at `content_start` -- the position several
+/// call sites reach by `text.find`-ing a marker such as `{1,0,<uuid>}` and
+/// then wanting the enclosing `{<N>,<ws><marker>...}` block's start.
+///
+/// `N` is a layout tag whose value varies by object and platform revision
+/// (see `metadata_header_field_index` for the two header-block spellings
+/// it most commonly gates: an eight-member block opened by `{1,0,<uuid>}`
+/// with a nine-member sibling that carries one extra trailing `0`, and
+/// likewise a four/eight-member pair opened by `{0,0,<uuid>}`). Callers
+/// used to `rfind` one specific literal like `"{3,"`; that finds the wrong
+/// occurrence -- or none at all -- whenever a record's actual count
+/// differs from whichever value the call site was written against, which
+/// is exactly the fixed-arity defect this project keeps rediscovering.
+/// Reading the digits back from the text instead of assuming one of them
+/// closes every observed variant at once, including the case where an
+/// outer wrapper happens to share the same leading digit as the inner one
+/// (a plain `rfind` would then latch onto the inner, closer match).
+fn enclosing_counted_block_start(text: &str, content_start: usize) -> Option<usize> {
+    let prefix = text.get(..content_start)?;
+    let trimmed = prefix.trim_end_matches(|ch: char| ch.is_ascii_whitespace());
+    let after_comma = trimmed.strip_suffix(',')?;
+    let digit_count = after_comma
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .count();
+    if digit_count == 0 {
+        return None;
+    }
+    let before_digits = &after_comma[..after_comma.len() - digit_count];
+    before_digits
+        .ends_with('{')
+        .then(|| before_digits.len() - 1)
+}
+
 fn field_starts_with(field: Option<&&str>, prefix: &str) -> bool {
     field
         .map(|value| value.trim_start().starts_with(prefix))
@@ -10524,7 +10560,7 @@ fn field_is_quoted_string(field: Option<&&str>) -> bool {
 fn parse_common_module_flags_from_text(text: &str, uuid: &str) -> Option<CommonModuleFlags> {
     let marker = format!("{{1,0,{uuid}}},");
     let marker_start = text.find(&marker)?;
-    let base_object_start = text[..marker_start].rfind("{3,")?;
+    let base_object_start = enclosing_counted_block_start(text, marker_start)?;
     let owner_object_start = text[..base_object_start].rfind("{12,")?;
     let base_object_end = scan_1c_braced_value(text, base_object_start)?;
     let flags_start = expect_comma_at(text, base_object_end)?;
@@ -29032,7 +29068,16 @@ fn parse_typed_metadata_value_types_before(
     marker_start: usize,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    let typed_object_start = text[..marker_start].rfind("{2,")?;
+    // Two counted blocks separate `marker_start` from the type pattern: the
+    // header-wrapper (`{2,` or `{3,`, see `enclosing_counted_block_start`)
+    // and, one level out, this typed-value wrapper. A literal `rfind("{2,"`
+    // here used to work only because the two counts usually differ; when a
+    // record's header wrapper also happens to declare `2` (the same
+    // constant-arity defect as the header-wrapper itself), the blind
+    // backward search latched onto that closer, inner `{2,` instead of the
+    // real outer one and read the wrong slot entirely.
+    let header_wrapper_start = enclosing_counted_block_start(text, marker_start)?;
+    let typed_object_start = enclosing_counted_block_start(text, header_wrapper_start)?;
     let typed_fields = split_1c_braced_fields(text, typed_object_start)?;
     parse_metadata_type_pattern(typed_fields.get(2)?, type_index)
 }
@@ -29072,12 +29117,18 @@ fn parse_command_group_properties_from_text(
     uuid: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<CommandGroupProperties> {
-    let marker = format!("{{1,0,{uuid}}}");
-    let marker_start = text.find(&marker)?;
-    let inner_start = text[..marker_start].rfind("{3,")?;
-    let group_start = text[..inner_start].rfind("{3,")?;
-    let fields = split_1c_braced_fields(text, group_start)?;
-    if fields.len() < 7 {
+    // The header-wrapper is this block's *sixth* field (after the picture
+    // ref, category, representation and two reserved `{0}` slots), not its
+    // first, so a marker-anchored backward scan cannot generically find
+    // this block's own start the way it can the header-wrapper's (that
+    // scan assumes the thing it is looking for is the first field right
+    // after the leading count -- true for the header-wrapper itself, not
+    // for its parent here). `metadata_object_fields` + a position check
+    // via `metadata_header_field_index` is the pattern already proven
+    // elsewhere in this file for exactly this shape (see
+    // `parse_functional_option_properties_from_text`).
+    let fields = metadata_object_fields(text)?;
+    if metadata_header_field_index(&fields, uuid) != Some(6) {
         return None;
     }
     let (picture_ref, picture_load_transparent) =
@@ -29101,12 +29152,46 @@ fn parse_common_command_properties_from_text(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<CommonCommandProperties> {
+    // Unlike CommandGroup, this function is also called for a *nested*
+    // command owned by some other object (`nested_child_commands_from_text`
+    // / `..._for_owner_from_text`), where `text` is the *owner's* whole
+    // record and this command's own block sits embedded somewhere inside
+    // it rather than at the root -- `metadata_object_fields`, which reads
+    // `text` as if it started with this command's own top code, silently
+    // read the owner's unrelated top fields instead and always missed
+    // (confirmed against ERP УХ MDM_Management's `Catalogs/СправочникиБД`,
+    // which owns commands and regressed under that approach). So this
+    // stays marker-anchored -- `text.find` locates the `{1,0,<uuid>}`
+    // marker wherever it actually sits -- and only widens the two
+    // hardcoded literals a backward search used to require to the two
+    // shapes evidenced on real corpora: a header-wrapper opened by `{2,`
+    // or `{3,` (one fewer trailing member; see
+    // `enclosing_counted_block_start`), inside a command block opened by
+    // `{8,` or `{9,` (ditto, one fewer trailing member -- the
+    // `OnMainServerUnavailableBehavior` slot below). Landing on the wrong
+    // one of two same-named occurrences is exactly the failure class
+    // `enclosing_counted_block_start` closes elsewhere, so this cross-checks
+    // the result the same way that helper's callers get for free: the
+    // resolved block must carry `uuid` at the well-evidenced position 9.
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
-    let base_object_start = text[..marker_start].rfind("{3,")?;
-    let command_start = text[..base_object_start].rfind("{9,")?;
+    let base_object_start = ["{3,", "{2,"]
+        .into_iter()
+        .filter_map(|needle| text[..marker_start].rfind(needle))
+        .max()?;
+    let command_start = ["{9,", "{8,"]
+        .into_iter()
+        .filter_map(|needle| text[..base_object_start].rfind(needle))
+        .max()?;
     let fields = split_1c_braced_fields(text, command_start)?;
-    if fields.len() < 13 {
+    if metadata_header_field_index(&fields, uuid) != Some(9) {
+        return None;
+    }
+    // The trailing `OnMainServerUnavailableBehavior` slot (index 12) is
+    // omitted, not written `0`, whenever a command leaves it at its
+    // default -- the header-wrapper's own position (9) is unaffected, but
+    // this floor drops to match.
+    if fields.len() < 12 {
         return None;
     }
     let (picture_ref, picture_load_transparent) =
@@ -29130,9 +29215,21 @@ fn parse_common_command_properties_from_text(
         .get(10)
         .and_then(|field| parse_1c_bool_flag(field.trim()))
         .unwrap_or(false);
+    // Confirmed against the native export of a record that omits this slot
+    // (`CommonCommands/ВвестиЗначенияКритериевОценкиАльтернатив.xml`, ERP
+    // УХ 3.2.12.6): the platform still writes `Auto`, and the renderer
+    // below already collapses every observed value to that same constant,
+    // so an absent slot is read as the same "no override" case a present
+    // `0` already is -- not guessed, since the two are indistinguishable
+    // in the one place this value is used. A *present* slot that fails to
+    // parse still fails closed via `?`.
+    let on_main_server_unavailable_behavior_value = match fields.get(12) {
+        Some(field) => field.trim().parse::<u8>().ok()?,
+        None => 0,
+    };
     let on_main_server_unavailable_behavior =
         common_command_on_main_server_unavailable_behavior_xml(
-            fields.get(12)?.trim().parse().ok()?,
+            on_main_server_unavailable_behavior_value,
         );
 
     Some(CommonCommandProperties {

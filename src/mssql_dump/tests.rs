@@ -42189,6 +42189,49 @@ fn extracts_common_module_xml_from_metadata_blob() {
 }
 
 #[test]
+fn extracts_common_module_xml_from_metadata_blob_with_short_header_wrapper() {
+    // Real shape (ERP УХ 3.2.12.6, `CommonModules/АккредитацияПоставщиковВызовСервераУХ`,
+    // uuid `8a6b88a6-b0d9-4bb8-a331-b6837bba4eeb`): the header-wrapper is
+    // opened by `{2,` with a single-language synonym and no trailing `0`,
+    // not the `{3,` / dual-language / trailing-`0` shape the test above
+    // covers. `parse_common_module_flags_from_text` used to locate this
+    // wrapper via a literal `rfind("{3,")`, which never matches here and
+    // silently dropped the whole module (232 such CommonModules on the
+    // full ERP УХ corpus).
+    let uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+    let template = "\u{feff}{1,\r\n{12,\r\n{2,\r\n{1,0,UUID},\"SalesModule\",\r\n{1,\"ru\",\"Модуль продаж\"},\"\",0,0,00000000-0000-0000-0000-000000000000},1,1,1,0,0,0,0,1}\r\n,0}";
+    let blob = deflate_for_test(template.replace("UUID", uuid).as_bytes());
+
+    let extracted = extract_metadata_source_xml(
+        &blob,
+        uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let properties = parse_common_module_xml_properties(&extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("CommonModules").join("SalesModule.xml")
+    );
+    assert_eq!(properties.uuid, uuid);
+    assert_eq!(properties.name, "SalesModule");
+    assert_eq!(properties.comment, "");
+    assert_eq!(properties.synonyms[0].content, "Модуль продаж");
+    assert_eq!(properties.synonyms.len(), 1);
+    assert!(properties.client_ordinary_application);
+    assert!(properties.server);
+    assert!(properties.external_connection);
+    assert!(!properties.privileged);
+    assert!(!properties.global);
+    assert!(!properties.client_managed_application);
+    assert!(properties.server_call);
+    assert_eq!(properties.return_values_reuse, ReturnValuesReuse::DontUse);
+}
+
+#[test]
 fn legacy_source_asset_bridge_normalizes_root_version_without_claiming_migration() {
     let v21 = MssqlLegacyAdapter::from_legacy_selector(InfobaseConfigSourceVersion::V2_21);
     assert_eq!(

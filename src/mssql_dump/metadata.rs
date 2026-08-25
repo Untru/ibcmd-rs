@@ -193,6 +193,17 @@ pub(super) fn metadata_source_for_object_text(
     metadata_source_for_object_fields(code, &wrapped_text, uuid, &fields)
 }
 
+/// Fixed evidenced ValueId every `Command`-family `GeneratedType` pair
+/// carries (`docs/evidence/utility-objects-8.3.27.md`); independently
+/// redefined per module elsewhere in this crate (`compiler/families/
+/// commands.rs`, `business_object.rs`, `utility.rs`) rather than shared,
+/// matching the existing convention.
+const COMMAND_VALUE_UUID: &str = "078a6af8-d22c-4248-9c33-7e90075a3d2c";
+
+fn contains_common_command_value_marker(text: &str, uuid: &str) -> bool {
+    text.contains(&format!("{{2,{uuid},{COMMAND_VALUE_UUID}}}"))
+}
+
 pub(super) fn metadata_source_for_object_fields(
     code: u32,
     text: &str,
@@ -219,7 +230,16 @@ pub(super) fn metadata_source_for_object_fields(
             Some(("XDTOPackage", "XDTOPackages"))
         }
         1 if header_index == Some(1) => Some(("Bot", "Bots")),
-        2 if contains_wrapped_metadata_object_code(text, 9, uuid) => {
+        // The command wrapper's own leading count (`{8,` or `{9,`, one
+        // trailing `OnMainServerUnavailableBehavior` slot apart -- see
+        // `parse_common_command_properties_from_text`) is not a stable
+        // discriminator: a literal `{9,` substring check missed every
+        // record that happened to omit that slot. The `{2,<uuid>,<value
+        // id>}` GeneratedType pair right after the code is stable instead
+        // -- `COMMAND_VALUE_UUID` is the fixed, evidenced ValueId every
+        // Command-family object carries there regardless of the wrapper's
+        // own declared count (see docs/evidence/utility-objects-8.3.27.md).
+        2 if contains_common_command_value_marker(text, uuid) => {
             Some(("CommonCommand", "CommonCommands"))
         }
         2 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
