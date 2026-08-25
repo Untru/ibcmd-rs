@@ -71996,257 +71996,6 @@ fn renders_show_close_button_for_form_with_navigator_gap() {
     );
 }
 
-/// Evidence: fixture `form-chart-series-count`, three `chart-form-*` seeds on
-/// the `Web_Service` skeleton (a synthetic `DataProcessor.ChartFormTest` with
-/// one `Диаграмма` attribute of type `Chart`) at `realSeriesCount` 0, 1 and
-/// 4 -- the last matching native UT 11.5.27.75's
-/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` `ДиаграммаПоказателей`
-/// attribute's own series count (ids 2,3,4,6). Asserts the whole `<Settings
-/// xsi:type="d4p1:Chart">...</Settings>` fragment comes back byte for byte,
-/// proving the `realSeriesCount` real `realSeriesData` records precede the
-/// fixed `realExSeriesData` placeholder and the tail grows by exactly three
-/// members per series -- see the fixture's `manifest.json` for the full
-/// claim list.
-fn assert_platform_proven_form_chart_settings(raw_field: &str, native_settings_xml: &str) {
-    let rendered = parse_and_render_form_chart_settings_for_test(raw_field)
-        .expect("platform-proven form chart settings field must decode");
-    assert_eq!(
-        rendered, native_settings_xml,
-        "rendered <Settings xsi:type=\"d4p1:Chart\"> must remain byte-identical to the native export"
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_zero_series_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/zero-series.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/zero-series-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_one_series_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/one-series.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/one-series-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_four_series_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/four-series.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/four-series-settings.xml"
-        ),
-    );
-}
-
-/// Evidence: fixture `form-chart-linetype-splinemode`, two seeds each
-/// changing exactly one XML element on the `chart-form-4series` control.
-#[test]
-fn renders_form_chart_settings_with_line_chart_type_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/line-type.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/line-type-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_spline_mode_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/spline-mode.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/spline-mode-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_gauge_chart_type_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/gauge-type.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/gauge-type-settings.xml"
-        ),
-    );
-}
-
-/// Evidence: fixture `form-chart-provkontr-gauge`, native UT 11.5.27.75's
-/// two other Chart-typed attributes on
-/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` (chartType=Gauge,
-/// realSeriesCount=0) -- discovered only because the full `ut` gate still
-/// showed the whole file differing after
-/// `renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven_xml`
-/// alone passed: the file carries three Chart-typed attributes, not one.
-#[test]
-fn renders_form_chart_settings_for_native_ut_provkontr_gauge_1_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/raw/gauge-1.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/native/gauge-1-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_for_native_ut_provkontr_gauge_2_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/raw/gauge-2.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/native/gauge-2-settings.xml"
-        ),
-    );
-}
-
-/// Evidence: fixture `form-chart-placement-and-showmodes`, five seeds each
-/// changing exactly one XML element on the `chart-form-4series` control.
-#[test]
-fn renders_form_chart_settings_with_legend_placement_bottom_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/legend-bottom.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/legend-bottom-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_title_area_placement_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/title-area-placement.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/title-area-placement-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_values_tooltip_show_mode_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/values-tooltip-show-mode.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/values-tooltip-show-mode-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_points_drop_lines_show_mode_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/points-drop-lines-show-mode.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/points-drop-lines-show-mode-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_values_drop_lines_show_mode_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/values-drop-lines-show-mode.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/values-drop-lines-show-mode-settings.xml"
-        ),
-    );
-}
-
-/// Evidence: fixture `form-chart-points-scale`, three seeds triangulating
-/// `pointsScale`'s raw layout on top of the `chart-form-4series` control.
-#[test]
-fn renders_form_chart_settings_with_points_scale_full_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/full.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/full-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_points_scale_minimal_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/minimal.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/minimal-settings.xml"
-        ),
-    );
-}
-
-#[test]
-fn renders_form_chart_settings_with_points_scale_label_color_only_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/label-color-only.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/label-color-only-settings.xml"
-        ),
-    );
-}
-
-/// The real target this whole pt.4 investigation was for: native UT
-/// 11.5.27.75's own `DataProcessors/ПроверкаКонтрагента/Forms/Форма`
-/// `ДиаграммаПоказателей` attribute record (`realSeriesCount=4`,
-/// `chartType=Line`, `elementsIsInit=false`, `splineMode=SmoothCurve`,
-/// `legendPlacement=Bottom`, `pointsScale`/`valuesScale`/`seriesScale` all
-/// present) -- five variables at once, exactly the record the wave-
-/// 2026-08-25-afternoon notes said was too tangled to decode without
-/// isolating each one first via seed. Not a seed: `raw/target.txt` is the
-/// record's own bytes, extracted directly from `1cv8.cf` (`cf extract
-/// <ut 1cv8.cf> acd13c5d-edf3-4c18-99d7-663ac866d5e8.0`, the form body;
-/// this chart is the FIRST occurrence of the `{11},\r\n{74,` marker in the
-/// decoded text, not the third -- an earlier wave-note's `str.find` on
-/// decoded text was mistaken for a byte offset and landed on an unrelated
-/// empty chart on the same form).
-#[test]
-fn renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven_xml() {
-    assert_platform_proven_form_chart_settings(
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/raw/target.txt"
-        ),
-        include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/native/target-settings.xml"
-        ),
-    );
-}
-
 /// Short item-record revisions resolve to the class the platform declares.
 ///
 /// Both constants below are the bytes ERP УХ 3.2.12.6 actually wrote. The
@@ -72664,4 +72413,507 @@ fn short_extended_tooltip_revision_is_read_as_its_canonical_shape() {
         .expect("a short-revision extended tooltip must be readable");
     assert_eq!(tooltip.name, "Реквизит1РасширеннаяПодсказка");
     assert_eq!(tooltip.id, "3");
+}
+
+/// Evidence: fixture `form-chart-series-count`, three `chart-form-*` seeds on
+/// the `Web_Service` skeleton (a synthetic `DataProcessor.ChartFormTest` with
+/// one `Диаграмма` attribute of type `Chart`) at `realSeriesCount` 0, 1 and
+/// 4 -- the last matching native UT 11.5.27.75's
+/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` `ДиаграммаПоказателей`
+/// attribute's own series count (ids 2,3,4,6). Asserts the whole `<Settings
+/// xsi:type="d4p1:Chart">...</Settings>` fragment comes back byte for byte,
+/// proving the `realSeriesCount` real `realSeriesData` records precede the
+/// fixed `realExSeriesData` placeholder and the tail grows by exactly three
+/// members per series -- see the fixture's `manifest.json` for the full
+/// claim list.
+fn assert_platform_proven_form_chart_settings(raw_field: &str, native_settings_xml: &str) {
+    let rendered = parse_and_render_form_chart_settings_for_test(raw_field)
+        .expect("platform-proven form chart settings field must decode");
+    assert_eq!(
+        rendered, native_settings_xml,
+        "rendered <Settings xsi:type=\"d4p1:Chart\"> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_zero_series_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/zero-series.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/zero-series-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_one_series_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/one-series.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/one-series-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_four_series_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/four-series.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/native/four-series-settings.xml"
+        ),
+    );
+}
+
+/// Evidence: fixture `form-chart-linetype-splinemode`, two seeds each
+/// changing exactly one XML element on the `chart-form-4series` control.
+#[test]
+fn renders_form_chart_settings_with_line_chart_type_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/line-type.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/line-type-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_spline_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/spline-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/spline-mode-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_gauge_chart_type_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/raw/gauge-type.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-linetype-splinemode/native/gauge-type-settings.xml"
+        ),
+    );
+}
+
+/// Evidence: fixture `form-chart-provkontr-gauge`, native UT 11.5.27.75's
+/// two other Chart-typed attributes on
+/// `DataProcessors/ПроверкаКонтрагента/Forms/Форма` (chartType=Gauge,
+/// realSeriesCount=0) -- discovered only because the full `ut` gate still
+/// showed the whole file differing after
+/// `renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven_xml`
+/// alone passed: the file carries three Chart-typed attributes, not one.
+#[test]
+fn renders_form_chart_settings_for_native_ut_provkontr_gauge_1_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/raw/gauge-1.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/native/gauge-1-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_for_native_ut_provkontr_gauge_2_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/raw/gauge-2.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-gauge/native/gauge-2-settings.xml"
+        ),
+    );
+}
+
+/// Evidence: fixture `form-chart-placement-and-showmodes`, five seeds each
+/// changing exactly one XML element on the `chart-form-4series` control.
+#[test]
+fn renders_form_chart_settings_with_legend_placement_bottom_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/legend-bottom.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/legend-bottom-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_title_area_placement_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/title-area-placement.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/title-area-placement-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_values_tooltip_show_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/values-tooltip-show-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/values-tooltip-show-mode-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_points_drop_lines_show_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/points-drop-lines-show-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/points-drop-lines-show-mode-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_values_drop_lines_show_mode_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/raw/values-drop-lines-show-mode.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-placement-and-showmodes/native/values-drop-lines-show-mode-settings.xml"
+        ),
+    );
+}
+
+/// Evidence: fixture `form-chart-points-scale`, three seeds triangulating
+/// `pointsScale`'s raw layout on top of the `chart-form-4series` control.
+#[test]
+fn renders_form_chart_settings_with_points_scale_full_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/full.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/full-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_points_scale_minimal_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/minimal.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/minimal-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_chart_settings_with_points_scale_label_color_only_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/raw/label-color-only.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-points-scale/native/label-color-only-settings.xml"
+        ),
+    );
+}
+
+/// The real target this whole pt.4 investigation was for: native UT
+/// 11.5.27.75's own `DataProcessors/ПроверкаКонтрагента/Forms/Форма`
+/// `ДиаграммаПоказателей` attribute record (`realSeriesCount=4`,
+/// `chartType=Line`, `elementsIsInit=false`, `splineMode=SmoothCurve`,
+/// `legendPlacement=Bottom`, `pointsScale`/`valuesScale`/`seriesScale` all
+/// present) -- five variables at once, exactly the record the wave-
+/// 2026-08-25-afternoon notes said was too tangled to decode without
+/// isolating each one first via seed. Not a seed: `raw/target.txt` is the
+/// record's own bytes, extracted directly from `1cv8.cf` (`cf extract
+/// <ut 1cv8.cf> acd13c5d-edf3-4c18-99d7-663ac866d5e8.0`, the form body;
+/// this chart is the FIRST occurrence of the `{11},\r\n{74,` marker in the
+/// decoded text, not the third -- an earlier wave-note's `str.find` on
+/// decoded text was mistaken for a byte offset and landed on an unrelated
+/// empty chart on the same form).
+#[test]
+fn renders_form_chart_settings_for_native_ut_provkontr_target_to_platform_proven_xml() {
+    assert_platform_proven_form_chart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/raw/target.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-provkontr-target/native/target-settings.xml"
+        ),
+    );
+}
+
+/// `Button` under its short revision `30`.
+///
+/// Real ERP УХ 3.2.12.6 bytes:
+/// `Documents/НастраиваемыйОтчет/Forms/ФормаВводаУсловияНаЧисловойПоказательНО`'s
+/// `ОК`, 52 members under leading member `30`, which native ibcmd writes as
+/// `<Button name="ОК" id="1">` with `<Type>UsualButton</Type>`,
+/// `<DefaultButton>true</DefaultButton>` and
+/// `<CommandName>Form.Command.ОК</CommandName>`.
+///
+/// Every (leading member, length) pair of the `Button` class has exactly one
+/// slot shape corpus-wide, and `30`/51 and `30`/52 are `31`/52 and `31`/53
+/// minus one trailing scalar on all 111 records, trailing run 18 -> 17. The
+/// assertions below go past mere recognition on purpose: `item_type` and
+/// `default_button` are read from slots the extended-button layout owns, so
+/// they only come out right if the record was normalized rather than guessed
+/// at.
+///
+/// The arity guard keeps this clear of the only other `{30,...}` in the
+/// codebase -- `compiler::families::business_object`'s 49-field
+/// `BusinessProcess` metadata descriptor, which shares the leading member and
+/// nothing else.
+#[test]
+fn short_button_revision_is_read_with_its_extended_layout() {
+    const BUTTON_30: &str = r#"{30,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,
+{0,
+{0,
+{"B",1},0}
+},1,"ОК",
+{1,0},1,
+{1,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,1,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{11,
+{12,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОКРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,1,0,0,0,1}"#;
+
+    let item = parse_form_child_item(
+        BUTTON_30,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("a short-revision button must be readable");
+
+    assert_eq!(item.tag, "Button");
+    assert_eq!(item.name, "ОК");
+    assert_eq!(item.id, "1");
+    assert_eq!(item.item_type, Some("UsualButton"));
+    assert_eq!(item.default_button, Some(true));
+}
+
+/// The `LabelDecoration`/`PictureDecoration` sub-shape of the decoration class
+/// under its short revision `11`.
+///
+/// This sub-shape has a different base arity from the `ExtendedTooltip` one
+/// the previous test covers -- 36 members under `12`, 37 with the conditional
+/// `UserVisible`-common prefix, against the tooltip's 34/35 -- so the short
+/// revision shows up at 35 and 36 members rather than 33 and 34. Anchored on
+/// the class uuid the platform writes before each record, ERP УХ's 102
+/// decorations under `11` are exactly two shapes, 61 at 35 members and 41 at
+/// 36, and each is its `12` counterpart minus its final member with no
+/// exception; the trailing scalar run falls 9 -> 8.
+///
+/// `LABEL_35` is `Catalogs/Контрагенты/Forms/ФормаПараметрыКлассификаторовУХ`'s
+/// `ОтступОКОПФ`, which native ibcmd writes as
+/// `<LabelDecoration name="ОтступОКОПФ" id="16">`; `PICTURE_36` is
+/// `Catalogs/УдалитьПанелиОтчетов/Forms/ФормаДлительнойОперации`'s
+/// `Декорация1`, written `<PictureDecoration name="Декорация1" id="1">` and
+/// carrying the prefix, so it is the 36-member shape. Both kinds occur under
+/// the short revision (94 label, 8 picture), which is why both are asserted.
+#[test]
+fn short_decoration_revision_resolves_both_of_its_kinds() {
+    const LABEL_35: &str = r#"{11,
+{16,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОтступОКОПФ",
+{1,0},
+{1,0},1,1,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},1,
+{22,
+{17,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОтступОКОПФКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,2,
+{1,
+{1,0},0},0,1,
+{11,
+{47,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОтступОКОПФExtendedTooltip",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},1,0,0,1,0,3,3,0}"#;
+    const PICTURE_36: &str = r#"{11,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,
+{0,
+{0,
+{"B",1},0}
+},1,"Декорация1",
+{1,0},
+{1,0},1,6,3,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{4,
+{4,1,
+{0,7fd570f8-f7f6-4b4c-8831-71b304be8c0f},"",-1,-1,1,0,""},0,0,0,
+{1,0},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,
+{0,1,0},0,100},1,
+{22,
+{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"Декорация1КонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,2,
+{1,
+{1,0},0},0,1,
+{11,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"Декорация1РасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},1,0,0,1,0,3,3,0}"#;
+
+    let read = |field: &str| {
+        parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .map(|item| (item.tag, item.name, item.id))
+    };
+
+    assert_eq!(
+        read(LABEL_35),
+        Some((
+            "LabelDecoration",
+            "ОтступОКОПФ".to_string(),
+            "16".to_string()
+        ))
+    );
+    assert_eq!(
+        read(PICTURE_36),
+        Some((
+            "PictureDecoration",
+            "Декорация1".to_string(),
+            "1".to_string()
+        ))
+    );
 }

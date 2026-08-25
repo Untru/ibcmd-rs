@@ -16447,17 +16447,43 @@ fn form_item_record_canonical_revision(
         // field record normalizes, the packer's own button does not and stays
         // with the `Button` arm below.
         "34" if matches!(field_count, 56 | 57) => Some(("37", 3)),
-        // The `ExtendedTooltip` sub-shape of the decoration class, whose own
-        // base arity (34 members, 35 with the conditional `UserVisible`-common
-        // prefix) differs from the `LabelDecoration`/`PictureDecoration`
-        // sub-shape's 36/37 -- the tooltip reader already documents that split.
-        // All 1 813 tooltips ERP УХ writes under `11` reproduce a `12`
-        // tooltip's slot shape minus its final member, with the trailing scalar
-        // run falling 11 -> 10, and none of them mismatches. The arity guard
-        // keeps this away from the decoration sub-shape's own short revision
-        // (`11` at 35/36 members), which is a separate shape and has not had
-        // its own pass.
-        "11" if matches!(field_count, 33 | 34) => Some(("12", 1)),
+        // The decoration class ships two sub-shapes with different base
+        // arities, and the short revision `11` covers both.
+        //
+        // `ExtendedTooltip` is 34 members under `12`, 35 with the conditional
+        // `UserVisible`-common prefix -- the tooltip reader already documents
+        // that split. All 4 786 tooltips ERP УХ writes under `11` reproduce a
+        // `12` tooltip's slot shape minus its final member, trailing scalar
+        // run 11 -> 10.
+        //
+        // `LabelDecoration`/`PictureDecoration` is 36 members under `12`, 37
+        // with the prefix. Anchored on the class uuid the platform writes
+        // before each record, ERP УХ's 102 decorations under `11` fall into
+        // exactly two shapes -- 61 at 35 members and 41 at 36 -- each of which
+        // is its `12` counterpart minus its final member with no exception,
+        // trailing scalar run 9 -> 8. Both kinds are represented (94 with the
+        // `LabelDecoration` discriminator, 8 with `PictureDecoration`).
+        //
+        // Nothing else in any of the seven corpora writes a `{11,...}` record
+        // at 33..36 members: outside ERP УХ there are none at all, and inside
+        // it every one is a tooltip or a class-anchored decoration. The arity
+        // guard is therefore total over the measured corpus, not a filter that
+        // happens to hold.
+        "11" if matches!(field_count, 33 | 34 | 35 | 36) => Some(("12", 1)),
+        // `Button`'s arity invariant: `field_count - wrapper` is 21 with the
+        // name at slot 5 and 22 with the conditional `UserVisible`-common
+        // tuple at slot 4 pushing it to slot 6. Over the whole corpus each
+        // (leading member, length) pair has exactly one slot shape --
+        // `30`/51 and `30`/52 are `31`/52 and `31`/53 minus one trailing
+        // scalar, member for member, on all 111 records with no exception,
+        // and the trailing scalar run falls 18 -> 17.
+        //
+        // The guard also keeps this clear of the only other `{30,...}` this
+        // repository knows: `compiler::families::business_object` writes a
+        // 49-field `BusinessProcess` *metadata* descriptor under the same
+        // leading member. It never reaches a form record, and 49 is neither
+        // 51 nor 52.
+        "30" if matches!(field_count, 51 | 52) => Some(("31", 1)),
         _ => None,
     }
 }
