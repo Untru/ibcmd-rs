@@ -43,7 +43,10 @@ use crate::metadata_owner_graph::{
 };
 #[cfg(all(test, feature = "mssql-live-tests"))]
 use crate::module_blob::{LocalizedString, SpreadsheetNumberFormatHint};
-use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
+use crate::module_blob::{
+    ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text,
+    unpack_plain_text_module_body,
+};
 use crate::parallel;
 
 mod characteristics {
@@ -4799,6 +4802,7 @@ fn dump_table_row_bytes(
             }
             Err(_) if context.module_text_paths.contains_key(file_name) => {
                 unpack_form_body_module_text(&bytes)
+                    .or_else(|| unpack_plain_text_module_body(&bytes))
             }
             Err(_) => None,
         };
