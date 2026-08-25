@@ -1,0 +1,32 @@
+					<Popup name="ИзменитьДолюУчастия" id="107">
+						<Title>
+							<v8:item>
+								<v8:lang>ru</v8:lang>
+								<v8:content>Изменить долю участия</v8:content>
+							</v8:item>
+						</Title>
+						<ToolTip>
+							<v8:item>
+								<v8:lang>ru</v8:lang>
+								<v8:content>Изменить долю участия</v8:content>
+							</v8:item>
+						</ToolTip>
+						<Picture>
+							<xr:Ref>StdPicture.Change</xr:Ref>
+							<xr:LoadTransparent>true</xr:LoadTransparent>
+						</Picture>
+						<CommandSource>Form</CommandSource>
+						<ExtendedTooltip name="ИзменитьДолюУчастияРасширеннаяПодсказка" id="108"/>
+						<ChildItems>
+							<Button name="РеестрПоступлениеИнвестиций" id="109">
+								<Type>CommandBarButton</Type>
+								<CommandName>Form.Command.ПоступлениеИнвестиций</CommandName>
+								<ExtendedTooltip name="РеестрПоступлениеИнвестицийРасширеннаяПодсказка" id="110"/>
+							</Button>
+							<Button name="РеестрВыбытиеИнвестиций" id="111">
+								<Type>CommandBarButton</Type>
+								<CommandName>Form.Command.ВыбытиеИнвестиций</CommandName>
+								<ExtendedTooltip name="РеестрВыбытиеИнвестицийРасширеннаяПодсказка" id="112"/>
+							</Button>
+						</ChildItems>
+					</Popup>

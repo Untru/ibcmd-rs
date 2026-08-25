@@ -72665,3 +72665,69 @@ fn short_extended_tooltip_revision_is_read_as_its_canonical_shape() {
     assert_eq!(tooltip.name, "Реквизит1РасширеннаяПодсказка");
     assert_eq!(tooltip.id, "3");
 }
+
+/// `FormConditionalGroupSchema::from_raw_layout` (`src/form_schema.rs`)
+/// admitted the wrapper-`22` conditional `UserVisible`-common prefix tuple
+/// only for shifted discriminators `2`|`3`|`4`|`5` (grouping controls) and
+/// `8`|`9` (a `Table`'s own service items) -- never `0` (`CommandBar`), `1`
+/// (`Popup`) or `6` (`ButtonGroup`), even though `FormChildItemVisibleSchema`
+/// right below it already lists all seven kinds together for the identical
+/// tuple. Without the shift, the discriminator/name read lands on the
+/// prefix tuple's own opening brace instead of a bare digit or a quoted
+/// name, both refuse, and the whole item -- with everything nested inside it
+/// -- is dropped silently by `parse_form_child_item_pairs`'s
+/// exact-count-or-partial fallback. See this fixture's `manifest.json` for
+/// the full evidence trail across three independent native ERP УХ 3.2.12.6
+/// forms.
+#[test]
+fn extracts_command_bar_with_conditional_group_prefix() {
+    let raw: &[u8] = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/89738071-8272-45ca-b19c-17b0f4423c1e.deflate"
+    );
+    let expected = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/command-bar-open.xml"
+    );
+    let xml = extract_form_body_xml(raw, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected),
+        "CommandBar id=73 (shifted discriminator 0) must survive the \
+conditional-prefix fix, own subtree intact; missing or different in:\n{xml}"
+    );
+}
+
+#[test]
+fn extracts_popup_with_conditional_group_prefix() {
+    let raw: &[u8] = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/f46eb0f0-c10e-4bff-b40d-200dc10ce7b9.deflate"
+    );
+    let expected = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/popup-block.xml"
+    );
+    let xml = extract_form_body_xml(raw, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected),
+        "Popup id=107 (shifted discriminator 1) must render byte-identical \
+to the native export; block missing or different in:\n{xml}"
+    );
+}
+
+#[test]
+fn extracts_button_group_with_conditional_group_prefix() {
+    let raw: &[u8] = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/9582d589-957a-404a-aae8-a705e82882c1.deflate"
+    );
+    let expected = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/button-group-block.xml"
+    );
+    let xml = extract_form_body_xml(raw, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected),
+        "ButtonGroup id=28 (shifted discriminator 6) must render \
+byte-identical to the native export -- it is the sole child of the form \
+root's own AutoCommandBar, so losing it emptied that AutoCommandBar's \
+<ChildItems> entirely; block missing or different in:\n{xml}"
+    );
+}
