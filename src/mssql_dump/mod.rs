@@ -15596,6 +15596,23 @@ fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Opt
     {
         return Some("Attribute");
     }
+    // AccumulationRegister writes a dedicated marker collection
+    // (`b64d9a42-1642-11d6-a3c7-0050bae0a776`) for its own Attribute
+    // children. The `code 4 && code 27` check below already covers the
+    // long wrapper the platform writes when Indexing/FullTextSearch deviate
+    // from default; it never fires for the short `{3, <body>, 0, 1}` form
+    // written at default (confirmed via `cf extract` on ERP УХ 3.2.12.6,
+    // AccumulationRegisters/ДанныеМСФО: 13 Attribute children, all short
+    // form, all previously untagged and so dropped before reaching
+    // parse_accumulation_register_attribute_payload at all). The list
+    // marker alone is unambiguous -- a Dimension or Resource never sits
+    // inside it -- so it does not need the inner-code guard the long form
+    // uses to disambiguate from a header tuple's own leading `3`.
+    if kind == "AccumulationRegister"
+        && is_offset_inside_accumulation_register_attribute_list(text, marker_start)
+    {
+        return Some("Attribute");
+    }
     if is_offset_inside_metadata_object_code(text, marker_start, 5)
         && is_offset_inside_register_resource_list(text, marker_start)
     {
