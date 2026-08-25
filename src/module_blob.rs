@@ -12180,13 +12180,18 @@ fn replace_form_vertical_align(layout: &mut String, value: FormRootVerticalAlign
     let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
         return Ok(());
     };
+    let trailer: Vec<&str> = fields[tail_start..]
+        .iter()
+        .map(|range| &layout[range.clone()])
+        .collect();
     let Some(schema) = FormRootVerticalAlignSchema::from_raw_layout(
         fields.first().map(|range| layout[range.clone()].trim()),
-        fields.len().saturating_sub(tail_start),
+        &trailer,
     ) else {
         return Ok(());
     };
-    let Some(range) = fields.get(tail_start + schema.trailer_slot()) else {
+    let slot = schema.trailer_slot();
+    let Some(range) = fields.get(tail_start + slot) else {
         return Ok(());
     };
     if schema.accepts_raw_value(&layout[range.clone()]) {

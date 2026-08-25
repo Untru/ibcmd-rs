@@ -8058,6 +8058,176 @@ fn extracts_form_auto_url_and_customizable_false_to_body_xml() {
 }
 
 #[test]
+fn extracts_form_auto_url_false_from_root_trailer_declaring_no_optional_blocks() {
+    // Root `50` trailer with member 2 reading `0`: 24 members, `AutoURL`
+    // immediately at index 3. This is the shape БСП, БСП демо, УТ and WMS use.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,0,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
+}
+
+#[test]
+fn does_not_extract_form_auto_url_from_root_trailer_declaring_no_optional_blocks() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(!form_xml.contains("<AutoURL>"));
+}
+
+#[test]
+fn extracts_form_auto_url_false_from_root_trailer_declaring_one_optional_block() {
+    // Root `50` trailer with member 2 reading `1`: one `{22,...}` block sits
+    // between the count and the flag, so the trailer runs to 25 members and
+    // `AutoURL` moves to index 4. This is the shape ERP УХ and its
+    // MDM_Management use, and reading index 3 here would find the block, not
+    // the flag.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},0,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
+}
+
+#[test]
+fn does_not_extract_form_auto_url_from_root_trailer_declaring_one_optional_block() {
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(!form_xml.contains("<AutoURL>"));
+}
+
+#[test]
+fn extracts_form_save_window_settings_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 23 is read at 24. Reading 23 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},0},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<SaveWindowSettings>false</SaveWindowSettings>"));
+}
+
+#[test]
+fn extracts_form_conversations_representation_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 19 is read at 20. Reading 19 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,2,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(
+        form_xml.contains("<ConversationsRepresentation>DontShow</ConversationsRepresentation>")
+    );
+}
+
+#[test]
+fn extracts_form_show_close_button_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 18 is read at 19. Reading 18 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,0,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<ShowCloseButton>false</ShowCloseButton>"));
+}
+
+#[test]
+fn extracts_form_scaling_mode_from_root_trailer_declaring_one_optional_block() {
+    // Trailer member 2 declares one optional block, so every start-anchored
+    // slot from member 3 on sits one further out: this property's base slot
+    // 6 is read at 7. Reading 6 here would find the neighbouring
+    // member and drop the property, which is what ERP УХ saw on every form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,1,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,0},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<ScalingMode>Normal</ScalingMode>"));
+}
+
+#[test]
+fn extracts_form_auto_url_false_from_root_49_trailer() {
+    // Root `49`'s 24-member trailer declares a count of 1, so `AutoURL`'s base
+    // slot 3 is read at 4 -- the same `base + count` root `50` follows.
+    let form_body = deflate_for_test(
+            r##"{4,{49,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},0,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{49,0}},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
+}
+
+#[test]
+fn extracts_form_show_title_false_from_root_49_trailer() {
+    // Slot 17 holds the constant `100` on every root `49` form on the stand, so
+    // the older length-keyed reading never emitted this property for any of
+    // them; the declared count puts it at 18.
+    let form_body = deflate_for_test(
+            r##"{4,{49,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,0,1,0,0,0,{49,0}},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<ShowTitle>false</ShowTitle>"));
+}
+
+#[test]
+fn extracts_form_mobile_device_command_bar_content_from_root_trailer_declaring_no_optional_blocks()
+{
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,1,"",{"N",0}},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<MobileDeviceCommandBarContent>"));
+    assert!(form_xml.contains(r#"<xr:Value xsi:type="xs:string"/>"#));
+}
+
+#[test]
+fn extracts_form_mobile_device_command_bar_content_from_root_trailer_declaring_one_optional_block()
+{
+    // The content block's base slot 22 is read at 23 here, and the schema
+    // validates the trailer against its own declared count rather than
+    // requiring exactly 24 members -- the gate that dropped the block on every
+    // ERP УХ form.
+    let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,"","",1,{22,{0},0,0,0,0,0},1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{50,1,"",{"N",0}},1},"",{0}}"##.as_bytes(),
+        );
+
+    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+    assert!(form_xml.contains("<MobileDeviceCommandBarContent>"));
+    assert!(form_xml.contains(r#"<xr:Value xsi:type="xs:string"/>"#));
+}
+
+#[test]
 fn does_not_extract_form_auto_url_from_property_bag_layout() {
     let form_body = deflate_for_test(
             r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,0,1,1,0,1,4,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
