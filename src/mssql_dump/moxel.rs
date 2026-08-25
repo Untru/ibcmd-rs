@@ -8231,7 +8231,19 @@ pub(super) fn parse_moxel_area_list(text: &str) -> Option<Vec<MoxelArea>> {
 pub(super) fn parse_moxel_named_item_list(text: &str) -> Option<Vec<MoxelNamedItem>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
-    if count == 0 || count > 512 || fields.len() != count * 2 + 1 {
+    // Evidence (native ERP УХ 3.2.12.6): the arity check right below
+    // (`fields.len() == count * 2 + 1`) is already a complete, self-validating
+    // structural guard -- the declared `count` must exactly match the actual
+    // field layout the text carries, which a coincidental false match cannot
+    // satisfy for anything but a trivially small count. A `count > 512` cap
+    // formerly rejected the whole list outright on any larger table; real
+    // regulated-report templates publish named cell ranges by the hundreds
+    // (e.g. `Documents/ЗаявлениеВФССОВозмещенииВыплатРодителямДетейИнвалидов/
+    // Templates/ЗаявлениеВФССДополнительныеДниОтпуска_2017` declares 700), so
+    // the cap dropped every `<namedItem>` in the document, not merely the
+    // members past the 512th -- the same "fixed arity/whitelist instead of
+    // the declared count" defect class this project has hit before.
+    if count == 0 || fields.len() != count * 2 + 1 {
         return None;
     }
     let mut items = Vec::with_capacity(count);

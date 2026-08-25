@@ -35689,6 +35689,33 @@ fn moxel_drawing_line_style_uses_its_own_enumeration() {
     assert!(!xml.contains("Double"), "{xml}");
 }
 
+/// Evidence (native ERP УХ 3.2.12.6): real regulated-report templates name
+/// cell ranges by the hundreds -- `Documents/
+/// ЗаявлениеВФССОВозмещенииВыплатРодителямДетейИнвалидов/Templates/
+/// ЗаявлениеВФССДополнительныеДниОтпуска_2017` declares 700 -- and a
+/// formerly hardcoded `count > 512` cap dropped the *entire* `<namedItem>`
+/// list, not merely the members past the 512th, on any document that
+/// exceeded it: the fixed-arity-cap-instead-of-declared-count defect class
+/// this project has hit before elsewhere. The arity check right beside it
+/// (`fields.len() == count * 2 + 1`) is already a complete, self-validating
+/// structural guard, so the cap added nothing but a ceiling.
+#[test]
+fn moxel_named_item_list_is_not_capped_at_512_entries() {
+    let n = 513usize;
+    let mut text = format!("{{{n}");
+    for i in 0..n {
+        text.push_str(&format!(",\"Item{i}\",{{1,{{3,{i},{i},{i},{i}}}}}"));
+    }
+    text.push('}');
+
+    let items = parse_moxel_named_item_list(&text).expect("must parse past the old 512 cap");
+    assert_eq!(items.len(), n);
+    match items.last().unwrap() {
+        MoxelNamedItem::Cells(area) => assert_eq!(area.name, format!("Item{}", n - 1)),
+        MoxelNamedItem::Drawing { .. } => panic!("expected a cell area"),
+    }
+}
+
 /// Fixture: `tests/fixtures/moxel_sales_plan_norm_file_load_raw.txt`, 1985
 /// bytes, sha256
 /// `00d7b6f37dd4d8a8410aa1f59f7a10f5ae91aa11b5622110cf52ba0bfd49d05f`. Native
