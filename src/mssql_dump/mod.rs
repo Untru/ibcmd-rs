@@ -18169,6 +18169,24 @@ fn information_register_uuid_is_zero(value: &str) -> bool {
     value == "00000000-0000-0000-0000-000000000000"
 }
 
+/// True when `value` is a well-known "ChoiceParameterLinks container" marker
+/// code, the first member of `{<code>, <count>, <link>...}`.
+///
+/// `5006` is the only code every previously-evidenced corpus (БСП demo/base,
+/// Управление торговлей) ever wrote. ERP УХ 3.2.12.6 also writes `5004` for
+/// the identically-shaped, identically-consumed container -- confirmed via
+/// `cf extract` raw metadata on an InformationRegister dimension
+/// (`InformationRegisters/АктуальныеСтадииМероприятий`, dimension
+/// `Стадия`/`Мероприятие`, both empty: `{5004,0}`) and, through the shared
+/// standard-attribute reader, on the register's own `Active`/`LineNumber`/
+/// `Recorder`/`Period` standard attributes. The declared count that follows
+/// is read either way, so accepting both codes here is doctrine rule 7
+/// (declared counter, not a fixed value/arity whitelist), not a loosened
+/// non-empty-list reader.
+fn is_choice_parameter_links_container_marker(value: &str) -> bool {
+    matches!(value.trim(), "5006" | "5004")
+}
+
 fn parse_information_register_choice_parameter_links(
     value: &str,
     owner_kind: &str,
@@ -18177,7 +18195,7 @@ fn parse_information_register_choice_parameter_links(
     preserve_raw_data_paths: bool,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "5006" {
+    if !is_choice_parameter_links_container_marker(fields.first()?) {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -19054,7 +19072,7 @@ fn parse_document_choice_parameter_links(
     data_path_owner_proof: &DocumentDataPathOwnerProof,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value.trim(), 0)?;
-    if fields.len() < 2 || fields.first()?.trim() != "5006" {
+    if fields.len() < 2 || !is_choice_parameter_links_container_marker(fields.first()?) {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -19332,7 +19350,7 @@ fn parse_owner_choice_parameter_links(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value.trim(), 0)?;
-    if fields.len() < 2 || fields.first()?.trim() != "5006" {
+    if fields.len() < 2 || !is_choice_parameter_links_container_marker(fields.first()?) {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -22006,7 +22024,9 @@ fn parse_cct_attribute_properties(
         )?,
         None => {
             let record = split_information_register_braced_fields(payload.get(14)?)?;
-            if record.len() != 2 || record.first()?.trim() != "5006" || record.get(1)?.trim() != "0"
+            if record.len() != 2
+                || !is_choice_parameter_links_container_marker(record.first()?)
+                || record.get(1)?.trim() != "0"
             {
                 return None;
             }
@@ -28060,7 +28080,10 @@ fn parse_metadata_child_choice_parameter_links(
         return Some(Vec::new());
     }
     let fields = split_1c_braced_fields(field, 0)?;
-    if fields.first().map(|value| value.trim()) != Some("5006") {
+    if !fields
+        .first()
+        .is_some_and(|value| is_choice_parameter_links_container_marker(value))
+    {
         return None;
     }
     let count = fields
