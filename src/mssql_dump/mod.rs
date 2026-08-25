@@ -13564,6 +13564,51 @@ fn parse_information_register_standard_attribute_fill_value(
     }
 }
 
+/// True when a standard attribute's `ChoiceParameterLinks` slot carries zero
+/// links: `{"#", <link-list type uuid>, {<container-kind code>, 0}}`, where
+/// the trailing `0` is the platform's own declared item count.
+///
+/// The container-kind code (first member of the nested pair) is not itself
+/// evidence of emptiness -- it names which collection representation the
+/// platform picked, and ERP УХ 3.2.12.6 has now been observed writing `5004`
+/// there (`InformationRegisters/АктуальныеСтадииМероприятий`, standard
+/// attribute `Active`, all four standard attributes of that register
+/// identically) where every previously-evidenced corpus (БСП demo/base,
+/// Управление торговлей) only ever wrote `5006`. Gating on the declared count
+/// instead of a single hardcoded code follows doctrine rule 7 -- reading the
+/// declared counter, not a fixed arity/value whitelist -- and does not widen
+/// what a *non-empty* list is accepted: a real `ChoiceParameterLinks` entry
+/// still fails here (no parser below decodes contents), so this only ever
+/// changes an already-`None` outcome into recognizing a legitimately empty
+/// list.
+fn information_register_standard_attribute_choice_parameter_links_is_empty(value: &str) -> bool {
+    let Some(fields) = split_information_register_braced_fields(value) else {
+        return false;
+    };
+    if fields.len() != 3
+        || fields.first().map(|field| field.trim()) != Some(r##""#""##)
+        || !fields.get(1).is_some_and(|field| {
+            information_register_uuid_matches(
+                field,
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+            )
+        })
+    {
+        return false;
+    }
+    // Only the two leading kind tags actually observed on real bytes are
+    // accepted: `"5006"` (long-standing) and `"5004"` (ERP УХ 3.2.12.6 --
+    // `AccumulationRegisters/ВыработкаВНА`'s `Recorder`, and all nine
+    // standard attributes of `Catalogs/ВариантыЗначенийПоказателей`). A
+    // zero count alone is deliberately NOT enough: accepting any kind tag
+    // that happens to carry `0` would be a pattern guess, and this project
+    // is fail-closed -- a third value gets added here once real bytes show
+    // it, not before (docs/evidence/arity-literal-audit-20260825.md).
+    split_information_register_braced_fields(fields[2]).is_some_and(|nested| {
+        nested.len() == 2 && nested[1].trim() == "0" && matches!(nested[0].trim(), "5006" | "5004")
+    })
+}
+
 fn parse_register_standard_attribute_with_comment<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
@@ -13578,37 +13623,8 @@ fn parse_register_standard_attribute_with_comment<'a>(
             expected_type_reduction_mode,
             None,
         )?;
-    // The empty `ChoiceParameterLinks` record's own leading kind tag is not
-    // pinned at `"5006"` platform-wide: real ERP УХ 3.2.12.6 bytes write
-    // `"5004"` instead, evidenced on two unrelated families sharing this
-    // helper -- `AccumulationRegisters/ВыработкаВНА` (uuid
-    // `d0cb999a-42d7-4f4f-9160-fa23808dc40d`) standard attribute `Recorder`,
-    // and every standard attribute of `Catalogs/ВариантыЗначенийПоказателей`
-    // (uuid `b9cae7bf-ed0e-442b-b5de-d455c3fa1fc5`, 9 occurrences, all
-    // `{5004,0}`). Both are otherwise-well-formed, real bytes with no other
-    // fault: `parse_register_standard_attribute_with_comment_and_choice_
-    // parameter_links` succeeds on both, and this final shape check was the
-    // only rejection point. Before this, one unrecognized kind tag on any
-    // standard attribute aborted the whole owning object's export (`?`
-    // chains up through `parse_exact_register_standard_attributes` and
-    // similar), surfacing as "no legacy family decoder recognized this
-    // storage entry" -- the corpus's largest still-`missing` root-cause
-    // bucket (151 opaque roots at 2ccd98f, Catalogs alone accounting for
-    // 72). Not treated as "accept any kind tag with a zero count": only the
-    // two values actually observed on real bytes are accepted, per this
-    // project's fail-closed doctrine (see `docs/evidence/arity-literal-
-    // audit-20260825.md`) -- a third value should be evidenced before being
-    // added here, not assumed safe by pattern alone.
-    (information_register_standard_attribute_nested_values_are(
-        choice_parameter_links,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
-        &["5006", "0"],
-    ) || information_register_standard_attribute_nested_values_are(
-        choice_parameter_links,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
-        &["5004", "0"],
-    ))
-    .then_some((attribute, comment))
+    information_register_standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
+        .then_some((attribute, comment))
 }
 
 fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>(
@@ -15640,6 +15656,23 @@ fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Opt
     {
         return Some("Attribute");
     }
+    // AccumulationRegister writes a dedicated marker collection
+    // (`b64d9a42-1642-11d6-a3c7-0050bae0a776`) for its own Attribute
+    // children. The `code 4 && code 27` check below already covers the
+    // long wrapper the platform writes when Indexing/FullTextSearch deviate
+    // from default; it never fires for the short `{3, <body>, 0, 1}` form
+    // written at default (confirmed via `cf extract` on ERP УХ 3.2.12.6,
+    // AccumulationRegisters/ДанныеМСФО: 13 Attribute children, all short
+    // form, all previously untagged and so dropped before reaching
+    // parse_accumulation_register_attribute_payload at all). The list
+    // marker alone is unambiguous -- a Dimension or Resource never sits
+    // inside it -- so it does not need the inner-code guard the long form
+    // uses to disambiguate from a header tuple's own leading `3`.
+    if kind == "AccumulationRegister"
+        && is_offset_inside_accumulation_register_attribute_list(text, marker_start)
+    {
+        return Some("Attribute");
+    }
     if is_offset_inside_metadata_object_code(text, marker_start, 5)
         && is_offset_inside_register_resource_list(text, marker_start)
     {
@@ -17135,24 +17168,50 @@ fn parse_accumulation_register_attribute_payload(
         metadata_object_field_candidates_around_header(text, marker_start, &child_header.uuid)
             .into_iter()
             .filter_map(|fields| {
-                if fields.len() != 6 || fields.first().map(|field| field.trim()) != Some("4") {
-                    return None;
-                }
-                let indexing = metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
-                let full_text_search = register_child_full_text_search_xml(fields.get(3)?.trim())?;
-                if fields.get(4).map(|field| field.trim()) != Some("0") {
-                    return None;
-                }
-                let data_history = split_1c_braced_fields(fields.get(5)?.trim(), 0)?;
-                if data_history.len() != 2
-                    || data_history.first().map(|field| field.trim()) != Some("1")
-                    || !information_register_uuid_is_zero(&parse_uuid_field(
-                        data_history.get(1)?.trim(),
-                    )?)
-                {
-                    return None;
-                }
-                let common_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+                // The platform writes the full six-member wrapper --
+                // `{4, <body>, <indexing>, <full-text-search>, 0, <data
+                // history>}` -- only when `Indexing`/`FullTextSearch` deviate
+                // from their defaults (`DontIndex`/`Use`); at default it
+                // drops all four trailing members to a bare
+                // `{3, <body>, 0, 1}`. Native XML never writes `DataHistory`
+                // for this family regardless, so the short form loses
+                // nothing the long form's tail actually feeds into
+                // `properties` below. Confirmed via `cf extract` on ERP УХ
+                // 3.2.12.6: 14 short-form attributes across
+                // `AccumulationRegisters/ДанныеМСФО` and
+                // `.../ЗаказыМатериаловВПроизводство` (`DontIndex`/`Use`)
+                // against the long form on
+                // `.../СтруктураОстатковАктивовМСФО` (`Index`/`Use`) and
+                // `.../ЗначенияОперативныхПоказателейРасчетаЗарплатыОрганизаций`
+                // (`DontIndex`/`DontUse`).
+                let (indexing, full_text_search, body_field) =
+                    if fields.len() == 6 && fields.first().map(|field| field.trim()) == Some("4") {
+                        let indexing = metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
+                        let full_text_search =
+                            register_child_full_text_search_xml(fields.get(3)?.trim())?;
+                        if fields.get(4).map(|field| field.trim()) != Some("0") {
+                            return None;
+                        }
+                        let data_history = split_1c_braced_fields(fields.get(5)?.trim(), 0)?;
+                        if data_history.len() != 2
+                            || data_history.first().map(|field| field.trim()) != Some("1")
+                            || !information_register_uuid_is_zero(&parse_uuid_field(
+                                data_history.get(1)?.trim(),
+                            )?)
+                        {
+                            return None;
+                        }
+                        (indexing, full_text_search, fields.get(1)?)
+                    } else if fields.len() == 4
+                        && fields.first().map(|field| field.trim()) == Some("3")
+                        && fields.get(2).map(|field| field.trim()) == Some("0")
+                        && fields.get(3).map(|field| field.trim()) == Some("1")
+                    {
+                        ("DontIndex", "Use", fields.get(1)?)
+                    } else {
+                        return None;
+                    };
+                let common_fields = split_1c_braced_fields(body_field, 0)?;
                 let value_types = parse_register_common_child_value_types(
                     &common_fields,
                     child_header,
@@ -18213,6 +18272,24 @@ fn information_register_uuid_is_zero(value: &str) -> bool {
     value == "00000000-0000-0000-0000-000000000000"
 }
 
+/// True when `value` is a well-known "ChoiceParameterLinks container" marker
+/// code, the first member of `{<code>, <count>, <link>...}`.
+///
+/// `5006` is the only code every previously-evidenced corpus (БСП demo/base,
+/// Управление торговлей) ever wrote. ERP УХ 3.2.12.6 also writes `5004` for
+/// the identically-shaped, identically-consumed container -- confirmed via
+/// `cf extract` raw metadata on an InformationRegister dimension
+/// (`InformationRegisters/АктуальныеСтадииМероприятий`, dimension
+/// `Стадия`/`Мероприятие`, both empty: `{5004,0}`) and, through the shared
+/// standard-attribute reader, on the register's own `Active`/`LineNumber`/
+/// `Recorder`/`Period` standard attributes. The declared count that follows
+/// is read either way, so accepting both codes here is doctrine rule 7
+/// (declared counter, not a fixed value/arity whitelist), not a loosened
+/// non-empty-list reader.
+fn is_choice_parameter_links_container_marker(value: &str) -> bool {
+    matches!(value.trim(), "5006" | "5004")
+}
+
 fn parse_information_register_choice_parameter_links(
     value: &str,
     owner_kind: &str,
@@ -18221,7 +18298,7 @@ fn parse_information_register_choice_parameter_links(
     preserve_raw_data_paths: bool,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "5006" {
+    if !is_choice_parameter_links_container_marker(fields.first()?) {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -19098,7 +19175,7 @@ fn parse_document_choice_parameter_links(
     data_path_owner_proof: &DocumentDataPathOwnerProof,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value.trim(), 0)?;
-    if fields.len() < 2 || fields.first()?.trim() != "5006" {
+    if fields.len() < 2 || !is_choice_parameter_links_container_marker(fields.first()?) {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -19376,7 +19453,7 @@ fn parse_owner_choice_parameter_links(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value.trim(), 0)?;
-    if fields.len() < 2 || fields.first()?.trim() != "5006" {
+    if fields.len() < 2 || !is_choice_parameter_links_container_marker(fields.first()?) {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -22050,7 +22127,9 @@ fn parse_cct_attribute_properties(
         )?,
         None => {
             let record = split_information_register_braced_fields(payload.get(14)?)?;
-            if record.len() != 2 || record.first()?.trim() != "5006" || record.get(1)?.trim() != "0"
+            if record.len() != 2
+                || !is_choice_parameter_links_container_marker(record.first()?)
+                || record.get(1)?.trim() != "0"
             {
                 return None;
             }
@@ -28104,7 +28183,10 @@ fn parse_metadata_child_choice_parameter_links(
         return Some(Vec::new());
     }
     let fields = split_1c_braced_fields(field, 0)?;
-    if fields.first().map(|value| value.trim()) != Some("5006") {
+    if !fields
+        .first()
+        .is_some_and(|value| is_choice_parameter_links_container_marker(value))
+    {
         return None;
     }
     let count = fields
@@ -28395,13 +28477,23 @@ fn parse_common_attribute_separation_properties(
     Some(CommonAttributeSeparationProperties {
         data_separation: common_attribute_reversed_separation_xml(fields.get(5)?.trim())?,
         separated_data_use: common_attribute_separated_data_use_xml(fields.get(12)?.trim())?,
-        users_separation: common_attribute_separation_xml(fields.get(13)?.trim())?,
+        // `UsersSeparation` and `ConfigurationExtensionsSeparation` were read
+        // from each other's slot. Confirmed on ERP УХ 3.2.12.6 via cf
+        // extract (CommonAttributes/ВидДокументаБД, uuid
+        // ca061382-6b1c-4f92-8fea-bbebac45e3c5): native writes
+        // UsersSeparation=DontUse, ConfigurationExtensionsSeparation=Separate,
+        // and the raw fields carry them as fields[10]="0" (DontUse) and
+        // fields[13]="1" (Separate) respectively -- the previous code read
+        // fields[13] for UsersSeparation and fields[10] for
+        // ConfigurationExtensionsSeparation, swapping both on every one of
+        // 11 differing CommonAttributes in the corpus.
+        users_separation: common_attribute_separation_xml(fields.get(10)?.trim())?,
         authentication_separation: common_attribute_reversed_separation_xml(fields.get(6)?.trim())?,
         data_separation_value: parse_common_attribute_optional_ref(fields.get(7)?, object_refs),
         data_separation_use: parse_common_attribute_optional_ref(fields.get(8)?, object_refs),
         conditional_separation: parse_common_attribute_optional_ref(fields.get(9)?, object_refs),
         configuration_extensions_separation: common_attribute_separation_xml(
-            fields.get(10)?.trim(),
+            fields.get(13)?.trim(),
         )?,
         indexing: common_attribute_indexing_xml(fields.get(3)?.trim())?,
         full_text_search: common_attribute_use_xml(fields.get(4)?.trim())?,
@@ -35156,6 +35248,18 @@ fn push_metadata_child_object_xml_with_tail_order(
             push_nested_metadata_child_object_xml(xml, nested_child, 5, indexing_before_use);
         }
         xml.push_str("\t\t\t\t</ChildObjects>\r\n");
+    } else if child.tag == "TabularSection" {
+        // A TabularSection is the one child kind that can itself own
+        // children (its own Attribute list); native always writes the
+        // element, self-closed when that list is empty, the way it does for
+        // every other native-evidenced empty collection. Dimension/
+        // Resource/Attribute children never carry a ChildObjects element in
+        // native XML at all, so the omission stays scoped to this tag.
+        // Confirmed on ERP УХ 3.2.12.6,
+        // DataProcessors/АктуализацияБюджетов.xml: an empty TabularSection
+        // (uuid unlisted, no Attribute children) still gets
+        // `<ChildObjects/>` right after `</Properties>`.
+        xml.push_str("\t\t\t\t<ChildObjects/>\r\n");
     }
     xml.push_str(&format!("\t\t\t</{}>\r\n", child.tag));
 }

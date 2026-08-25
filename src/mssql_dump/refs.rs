@@ -39,6 +39,20 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
 /// pre-existing `true` assumption rather than a guessed offset, per the
 /// project's fail-closed rule on unevidenced field positions.
 fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeader) -> Option<bool> {
+    if kind == "InformationRegister" {
+        // Same slot `parse_information_register_owner_properties` already
+        // reads for the register's own `InformationRegisters/<name>.xml`
+        // (`UseStandardCommands`, logical field 7). Confirmed missing here
+        // specifically on ERP УХ 3.2.12.6,
+        // `InformationRegisters/СоответствиеВнутригрупповыхПоказателей`
+        // (`UseStandardCommands=false`): every `Subsystems/.../Ext/
+        // CommandInterface.xml` referencing its `StandardCommand.OpenList`
+        // synthesized the name instead of keeping the platform's own
+        // `0:<uuid>` sentinel, because this function returned `None` (falling
+        // back to the default `true`) for every kind but `Catalog`.
+        let fields = parse_information_register_owner_fields(text, header)?;
+        return information_register_bool(fields.logical.get(7)?);
+    }
     if kind != "Catalog" {
         return None;
     }
@@ -2093,6 +2107,20 @@ pub(super) fn template_type_from_code(code: u32) -> Option<&'static str> {
         4 => Some("TextDocument"),
         6 => Some("DataCompositionSchema"),
         7 => Some("DataCompositionAppearanceTemplate"),
+        // Confirmed on real ERP УХ 3.2.12.6 raw metadata via `cf extract` on
+        // two owned templates whose native XML declares
+        // `<TemplateType>GraphicalSchema</TemplateType>`:
+        // `DataProcessors/ВыполнениеМаршрутныхЛистов/Templates/МетодикаББВ`
+        // (uuid b882ff8c-b85a-4c2a-bcd9-4321c2dbb154) and
+        // `Reports/АнализСостоянияНалоговогоУчетаПоНДС/Templates/УчетНДС`
+        // (uuid 325ac0f9-1bc2-49d9-8a62-c9fe1a988830) both carry raw code 8
+        // (`{2,8,{3,{1,0,<uuid>},...}}`). Neither БСП demo/base nor УТ
+        // 11.5.27.75 ever writes this code among their owned templates, so it
+        // was previously unmapped and every such template fell back through
+        // body content-sniffing to `BinaryData` -- wrong, since a
+        // GraphicalSchema body is not always distinguishable as such by
+        // sniffing raw bytes.
+        8 => Some("GraphicalSchema"),
         9 => Some("AddIn"),
         _ => None,
     }
