@@ -6,8 +6,13 @@ Rights.xml` on ERP Управление холдингом 3.2.12.6 (base commit
 20260824.md` closed the Configuration-root parsing gap, 1,401 role Rights.xml
 files remained `differing` — files whose Configuration-root `<object>` block
 already byte-matched the native export, but whose *other* objects (Catalog,
-Document, InformationRegister, Constant, …) did not. This change finds and
-closes the single defect responsible for 1,171 of those 1,401 files (83.6%).
+Document, InformationRegister, Constant, …) did not. This pass closes two
+defects, landed as two commits: the top-level `setForNewObjects`-default
+rule (1,171/1,401 files) below, and a follow-on nested-object
+`setForAttributesByDefault` rule (see "A third fix" at the end) that closes
+most of the remainder. Combined: **1,381 of 1,401 resolved (98.6%), 20
+still differing, 0 broken** by exact-set difference against
+`$D/base789/uh.parity.json`.
 
 ## Root cause
 
@@ -160,10 +165,10 @@ from a second, independent fix landed in the same pass (see below); the
 (measured as "Roles/* files present in the original 1,401 differing set that
 are no longer differing or missing").
 
-The 230 still-differing Roles files are not addressed by this change — likely
-candidates include the ~137-file nested-`View` residual noted above, the
-previously-flagged `{0}`-restriction-condition-wrapper roles not covered by
-the companion fix below, and independent defects not yet investigated.
+The 230 still-differing Roles files were dominated (180/230 as the *sole*
+cause) by a residual nested-object `View`-right defect, closed by a third,
+follow-on fix — see "A third fix" below for that investigation, including a
+regression it initially introduced and how the gates caught it.
 
 ## A second, independent fix landed in the same pass
 
@@ -187,7 +192,71 @@ previously-flagged general-parser-gap roles from `role-rights-configuration-
 root-20260824.md`'s "16 still-missing" list; the `−11 missing` line in the
 table above is this fix, not the top-level-suppression fix.
 
-## Fast-gate parity (no-regression check)
+## A third fix: nested attribute `View`/`Edit`, and a regression the gates caught
+
+After the two fixes above, 230 `Roles/*/Ext/Rights.xml` remained differing.
+Reclassifying their diffs by object/right showed 180/230 (78%) had their
+*entire* diff explained by a single cause: an extra, plain-`false`-matching
+`View` right on nested (attribute-level) objects — `InformationRegister.
+nested` (95 files), `Document.nested` (78), `Catalog.nested` (58, files
+overlap across kinds) and smaller counts on `AccumulationRegister`,
+`DataProcessor`, `ExchangePlan`, `Report`.
+
+**What the corpus proved.** `RoleRights` already carries a
+`set_for_attributes_by_default` field (parsed, but until now unused in
+rendering) — the attribute-level counterpart of `set_for_new_objects`. A
+direct scan of the same native corpus (2,118 roles) found: restricted to
+`View`/`Edit` rights on nested objects, **146,661/146,661 checks confirm**
+`restricted || value != setForAttributesByDefault`, 0 violations, both
+directions (native-printed rights, and our own parsed right list against
+the 1,401 originally-differing files). Every violation found while testing
+a broader "any right name" version of this rule (see below) came from
+exactly one closed set of nested *categories* (the `Kind.Name.<Category>.
+<Leaf>` segment): `Command`, `Subsystem`, `Operation`, `URLTemplate`,
+`IntegrationServiceChannel` — these name a specific command/subsystem/
+service-operation, not a data attribute, and their one right (named `View`
+for `Command`/`Subsystem`, `Use` for the other three) always prints
+regardless of value (1,887/1,887 confirms) — the pre-existing "print
+everything" nested behavior, left unchanged for these.
+
+**The regression, and why the gates exist.** A first version of this fix
+applied the `setForAttributesByDefault` rule to *every* right on any
+non-action-category nested object, gated only by category. `cargo test
+--lib` passed clean, and the full `uh` gate showed 0 broken — but the `ssl`
+fast gate (base789 `ssl.parity.json`, exact-set diff) caught **1 broken**
+file: `Roles/_ДемоДобавлениеИзменениеЗарплаты/Ext/Rights.xml`. The cause:
+`CalculationRegister._ДемоОсновныеНачисления.Recalculation.
+ПерерасчетОсновныхНачислений`, a nested object with `Read`/`Update` rights
+(not `View`/`Edit`) that don't occur anywhere in the ERP УХ census this
+rule was proven against — SSL is a different configuration with its own
+nested-category vocabulary. The category-only version of the rule wrongly
+suppressed `Read`/`Update` there, emptying and omitting the whole object.
+This is exactly the doctrine's point of running every fast gate, not just
+the corpus the fix was derived from: a rule proven with 0 counterexamples
+on one corpus can still be too broad for another. The fix was narrowed to
+require *both* the right name (`View`/`Edit` only) and the category gate —
+re-verified: `cargo test --lib` still matches `$D/fail-base.txt` exactly,
+and every fast gate (including `ssl`) plus the full `uh` gate show 0 broken.
+
+## Measured against the full ERP УХ gate (both fixes combined)
+
+`$D/kit/run.sh uh <worktree> <out>` vs `$D/base789/uh.parity.json`, exact-set
+difference, after all three fixes (top-level default rule, the rescued
+conditionless-restriction patch, and the nested attribute default rule):
+
+| | exact | differing | missing | extra |
+| --- | ---: | ---: | ---: | ---: |
+| before | 119,049 | 19,849 | 1,513 | 64 |
+| after | 120,434 | 18,475 | 1,502 | 64 |
+| Δ | **+1,385** | **−1,374** | **−11** | 0 |
+
+**Broken: 0.** Of the original 1,401 differing `Roles/*/Ext/Rights.xml`:
+**1,381 resolved (98.6%)**, **20 still differing**, **0 moved to `missing`**,
+**0 vanished**. The 20 remaining are not addressed by this pass — likely a
+mix of the previously-flagged non-`{0}` general-parser gaps and independent,
+unclassified defects.
+
+## Fast-gate parity (no-regression check, final state)
 
 `$D/kit/run.sh <key> <worktree> <out>` vs `$D/base789/<key>.parity.json`,
 exact-set difference:

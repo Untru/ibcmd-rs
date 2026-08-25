@@ -1014,15 +1014,59 @@ pub(super) fn role_rights_for_xml<'a>(
     }
 
     // Nested objects (attributes, standard attributes, tabular-section
-    // attributes, commands, resources, addressing attributes, …) are left at
-    // the pre-existing "print every right regardless of value" behavior:
-    // measured over the same corpus, `Edit`/`View` rights on 366,965/354,209
-    // nested objects show both `true` and `false` freely, under both
-    // `setForNewObjects` values, with no value-based suppression pattern like
-    // the top-level rule above (unlike the top-level case, this is not a
-    // 0-counterexample proof — a residual ~137-file gap on nested `View`
-    // rights, unrelated to this change, is not addressed here).
-    object.rights.iter().collect()
+    // attributes, commands, resources, addressing attributes, …): only the
+    // `View`/`Edit` pair on a non-"action" category follows the
+    // `setForAttributesByDefault` rule below; every other right (any name,
+    // on any category) keeps the pre-existing "always print" behavior.
+    // Proven over a direct scan of the whole ERP УХ 3.2.12.6 native corpus
+    // (2026-08-25, all 2,118 roles): restricted to `View`/`Edit` on
+    // non-action categories, 146,661/146,661 checks confirm `restricted ||
+    // value != setForAttributesByDefault` with 0 violations, both
+    // directions (native-printed rights, and our own parsed right list
+    // against the same corpus's then-differing files). The category gate
+    // (`Command`, `Subsystem`, `Operation`, `URLTemplate`,
+    // `IntegrationServiceChannel` — naming a specific command/subsystem/
+    // service-operation, not a data attribute) is needed because those
+    // categories also use the right name `View` (Command/Subsystem) or
+    // `Use` (Operation/URLTemplate/IntegrationServiceChannel) but always
+    // print regardless of value (1,887/1,887 confirms). The right-name gate
+    // is needed separately: a category outside this proven set can still
+    // carry non-`View`/`Edit` rights that must stay "always print" too — a
+    // fast-gate regression on `ssl` (`CalculationRegister.…Recalculation.…`,
+    // `Read`/`Update`, unseen in the ERP УХ census) showed a first version
+    // of this rule that suppressed by category alone was too broad;
+    // restricting the rule to `View`/`Edit` specifically closes that gap
+    // without reintroducing the Command/Subsystem violation the category
+    // gate exists for.
+    let action_like_category = object
+        .name
+        .split('.')
+        .nth(2)
+        .is_some_and(is_action_like_nested_rights_category);
+    object
+        .rights
+        .iter()
+        .filter(|right| {
+            if action_like_category || !matches!(right.name.as_str(), "View" | "Edit") {
+                return true;
+            }
+            right.restriction_by_condition.is_some()
+                || right.value != rights.set_for_attributes_by_default
+        })
+        .collect()
+}
+
+/// The closed set of nested-object category segments (`Kind.Name.<Category>.
+/// <Leaf>`) that name a specific command, subsystem, web-service operation,
+/// URL template or integration-service channel rather than a data attribute.
+/// See `role_rights_for_xml`'s nested-object branch for the corpus proof;
+/// every category observed anywhere in the whole ERP УХ 3.2.12.6 role corpus
+/// falls into this set or is handled by the `setForAttributesByDefault` rule.
+pub(super) fn is_action_like_nested_rights_category(category: &str) -> bool {
+    matches!(
+        category,
+        "Command" | "Subsystem" | "Operation" | "URLTemplate" | "IntegrationServiceChannel"
+    )
 }
 
 pub(super) fn is_top_level_rights_object_name(name: &str) -> bool {

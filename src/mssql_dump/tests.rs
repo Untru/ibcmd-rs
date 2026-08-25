@@ -36449,7 +36449,7 @@ fn role_rights_blob_resolves_standard_attribute_refs() {
 {{{{1,{object_uuid},1,1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
 {{{{1,{object_uuid},1,2}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
 {{{{1,{object_uuid},1,3}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
-}},{{0}},0,1,0,4294967295}}"
+}},{{0}},0,0,0,4294967295}}"
     );
     let rights_blob = deflate_for_test(rights_text.as_bytes());
     let object_refs = BTreeMap::from([(
@@ -36475,6 +36475,11 @@ fn role_rights_blob_resolves_standard_attribute_refs() {
         ]
     );
     let xml = format_role_rights_xml(&rights);
+    // `setForAttributesByDefault` is `false` in this fixture, so each nested
+    // object's `true`-valued `View` right differs from the default and
+    // renders (see `role_rights_for_xml`'s nested-object rule); this test's
+    // own purpose is StandardAttribute ref-name resolution, exercised via
+    // the `names` assertion above, not the suppression rule itself.
     assert!(xml.contains("<name>InformationRegister.Prices.StandardAttribute.Active</name>"));
     assert!(xml.contains("<name>InformationRegister.Prices.StandardAttribute.LineNumber</name>"));
 }
