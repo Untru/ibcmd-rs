@@ -1,10 +1,12 @@
 # Open lead: module bodies with no V8 container framing, 20260825
 
-Status: evidenced but not fixed. A real, confirmed defect with a tried fix
-that caused a worse regression than it closed; reverted rather than shipped.
-No code change from this note is in the tree -- `unpack_module_blob_text`
-and its one call site in `mssql_dump::mod::dump_row` are exactly as they
-were on 789b1ae.
+Status: **fixed** in `cce7b1c` (second UH pass, 20260825) via the "tighten
+the content discriminator" option below, option 2. See "The fix that
+shipped" at the end of this note for what landed, the real-byte negative
+control that reproduces the exact regression the first attempt caused, and
+the full seven-corpus verification. The rest of this note (through "What a
+safe fix needs") is preserved as originally written, describing the state
+before this fix and the reverted first attempt.
 
 ## The defect
 
@@ -113,3 +115,92 @@ diff <outdir>/unpacked.bin <native>/.../Ext/Module.bsl # confirms plain-text sha
 ```
 
 No code in this commit implements or depends on the reverted fallback.
+
+## The fix that shipped (`cce7b1c`)
+
+Option 2 from "What a safe fix needs" above: tighten the content
+discriminator past "BOM + valid UTF-8", without touching `module_text_paths`
+construction (option 1, the more correct but form-classification-adjacent
+fix, is still open -- see the root-cause map's "What is still open").
+
+New function `unpack_plain_text_module_body` (`src/module_blob.rs`, next to
+`unpack_module_blob_text`): inflates the raw blob itself (mirroring what
+`unpack_module_blob_text` does internally before failing), requires the
+inflated bytes to be BOM-prefixed and valid UTF-8, then rejects the payload
+if its first non-whitespace byte after the BOM is `<`, `{` or `[`. Wired into
+`dump_row`'s existing fallback chain (`mssql_dump::mod`) as a third tier,
+tried only after `unpack_form_body_module_text` (the existing, safe,
+structurally-typed form-body decoder) also fails:
+
+```rust
+Err(_) if context.module_text_paths.contains_key(file_name) => {
+    unpack_form_body_module_text(&bytes)
+        .or_else(|| unpack_plain_text_module_body(&bytes))
+}
+```
+
+Why `<`/`{`/`[` and not a positive BSL-keyword allowlist: legal BSL module
+bodies can open with many different constructs (a `//` comment, a `#`
+preprocessor region, an annotation, a label, a bare statement), so requiring
+one specific shape would fail closed on real modules the corpus has not
+happened to sample yet. The three excluded bytes are, by contrast, exactly
+the first byte of every non-module wrapper shape this defect's own evidence
+turned up, and none of them is legal as the first token of a BSL module (not
+even a `<` comparison, which needs a preceding operand).
+
+**Negative control for the exact reverted regression.** Re-extracted the
+precise colliding row named above (`sslbase`, storage element
+`5a971dc0-28bf-4426-9426-9f456aea080a.1`) with `cf extract` against this
+session's built binary. Two things the first attempt's writeup did not have
+byte-level confirmation of, now confirmed:
+
+- The row's raw-deflate-inflated bytes are *not* `Help.xml`'s text
+  directly -- they are 1C's own typed-value wrapper around it,
+  `{5,1,"ru",{#base64:...},0}` (a per-language content record; the
+  base64 payload decodes to the `ru.html` help body). It opens with `{`,
+  one of the three excluded bytes, independent of the `<` check that
+  excludes plain XML wrappers elsewhere in the corpus.
+- `unpack_module_blob_text` still rejects it (no V8 container), and
+  `unpack_plain_text_module_body` now also rejects it -- reproducing the
+  exact shape that caused the first attempt's regression and confirming
+  this fix does not repeat it. Captured as a real-byte fixture
+  (`tests/fixtures/native-evidence/8.3.27.2214/plain-text-module-body/
+  form-help-topic-braced-record.bin.b64`) with a dedicated regression test
+  (`module_blob::tests::
+  rejects_form_help_topic_braced_record_that_caused_the_reverted_regression`).
+
+Two more real-byte fixtures cover the positive side: `CommonModules/
+БПМСФОУХ.0` and `CommonModules/ВзаиморасчетыВызовСервера.0` from ERP УХ's
+own `1cv8.cf` (the latter opens with `#Область` after a leading CRLF, not a
+`//` comment, exercising both confirmed leading shapes) --
+`module_blob::tests::unpacks_plain_text_module_body_real_common_modules`.
+Plus a synthetic-bytes test for the three-way `<`/`{`/`[` exclusion and the
+BOM-required gate (`module_blob::tests::
+plain_text_module_body_rejects_xml_and_json_leads_accepts_bare_statement`).
+
+**Full seven-corpus verification**, exact-set diff against
+`$D/base789/<key>.parity.json` (not counts):
+
+```
+ws        BROKEN=0  gained=0    new_extra=0
+mdm       BROKEN=0  gained=0    new_extra=0
+wms       BROKEN=0  gained=0    new_extra=0
+sslbase   BROKEN=0  gained=0    new_extra=0   (the corpus the reverted fix broke)
+ssl       BROKEN=0  gained=0    new_extra=0   (ditto)
+ut        BROKEN=0  gained=0    new_extra=0
+uh        BROKEN=0  gained=150  new_extra=0   (extra stays at exactly 64, unchanged)
+```
+
+`uh`'s 150-file gain by family (comparing `missing` sets before/after):
+`CommonModules` 73 (fully closed, matching this note's earlier prediction),
+`Documents` 44, `Catalogs` 19, `DataProcessors` 5, `InformationRegisters` 4,
+`Constants` 2, `ChartsOfCharacteristicTypes` 2, `Ext` 1 -- confirming the
+`Ext/ManagerModule.bsl`/`Ext/ObjectModule.bsl` portion of `Catalogs`'/
+`Documents`' own remaining opaque buckets the root-cause map flagged as
+"exactly this module-body shape" was in fact this same defect, just spread
+across families beyond the three (`CommonModules`/`Catalogs`/`Reports`) the
+map had confirmed it in directly. `uh` missing: 1,513 -> 1,363.
+
+`cargo test --lib`: 2235/33 (was 2232/33, +3 new tests), 33 failures still
+name-for-name identical to `$D/fail-base.txt`. `bundled9.sh`: 9/9. `cargo fmt
+--check` and `git diff --check` clean.

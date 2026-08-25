@@ -71012,3 +71012,71 @@ fn suppresses_graphical_schema_field_geometry_under_leftwidest_page() {
     // and the comment on this branch.
     assert!(field_xml.contains("<Edit>false</Edit>"));
 }
+
+/// `parse_metadata_code27_payload_fields`'s attribute-header check hardcoded
+/// `header.len() != 9 || header.first() != "3"` -- the same short-wrapper
+/// omission `parse_information_register_owner_header` documents (`0575505`):
+/// the platform drops the trailing default `0` (and the wrapper's own
+/// leading count from `3` to `2`) whenever the attribute leaves
+/// Synonym/Comment at default. Two real ERP УХ 3.2.12.6 `code27`
+/// attribute-type-declaration payloads, extracted byte-for-byte (balanced
+/// braces, `cf extract` on `1cv8.cf`) from two different `Catalogs`:
+/// `Catalogs/ВариантыЗаполненияШаблонов`'s `Комментарий` attribute (uuid
+/// `5c1b73cc-2842-4ca0-bc76-436456449e45`, 8-member `"2"`-discriminator
+/// header -- this exact shape made the hardcoded check reject the payload,
+/// which made the *whole catalog* opaque with "no legacy family decoder
+/// recognized this storage entry", since one malformed direct attribute
+/// fails the entire collection) and `Catalogs/АналитическаяПодписка`'s
+/// `КонтрольСостояния` attribute (uuid
+/// `616f2156-e77c-4956-9e7c-69ed1d06c9b0`, 9-member `"3"`-discriminator
+/// header -- the unaffected, already-working shape).
+#[test]
+fn parses_code27_attribute_payload_with_short_and_long_header_wrapper() {
+    let short_header_payload = concat!(
+        "{27,\n",
+        "{2,\n",
+        "{2,\n",
+        "{1,0,5c1b73cc-2842-4ca0-bc76-436456449e45},\"Комментарий\",\n",
+        "{1,\"ru\",\"Комментарий\"},\"\",0,0,00000000-0000-0000-0000-000000000000},\n",
+        "{\"Pattern\",\n",
+        "{\"S\",300,1}\n",
+        "}\n",
+        "},0,\n",
+        "{0},\n",
+        "{0},0,\"\",0,\n",
+        "{\"U\"},\n",
+        "{\"U\"},0,00000000-0000-0000-0000-000000000000,2,0,\n",
+        "{5006,0},\n",
+        "{3,0,0},\n",
+        "{0,0},0,\n",
+        "{0},\n",
+        "{\"S\",\"\"},0,0,0}",
+    );
+    let (_, short_header_uuid) = super::parse_metadata_code27_payload(short_header_payload)
+        .expect("short (8-member, discriminator \"2\") attribute header must parse");
+    assert_eq!(short_header_uuid, "5c1b73cc-2842-4ca0-bc76-436456449e45");
+
+    let long_header_payload = concat!(
+        "{27,\n",
+        "{2,\n",
+        "{3,\n",
+        "{1,0,616f2156-e77c-4956-9e7c-69ed1d06c9b0},\"КонтрольСостояния\",\n",
+        "{1,\"ru\",\"Контроль состояния\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\n",
+        "{\"Pattern\",\n",
+        "{\"B\"}\n",
+        "}\n",
+        "},0,\n",
+        "{0},\n",
+        "{0},0,\"\",0,\n",
+        "{\"U\"},\n",
+        "{\"U\"},0,00000000-0000-0000-0000-000000000000,2,0,\n",
+        "{5006,0},\n",
+        "{3,0,0},\n",
+        "{0,0},0,\n",
+        "{0},\n",
+        "{\"S\",\"\"},0,0,0}",
+    );
+    let (_, long_header_uuid) = super::parse_metadata_code27_payload(long_header_payload)
+        .expect("long (9-member, discriminator \"3\") attribute header must still parse");
+    assert_eq!(long_header_uuid, "616f2156-e77c-4956-9e7c-69ed1d06c9b0");
+}

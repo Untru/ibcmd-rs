@@ -10,6 +10,108 @@ project normally reads from `$S` was wiped twice by host `/tmp` cleanup
 during this pass and has since moved to `/Users/untru/Documents/ChatGPT/
 ibcmd-stand`, referenced below as `$D`).
 
+**Update, second UH pass (`cce7b1c`):** the plain-text module-body gap this
+map's "What is still open" flagged as evidenced-but-reverted is now fixed --
+see `plain-text-module-body-lead-20260825.md`'s "The fix that shipped"
+section. `uh` missing: 1,513 -> 1,363 (`BROKEN=0` on all seven gate corpora,
+exact-set diff against `$D/base789`). By family: `CommonModules` fully
+closed (73 -> 0), `Documents` -44, `Catalogs` -19, `DataProcessors` -5,
+`InformationRegisters` -4, `Constants` -2, `ChartsOfCharacteristicTypes` -2,
+`Ext` -1. The rest of this document (counts, tables, "What is still open")
+is preserved as originally measured, i.e. still describes the 1,513-file
+state from before this fix; treat every count below as pre-`cce7b1c` unless
+this note says otherwise.
+
+**Update, `06249bd` (same pass):** a third occurrence of the `ab58c3f`/
+`0575505` short-wrapper-omission class, this time in
+`parse_metadata_code27_payload_fields` (the attribute-type-declaration
+payload shared by `Catalog`/`Document`/`DataProcessor`/`Report`/tabular-
+section attributes across several call sites) -- hardcoded
+`header.len() != 9 || header[0] != "3"` on the attribute's own nested
+`{1,0,<uuid>}`-based header, rejecting the same short (`"2"`, 8-member) form
+`0575505` already fixed elsewhere. One malformed direct attribute failed the
+*entire* owning object's direct-attribute collection, which failed the whole
+descriptor -- explaining a slice of the "Catalogs (111 remaining)" bucket
+this document's "What is still open" flagged as needing individual tracing.
+Confirmed on real ERP УХ 3.2.12.6 bytes: `Catalogs/ВариантыЗаполненияШаблонов`
+(uuid `996f1881-4ee2-4c39-bc39-e61dd7f42502`)'s `Комментарий` attribute
+(uuid `5c1b73cc-2842-4ca0-bc76-436456449e45`, 8-member header) against the
+working twin `Catalogs/АналитическаяПодписка`'s `КонтрольСостояния`
+attribute (uuid `616f2156-e77c-4956-9e7c-69ed1d06c9b0`, 9-member header).
+`BROKEN=0` on all seven gate corpora. `uh` missing: 1,363 -> 1,351 (-12: 10
+`Catalogs` + 2 `Documents` root descriptors, previously fully opaque).
+
+Found via a temporary diagnostic checkpoint macro placed inside
+`parse_strict_catalog_properties_from_text` (one `eprintln!` per major
+parse stage, gated on `IBCMD_DEBUG_CATALOG_UUID`), compiled in for one
+full `cf export` run against the real `uh` `1cv8.cf` on this specific
+uuid, then removed entirely before shipping (see `06249bd`'s diff --
+`grep -rn "eprintln!\|std::env::var" src` shows only pre-existing,
+unrelated uses after this pass). `decode_owner_graph` itself parsed the
+whole object fine; the diagnostic pinpointed the exact next call
+(`parse_catalog_attribute_collection_indexed` ->
+`parse_catalog_attribute_wrapper_fields` ->
+`parse_metadata_code27_payload_fields`) that failed, which manual byte
+comparison against a working twin then explained.
+
+**New lead exposed, not fixed:** the 12 objects this fix newly unblocked
+moved from `missing` to `differing`, not `exact`. Diffing one
+(`Catalogs/ВариантыЗаполненияШаблонов.xml`) against native shows three
+attributes -- all three with the short header form -- rendering an empty
+`<Type/>` where native declares the real value type (e.g.
+`<v8:Type>cfg:EnumRef.НазначенияШаблонов</v8:Type>` or a
+`StringQualifiers` block). The rest of each file (10,000+ lines) matches
+exactly; this is a narrow, contained, separate defect in how an
+attribute's `"Pattern"` payload becomes `<Type>` XML -- previously
+invisible because the whole object was opaque before this fix. Not
+investigated further here: needs its own byte-level trace of the
+type-pattern-to-XML path (distinct code from the header-wrapper parsing
+this fix touched) for attributes carrying the short header form,
+verified this fix's `<Type/>` correlation isn't coincidental to just
+these 12 objects.
+
+Likely root cause, traced far enough to save re-discovery but not verified
+against real bytes or shipped: value-type resolution for a `Catalog`/
+`DataProcessor` attribute goes through
+`innermost_metadata_object_fields_around_header` (`mssql_dump::mod`),
+which walks enclosing braces outward from the attribute's `marker_start`
+and skips a candidate block via `matches!(fields.first()..., Some("1" |
+"3"))` -- meant to skip past the `{1,0,<uuid>}` identity wrapper (always
+`"1"`) and the *full-length* header wrapper (`"3"`, 9 members) to reach the
+`{2, <header>, {"Pattern", ...}}` "detail" wrapper (itself always `"2"`,
+3 members) one level out, where the `"Pattern"` field the caller needs
+actually lives. The *short* header wrapper this fix's own change made
+common now opens with `"2"` (8 members) too -- indistinguishable from
+`detail`'s own `"2"` by leading digit alone, so the skip condition (which
+only tests the leading digit, not member count) does not skip it: the
+search stops one level too early, at the header block itself, whose own
+fields contain no `"Pattern"` field, so
+`parse_metadata_child_value_types_with_builtin`/
+`parse_metadata_child_value_types` fall through to `unwrap_or_default()`
+-- an empty type list, rendered as `<Type/>`. This is a *silent* default,
+not a typed refusal (doctrine point 2/6) -- worth noting when this gets
+fixed, since it means other short-header attributes could be emitting a
+wrong-but-plausible-looking empty `<Type/>` in corpora this pass's exact-set
+gate happened not to catch as `differing` (e.g. if the platform's own XML
+also permits an empty `<Type/>` under some other legitimate condition,
+masking the defect count).
+
+The fix is not simply "also skip discriminator `"2"`": `detail` legitimately
+opens with `"2"` too and must *not* be skipped, or the search would run past
+the level the caller actually wants for the working (full-header) case as
+well. The two `"2"`-shapes differ by member count (short header: 8; `detail`:
+3), so the skip test needs to key off the *header's own declared-length
+discriminator* semantics (this function's local caller doesn't otherwise
+know the header layout) rather than a bare leading-digit match -- likely
+needs a shared predicate function (`is_metadata_child_header_wrapper(fields)`
+or similar) usable both here and in the header-wrapper parsers this pass
+already fixed, so the two never drift apart again.
+`innermost_metadata_object_fields_around_header` has four call sites, not
+all Catalog-attribute-shaped (`parse_metadata_tabular_section_properties`'s
+tabular-section-property read and `http_service_child_candidates_from_text`
+also use it) -- any fix needs real-byte evidence from all four shapes, not
+just the Catalog-attribute one this note traced, before it should land.
+
 ## Method
 
 For each of the 1,977 (then 1,594) missing native paths, resolve its root
@@ -167,13 +269,14 @@ module-body gap). The opaque bucket overall: 450/416 -> 362/329.
   different functions turning out to share one root cause in this pass is
   a reason to check for a third, not a license to assume every remaining
   family does too.
-- The plain-text module-body gap (`plain-text-module-body-lead-20260825.md`):
-  evidenced, one fix attempt reverted after it regressed `sslbase`/`ssl`
-  (spurious `Bots/.../Ext/Module.bsl` files from a `module_text_paths`
-  collision the permissive content check exposed). Needs either the
-  collision fixed at its source or a materially tighter content
-  discriminator, verified against all seven gate corpora, not just the
-  ones the fix targets.
+- ~~The plain-text module-body gap~~ -- **fixed in `cce7b1c`**, see the
+  update note at the top of this document and
+  `plain-text-module-body-lead-20260825.md`'s "The fix that shipped". Closed
+  via the tighter-content-discriminator option, verified `BROKEN=0` on all
+  seven gate corpora including `sslbase`/`ssl` (the two the reverted attempt
+  broke). The `module_text_paths` collision itself (option 1, the more
+  correct fix) is still open -- it lives in form-classification territory,
+  not touched here.
 - The `OpaqueDcsFormAttributesConditionalAppearance` reason variants (497 +
   102 + 59 + 34 + 20 = 712 files after both fixes, essentially unchanged by
   this pass -- the +2/+1 root drift on the largest variant is objects whose
