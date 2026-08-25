@@ -1703,7 +1703,15 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         let omit = namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
                             && local.as_ref() == b"outputParameters"
                             && !event_has_ordinary_attributes(&event)?;
-                        if !omit {
+                        if omit {
+                            // The immediately preceding `Event::Text` already
+                            // wrote the indentation that led up to this now-
+                            // omitted element; trimmed too, so no orphaned
+                            // blank line is left for whatever follows.
+                            let trimmed_len =
+                                self.output.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                            self.output.truncate(trimmed_len);
+                        } else {
                             self.write_start_tag(
                                 &reader,
                                 &event,
@@ -1736,7 +1744,13 @@ impl<'a> DataCompositionXmlWriter<'a> {
                             .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
                     match frame.empty_element_action {
                         Some(DcsEmptyElementAction::OmitIfEmpty) if is_empty => {
+                            // As in the `Event::Empty` arm above, the
+                            // indentation leading up to this element's own
+                            // opening tag is trimmed too.
                             self.output.truncate(frame.start_tag_begin_offset);
+                            let trimmed_len =
+                                self.output.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                            self.output.truncate(trimmed_len);
                         }
                         Some(DcsEmptyElementAction::SelfCloseIfEmpty) if is_empty => {
                             // Drop any whitespace-only interior, then rewrite
