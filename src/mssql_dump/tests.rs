@@ -9591,16 +9591,22 @@ fn restores_accumulation_register_balance_main_table_from_raw_category() {
     // carry across metadata kinds: UT 11.5.27.75 puts all 17 blocks whose
     // category is `{"N",3}` on `AccumulationRegister…Balance` (11) and
     // `InformationRegister…SliceLast` (6), and both blocks that reach
-    // `Task…TasksByExecutive` store `{"N",2}`, not `{"N",3}`. No
-    // accounting-register list occurs anywhere in the corpus, so the pair is
-    // unobserved and keeps the bare main table instead of a guessed suffix.
+    // `Task…TasksByExecutive` store `{"N",2}`, not `{"N",3}`.
+    //
+    // Second contract change: SSL demo/base 3.1.12.297 supply the
+    // accounting-register list this test used to call unobserved --
+    // `AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета` and its
+    // `...БезКорреспонденции` sibling both carry `{"N",3}` and both native
+    // `<MainTable>` write `.RecordsWithExtDimensions`, with no
+    // counter-example, so the pair now gets that suffix rather than the bare
+    // main table.
     assert_eq!(
         normalize_form_main_table_category(
             Some("AccountingRegister.RegisterB".to_string()),
             Some("3"),
         )
         .as_deref(),
-        Some("AccountingRegister.RegisterB")
+        Some("AccountingRegister.RegisterB.RecordsWithExtDimensions")
     );
     assert_eq!(
         parse_main_table(
@@ -69452,7 +69458,10 @@ fn omits_key_type_and_key_fields_for_the_empty_stored_shapes() {
 /// `Task.<name>.TasksByExecutive` (2), `{"N",3}` writes
 /// `AccumulationRegister.<name>.Balance` (11) and
 /// `InformationRegister.<name>.SliceLast` (6), and `{"N",4}` writes
-/// `AccumulationRegister.<name>.Turnovers` (4).
+/// `AccumulationRegister.<name>.Turnovers` (4). SSL demo/base 3.1.12.297 add a
+/// fifth: `{"N",3}` on `AccountingRegister` writes
+/// `AccountingRegister.<name>.RecordsWithExtDimensions`, confirmed on both
+/// native list forms of an accounting register the corpus carries.
 #[test]
 fn appends_the_virtual_table_the_main_table_category_names() {
     for (category, main_table, expected) in [
@@ -69475,6 +69484,11 @@ fn appends_the_virtual_table_the_main_table_category_names() {
             "3",
             "InformationRegister.Цены",
             "InformationRegister.Цены.SliceLast",
+        ),
+        (
+            "3",
+            "AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета",
+            "AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.RecordsWithExtDimensions",
         ),
         (
             "4",

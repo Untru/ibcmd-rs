@@ -7008,11 +7008,18 @@ pub(super) fn normalize_form_main_table_category(
 /// `AccumulationRegister.<name>.Balance` (11) and
 /// `InformationRegister.<name>.SliceLast` (6); `{"N",4}` (4) writes
 /// `AccumulationRegister.<name>.Turnovers`. No other code occurs and no pair
-/// disagrees. A pair outside the table -- including every accounting-register
-/// code, none of which the corpus carries -- writes the bare main table rather
-/// than a guessed suffix.
+/// disagrees.
+///
+/// SSL demo/base 3.1.12.297 add a third table `{"N",3}` reaches:
+/// `AccountingRegister.<name>.RecordsWithExtDimensions`, on both native list
+/// forms of an accounting register the corpus carries
+/// (`_ДемоЖурналПроводокБухгалтерскогоУчета` and its
+/// `...БезКорреспонденции` sibling), with no counter-example. A pair still
+/// outside the table writes the bare main table rather than a guessed
+/// suffix.
 const FORM_MAIN_TABLE_CATEGORY_SUFFIXES: &[(&str, &str, &str)] = &[
     ("2", "Task", "TasksByExecutive"),
+    ("3", "AccountingRegister", "RecordsWithExtDimensions"),
     ("3", "AccumulationRegister", "Balance"),
     ("3", "InformationRegister", "SliceLast"),
     ("4", "AccumulationRegister", "Turnovers"),
