@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-mobile-device-command-bar-content-navigator-gap",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "host": "macOS",
+    "note": "Real ERP УХ 3.2.12.6 1cv8.cf storage entries, extracted with `ibcmd-rs cf extract <cf> <form-uuid>.0 <outdir>` (compression raw-deflate). Both forms carry a built-in Navigator/quick-search child item, which writes one extra field between the root child-items count-list and the classic 24-member form-root trailer -- a 25-member trailer, not 24. The pre-fix parser (`form_root_child_items_tail_start`, root `50` + trailer `[24]` only) found no valid count-list at all for either form and silently dropped the whole `<MobileDeviceCommandBarContent>` block (doctrine point 2/6: a silent default, not a typed refusal). Confirmed on two more native forms not included as fixtures here (Catalogs/ВерсииФайлов/Forms/ФормаВыбора uuid 2d86d1fc-5367-47b8-804e-7f9c5fc8f3b1, CommonForms/ФормаОтчета uuid 9d6d77a9-1f55-4162-93a5-14bb3f3febaf) -- all four validate cleanly at `fields.len() - 25` via the existing shared count-list scan (`form_root_child_items_tail_start_at`), and in every case the resulting trailer's second-to-last field (not a fixed absolute slot) is the `{50,<count>,\"\",...}` MobileDeviceCommandBarContent content tuple."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "business-process-list-form",
+      "description": "BusinessProcesses/Задание/Forms/ФормаСписка. Root child-items count-list: 5 items (ГруппаПоРеквизитам, Флажки, ГруппаПользовательскихНастроекПолей, КоманднаяПанель, Список/Table), followed by the Navigator item and the extra gap field, then the 25-member trailer whose second-to-last field declares one MobileDeviceCommandBarContent item referencing child id 53 (\"КоманднаяПанель\").",
+      "form_uuid": "1a7c7427-bead-4655-9dd6-df6e722663c5",
+      "raw_entry": {
+        "path": "raw/1a7c7427-bead-4655-9dd6-df6e722663c5.deflate",
+        "sha256": "66212daaa8ded3a37e33ce462e3add157b25092d60b33a9285d51fd9b2b370f0"
+      },
+      "native_object_fragment": { "path": "native/mobile-device-command-bar-content-block.xml" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "catalog-list-form",
+      "description": "Catalogs/Валюты/Forms/ФормаСписка. Same 25-member-trailer shape and the same single-item MobileDeviceCommandBarContent content (referencing the form's own auto CommandBar item), confirming the fix generalizes across independent object families rather than being coincidental to one form.",
+      "form_uuid": "5f91b00f-d8fc-4d63-8486-66339357ab22",
+      "raw_entry": {
+        "path": "raw/5f91b00f-d8fc-4d63-8486-66339357ab22.deflate",
+        "sha256": "a0012cb3fc3f6b52dfec6b446cfed9121b5f5cfe38c21a04f4ec2e7ad059b62e"
+      },
+      "native_object_fragment": { "path": "native/mobile-device-command-bar-content-block.xml" }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-save-window-settings-navigator-gap",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "host": "macOS",
+    "note": "Real ERP УХ 3.2.12.6 1cv8.cf storage entries, extracted with `ibcmd-rs cf extract <cf> <form-uuid>.0 <outdir>` (compression raw-deflate). Same root cause as the form-mobile-device-command-bar-content-navigator-gap fixture: both forms carry a built-in Navigator/quick-search child item, which writes one extra field between the root child-items count-list and the classic 24-member form-root trailer -- a 25-member trailer, not 24. `extract_form_save_window_settings` (src/mssql_dump/form_body.rs) previously read a fixed absolute offset `tail_start + 23` (the trailer's last slot under the 24-shape only) located via the strict `[24]`-only `form_root_child_items_tail_start`; for a 25-member trailer that search found no valid count-list at all and the whole property silently disappeared. The property's value is genuinely the trailer's *last* field regardless of shape (confirmed: absolute last field of `fields` is unchanged whether the count-list search targets 24 or 25), so the fix reads `trailer.len() - 1` off the already-fixed `form_root_child_items_tail_start_50_with_navigator_gap` instead of a fixed offset."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "catalog-list-form",
+      "description": "Catalogs/КартыИсследованияТоваров/Forms/ФормаСписка. Trailer's last field is \"0\"; native writes <SaveWindowSettings>false</SaveWindowSettings> as the form root's very first child element.",
+      "form_uuid": "085702c9-6d28-441d-b4ee-3319c23b2fef",
+      "raw_entry": {
+        "path": "raw/085702c9-6d28-441d-b4ee-3319c23b2fef.deflate",
+        "sha256": "1e443013c69c3ed39e565b172014596e3b7f939425f3a3cdb2bd1cbd9a7b563c"
+      }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "document-list-form",
+      "description": "Documents/ВводОстатковУзловКомпонентовАмортизации/Forms/ФормаСписка. Independent object family from the Catalog sample above, confirming the fix generalizes rather than being coincidental to one family.",
+      "form_uuid": "ffbe920e-f47c-495e-8d96-bedbc0a631e2",
+      "raw_entry": {
+        "path": "raw/ffbe920e-f47c-495e-8d96-bedbc0a631e2.deflate",
+        "sha256": "a47095a35bb5c1a2dda3b0496daa885a6b21fc635bee250581f8ede7415d2c42"
+      }
+    }
+  ]
+}

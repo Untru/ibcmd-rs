@@ -71614,3 +71614,214 @@ fn renders_empty_stacked_bar_chart_without_extended_scales_to_platform_proven_xm
         ),
     );
 }
+
+/// Forms carrying a built-in Navigator/quick-search child item write one
+/// extra field between the root child-items count-list and the classic
+/// 24-member form-root trailer -- a 25-member trailer, not 24. Before this
+/// fix, `extract_form_mobile_device_command_bar_content` located the
+/// trailer via `form_root_child_items_tail_start` (root `50` + `[24]`
+/// only), which found no valid count-list at all for such forms and
+/// silently returned an empty `Vec` -- dropping the whole
+/// `<MobileDeviceCommandBarContent>` block with no error (doctrine point
+/// 2/6: a silent default, not a typed refusal). See this fixture's
+/// `manifest.json` for the full evidence trail across four independent
+/// native ERP УХ 3.2.12.6 forms (two are fixtures here, two more confirmed
+/// but not embedded).
+fn assert_platform_proven_mobile_device_command_bar_content(
+    raw_deflate: &[u8],
+    expected_block: &str,
+) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_block),
+        "expected the MobileDeviceCommandBarContent block to render byte-identical to the \
+native export; block missing or different in:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_mobile_device_command_bar_content_for_business_process_list_form_with_navigator_gap() {
+    assert_platform_proven_mobile_device_command_bar_content(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/1a7c7427-bead-4655-9dd6-df6e722663c5.deflate"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_mobile_device_command_bar_content_for_catalog_list_form_with_navigator_gap() {
+    assert_platform_proven_mobile_device_command_bar_content(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/5f91b00f-d8fc-4d63-8486-66339357ab22.deflate"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+        ),
+    );
+}
+
+/// `SaveWindowSettings` sits in the trailer's own last slot. Before this
+/// fix, `extract_form_save_window_settings` located it via a fixed absolute
+/// offset (`tail_start + 23`) off the strict `[24]`-only
+/// `form_root_child_items_tail_start`, which found no valid count-list at
+/// all for forms with a built-in Navigator/quick-search item (a 25-member
+/// trailer, not 24) and silently dropped the whole property. See this
+/// fixture's `manifest.json` for the full evidence trail.
+fn assert_platform_proven_save_window_settings_false(raw_deflate: &[u8]) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains("<SaveWindowSettings>false</SaveWindowSettings>"),
+        "expected <SaveWindowSettings>false</SaveWindowSettings> to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_save_window_settings_for_catalog_list_form_with_navigator_gap() {
+    assert_platform_proven_save_window_settings_false(include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/085702c9-6d28-441d-b4ee-3319c23b2fef.deflate"
+    ));
+}
+
+#[test]
+fn renders_save_window_settings_for_document_list_form_with_navigator_gap() {
+    assert_platform_proven_save_window_settings_false(include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/ffbe920e-f47c-495e-8d96-bedbc0a631e2.deflate"
+    ));
+}
+
+/// `Group` and `VerticalSpacing` both sit in the form-root trailer at fixed
+/// slots counted from the trailer's own start. Before this fix, forms with a
+/// built-in Navigator/quick-search child item (a 25-member trailer, not 24 --
+/// see `form_root_child_items_tail_start_50_with_navigator_gap`'s doc
+/// comment) found no valid count-list at all under the strict `[24]`-only
+/// search and silently dropped both properties. See this fixture's
+/// `manifest.json` for the full evidence trail.
+fn assert_platform_proven_form_root_tag(raw_deflate: &[u8], expected_tag: &str) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_tag),
+        "expected {expected_tag:?} to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_group_always_horizontal_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/cd41f832-773f-42e8-a4ed-8f521eace1fc.deflate"
+        ),
+        "<Group>AlwaysHorizontal</Group>",
+    );
+}
+
+#[test]
+fn renders_group_horizontal_if_possible_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/e2ce87bf-3feb-4c15-870e-d876fd5f3ab7.deflate"
+        ),
+        "<Group>HorizontalIfPossible</Group>",
+    );
+}
+
+#[test]
+fn renders_vertical_spacing_half_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/1e9ea8b1-7ff1-463b-b249-60c15fc5fb33.deflate"
+        ),
+        "<VerticalSpacing>Half</VerticalSpacing>",
+    );
+}
+
+#[test]
+fn renders_vertical_spacing_one_and_half_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/2bf025be-45bd-4ff8-bc86-02feabc4bfda.deflate"
+        ),
+        "<VerticalSpacing>OneAndHalf</VerticalSpacing>",
+    );
+}
+
+/// The remaining form-root trailer readers that shared the same strict
+/// `[24]`-only tail-start search as `Group`/`VerticalSpacing`: before this
+/// fix, forms with a built-in Navigator/quick-search child item (a
+/// 25-member trailer, not 24 -- see
+/// `form_root_child_items_tail_start_50_with_navigator_gap`'s doc comment)
+/// found no valid count-list at all and silently dropped each property. See
+/// this fixture's `manifest.json` for the full evidence trail.
+fn assert_platform_proven_form_root_alignment_tag(raw_deflate: &[u8], expected_tag: &str) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_tag),
+        "expected {expected_tag:?} to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_conversations_representation_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/595e5752-36a7-4bba-8a40-26920acae01d.deflate"
+        ),
+        "<ConversationsRepresentation>Show</ConversationsRepresentation>",
+    );
+}
+
+#[test]
+fn renders_vertical_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/826c2821-147d-4aaf-910c-acfbdb58a29f.deflate"
+        ),
+        "<VerticalAlign>Bottom</VerticalAlign>",
+    );
+}
+
+#[test]
+fn renders_children_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/36454dc5-ab04-4773-85cf-f634b17dfc4f.deflate"
+        ),
+        "<ChildrenAlign>None</ChildrenAlign>",
+    );
+}
+
+#[test]
+fn renders_scaling_mode_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/79a77da6-ce40-4cd8-ab79-f70d5b5aa7b0.deflate"
+        ),
+        "<ScalingMode>Normal</ScalingMode>",
+    );
+}
+
+#[test]
+fn renders_horizontal_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/beed4e3c-4d47-4881-82f0-2f57f9d2bc7b.deflate"
+        ),
+        "<HorizontalAlign>Center</HorizontalAlign>",
+    );
+}
+
+#[test]
+fn renders_show_close_button_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/f30b88e9-919b-45bc-ba99-a2c32ca399e7.deflate"
+        ),
+        "<ShowCloseButton>false</ShowCloseButton>",
+    );
+}
