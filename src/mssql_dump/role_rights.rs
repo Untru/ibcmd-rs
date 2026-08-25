@@ -869,10 +869,6 @@ const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
     ("bd33c881-192c-4ef7-a51d-b146e38c5078", "WebClient"),
 ];
 
-pub(super) fn normalize_role_condition_text(condition: &str) -> String {
-    condition.replace("\r\n", "\n").replace('\r', "\n")
-}
-
 pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
@@ -915,9 +911,23 @@ pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
                     xml.push_str("</field>\r\n");
                 }
                 xml.push_str("\t\t\t\t<condition>");
-                xml.push_str(&escape_xml_element_text(&normalize_role_condition_text(
-                    &restriction.condition,
-                )));
+                // Condition text is handed to `escape_xml_element_text`
+                // verbatim, and that escaper's single `\r\n` -> `\n`
+                // replacement is the platform's whole rule for it: once, not
+                // twice, and never a bare-`\r` pass. Measured on ERP УХ
+                // 3.2.12.6 (2026-08-25) by extracting role Rights elements
+                // (`<role uuid>.0`) and comparing their inflated bytes with
+                // the native `Ext/Rights.xml`. `Roles/ЧтениеПеремещенийОС`
+                // stores every condition line break as `\r\n` (3,196 of them,
+                // no `\r\r\n`) and native prints a bare `\n`;
+                // `Roles/ПросмотрТрансляции` stores 3,219 of its breaks as
+                // `\r\r\n` and native prints `\r\n` for each -- dropping one
+                // `\r`, keeping the other. One replacement maps both
+                // (`"\r\r\n"` -> `"\r\n"`); a second collapse, or a lone-`\r`
+                // pass, flattens the second case to `\n`. Four roles in the
+                // 2,118-role corpus carry `\r` in a native condition, all as
+                // `\r\n`; no native condition prints a lone `\r`.
+                xml.push_str(&escape_xml_element_text(&restriction.condition));
                 xml.push_str("</condition>\r\n\t\t\t</restrictionByCondition>\r\n");
             }
             xml.push_str("\t\t</right>\r\n");
@@ -928,9 +938,9 @@ pub(super) fn format_role_rights_xml(rights: &RoleRights) -> String {
         xml.push_str("\t<restrictionTemplate>\r\n\t\t<name>");
         xml.push_str(&escape_xml_element_text(&template.name));
         xml.push_str("</name>\r\n\t\t<condition>");
-        xml.push_str(&escape_xml_element_text(&normalize_role_condition_text(
-            &template.condition,
-        )));
+        // Verbatim, for the reason spelled out at the `restrictionByCondition`
+        // condition above.
+        xml.push_str(&escape_xml_element_text(&template.condition));
         xml.push_str("</condition>\r\n\t</restrictionTemplate>\r\n");
     }
     xml.push_str("</Rights>");
