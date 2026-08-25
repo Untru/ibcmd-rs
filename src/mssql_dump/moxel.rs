@@ -489,6 +489,10 @@ pub(super) struct MoxelVerticalGroup {
     /// the 10 publish `<o>false</o>` - the other 1693 publish no `<o>` at all
     /// and no record in the corpus publishes `<o>true</o>`.
     pub(super) open: bool,
+    /// The group's own label, published as `<t>`. Empty when the record's
+    /// own localized-value member (field 3) declares zero items -- see
+    /// `parse_moxel_vertical_group`.
+    pub(super) text: Vec<MoxelLocalizedValue>,
 }
 
 #[derive(Clone)]
@@ -2153,14 +2157,28 @@ pub(super) fn parse_moxel_vertical_groups(fields: &[&str]) -> Vec<MoxelVerticalG
 
 pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGroup> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 6 || fields.get(3).map(|field| field.trim()) != Some("{1,0}") {
+    if fields.len() != 6 {
         return None;
     }
+    // Evidence (native ERP УХ 3.2.12.6): member 3 is not the fixed marker
+    // `{1,0}` the previous reading demanded -- it is a localized-value list,
+    // exactly the same `{1,count,{lang,content},...}` shape used everywhere
+    // else in this file, whose empty (`count == 0`) form happens to render
+    // as `{1,0}`. Non-empty, it carries the group's own label, published as
+    // `<t>`, e.g. `{1,1,{"#","ГО"}}` for `Documents/
+    // ЭлектроннаяТранспортнаяНакладная/Templates/
+    // СоответствиеИменРеквизитов`'s first group (begin 0, end 813): the
+    // corpus's own convention here spells the pseudo-language `#`, never
+    // `ru`/`en`. Requiring the literal empty marker rejected every group in
+    // any document where even one group carried a label -- the whole
+    // `<vg>`/`<vgLevels>` construction, not just the labelled groups.
+    let text_items = parse_moxel_localized_values(fields.get(3)?)?;
     Some(MoxelVerticalGroup {
         begin_row: fields.first()?.trim().parse::<usize>().ok()?,
         end_row: fields.get(1)?.trim().parse::<usize>().ok()?,
         level: fields.get(2)?.trim().parse::<usize>().ok()?,
         open: fields.get(4)?.trim().parse::<usize>().ok()? == 0,
+        text: text_items,
     })
 }
 
@@ -8860,7 +8878,19 @@ pub(super) fn parse_moxel_area_list(text: &str) -> Option<Vec<MoxelArea>> {
 pub(super) fn parse_moxel_named_item_list(text: &str) -> Option<Vec<MoxelNamedItem>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
-    if count == 0 || count > 512 || fields.len() != count * 2 + 1 {
+    // Evidence (native ERP УХ 3.2.12.6): the arity check right below
+    // (`fields.len() == count * 2 + 1`) is already a complete, self-validating
+    // structural guard -- the declared `count` must exactly match the actual
+    // field layout the text carries, which a coincidental false match cannot
+    // satisfy for anything but a trivially small count. A `count > 512` cap
+    // formerly rejected the whole list outright on any larger table; real
+    // regulated-report templates publish named cell ranges by the hundreds
+    // (e.g. `Documents/ЗаявлениеВФССОВозмещенииВыплатРодителямДетейИнвалидов/
+    // Templates/ЗаявлениеВФССДополнительныеДниОтпуска_2017` declares 700), so
+    // the cap dropped every `<namedItem>` in the document, not merely the
+    // members past the 512th -- the same "fixed arity/whitelist instead of
+    // the declared count" defect class this project has hit before.
+    if count == 0 || fields.len() != count * 2 + 1 {
         return None;
     }
     let mut items = Vec::with_capacity(count);
@@ -11914,6 +11944,22 @@ pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerti
     if group.end_row != group.begin_row {
         xml.push_str(&format!("\t\t<e>{}</e>\r\n", group.end_row));
     }
+    if !group.text.is_empty() {
+        xml.push_str("\t\t<t>\r\n");
+        for item in &group.text {
+            xml.push_str("\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_element_text(&item.lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_element_text(&item.content)
+            ));
+            xml.push_str("\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t</t>\r\n");
+    }
     if !group.open {
         xml.push_str("\t\t<o>false</o>\r\n");
     }
@@ -12120,9 +12166,6 @@ pub(super) fn push_moxel_row_xml(
                 .unwrap_or(cell.format_index)
         };
         xml.push_str(&format!("\t\t\t\t\t<f>{cell_format_index}</f>\r\n"));
-        if let Some(control) = &cell.control {
-            push_moxel_cell_control_xml(xml, control);
-        }
         let text_element = if cell.formatted_text { "tfl" } else { "tl" };
         if !cell.text.is_empty() {
             xml.push_str(&format!("\t\t\t\t\t<{text_element}>\r\n"));
@@ -12148,11 +12191,56 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(parameter)
             ));
         }
+        // Member publication order below is evidence-derived, not the storage
+        // record's own slot order (control, value, detail_value, detailParameter,
+        // pictureParameter, text, note) and not a simple reversal of it either.
+        // Full corpus scan (native ERP УХ 3.2.12.6, every `<c><c>...</c></c>` cell
+        // body carrying two or more of these members -- 40,632 multi-member cells
+        // across the whole `uh` corpus, every member form -- `xsi:type`, `xsi:nil`
+        // and the bare `<r>` a stored reference collapses to -- counted separately)
+        // found zero contradictions for this split:
+        //
+        // `value` is early ONLY when it is not a reference: a literal/typed or nil
+        // `<v>` always precedes detailParameter (1,700 co-occurrences) and control
+        // (15,149), and always follows text/parameter (128) when both are present.
+        // A *referenced* value (`<r>`, `MoxelCellValue::Reference`) behaves like
+        // `detail_value` instead: whenever it coexists with detailParameter or
+        // parameter, `<r>` is always the later element (3 and 9 co-occurrences,
+        // zero counter-examples) -- two previously-exact files broke when an
+        // earlier version of this fix treated every `value` variant alike and
+        // moved reference values ahead of detailParameter too.
+        //
+        // `detail_value` (any variant -- typed 113/24 co-occurrences with
+        // text/note, nil 42/38 with parameter/detailParameter) is always late:
+        // it always follows text/parameter/detailParameter, matching the
+        // referenced-value case above, and (from the 5 co-occurrences where a
+        // literal `value` and a `detail_value` both appear) always follows a
+        // literal `value` too.
+        //
+        // detailParameter always precedes control (9, the only triple combo in
+        // the corpus) and note (129); pictureParameter and note both follow
+        // detailParameter on the rare cases they coexist with it. `control` was
+        // previously emitted first, ahead of every other member -- the reverse of
+        // where the platform actually places it.
+        let value_is_reference = matches!(cell.value, Some(MoxelCellValue::Reference(_)));
+        if let Some(value) = &cell.value {
+            if !value_is_reference {
+                push_moxel_cell_value_xml(xml, "v", value);
+            }
+        }
         if let Some(detail_parameter) = &cell.detail_parameter {
             xml.push_str(&format!(
                 "\t\t\t\t\t<detailParameter>{}</detailParameter>\r\n",
                 escape_xml_element_text(detail_parameter)
             ));
+        }
+        if let Some(value) = &cell.value {
+            if value_is_reference {
+                push_moxel_cell_value_xml(xml, "v", value);
+            }
+        }
+        if let Some(detail_value) = &cell.detail_value {
+            push_moxel_cell_value_xml(xml, "d", detail_value);
         }
         if let Some(picture_parameter) = &cell.picture_parameter {
             xml.push_str(&format!(
@@ -12160,14 +12248,11 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(picture_parameter)
             ));
         }
-        if let Some(value) = &cell.value {
-            push_moxel_cell_value_xml(xml, "v", value);
-        }
-        if let Some(detail_value) = &cell.detail_value {
-            push_moxel_cell_value_xml(xml, "d", detail_value);
-        }
         if let Some(note) = &cell.note {
             push_moxel_note_xml(xml, note, output_format_index_map);
+        }
+        if let Some(control) = &cell.control {
+            push_moxel_cell_control_xml(xml, control);
         }
         xml.push_str("\t\t\t\t</c>\r\n");
         xml.push_str("\t\t\t</c>\r\n");

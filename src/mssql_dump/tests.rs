@@ -31378,6 +31378,47 @@ fn parses_and_formats_moxel_vertical_groups() {
     assert!(xml.contains("\t<vg>\r\n\t\t<b>3</b>\r\n\t</vg>"));
 }
 
+/// Evidence (native ERP УХ 3.2.12.6): a vertical group's member 3 is a
+/// localized-value list, not the fixed marker `{1,0}` a previous reading
+/// demanded -- `{1,0}` is just that list's empty (`count == 0`) form. Real
+/// corpus shape, `Documents/ЭлектроннаяТранспортнаяНакладная/Templates/
+/// СоответствиеИменРеквизитов`'s first group: begin row 0, end row 813,
+/// label `{"#","ГО"}` (this corpus's own convention spells the pseudo-
+/// language `#`, never `ru`/`en`). Requiring the empty marker literally
+/// rejected the whole `<vg>`/`<vgLevels>` construction in any document
+/// where even one group carried a label, not merely that group.
+#[test]
+fn moxel_vertical_group_label_publishes_as_t() {
+    let groups = parse_moxel_vertical_groups(&[
+        "1",
+        "{0,813,0,{1,1,\r\n{\"#\",\"ГО\"}\r\n},0,0}",
+        "-1",
+        "0",
+        "0",
+        "0",
+    ]);
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].begin_row, 0);
+    assert_eq!(groups[0].end_row, 813);
+    assert_eq!(
+        groups[0].text,
+        vec![MoxelLocalizedValue {
+            lang: "#".to_string(),
+            content: "ГО".to_string(),
+        }]
+    );
+
+    let mut xml = String::new();
+    push_moxel_vertical_group_xml(&mut xml, &groups[0]);
+    assert_eq!(
+        xml,
+        "\t<vg>\r\n\t\t<b>0</b>\r\n\t\t<e>813</e>\r\n\t\t<t>\r\n\t\t\t<v8:item>\r\n\
+         \t\t\t\t<v8:lang>#</v8:lang>\r\n\t\t\t\t<v8:content>ГО</v8:content>\r\n\
+         \t\t\t</v8:item>\r\n\t\t</t>\r\n\t</vg>\r\n"
+    );
+}
+
 #[test]
 fn parses_moxel_named_area_list_with_drawing_items() {
     let areas = parse_moxel_area_list(
@@ -32178,6 +32219,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
             end_row: 0,
             level: 0,
             open: true,
+            text: Vec::new(),
         }],
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
@@ -32338,6 +32380,152 @@ fn formats_moxel_remapped_explicit_row_format_one_is_preserved() {
     );
 
     assert!(xml.contains("<formatIndex>1</formatIndex>"));
+}
+
+#[test]
+fn formats_moxel_cell_value_precedes_detail_parameter_and_control() {
+    // Evidence (native ERP УХ 3.2.12.6, full-corpus scan of every `<c><c>...</c></c>`
+    // cell body carrying two or more of `control`/`text`/`parameter`/
+    // `detailParameter`/`pictureParameter`/`value`/`detail_value`/`note` -- 40,612
+    // multi-member cells across the whole `uh` corpus, zero contradictions): the
+    // platform always publishes `<v>` before `<detailParameter>` (1,700
+    // co-occurrences) and `<detailParameter>` before `<control>` (9
+    // co-occurrences, the only triple combo of these three members in the
+    // corpus) -- `<v>` immediately follows `<f>`, `<control>` is emitted last,
+    // the reverse of the previous (storage-slot) order.
+    let mut xml = String::new();
+    push_moxel_row_xml(
+        &mut xml,
+        &MoxelRow {
+            index: 1,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 0,
+                source_format_index: None,
+                text: Vec::new(),
+                parameter: None,
+                detail_parameter: Some("Сделка".to_string()),
+                note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: Some("QUJD".to_string()),
+                value: Some(MoxelCellValue::Text(String::new())),
+                detail_value: None,
+                empty_text: false,
+            }],
+        },
+        &BTreeMap::new(),
+        false,
+    );
+
+    assert!(xml.contains(concat!(
+        "\t\t\t\t\t<f>0</f>\r\n",
+        "\t\t\t\t\t<v xsi:type=\"xs:string\"/>\r\n",
+        "\t\t\t\t\t<detailParameter>Сделка</detailParameter>\r\n",
+        "\t\t\t\t\t<control xsi:type=\"xs:base64Binary\">QUJD</control>\r\n",
+    )));
+}
+
+#[test]
+fn formats_moxel_cell_referenced_value_follows_detail_parameter() {
+    // Evidence (native ERP УХ 3.2.12.6): unlike a literal/typed `<v>`, a
+    // *referenced* value (`MoxelCellValue::Reference`, published as bare `<r>`
+    // regardless of which member carries it) always follows detailParameter
+    // when both are present (3 co-occurrences, zero counter-examples) --
+    // real corpus shape, e.g.
+    // `Documents/ЗапросКоммерческихПредложенийПоставщиков/Templates/
+    // ПФ_MXL_СравнениеУсловийПредложений/Ext/Template.xml`:
+    // `<parameter>СрокПоставки</parameter><detailParameter>Расшифровка
+    // </detailParameter><r>15</r>`. An earlier version of this fix moved
+    // every `value` variant ahead of detailParameter alike and broke this
+    // exact file (and one other, DataProcessors/
+    // СверткаИнформационнойБазы/.../МакетОграниченияСвертки) by publishing
+    // `<r>`/`<d xsi:nil="true"/>` before detailParameter instead of after.
+    let mut xml = String::new();
+    push_moxel_row_xml(
+        &mut xml,
+        &MoxelRow {
+            index: 1,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 0,
+                source_format_index: None,
+                text: Vec::new(),
+                parameter: Some("СрокПоставки".to_string()),
+                detail_parameter: Some("Расшифровка".to_string()),
+                note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: Some(MoxelCellValue::Reference(15)),
+                detail_value: None,
+                empty_text: false,
+            }],
+        },
+        &BTreeMap::new(),
+        false,
+    );
+
+    assert!(xml.contains(concat!(
+        "\t\t\t\t\t<f>0</f>\r\n",
+        "\t\t\t\t\t<parameter>СрокПоставки</parameter>\r\n",
+        "\t\t\t\t\t<detailParameter>Расшифровка</detailParameter>\r\n",
+        "\t\t\t\t\t<r>15</r>\r\n",
+    )));
+}
+
+#[test]
+fn formats_moxel_cell_detail_value_follows_detail_parameter() {
+    // Evidence (native ERP УХ 3.2.12.6): `detail_value` in every observed
+    // form (typed and nil) always follows detailParameter when both are
+    // present (38 nil co-occurrences, zero counter-examples) -- real corpus
+    // shape, e.g. `DataProcessors/СверткаИнформационнойБазы/Templates/
+    // МакетОграниченияСвертки/Ext/Template.xml`: `<parameter>Организация
+    // </parameter><detailParameter>Организация</detailParameter>
+    // <d xsi:nil="true"/>`.
+    let mut xml = String::new();
+    push_moxel_row_xml(
+        &mut xml,
+        &MoxelRow {
+            index: 1,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 0,
+                source_format_index: None,
+                text: Vec::new(),
+                parameter: Some("Организация".to_string()),
+                detail_parameter: Some("Организация".to_string()),
+                note: None,
+                formatted_text: false,
+                picture_parameter: None,
+                control: None,
+                value: None,
+                detail_value: Some(MoxelCellValue::Nil),
+                empty_text: false,
+            }],
+        },
+        &BTreeMap::new(),
+        false,
+    );
+
+    assert!(xml.contains(concat!(
+        "\t\t\t\t\t<f>0</f>\r\n",
+        "\t\t\t\t\t<parameter>Организация</parameter>\r\n",
+        "\t\t\t\t\t<detailParameter>Организация</detailParameter>\r\n",
+        "\t\t\t\t\t<d xsi:nil=\"true\"/>\r\n",
+    )));
 }
 
 #[test]
@@ -35714,6 +35902,33 @@ fn moxel_drawing_line_style_uses_its_own_enumeration() {
         "{xml}"
     );
     assert!(!xml.contains("Double"), "{xml}");
+}
+
+/// Evidence (native ERP УХ 3.2.12.6): real regulated-report templates name
+/// cell ranges by the hundreds -- `Documents/
+/// ЗаявлениеВФССОВозмещенииВыплатРодителямДетейИнвалидов/Templates/
+/// ЗаявлениеВФССДополнительныеДниОтпуска_2017` declares 700 -- and a
+/// formerly hardcoded `count > 512` cap dropped the *entire* `<namedItem>`
+/// list, not merely the members past the 512th, on any document that
+/// exceeded it: the fixed-arity-cap-instead-of-declared-count defect class
+/// this project has hit before elsewhere. The arity check right beside it
+/// (`fields.len() == count * 2 + 1`) is already a complete, self-validating
+/// structural guard, so the cap added nothing but a ceiling.
+#[test]
+fn moxel_named_item_list_is_not_capped_at_512_entries() {
+    let n = 513usize;
+    let mut text = format!("{{{n}");
+    for i in 0..n {
+        text.push_str(&format!(",\"Item{i}\",{{1,{{3,{i},{i},{i},{i}}}}}"));
+    }
+    text.push('}');
+
+    let items = parse_moxel_named_item_list(&text).expect("must parse past the old 512 cap");
+    assert_eq!(items.len(), n);
+    match items.last().unwrap() {
+        MoxelNamedItem::Cells(area) => assert_eq!(area.name, format!("Item{}", n - 1)),
+        MoxelNamedItem::Drawing { .. } => panic!("expected a cell area"),
+    }
 }
 
 /// Fixture: `tests/fixtures/moxel_sales_plan_norm_file_load_raw.txt`, 1985
