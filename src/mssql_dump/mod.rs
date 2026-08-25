@@ -13578,6 +13578,22 @@ fn parse_register_standard_attribute_with_comment<'a>(
             expected_type_reduction_mode,
             None,
         )?;
+    // LEAD, not yet fixed: this hardcodes the value-id `"5006"` as the only
+    // admissible `choice_parameter_links` shape. Real ERP УХ 3.2.12.6 bytes
+    // (`AccumulationRegisters/ВыработкаВНА`, uuid
+    // `d0cb999a-42d7-4f4f-9160-fa23808dc40d`, standard attribute
+    // `Recorder`) carry `["5004", "0"]` here instead and refuse at exactly
+    // this check -- confirmed by calling `parse_register_standard_
+    // attribute_with_comment_and_choice_parameter_links` directly on the
+    // real bag (which succeeds) and observing only this final shape check
+    // reject it. `5004` vs `5006` most likely encode which underlying
+    // document-type restriction set applies to the register's specific
+    // `Recorder` (this is the one standard attribute whose value type is
+    // inherently per-register, unlike `Active`/`Period`/etc.), not a fixed
+    // platform constant -- needs a real-bytes survey across more registers
+    // before generalizing this check, out of scope for the pass that added
+    // this comment (see `docs/evidence/arity-literal-audit-20260825.md`'s
+    // "default is not absence" class, which this may or may not belong to).
     information_register_standard_attribute_nested_values_are(
         choice_parameter_links,
         INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
