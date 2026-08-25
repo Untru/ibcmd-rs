@@ -770,6 +770,42 @@ pub(super) enum MoxelDrawingKind {
         picture_index: usize,
     },
     Chart(MoxelChart),
+    GanttChart(MoxelGanttChart),
+}
+
+/// `GanttChart`'s own wrapper: `{19, field[1..33)}` -- `field[1]` is the same
+/// `{0,{11},{74,...}}` triple `Chart` stores (`chart` below, parsed by the
+/// same `parse_moxel_chart`), `field[2..33)` are GanttChart-specific.
+///
+/// Evidence: native UT 11.5.27.75's two `GanttChart` templates
+/// (`АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий`,
+/// `elementsIsInit == true`, and `ДлительностьОтложенногоОбновления/
+/// ДиаграммаГанта`, `elementsIsInit == false`) are the only two examples in
+/// the corpus. Every field below is one this reader either observed vary
+/// between the two or a fixed-position sub-structure it decomposes to reach
+/// one that does; every other member of the raw wrapper (roughly two thirds
+/// of it) is unread and validated as a literal in `parse_moxel_gantt_chart`,
+/// same treatment as `MoxelChart`'s own literal-heavy fields.
+pub(super) struct MoxelGanttChart {
+    chart: MoxelChart,
+    points_base_data: String,
+    points_auto_text: bool,
+    series_base_data: String,
+    series_auto_text: bool,
+    draw_empty: bool,
+    time_scale_measure: &'static str,
+    time_scale_show: bool,
+    time_scale_day_format_rule: &'static str,
+    time_scale_back_color: String,
+    fixed_variant_measure: &'static str,
+    full_interval_begin: String,
+    full_interval_end: String,
+    visual_begin: String,
+    interval_draw_type: &'static str,
+    vertical_scroll_enable: bool,
+    outbound_color: String,
+    links_color: String,
+    text_placement: &'static str,
 }
 
 pub(super) struct MoxelChart {
@@ -4605,6 +4641,7 @@ fn parse_moxel_drawing_format_record(text: &str) -> Option<(usize, MoxelDrawingM
 /// replaces refused those.
 pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
     const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
+    const GANTT_CHART_TYPE_UUID: &str = "e5fdc112-5c84-4a16-9728-72b85692b6e2";
 
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() != 12 && fields.len() != 14 {
@@ -4655,14 +4692,36 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
                 )
             }
             // The chart family shares kind 10 and separates on the type uuid.
-            // `GanttChart` (uuid e5fdc112-..., 2 records in 2 documents, each the
-            // document's only drawing) has no decoder for its object payload, so
-            // the record refuses rather than publishing a truncated subtree.
             "10" if fields.get(11)?.trim().eq_ignore_ascii_case(CHART_TYPE_UUID)
                 && fields.get(13)?.trim() == "0" =>
             {
                 (
                     MoxelDrawingKind::Chart(parse_moxel_chart(fields.get(12)?)?),
+                    false,
+                )
+            }
+            // `GanttChart` (uuid e5fdc112-...): both of native UT 11.5.27.75's
+            // two records (each the only drawing in its document) decode --
+            // see `parse_moxel_gantt_chart`. Unlike the plain `Chart` slot
+            // above, `fields[12]` here carries one extra wrapping brace
+            // around the `{19,...}` object (`{ {19,...} }`, a single member
+            // with no top-level comma) -- confirmed against native UT
+            // 11.5.27.75's own `1cv8.cf` (the fixture's raw payload files
+            // are the ALREADY-unwrapped `{19,...}` text, sliced by a prior
+            // wave searching for that marker directly, not the raw
+            // `cf extract` output).
+            "10" if fields
+                .get(11)?
+                .trim()
+                .eq_ignore_ascii_case(GANTT_CHART_TYPE_UUID)
+                && fields.get(13)?.trim() == "0" =>
+            {
+                let wrapped = split_1c_braced_fields(fields.get(12)?, 0)?;
+                if wrapped.len() != 1 {
+                    return None;
+                }
+                (
+                    MoxelDrawingKind::GanttChart(parse_moxel_gantt_chart(wrapped.first()?)?),
                     false,
                 )
             }
@@ -5074,6 +5133,324 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     })
 }
 
+const MAX_MOXEL_GANTT_CHART_BYTES: usize = 1024 * 1024;
+
+/// `GanttChart`'s `field[2]` (`<d3p1:points>`) / `field[3]`
+/// (`<d3p1:series>`): the two records share this exact shape apart from one
+/// extra `picture`/`font` pair `points` alone carries (see the two call
+/// sites), each varying in exactly two places -- `baseData` (the numeric
+/// cache-template id `<d3p1:value><d3p1:baseData>` publishes verbatim) and
+/// `autoText`. Everything else is read as a positional literal: no
+/// observation ties any of it to anything the native XML publishes
+/// differently between the two `GanttChart` records.
+struct MoxelGanttSeriesLikeData {
+    base_data: String,
+    auto_text: bool,
+}
+
+/// `{1,{3,0,1,0,{2,<key record>,<picture>,<font>},<contentCacheItem>,
+/// <autoText>,0}}` -- `field[2]`'s exact shape (`<d3p1:points>`, with `font`/
+/// `picture` members `<d3p1:series>` does not carry).
+fn parse_gantt_points_data(text: &str) -> Option<MoxelGanttSeriesLikeData> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    if outer.len() != 2 || compact_moxel_chart_token(outer.first()?) != "1" {
+        return None;
+    }
+    let inner = split_1c_braced_fields(outer.get(1)?, 0)?;
+    if inner.len() != 8
+        || compact_moxel_chart_token(inner.first()?) != "3"
+        || inner.get(1)?.trim() != "0"
+        || inner.get(2)?.trim() != "1"
+        || inner.get(3)?.trim() != "0"
+        || inner.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let value = split_1c_braced_fields(inner.get(4)?, 0)?;
+    if value.len() != 4 || compact_moxel_chart_token(value.first()?) != "2" {
+        return None;
+    }
+    let base_data = gantt_series_key_record_base_data(value.get(1)?)?;
+    if compact_moxel_chart_token(value.get(2)?) != "{4,0,{0},\"\",-1,-1,1,0,\"\"}" {
+        return None;
+    }
+    parse_moxel_font(value.get(3)?, &BTreeMap::new())?;
+    if compact_moxel_chart_token(inner.get(5)?)
+        != "{0,1,{0,{0,{3,0,{0}},{3,0,{0}}},{3,4,{0}},{3,4,{0}}}}"
+    {
+        return None;
+    }
+    let auto_text = parse_moxel_chart_bool(inner.get(6)?)?;
+    Some(MoxelGanttSeriesLikeData {
+        base_data,
+        auto_text,
+    })
+}
+
+/// `{0,{3,0,1,0,{3,<key record>},<contentCacheItem>,<autoText>,0}}` --
+/// `field[3]`'s exact shape (`<d3p1:series>`, no `font`/`picture` members).
+fn parse_gantt_series_data(text: &str) -> Option<MoxelGanttSeriesLikeData> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    if outer.len() != 2 || outer.first()?.trim() != "0" {
+        return None;
+    }
+    let inner = split_1c_braced_fields(outer.get(1)?, 0)?;
+    if inner.len() != 8
+        || compact_moxel_chart_token(inner.first()?) != "3"
+        || inner.get(1)?.trim() != "0"
+        || inner.get(2)?.trim() != "1"
+        || inner.get(3)?.trim() != "0"
+        || inner.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let value = split_1c_braced_fields(inner.get(4)?, 0)?;
+    if value.len() != 2 || compact_moxel_chart_token(value.first()?) != "3" {
+        return None;
+    }
+    let base_data = gantt_series_key_record_base_data(value.get(1)?)?;
+    if compact_moxel_chart_token(inner.get(5)?) != "{0,1,{0,{0,{3,0,{0}},{3,0,{0}}},{3,0,{0}}}}" {
+        return None;
+    }
+    let auto_text = parse_moxel_chart_bool(inner.get(6)?)?;
+    Some(MoxelGanttSeriesLikeData {
+        base_data,
+        auto_text,
+    })
+}
+
+/// `{8,0,0,0,0,0,{"U"},{1,0},{"U"},0,<baseData>}` -- the `itemKey`..
+/// `baseData` key record both `points`' and `series`' `value` element share.
+/// Only `baseData` (the last member) is read as a field; the rest is a
+/// literal no observation varies (`itemKey`/`key`/`parentKey`/`leftKey`/
+/// `rightKey`/`extKey` all `0`, `title` empty, two `{"U"}` markers this
+/// reader does not interpret, `cacheKey` `0`).
+fn gantt_series_key_record_base_data(text: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    const PREFIX: [&str; 9] = ["8", "0", "0", "0", "0", "0", "{\"U\"}", "{1,0}", "{\"U\"}"];
+    if fields.len() != 11 || fields.get(9)?.trim() != "0" {
+        return None;
+    }
+    for (index, expected) in PREFIX.iter().enumerate() {
+        if compact_moxel_chart_token(fields.get(index)?) != *expected {
+            return None;
+        }
+    }
+    Some(fields.get(10)?.trim().to_string())
+}
+
+/// The `Minute`/`Hour`/`Day`/`Month` codes `field[9]`'s `fixedVariantMeasure`
+/// and `field[7]`'s nested `timeScale.level.measure` share -- both `GanttChart`
+/// records spell all four codes between the two of them (`10`/`20` for
+/// `level.measure`, `30`/`50` for `fixedVariantMeasure`), evenly spaced by
+/// `10`, suggesting a longer ladder (`Second`, `Week`, `Quarter`, `Year`) this
+/// reader has not observed and therefore does not guess at.
+fn moxel_gantt_time_measure(code: &str) -> Option<&'static str> {
+    match code.trim() {
+        "10" => Some("Minute"),
+        "20" => Some("Hour"),
+        "30" => Some("Day"),
+        "50" => Some("Month"),
+        _ => None,
+    }
+}
+
+/// `field[7]`, `<d3p1:timeScale>`: `{3,0,1,<level>,<transparent>,
+/// <backColor>,<textColor>,<currentLevel>}`. `placement` (`Top` on both
+/// records) is the fixed `3,0,1` prefix, not read as a field; `transparent`
+/// (`false`) and `textColor` (`style:FormTextColor`) are literals too, no
+/// observation varying them either.
+struct MoxelGanttTimeScale {
+    measure: &'static str,
+    show: bool,
+    day_format_rule: &'static str,
+    back_color: String,
+}
+
+fn parse_gantt_time_scale(text: &str) -> Option<MoxelGanttTimeScale> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 8
+        || compact_moxel_chart_token(fields.first()?) != "3"
+        || fields.get(1)?.trim() != "0"
+        || fields.get(2)?.trim() != "1"
+        || fields.get(4)?.trim() != "0"
+        || compact_moxel_chart_token(fields.get(6)?) != "{3,3,{-3}}"
+        || fields.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let level = split_1c_braced_fields(fields.get(3)?, 0)?;
+    if level.len() != 12
+        || compact_moxel_chart_token(level.first()?) != "8"
+        || level.get(2)?.trim() != "1"
+        || compact_moxel_chart_token(level.get(4)?)
+            != "{4,0,{0},2,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"
+        || compact_moxel_chart_token(level.get(5)?) != "{3,0,{12632256}}"
+        || compact_moxel_chart_token(level.get(7)?) != "{1,0}"
+        || compact_moxel_chart_token(level.get(8)?) != "{0,{1,0,0}}"
+        || compact_moxel_chart_token(level.get(9)?) != "{3,4,{0}}"
+        || compact_moxel_chart_token(level.get(10)?) != "{3,4,{0}}"
+        || level.get(11)?.trim() != "1"
+    {
+        return None;
+    }
+    let measure = moxel_gantt_time_measure(level.get(1)?)?;
+    let show = parse_moxel_chart_bool(level.get(3)?)?;
+    let day_format_rule = match level.get(6)?.trim() {
+        "2" => "WeekDay",
+        "3" => "MonthDayWeekDay",
+        _ => return None,
+    };
+    let back_color = parse_moxel_chart_color(fields.get(5)?)?;
+    Some(MoxelGanttTimeScale {
+        measure,
+        show,
+        day_format_rule,
+        back_color,
+    })
+}
+
+/// `field[12]`/`[13]`/`[14]` (`fullIntervalBegin`/`fullIntervalEnd`/
+/// `visualBegin`): a bare 14-digit `YYYYMMDDHHMMSS` numeric string, matching
+/// the ISO `YYYY-MM-DDTHH:MM:SS` native XML publishes byte for byte once the
+/// four separators are inserted back. Confirmed on both `GanttChart`
+/// records' three date fields each (six total, none sharing a value).
+fn parse_moxel_gantt_date(text: &str) -> Option<String> {
+    let digits = text.trim();
+    if digits.len() != 14 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}T{}:{}:{}",
+        &digits[0..4],
+        &digits[4..6],
+        &digits[6..8],
+        &digits[8..10],
+        &digits[10..12],
+        &digits[12..14]
+    ))
+}
+
+/// `{19, field[1..33)}`: `field[1]` is the plain `Chart` payload
+/// `parse_moxel_chart` already reads (see `MoxelGanttChart`'s doc comment);
+/// `field[2..33)` are decoded/validated here. Only two native examples exist
+/// in the whole corpus (native UT 11.5.27.75's
+/// `АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий` and
+/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта`), so every literal
+/// below is validated against both, not derived from a larger sample.
+fn parse_moxel_gantt_chart(text: &str) -> Option<MoxelGanttChart> {
+    if text.len() > MAX_MOXEL_GANTT_CHART_BYTES {
+        return None;
+    }
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 33 || fields.first()?.trim() != "19" {
+        return None;
+    }
+    // `field[1]` is `{0,{11},{74,...}}`: strip the leading `0,` marker and
+    // re-wrap the remaining two-tuple the way `parse_moxel_chart` expects.
+    let chart_triple = split_1c_braced_fields(fields.get(1)?, 0)?;
+    if chart_triple.len() != 3 || chart_triple.first()?.trim() != "0" {
+        return None;
+    }
+    let chart = parse_moxel_chart(&format!(
+        "{{{},{}}}",
+        chart_triple.get(1)?,
+        chart_triple.get(2)?
+    ))?;
+
+    let points = parse_gantt_points_data(fields.get(2)?)?;
+    let series = parse_gantt_series_data(fields.get(3)?)?;
+    // Two more design-time-only fields no observation ties to any XML
+    // content, same treatment as the plain `Chart`'s own literal-heavy
+    // regions -- see `MoxelChart`'s doc comments.
+    if fields.get(4)?.trim() != "0" || fields.get(5)?.trim() != "0" {
+        return None;
+    }
+    let draw_empty = parse_moxel_chart_bool(fields.get(6)?)?;
+    let time_scale = parse_gantt_time_scale(fields.get(7)?)?;
+    // `keepScaleVariant`: only `"2"` (`AllData`) observed on either record.
+    if fields.get(8)?.trim() != "2" {
+        return None;
+    }
+    let fixed_variant_measure = moxel_gantt_time_measure(fields.get(9)?)?;
+    // `fixedVariantInterval` (`1`) and `autoFullInterval` (`true`): literals,
+    // unvaried between the two records.
+    if fields.get(10)?.trim() != "1" || fields.get(11)?.trim() != "1" {
+        return None;
+    }
+    let full_interval_begin = parse_moxel_gantt_date(fields.get(12)?)?;
+    let full_interval_end = parse_moxel_gantt_date(fields.get(13)?)?;
+    let visual_begin = parse_moxel_gantt_date(fields.get(14)?)?;
+    let interval_draw_type = match fields.get(15)?.trim() {
+        "0" => "Flat",
+        "3" => "Gradient",
+        _ => return None,
+    };
+    // `noneVariantChars` (`3`), `noneVariantMeasure` (`Day`, code `30`),
+    // `verticalStretch` (`None`), `showValueText` (`None`) and `extTitle`
+    // (empty): literals, unvaried between the two records.
+    if fields.get(16)?.trim() != "3"
+        || fields.get(17)?.trim() != "30"
+        || fields.get(18)?.trim() != "0"
+        || fields.get(20)?.trim() != "0"
+        || compact_moxel_chart_token(fields.get(21)?) != "{1,0}"
+    {
+        return None;
+    }
+    let vertical_scroll_enable = parse_moxel_chart_bool(fields.get(19)?)?;
+    let outbound_color = parse_moxel_chart_color(fields.get(22)?)?;
+    // `backIntervals` (`collection.ticks`/`ticks` both `0`): literal,
+    // unvaried between the two records.
+    if compact_moxel_chart_token(fields.get(23)?) != "{3,{0,{1,0,0},0},{0,0}}"
+        || fields.get(24)?.trim() != "0"
+    {
+        return None;
+    }
+    let links_color = parse_moxel_chart_color(fields.get(25)?)?;
+    let links_line = parse_moxel_chart_line(fields.get(26)?)?;
+    if links_line.width != 1 {
+        return None;
+    }
+    // `showPointsText` (`Show`), `showData` (`Auto`) and
+    // `intervalTextRepresentation` (`Auto`): literals, unvaried between the
+    // two records -- see `push_moxel_gantt_chart_xml`.
+    if compact_moxel_chart_token(fields.get(27)?) != "{0,0,0}"
+        || fields.get(28)?.trim() != "1"
+        || fields.get(29)?.trim() != "0"
+        || fields.get(30)?.trim() != "1"
+        || fields.get(32)?.trim() != "0"
+    {
+        return None;
+    }
+    let text_placement = match fields.get(31)?.trim() {
+        "0" => "Auto",
+        "1" => "Cut",
+        _ => return None,
+    };
+
+    Some(MoxelGanttChart {
+        chart,
+        points_base_data: points.base_data,
+        points_auto_text: points.auto_text,
+        series_base_data: series.base_data,
+        series_auto_text: series.auto_text,
+        draw_empty,
+        time_scale_measure: time_scale.measure,
+        time_scale_show: time_scale.show,
+        time_scale_day_format_rule: time_scale.day_format_rule,
+        time_scale_back_color: time_scale.back_color,
+        fixed_variant_measure,
+        full_interval_begin,
+        full_interval_end,
+        visual_begin,
+        interval_draw_type,
+        vertical_scroll_enable,
+        outbound_color,
+        links_color,
+        text_placement,
+    })
+}
+
 /// Test-only entry point: parses a raw `{{11},{74,...}}` chart payload (the
 /// text `parse_moxel_drawing` would pass as `fields.get(12)` for a kind-`10`
 /// drawing whose type uuid is the plain `Chart`, not `GanttChart`) and
@@ -5087,6 +5464,20 @@ pub(super) fn parse_and_render_moxel_chart_for_test(text: &str) -> Option<String
     let chart = parse_moxel_chart(text)?;
     let mut xml = String::new();
     push_moxel_chart_xml(&mut xml, &chart);
+    Some(xml)
+}
+
+/// Test-only entry point, `GanttChart`'s counterpart to
+/// `parse_and_render_moxel_chart_for_test`: parses a raw `{19,...}` wrapper
+/// payload (the text `parse_moxel_drawing` would pass as `fields.get(12)`
+/// for a kind-`10` drawing whose type uuid is `GanttChart`) and renders it
+/// back to the `<object xsi:type="d3p1:GanttChart">...</object>` fragment
+/// `push_moxel_gantt_chart_xml` writes.
+#[cfg(test)]
+pub(super) fn parse_and_render_moxel_gantt_chart_for_test(text: &str) -> Option<String> {
+    let gantt = parse_moxel_gantt_chart(text)?;
+    let mut xml = String::new();
+    push_moxel_gantt_chart_xml(&mut xml, &gantt);
     Some(xml)
 }
 
@@ -5162,9 +5553,14 @@ fn parse_moxel_chart_color(text: &str) -> Option<String> {
         // stores its mandatory `realExSeriesData`'s colour as `{3,3,{-23}}`
         // and publishes `<d3p1:color>style:ToolTipBackColor</d3p1:color>` --
         // none of the pre-existing 13 chart records use this style colour.
+        // `-10` is new: native UT 11.5.27.75's `GanttChart` template
+        // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` stores its
+        // `timeScale`'s own `backColor` as `{3,3,{-10}}` and publishes
+        // `<d3p1:backColor>style:FieldBackColor</d3p1:backColor>`.
         "3" if fields.len() == 3 && payload.len() == 1 => match payload.first()?.trim() {
             "-1" => Some("style:FormBackColor".to_string()),
             "-3" => Some("style:FormTextColor".to_string()),
+            "-10" => Some("style:FieldBackColor".to_string()),
             "-22" => Some("style:BorderColor".to_string()),
             "-23" => Some("style:ToolTipBackColor".to_string()),
             _ => None,
@@ -10592,6 +10988,7 @@ pub(super) fn push_moxel_drawing_xml(
         MoxelDrawingKind::Shape(shape) => shape,
         MoxelDrawingKind::Picture { .. } => "Picture",
         MoxelDrawingKind::Chart(_) => "Chart",
+        MoxelDrawingKind::GanttChart(_) => "GanttChart",
     };
     xml.push_str(&format!(
         "\t\t<drawingType>{drawing_type}</drawingType>\r\n"
@@ -10681,7 +11078,9 @@ pub(super) fn push_moxel_drawing_xml(
     ));
     let picture_size = match &drawing.kind {
         MoxelDrawingKind::Picture { picture_size, .. } => *picture_size,
-        MoxelDrawingKind::Shape(_) | MoxelDrawingKind::Chart(_) => "Stretch",
+        MoxelDrawingKind::Shape(_)
+        | MoxelDrawingKind::Chart(_)
+        | MoxelDrawingKind::GanttChart(_) => "Stretch",
     };
     xml.push_str(&format!(
         "\t\t<pictureSize>{picture_size}</pictureSize>\r\n"
@@ -10695,6 +11094,7 @@ pub(super) fn push_moxel_drawing_xml(
             ));
         }
         MoxelDrawingKind::Chart(chart) => push_moxel_chart_xml(xml, chart),
+        MoxelDrawingKind::GanttChart(gantt) => push_moxel_gantt_chart_xml(xml, gantt),
     }
     xml.push_str("\t</drawing>\r\n");
 }
@@ -10794,7 +11194,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
             "Auto"
         },
     );
-    push_moxel_chart_line_xml(xml, "scaleLine", &MoxelChartLine { width: 1 }, 3);
+    push_moxel_chart_line_xml(xml, "scaleLine", &MoxelChartLine { width: 1 }, 3, "Solid");
     push_moxel_chart_literal(xml, "scaleColor", &chart.scale_color);
     push_moxel_chart_bool(xml, "isAutoSeriesName", chart.is_auto_series_name);
     push_moxel_chart_bool(xml, "isAutoPointName", chart.is_auto_point_name);
@@ -10882,7 +11282,13 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
         &chart.funnel_neck_width_percent,
     );
     push_moxel_chart_literal(xml, "funnelGapSumPercent", &chart.funnel_gap_sum_percent);
-    push_moxel_chart_line_xml(xml, "multiStageLinkLine", &MoxelChartLine { width: 1 }, 3);
+    push_moxel_chart_line_xml(
+        xml,
+        "multiStageLinkLine",
+        &MoxelChartLine { width: 1 },
+        3,
+        "Solid",
+    );
     push_moxel_chart_literal(xml, "multiStageLinkColor", "#000000");
     push_moxel_chart_axis_xml(xml, "valuesAxis", &chart.values_axis);
     push_moxel_chart_axis_xml(xml, "pointsAxis", &chart.points_axis);
@@ -10972,6 +11378,157 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     xml.push_str("\t\t</object>\r\n");
 }
 
+/// Re-wraps `push_moxel_chart_xml`'s `<object xsi:type="d3p1:Chart">`
+/// fragment (two-tab indent, itself a `<drawing>` element's direct child) as
+/// the three-tab-indented `<d3p1:chart>` a `GanttChart` object nests it
+/// under instead -- same content, different wrapper tag and one extra tab
+/// throughout. Written this way rather than a second copy of
+/// `push_moxel_chart_xml` because the two are otherwise byte-for-byte
+/// identical: native UT 11.5.27.75's two `GanttChart` templates' own
+/// `<d3p1:chart>` blocks decode through the exact same `parse_moxel_chart`.
+fn push_moxel_gantt_embedded_chart_xml(xml: &mut String, chart: &MoxelChart) {
+    let mut inner = String::new();
+    push_moxel_chart_xml(&mut inner, chart);
+    let mut lines: Vec<&str> = inner.split("\r\n").collect();
+    if lines.last() == Some(&"") {
+        lines.pop();
+    }
+    let last_index = lines.len().saturating_sub(1);
+    for (index, line) in lines.iter().enumerate() {
+        if index == 0 {
+            xml.push_str("\t\t\t<d3p1:chart>\r\n");
+        } else if index == last_index {
+            xml.push_str("\t\t\t</d3p1:chart>\r\n");
+        } else {
+            xml.push('\t');
+            xml.push_str(line);
+            xml.push_str("\r\n");
+        }
+    }
+}
+
+/// `<object xsi:type="d3p1:GanttChart">`'s own content, past the shared
+/// `<d3p1:chart>` block `push_moxel_gantt_embedded_chart_xml` writes. See
+/// `MoxelGanttChart`'s doc comment for which of these fields are real and
+/// which are literals no observation (either of the corpus's two records)
+/// varies.
+fn push_moxel_gantt_chart_xml(xml: &mut String, gantt: &MoxelGanttChart) {
+    xml.push_str(
+        "\t\t<object xmlns:d3p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d3p1:GanttChart\">\r\n",
+    );
+    push_moxel_gantt_embedded_chart_xml(xml, &gantt.chart);
+
+    xml.push_str("\t\t\t<d3p1:points>\r\n");
+    push_moxel_chart_bool_indented(xml, "testMode", false, 4);
+    xml.push_str("\t\t\t\t<d3p1:value>\r\n");
+    for tag in [
+        "itemKey",
+        "key",
+        "parentKey",
+        "leftKey",
+        "rightKey",
+        "extKey",
+    ] {
+        push_moxel_chart_text_indented(xml, tag, 0, 5);
+    }
+    xml.push_str("\t\t\t\t\t<d3p1:title/>\r\n");
+    push_moxel_chart_text_indented(xml, "cacheKey", 0, 5);
+    push_moxel_chart_literal_indented(xml, "baseData", &gantt.points_base_data, 5);
+    xml.push_str("\t\t\t\t\t<d3p1:font kind=\"AutoFont\"/>\r\n");
+    xml.push_str("\t\t\t\t\t<d3p1:picture/>\r\n");
+    xml.push_str("\t\t\t\t</d3p1:value>\r\n");
+    xml.push_str("\t\t\t\t<d3p1:contentCacheItem>\r\n");
+    push_moxel_chart_literal_indented(xml, "mainColor", "#000000", 5);
+    push_moxel_chart_literal_indented(xml, "secondColor", "#000000", 5);
+    push_moxel_chart_literal_indented(xml, "backColor", "auto", 5);
+    push_moxel_chart_literal_indented(xml, "textColor", "auto", 5);
+    xml.push_str("\t\t\t\t</d3p1:contentCacheItem>\r\n");
+    push_moxel_chart_bool_indented(xml, "autoText", gantt.points_auto_text, 4);
+    push_moxel_chart_bool_indented(xml, "useValuesReverseBehavior", false, 4);
+    xml.push_str("\t\t\t</d3p1:points>\r\n");
+
+    xml.push_str("\t\t\t<d3p1:series>\r\n");
+    push_moxel_chart_bool_indented(xml, "testMode", false, 4);
+    xml.push_str("\t\t\t\t<d3p1:value>\r\n");
+    for tag in [
+        "itemKey",
+        "key",
+        "parentKey",
+        "leftKey",
+        "rightKey",
+        "extKey",
+    ] {
+        push_moxel_chart_text_indented(xml, tag, 0, 5);
+    }
+    xml.push_str("\t\t\t\t\t<d3p1:title/>\r\n");
+    push_moxel_chart_text_indented(xml, "cacheKey", 0, 5);
+    push_moxel_chart_literal_indented(xml, "baseData", &gantt.series_base_data, 5);
+    xml.push_str("\t\t\t\t</d3p1:value>\r\n");
+    xml.push_str("\t\t\t\t<d3p1:contentCacheItem>\r\n");
+    push_moxel_chart_literal_indented(xml, "mainColor", "#000000", 5);
+    push_moxel_chart_literal_indented(xml, "secondColor", "#000000", 5);
+    push_moxel_chart_literal_indented(xml, "hatchBetweenIntervalsColor", "#000000", 5);
+    xml.push_str("\t\t\t\t</d3p1:contentCacheItem>\r\n");
+    push_moxel_chart_bool_indented(xml, "autoText", gantt.series_auto_text, 4);
+    push_moxel_chart_bool_indented(xml, "useValuesReverseBehavior", false, 4);
+    xml.push_str("\t\t\t</d3p1:series>\r\n");
+
+    push_moxel_chart_bool_indented(xml, "drawEmpty", gantt.draw_empty, 3);
+
+    xml.push_str("\t\t\t<d3p1:timeScale>\r\n");
+    push_moxel_chart_literal_indented(xml, "placement", "Top", 4);
+    xml.push_str("\t\t\t\t<d3p1:level>\r\n");
+    push_moxel_chart_literal_indented(xml, "measure", gantt.time_scale_measure, 5);
+    push_moxel_chart_text_indented(xml, "interval", 1, 5);
+    push_moxel_chart_bool_indented(xml, "show", gantt.time_scale_show, 5);
+    push_moxel_chart_line_xml(xml, "line", &MoxelChartLine { width: 1 }, 5, "Dotted");
+    push_moxel_chart_literal_indented(xml, "scaleColor", "#C0C0C0", 5);
+    push_moxel_chart_literal_indented(xml, "dayFormatRule", gantt.time_scale_day_format_rule, 5);
+    xml.push_str("\t\t\t\t\t<d3p1:format/>\r\n");
+    xml.push_str("\t\t\t\t\t<d3p1:labels>\r\n");
+    push_moxel_chart_text_indented(xml, "ticks", 0, 6);
+    xml.push_str("\t\t\t\t\t</d3p1:labels>\r\n");
+    push_moxel_chart_literal_indented(xml, "backColor", "auto", 5);
+    push_moxel_chart_literal_indented(xml, "textColor", "auto", 5);
+    push_moxel_chart_bool_indented(xml, "showPereodicalLabels", true, 5);
+    xml.push_str("\t\t\t\t</d3p1:level>\r\n");
+    push_moxel_chart_bool_indented(xml, "transparent", false, 4);
+    push_moxel_chart_literal_indented(xml, "backColor", &gantt.time_scale_back_color, 4);
+    push_moxel_chart_literal_indented(xml, "textColor", "style:FormTextColor", 4);
+    push_moxel_chart_text_indented(xml, "currentLevel", 0, 4);
+    xml.push_str("\t\t\t</d3p1:timeScale>\r\n");
+
+    push_moxel_chart_literal_indented(xml, "keepScaleVariant", "AllData", 3);
+    push_moxel_chart_literal_indented(xml, "fixedVariantMeasure", gantt.fixed_variant_measure, 3);
+    push_moxel_chart_text_indented(xml, "fixedVariantInterval", 1, 3);
+    push_moxel_chart_bool_indented(xml, "autoFullInterval", true, 3);
+    push_moxel_chart_literal_indented(xml, "fullIntervalBegin", &gantt.full_interval_begin, 3);
+    push_moxel_chart_literal_indented(xml, "fullIntervalEnd", &gantt.full_interval_end, 3);
+    push_moxel_chart_literal_indented(xml, "visualBegin", &gantt.visual_begin, 3);
+    push_moxel_chart_literal_indented(xml, "intervalDrawType", gantt.interval_draw_type, 3);
+    push_moxel_chart_text_indented(xml, "noneVariantChars", 3, 3);
+    push_moxel_chart_literal_indented(xml, "noneVariantMeasure", "Day", 3);
+    push_moxel_chart_literal_indented(xml, "verticalStretch", "None", 3);
+    push_moxel_chart_bool_indented(xml, "verticalScrollEnable", gantt.vertical_scroll_enable, 3);
+    push_moxel_chart_literal_indented(xml, "showValueText", "None", 3);
+    xml.push_str("\t\t\t<d3p1:extTitle/>\r\n");
+    push_moxel_chart_literal_indented(xml, "outboundColor", &gantt.outbound_color, 3);
+    xml.push_str("\t\t\t<d3p1:backIntervals>\r\n");
+    xml.push_str("\t\t\t\t<d3p1:collection>\r\n");
+    push_moxel_chart_text_indented(xml, "ticks", 0, 5);
+    xml.push_str("\t\t\t\t</d3p1:collection>\r\n");
+    push_moxel_chart_text_indented(xml, "ticks", 0, 4);
+    xml.push_str("\t\t\t</d3p1:backIntervals>\r\n");
+    push_moxel_chart_literal_indented(xml, "linksColor", &gantt.links_color, 3);
+    push_moxel_chart_line_xml(xml, "linksLine", &MoxelChartLine { width: 1 }, 3, "Solid");
+    push_moxel_chart_literal_indented(xml, "showPointsText", "Show", 3);
+    push_moxel_chart_literal_indented(xml, "showData", "Auto", 3);
+    push_moxel_chart_literal_indented(xml, "textPlacement", gantt.text_placement, 3);
+    push_moxel_chart_literal_indented(xml, "intervalTextRepresentation", "Auto", 3);
+
+    xml.push_str("\t\t</object>\r\n");
+}
+
 /// The name the platform writes for a series whose own name the user never
 /// changed.
 ///
@@ -11037,7 +11594,7 @@ fn push_moxel_chart_series_xml(
     xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
     push_moxel_chart_text_indented(xml, "id", series.id, 4);
     push_moxel_chart_literal_indented(xml, "color", &series.color, 4);
-    push_moxel_chart_line_xml(xml, "line", &series.line, 4);
+    push_moxel_chart_line_xml(xml, "line", &series.line, 4, "Solid");
     push_moxel_chart_literal_indented(xml, "marker", series.marker, 4);
     push_moxel_chart_series_text_xml(xml, series, automatic_names_apply);
     push_moxel_chart_bool_indented(xml, "strIsChanged", series.str_is_changed, 4);
@@ -11051,7 +11608,7 @@ fn push_moxel_chart_point_xml(xml: &mut String, point: &MoxelChartPoint) {
     xml.push_str("\t\t\t<d3p1:realPointData>\r\n");
     push_moxel_chart_text_indented(xml, "id", point.id, 4);
     push_moxel_chart_literal_indented(xml, "color", &point.color, 4);
-    push_moxel_chart_line_xml(xml, "line", &point.line, 4);
+    push_moxel_chart_line_xml(xml, "line", &point.line, 4, "Solid");
     push_moxel_chart_literal_indented(xml, "marker", point.marker, 4);
     push_moxel_chart_localized_xml(xml, "text", &point.text, 4);
     push_moxel_chart_bool_indented(xml, "strIsChanged", point.str_is_changed, 4);
@@ -11061,14 +11618,20 @@ fn push_moxel_chart_point_xml(xml: &mut String, point: &MoxelChartPoint) {
     xml.push_str("\t\t\t</d3p1:realPointData>\r\n");
 }
 
-fn push_moxel_chart_line_xml(xml: &mut String, tag: &str, line: &MoxelChartLine, indent: usize) {
+fn push_moxel_chart_line_xml(
+    xml: &mut String,
+    tag: &str,
+    line: &MoxelChartLine,
+    indent: usize,
+    style: &str,
+) {
     let tabs = "\t".repeat(indent);
     xml.push_str(&format!(
         "{tabs}<d3p1:{tag} width=\"{}\" gap=\"false\">\r\n",
         line.width
     ));
     xml.push_str(&format!(
-        "{tabs}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">Solid</v8ui:style>\r\n"
+        "{tabs}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">{style}</v8ui:style>\r\n"
     ));
     xml.push_str(&format!("{tabs}</d3p1:{tag}>\r\n"));
 }
