@@ -150,22 +150,70 @@ text` (the latter has no arity check at all -- it scans forward from the
 `{1,0,uuid},` marker rather than assuming a member count, so it was never
 subject to this class of bug).
 
-## What is still open
+## Follow-up on `innermost_metadata_object_fields_around_header`'s other two call sites
 
-- `parse_metadata_tabular_section_properties`'s non-`DataProcessor` branch
-  and `http_service_child_candidates_from_text` (the other two call sites
-  of `innermost_metadata_object_fields_around_header`, see `uh-missing-
-  root-cause-map-20260825.md`'s "third UH pass" update): the shared-
-  function fix applies to them structurally, and the HTTPService full-
-  header case is regression-tested, but neither has a corpus-confirmed
-  short-header specimen the way the Catalog/DataProcessor attribute-
-  Pattern call site does (over 3,000 real hits). The `IBCMD_DEBUG_SHORT_
-  HEADER_SCAN` survey that found those 3,000+ hits was cut short by a host
-  disk-space emergency mid-pass before it reached TabularSection/
-  HTTPService objects in the corpus traversal order; re-running it (or a
-  targeted `cf extract`-based survey per the operational note below) to
-  either confirm or rule out the short form at these two sites is the
-  natural follow-up, not done here.
+`uh-missing-root-cause-map-20260825.md`'s "third UH pass" update left the
+short-header question open for this function's other two call sites
+(`parse_metadata_tabular_section_properties`'s non-`DataProcessor` branch,
+`http_service_child_candidates_from_text`) because the corpus survey that
+found 3,000+ real short-header hits at the Catalog/DataProcessor
+attribute-Pattern call site was cut short by the disk-space emergency
+before reaching those object kinds. Followed up here with cheap, targeted
+`cf extract` calls instead of a full corpus re-export, per the coordinator's
+guidance (see Operational note):
+
+- **`http_service_child_candidates_from_text`:** all 7 real HTTPServices in
+  `uh` extracted directly by their own top-level uuid (`edo`,
+  `exchange_dsl_1_0_0_1`, `Биллинг`, `ОткрытаяАвторизацияПочтовогоСервиса`,
+  `ПередачаДанных`, `СерверЛояльности`, `ЭДО`). 144 URL-template/method
+  headers total across the seven, **zero** short-form (`"2,"`-tagged)
+  occurrences -- all 144 are the full 9-member `"3,"` form. **Checked,
+  short form not observed for this call site in the real `uh` corpus.**
+  This pass's fix to the shared function is still correct and non-
+  regressive either way (the real-layout HTTPService test still passes
+  unchanged), just not currently load-bearing here.
+- **`parse_metadata_tabular_section_properties`'s non-`DataProcessor`
+  branch:** checking this surfaced a *different*, independently confirmed
+  bug, unrelated to the short/full header ambiguity this pass's main fix
+  targeted. Real bytes (`cf extract` on `uh`'s `Catalogs/
+  АналитическаяПодписка`, tabular section `РассылаемыеСостояния`, uuid
+  `a1797ec2-1651-4dba-a3b6-8b2c07c2fcd1`, real non-default `ToolTip` =
+  "Состояния показателей, в которых будет производиться их рассылка")
+  confirmed via a direct call that `parse_metadata_tabular_section_
+  properties("Catalog", ...)` returns an **empty tooltip** for this
+  object -- even though its header is the *full* 9-member form, not the
+  short one. The cause: `innermost_metadata_object_fields_around_header`
+  correctly resolves the 2-member `{0, header}` wrapper (the same shape
+  the DataProcessor branch's own dedicated parser handles differently),
+  but this function's `fields.get(header_index + 1/+2/+4/+5)` reads
+  assume a *much longer* record than those 2 fields -- the real tooltip
+  instead lives in a sibling field of the *outer* `{11, ids..., {0,
+  header}, tag, attributes, tooltip}` envelope (9 top-level members, with
+  the tooltip as the *last* one, after the tabular section's own
+  attribute collection), which nothing currently walks out to. This is a
+  distinct defect from the arity-omission class this document otherwise
+  tracks (it doesn't matter whether the header is short or full -- the
+  offset math is wrong either way) and was not fixed here, for two
+  reasons: it's structurally a different, larger fix (correctly locating
+  and reading the *outer* envelope's own field layout, not just picking
+  the right wrapper level), and its real-world impact could not be
+  confirmed in the time available -- the one real specimen checked did
+  **not** actually go through this legacy function at all.
+  `parse_metadata_tabular_section_properties` is only reached as a
+  fallback when `parse_exact_metadata_tabular_section` (a separate,
+  "strict"/owner-graph-based decoder tried first, mod.rs ~line 16055)
+  returns `None`; for `АналитическаяПодписка`'s tabular section the strict
+  decoder succeeds, so the legacy bug never manifests in that file's
+  actual output (confirmed directly: `parse_exact_metadata_tabular_
+  section(...).flatten().is_some() == true` for this exact input) --
+  consistent with the file being `exact` in the real `uh` parity gate.
+  Whether any real `uh`/`ut`/`ssl` object actually falls through to the
+  legacy path *and* has a non-default tooltip (the only way this bug can
+  surface in real output) is unknown; flagging this precisely, rather than
+  leaving it as a vague "still open," is this follow-up's main
+  contribution -- a future pass should grep the strict decoder's own
+  rejection conditions for which real objects fall through, before
+  attempting a fix.
 - The five `Constants/*.xml` still in `differing` on real `uh` (see
   "Checked and confirmed safe" above) are a separate, unidentified cause
   -- not the `rfind("{16,")` risk this pass ruled out, not investigated
@@ -183,11 +231,18 @@ in this pass to run the `IBCMD_DEBUG_SHORT_HEADER_SCAN` survey that
 produced the 3,000+-hit confirmation above; it was killed mid-run (before
 writing any of the XML tree) when a host disk-space emergency dropped free
 space to 10 GB, per the coordinator's redirect. The WebService short-form
-specimen (`ManagedApplication_1_0_0_1`) was instead found via 19 cheap,
-targeted `cf extract <cf> <object-uuid> <dir>` calls (each a few hundred
-bytes to a few KB) against the real `uh` `1cv8.cf` directly -- CF top-level
-storage element names are the metadata object's own uuid for at least
-WebService, so no full export or XML tree was needed for that lookup. This
-is the cheaper method for "does this specific family's header ever show up
+specimen (`ManagedApplication_1_0_0_1`) and the follow-up HTTPService (7
+objects) and TabularSection-tooltip (1 object) checks above were instead
+found via cheap, targeted `cf extract <cf> <object-uuid> <dir>` calls (each
+a few hundred bytes to a few KB) against the real `uh` `1cv8.cf` directly
+-- CF top-level storage element names are the metadata object's own uuid
+for every family checked this way (WebService, HTTPService, Catalog), so
+no full export or XML tree was needed for any of these lookups. This is
+the cheaper method for "does this specific family's header ever show up
 short" questions and should be preferred over a full corpus run when only
-one or a few object kinds need checking.
+one or a few object kinds need checking; a full-corpus
+`IBCMD_DEBUG_SHORT_HEADER_SCAN`-style survey is still the right tool when
+the question is "does this happen anywhere across the whole corpus" for a
+call site with no small, enumerable object list (as it was for the
+Catalog/DataProcessor attribute-Pattern call site's 3,000+-hit
+confirmation).
