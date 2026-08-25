@@ -13578,27 +13578,36 @@ fn parse_register_standard_attribute_with_comment<'a>(
             expected_type_reduction_mode,
             None,
         )?;
-    // LEAD, not yet fixed: this hardcodes the value-id `"5006"` as the only
-    // admissible `choice_parameter_links` shape. Real ERP УХ 3.2.12.6 bytes
-    // (`AccumulationRegisters/ВыработкаВНА`, uuid
-    // `d0cb999a-42d7-4f4f-9160-fa23808dc40d`, standard attribute
-    // `Recorder`) carry `["5004", "0"]` here instead and refuse at exactly
-    // this check -- confirmed by calling `parse_register_standard_
-    // attribute_with_comment_and_choice_parameter_links` directly on the
-    // real bag (which succeeds) and observing only this final shape check
-    // reject it. `5004` vs `5006` most likely encode which underlying
-    // document-type restriction set applies to the register's specific
-    // `Recorder` (this is the one standard attribute whose value type is
-    // inherently per-register, unlike `Active`/`Period`/etc.), not a fixed
-    // platform constant -- needs a real-bytes survey across more registers
-    // before generalizing this check, out of scope for the pass that added
-    // this comment (see `docs/evidence/arity-literal-audit-20260825.md`'s
-    // "default is not absence" class, which this may or may not belong to).
-    information_register_standard_attribute_nested_values_are(
+    // The empty `ChoiceParameterLinks` record's own leading kind tag is not
+    // pinned at `"5006"` platform-wide: real ERP УХ 3.2.12.6 bytes write
+    // `"5004"` instead, evidenced on two unrelated families sharing this
+    // helper -- `AccumulationRegisters/ВыработкаВНА` (uuid
+    // `d0cb999a-42d7-4f4f-9160-fa23808dc40d`) standard attribute `Recorder`,
+    // and every standard attribute of `Catalogs/ВариантыЗначенийПоказателей`
+    // (uuid `b9cae7bf-ed0e-442b-b5de-d455c3fa1fc5`, 9 occurrences, all
+    // `{5004,0}`). Both are otherwise-well-formed, real bytes with no other
+    // fault: `parse_register_standard_attribute_with_comment_and_choice_
+    // parameter_links` succeeds on both, and this final shape check was the
+    // only rejection point. Before this, one unrecognized kind tag on any
+    // standard attribute aborted the whole owning object's export (`?`
+    // chains up through `parse_exact_register_standard_attributes` and
+    // similar), surfacing as "no legacy family decoder recognized this
+    // storage entry" -- the corpus's largest still-`missing` root-cause
+    // bucket (151 opaque roots at 2ccd98f, Catalogs alone accounting for
+    // 72). Not treated as "accept any kind tag with a zero count": only the
+    // two values actually observed on real bytes are accepted, per this
+    // project's fail-closed doctrine (see `docs/evidence/arity-literal-
+    // audit-20260825.md`) -- a third value should be evidenced before being
+    // added here, not assumed safe by pattern alone.
+    (information_register_standard_attribute_nested_values_are(
         choice_parameter_links,
         INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
         &["5006", "0"],
-    )
+    ) || information_register_standard_attribute_nested_values_are(
+        choice_parameter_links,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+        &["5004", "0"],
+    ))
     .then_some((attribute, comment))
 }
 

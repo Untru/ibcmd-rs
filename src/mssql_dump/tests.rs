@@ -62581,6 +62581,33 @@ fn accumulation_register_exports_with_no_customized_standard_attributes() {
     assert!(!xml.contains("<StandardAttribute"));
 }
 
+/// Real ERP УХ 3.2.12.6 bytes write kind tag `5004` for an empty
+/// `ChoiceParameterLinks` record (`AccumulationRegisters/ВыработкаВНА`'s
+/// `Recorder` standard attribute, and every standard attribute of
+/// `Catalogs/ВариантыЗначенийПоказателей`), not only the `5006` this
+/// fixture helper's default value uses. Before this, that one unrecognized
+/// kind tag on any standard attribute refused the whole register/Catalog/
+/// etc. export via `parse_register_standard_attribute`'s callers, not just
+/// this one detail. Negative control: reverting the second `||` branch in
+/// `parse_register_standard_attribute_with_comment` makes this fail
+/// (confirmed by hand).
+#[test]
+fn register_standard_attribute_accepts_choice_parameter_links_kind_5004() {
+    let mut values = information_register_standard_attribute_values_for_test("Active", false);
+    values[21] = format!(
+        "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5004,0}}}}"
+    );
+    let bag_text = information_register_standard_attribute_bag_from_values_for_test(&values, false);
+    let bag = parse_information_register_standard_attribute_bag(&bag_text)
+        .expect("bag with a 5004 choice-parameter-links kind tag must still parse");
+    let attribute = parse_register_standard_attribute("Active", &bag, MetadataChildFillValue::Nil);
+    assert!(
+        attribute.is_some(),
+        "a standard attribute whose empty ChoiceParameterLinks carries kind tag 5004 \
+         must not be refused"
+    );
+}
+
 #[test]
 fn accumulation_totals_rejects_malformed_exact_slot_atomically() {
     for malformed in ["", "value", "-1", "2", "00", "01", "4294967296", "{0}"] {
