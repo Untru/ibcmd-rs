@@ -231,6 +231,15 @@ pub(super) fn metadata_kind_for_source_folder(folder: &str) -> Option<&'static s
         "Tasks" => Some("Task"),
         "ExchangePlans" => Some("ExchangePlan"),
         "SettingsStorages" => Some("SettingsStorage"),
+        // Same 18-family list metadata_kind_can_own_forms carries (see its
+        // doc comment) -- folder name here, not the "FilterCriterion" kind
+        // token that owns forms. Missing this entry turned the ERP УХ
+        // FilterCriteria/<owner>/Forms/ФормаСписка.xml fix into a fatal
+        // `cf export` abort ("form <uuid> has no canonical metadata
+        // reference", write_config_dump_info in config_dump_info.rs) instead
+        // of a routed form, because form_source_reference_name synthesizes
+        // the ConfigDumpInfo.xml canonical reference from this map.
+        "FilterCriteria" => Some("FilterCriterion"),
         _ => None,
     }
 }
