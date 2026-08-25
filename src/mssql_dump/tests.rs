@@ -71174,6 +71174,45 @@ fn extracts_non_predefined_bot_with_picture_to_platform_proven_xml() {
     );
 }
 
+/// `parse_bot_properties_from_text` hardcoded `text[..marker_start].rfind
+/// ("{3,")` for the Bot header -- no length check at all, not even the
+/// bare-arity form the other five sites this pass fixed had; its own doc
+/// comment stated the header was "the generic
+/// `{3,{1,0,uuid},Name,Synonym,Comment,0,0,NilUuid,0}` shape" as if that
+/// were the only form. Neither real Bot fixture captured for this project
+/// (`bot-a-predefined-no-picture.txt` / `bot-b-not-predefined-with-
+/// picture.txt`, both above) or the one real Bot object across this
+/// project's seven gate corpora (`Bots/ОповещенияПользователейОСобытиях`)
+/// happens to carry a short header, so unlike this pass's other fixes this
+/// one has no corpus-observed short-form specimen -- this fixture is
+/// mechanically derived from the real `bot-a-predefined-no-picture.txt`
+/// capture (drop the trailing default `0`, `"3"` -> `"2"`), the same
+/// omission rule already independently confirmed on real bytes six times
+/// elsewhere in this file for this identical header grammar production, not
+/// an independently-observed Bot specimen.
+#[test]
+fn parses_bot_properties_with_short_header_wrapper() {
+    let bot_uuid = "4c9fe47d-8f20-4d84-9df8-a7276405f4e0";
+    let short_text = concat!(
+        "{1,\n",
+        "{1,\n",
+        "{2,\n",
+        "{1,0,4c9fe47d-8f20-4d84-9df8-a7276405f4e0},\"БотА\",\n",
+        "{1,\"ru\",\"Бот А\"},\"\",0,0,00000000-0000-0000-0000-000000000000},1,\n",
+        "{4,0,\n",
+        "{0},\"\",-1,-1,1,0,\"\"}\n",
+        "},0}",
+    );
+    let properties = parse_bot_properties_from_text(short_text, bot_uuid, &BTreeMap::new())
+        .expect("short (8-member, discriminator \"2\") Bot header must not be rejected outright");
+    assert!(properties.predefined);
+    assert_eq!(properties.picture_ref, None);
+
+    // Negative control: the pre-fix code's bare `rfind("{3,")` never finds
+    // this text's `"{2,"`-tagged header at all.
+    assert!(!short_text.contains("{3,"));
+}
+
 /// Evidence: fixture `graphical-schema-field-leftwidest-page`, a minimal
 /// synthetic Form seeded on the Web_Service skeleton and round-tripped
 /// through platform 8.3.27.2214: one `Page` (`Group=Horizontal`,

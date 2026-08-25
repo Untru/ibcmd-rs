@@ -29429,11 +29429,27 @@ fn parse_defined_type_properties_from_text(
 
 /// Parses `Bot.Predefined` and `Bot.Picture` from the record's own text. See
 /// `BotProperties` for the evidence (seed `bots`). The header block is the
-/// generic `{3,{1,0,uuid},Name,Synonym,Comment,0,0,NilUuid,0}` shape already
-/// used by `parse_metadata_header_from_text`; `Predefined` is the bare digit
-/// immediately after it, and the picture descriptor is the trailing `{4,...}`
-/// block, decoded by the same reader `CommonCommand.Picture` uses since the
-/// two tuples share their shape byte for byte.
+/// generic `{1,0,uuid},Name,Synonym,Comment,0,0,NilUuid,0}` shape already
+/// used by `parse_metadata_header_from_text` -- full form (9 members,
+/// discriminator `"3"`) or short form (8 members, `"2"`, the platform's
+/// trailing-default-`0` omission `parse_information_register_owner_header`
+/// (`0575505`) and five other call sites in this file document for this
+/// exact grammar production); `Predefined` is the bare digit immediately
+/// after it, and the picture descriptor is the trailing `{4,...}` block,
+/// decoded by the same reader `CommonCommand.Picture` uses since the two
+/// tuples share their shape byte for byte.
+///
+/// The one real Bot object available across this project's seven gate
+/// corpora (`Bots/ОповещенияПользователейОСобытиях`, shared by `uh`/`ut`)
+/// happens to use the full form, so the short form is not corpus-confirmed
+/// here the way it is for the other sites in this pass -- but this is the
+/// same shared header production already independently confirmed short-
+/// form-capable on real bytes at six other call sites, and this function's
+/// own doc comment already assumed the fixed 9-member shape outright with
+/// no length check at all, the purest instance of the recurring defect
+/// class this pass audited for. `enclosing_counted_block_start` reads the
+/// block's own declared count back from the text instead of assuming a
+/// literal `"{3,"`, so it accepts either form without an explicit branch.
 fn parse_bot_properties_from_text(
     text: &str,
     uuid: &str,
@@ -29441,7 +29457,7 @@ fn parse_bot_properties_from_text(
 ) -> Option<BotProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
-    let header_start = text[..marker_start].rfind("{3,")?;
+    let header_start = enclosing_counted_block_start(text, marker_start)?;
     let header_end = scan_1c_braced_value(text, header_start)?;
     let mut offset = expect_comma_at(text, header_end)?;
     offset = skip_ascii_ws_at(text, offset);
