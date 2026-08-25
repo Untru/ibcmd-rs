@@ -2937,6 +2937,8 @@ pub(super) fn collect_form_body_events(
 }
 
 pub(super) fn is_form_child_item_fields(fields: &[&str]) -> bool {
+    let revision_fields = normalize_form_item_record_revision(fields);
+    let fields = revision_fields.as_deref().unwrap_or(fields);
     let Some(wrapper) = fields.first().map(|value| value.trim()) else {
         return false;
     };
@@ -3182,21 +3184,23 @@ pub(super) fn form_item_picture_owner_at(
         if end <= marker_start {
             continue;
         }
-        let Some(fields) = split_1c_braced_fields(&text[start..end], 0) else {
+        let Some(split_fields) = split_1c_braced_fields(&text[start..end], 0) else {
             continue;
         };
+        let revision_fields = normalize_form_item_record_revision(&split_fields);
+        let fields = revision_fields.as_deref().unwrap_or(&split_fields);
         let Some(wrapper) = fields.first().map(|field| field.trim()) else {
             continue;
         };
-        if form_child_item_id(&fields).is_none() {
+        if form_child_item_id(fields).is_none() {
             continue;
         }
         let Some(property_name) =
-            form_item_picture_property_at(text, marker_start, wrapper, &fields)
+            form_item_picture_property_at(text, marker_start, wrapper, fields)
         else {
             continue;
         };
-        if let Some(item_name) = parse_form_child_item_name(wrapper, &fields) {
+        if let Some(item_name) = parse_form_child_item_name(wrapper, fields) {
             return Some((item_name, property_name));
         }
     }
@@ -8433,12 +8437,14 @@ fn collect_form_child_item_indexes_from_field_traced(
     owner_chain: &[String],
     trace_occurrence: &mut usize,
 ) {
-    let Some(raw_fields) = split_1c_braced_fields(field.trim(), 0) else {
+    let Some(split_fields) = split_1c_braced_fields(field.trim(), 0) else {
         return;
     };
+    let revision_fields = normalize_form_item_record_revision(&split_fields);
+    let raw_fields = revision_fields.as_deref().unwrap_or(&split_fields);
     let wrapper = raw_fields.first().map(|field| field.trim());
     let conditional_table_schema =
-        wrapper.and_then(|wrapper| form_conditional_table_schema(wrapper, &raw_fields));
+        wrapper.and_then(|wrapper| form_conditional_table_schema(wrapper, raw_fields));
     let normalized_fields = conditional_table_schema.map(|schema| {
         raw_fields
             .iter()
@@ -9213,10 +9219,12 @@ fn parse_form_child_item_with_metadata_owners(
     object_refs: &BTreeMap<String, String>,
     parent_child_items_width: Option<&'static str>,
 ) -> Option<FormChildItem> {
-    let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let split_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let revision_fields = normalize_form_item_record_revision(&split_fields);
+    let raw_fields = revision_fields.as_deref().unwrap_or(&split_fields);
     let wrapper = raw_fields.first()?.trim();
-    let conditional_group_schema = form_conditional_group_schema(wrapper, &raw_fields);
-    let conditional_table_schema = form_conditional_table_schema(wrapper, &raw_fields);
+    let conditional_group_schema = form_conditional_group_schema(wrapper, raw_fields);
+    let conditional_table_schema = form_conditional_table_schema(wrapper, raw_fields);
     // The conditional prefix carries the flag both ways: `false` is the
     // non-default state the platform writes `<UserVisible>` for, and `true` is
     // the default state it writes nothing for. Every previously evidenced
@@ -16331,6 +16339,89 @@ fn form_conditional_table_schema(
     )
 }
 
+/// Placeholder for a trailing member a short item-record revision does not
+/// carry.  Deliberately unparseable as a 1C scalar, quoted string or block, so
+/// a reader that reaches one refuses (doctrine point 2) instead of reading a
+/// fabricated default (doctrine point 6).
+const FORM_ITEM_ABSENT_MEMBER: &str = "\u{1}absent";
+
+/// The canonical revision of an item record whose own leading member declares
+/// a shorter one, and how many trailing members that shorter revision drops.
+///
+/// The platform declares a form item's *class* with the uuid it writes
+/// immediately before the item's record; the record's own leading member is
+/// not a type code but its declared length, so one class ships under more than
+/// one leading member as the schema gains trailing properties.  Over every
+/// item record of all seven gate corpora (459 639 records) `field_count -
+/// wrapper` is a per-class constant taking exactly two values -- `22`/`23` for
+/// the field class, `44`.. for `Table`'s variable column tail, `21`/`22` for
+/// `Button`, `24`/`25` for the decorations -- and the shorter revision is a
+/// *tail* truncation of the canonical one, member for member: all 296 ERP УХ
+/// `Table` records written under `54` reproduce a `55` record's slot shape
+/// minus its final member, and all 2 104 field records written under `34`
+/// reproduce a `37` record's minus its final three.  The trailing scalar runs
+/// confirm it independently and exactly -- `Table` `55`/`54` end in 16/15
+/// scalars, the field class `37`/`35`/`34` in 6/4/3.
+///
+/// Normalizing the leading member to the canonical revision and padding the
+/// dropped trailing members back as absent therefore leaves every forward slot
+/// at its own index, keeps every end-anchored offset (`FormTableSchema`'s
+/// reverse offsets, `FormChildItemDisplayImportanceSchema`'s `field_count - 4`
+/// and `- 3`, `FormChildItemVisibleSchema`'s `field_count - 35`) pointing at
+/// the member it named before, and restores the parity the counted-pair gates
+/// key off: an unprefixed `54` record is even-length where the `55` one is
+/// odd, and the `+ 1` puts it back.
+///
+/// Only the two revisions evidenced by that measurement are admitted here.
+/// `Button` `30` (111 records) and the decorations' `11` (102) have the same
+/// shape but have not had their own byte-level pass -- see
+/// `docs/evidence/uh-form-item-tree-revision-map-20260825.md`.  Wrapper `35`
+/// keeps the separate handling it already has; it is not normalized, because
+/// unlike `34` it occurs outside ERP УХ (ERP УХ MDM_Management) where the
+/// existing arms are already proven against native bytes.
+fn form_item_record_canonical_revision(
+    wrapper: &str,
+    field_count: usize,
+) -> Option<(&'static str, usize)> {
+    match wrapper {
+        // `Table`'s tail is variable (its columns), so the only arity fact
+        // available is the canonical revision's own floor: `FormTableSchema`
+        // refuses anything under 99 members, and the short revision carries one
+        // fewer. Observed `54` lengths run 99..170, so the floor never excludes
+        // a real record.
+        "54" if field_count >= 98 => Some(("55", 1)),
+        // The field class's arity invariant, measured over all 122 058 of its
+        // records: `field_count - wrapper` is 22 with the name at slot 6 and 23
+        // with the conditional `UserVisible`-common tuple at slot 5 pushing it
+        // to slot 7. All 2 104 platform `34` records are 56 or 57 members.
+        //
+        // The guard is not decoration. This codebase's *own* base-free packer
+        // (`module_blob::format_form_layout_new_button_item`) writes a synthetic
+        // short `Button` record under the same leading member `34`, roughly ten
+        // members long, and `compiler::bodies::form`'s roundtrip tests read it
+        // back. Keying on the declared arity keeps the two apart: a platform
+        // field record normalizes, the packer's own button does not and stays
+        // with the `Button` arm below.
+        "34" if matches!(field_count, 56 | 57) => Some(("37", 3)),
+        _ => None,
+    }
+}
+
+/// Rewrite a short item-record revision into its canonical one, or `None` when
+/// the record already declares the canonical revision (the overwhelmingly
+/// common case, which stays allocation-free).
+fn normalize_form_item_record_revision<'a>(fields: &[&'a str]) -> Option<Vec<&'a str>> {
+    let wrapper = fields.first()?.trim();
+    let (canonical, dropped_trailing) = form_item_record_canonical_revision(wrapper, fields.len())?;
+    let mut normalized = Vec::with_capacity(fields.len() + dropped_trailing);
+    normalized.push(canonical);
+    normalized.extend(fields[1..].iter().copied());
+    for _ in 0..dropped_trailing {
+        normalized.push(FORM_ITEM_ABSENT_MEMBER);
+    }
+    Some(normalized)
+}
+
 pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
     match wrapper {
         "22" => match fields
@@ -20811,12 +20902,14 @@ pub(super) fn collect_form_table_column_names_for_table(
         if !field.starts_with('{') {
             continue;
         }
-        let Some(nested) = split_1c_braced_fields(field, 0) else {
+        let Some(split_nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
+        let revision_nested = normalize_form_item_record_revision(&split_nested);
+        let nested = revision_nested.as_deref().unwrap_or(&split_nested);
         let wrapper = nested.first().map(|value| value.trim()).unwrap_or_default();
         if matches!(
-            form_child_item_tag(wrapper, &nested),
+            form_child_item_tag(wrapper, nested),
             Some("InputField" | "LabelField")
         ) && let Some(identity) = nested
             .get(1)
