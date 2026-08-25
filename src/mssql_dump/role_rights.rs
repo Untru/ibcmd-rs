@@ -112,6 +112,19 @@ pub(super) fn parse_role_rights_blob(
         if !is_uuid_text(object_uuid) {
             return None;
         }
+        if !object_refs.contains_key(object_uuid) {
+            // A reference to metadata that no longer exists. The platform
+            // drops the whole `<object>` rather than printing the bare uuid:
+            // measured on ERP УХ 3.2.12.6 (2026-08-25), 578 such uuids occur
+            // across 13 role Rights blobs, none of them is declared anywhere
+            // in the 187,101-uuid `uuid="..."` inventory of the native source
+            // tree, and native prints no `<object>` for a single one of them.
+            // The platform makes the same admission elsewhere for these very
+            // uuids -- `Subsystems/.../Ext/CommandInterface.xml` carries them
+            // as unresolved `0:<uuid>` command names -- so this is its own
+            // behaviour on a dangling reference, not a guess about ours.
+            continue;
+        }
         let object_name = role_object_ref_name(&object_ref, object_refs)?;
 
         let (rights, has_conditionless_restrictions) =
@@ -157,9 +170,15 @@ pub(super) fn role_rights_object_intra_uuid_order(
     fields: &[&str],
     object_name: &str,
 ) -> Option<usize> {
-    let kind_code = fields.get(2).map(|field| field.trim());
-    let slot_code = fields.get(3).map(|field| field.trim())?;
-    role_standard_attribute_sort_order(object_name, kind_code, slot_code)
+    // Only a braced `{slot, family}` reference carries a print order; a bare
+    // integer slot leaves the object in serialized order. Pre-existing rule,
+    // kept as it was: every slot code in every ERP УХ 3.2.12.6 role Rights
+    // blob is braced, so no measurement here can speak to the bare form.
+    if !fields.get(3)?.trim_start().starts_with('{') {
+        return None;
+    }
+    let (kind, _) = object_name.split_once('.')?;
+    role_nested_ref_suffix(kind, fields).map(|(_, order)| order)
 }
 
 pub(super) fn role_object_ref_name(
@@ -170,52 +189,183 @@ pub(super) fn role_object_ref_name(
     if !is_uuid_text(uuid) {
         return None;
     }
-    let base_name = object_refs
-        .get(uuid)
-        .cloned()
-        .unwrap_or_else(|| uuid.to_string());
-    let kind_code = fields.get(2).map(|field| field.trim());
-    let slot_code = fields.get(3).map(|field| field.trim());
-    role_standard_attribute_ref_name(&base_name, kind_code, slot_code).or(Some(base_name))
+    // Callers skip entries whose uuid is not in `object_refs` (see
+    // `parse_role_rights_blob`), so a miss here is a caller bug, not a
+    // dangling reference, and is refused rather than named after its uuid.
+    let base_name = object_refs.get(uuid).cloned()?;
+    let Some((kind, _)) = base_name.split_once('.') else {
+        return Some(base_name);
+    };
+    match role_nested_ref_suffix(kind, fields) {
+        Some((suffix, _)) => Some(format!("{base_name}.{suffix}")),
+        None => Some(base_name),
+    }
 }
 
-pub(super) fn role_standard_attribute_ref_name(
-    base_name: &str,
-    kind_code: Option<&str>,
-    slot_code: Option<&str>,
-) -> Option<String> {
-    if kind_code != Some("1") {
+/// Family uuid a nested reference's slot carries for an ordinary standard
+/// attribute, and for a standard tabular section.
+///
+/// Both are platform-fixed: every `{slot, family}` pair observed in an ERP УХ
+/// 3.2.12.6 role Rights blob uses `STANDARD_ATTRIBUTE_FAMILY` except the
+/// chart-of-accounts `ExtDimensionTypes` section, which uses
+/// `STANDARD_TABULAR_SECTION_FAMILY`.
+const STANDARD_ATTRIBUTE_FAMILY: &str = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+const STANDARD_TABULAR_SECTION_FAMILY: &str = "28db313d-dbc2-4b83-8c4a-d2aeee708062";
+
+/// The two families an accounting register's ext-dimension pair is split
+/// across: `{n, EXT_DIMENSION_FAMILY}` is `ExtDimension<n+1>`,
+/// `{n, EXT_DIMENSION_TYPE_FAMILY}` is `ExtDimensionType<n+1>`.
+const EXT_DIMENSION_FAMILY: &str = "91162600-3161-4326-89a0-4a7cecd5092a";
+const EXT_DIMENSION_TYPE_FAMILY: &str = "b3b48b29-d652-47ab-9d21-7e06768c31b5";
+
+/// Name suffix (everything after `Kind.Name.`) and intra-owner print order of
+/// a nested role-rights reference, or `None` when the reference names the
+/// owner itself.
+///
+/// `fields` is the reference's own braced list: `{1, uuid}` for the owner,
+/// `{1, uuid, 1, {slot, family}, …}` for a standard attribute or a standard
+/// tabular section, and `{1, uuid, 2, {slot, family}, {slot, family}, …}` for
+/// something nested one level deeper (a standard tabular section's own
+/// standard attribute, an accounting register's ext-dimension pair).
+///
+/// ## How the slot tables were measured (ERP УХ 3.2.12.6, 2026-08-25)
+///
+/// A metadata object's storage element declares its standard attributes in
+/// one list, each entry `{slot[,family]},510405d3-2a0c-4fea-960a-7fee59b32f9b`,
+/// and the platform writes that same list, in that same order and with the
+/// same length, as the object's `<StandardAttributes>` block in its native
+/// XML. Pairing the two by position gives slot -> name directly. Checked
+/// against the two kinds whose tables were already corpus-hardened here:
+/// `Catalogs/Организации` yields exactly the nine `Catalog` rows below
+/// (`-13` PredefinedDataName … `-2` Code), and `AccountingRegisters/МСФО`
+/// yields the four register rows (`-5` Active, `-4` LineNumber, `-3`
+/// Recorder, `-2` Period) -- 13/13 agreements, no disagreement.
+/// (`Document`'s existing rows pair the same five slots in the opposite
+/// order; nothing in any corpus can tell the two apart -- see the order note
+/// below -- so they are left exactly as they were.)
+///
+/// The `order` half is measured separately and directly, from the native
+/// `Roles/*/Ext/Rights.xml` print sequence inside one owner's `<object>`
+/// group. It is what the export actually depends on: across all 10,619
+/// standard-attribute groups in the whole 2,118-role ERP УХ corpus, exactly
+/// one (`Catalog.СоответствиеВнешнимИБ` in `Roles/БазовыеПраваБПУХ`) prints
+/// two different right lists inside a group, so which *name* a slot carries
+/// is almost never observable, while the order they print in always is.
+fn role_nested_ref_suffix(kind: &str, fields: &[&str]) -> Option<(String, usize)> {
+    let kind_code = fields.get(2).map(|field| field.trim())?;
+    let outer = role_nested_slot(fields.get(3)?)?;
+    match kind_code {
+        "1" => {
+            if outer.family == Some(STANDARD_TABULAR_SECTION_FAMILY) {
+                let (section, order) = role_standard_tabular_section(kind, outer.slot)?;
+                return Some((format!("StandardTabularSection.{section}"), order));
+            }
+            let slot_index = usize::try_from(outer.slot).ok();
+            let (attribute, order) =
+                role_standard_attribute_descriptor(kind, outer.slot, slot_index)?;
+            Some((format!("StandardAttribute.{attribute}"), order))
+        }
+        "2" => {
+            let inner = role_nested_slot(fields.get(4)?)?;
+            if outer.family == Some(STANDARD_TABULAR_SECTION_FAMILY) {
+                let (section, _) = role_standard_tabular_section(kind, outer.slot)?;
+                let (attribute, order) = role_standard_tabular_section_attribute(kind, inner.slot)?;
+                return Some((
+                    format!("StandardTabularSection.{section}.StandardAttribute.{attribute}"),
+                    order,
+                ));
+            }
+            role_ext_dimension_descriptor(kind, outer, inner)
+                .map(|(attribute, order)| (format!("StandardAttribute.{attribute}"), order))
+        }
+        _ => None,
+    }
+}
+
+/// A nested reference's `{slot, family}` pair, or a bare slot number.
+#[derive(Clone, Copy)]
+struct RoleNestedSlot<'a> {
+    slot: isize,
+    family: Option<&'a str>,
+}
+
+fn role_nested_slot(slot_code: &str) -> Option<RoleNestedSlot<'_>> {
+    let slot_code = slot_code.trim();
+    if let Ok(slot) = slot_code.parse::<isize>() {
+        return Some(RoleNestedSlot { slot, family: None });
+    }
+    let fields = split_1c_braced_fields(slot_code, 0)?;
+    let slot = fields.first()?.trim().parse::<isize>().ok()?;
+    let family = fields
+        .get(1)
+        .map(|field| field.trim())
+        .filter(|field| is_uuid_text(field));
+    Some(RoleNestedSlot { slot, family })
+}
+
+/// The one standard tabular section any role Rights blob refers to: the
+/// chart of accounts' `ExtDimensionTypes`, slot `-12` in
+/// `STANDARD_TABULAR_SECTION_FAMILY`. Its order sits between `Order` (2) and
+/// its own four attributes (4..=7), exactly as native prints the group -- see
+/// `Roles/БазовыеПраваУХ`, `ChartOfAccounts.Хозрасчетный`. No other kind is
+/// observed carrying a standard tabular section, so no other kind is named.
+fn role_standard_tabular_section(kind: &str, slot: isize) -> Option<(&'static str, usize)> {
+    match (kind, slot) {
+        ("ChartOfAccounts", -12) => Some(("ExtDimensionTypes", 3)),
+        _ => None,
+    }
+}
+
+/// Standard attributes of the chart of accounts' `ExtDimensionTypes` section.
+/// Slots from the chart's own storage element (`-15`, `-14`, `-13`, `-12`,
+/// paired positionally with the tail of its `<StandardAttributes>` block);
+/// order from the native Rights print sequence.
+fn role_standard_tabular_section_attribute(
+    kind: &str,
+    slot: isize,
+) -> Option<(&'static str, usize)> {
+    if kind != "ChartOfAccounts" {
         return None;
     }
-    let slot = role_standard_attribute_slot(slot_code?)?;
-    let slot_index = usize::try_from(slot).ok();
-    let (kind, _) = base_name.split_once('.')?;
-    let attribute = role_standard_attribute_descriptor(kind, slot, slot_index)?.0;
-    Some(format!("{base_name}.StandardAttribute.{attribute}"))
+    match slot {
+        -15 => Some(("TurnoversOnly", 4)),
+        -14 => Some(("Predefined", 5)),
+        -13 => Some(("ExtDimensionType", 6)),
+        -12 => Some(("LineNumber", 7)),
+        _ => None,
+    }
 }
 
-pub(super) fn role_standard_attribute_slot(slot_code: &str) -> Option<isize> {
-    slot_code.parse::<isize>().ok().or_else(|| {
-        split_1c_braced_fields(slot_code, 0)?
-            .first()?
-            .trim()
-            .parse::<isize>()
-            .ok()
-    })
-}
-
-pub(super) fn role_standard_attribute_sort_order(
-    base_name: &str,
-    kind_code: Option<&str>,
-    slot_code: &str,
-) -> Option<usize> {
-    if kind_code != Some("1") || !slot_code.trim_start().starts_with('{') {
+/// An accounting register's `ExtDimension<n>` / `ExtDimensionType<n>` pair.
+///
+/// Unlike every other standard attribute these are generated per ext-dimension
+/// slot of the register's chart of accounts, so they carry an index rather
+/// than a fixed negative slot: outer `{n, STANDARD_ATTRIBUTE_FAMILY}`, inner
+/// `{n, EXT_DIMENSION_FAMILY | EXT_DIMENSION_TYPE_FAMILY}`. The family split
+/// and the `n -> n + 1` numbering come from pairing
+/// `AccountingRegisters/МСФО`'s eleven element entries with its eleven
+/// `<StandardAttributes>` names, and again from
+/// `AccountingRegisters/МеждународныйБезКорреспонденции`'s twelve; both
+/// agree. They print after `Period` (6), interleaved `ExtDimension1`,
+/// `ExtDimensionType1`, `ExtDimension2`, … -- see `Roles/ЧтениеДанныхМСФОУХ`.
+fn role_ext_dimension_descriptor(
+    kind: &str,
+    outer: RoleNestedSlot<'_>,
+    inner: RoleNestedSlot<'_>,
+) -> Option<(String, usize)> {
+    if kind != "AccountingRegister" || outer.family != Some(STANDARD_ATTRIBUTE_FAMILY) {
         return None;
     }
-    let slot = role_standard_attribute_slot(slot_code)?;
-    let slot_index = usize::try_from(slot).ok();
-    let (kind, _) = base_name.split_once('.')?;
-    role_standard_attribute_descriptor(kind, slot, slot_index).map(|(_, order)| order)
+    let index = usize::try_from(inner.slot).ok()?;
+    if outer.slot != inner.slot {
+        return None;
+    }
+    let (stem, offset) = match inner.family? {
+        EXT_DIMENSION_FAMILY => ("ExtDimension", 0),
+        EXT_DIMENSION_TYPE_FAMILY => ("ExtDimensionType", 1),
+        _ => return None,
+    };
+    Some((format!("{stem}{}", index + 1), 7 + index * 2 + offset))
 }
 
 pub(super) fn role_standard_attribute_descriptor(
@@ -322,11 +472,76 @@ pub(super) fn role_standard_attribute_descriptor(
             3 | -4 => Some(("LineNumber", 3)),
             _ => None,
         },
-        "AccountingRegister" | "CalculationRegister" | "InformationRegister" => match slot {
+        "AccountingRegister" => match slot {
+            // Slots from `AccountingRegisters/МСФО` and
+            // `.../МеждународныйБезКорреспонденции`, paired positionally with
+            // their `<StandardAttributes>` blocks (11/11 and 12/12); order
+            // from the native Rights print sequence, which puts `Account` and
+            // `RecordType` ahead of the four a register shares with the other
+            // kinds, then the ext-dimension pairs (7 onward, see
+            // `role_ext_dimension_descriptor`). `Roles/ЧтениеДанныхМСФОУХ`
+            // prints the 11-member group, `Roles/БазовыеПраваБПУХ` the
+            // 12-member one with `RecordType`.
+            -10 => Some(("Account", 1)),
+            -9 => Some(("RecordType", 2)),
+            0 | -5 => Some(("Active", 3)),
+            3 | -4 => Some(("LineNumber", 4)),
+            2 | -3 => Some(("Recorder", 5)),
+            1 | -2 => Some(("Period", 6)),
+            _ => None,
+        },
+        "CalculationRegister" | "InformationRegister" => match slot {
             0 | -5 => Some(("Active", 1)),
             1 | -2 => Some(("Period", 4)),
             2 | -3 => Some(("Recorder", 3)),
             3 | -4 => Some(("LineNumber", 2)),
+            _ => None,
+        },
+        "DocumentJournal" => match slot {
+            // `DocumentJournals/ДокументыБюджетирования` and
+            // `.../ОперацииСЦеннымиБумагами` both declare the same six slots
+            // in the same order as their `<StandardAttributes>` block, and
+            // native prints the group in that order too -- all 124
+            // DocumentJournal groups in the corpus print all six.
+            -60003 => Some(("Type", 1)),
+            -101 => Some(("Ref", 2)),
+            -100 => Some(("Date", 3)),
+            -7 => Some(("Posted", 4)),
+            -4 => Some(("DeletionMark", 5)),
+            -2 => Some(("Number", 6)),
+            _ => None,
+        },
+        "Task" => match slot {
+            // `Tasks/БюджетнаяЗадача` and `Tasks/ЗадачаИсполнителя` agree on
+            // all eight; order confirmed against
+            // `Roles/ЧтениеВыполнениеБюджетныхЗадач`.
+            -10 => Some(("Executed", 1)),
+            -9 => Some(("Description", 2)),
+            -8 => Some(("RoutePoint", 3)),
+            -7 => Some(("BusinessProcess", 4)),
+            -5 => Some(("Ref", 5)),
+            -4 => Some(("DeletionMark", 6)),
+            -3 => Some(("Date", 7)),
+            -2 => Some(("Number", 8)),
+            _ => None,
+        },
+        "ChartOfAccounts" => match slot {
+            // `ChartsOfAccounts/МСФО` and `.../Хозрасчетный` declare the same
+            // fourteen entries; the first ten are these, the last four belong
+            // to the `ExtDimensionTypes` section (see
+            // `role_standard_tabular_section_attribute`). Orders 3..=7 are
+            // that section and its attributes, which native prints between
+            // `Order` and `OffBalance` -- see `Roles/БазовыеПраваУХ`.
+            -28 => Some(("PredefinedDataName", 1)),
+            -17 => Some(("Order", 2)),
+            -11 => Some(("OffBalance", 8)),
+            -10 => Some(("Type", 9)),
+            -8 => Some(("Description", 10)),
+            -7 => Some(("Code", 11)),
+            -6 => Some(("Parent", 12)),
+            -5 => Some(("Predefined", 13)),
+            -4 => Some(("DeletionMark", 14)),
+            -2 => Some(("Ref", 15)),
             _ => None,
         },
         _ => None,
