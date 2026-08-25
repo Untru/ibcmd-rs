@@ -5609,16 +5609,69 @@ pub(crate) struct FormRootAutoUrlSchema {
 }
 
 impl FormRootAutoUrlSchema {
-    const AUTO_URL_SLOT: usize = 3;
+    /// The root trailer declares how many optional blocks sit ahead of
+    /// `AutoURL`, and the flag is read from that declared count rather than
+    /// from the trailer's overall length.
+    ///
+    /// Trailer member 2 is that count. Where it reads `0` the trailer is 24
+    /// members long and `AutoURL` follows immediately at index 3; where it
+    /// reads `1` a single `{22,...}` block sits between them, the trailer is
+    /// 25 members long, and `AutoURL` moves to index 4. Both shapes are the
+    /// same layout, so the slot is `3 + count`, never a per-arity constant:
+    ///
+    /// ```text
+    /// count 0 (БСП):  "" | "" | 0 |              1 | "" | 0 0 0 0 0 0 | ...
+    /// count 1 (УХ):   "" | "" | 1 | {22,{0},0,0,0,} | 0 | "" | 0 0 0 0 0 0 | ...
+    ///                            ^         block      ^
+    ///                          count                AutoURL
+    /// ```
+    ///
+    /// Measured over all 18 634 root `50` forms the export walks on the stand,
+    /// member 2 equals `trailer.len() - 24` on every single one, with no
+    /// exception, and the member at `3 + count` is `0` on exactly the 587
+    /// forms whose native document carries `<AutoURL>false</AutoURL>` and `1`
+    /// on the other 18 047 -- no form reads anything else, and the two
+    /// populations do not overlap:
+    ///
+    /// | corpus  | count | trailer | `0` (element present) | `1` (absent) |
+    /// |---------|------:|--------:|----------------------:|-------------:|
+    /// | wms     |     0 |      24 |                     0 |            5 |
+    /// | sslbase |     0 |      24 |                    31 |          878 |
+    /// | ssl     |     0 |      24 |                    44 |        1 119 |
+    /// | ut      |     0 |      24 |                   231 |        4 970 |
+    /// | mdm     |     1 |      25 |                     0 |            7 |
+    /// | uh      |     1 |      25 |                   281 |       11 068 |
+    ///
+    /// Reading the count instead of trusting the length also keeps the search
+    /// honest: `from_raw_layout` is handed whichever trailer the tail search
+    /// validated, and a trailer whose declared count disagrees with its own
+    /// length is refused rather than read at a guessed offset.
+    ///
+    /// Root `49` is deliberately left out. Its 1 543 ERP УХ roots put a braced
+    /// group where root `50` keeps the count, and the 3 of them that carry the
+    /// element are too thin a positive population to attribute a slot from, so
+    /// they stay fail-closed.
+    const AUTO_URL_BASE_TRAILER_FIELDS: usize = 24;
+    const AUTO_URL_OPTIONAL_BLOCK_COUNT_SLOT: usize = 2;
+    const AUTO_URL_SLOT_WITHOUT_OPTIONAL_BLOCKS: usize = 3;
 
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
         trailer: &[&str],
     ) -> Option<Self> {
-        if root_discriminator != Some("50") || trailer.len() != 24 {
+        if root_discriminator != Some("50") {
             return None;
         }
-        let auto_url = match trailer.get(Self::AUTO_URL_SLOT)?.trim() {
+        let declared_blocks = trailer
+            .get(Self::AUTO_URL_OPTIONAL_BLOCK_COUNT_SLOT)?
+            .trim()
+            .parse::<usize>()
+            .ok()?;
+        if trailer.len() != Self::AUTO_URL_BASE_TRAILER_FIELDS.checked_add(declared_blocks)? {
+            return None;
+        }
+        let slot = Self::AUTO_URL_SLOT_WITHOUT_OPTIONAL_BLOCKS.checked_add(declared_blocks)?;
+        let auto_url = match trailer.get(slot)?.trim() {
             "0" => Some(false),
             "1" => None,
             _ => return None,

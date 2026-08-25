@@ -2103,7 +2103,7 @@ pub(super) fn extract_form_auto_url(fields: &[&str]) -> Option<bool> {
     let root_discriminator = fields.first().map(|field| field.trim());
     match root_discriminator {
         Some("50") => {
-            let tail_start = form_root_child_items_tail_start(fields)?;
+            let tail_start = form_root_child_items_tail_start_50_24_or_25(fields)?;
             FormRootAutoUrlSchema::from_raw_layout(root_discriminator, fields.get(tail_start..)?)?
                 .auto_url()
         }
@@ -9006,6 +9006,32 @@ pub(super) fn parse_form_child_item_count(value: &str) -> Option<usize> {
 
 pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
     form_root_child_items_tail_start_for(fields, &["50"], &[24])
+}
+
+/// Same trailer search as `form_root_child_items_tail_start`, but admitting
+/// the 25-member root `50` trailer alongside the classic 24-member one.
+///
+/// The root `50` trailer declares, in its own member 2, how many optional
+/// blocks it carries: БСП, БСП демо, УТ and WMS all declare `0` and end in the
+/// classic 24-member shape, while ERP УХ and its MDM_Management declare `1`
+/// and carry one further `{22,...}` block, for 25. Over all 18 634 root `50`
+/// forms on the stand that declared count equals `trailer.len() - 24` without
+/// exception, and no form validates a trailer at both lengths, so the search
+/// stays unambiguous and `FormRootAutoUrlSchema::from_raw_layout` re-checks
+/// the count against the length it was handed before reading anything.
+///
+/// This is a *separate* entry point rather than a broadened gate on the shared
+/// function above for the reason spelled out on
+/// `form_root_child_items_tail_start_49_or_50`: most callers of the shared
+/// function read a fixed trailer slot directly, counted from the start of the
+/// trailer, with no re-check of their own. Admitting the 25-member trailer
+/// there would shift every one of those reads by one member on ERP УХ at once.
+/// Only callers that have separately established what their own slot means in
+/// the 25-member trailer -- so far: `FormRootAutoUrlSchema`, which derives its
+/// slot from the declared count rather than assuming a fixed one -- should
+/// call this one.
+pub(super) fn form_root_child_items_tail_start_50_24_or_25(fields: &[&str]) -> Option<usize> {
+    form_root_child_items_tail_start_for(fields, &["50"], &[24, 25])
 }
 
 /// Same trailer search as `form_root_child_items_tail_start`, but also
