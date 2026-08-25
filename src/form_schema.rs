@@ -5321,15 +5321,40 @@ pub(crate) struct FormRootGroupingSchema {
 impl FormRootGroupingSchema {
     const CHILD_ITEMS_WIDTH_SLOT: usize = 12;
 
+    /// Forms carrying a built-in Navigator/quick-search child item write one
+    /// extra field ahead of the classic 24-member trailer's own start,
+    /// pushing every slot counted from the front out by one -- a 25-member
+    /// trailer whose slots 10/11/21 hold what slots 9/10/20 hold in the
+    /// 24-shape. Evidence: ERP УХ 3.2.12.6,
+    /// `Catalogs/ЗаявлениеОНазначенииПенсии/Forms/ФормаЭлемента` (native
+    /// `<VerticalSpacing>Half</VerticalSpacing>`, raw code `2`): the
+    /// 24-member reading of slot 10 finds `0` (wrong -- would read as no
+    /// property), the 25-member reading of slot 11 finds `2` (`Half`,
+    /// correct) -- the same one-slot shift `Group`
+    /// (`FormRootGroupSchema::GROUP_KIND_SLOT_WITH_NAVIGATOR_GAP`'s doc
+    /// comment) and `SaveWindowSettings`/`MobileDeviceCommandBarContent`
+    /// (`form_root_child_items_tail_start_50_with_navigator_gap`'s doc
+    /// comment in `mssql_dump::form_body`) independently confirm.
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
         trailer_field_count: usize,
     ) -> Option<Self> {
-        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
-            horizontal_spacing_trailer_slot: 9,
-            vertical_spacing_trailer_slot: 10,
-            collapse_items_by_importance_trailer_slot: 20,
-        })
+        if root_discriminator != Some("50") {
+            return None;
+        }
+        match trailer_field_count {
+            24 => Some(Self {
+                horizontal_spacing_trailer_slot: 9,
+                vertical_spacing_trailer_slot: 10,
+                collapse_items_by_importance_trailer_slot: 20,
+            }),
+            25 => Some(Self {
+                horizontal_spacing_trailer_slot: 10,
+                vertical_spacing_trailer_slot: 11,
+                collapse_items_by_importance_trailer_slot: 21,
+            }),
+            _ => None,
+        }
     }
 
     pub(crate) fn horizontal_spacing(self, trailer: &[&str]) -> Option<&'static str> {
@@ -5584,20 +5609,45 @@ impl FormRootGroupSchema {
     const GROUP_KIND_SLOT: usize = 14;
     const GROUP_VALUE_SLOT: usize = 21;
 
+    /// Forms carrying a built-in Navigator/quick-search child item write one
+    /// extra field ahead of the classic 24-member trailer's own start,
+    /// pushing every slot counted from the front out by one -- a 25-member
+    /// trailer whose slots 15/22 hold what slots 14/21 hold in the 24-shape.
+    /// Evidence: ERP УХ 3.2.12.6,
+    /// `Catalogs/НемонетарныеПоказатели/Forms/ФормаСписка` (native
+    /// `<Group>Horizontal</Group>`): header marker (root field 11, stable
+    /// regardless of trailer shape) reads `1`, and slots 15/22 of the
+    /// 25-member trailer read `1`/`1` -- exactly the `(1,1,1)` pattern the
+    /// 24-shape's slots 14/21 read for the same form's other samples,
+    /// shifted by the same one slot `SaveWindowSettings`/
+    /// `MobileDeviceCommandBarContent` need (see
+    /// `form_root_child_items_tail_start_50_with_navigator_gap`'s doc
+    /// comment in `mssql_dump::form_body`). See
+    /// `FormRootGroupingSchema::from_raw_layout`'s doc comment for the same
+    /// shift confirmed independently on `VerticalSpacing`.
+    const GROUP_KIND_SLOT_WITH_NAVIGATOR_GAP: usize = Self::GROUP_KIND_SLOT + 1;
+    const GROUP_VALUE_SLOT_WITH_NAVIGATOR_GAP: usize = Self::GROUP_VALUE_SLOT + 1;
+
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
         header_group_marker: Option<&str>,
         trailer: &[&str],
     ) -> Option<Self> {
-        if root_discriminator != Some("50") || trailer.len() != 24 {
+        if root_discriminator != Some("50") {
             return None;
         }
+        let (kind_slot, value_slot) = match trailer.len() {
+            24 => (Self::GROUP_KIND_SLOT, Self::GROUP_VALUE_SLOT),
+            25 => (
+                Self::GROUP_KIND_SLOT_WITH_NAVIGATOR_GAP,
+                Self::GROUP_VALUE_SLOT_WITH_NAVIGATOR_GAP,
+            ),
+            _ => return None,
+        };
         let group = match (
             header_group_marker.map(str::trim),
-            trailer.get(Self::GROUP_KIND_SLOT).map(|field| field.trim()),
-            trailer
-                .get(Self::GROUP_VALUE_SLOT)
-                .map(|field| field.trim()),
+            trailer.get(kind_slot).map(|field| field.trim()),
+            trailer.get(value_slot).map(|field| field.trim()),
         ) {
             (Some("0"), Some("0"), Some("0")) => None,
             (Some("1"), Some("1"), Some("1")) => Some("Horizontal"),

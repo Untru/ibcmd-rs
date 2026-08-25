@@ -2145,7 +2145,7 @@ pub(super) fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
     let root_discriminator = fields.first().map(|field| field.trim());
     match root_discriminator {
         Some("50") => {
-            let tail_start = form_root_child_items_tail_start(fields)?;
+            let tail_start = form_root_child_items_tail_start_50_with_navigator_gap(fields)?;
             FormRootGroupSchema::from_raw_layout(
                 root_discriminator,
                 fields.get(11).copied(),
@@ -2489,7 +2489,7 @@ pub(super) fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static 
 }
 
 pub(super) fn extract_form_horizontal_spacing(fields: &[&str]) -> Option<&'static str> {
-    let trailer = fields.get(form_root_child_items_tail_start(fields)?..)?;
+    let trailer = fields.get(form_root_child_items_tail_start_50_with_navigator_gap(fields)?..)?;
     FormRootGroupingSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
         trailer.len(),
@@ -2498,7 +2498,7 @@ pub(super) fn extract_form_horizontal_spacing(fields: &[&str]) -> Option<&'stati
 }
 
 pub(super) fn extract_form_vertical_spacing(fields: &[&str]) -> Option<&'static str> {
-    let trailer = fields.get(form_root_child_items_tail_start(fields)?..)?;
+    let trailer = fields.get(form_root_child_items_tail_start_50_with_navigator_gap(fields)?..)?;
     FormRootGroupingSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
         trailer.len(),
@@ -2509,7 +2509,7 @@ pub(super) fn extract_form_vertical_spacing(fields: &[&str]) -> Option<&'static 
 pub(super) fn extract_form_collapse_items_by_importance_variant(
     fields: &[&str],
 ) -> Option<&'static str> {
-    let trailer = fields.get(form_root_child_items_tail_start(fields)?..)?;
+    let trailer = fields.get(form_root_child_items_tail_start_50_with_navigator_gap(fields)?..)?;
     FormRootGroupingSchema::from_raw_layout(
         fields.first().map(|field| field.trim()),
         trailer.len(),
