@@ -30638,6 +30638,20 @@ fn parse_style_border_value_xml(value: &str) -> Option<String> {
     ))
 }
 
+/// Codes 49/61/78/110/115/117/123/127/129/131 (GhostWhite/Lavender/
+/// LightSteelBlue/PaleTurquoise/Pink/PowderBlue/Salmon/Sienna/SkyBlue/
+/// SlateGray) are evidenced on all 10 `StyleItems` real ERP УХ 3.2.12.6
+/// bytes leave `missing` at 2ccd98f for exactly this reason: `parse_style_
+/// item_properties_from_text` -> `parse_style_color_value` -> here returns
+/// `None` for any code this function does not recognize, which refuses the
+/// *entire* StyleItem (not a partial result) -- one unmapped color code is
+/// indistinguishable from "no legacy family decoder recognized this
+/// storage entry" in the export report. Each value here was read directly
+/// off the platform's own native `<Value xsi:type="v8ui:Color">web:
+/// <Name></Value>` for that exact object (not inferred from .NET's
+/// KnownColor numbering, which this table's existing gaps/duplicates --
+/// e.g. `27`/`31` both `DarkGreen`, `94`/`105` both `Orange` -- already show
+/// does not hold platform-wide).
 fn style_web_color_name(code: i32) -> Option<&'static str> {
     match code {
         8 => Some("web:Black"),
@@ -30656,9 +30670,11 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         50 => Some("web:Gold"),
         51 => Some("web:Goldenrod"),
         48 => Some("web:Gainsboro"),
+        49 => Some("web:GhostWhite"),
         52 => Some("web:Gray"),
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
+        61 => Some("web:Lavender"),
         64 => Some("web:LightCoral"),
         65 => Some("web:LightBlue"),
         66 => Some("web:LightCoral"),
@@ -30667,6 +30683,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         69 => Some("web:LightGoldenRodYellow"),
         71 => Some("web:LightGray"),
         72 => Some("web:LightPink"),
+        78 => Some("web:LightSteelBlue"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
         86 => Some("web:MediumBlue"),
@@ -30677,11 +30694,18 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         98 => Some("web:MistyRose"),
         96 => Some("web:Moccasin"),
         99 => Some("web:Moccasin"),
+        110 => Some("web:PaleTurquoise"),
+        115 => Some("web:Pink"),
+        117 => Some("web:PowderBlue"),
         119 => Some("web:Red"),
         120 => Some("web:RosyBrown"),
         121 => Some("web:RoyalBlue"),
+        123 => Some("web:Salmon"),
+        127 => Some("web:Sienna"),
         128 => Some("web:Silver"),
+        129 => Some("web:SkyBlue"),
         130 => Some("web:SlateBlue"),
+        131 => Some("web:SlateGray"),
         134 => Some("web:SteelBlue"),
         140 => Some("web:Violet"),
         141 => Some("web:VioletRed"),

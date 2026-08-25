@@ -27490,6 +27490,41 @@ fn formats_style_item_native_color_and_font_attrs() {
     );
 }
 
+/// `style_web_color_name` used to be missing 10 codes, one per real ERP УХ
+/// 3.2.12.6 `StyleItems` object left `missing` at 2ccd98f: `parse_style_
+/// color_value` returning `None` for an unmapped code refuses the *whole*
+/// owning StyleItem (not a partial color), surfacing as "no legacy family
+/// decoder recognized this storage entry" like any other unclassified
+/// object. Each `(code, name)` pair here is the object's own real raw
+/// braced color value paired with the exact `web:<Name>` the platform's own
+/// exported XML carries for that object (`cf extract` against the real
+/// `.cf`, cross-referenced with `$D/cap/uh-r1/src/StyleItems/*.xml`), not
+/// inferred from any general color-numbering scheme.
+#[test]
+fn detects_previously_unmapped_style_web_colors_from_real_objects() {
+    let cases: &[(&str, i32, &str)] = &[
+        ("ОбъединенныеЭлементыФормыФон", 49, "web:GhostWhite"),
+        ("ЦветФонаПанелиСогласования", 61, "web:Lavender"),
+        ("ЦветФонаПозицииВРеестреПлатежей", 78, "web:LightSteelBlue"),
+        ("ЦветКритичногоИзлишкаСредств", 110, "web:PaleTurquoise"),
+        ("ЦветНекритичногоНедостаткаСредств", 115, "web:Pink"),
+        ("ЦветФонаПозицииНаИсполнении", 117, "web:PowderBlue"),
+        ("ЦветКритичногоНедостаткаСредств", 123, "web:Salmon"),
+        ("ЦветАльтернативногоВидаРабочихЦентров", 127, "web:Sienna"),
+        ("ЦветФонаТекущейДатыВГрафикеУХ", 129, "web:SkyBlue"),
+        ("СерыйЦветТекста2", 131, "web:SlateGray"),
+    ];
+    for (name, code, expected) in cases {
+        let value =
+            format!(r##"{{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{{3,2,{{{code}}}}}}}"##);
+        assert_eq!(
+            parse_style_color_value(&value).as_deref(),
+            Some(*expected),
+            "object {name} (code {code})"
+        );
+    }
+}
+
 #[test]
 fn writes_style_item_metadata_xml_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
