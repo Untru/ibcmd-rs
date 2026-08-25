@@ -70,6 +70,48 @@ this fix touched) for attributes carrying the short header form,
 verified this fix's `<Type/>` correlation isn't coincidental to just
 these 12 objects.
 
+Likely root cause, traced far enough to save re-discovery but not verified
+against real bytes or shipped: value-type resolution for a `Catalog`/
+`DataProcessor` attribute goes through
+`innermost_metadata_object_fields_around_header` (`mssql_dump::mod`),
+which walks enclosing braces outward from the attribute's `marker_start`
+and skips a candidate block via `matches!(fields.first()..., Some("1" |
+"3"))` -- meant to skip past the `{1,0,<uuid>}` identity wrapper (always
+`"1"`) and the *full-length* header wrapper (`"3"`, 9 members) to reach the
+`{2, <header>, {"Pattern", ...}}` "detail" wrapper (itself always `"2"`,
+3 members) one level out, where the `"Pattern"` field the caller needs
+actually lives. The *short* header wrapper this fix's own change made
+common now opens with `"2"` (8 members) too -- indistinguishable from
+`detail`'s own `"2"` by leading digit alone, so the skip condition (which
+only tests the leading digit, not member count) does not skip it: the
+search stops one level too early, at the header block itself, whose own
+fields contain no `"Pattern"` field, so
+`parse_metadata_child_value_types_with_builtin`/
+`parse_metadata_child_value_types` fall through to `unwrap_or_default()`
+-- an empty type list, rendered as `<Type/>`. This is a *silent* default,
+not a typed refusal (doctrine point 2/6) -- worth noting when this gets
+fixed, since it means other short-header attributes could be emitting a
+wrong-but-plausible-looking empty `<Type/>` in corpora this pass's exact-set
+gate happened not to catch as `differing` (e.g. if the platform's own XML
+also permits an empty `<Type/>` under some other legitimate condition,
+masking the defect count).
+
+The fix is not simply "also skip discriminator `"2"`": `detail` legitimately
+opens with `"2"` too and must *not* be skipped, or the search would run past
+the level the caller actually wants for the working (full-header) case as
+well. The two `"2"`-shapes differ by member count (short header: 8; `detail`:
+3), so the skip test needs to key off the *header's own declared-length
+discriminator* semantics (this function's local caller doesn't otherwise
+know the header layout) rather than a bare leading-digit match -- likely
+needs a shared predicate function (`is_metadata_child_header_wrapper(fields)`
+or similar) usable both here and in the header-wrapper parsers this pass
+already fixed, so the two never drift apart again.
+`innermost_metadata_object_fields_around_header` has four call sites, not
+all Catalog-attribute-shaped (`parse_metadata_tabular_section_properties`'s
+tabular-section-property read and `http_service_child_candidates_from_text`
+also use it) -- any fix needs real-byte evidence from all four shapes, not
+just the Catalog-attribute one this note traced, before it should land.
+
 ## Method
 
 For each of the 1,977 (then 1,594) missing native paths, resolve its root
