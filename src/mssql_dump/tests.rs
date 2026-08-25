@@ -4249,6 +4249,50 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
     assert_eq!(reordered_diagnostic.collection_index, Some(1));
 }
 
+/// `parse_owner_graph_command_identity_slot` hardcoded `properties.len() !=
+/// 13 || properties.first() != "9"` for the owned-command's own outer
+/// properties block -- shared by every owner-graph family that routes
+/// through `parse_owner_graph_command_identity_slots_indexed` (Catalog,
+/// Document, BusinessProcess), and hand-duplicated (not shared) by
+/// `parse_task_commands` and `parse_document_journal_commands`. The
+/// omitted-trailing-default-field defect this pass keeps finding: the
+/// platform drops `OnMainServerUnavailableBehavior` (index 12), not
+/// writing it as `0`, whenever a command leaves it at default -- the same
+/// omission `parse_common_command_properties_from_text` and
+/// `parse_information_register_child_command_properties_from_fields`'s
+/// outer command block already document on real bytes. Mechanical
+/// transformation of this file's own `command_properties` fixture shape
+/// (see the BusinessProcess/malformed-command test above): drop the
+/// trailing `0` (13 -> 12 members, tag `"9"` -> `"8"`).
+#[test]
+fn accepts_short_owner_graph_command_properties_block() {
+    let identity_uuid = "55555555-5555-4555-8555-555555555555";
+    let value_uuid = "66666666-6666-4666-8666-666666666666";
+    let command_header = format!(
+        "{{3,{{1,0,{identity_uuid}}},\"Run\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}"
+    );
+    let full_properties = format!("{{9,0,0,0,0,0,0,0,0,{command_header},0,0,0}}");
+    let short_properties = format!("{{8,0,0,0,0,0,0,0,0,{command_header},0,0}}");
+    for properties in [&full_properties, &short_properties] {
+        let body = format!("{{1,{{2,{identity_uuid},{value_uuid}}},{properties}}}");
+        let nested = format!("{{0,0,0,{body}}}");
+        let wrapper = format!("{{0,{nested}}}");
+        let command = format!("{{{wrapper},0}}");
+        let outer = split_information_register_braced_fields(&command).unwrap();
+        assert_eq!(outer.len(), 2, "{command}");
+        let slots = parse_owner_graph_command_identity_slots_indexed(&[command.as_str()])
+            .unwrap_or_else(|_| panic!("must accept this properties block: {command}"));
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].identity_uuid, identity_uuid);
+        assert_eq!(slots[0].header.name, "Run");
+    }
+    // Negative control: the pre-fix code required exactly 13 members with a
+    // `"9"` tag, which `short_properties` (12 members, `"8"`) never carries.
+    let short_fields = split_information_register_braced_fields(&short_properties).unwrap();
+    assert_eq!(short_fields.len(), 12);
+    assert_eq!(short_fields.first().copied(), Some("8"));
+}
+
 fn owner_graph_nested_attribute_for_test(
     family: owner_graph::OwnerGraphFamily,
     wrapper_code: u32,
@@ -30536,7 +30580,10 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
                 column_index: 0,
                 format_index: 5,
                 source_format_index: Some(5),
-                text: Some("Cell".to_string()),
+                text: vec![MoxelLocalizedValue {
+                    lang: "ru".to_string(),
+                    content: "Cell".to_string(),
+                }],
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -30926,7 +30973,10 @@ fn parses_and_formats_moxel_vertical_groups() {
                 column_index: 0,
                 format_index: 0,
                 source_format_index: None,
-                text: Some("Cell".to_string()),
+                text: vec![MoxelLocalizedValue {
+                    lang: "ru".to_string(),
+                    content: "Cell".to_string(),
+                }],
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31486,7 +31536,7 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     column_index: 0,
                     format_index: 3,
                     source_format_index: Some(3),
-                    text: None,
+                    text: Vec::new(),
                     parameter: None,
                     detail_parameter: None,
                     note: None,
@@ -31501,7 +31551,7 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     column_index: 1,
                     format_index: 0,
                     source_format_index: None,
-                    text: None,
+                    text: Vec::new(),
                     parameter: None,
                     detail_parameter: None,
                     note: None,
@@ -31549,7 +31599,7 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 column_index: 0,
                 format_index: 54,
                 source_format_index: Some(2),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31564,7 +31614,7 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 column_index: 1,
                 format_index: 55,
                 source_format_index: Some(5),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31708,7 +31758,10 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
                 column_index: 0,
                 format_index: 2,
                 source_format_index: None,
-                text: Some("x".to_string()),
+                text: vec![MoxelLocalizedValue {
+                    lang: "ru".to_string(),
+                    content: "x".to_string(),
+                }],
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31847,7 +31900,7 @@ fn formats_moxel_non_zero_column_slots_suppress_row_output_index_one() {
                 column_index: 0,
                 format_index: 25,
                 source_format_index: Some(25),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -31882,7 +31935,7 @@ fn formats_moxel_leading_shared_default_suppresses_shifted_row_output_index_two(
                 column_index: 0,
                 format_index: 20,
                 source_format_index: Some(20),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
@@ -33276,7 +33329,7 @@ fn parses_moxel_detail_parameter_cell_variants() {
     assert_eq!(detail_only.column_index, 4);
     assert_eq!(detail_only.format_index, 28);
     assert_eq!(detail_only.detail_parameter.as_deref(), Some("Расшифровка"));
-    assert!(detail_only.text.is_none());
+    assert!(detail_only.text.is_empty());
     assert!(detail_only.parameter.is_none());
 
     let note_bearing = parse_moxel_cell(
@@ -33290,7 +33343,13 @@ fn parses_moxel_detail_parameter_cell_variants() {
         note_bearing.detail_parameter.as_deref(),
         Some("Расшифровка")
     );
-    assert_eq!(note_bearing.text.as_deref(), Some("Длинная тонна"));
+    assert_eq!(
+        note_bearing.text,
+        vec![MoxelLocalizedValue {
+            lang: "ru".to_string(),
+            content: "Длинная тонна".to_string(),
+        }]
+    );
 }
 
 #[test]
@@ -33510,7 +33569,7 @@ fn self_closes_empty_string_drawing_value() {
         auto_size: false,
         z_order: 4,
         members: MoxelDrawingMembers {
-            text: None,
+            text: Vec::new(),
             parameter: Some("ФИОРуководителя".to_string()),
             value: Some(String::new()),
             detail_parameter: None,
@@ -34130,7 +34189,7 @@ fn formats_moxel_sparse_body_refs_skip_reserved_source_slots() {
             column_index: 0,
             format_index: 99,
             source_format_index: Some(5),
-            text: None,
+            text: Vec::new(),
             parameter: None,
             detail_parameter: None,
             note: None,
@@ -43500,6 +43559,60 @@ fn parses_detailed_information_register_command_picture_and_parameter_types() {
     );
 }
 
+/// `parse_information_register_child_command_properties_from_fields` hand
+/// reimplemented two independent instances of the recurring omitted-
+/// trailing-default-field defect: the outer command block itself (the
+/// `OnMainServerUnavailableBehavior` slot at index 12, mirroring
+/// `parse_common_command_properties_from_text`'s already-evidenced `{9,`/
+/// `{8,` pair) and the nested header at index 9 (the code27-adjacent
+/// short-wrapper omission `06249bd` documents). Both hardcoded a single
+/// exact length/discriminator instead of branching on the two lengths the
+/// platform actually writes. Mechanical transformation of this test's own
+/// `parses_detailed_information_register_command_picture_and_parameter_types`
+/// fixture: drop the outer trailing `0` (13 -> 12 members, tag `9` -> `8`)
+/// and the header's own trailing `0` (9 -> 8 members, tag `3` -> `2`) --
+/// the same shortening already independently confirmed on real ERP УХ
+/// bytes for this exact header shape elsewhere in this file.
+#[test]
+fn parses_information_register_child_command_with_short_outer_block_and_short_header() {
+    let command_uuid = "11111111-1111-4111-8111-111111111111";
+    let empty_descriptor = r#"{4,0,{0},"",-1,-1,1,0,""}"#;
+    let type_pattern = r#"{"Pattern",{"B"}}"#;
+    let short_command = format!(
+        "{{8,{empty_descriptor},2,{{1,\"en\",\"Run command\"}},1,{{0,0,0}},0,{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},{type_pattern},{{2,{{1,0,{command_uuid}}},\"Run\",{{1,\"en\",\"Run\"}},\"comment\",0,0,00000000-0000-0000-0000-000000000000}},1,1}}"
+    );
+    let header = MetadataHeader {
+        uuid: command_uuid.to_string(),
+        name: "Run".to_string(),
+        synonyms: vec![("en".to_string(), "Run".to_string())],
+        comment: "comment".to_string(),
+        template_type_code: None,
+    };
+    let fields = split_1c_braced_fields(&short_command, 0).unwrap();
+    let properties = parse_information_register_child_command_properties_from_fields(
+        &fields,
+        &header,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .expect("short (12-member outer / 8-member header) command must still parse");
+
+    assert_eq!(properties.representation, "PictureAndText");
+    assert_eq!(properties.parameter_use_mode, "Multiple");
+    assert!(properties.modifies_data);
+    assert_eq!(
+        properties.command_parameter_types,
+        vec![ConstantValueType::Boolean]
+    );
+    assert_eq!(properties.picture_ref, None);
+
+    // Negative control: the pre-fix code required exactly 13 outer members
+    // with a `"9"` tag and exactly 9 header members with a `"3"` tag: this
+    // exact short fixture is precisely what it rejected outright.
+    assert_ne!(fields.len(), 13);
+    assert_eq!(fields.first().copied(), Some("8"));
+}
+
 #[test]
 fn appends_register_commands_to_existing_child_objects_block() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
@@ -44361,6 +44474,116 @@ fn replace_flat_configuration_property_field(text: &str, index: usize, value: &s
     fields[index] = value.to_string();
     let properties = format!("{{{}}}", fields.join(","));
     format!("{}{}{}", &text[..start], properties, &text[end..])
+}
+
+/// `is_configuration_root_property_header` (refs.rs) hardcoded
+/// `header.len() != 9 || header.first() != "3"` for the Configuration
+/// root's own `{1,0,<uuid>},Name,Synonym,Comment,0,0,NilUuid,0}` header --
+/// the same short-wrapper omission `parse_information_register_owner_
+/// header` (`0575505`) and `innermost_metadata_object_fields_around_header`
+/// (this pass) document elsewhere for this identical grammar production.
+/// Only one Configuration root exists per config, so this mechanically
+/// transforms `flat_configuration_properties_text`'s own known-good full
+/// header (drop the trailing default `0`, `"3"` -> `"2"`) rather than
+/// relying on a real capture -- the transformation itself is the same one
+/// already independently confirmed on real bytes for this exact header
+/// shape at several other call sites in this file. Uses genuinely
+/// non-empty BriefInformation/DetailedInformation/DefaultRoles content
+/// (mirroring `extracts_configuration_default_roles_for_proven_layouts`),
+/// not an empty/minimal fixture: `configuration_root_property_fields`
+/// gates all of that content, and a fixture with nothing in those slots
+/// can't tell a rejection apart from a legitimate empty result.
+#[test]
+fn accepts_short_configuration_root_property_header() {
+    let role_uuids = [
+        "50000000-0000-4000-8000-000000000001",
+        "50000000-0000-4000-8000-000000000002",
+    ];
+    let roles_raw = configuration_default_roles_raw(2, &role_uuids);
+    let detailed_raw = configuration_localized_raw(&[("ru", "Подробно"), ("en", "Detailed")]);
+    let brief_raw = configuration_localized_raw(&[("ru", "Кратко"), ("en", "Brief")]);
+    // Fields 6/7/8 (copyright, vendor/configuration information addresses)
+    // must be valid (if empty) localized-value blocks too -- the base
+    // fixture's default `"0"` filler isn't a `{count,...}` shape at all,
+    // which made `parse_configuration_localized_property_field` fail on
+    // them via `?` before this test's own header substitution was ever
+    // reached (caught while building this test, not a defect in the fix).
+    let empty_localized = configuration_localized_raw(&[]);
+    let (uuid, full_text) = flat_configuration_properties_text(
+        67,
+        60,
+        &[
+            (4, &detailed_raw),
+            (5, &brief_raw),
+            (6, &empty_localized),
+            (7, &empty_localized),
+            (8, &empty_localized),
+            (39, &roles_raw),
+        ],
+    );
+    let object_refs = BTreeMap::from([
+        (role_uuids[0].to_string(), "Role.FullRights".to_string()),
+        (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
+    ]);
+
+    let full_header = "{0,{3,{1,0,20000000-0000-4000-8000-000000000001},\"DemoApp\",{1,\"en\",\"Demo app\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}";
+    let short_header = "{0,{2,{1,0,20000000-0000-4000-8000-000000000001},\"DemoApp\",{1,\"en\",\"Demo app\"},\"\",0,0,00000000-0000-0000-0000-000000000000}}";
+    assert_eq!(
+        full_text.matches(full_header).count(),
+        1,
+        "fixture's own root property header shape must match what this test transforms"
+    );
+    let short_text = full_text.replacen(full_header, short_header, 1);
+
+    // `parse_configuration_localized_properties_from_root` and
+    // `parse_configuration_default_roles_from_root` fail outright whenever
+    // `configuration_root_property_fields` (and, inside it,
+    // `is_configuration_root_property_header`) fails to resolve the root
+    // header. This is the direct, load-bearing assertion: a rejection here
+    // silently drops BriefInformation/DetailedInformation/Copyright/vendor
+    // and configuration information addresses, and DefaultRoles, for any
+    // Configuration root that happens to leave its header's own trailing
+    // default field at default.
+    let full_props = parse_configuration_localized_properties_from_root(&full_text, &uuid)
+        .expect("full header baseline must parse");
+    let short_props = parse_configuration_localized_properties_from_root(&short_text, &uuid)
+        .expect("short (8-member) Configuration root header must not be rejected outright");
+    assert_eq!(
+        short_props, full_props,
+        "short header form must resolve the same root properties as the full form"
+    );
+    assert!(
+        !full_props.brief_information.is_empty() && !full_props.detailed_information.is_empty(),
+        "fixture must actually carry non-empty content, or this test can't tell a rejection \
+         apart from a legitimate empty result"
+    );
+
+    let full_roles = parse_configuration_default_roles_from_root(&full_text, &uuid, &object_refs)
+        .expect("full header baseline roles must parse");
+    let short_roles = parse_configuration_default_roles_from_root(&short_text, &uuid, &object_refs)
+        .expect("short header must not lose DefaultRoles either");
+    assert_eq!(short_roles, full_roles);
+    assert!(!full_roles.is_empty());
+
+    let full_xml = extract_configuration_source_xml(
+        &full_text,
+        &uuid,
+        &object_refs,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let short_xml = extract_configuration_source_xml(
+        &short_text,
+        &uuid,
+        &object_refs,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    assert_eq!(
+        short_xml, full_xml,
+        "short header form must produce byte-identical XML to the full form"
+    );
+    assert!(short_xml.contains("<DefaultRoles>"));
 }
 
 #[test]
@@ -60958,6 +61181,47 @@ fn rejects_web_service_trailing_data_at_nested_boundaries() {
     );
 }
 
+/// `parse_web_service_header` hardcoded `fields.len() != 9 || fields.first()
+/// != "3"` for the WebService's own root header -- structurally identical
+/// to `parse_information_register_owner_header` before `0575505`, just
+/// built on WebService's own field splitter
+/// (`split_web_service_braced_fields`) instead of
+/// `split_information_register_braced_fields`, so that fix never reached
+/// it. Real ERP УХ 3.2.12.6 bytes (`cf extract` on `1cv8.cf`,
+/// `WebServices/ManagedApplication_1_0_0_1`, uuid
+/// `91c6887c-aa41-4a36-ae08-24a86e53c77f`): an 8-member, `"2"`-discriminator
+/// header -- confirmed the *only* short-form header among the 19 real
+/// WebServices this pass surveyed in `uh` (the other 18 all use the full
+/// 9-member `"3"` form), so this is a genuine, if narrow, real-corpus hit
+/// rather than a purely theoretical shape.
+#[test]
+fn parses_web_service_header_with_real_short_header_wrapper() {
+    let uuid = "91c6887c-aa41-4a36-ae08-24a86e53c77f";
+    let short_header = concat!(
+        "{2,\n",
+        "{1,0,91c6887c-aa41-4a36-ae08-24a86e53c77f},\"ManagedApplication_1_0_0_1\",\n",
+        "{2,\"ru\",\"Managed application 1 0 0 1\",\"en\",\"Managed application 1 0 0 1\"},\"\",0,0,00000000-0000-0000-0000-000000000000}",
+    );
+    let header = parse_web_service_header(short_header)
+        .expect("short (8-member, discriminator \"2\") WebService root header must parse");
+    assert_eq!(header.uuid, uuid);
+    assert_eq!(header.name, "ManagedApplication_1_0_0_1");
+    assert_eq!(
+        header.synonyms,
+        vec![
+            ("ru".to_string(), "Managed application 1 0 0 1".to_string()),
+            ("en".to_string(), "Managed application 1 0 0 1".to_string()),
+        ]
+    );
+    assert_eq!(header.comment, "");
+
+    // Negative control: the pre-fix code required exactly 9 members with a
+    // `"3"` tag, which this real 8-member fixture never carries.
+    let fields = split_web_service_braced_fields(short_header).unwrap();
+    assert_eq!(fields.len(), 8);
+    assert_eq!(fields.first().copied(), Some("2"));
+}
+
 #[test]
 fn rejects_web_service_non_decimal_and_overflowing_counts() {
     let usize_overflow = format!("{}0", usize::MAX);
@@ -70969,6 +71233,45 @@ fn extracts_non_predefined_bot_with_picture_to_platform_proven_xml() {
     );
 }
 
+/// `parse_bot_properties_from_text` hardcoded `text[..marker_start].rfind
+/// ("{3,")` for the Bot header -- no length check at all, not even the
+/// bare-arity form the other five sites this pass fixed had; its own doc
+/// comment stated the header was "the generic
+/// `{3,{1,0,uuid},Name,Synonym,Comment,0,0,NilUuid,0}` shape" as if that
+/// were the only form. Neither real Bot fixture captured for this project
+/// (`bot-a-predefined-no-picture.txt` / `bot-b-not-predefined-with-
+/// picture.txt`, both above) or the one real Bot object across this
+/// project's seven gate corpora (`Bots/ОповещенияПользователейОСобытиях`)
+/// happens to carry a short header, so unlike this pass's other fixes this
+/// one has no corpus-observed short-form specimen -- this fixture is
+/// mechanically derived from the real `bot-a-predefined-no-picture.txt`
+/// capture (drop the trailing default `0`, `"3"` -> `"2"`), the same
+/// omission rule already independently confirmed on real bytes six times
+/// elsewhere in this file for this identical header grammar production, not
+/// an independently-observed Bot specimen.
+#[test]
+fn parses_bot_properties_with_short_header_wrapper() {
+    let bot_uuid = "4c9fe47d-8f20-4d84-9df8-a7276405f4e0";
+    let short_text = concat!(
+        "{1,\n",
+        "{1,\n",
+        "{2,\n",
+        "{1,0,4c9fe47d-8f20-4d84-9df8-a7276405f4e0},\"БотА\",\n",
+        "{1,\"ru\",\"Бот А\"},\"\",0,0,00000000-0000-0000-0000-000000000000},1,\n",
+        "{4,0,\n",
+        "{0},\"\",-1,-1,1,0,\"\"}\n",
+        "},0}",
+    );
+    let properties = parse_bot_properties_from_text(short_text, bot_uuid, &BTreeMap::new())
+        .expect("short (8-member, discriminator \"2\") Bot header must not be rejected outright");
+    assert!(properties.predefined);
+    assert_eq!(properties.picture_ref, None);
+
+    // Negative control: the pre-fix code's bare `rfind("{3,")` never finds
+    // this text's `"{2,"`-tagged header at all.
+    assert!(!short_text.contains("{3,"));
+}
+
 /// Evidence: fixture `graphical-schema-field-leftwidest-page`, a minimal
 /// synthetic Form seeded on the Web_Service skeleton and round-tripped
 /// through platform 8.3.27.2214: one `Page` (`Group=Horizontal`,
@@ -71081,6 +71384,147 @@ fn parses_code27_attribute_payload_with_short_and_long_header_wrapper() {
     assert_eq!(long_header_uuid, "616f2156-e77c-4956-9e7c-69ed1d06c9b0");
 }
 
+/// `06249bd` taught `parse_metadata_code27_payload_fields` to accept the
+/// short (8-member, `"2"`-discriminator) attribute header, which unblocked
+/// the 12 objects this test's real payload belongs to from `missing` to
+/// `differing` -- but a second, independent bug in
+/// `innermost_metadata_object_fields_around_header` (the walk that resolves
+/// an attribute's value-type pattern via its *own* production path, not
+/// `parse_metadata_code27_payload_fields`) kept rendering `<Type/>` empty
+/// for exactly these attributes: its skip test only recognized the full
+/// header (`"3"`, 9 members) as "keep walking outward past this", so a
+/// short header (`"2"`, 8 members) -- indistinguishable from the unrelated
+/// `detail` wrapper's own `"2"`, 3-member tag by leading digit alone -- got
+/// treated as the final answer instead of `detail`, whose `"Pattern"` field
+/// the caller actually needs. Real ERP УХ 3.2.12.6 bytes (same capture as
+/// `parses_code27_attribute_payload_with_short_and_long_header_wrapper`):
+/// `Catalogs/ВариантыЗаполненияШаблонов`'s `Комментарий` attribute, uuid
+/// `5c1b73cc-2842-4ca0-bc76-436456449e45`. Confirmed pervasive on the real
+/// `uh` corpus: over 3,000 short-header attributes hit this exact
+/// stop-too-early case in one full `cf export` pass (docs/evidence/
+/// uh-missing-root-cause-map-20260825.md).
+#[test]
+fn innermost_metadata_object_fields_around_header_skips_short_attribute_header_to_reach_detail() {
+    let uuid = "5c1b73cc-2842-4ca0-bc76-436456449e45";
+    let text = concat!(
+        "{27,\n",
+        "{2,\n",
+        "{2,\n",
+        "{1,0,5c1b73cc-2842-4ca0-bc76-436456449e45},\"Комментарий\",\n",
+        "{1,\"ru\",\"Комментарий\"},\"\",0,0,00000000-0000-0000-0000-000000000000},\n",
+        "{\"Pattern\",\n",
+        "{\"S\",300,1}\n",
+        "}\n",
+        "},0,\n",
+        "{0},\n",
+        "{0},0,\"\",0,\n",
+        "{\"U\"},\n",
+        "{\"U\"},0,00000000-0000-0000-0000-000000000000,2,0,\n",
+        "{5006,0},\n",
+        "{3,0,0},\n",
+        "{0,0},0,\n",
+        "{0},\n",
+        "{\"S\",\"\"},0,0,0}",
+    );
+    let marker_start = text.find(uuid).unwrap();
+
+    let (_, _, fields) =
+        super::innermost_metadata_object_fields_around_header(text, marker_start, uuid)
+            .expect("must resolve the enclosing `detail` wrapper, not fail outright");
+    assert_eq!(
+        fields.len(),
+        3,
+        "must land on `detail` (`{{2, header, {{\"Pattern\",...}}}}`, 3 members), \
+         not stop one level too early at the 8-member short header itself: {fields:?}"
+    );
+    assert_eq!(fields[0].trim(), "2");
+    assert!(
+        fields[2].contains(r#""Pattern""#),
+        "detail's third member must be the Pattern block: {:?}",
+        fields[2]
+    );
+
+    let value_types = super::parse_metadata_child_value_types_with_builtin(
+        text,
+        marker_start,
+        uuid,
+        &BTreeMap::new(),
+        super::platform_reference_family_type_reference,
+    );
+    assert_eq!(
+        value_types,
+        vec![super::ConstantValueType::String {
+            length: Some(300),
+            allowed_length_flag: 1,
+        }],
+        "the short header must not silently render an empty <Type/>"
+    );
+}
+
+/// `register_common_child_header_matches` and
+/// `parse_information_register_child_value_types_from_fields` each hand
+/// reimplement the same `{27,{2,header,{"Pattern",...}}}` shape
+/// `parse_metadata_code27_payload_fields` (`06249bd`) already fixed --
+/// duplicated instead of shared, so the short (8-member, `"2"`) header fix
+/// didn't reach either. Reuses the exact same real ERP УХ 3.2.12.6 payload
+/// bytes as the code27 tests above (`Catalogs/ВариантыЗаполненияШаблонов`'s
+/// `Комментарий` attribute) -- the wrapper shape is identical regardless of
+/// which owning family's child dispatches through it.
+#[test]
+fn information_register_child_helpers_accept_short_attribute_header() {
+    let uuid = "5c1b73cc-2842-4ca0-bc76-436456449e45";
+    let payload = concat!(
+        "{27,\n",
+        "{2,\n",
+        "{2,\n",
+        "{1,0,5c1b73cc-2842-4ca0-bc76-436456449e45},\"Комментарий\",\n",
+        "{1,\"ru\",\"Комментарий\"},\"\",0,0,00000000-0000-0000-0000-000000000000},\n",
+        "{\"Pattern\",\n",
+        "{\"S\",300,1}\n",
+        "}\n",
+        "},0,\n",
+        "{0},\n",
+        "{0},0,\"\",0,\n",
+        "{\"U\"},\n",
+        "{\"U\"},0,00000000-0000-0000-0000-000000000000,2,0,\n",
+        "{5006,0},\n",
+        "{3,0,0},\n",
+        "{0,0},0,\n",
+        "{0},\n",
+        "{\"S\",\"\"},0,0,0}",
+    );
+    let header = MetadataHeader {
+        uuid: uuid.to_string(),
+        name: "Комментарий".to_string(),
+        synonyms: vec![("ru".to_string(), "Комментарий".to_string())],
+        comment: String::new(),
+        template_type_code: None,
+    };
+
+    let common_fields = split_1c_braced_fields(payload, 0).unwrap();
+    assert_eq!(common_fields.len(), 23);
+    assert!(
+        super::register_common_child_header_matches(&common_fields, &header),
+        "must accept the short (8-member) header, not just the full (9-member) form"
+    );
+
+    let resource_fields = ["7", payload, "0", "0", "0"];
+    let value_types = super::parse_information_register_child_value_types_from_fields(
+        &resource_fields,
+        &header,
+        "Resource",
+        &BTreeMap::new(),
+    )
+    .expect("short (8-member) attribute header must not be rejected outright");
+    assert_eq!(
+        value_types,
+        vec![super::ConstantValueType::String {
+            length: Some(300),
+            allowed_length_flag: 1,
+        }]
+    );
+}
+
 /// Evidence: fixture `moxel-chart-series-count-zero`, six seed variations of
 /// native UT 11.5.27.75's
 /// `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров`
@@ -71168,5 +71612,216 @@ fn renders_empty_stacked_bar_chart_without_extended_scales_to_platform_proven_xm
         include_str!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-no-extended-scales-object.xml"
         ),
+    );
+}
+
+/// Forms carrying a built-in Navigator/quick-search child item write one
+/// extra field between the root child-items count-list and the classic
+/// 24-member form-root trailer -- a 25-member trailer, not 24. Before this
+/// fix, `extract_form_mobile_device_command_bar_content` located the
+/// trailer via `form_root_child_items_tail_start` (root `50` + `[24]`
+/// only), which found no valid count-list at all for such forms and
+/// silently returned an empty `Vec` -- dropping the whole
+/// `<MobileDeviceCommandBarContent>` block with no error (doctrine point
+/// 2/6: a silent default, not a typed refusal). See this fixture's
+/// `manifest.json` for the full evidence trail across four independent
+/// native ERP УХ 3.2.12.6 forms (two are fixtures here, two more confirmed
+/// but not embedded).
+fn assert_platform_proven_mobile_device_command_bar_content(
+    raw_deflate: &[u8],
+    expected_block: &str,
+) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_block),
+        "expected the MobileDeviceCommandBarContent block to render byte-identical to the \
+native export; block missing or different in:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_mobile_device_command_bar_content_for_business_process_list_form_with_navigator_gap() {
+    assert_platform_proven_mobile_device_command_bar_content(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/1a7c7427-bead-4655-9dd6-df6e722663c5.deflate"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_mobile_device_command_bar_content_for_catalog_list_form_with_navigator_gap() {
+    assert_platform_proven_mobile_device_command_bar_content(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/5f91b00f-d8fc-4d63-8486-66339357ab22.deflate"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+        ),
+    );
+}
+
+/// `SaveWindowSettings` sits in the trailer's own last slot. Before this
+/// fix, `extract_form_save_window_settings` located it via a fixed absolute
+/// offset (`tail_start + 23`) off the strict `[24]`-only
+/// `form_root_child_items_tail_start`, which found no valid count-list at
+/// all for forms with a built-in Navigator/quick-search item (a 25-member
+/// trailer, not 24) and silently dropped the whole property. See this
+/// fixture's `manifest.json` for the full evidence trail.
+fn assert_platform_proven_save_window_settings_false(raw_deflate: &[u8]) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains("<SaveWindowSettings>false</SaveWindowSettings>"),
+        "expected <SaveWindowSettings>false</SaveWindowSettings> to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_save_window_settings_for_catalog_list_form_with_navigator_gap() {
+    assert_platform_proven_save_window_settings_false(include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/085702c9-6d28-441d-b4ee-3319c23b2fef.deflate"
+    ));
+}
+
+#[test]
+fn renders_save_window_settings_for_document_list_form_with_navigator_gap() {
+    assert_platform_proven_save_window_settings_false(include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/ffbe920e-f47c-495e-8d96-bedbc0a631e2.deflate"
+    ));
+}
+
+/// `Group` and `VerticalSpacing` both sit in the form-root trailer at fixed
+/// slots counted from the trailer's own start. Before this fix, forms with a
+/// built-in Navigator/quick-search child item (a 25-member trailer, not 24 --
+/// see `form_root_child_items_tail_start_50_with_navigator_gap`'s doc
+/// comment) found no valid count-list at all under the strict `[24]`-only
+/// search and silently dropped both properties. See this fixture's
+/// `manifest.json` for the full evidence trail.
+fn assert_platform_proven_form_root_tag(raw_deflate: &[u8], expected_tag: &str) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_tag),
+        "expected {expected_tag:?} to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_group_always_horizontal_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/cd41f832-773f-42e8-a4ed-8f521eace1fc.deflate"
+        ),
+        "<Group>AlwaysHorizontal</Group>",
+    );
+}
+
+#[test]
+fn renders_group_horizontal_if_possible_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/e2ce87bf-3feb-4c15-870e-d876fd5f3ab7.deflate"
+        ),
+        "<Group>HorizontalIfPossible</Group>",
+    );
+}
+
+#[test]
+fn renders_vertical_spacing_half_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/1e9ea8b1-7ff1-463b-b249-60c15fc5fb33.deflate"
+        ),
+        "<VerticalSpacing>Half</VerticalSpacing>",
+    );
+}
+
+#[test]
+fn renders_vertical_spacing_one_and_half_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/2bf025be-45bd-4ff8-bc86-02feabc4bfda.deflate"
+        ),
+        "<VerticalSpacing>OneAndHalf</VerticalSpacing>",
+    );
+}
+
+/// The remaining form-root trailer readers that shared the same strict
+/// `[24]`-only tail-start search as `Group`/`VerticalSpacing`: before this
+/// fix, forms with a built-in Navigator/quick-search child item (a
+/// 25-member trailer, not 24 -- see
+/// `form_root_child_items_tail_start_50_with_navigator_gap`'s doc comment)
+/// found no valid count-list at all and silently dropped each property. See
+/// this fixture's `manifest.json` for the full evidence trail.
+fn assert_platform_proven_form_root_alignment_tag(raw_deflate: &[u8], expected_tag: &str) {
+    let xml = extract_form_body_xml(raw_deflate, &BTreeMap::new())
+        .expect("platform-proven form body payload must decode");
+    assert!(
+        xml.contains(expected_tag),
+        "expected {expected_tag:?} to render; got:\n{xml}"
+    );
+}
+
+#[test]
+fn renders_conversations_representation_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/595e5752-36a7-4bba-8a40-26920acae01d.deflate"
+        ),
+        "<ConversationsRepresentation>Show</ConversationsRepresentation>",
+    );
+}
+
+#[test]
+fn renders_vertical_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/826c2821-147d-4aaf-910c-acfbdb58a29f.deflate"
+        ),
+        "<VerticalAlign>Bottom</VerticalAlign>",
+    );
+}
+
+#[test]
+fn renders_children_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/36454dc5-ab04-4773-85cf-f634b17dfc4f.deflate"
+        ),
+        "<ChildrenAlign>None</ChildrenAlign>",
+    );
+}
+
+#[test]
+fn renders_scaling_mode_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/79a77da6-ce40-4cd8-ab79-f70d5b5aa7b0.deflate"
+        ),
+        "<ScalingMode>Normal</ScalingMode>",
+    );
+}
+
+#[test]
+fn renders_horizontal_align_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/beed4e3c-4d47-4881-82f0-2f57f9d2bc7b.deflate"
+        ),
+        "<HorizontalAlign>Center</HorizontalAlign>",
+    );
+}
+
+#[test]
+fn renders_show_close_button_for_form_with_navigator_gap() {
+    assert_platform_proven_form_root_alignment_tag(
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/f30b88e9-919b-45bc-ba99-a2c32ca399e7.deflate"
+        ),
+        "<ShowCloseButton>false</ShowCloseButton>",
     );
 }

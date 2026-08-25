@@ -14163,22 +14163,28 @@ mod tests {
 
     #[test]
     fn task_scalar_slots_use_platform_proven_xml_mappings() {
-        // `NumberAllowedLength` is not read off its own slot -- see
-        // `task_number_allowed_length_from_auto_prefix` -- it is derived
-        // from the already-proven `TaskNumberAutoPrefix` reading instead.
-        // `ЗадачаИсполнителя` (`DontUse`) and `CorpusTask`
-        // (`BusinessProcessNumber`) pin both directions.
+        // `NumberAllowedLength` has its own carrier: native tuple field 43.
+        // This assertion used to exercise a derivation from
+        // `TaskNumberAutoPrefix`, inferred when the only evidence was two
+        // vendor objects in which the two properties happen to co-vary.
+        // Purpose-built seed configurations settled it by varying each
+        // property alone -- the platform then wrote them independently --
+        // so the derivation was removed in favour of
+        // `parse_task_number_allowed_length_slot`. See
+        // `docs/evidence/seed-configurations-method.md`.
         assert_eq!(
-            task_number_allowed_length_from_auto_prefix(TaskNumberAutoPrefix::DontUse).xml_value(),
+            parse_task_number_allowed_length_slot("0")
+                .unwrap()
+                .xml_value(),
             "Fixed"
         );
         assert_eq!(
-            task_number_allowed_length_from_auto_prefix(
-                TaskNumberAutoPrefix::BusinessProcessNumber
-            )
-            .xml_value(),
+            parse_task_number_allowed_length_slot("1")
+                .unwrap()
+                .xml_value(),
             "Variable"
         );
+        assert_eq!(parse_task_number_allowed_length_slot("2"), None);
         assert_eq!(
             parse_task_choice_history_on_input_slot("1")
                 .unwrap()
@@ -14193,12 +14199,23 @@ mod tests {
         );
         assert_eq!(parse_task_include_help_in_contents_slot("1"), Some(true));
         assert_eq!(parse_task_include_help_in_contents_slot("0"), Some(false));
-        // `DataLockControlMode` is likewise derived, not read off its own
-        // slot -- see `parse_task_data_lock_control_mode_slot`'s doc comment
-        // and the `DataLockFields`-emptiness derivation at its one call
-        // site. This only checks the slot stays the validated reserved
-        // constant it is everywhere observed to be.
-        assert!(parse_task_data_lock_control_mode_slot("1").is_some());
+        // `DataLockControlMode` has its own carrier too: native tuple
+        // field 33. Same history as `NumberAllowedLength` above -- it was
+        // read as a derivation from `DataLockFields` emptiness while the
+        // only evidence was co-varying vendor objects, and seeds that
+        // varied it alone showed the platform writes it independently.
+        assert_eq!(
+            parse_task_data_lock_control_mode_slot("1")
+                .unwrap()
+                .xml_value(),
+            "Managed"
+        );
+        assert_eq!(
+            parse_task_data_lock_control_mode_slot("0")
+                .unwrap()
+                .xml_value(),
+            "Automatic"
+        );
         assert_eq!(
             parse_task_full_text_search_slot("0").unwrap().xml_value(),
             "Use"
@@ -14210,7 +14227,7 @@ mod tests {
 
         assert!(parse_task_choice_history_on_input_slot("2").is_none());
         assert!(parse_task_include_help_in_contents_slot("2").is_none());
-        assert!(parse_task_data_lock_control_mode_slot("0").is_none());
+        assert!(parse_task_data_lock_control_mode_slot("2").is_none());
         assert!(parse_task_full_text_search_slot("2").is_none());
     }
 

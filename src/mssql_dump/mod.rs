@@ -6908,19 +6908,47 @@ fn parse_information_register_child_command_properties_from_fields(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<CommonCommandProperties> {
-    if fields.len() != 13
-        || fields.first()?.trim() != "9"
+    // Two independent instances of the same recurring omitted-trailing-
+    // default-field defect in this one function: the outer command block
+    // itself (mirrors `parse_common_command_properties_from_text`'s
+    // already-evidenced `{9,`/`{8,` pair -- the trailing
+    // `OnMainServerUnavailableBehavior` slot at index 12 is omitted, not
+    // written `0`, whenever left at default), and the nested header at
+    // index 9 (the same code27-adjacent short-wrapper omission
+    // `register_common_child_header_matches` just above and `06249bd`
+    // document). This function is InformationRegister-child-command-only,
+    // so smaller blast radius than either sibling, but the same class.
+    let command_has_trailing_default = match fields.len() {
+        13 => true,
+        12 => false,
+        _ => return None,
+    };
+    if fields.first()?.trim()
+        != (if command_has_trailing_default {
+            "9"
+        } else {
+            "8"
+        })
         || fields.get(4)?.trim() != "1"
         || fields.get(6)?.trim() != "0"
-        || fields.get(12)?.trim() != "0"
+        || (command_has_trailing_default && fields.get(12)?.trim() != "0")
     {
         return None;
     }
     let (picture_ref, picture_load_transparent) =
         parse_information_register_command_picture_descriptor(fields.get(1)?, object_refs)?;
     let header_fields = split_1c_braced_fields(fields.get(9)?, 0)?;
-    if header_fields.len() != 9
-        || header_fields.first()?.trim() != "3"
+    let header_has_trailing_default = match header_fields.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if header_fields.first()?.trim()
+        != (if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
         || metadata_header_field_index(&header_fields, &header.uuid) != Some(1)
     {
         return None;
@@ -17283,8 +17311,22 @@ fn register_common_child_header_matches(
     else {
         return false;
     };
-    if header_fields.len() != 9
-        || header_fields.first().map(|field| field.trim()) != Some("3")
+    // Same code27 attribute-header short-wrapper omission `06249bd`
+    // documents for `parse_metadata_code27_payload_fields`: this is a hand
+    // reimplementation of that exact `{27,{2,header,{"Pattern",...}}}`
+    // shape for InformationRegister-owned children specifically, so it
+    // needs the same 9/8-member branch instead of hard-requiring 9.
+    let header_has_trailing_default = match header_fields.len() {
+        9 => true,
+        8 => false,
+        _ => return false,
+    };
+    if header_fields.first().map(|field| field.trim())
+        != Some(if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
         || metadata_header_field_index(&header_fields, &child_header.uuid) != Some(1)
     {
         return false;
@@ -17462,8 +17504,22 @@ fn parse_information_register_child_value_types_from_fields(
         return None;
     }
     let header_fields = split_1c_braced_fields(typed_header.get(1)?, 0)?;
-    if header_fields.len() != 9
-        || header_fields.first()?.trim() != "3"
+    // Same code27 short-wrapper omission as `register_common_child_header_
+    // matches` just above and `parse_metadata_code27_payload_fields`
+    // (`06249bd`) -- another hand reimplementation of the same
+    // `{27,{2,header,{"Pattern",...}}}` shape, this time for
+    // InformationRegister Resource/Attribute/Dimension value types.
+    let header_has_trailing_default = match header_fields.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if header_fields.first()?.trim()
+        != (if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
         || metadata_header_field_index(&header_fields, &child_header.uuid) != Some(1)
     {
         return None;
@@ -26265,7 +26321,25 @@ fn parse_task_commands(
         let identity_uuid = parse_information_register_non_zero_uuid(identity.get(1)?)?;
         let value_uuid = parse_information_register_non_zero_uuid(identity.get(2)?)?;
         let properties = split_information_register_braced_fields(body.get(2)?)?;
-        if properties.len() != 13 || properties.first()?.trim() != "9" {
+        // Same recurring omitted-trailing-default-field defect this pass
+        // already fixed for the shared `parse_owner_graph_command_
+        // identity_slot` (Catalog/Document/BusinessProcess) and
+        // `parse_information_register_child_command_properties_from_
+        // fields`'s outer command block: this function hand-duplicates
+        // the same 13/12-member, `"9"`/`"8"`-tagged shape instead of
+        // reusing either.
+        let properties_has_trailing_default = match properties.len() {
+            13 => true,
+            12 => false,
+            _ => return None,
+        };
+        if properties.first().map(|field| field.trim())
+            != Some(if properties_has_trailing_default {
+                "9"
+            } else {
+                "8"
+            })
+        {
             return None;
         }
         let header = parse_information_register_owner_header(properties.get(9)?)?;
@@ -26311,6 +26385,7 @@ const OWNER_GRAPH_COMMAND_ZERO: &str = "0";
 const OWNER_GRAPH_COMMAND_BODY_TAG: &str = "1";
 const OWNER_GRAPH_COMMAND_IDENTITY_TAG: &str = "2";
 const OWNER_GRAPH_COMMAND_PROPERTIES_TAG: &str = "9";
+const OWNER_GRAPH_COMMAND_PROPERTIES_TAG_SHORT: &str = "8";
 
 fn parse_owner_graph_command_identity_slot(value: &str) -> Option<OwnerGraphCommandIdentitySlot> {
     let item = split_information_register_braced_fields(value)?;
@@ -26340,7 +26415,27 @@ fn parse_owner_graph_command_identity_slot(value: &str) -> Option<OwnerGraphComm
     let identity_uuid = parse_information_register_non_zero_uuid(identity.get(1)?)?;
     let value_uuid = parse_information_register_non_zero_uuid(identity.get(2)?)?;
     let properties = split_information_register_braced_fields(body.get(2)?)?;
-    if properties.len() != 13 || properties.first()?.trim() != OWNER_GRAPH_COMMAND_PROPERTIES_TAG {
+    // Same recurring omitted-trailing-default-field defect
+    // `parse_information_register_child_command_properties_from_fields`'s
+    // outer command block documents (this pass) and
+    // `parse_common_command_properties_from_text` already established on
+    // real bytes (`OnMainServerUnavailableBehavior` omitted, not written
+    // `0`, when left at default): shared by every owner-graph family that
+    // routes through this function (Catalog, Document, BusinessProcess via
+    // `parse_owner_graph_command_identity_slots_indexed`'s three call
+    // sites).
+    let properties_has_trailing_default = match properties.len() {
+        13 => true,
+        12 => false,
+        _ => return None,
+    };
+    if properties.first().map(|field| field.trim())
+        != Some(if properties_has_trailing_default {
+            OWNER_GRAPH_COMMAND_PROPERTIES_TAG
+        } else {
+            OWNER_GRAPH_COMMAND_PROPERTIES_TAG_SHORT
+        })
+    {
         return None;
     }
     let header = parse_information_register_owner_header(properties.get(9)?)?;
@@ -26865,7 +26960,25 @@ fn parse_document_journal_commands(
             return None;
         }
         let properties = split_information_register_braced_fields(body.get(2)?)?;
-        if properties.len() != 13 || properties.first()?.trim() != "9" {
+        // Same recurring omitted-trailing-default-field defect this pass
+        // already fixed for the shared `parse_owner_graph_command_
+        // identity_slot` (Catalog/Document/BusinessProcess) and
+        // `parse_information_register_child_command_properties_from_
+        // fields`'s outer command block: this function hand-duplicates
+        // the same 13/12-member, `"9"`/`"8"`-tagged shape instead of
+        // reusing either.
+        let properties_has_trailing_default = match properties.len() {
+            13 => true,
+            12 => false,
+            _ => return None,
+        };
+        if properties.first().map(|field| field.trim())
+            != Some(if properties_has_trailing_default {
+                "9"
+            } else {
+                "8"
+            })
+        {
             return None;
         }
         let header = parse_information_register_owner_header(properties.get(9)?)?;
@@ -28720,13 +28833,28 @@ fn parse_web_service_xdto_type(value: &str) -> Option<WebServiceXdtoType> {
 
 fn parse_web_service_header(value: &str) -> Option<MetadataHeader> {
     let fields = split_web_service_braced_fields(value)?;
-    if fields.len() != 9
-        || fields.first()?.trim() != "3"
+    // Same short-wrapper omission `parse_information_register_owner_header`
+    // documents (`0575505`) and `innermost_metadata_object_fields_around_
+    // header` documents (this pass): the platform drops the trailing
+    // default `0` (and the wrapper's own leading count from `3` to `2`)
+    // whenever the WebService's own header leaves that slot at default.
+    // WebService uses its own field splitter
+    // (`split_web_service_braced_fields`), so it wasn't covered by either
+    // earlier fix even though it's the identical grammar production;
+    // `WebServices` is one of the families the missing-root-cause map's
+    // pre-`0575505` opaque-bucket table lists as still nonzero
+    // (docs/evidence/uh-missing-root-cause-map-20260825.md).
+    let has_trailing_default = match fields.len() {
+        9 => true,
+        8 => false,
+        _ => return None,
+    };
+    if fields.first()?.trim() != (if has_trailing_default { "3" } else { "2" })
         || fields.get(5)?.trim() != "0"
         || fields.get(6)?.trim() != "0"
         || !parse_uuid_field(fields.get(7)?.trim())
             .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
-        || fields.get(8)?.trim() != "0"
+        || (has_trailing_default && fields.get(8)?.trim() != "0")
     {
         return None;
     }
@@ -29139,7 +29267,35 @@ fn innermost_metadata_object_fields_around_header<'a>(
         let Some(fields) = split_1c_braced_fields(text, start) else {
             continue;
         };
-        if matches!(fields.first().map(|field| field.trim()), Some("1" | "3")) {
+        let discriminator = fields.first().map(|field| field.trim());
+        // Skip the identity marker (`"1"`, always `{1,0,<uuid>}`) and the
+        // child-object header wrapper itself -- full form (`"3"`, 9
+        // members: `{1,0,<uuid>},Name,Synonym,Comment,0,0,NilUuid,0`) or
+        // short form (`"2"`, 8 members: same shape minus the trailing
+        // default `0`, exactly the omission `parse_information_register_
+        // owner_header` and `parse_metadata_code27_payload_fields` already
+        // document for this grammar production) -- to reach the *next*
+        // enclosing wrapper the caller actually wants (`detail` for the
+        // code27 attribute-Pattern payload, or the analogous outer record
+        // for tabular-section/HTTPService candidates).
+        //
+        // Before this fix, only the full form was skipped: a short header
+        // also opens with `"2"`, indistinguishable by leading digit alone
+        // from `detail`'s own unrelated `"2"`-tagged 3-member wrapper, so
+        // the walk stopped one level too early at the header itself,
+        // leaving no `"Pattern"` field for the caller to find (rendering an
+        // empty `<Type/>`). Confirmed on real ERP УХ 3.2.12.6 bytes: over
+        // 3,000 short-header attributes hit exactly this stop-too-early
+        // case in one `uh` corpus pass (docs/evidence/
+        // uh-missing-root-cause-map-20260825.md). Length, not just the
+        // digit, is what makes the short header (8) and `detail` (3)
+        // distinguishable; the full header keeps its existing bare-digit
+        // skip (unchanged, already validated by the whole corpus) since no
+        // evidence has surfaced of a non-9-member `"3"` collision here.
+        if matches!(discriminator, Some("1"))
+            || discriminator == Some("3")
+            || (discriminator == Some("2") && fields.len() == 8)
+        {
             continue;
         }
         if metadata_header_field_index(&fields, uuid).is_none() {
@@ -29330,11 +29486,27 @@ fn parse_defined_type_properties_from_text(
 
 /// Parses `Bot.Predefined` and `Bot.Picture` from the record's own text. See
 /// `BotProperties` for the evidence (seed `bots`). The header block is the
-/// generic `{3,{1,0,uuid},Name,Synonym,Comment,0,0,NilUuid,0}` shape already
-/// used by `parse_metadata_header_from_text`; `Predefined` is the bare digit
-/// immediately after it, and the picture descriptor is the trailing `{4,...}`
-/// block, decoded by the same reader `CommonCommand.Picture` uses since the
-/// two tuples share their shape byte for byte.
+/// generic `{1,0,uuid},Name,Synonym,Comment,0,0,NilUuid,0}` shape already
+/// used by `parse_metadata_header_from_text` -- full form (9 members,
+/// discriminator `"3"`) or short form (8 members, `"2"`, the platform's
+/// trailing-default-`0` omission `parse_information_register_owner_header`
+/// (`0575505`) and five other call sites in this file document for this
+/// exact grammar production); `Predefined` is the bare digit immediately
+/// after it, and the picture descriptor is the trailing `{4,...}` block,
+/// decoded by the same reader `CommonCommand.Picture` uses since the two
+/// tuples share their shape byte for byte.
+///
+/// The one real Bot object available across this project's seven gate
+/// corpora (`Bots/ОповещенияПользователейОСобытиях`, shared by `uh`/`ut`)
+/// happens to use the full form, so the short form is not corpus-confirmed
+/// here the way it is for the other sites in this pass -- but this is the
+/// same shared header production already independently confirmed short-
+/// form-capable on real bytes at six other call sites, and this function's
+/// own doc comment already assumed the fixed 9-member shape outright with
+/// no length check at all, the purest instance of the recurring defect
+/// class this pass audited for. `enclosing_counted_block_start` reads the
+/// block's own declared count back from the text instead of assuming a
+/// literal `"{3,"`, so it accepts either form without an explicit branch.
 fn parse_bot_properties_from_text(
     text: &str,
     uuid: &str,
@@ -29342,7 +29514,7 @@ fn parse_bot_properties_from_text(
 ) -> Option<BotProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
-    let header_start = text[..marker_start].rfind("{3,")?;
+    let header_start = enclosing_counted_block_start(text, marker_start)?;
     let header_end = scan_1c_braced_value(text, header_start)?;
     let mut offset = expect_comma_at(text, header_end)?;
     offset = skip_ascii_ws_at(text, offset);

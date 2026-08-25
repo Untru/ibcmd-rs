@@ -388,7 +388,14 @@ pub(super) struct MoxelCell {
     pub(super) column_index: usize,
     pub(super) format_index: usize,
     pub(super) source_format_index: Option<usize>,
-    pub(super) text: Option<String>,
+    /// Every declared language of the cell's text list, in declaration
+    /// order. Evidence (native ERP УХ 3.2.12.6, bilingual corpus): a cell
+    /// text list declares as many `v8:item` entries as languages are
+    /// configured (ru, en) and the platform publishes every one of them; an
+    /// empty vec with `empty_text` unset means no text member is present at
+    /// all, and an empty vec with `empty_text` set publishes a self-closed
+    /// `<tl/>`/`<tfl/>`.
+    pub(super) text: Vec<MoxelLocalizedValue>,
     /// The text list carries a trailing `1`: the platform spells the same
     /// content `<tfl>` instead of `<tl>`.
     pub(super) formatted_text: bool,
@@ -419,7 +426,7 @@ pub(super) struct MoxelNote {
     pub(super) auto_size: bool,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MoxelLocalizedValue {
     pub(super) lang: String,
     pub(super) content: String,
@@ -745,7 +752,10 @@ pub(super) struct MoxelDrawing {
 /// carries, published between `formatIndex` and `beginRow`.
 #[derive(Default)]
 pub(super) struct MoxelDrawingMembers {
-    pub(super) text: Option<MoxelLocalizedValue>,
+    /// Every declared language of the drawing's text member, in declaration
+    /// order. Same container the cell record uses (see `MoxelCell::text`);
+    /// a bilingual drawing publishes one `v8:item` per configured language.
+    pub(super) text: Vec<MoxelLocalizedValue>,
     pub(super) parameter: Option<String>,
     pub(super) value: Option<String>,
     pub(super) detail_parameter: Option<String>,
@@ -3037,16 +3047,19 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     // text list and of the note are read as before, so a member this reader
     // cannot spell out is dropped rather than costing the cell.
     let localized = text_at.and_then(|at| parse_moxel_localized_cell_value(fields.get(at)?));
-    let empty_text = matches!(localized, Some(None));
-    let localized = localized.flatten();
-    let text = localized
-        .as_ref()
-        .filter(|value| !value.lang.is_empty())
-        .map(|value| value.content.clone());
-    let parameter = localized
-        .as_ref()
-        .filter(|value| value.lang.is_empty())
-        .map(|value| value.content.clone());
+    let empty_text = matches!(localized.as_deref(), Some([]));
+    // An empty language on the leading item marks a parameter reference
+    // rather than a text list (see `MoxelDrawingMembers::text`, the same
+    // container); a parameter is always the sole item, everything else is
+    // the text list in full, every declared language included.
+    let (text, parameter) = match localized {
+        Some(items) if items.first().is_some_and(|first| first.lang.is_empty()) => (
+            Vec::new(),
+            items.into_iter().next().map(|item| item.content),
+        ),
+        Some(items) => (items, None),
+        None => (Vec::new(), None),
+    };
     // Where the record carries a formatted tail, that tail is the text the
     // platform publishes; the plain copy beside it is the same content with its
     // markup stripped. Evidence (native 1С:УТ 11.5.27.75): 16 cells in the
@@ -3055,7 +3068,7 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     // published `<tfl>` is the tail's `<b>…</>` form and never the plain one.
     let text = formatted_at
         .and_then(|at| parse_moxel_formatted_cell_text(fields.get(at)?))
-        .or(text);
+        .unwrap_or(text);
     let note = note_at.and_then(|at| parse_moxel_cell_note(&fields, at));
     Some(MoxelCell {
         column_index,
@@ -3151,26 +3164,52 @@ fn parse_moxel_single_localized_value(text: &str) -> Option<MoxelLocalizedValue>
 }
 
 /// The formatted tail `{1, <text list>, 1}` of a cell record.
-fn parse_moxel_formatted_cell_text(text: &str) -> Option<String> {
+///
+/// Returns every declared language of the tail's own text list (evidence:
+/// same container `parse_moxel_localized_cell_value` reads elsewhere - a
+/// bilingual formatted tail declares one pair per language, not one). A
+/// leading item whose language is empty marks a parameter, which the
+/// formatted tail never carries, so that shape falls back to `None` exactly
+/// as before.
+fn parse_moxel_formatted_cell_text(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
     let group = split_1c_braced_fields(text, 0)?;
     if group.len() != 3 || group.first()?.trim() != "1" || group.get(2)?.trim() != "1" {
         return None;
     }
-    parse_moxel_localized_cell_value(group.get(1)?)?
-        .filter(|value| !value.lang.is_empty())
-        .map(|value| value.content)
+    let items = parse_moxel_localized_cell_value(group.get(1)?)?;
+    match items.first() {
+        Some(first) if !first.lang.is_empty() => Some(items),
+        _ => None,
+    }
 }
 
-pub(super) fn parse_moxel_localized_cell_value(text: &str) -> Option<Option<MoxelLocalizedValue>> {
+/// Every declared language of a cell/drawing text-list member.
+///
+/// The leading field is the item count; `Some(vec![])` is the explicit
+/// `count == 0` shape (published as a self-closed element), `None` is a
+/// parse failure. Evidence (native ERP УХ 3.2.12.6, bilingual corpus): a
+/// record declaring `count` items carries exactly that many `{lang,
+/// content}` pairs and the platform publishes every one of them - reading
+/// only the first (the prior shape of this function) silently dropped every
+/// language past the first on any multi-language configuration.
+pub(super) fn parse_moxel_localized_cell_value(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
     if count == 0 {
-        return Some(None);
+        return Some(Vec::new());
     }
-    let pair = split_1c_braced_fields(fields.iter().skip(2).take(count).next()?, 0)?;
-    let lang = parse_1c_string(pair.first()?)?;
-    let content = parse_1c_string(pair.get(1)?)?;
-    Some(Some(MoxelLocalizedValue { lang, content }))
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .map(|field| {
+            let pair = split_1c_braced_fields(field, 0)?;
+            Some(MoxelLocalizedValue {
+                lang: parse_1c_string(pair.first()?)?,
+                content: parse_1c_string(pair.get(1)?)?,
+            })
+        })
+        .collect()
 }
 
 #[allow(dead_code)]
@@ -4479,13 +4518,16 @@ fn parse_moxel_drawing_format_record(text: &str) -> Option<(usize, MoxelDrawingM
     }
     if mask & MOXEL_DRAWING_MEMBER_LOCALIZED != 0 {
         // The same container the cell record uses: an empty language identifier
-        // marks a parameter name, a non-empty one a localized text.
-        if let Some(localized) = parse_moxel_localized_cell_value(fields.get(cursor)?)? {
-            if localized.lang.is_empty() {
-                members.parameter = Some(localized.content);
-            } else {
-                members.text = Some(localized);
+        // on the leading item marks a parameter name (always the sole item);
+        // a non-empty one opens a localized text list, every declared
+        // language included.
+        let localized = parse_moxel_localized_cell_value(fields.get(cursor)?)?;
+        match localized.first() {
+            Some(first) if first.lang.is_empty() => {
+                members.parameter = Some(first.content.clone());
             }
+            Some(_) => members.text = localized,
+            None => {}
         }
         if fields.get(cursor + 1)?.trim() != "0" {
             return None;
@@ -9794,10 +9836,17 @@ fn push_moxel_language_settings_xml(xml: &mut String, settings: Option<&MoxelLan
             "\t\t\t<code>{}</code>\r\n",
             escape_xml_text(&info.code)
         ));
-        xml.push_str(&format!(
-            "\t\t\t<description>{}</description>\r\n",
-            escape_xml_text(&info.description)
-        ));
+        // A configured language with no translated name (typically `en`
+        // when only its `ru` name is filled in) self-closes: the platform
+        // writes `<description/>`, never `<description></description>`.
+        if info.description.is_empty() {
+            xml.push_str("\t\t\t<description/>\r\n");
+        } else {
+            xml.push_str(&format!(
+                "\t\t\t<description>{}</description>\r\n",
+                escape_xml_text(&info.description)
+            ));
+        }
         xml.push_str("\t\t</languageInfo>\r\n");
     }
     xml.push_str("\t</languageSettings>\r\n");
@@ -10326,17 +10375,21 @@ pub(super) fn push_moxel_drawing_xml(
     // Member publication order is `text`/`parameter`, `value`,
     // `detailParameter`, which is the reverse of their slot order in the record;
     // the 9 records that carry all three pin it.
-    if let Some(text) = &drawing.members.text {
-        xml.push_str("\t\t<text>\r\n\t\t\t<v8:item>\r\n");
-        xml.push_str(&format!(
-            "\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-            escape_xml_element_text(&text.lang)
-        ));
-        xml.push_str(&format!(
-            "\t\t\t\t<v8:content>{}</v8:content>\r\n",
-            escape_xml_element_text(&text.content)
-        ));
-        xml.push_str("\t\t\t</v8:item>\r\n\t\t</text>\r\n");
+    if !drawing.members.text.is_empty() {
+        xml.push_str("\t\t<text>\r\n");
+        for item in &drawing.members.text {
+            xml.push_str("\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_element_text(&item.lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_element_text(&item.content)
+            ));
+            xml.push_str("\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t</text>\r\n");
     }
     if let Some(parameter) = &drawing.members.parameter {
         xml.push_str(&format!(
@@ -11201,15 +11254,20 @@ pub(super) fn push_moxel_row_xml(
             push_moxel_cell_control_xml(xml, control);
         }
         let text_element = if cell.formatted_text { "tfl" } else { "tl" };
-        if let Some(text) = &cell.text {
+        if !cell.text.is_empty() {
             xml.push_str(&format!("\t\t\t\t\t<{text_element}>\r\n"));
-            xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
-            xml.push_str("\t\t\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n");
-            xml.push_str(&format!(
-                "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_element_text(text)
-            ));
-            xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
+            for item in &cell.text {
+                xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                    escape_xml_element_text(&item.lang)
+                ));
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                    escape_xml_element_text(&item.content)
+                ));
+                xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
+            }
             xml.push_str(&format!("\t\t\t\t\t</{text_element}>\r\n"));
         } else if cell.empty_text {
             xml.push_str(&format!("\t\t\t\t\t<{text_element}/>\r\n"));
@@ -11638,7 +11696,7 @@ mod moxel_exact_parity_tests {
             value_only.value,
             Some(MoxelCellValue::Number("0".to_string()))
         );
-        assert!(!value_only.empty_text && value_only.text.is_none());
+        assert!(!value_only.empty_text && value_only.text.is_empty());
 
         let formatted = parse_moxel_cell(
             "{16,2,{1,1,{\"ru\",\"Код\"}},1,{1,{1,1,{\"ru\",\"Код\"}},1}}",
@@ -11646,7 +11704,13 @@ mod moxel_exact_parity_tests {
         )
         .unwrap();
         assert!(formatted.formatted_text);
-        assert_eq!(formatted.text.as_deref(), Some("Код"));
+        assert_eq!(
+            formatted.text,
+            vec![MoxelLocalizedValue {
+                lang: "ru".to_string(),
+                content: "Код".to_string(),
+            }]
+        );
     }
 
     #[test]
@@ -11656,6 +11720,57 @@ mod moxel_exact_parity_tests {
         assert!(parse_moxel_cell("{128,3,\"Расшифровка\"}", 0).is_none());
         assert!(parse_moxel_cell("{8,3,\"Расшифровка\",\"Поставщик\"}", 0).is_none());
         assert!(parse_moxel_cell("{16,2,{1,0}}", 0).is_none());
+    }
+
+    /// A bilingual configuration declares one `v8:item` per configured
+    /// language on a cell's text list, not one. Evidence (native ERP УХ
+    /// 3.2.12.6, `Reports/РегламентированныйОтчетНДДУ/Templates/
+    /// ФормаОтчета2022Кв4_Раздел2/Ext/Template.xml`): a `<tl>` cell declares
+    /// `{1,2,{"ru",...},{"en",...}}` and the platform publishes both items in
+    /// declaration order. The prior reader took only the first pair
+    /// (`.skip(2).take(count).next()`), and the writer hard-coded
+    /// `<v8:lang>ru</v8:lang>` for the single item it kept - together
+    /// dropping every second-language cell text in a bilingual corpus.
+    #[test]
+    fn bilingual_cell_text_list_publishes_every_declared_language() {
+        let cell = parse_moxel_cell(
+            r#"{16,2,{1,2,{"ru","Добавить страницу"},{"en","Add page"}},0}"#,
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            cell.text,
+            vec![
+                MoxelLocalizedValue {
+                    lang: "ru".to_string(),
+                    content: "Добавить страницу".to_string(),
+                },
+                MoxelLocalizedValue {
+                    lang: "en".to_string(),
+                    content: "Add page".to_string(),
+                },
+            ]
+        );
+
+        let row = MoxelRow {
+            index: 0,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![cell],
+        };
+        let mut xml = String::new();
+        push_moxel_row_xml(&mut xml, &row, &BTreeMap::new(), false);
+        assert_eq!(xml.matches("<v8:item>").count(), 2);
+        assert!(xml.contains(
+            "<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Добавить страницу</v8:content>"
+        ));
+        assert!(
+            xml.contains(
+                "<v8:lang>en</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Add page</v8:content>"
+            )
+        );
     }
 
     #[test]
@@ -11759,7 +11874,7 @@ mod moxel_exact_parity_tests {
                 column_index: 0,
                 format_index: 3,
                 source_format_index: Some(2),
-                text: None,
+                text: Vec::new(),
                 parameter: None,
                 detail_parameter: None,
                 note: None,
