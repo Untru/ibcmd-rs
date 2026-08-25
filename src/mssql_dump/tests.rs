@@ -17629,6 +17629,49 @@ fn extracts_shifted_radio_button_field_title_without_duplicating_into_tooltip() 
     );
 }
 
+/// The same `top_level_offset == 1` gap `FormFieldSchema::from_raw_layout`
+/// had for `RadioButtonField` also blocked every event of a shifted
+/// `SpreadSheetDocumentField`, `DetailProcessing` included:
+/// `parse_form_schema_backed_child_item_events`'s only route to the field's
+/// event collection is `options.get(schema.collection_slot())`, gated on
+/// this same schema matching, and there is no positional fallback the way
+/// title/tooltip have one -- a rejected schema means the whole `<Events>`
+/// block goes unwritten, not just one event misread.
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `074f9be4-aec8-49d5-b17f-56997fe8782a.0`
+/// (`CommonForms/ИсторияСогласованияЦентрализованнаяБаза`), item id 1
+/// `ИсторияСогласования` -- wrapper `37`, 60 top-level fields (the unshifted
+/// base is 59), discriminator `6`, a 32-member option tuple headed `13`.
+/// Native writes one `<Events>` entry, `DetailProcessing`.
+#[test]
+fn extracts_detail_processing_event_from_shifted_spreadsheet_document_field() {
+    let item = parse_form_child_item(
+            r##"{37,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},6,"ИсторияСогласования",0,0,{1,0},{1,0},{1,{1}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{13,50,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{1,2988b2a5-c887-4928-94ae-5d0c9c31e999,"ИсторияСогласованияОбработкаРасшифровки",1,0,2988b2a5-c887-4928-94ae-5d0c9c31e999,0,1},0,1,0,0,1,0,0,0,0,2,2,1,2},{0,1,0},1,{22,{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ИсторияСогласованияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИсторияСогласованияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(item.tag, "SpreadSheetDocumentField");
+    assert_eq!(item.events.len(), 1, "events: {:?}", item.events);
+    assert_eq!(item.events[0].name, "DetailProcessing");
+    assert_eq!(
+        item.events[0].handler,
+        "ИсторияСогласованияОбработкаРасшифровки"
+    );
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Events>"));
+    assert!(xml.contains(
+        r#"<Event name="DetailProcessing">ИсторияСогласованияОбработкаРасшифровки</Event>"#
+    ));
+}
+
 #[test]
 fn parses_radio_button_type_and_columns_count_from_options() {
     for (code, expected) in [("0", "Auto"), ("1", "RadioButtons"), ("2", "Tumbler")] {
