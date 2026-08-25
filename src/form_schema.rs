@@ -3447,13 +3447,41 @@ impl FormFieldSchema {
         } else {
             59
         };
+        // `top_level_offset == 1` was accepted for four kinds and not a fifth,
+        // `RadioButtonField`, even though the offset itself
+        // (`input_field_top_level_offset` at the one call site) is already
+        // computed uniformly across all of them -- the same shift is already
+        // used to locate this kind's own discriminator and options slot
+        // before it ever reaches this guard. Rejecting the schema here does
+        // not drop the item; `parse_form_child_item_title` and
+        // `parse_form_child_item_tooltip` both fall back to a positional
+        // guess (`&[9, 10]` and `&[10, 11]`) that assumes offset 0, so a
+        // shifted `RadioButtonField` had its title read correctly from slot
+        // 10 (the fallback's second candidate, since slot 9 is empty at this
+        // offset) while its tooltip fallback picked slot 10 too -- the same
+        // title text read again -- instead of slot 11, the truly empty
+        // tooltip slot.
+        //
+        // Evidence: ERP UH MDM_Management
+        // `Catalogs/СправочникиБД/Forms/ФормаЭлемента`, item
+        // `СогласованиеСвязанныхОбъектов` -- wrapper `37`, 60 fields (offset
+        // 1), discriminator `5`, a 12-member option tuple headed `8` (all
+        // exactly what this schema already requires of an unshifted
+        // `RadioButtonField`) -- has its title at slot 10 and an empty
+        // `{1,0}` at slot 11; native writes `<Title>` and no `<ToolTip>` at
+        // all, matching `title_slot = 9 + offset` / `tooltip_slot = 10 +
+        // offset` exactly once the schema is allowed to match.
         if wrapper != "37"
             || field_count != field_count_base + top_level_offset
             || top_level_offset > 1
             || (top_level_offset == 1
                 && !matches!(
                     item_tag,
-                    "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
+                    "LabelField"
+                        | "InputField"
+                        | "CheckBoxField"
+                        | "PictureField"
+                        | "RadioButtonField"
                 ))
             || direct_discriminator != Some(discriminator)
             || options.len() != options_len

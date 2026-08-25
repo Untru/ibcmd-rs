@@ -17579,6 +17579,56 @@ fn extracts_radio_button_field_with_choice_list_from_layout_code() {
     assert!(xml.contains(r#"<ContextMenu name="ВариантОбработкиКонтекстноеМеню" id="39"/>"#));
 }
 
+/// A shifted (`top_level_offset == 1`) `RadioButtonField` used to lose its
+/// `FormFieldSchema` match outright -- the guard allowed the offset only for
+/// `LabelField`/`InputField`/`CheckBoxField`/`PictureField` -- and fall back to
+/// the unshifted-assuming positional readers instead. Title fell back
+/// correctly (its `&[9, 10]` candidate list still finds the real title at
+/// slot 10, one past the empty slot 9), but tooltip's `&[10, 11]` candidate
+/// list picked slot 10 first too: the same title text, read a second time as
+/// if it were the tooltip.
+///
+/// Provenance: ERP UH `MDM_Management.cf`, storage element
+/// `64cdce18-0812-4f5e-9caf-33459239e2b9.0`
+/// (`Catalogs/СправочникиБД/Forms/ФормаЭлемента`), item id 72
+/// `СогласованиеСвязанныхОбъектов` -- wrapper `37`, 60 top-level fields (the
+/// unshifted base is 59), discriminator `5`. Native writes `<Title>` and no
+/// `<ToolTip>` at all for this item.
+#[test]
+fn extracts_shifted_radio_button_field_title_without_duplicating_into_tooltip() {
+    let item = parse_form_child_item(
+            r##"{37,{72,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",1},0}},5,"СогласованиеСвязанныхОбъектов",3,0,{1,1,{"ru","Утверждение связанных заявок на регистрацию используемых неактивных элементов других справочников"}},{1,0},{2,{1},{0,144efa7e-feae-4008-8582-d30937446e25}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{3,0},0,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2},{0,1,0},1,{22,{73,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СогласованиеСвязанныхОбъектовКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{74,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СогласованиеСвязанныхОбъектовРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##,
+            Some("Объект"),
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(item.tag, "RadioButtonField");
+    assert_eq!(
+        item.title,
+        vec![(
+            "ru".to_string(),
+            "Утверждение связанных заявок на регистрацию используемых неактивных элементов других справочников".to_string()
+        )]
+    );
+    assert!(
+        item.tooltip.is_empty(),
+        "tooltip must stay empty, not duplicate the title: {:?}",
+        item.tooltip
+    );
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Title>"));
+    assert!(
+        !xml.contains("<ToolTip>"),
+        "must not write a spurious ToolTip: {xml}"
+    );
+}
+
 #[test]
 fn parses_radio_button_type_and_columns_count_from_options() {
     for (code, expected) in [("0", "Auto"), ("1", "RadioButtons"), ("2", "Tumbler")] {
