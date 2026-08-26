@@ -1384,45 +1384,27 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let header_footer_format_ref = parse_moxel_uniform_header_footer_format_ref(&fields);
     let drawings = parse_moxel_drawings(&fields);
     // A cell note is a drawing record of its own -- `drawingType` `Comment`,
-    // its own `<formatIndex>` -- so the format it names is a drawing format,
-    // and that format's members 1, 3 and 4 are `drawingBorder`,
-    // `drawingHave*Border` and `print` rather than
-    // `leftBorder`/`rightBorder`/`bottomBorder`. This set was built from the
-    // `<drawing>` list alone, which left every note-only format read as a
-    // cell one.
+    // its own `<formatIndex>` -- and the format it names *can* be a drawing
+    // format: of the 23 `<format>` elements that publish `<print>` across the
+    // five corpora, eleven sit in documents with no `<drawing>` at all, and
+    // in each the format they name is exactly a `<note>`'s `<formatIndex>`.
+    // In `Reports/РасчетСтоимостиЧистыхАктивов/Templates/
+    // РасчетСтоимостиЧистыхАктивов` the whole `<formatIndex>` set is
+    // `{1..8, 31}`, disjoint from the `<f>` set the cells cite, and format 31
+    // is the one that publishes `<print>false</print>`.
     //
-    // Evidence: of the 23 `<format>` elements that publish `<print>` across
-    // ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, Документооборот КОРП 3.0.21.3 and
-    // БСП demo/base, eleven sit in documents that carry no `<drawing>` at
-    // all, and in every one the format they name is exactly the
-    // `<formatIndex>` of a `<note>`. In
-    // `Reports/РасчетСтоимостиЧистыхАктивов/Templates/РасчетСтоимостиЧистыхАктивов`
-    // the whole `<formatIndex>` set is `{1..8, 31}`, disjoint from the `<f>`
-    // set the cells cite, and format 31 is the one that publishes
-    // `<print>false</print>`.
-    //
-    // A note-named format is only a drawing format where **no cell names it
-    // too**: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
+    // Feeding those indexes into this set is NOT enough, though, and is left
+    // undone: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
     // ЗагрузкаИзФайла` and four documents like it share one format between a
-    // note and their own report-header cells, and the platform renders it as
-    // a cell format there -- `leftBorder`/`rightBorder` and no
-    // `drawingBorder`. In `РасчетСтоимостиЧистыхАктивов` the two sets are
-    // disjoint, which is what makes format 31 a drawing format.
-    let cell_format_indices = rows
-        .iter()
-        .flat_map(|row| {
-            std::iter::once(row.format_index).chain(row.cells.iter().map(|cell| cell.format_index))
-        })
-        .collect::<BTreeSet<_>>();
+    // note and their report header, and the platform renders it as a cell
+    // format there. Excluding the formats the rows and cells name does not
+    // separate them -- the shared format is reached some other way (a column
+    // set's own default, the header/footer reference) -- and the naive
+    // version broke those five documents on ut and fourteen on uh while
+    // gaining five. See docs/evidence/mxl-template-body-remainder-20260826.md.
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
-        .chain(
-            rows.iter()
-                .flat_map(|row| row.cells.iter())
-                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
-                .filter(|index| !cell_format_indices.contains(index)),
-        )
         .collect::<BTreeSet<_>>();
     let zero_column_format_table_is_width_only =
         parse_moxel_format_table(&fields, 0, &style_refs, &drawing_format_indices, &[])
