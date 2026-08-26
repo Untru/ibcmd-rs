@@ -9852,7 +9852,8 @@ fn parse_form_child_item_with_metadata_owners(
     let spreadsheet_document_properties = field_schema_and_options
         .as_ref()
         .and_then(|(schema, options)| schema.spreadsheet_document_properties(&fields, options));
-    let button_color_schema = FormButtonColorSchema::from_raw_layout(wrapper, fields.len(), tag);
+    let button_color_schema =
+        FormButtonColorSchema::from_raw_layout(wrapper, fields.len(), tag, button_top_level_offset);
     let button_shape_representation_schema = FormButtonShapeRepresentationSchema::from_raw_layout(
         wrapper,
         fields.len(),
