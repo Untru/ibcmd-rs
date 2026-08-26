@@ -1967,7 +1967,103 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     {
         remap_moxel_source_fonts(&source_font_map, &mut spreadsheet);
     }
+    normalize_moxel_lines_to_published_citation_order(&mut spreadsheet);
     Some(spreadsheet)
+}
+
+/// The line references one published `<format>` element names, in the order the
+/// element writes them.
+///
+/// `push_moxel_format_body_xml` writes `drawingBorder` ahead of `border`, and
+/// writes the four side references only where `border` is absent - a stored
+/// side reference behind a `border` is never published at all. Reading the
+/// stored members in their struct order instead would cite a line the document
+/// does not cite.
+fn moxel_published_line_citations(format: &MoxelFormat) -> Vec<usize> {
+    if format.is_empty() {
+        return Vec::new();
+    }
+    let mut cited = Vec::new();
+    if let Some(index) = format.drawing_border {
+        cited.push(index);
+    }
+    if let Some(index) = format.border {
+        cited.push(index);
+        return cited;
+    }
+    for value in [
+        format.left_border,
+        format.top_border,
+        format.right_border,
+        format.bottom_border,
+    ] {
+        if let Some(index) = value {
+            cited.push(index);
+        }
+    }
+    cited
+}
+
+/// The published `<line>` table is exactly the entries the published `<format>`
+/// pool cites, in first-citation order.
+///
+/// Evidence (every `Templates/*/Ext/Template.xml` of ERP УХ 3.2.12.6,
+/// 1С:УТ 11.5.27.75, Документооборот КОРП 3.0.21.3 and БСП demo/base that
+/// publishes a line table - 12 414 documents): walking the published `<format>`
+/// elements in document order and reading their `border`/`leftBorder`/
+/// `topBorder`/`rightBorder`/`bottomBorder`/`drawingBorder` references in
+/// publication order, the first mention of each new index is always exactly one
+/// past the previous one, and the number of distinct mentioned indexes always
+/// equals the number of `<line>` elements. Zero counterexamples.
+///
+/// `compact_moxel_line_table` runs before the pool exists and can only walk the
+/// internal `column_formats ++ formats ++ default_format` concatenation, which
+/// is not the published order wherever `moxel_output_format_indices` reorders
+/// the pool - nor the published member order. This pass runs once the pool is
+/// known and is a no-op on any document whose table already satisfies the fact
+/// above, so it can only move a document the walk disagrees with.
+fn normalize_moxel_lines_to_published_citation_order(spreadsheet: &mut MoxelSpreadsheet) {
+    if spreadsheet.lines.is_empty() {
+        return;
+    }
+    let mut order = Vec::new();
+    let mut seen = BTreeSet::new();
+    for format_index in moxel_output_format_indices(spreadsheet) {
+        for index in
+            moxel_published_line_citations(&moxel_format_for_index(spreadsheet, format_index))
+        {
+            if seen.insert(index) {
+                order.push(index);
+            }
+        }
+    }
+    if order.iter().copied().eq(0..spreadsheet.lines.len()) {
+        return;
+    }
+    // Fail-closed: a citation the table cannot answer is not this pass's case,
+    // and the table it would build would drop a line for a reference that
+    // resolves nowhere.
+    if order.iter().any(|index| *index >= spreadsheet.lines.len()) {
+        return;
+    }
+    let remap = order
+        .iter()
+        .enumerate()
+        .map(|(published, stored)| (*stored, published))
+        .collect::<BTreeMap<_, _>>();
+    let lines = order
+        .iter()
+        .map(|stored| spreadsheet.lines[*stored].clone())
+        .collect::<Vec<_>>();
+    for format in spreadsheet
+        .column_formats
+        .iter_mut()
+        .chain(spreadsheet.formats.iter_mut())
+    {
+        remap_moxel_format_line_refs(format, &remap);
+    }
+    remap_moxel_format_line_refs(&mut spreadsheet.default_format, &remap);
+    spreadsheet.lines = lines;
 }
 
 pub(super) fn normalize_moxel_fonts(fonts: &mut Vec<MoxelFont>, formats: &[MoxelFormat]) {
