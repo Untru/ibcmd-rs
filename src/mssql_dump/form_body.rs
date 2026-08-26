@@ -19130,19 +19130,28 @@ fn resolve_form_document_register_records_data_path(
                 )?
                 .to_string(),
                 [marker, uuid] => {
-                    marker.trim().parse::<i64>().ok()?;
-                    let uuid = parse_non_zero_uuid(uuid.trim())?;
-                    let reference = object_refs.get(&uuid)?;
-                    let (owner_reference, relative_path) =
-                        form_metadata_data_path_route(reference)?;
-                    // The member has to belong to the very register the chain
-                    // has reached; a field of some other register named by the
-                    // same marker would spell a path that register has no
-                    // column for.
-                    if owner_reference != *register_reference {
-                        return None;
+                    if let Some(name) = form_register_record_set_ext_dimension_name(
+                        register_family,
+                        marker.trim(),
+                        uuid.trim(),
+                    ) {
+                        name
+                    } else {
+                        let suffix =
+                            form_register_record_set_member_suffix(register_family, marker.trim())?;
+                        let uuid = parse_non_zero_uuid(uuid.trim())?;
+                        let reference = object_refs.get(&uuid)?;
+                        let (owner_reference, relative_path) =
+                            form_metadata_data_path_route(reference)?;
+                        // The member has to belong to the very register the
+                        // chain has reached; a field of some other register
+                        // named by the same marker would spell a path that
+                        // register has no column for.
+                        if owner_reference != *register_reference {
+                            return None;
+                        }
+                        format!("{relative_path}{suffix}")
                     }
-                    relative_path
                 }
                 _ => return None,
             };
@@ -19173,7 +19182,103 @@ fn form_register_record_set_standard_attribute_name(
 ) -> Option<&'static str> {
     match family {
         "AccumulationRegister" => accumulation_register_record_set_standard_attribute_name(marker),
+        "AccountingRegister" => ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES
+            .iter()
+            .find_map(|(candidate, name)| (*candidate == marker).then_some(*name)),
         _ => None,
+    }
+}
+
+/// The standard attributes an accounting register's *record set* spells for the
+/// markers a form binding names them by.
+///
+/// This is not the register's `<StandardAttributes>` metadata list and cannot
+/// be read off it: that list carries one `Account` descriptor, while the record
+/// set of a correspondence register carries the two columns `AccountDr` and
+/// `AccountCr`, which is what a form's `<DataPath>` spells.
+///
+/// Every row is a pairing of one `{-n}` terminal against the `<DataPath>` the
+/// platform writes for the item that carries it, over the only three forms in
+/// any gate corpus that bind an accounting register's record set (ERP УХ
+/// 3.2.12.6 `Documents/ОперацияБух`, `Documents/ОперацияМСФО` and
+/// `Documents/ОперацияМеждународный`, five register record sets across two
+/// charts of accounts and both settings of `Correspondence`):
+/// `-2` Period (3 register sets), `-4` LineNumber (3), `-5` Active (2, on
+/// `Международный` and `МеждународныйБезКорреспонденции`), `-6` AccountDr (3)
+/// and `-7` AccountCr (3). No marker is spelled two ways anywhere.
+///
+/// `Recorder`, `RecordType`, the non-correspondence `Account` and
+/// `PeriodAdjustment` are members the family has but no corpus binding names,
+/// so they have no evidenced marker here and the slot stays unresolved rather
+/// than borrowing the accumulation register's numbering.
+const ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
+    ("-7", "AccountCr"),
+    ("-6", "AccountDr"),
+    ("-5", "Active"),
+    ("-4", "LineNumber"),
+    ("-2", "Period"),
+];
+
+/// The `ExtDimension…` family a record-set terminal `{index, <family uuid>}`
+/// names, and the one-based number the platform appends to it.
+///
+/// Unlike every other member of a record set these are generated per
+/// ext-dimension slot of the register's chart of accounts, so the terminal
+/// carries an index against a fixed family uuid instead of the member's own.
+/// The two uuids are platform-wide, not per chart of accounts: the same pair
+/// serves `AccountingRegisters/Хозрасчетный` and
+/// `.../КорректировкиНалоговойБазы` (chart `Хозрасчетный`) and
+/// `AccountingRegisters/МСФО` (chart `МСФО`), 18 terminals in all, and the
+/// platform writes `ExtDimensionDr1..3` for the `1ab44b24…` family and
+/// `ExtDimensionCr1..3` for the `f77758c9…` one, index `0` spelling `1`.
+///
+/// A register whose chart of accounts is addressed without correspondence
+/// names its ext dimensions through neither family in any corpus form, so no
+/// third family is invented here.
+fn form_register_record_set_ext_dimension_name(
+    family: &str,
+    index: &str,
+    uuid: &str,
+) -> Option<String> {
+    if family != "AccountingRegister" {
+        return None;
+    }
+    let stem = match uuid {
+        ACCOUNTING_REGISTER_EXT_DIMENSION_DR_FAMILY => "ExtDimensionDr",
+        ACCOUNTING_REGISTER_EXT_DIMENSION_CR_FAMILY => "ExtDimensionCr",
+        _ => return None,
+    };
+    let index = index.parse::<usize>().ok()?;
+    Some(format!("{stem}{}", index.checked_add(1)?))
+}
+
+const ACCOUNTING_REGISTER_EXT_DIMENSION_DR_FAMILY: &str = "1ab44b24-3315-40a9-b495-f1f1227ac205";
+const ACCOUNTING_REGISTER_EXT_DIMENSION_CR_FAMILY: &str = "f77758c9-9fcd-490f-9bbd-1e446541f536";
+
+/// The suffix a record-set member's own name takes when the register splits it
+/// between the two sides of a correspondence entry.
+///
+/// A record-set terminal that names its member by uuid also carries a marker,
+/// and on an accounting register that marker is the side: the same dimension or
+/// resource uuid appears twice, once under `2` and once under `3`, and the
+/// platform writes the member's name with `Dr` and `Cr` appended respectively,
+/// while a member the register does not split carries `0` and is written
+/// plain. Measured over the three ERP УХ 3.2.12.6 forms that bind a record set:
+/// 26 terminals under `2`/`3` forming 13 `Dr`/`Cr` pairs and 14 under `0`, with
+/// no uuid spelled both ways under one marker and no other marker observed.
+///
+/// The other register families keep the reading they were measured under: their
+/// terminals carry a marker this code has never seen disagree with the member's
+/// own name, so it stays a number that must parse and nothing more.
+fn form_register_record_set_member_suffix(family: &str, marker: &str) -> Option<&'static str> {
+    match family {
+        "AccountingRegister" => match marker {
+            "0" => Some(""),
+            "2" => Some("Dr"),
+            "3" => Some("Cr"),
+            _ => None,
+        },
+        _ => marker.parse::<i64>().ok().map(|_| ""),
     }
 }
 
