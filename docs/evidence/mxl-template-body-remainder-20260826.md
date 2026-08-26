@@ -144,6 +144,26 @@ Templates/ЗагрузкаИзФайла` и ещё четыре докумен�
   `series_count = 75`, `point_count = 5` — далеко за пределом
   `series_count > 1`, которым читатель сейчас отказывает.
 
+## Плоские константы, оставшиеся в MXL
+
+Проверены по происхождению, но не по корпусу; ни одна из них в этом
+проходе отказа не давала. Список — чтобы следующему проходу не искать
+заново (`src/mssql_dump/moxel.rs`):
+
+`MAX_MOXEL_ROW_GAP` 1 000 000, `MAX_MOXEL_LINE_TABLE_ENTRIES` 2048,
+`MAX_MOXEL_LINE_WIDTH` 1024, `MAX_MOXEL_CHART_BYTES` 1 МиБ,
+`MAX_MOXEL_CHART_SERIES` 64, `MAX_MOXEL_CHART_POINTS` 1024,
+`MAX_MOXEL_CHART_LOCALIZED_VALUES` 64, `MAX_MOXEL_CHART_DECIMAL_BYTES`
+4096, `MAX_MOXEL_GANTT_CHART_BYTES` 1 МиБ, `MAX_MOXEL_VALUE_TYPES` 2048,
+`MAX_MOXCEL_STYLE_REFS` 2048, а также литералы `2048`, `4096` и `512`
+внутри сканеров `parse_moxel_format_table`, `parse_moxel_column_set`,
+`parse_moxel_pictures` и соседей. Снятый в этом проходе
+`count > 2048` на прогоне групп показывает, чем такие пределы
+опасны: там объявленный счёт доходил до 2 289.
+
+`moxel_explicit_zero` (правило «публикуется только нулевое поле»,
+опровергнутое прошлым проходом) удалена как мёртвый код.
+
 ## Остаток тел макетов uh после пакета (196 файлов)
 
 | файлов | первое расхождение | заметка |
