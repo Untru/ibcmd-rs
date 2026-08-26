@@ -5751,16 +5751,26 @@ fn parse_flowchart_item(
     })
 }
 
+/// Does an item of this code nest its base tuple one level deeper inside the
+/// record head, carrying the item's UUID alongside it? Such a head reads as
+/// `{{..base..},_,uuid}`; for every other code the head *is* the base tuple
+/// and there is no UUID. Both the UUID read and the descent to the base tuple
+/// ask this one predicate, so the two can never disagree about a code.
+fn flowchart_code_has_nested_head(code: &str) -> bool {
+    matches!(code, "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10")
+}
+
 fn parse_flowchart_base(code: &str, body: &str) -> Option<FlowchartBase> {
     let fields = split_1c_braced_fields(body, 0)?;
     let head = split_1c_braced_fields(fields.first()?, 0)?;
-    let uuid = if matches!(code, "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10") {
+    let nested_head = flowchart_code_has_nested_head(code);
+    let uuid = if nested_head {
         head.get(2).map(|value| value.trim().to_string())
     } else {
         None
     }
     .filter(|value| is_uuid_text(value));
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10") {
+    let base_fields = if nested_head {
         split_1c_braced_fields(head.first()?, 0)?
     } else {
         head
