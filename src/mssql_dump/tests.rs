@@ -50104,6 +50104,36 @@ fn extracts_strict_v20_filter_criterion_in_native_order_from_base_indexes() {
     );
 }
 
+/// `{0,0}` is the platform's real, empty `Content` shape -- confirmed on
+/// БСП 3.1.12.297's `FilterCriteria/СвязанныеДокументы`, whose native XML
+/// carries a self-closed `<Content/>`. This is the positive counterpart the
+/// removed "empty Content" case in
+/// `rejects_invalid_strict_filter_criterion_content_atomically` used to
+/// (wrongly) assert was malformed.
+#[test]
+fn extracts_strict_v20_filter_criterion_with_empty_content() {
+    let fixture = strict_filter_criterion_fixture();
+    let content = format!(
+        r##"{{0,2,{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{}}}}},{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{}}}}}}}"##,
+        fixture.content_ids[0], fixture.content_ids[1]
+    );
+    let raw = replace_filter_criterion_test_value(&fixture.raw, &content, "{0,0}");
+    let extracted = extract_filter_criterion_with_distinct_object_ref_indexes(
+        &fixture,
+        &raw,
+        &fixture.type_index,
+        &fixture.object_refs,
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert!(xml.contains("<Content/>\r\n"));
+    assert!(!xml.contains("<Content>"));
+    assert!(!xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">"#));
+}
+
 #[test]
 fn extracts_strict_v20_filter_criterion_with_two_types_and_448_ordered_content_items() {
     let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
@@ -50828,11 +50858,13 @@ fn rejects_invalid_strict_filter_criterion_content_atomically() {
         fixture.content_ids[0]
     );
     let wrong_marker = uuid::Uuid::new_v4().hyphenated().to_string();
+    // `{0,0}` (an empty `Content`, i.e. `count == 0`) used to be one of the
+    // cases below, but it is not malformed: БСП 3.1.12.297's
+    // `FilterCriteria/СвязанныеДокументы` writes exactly this shape for its
+    // real, empty `<Content/>` (see `parse_filter_criterion_content`'s
+    // `fields.len() < 2` guard). Removed rather than asserted the other way,
+    // since a positive round-trip for that shape belongs in its own test.
     let cases = [
-        (
-            "empty Content",
-            replace_filter_criterion_test_value(&fixture.raw, &content, "{0,0}"),
-        ),
         (
             "Content wrapper tag",
             replace_filter_criterion_test_value(

@@ -31200,6 +31200,7 @@ fn parse_style_border_value_xml(value: &str) -> Option<String> {
 /// does not hold platform-wide).
 fn style_web_color_name(code: i32) -> Option<&'static str> {
     match code {
+        6 => Some("web:Beige"),
         8 => Some("web:Black"),
         10 => Some("web:Blue"),
         20 => Some("web:Cream"),
@@ -37573,7 +37574,7 @@ fn parse_filter_criterion_content(
             FilterCriterionDecodeReason::Shape,
         )
     })?;
-    if fields.len() < 3
+    if fields.len() < 2
         || !fields
             .first()
             .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::zero(value.trim()))
@@ -37592,6 +37593,14 @@ fn parse_filter_criterion_content(
                 FilterCriterionDecodeReason::Count,
             )
         })?;
+    // `count == 0` is a real, native shape (`{0,0}`, no further members): the
+    // wrapper carries only its zero-marker and a zero item count. Confirmed
+    // on БСП 3.1.12.297's `FilterCriteria/СвязанныеДокументы` (native
+    // `<Content/>` is empty) -- rejecting `fields.len() < 3` outright refused
+    // every `FilterCriterion` whose `Content` collection has no members, the
+    // same class of bug as elsewhere in this reader: the general
+    // `count.checked_add(2) == fields.len()` relation below already proves
+    // the shape for any count, so no separate lower bound is needed.
     if count.checked_add(2) != Some(fields.len()) {
         return Err(FilterCriterionDecodeError::new(
             FilterCriterionDecodeStage::Content,
@@ -37902,14 +37911,22 @@ fn format_filter_criterion_source_xml(
         "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
         xml_bool(properties.use_standard_commands)
     ));
-    insert.push_str("\t\t\t<Content>\r\n");
-    for reference in &properties.content {
-        insert.push_str(&format!(
-            "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
-            escape_xml_element_text(reference)
-        ));
+    // An empty `Content` collection is the platform's self-closed
+    // `<Content/>`, not an empty-bodied pair -- БСП 3.1.12.297's
+    // `FilterCriteria/СвязанныеДокументы` (whose `content` is empty) writes
+    // the former.
+    if properties.content.is_empty() {
+        insert.push_str("\t\t\t<Content/>\r\n");
+    } else {
+        insert.push_str("\t\t\t<Content>\r\n");
+        for reference in &properties.content {
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                escape_xml_element_text(reference)
+            ));
+        }
+        insert.push_str("\t\t\t</Content>\r\n");
     }
-    insert.push_str("\t\t\t</Content>\r\n");
     insert.push_str(
         "\t\t\t<DefaultForm/>\r\n\
 \t\t\t<AuxiliaryForm/>\r\n\
