@@ -46,9 +46,10 @@ use crate::form_schema::{
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_extended_button_type_slot, form_root_trailer_optional_blocks,
-    form_table_counted_property_bag_bounds, form_text_document_context_menu_child_is_valid,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    form_choice_list_design_time_platform_value, form_extended_button_type_slot,
+    form_root_trailer_optional_blocks, form_table_counted_property_bag_bounds,
+    form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 #[cfg(test)]
@@ -9564,25 +9565,7 @@ fn parse_form_child_item_with_metadata_owners(
                 .then(|| split_1c_braced_fields(options_text, 0))
                 .flatten()
         })
-        // NOT normalized to the canonical `36`/66 revision here, although
-        // `form_input_field_extended_options` does exactly that for the value
-        // readers of the same block.  Normalizing here lets `FormFieldSchema`
-        // accept the short `32`/62 revision, which is worth a great deal --
-        // `Enabled`, `TitleLocation`, `Mask`, `TextColor`,
-        // `ToolTipRepresentation`, the geometry pair, the spreadsheet field's
-        // scroll bars and the field's whole `<Events>` collection all hang off
-        // this schema -- but it also lets the choice-list reader reach records
-        // it cannot read: a `ChoiceList` whose items are design-time values of
-        // a platform DCS enumeration, `{"#",<type uuid>,<ordinal>}` under a
-        // three-member value where this decoder's value grammar admits two.
-        // An unreadable choice list is a whole-form refusal, so ten ERP УХ
-        // form bodies stop being emitted and one
-        // `Ext/Form/Items/…/Picture.png` goes with them.  Measured on
-        // `8cc12dc`: `uh` exact 138 467 -> 138 936, missing 138 -> 149, and
-        // that one picture is a file that used to match byte for byte.
-        //
-        // The gate is broken = 0, so the normalization waits on the
-        // design-time enumeration value: see the report of this package.
+        .map(|options| normalize_form_property_bag_revision(&options).unwrap_or(options))
         .and_then(|options| {
             FormFieldSchema::from_raw_layout(
                 wrapper,
@@ -15713,6 +15696,10 @@ fn try_parse_form_radio_button_choice_list(
                 )
             })
         },
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
+        },
     )?;
     Some(decoded.items().to_vec())
 }
@@ -15743,6 +15730,10 @@ pub(super) fn try_parse_form_input_field_choice_list(
                     object_refs,
                 )
             })
+        },
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
         },
     )?;
     Some(decoded.items().to_vec())
@@ -15822,6 +15813,10 @@ pub(super) fn parse_form_input_field_choice_list_item(
                 .map(|owner| owner.owner_reference())
         },
         |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
+        },
     )
 }
 
@@ -15841,6 +15836,10 @@ pub(super) fn parse_form_radio_button_choice_list_item(
                 .map(|owner| owner.owner_reference())
         },
         |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
+        },
     )
 }
 
