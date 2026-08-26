@@ -62,19 +62,19 @@ mod characteristics {
     use ibcmd_core::identity::ObjectUuid;
 
     use super::{
-        CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES, DOCUMENT_CHARACTERISTIC_TYPE_UUID,
-        information_register_uuid_is_zero, information_register_uuid_matches,
-        parse_information_register_design_time_ref, parse_information_register_design_time_ref_ids,
-        parse_information_register_non_zero_uuid, parse_information_register_quoted_string,
-        parse_information_register_usize, resolve_exchange_plan_index_reference,
-        split_information_register_braced_fields,
+        BUSINESS_PROCESS_STANDARD_ATTRIBUTES, CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES,
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID, DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES,
+        information_register_bool, information_register_uuid_is_zero,
+        information_register_uuid_matches, parse_information_register_design_time_ref,
+        parse_information_register_design_time_ref_ids, parse_information_register_non_zero_uuid,
+        parse_information_register_quoted_string, parse_information_register_usize,
+        resolve_exchange_plan_index_reference, split_information_register_braced_fields,
     };
     pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
     use crate::metadata_owner_graph::{
         CHARACTERISTICS_REASON_TOKENS, CHARACTERISTICS_REFERENCE_KIND_TOKENS,
-        CHARACTERISTICS_STAGE_TOKENS, CharacteristicsPhysicalSchema, CharacteristicsSentinelKind,
-        CharacteristicsSourceShape, CharacteristicsStandardAttributeKind, CharacteristicsTagKind,
-        OwnerGraphFamily,
+        CHARACTERISTICS_STAGE_TOKENS, CharacteristicsOwnerFamily, CharacteristicsPhysicalSchema,
+        CharacteristicsSentinelKind, CharacteristicsStandardAttributeKind, CharacteristicsTagKind,
     };
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -97,7 +97,6 @@ mod characteristics {
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub(super) enum CharacteristicsReason {
-        UnsupportedFamily,
         InvalidEnvelope,
         InvalidCount,
         InvalidTypeTag,
@@ -131,7 +130,7 @@ mod characteristics {
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub(super) struct CharacteristicsDiagnostic {
-        pub(super) family: OwnerGraphFamily,
+        pub(super) family: CharacteristicsOwnerFamily,
         pub(super) stage: CharacteristicsStage,
         pub(super) field_index: usize,
         pub(super) item_index: Option<usize>,
@@ -142,7 +141,7 @@ mod characteristics {
 
     impl CharacteristicsDiagnostic {
         fn new(
-            family: OwnerGraphFamily,
+            family: CharacteristicsOwnerFamily,
             stage: CharacteristicsStage,
             item_index: Option<usize>,
             role: CharacteristicRole,
@@ -152,7 +151,7 @@ mod characteristics {
             Self {
                 family,
                 stage,
-                field_index: characteristics_slot(family).unwrap_or(0),
+                field_index: characteristics_slot(family),
                 item_index,
                 role,
                 reference_kind,
@@ -161,51 +160,30 @@ mod characteristics {
         }
     }
 
-    pub(super) fn characteristics_slot(
-        family: OwnerGraphFamily,
-    ) -> Result<usize, CharacteristicsDiagnostic> {
+    /// Which owner-record field carries the `Characteristics` collection.
+    /// Every family that declares the property has one; `BusinessProcess` (41)
+    /// and `Task` (44) were confirmed on real bytes by locating the slot whose
+    /// payload items are typed with the platform's own Characteristic type
+    /// uuid, then checking the declared item count against the number of
+    /// `<xr:Characteristic>` elements the platform writes for the same object.
+    pub(super) const fn characteristics_slot(family: CharacteristicsOwnerFamily) -> usize {
         match family {
-            OwnerGraphFamily::Catalog => Ok(52),
-            OwnerGraphFamily::Document => Ok(45),
-            OwnerGraphFamily::ChartOfCharacteristicTypes => Ok(50),
-            OwnerGraphFamily::BusinessProcess => Err(CharacteristicsDiagnostic {
-                family,
-                stage: CharacteristicsStage::Outer,
-                field_index: 0,
-                item_index: None,
-                role: CharacteristicRole::Collection,
-                reference_kind: None,
-                reason: CharacteristicsReason::UnsupportedFamily,
-            }),
+            CharacteristicsOwnerFamily::Catalog => 52,
+            CharacteristicsOwnerFamily::Document => 45,
+            CharacteristicsOwnerFamily::ChartOfCharacteristicTypes => 50,
+            CharacteristicsOwnerFamily::BusinessProcess => 41,
+            CharacteristicsOwnerFamily::Task => 44,
         }
     }
 
-    pub(super) fn decode_characteristics(
-        family: OwnerGraphFamily,
-        value: &str,
-        type_index: &BTreeMap<String, String>,
-        metadata_object_refs: &BTreeMap<String, String>,
-        object_refs: &BTreeMap<String, String>,
-    ) -> Result<Characteristics, CharacteristicsDiagnostic> {
-        decode_characteristics_with_owner_code(
-            family,
-            None,
-            value,
-            type_index,
-            metadata_object_refs,
-            object_refs,
-        )
-    }
-
     pub(super) fn decode_characteristics_with_owner_code(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         owner_code: Option<&str>,
         value: &str,
         type_index: &BTreeMap<String, String>,
         metadata_object_refs: &BTreeMap<String, String>,
         object_refs: &BTreeMap<String, String>,
     ) -> Result<Characteristics, CharacteristicsDiagnostic> {
-        let _ = characteristics_slot(family)?;
         let outer = split_information_register_braced_fields(value).ok_or_else(|| {
             diagnostic(
                 family,
@@ -260,7 +238,7 @@ mod characteristics {
                 .then(|| fields[0].trim().parse::<i32>().ok())
                 .flatten()
         };
-        if matches!(family, OwnerGraphFamily::Catalog)
+        if matches!(family, CharacteristicsOwnerFamily::Catalog)
             && CharacteristicsPhysicalSchema::catalog_57_legacy_empty(
                 owner_code.unwrap_or_default(),
                 outer
@@ -318,7 +296,7 @@ mod characteristics {
     }
 
     fn decode_item(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         type_index: &BTreeMap<String, String>,
@@ -509,7 +487,7 @@ mod characteristics {
     }
 
     fn decode_source(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         role: CharacteristicRole,
@@ -578,7 +556,7 @@ mod characteristics {
     }
 
     pub(super) fn decode_field(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         role: CharacteristicRole,
@@ -647,8 +625,8 @@ mod characteristics {
                         CharacteristicsReason::UnsupportedMarker,
                     )
                 })?;
-                let path = standard_attribute_reference(family, role, source.path(), marker)
-                    .ok_or_else(|| {
+                let path =
+                    standard_attribute_reference(source.path(), marker).ok_or_else(|| {
                         malformed_field(
                             family,
                             item_index,
@@ -734,41 +712,43 @@ mod characteristics {
         }
     }
 
-    fn standard_attribute_reference(
-        owner_family: OwnerGraphFamily,
-        role: CharacteristicRole,
-        source: &str,
-        marker: i32,
-    ) -> Option<String> {
-        let shape = CharacteristicsPhysicalSchema::source_shape(source)?;
-        let attributes = match owner_family {
-            OwnerGraphFamily::Catalog => CATALOG_STANDARD_ATTRIBUTES.as_slice(),
-            OwnerGraphFamily::ChartOfCharacteristicTypes => CCT_STANDARD_ATTRIBUTES.as_slice(),
-            _ => [].as_slice(),
-        };
-        let name = attributes
-            .iter()
-            .find_map(|(raw, name)| (raw.parse::<i32>().ok() == Some(marker)).then_some(*name));
-        // A tabular-section source names only the owner's own `Ref`, and which
-        // marker spells `Ref` is declared by the family's standard-attribute
-        // table (`-8` for catalogs, `-2` for characteristic-type plans) rather
-        // than being one number shared by both.
-        if shape == CharacteristicsSourceShape::TabularSection && !attributes.is_empty() {
-            return (name == Some("Ref"))
-                .then(|| CharacteristicsPhysicalSchema::standard_ref_path(source));
+    /// The standard-attribute marker vocabulary a reference speaks is declared
+    /// by the family of the object the reference points at, not by the family
+    /// of the object that owns the `Characteristics` property. The two are the
+    /// same object in the common case, which is why an owner-keyed table
+    /// survived this long, but a single `Characteristic` routinely mixes them:
+    /// `BusinessProcess.Исполнение` (ДО КОРП 3.0.21.3) reads its types out of
+    /// `Catalog.НаборыДополнительныхРеквизитовИСведений.TabularSection.
+    /// ДополнительныеРеквизиты` with marker `-8` and its values out of its own
+    /// tabular section with marker `-5`, and the platform spells both `Ref`.
+    fn source_standard_attributes(source: &str) -> Option<&'static [(&'static str, &'static str)]> {
+        match source.split('.').next()? {
+            "Catalog" => Some(CATALOG_STANDARD_ATTRIBUTES.as_slice()),
+            "ChartOfCharacteristicTypes" => Some(CCT_STANDARD_ATTRIBUTES.as_slice()),
+            "Document" => Some(DOCUMENT_STANDARD_ATTRIBUTES.as_slice()),
+            "BusinessProcess" => Some(BUSINESS_PROCESS_STANDARD_ATTRIBUTES.as_slice()),
+            "Task" => Some(TASK_STANDARD_ATTRIBUTES.as_slice()),
+            _ => None,
         }
-        match CharacteristicsPhysicalSchema::standard_attribute(owner_family, role, shape, marker)?
-        {
+    }
+
+    fn standard_attribute_reference(source: &str, marker: i32) -> Option<String> {
+        let shape = CharacteristicsPhysicalSchema::source_shape(source)?;
+        let name = source_standard_attributes(source)?
+            .iter()
+            .find_map(|(raw, name)| (raw.parse::<i32>().ok() == Some(marker)).then_some(*name))?;
+        match CharacteristicsPhysicalSchema::standard_attribute(shape, name)? {
             CharacteristicsStandardAttributeKind::Ref => {
                 Some(CharacteristicsPhysicalSchema::standard_ref_path(source))
             }
-            CharacteristicsStandardAttributeKind::FamilyTable => name
-                .map(|name| CharacteristicsPhysicalSchema::standard_attribute_path(source, name)),
+            CharacteristicsStandardAttributeKind::FamilyTable => Some(
+                CharacteristicsPhysicalSchema::standard_attribute_path(source, name),
+            ),
         }
     }
 
     pub(super) fn decode_filter_value(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         type_index: &BTreeMap<String, String>,
@@ -785,6 +765,18 @@ mod characteristics {
                     .ok_or_else(|| unsupported_filter(family, item_index, None))?;
                 CharacteristicFilterValue::string(&value)
                     .map_err(|_| unsupported_filter(family, item_index, None))
+            }
+            // The tag carries no payload of its own: the union member is the
+            // whole value. The platform still writes the element, spelled
+            // `xsi:nil="true"` -- an absent property would be a different
+            // shape entirely.
+            Some(CharacteristicsTagKind::Undefined) if fields.len() == 1 => {
+                Ok(CharacteristicFilterValue::Undefined)
+            }
+            Some(CharacteristicsTagKind::Boolean) if fields.len() == 2 => {
+                information_register_bool(fields[1])
+                    .map(CharacteristicFilterValue::Boolean)
+                    .ok_or_else(|| unsupported_filter(family, item_index, None))
             }
             Some(CharacteristicsTagKind::Item) if fields.len() == 3 => {
                 let (owner_uuid, value_uuid) =
@@ -839,7 +831,7 @@ mod characteristics {
     }
 
     fn diagnostic(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         stage: CharacteristicsStage,
         item_index: Option<usize>,
         role: CharacteristicRole,
@@ -850,7 +842,7 @@ mod characteristics {
     }
 
     fn item_diagnostic(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         stage: CharacteristicsStage,
         role: CharacteristicRole,
@@ -868,7 +860,7 @@ mod characteristics {
     }
 
     fn unresolved(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         stage: CharacteristicsStage,
         role: CharacteristicRole,
@@ -885,7 +877,7 @@ mod characteristics {
     }
 
     fn malformed_field(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         role: CharacteristicRole,
         reference_kind: Option<CharacteristicsReferenceKind>,
@@ -902,7 +894,7 @@ mod characteristics {
     }
 
     fn unsupported_filter(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         reference_kind: Option<CharacteristicsReferenceKind>,
     ) -> CharacteristicsDiagnostic {
@@ -8234,8 +8226,20 @@ struct MetadataTabularSectionProperties {
     line_number_fill_checking: &'static str,
     line_number_fill_value: Option<MetadataChildFillValue>,
     line_number_synonym: Vec<(String, String)>,
+    line_number_format: Vec<(String, String)>,
+    line_number_edit_format: Vec<(String, String)>,
     use_mode: Option<&'static str>,
     line_number_length: Option<u32>,
+}
+
+/// The stored properties of a tabular section's `LineNumber` standard
+/// attribute that the platform actually varies.
+#[derive(Clone, Default)]
+struct LineNumberStandardAttribute {
+    fill_value: Option<MetadataChildFillValue>,
+    synonym: Vec<(String, String)>,
+    format: Vec<(String, String)>,
+    edit_format: Vec<(String, String)>,
 }
 
 struct ExactMetadataTabularSection {
@@ -8264,6 +8268,13 @@ struct RegisterStandardAttribute {
     synonym: Vec<(String, String)>,
     data_history: &'static str,
     full_text_search: &'static str,
+    /// `<xr:ChoiceHistoryOnInput>`. The writer used to print `Auto`, and the
+    /// reader refused anything else. Three objects of the stand write
+    /// `DontUse` -- the `Date` standard attribute of `do`
+    /// `Documents/ДанныеДокументаМЭДО`, `КвитанцияМЭДО` and `УведомлениеМЭДО`
+    /// -- against 8 934 that write `Auto`, and the refusal lost all three
+    /// objects whole.
+    choice_history_on_input: &'static str,
     fill_value: MetadataChildFillValue,
     link_by_type: Option<RegisterStandardAttributeLinkByType>,
     mask: String,
@@ -8459,6 +8470,7 @@ struct DocumentNumberingProperties {
 
 struct BusinessProcessProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    characteristics: Characteristics,
     use_standard_commands: bool,
     edit_type: &'static str,
     input_by_string: Vec<String>,
@@ -8498,11 +8510,13 @@ struct BusinessProcessProperties {
     child_attributes: Vec<MetadataChildObject>,
     child_tabular_sections: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
+    child_templates: Vec<String>,
     child_commands: Vec<MetadataChildCommand>,
 }
 
 struct TaskProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    characteristics: Characteristics,
     internal_uuid_slots: TaskInternalUuidSlots,
     use_standard_commands: bool,
     number_type: &'static str,
@@ -8544,6 +8558,7 @@ struct TaskProperties {
     update_data_history_immediately_after_write: bool,
     execute_after_write_data_history_version_processing: bool,
     child_attributes: Vec<MetadataChildObject>,
+    child_tabular_sections: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     addressing_attributes: Vec<TaskAddressingAttribute>,
     child_commands: Vec<MetadataChildCommand>,
@@ -8783,6 +8798,10 @@ struct ConstantProperties {
     choice_parameters: Vec<ChoiceParameter>,
     choice_history_on_input: &'static str,
     data_lock_control_mode: &'static str,
+    multi_line: bool,
+    choice_folders_and_items: &'static str,
+    quick_choice: &'static str,
+    data_history: &'static str,
 }
 
 struct ChoiceParameter {
@@ -10724,9 +10743,10 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             object_refs,
             metadata_object_refs,
             form_refs,
+            template_refs,
             owner_graph_diagnostic,
         )?;
-        format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
+        format_business_process_source_xml(&header, &business_process, source_version)?.into_bytes()
     } else if kind == "Task" {
         let task = parse_task_properties_from_text(
             text,
@@ -10737,7 +10757,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             owner_graph_diagnostic,
         )?;
-        format_task_source_xml(&header, &task, source_version).into_bytes()
+        format_task_source_xml(&header, &task, source_version)?.into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid, form_refs)?;
         format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
@@ -13346,8 +13366,7 @@ fn characteristics_extraction_diagnostic(
     failure: characteristics::CharacteristicsDiagnostic,
 ) -> MetadataSourceExtractionDiagnostic {
     let class = match failure.reason {
-        characteristics::CharacteristicsReason::UnsupportedFamily
-        | characteristics::CharacteristicsReason::UnsupportedMarker
+        characteristics::CharacteristicsReason::UnsupportedMarker
         | characteristics::CharacteristicsReason::UnsupportedFilterUnion => {
             MetadataSourceFailureClass::Unsupported
         }
@@ -13381,20 +13400,14 @@ fn characteristics_extraction_diagnostic(
 }
 
 fn decode_owner_characteristics(
-    family: owner_graph::OwnerGraphFamily,
+    family: owner_graph::CharacteristicsOwnerFamily,
     fields: &[&str],
     type_index: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<Characteristics> {
-    let slot = match characteristics::characteristics_slot(family) {
-        Ok(slot) => slot,
-        Err(failure) => {
-            *diagnostic = Some(characteristics_extraction_diagnostic(failure));
-            return None;
-        }
-    };
+    let slot = characteristics::characteristics_slot(family);
     match characteristics::decode_characteristics_with_owner_code(
         family,
         fields.first().map(|value| value.trim()),
@@ -14109,10 +14122,6 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             quick_choice,
             INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
         )? != "2"
-        || parse_information_register_standard_attribute_direct_enum(
-            choice_history,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-        )? != "0"
         || parse_information_register_standard_attribute_bool(password_mode)?
         || parse_information_register_standard_attribute_bool(mark_negatives)?
         || !information_register_standard_attribute_nil_is_valid(min_value)
@@ -14154,6 +14163,12 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
         "1" => "Use",
         _ => return None,
     };
+    let choice_history_on_input = metadata_choice_history_on_input_xml(
+        parse_information_register_standard_attribute_direct_enum(
+            choice_history,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+        )?,
+    )?;
     Some((
         RegisterStandardAttribute {
             name,
@@ -14167,6 +14182,7 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             synonym: parse_information_register_standard_attribute_localized(synonym)?,
             data_history,
             full_text_search,
+            choice_history_on_input,
             fill_value,
             link_by_type: None,
             mask,
@@ -14962,6 +14978,7 @@ fn register_standard_attribute(
             .unwrap_or_default(),
         data_history: "Use",
         full_text_search: "Use",
+        choice_history_on_input: "Auto",
         fill_value: MetadataChildFillValue::Nil,
         link_by_type,
         mask: String::new(),
@@ -16564,7 +16581,9 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
                 marker_start,
                 &header.uuid,
                 parent_tabular_section.is_some(),
+                owner_name,
                 type_index,
+                object_refs,
                 metadata_object_refs,
             )
         } else if tag == "Attribute" {
@@ -17229,12 +17248,9 @@ fn parse_exact_metadata_tabular_section(
         "1" => "ShowError",
         _ => return None,
     };
-    let (line_number_fill_value, line_number_synonym) =
-        match parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?
-        {
-            Some((fill_value, synonym)) => (Some(fill_value), synonym),
-            None => (None, Vec::new()),
-        };
+    let line_number =
+        parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?
+            .unwrap_or_default();
     let tooltip = parse_information_register_owner_localized_value(fields.get(8)?)?;
     let TabularSectionEnvelope {
         use_mode,
@@ -17259,13 +17275,15 @@ fn parse_exact_metadata_tabular_section(
         properties: MetadataTabularSectionProperties {
             tooltip,
             fill_checking,
-            line_number_fill_checking: if line_number_fill_value.is_some() {
+            line_number_fill_checking: if line_number.fill_value.is_some() {
                 "DontCheck"
             } else {
                 ""
             },
-            line_number_fill_value,
-            line_number_synonym,
+            line_number_fill_value: line_number.fill_value,
+            line_number_synonym: line_number.synonym,
+            line_number_format: line_number.format,
+            line_number_edit_format: line_number.edit_format,
             use_mode,
             line_number_length,
         },
@@ -17275,7 +17293,7 @@ fn parse_exact_metadata_tabular_section(
 fn parse_exact_tabular_section_standard_attributes_presence(
     owner_kind: &str,
     value: &str,
-) -> Option<Option<(MetadataChildFillValue, Vec<(String, String)>)>> {
+) -> Option<Option<LineNumberStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
     match outer.as_slice() {
         [marker] if marker.trim() == "0" => Some(None),
@@ -17290,6 +17308,7 @@ fn parse_exact_tabular_section_standard_attributes_presence(
                 | "Document"
                 | "ExchangePlan"
                 | "ChartOfCharacteristicTypes"
+                | "Task"
                 | OWNER_KIND_BUSINESS_PROCESS => "-10",
                 "Report" | "DataProcessor" => "-3",
                 _ => return None,
@@ -17328,7 +17347,24 @@ fn parse_exact_tabular_section_standard_attributes_presence(
             let synonym = parse_information_register_standard_attribute_localized(
                 bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
             )?;
-            Some(Some((fill_value, synonym)))
+            // `Format` and `EditFormat` are stored the way `Synonym` is, and
+            // the writer used to print both as the empty element on the
+            // strength of every observed section writing them empty. `do`
+            // `BusinessProcess.КомплексныйПроцесс`, section `Этапы`, writes
+            // `ЧЦ=2` in both; the census of all 11 534 `LineNumber` standard
+            // attributes on the stand shows exactly that one section doing so.
+            let format = parse_information_register_standard_attribute_localized(
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID)?,
+            )?;
+            let edit_format = parse_information_register_standard_attribute_localized(
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID)?,
+            )?;
+            Some(Some(LineNumberStandardAttribute {
+                fill_value: Some(fill_value),
+                synonym,
+                format,
+                edit_format,
+            }))
         }
         _ => None,
     }
@@ -17406,7 +17442,7 @@ fn tabular_section_envelope_spec(owner_kind: &str) -> Option<(u32, bool, bool)> 
         "Catalog" => (2, true, true),
         "Document" => (2, false, true),
         "ChartOfCharacteristicTypes" => (1, true, true),
-        OWNER_KIND_BUSINESS_PROCESS | "ExchangePlan" => (1, false, true),
+        OWNER_KIND_BUSINESS_PROCESS | "ExchangePlan" | "Task" => (1, false, true),
         "Report" | "DataProcessor" => (0, false, false),
         _ => return None,
     })
@@ -20546,6 +20582,8 @@ fn parse_metadata_tabular_section_properties(
             line_number_fill_checking: fill_checking,
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: fields
                 .get(header_index + 4)
                 .and_then(|field| metadata_attribute_use_mode_xml(field.trim())),
@@ -20562,6 +20600,8 @@ fn parse_metadata_tabular_section_properties(
             line_number_fill_checking: "DontCheck",
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: None,
             line_number_length: None,
         });
@@ -20586,6 +20626,8 @@ fn parse_data_processor_tabular_section_properties_from_fields(
         line_number_fill_checking: "DontCheck",
         line_number_fill_value: None,
         line_number_synonym: Vec::new(),
+        line_number_format: Vec::new(),
+        line_number_edit_format: Vec::new(),
         use_mode: None,
         line_number_length: None,
     })
@@ -21886,6 +21928,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     .ok()?;
     let tabular_sections = parse_cct_tabular_sections_indexed(
         &tabular_section_collection.items,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
         &header.name,
         type_index,
         object_refs,
@@ -21949,7 +21992,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     )?;
 
     let characteristics = decode_owner_characteristics(
-        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
         fields,
         type_index,
         metadata_object_refs,
@@ -21971,6 +22014,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     }
 
     let code_length = fields.get(21)?.trim().parse::<u32>().ok()?;
+    // Field 24 is `"1"` on every characteristic-type plan of the stand. It used
+    // to be read as `<CodeSeries>`, which distinguished nothing; kept as a
+    // validated constant so an unobserved value fails closed instead of being
+    // read as something it has never been.
+    if fields.get(24)?.trim() != "1" {
+        return None;
+    }
     Some(ChartOfCharacteristicTypesProperties {
         generated_types,
         use_standard_commands: information_register_bool(fields.get(14)?)?,
@@ -21991,7 +22041,15 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             _ => return None,
         },
         description_length: fields.get(23)?.trim().parse::<u32>().ok()?,
-        code_series: (fields.get(24)?.trim() == "1").then_some("WholeCharacteristicKind")?,
+        // `<CodeSeries>` rides owner field 35, not field 24. Field 24 is `"1"`
+        // on all 47 characteristic-type plans of the stand and so distinguishes
+        // nothing; field 35 is `"1"` on exactly the one plan that writes
+        // `WithinSubordination` -- `do`
+        // `ChartsOfCharacteristicTypes/ВидыДоступа` -- and `"0"` on the 46 that
+        // write `WholeCharacteristicKind`. The old reading refused that object
+        // whole, because field 35 was also the slot `CreateOnInput` was pinned
+        // against.
+        code_series: cct_code_series_xml(fields.get(35)?.trim())?,
         check_unique: information_register_bool(fields.get(34)?)?,
         autonumbering: information_register_bool(fields.get(22)?)?,
         default_presentation: (fields.get(25)?.trim() == "1").then_some("AsDescription")?,
@@ -22009,7 +22067,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         edit_type: (fields.get(31)?.trim() == "2").then_some("InDialog")?,
         quick_choice: information_register_bool(fields.get(32)?)?,
         input_by_string: parse_cct_input_by_string(fields.get(33)?, &header.name)?,
-        create_on_input: (fields.get(35)?.trim() == "0").then_some("DontUse")?,
+        // The carrier of `<CreateOnInput>` is not known for this family: 46
+        // plans of the stand write `DontUse` and one, `uh`
+        // `ОперацииФинансовыхИнструментов`, writes `Use`, and no owner slot
+        // separates them -- field 35, against which this used to be pinned,
+        // is `"0"` for both. The constant is kept, and that one plan stays a
+        // known difference rather than an invented field attribution.
+        create_on_input: "DontUse",
         choice_history_on_input: match fields.get(55)?.trim() {
             "0" => "Auto",
             "1" => "DontUse",
@@ -22426,6 +22490,7 @@ fn parse_cct_direct_attributes_indexed(
         let child = parse_cct_attribute(
             item,
             false,
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
             owner_name,
             type_index,
             object_refs,
@@ -22458,6 +22523,7 @@ fn parse_cct_direct_attributes_indexed(
 fn parse_cct_attribute(
     value: &str,
     nested: bool,
+    owner_kind: &str,
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
@@ -22487,7 +22553,7 @@ fn parse_cct_attribute(
         &wrapper,
         nested,
         true,
-        Some((owner_name, object_refs)),
+        Some((owner_kind, owner_name, object_refs)),
         type_index,
         metadata_object_refs,
     )?;
@@ -22525,7 +22591,7 @@ fn parse_cct_attribute_properties(
     wrapper: &[&str],
     nested: bool,
     direct_use_mode: bool,
-    owner_scope: Option<(&str, &BTreeMap<String, String>)>,
+    owner_scope: Option<(&str, &str, &BTreeMap<String, String>)>,
     type_index: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
@@ -22540,12 +22606,12 @@ fn parse_cct_attribute_properties(
         metadata_object_refs,
     )?;
     // The links carry data paths, so they can only be resolved inside a named
-    // owner with its reference index. The business-process caller has neither,
-    // and there only the empty record is admitted.
+    // owner with its reference index. Without that scope only the empty record
+    // is admitted, because there is nothing to resolve a path against.
     let choice_parameter_links = match owner_scope {
-        Some((owner_name, object_refs)) => parse_owner_choice_parameter_links(
+        Some((owner_kind, owner_name, object_refs)) => parse_owner_choice_parameter_links(
             payload.get(14)?,
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            owner_kind,
             owner_name,
             nested,
             object_refs,
@@ -22645,7 +22711,9 @@ fn parse_business_process_child_properties(
     marker_start: usize,
     child_uuid: &str,
     expected_nested: bool,
+    owner_name: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
     let mut layouts =
@@ -22669,7 +22737,11 @@ fn parse_business_process_child_properties(
         &wrapper,
         expected_nested,
         false,
-        None,
+        Some((
+            owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
+            owner_name,
+            object_refs,
+        )),
         type_index,
         metadata_object_refs,
     )
@@ -22677,6 +22749,7 @@ fn parse_business_process_child_properties(
 
 fn parse_cct_tabular_sections_indexed(
     items: &[&str],
+    owner_kind: &str,
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
@@ -22715,9 +22788,7 @@ fn parse_cct_tabular_sections_indexed(
                     owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                 )
             })?;
-        let Some(section_envelope) =
-            parse_tabular_section_envelope("ChartOfCharacteristicTypes", &wrapper)
-        else {
+        let Some(section_envelope) = parse_tabular_section_envelope(owner_kind, &wrapper) else {
             return Err(failure(
                 owner_graph::OwnerGraphReference::ChildUuid,
                 owner_graph::OwnerGraphOwnedChildReason::WrongKind,
@@ -22749,11 +22820,8 @@ fn parse_cct_tabular_sections_indexed(
                         owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                     )
                 })?;
-        let expected_reference = format!(
-            "{}.{owner_name}.TabularSection.{}",
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
-            header.name
-        );
+        let expected_reference =
+            format!("{owner_kind}.{owner_name}.TabularSection.{}", header.name);
         if resolve_exchange_plan_index_reference(&header.uuid, object_refs)
             .is_none_or(|reference| reference != expected_reference)
         {
@@ -22793,7 +22861,7 @@ fn parse_cct_tabular_sections_indexed(
             ids.push(uuid);
         }
         let standard_attributes = parse_exact_tabular_section_standard_attributes_presence(
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            owner_kind,
             payload.get(7).copied().unwrap_or_default(),
         )
         .ok_or_else(|| {
@@ -22802,10 +22870,7 @@ fn parse_cct_tabular_sections_indexed(
                 owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
             )
         })?;
-        let (line_number_fill_value, line_number_synonym) = match standard_attributes {
-            Some((fill_value, synonym)) => (Some(fill_value), synonym),
-            None => (None, Vec::new()),
-        };
+        let line_number = standard_attributes.unwrap_or_default();
         let nested_items = parse_cct_collection(
             fields.get(2).copied().unwrap_or_default(),
             CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
@@ -22823,6 +22888,7 @@ fn parse_cct_tabular_sections_indexed(
             let child = parse_cct_attribute(
                 nested_item,
                 true,
+                owner_kind,
                 owner_name,
                 type_index,
                 object_refs,
@@ -22836,10 +22902,8 @@ fn parse_cct_tabular_sections_indexed(
                 )
             })?;
             let expected_reference = format!(
-                "{}.{owner_name}.TabularSection.{}.Attribute.{}",
-                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
-                header.name,
-                child.header.name
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                header.name, child.header.name
             );
             if resolve_exchange_plan_index_reference(&child.header.uuid, object_refs)
                 .is_none_or(|reference| reference != expected_reference)
@@ -22884,19 +22948,13 @@ fn parse_cct_tabular_sections_indexed(
             header: header.clone(),
             generated_types: vec![
                 GeneratedTypeEntry {
-                    name: format!(
-                        "ChartOfCharacteristicTypesTabularSection.{owner_name}.{}",
-                        header.name
-                    ),
+                    name: format!("{owner_kind}TabularSection.{owner_name}.{}", header.name),
                     category: "TabularSection",
                     type_id: ids[0].clone(),
                     value_id: ids[1].clone(),
                 },
                 GeneratedTypeEntry {
-                    name: format!(
-                        "ChartOfCharacteristicTypesTabularSectionRow.{owner_name}.{}",
-                        header.name
-                    ),
+                    name: format!("{owner_kind}TabularSectionRow.{owner_name}.{}", header.name),
                     category: "TabularSectionRow",
                     type_id: ids[2].clone(),
                     value_id: ids[3].clone(),
@@ -22909,13 +22967,15 @@ fn parse_cct_tabular_sections_indexed(
             tabular_section_properties: Some(MetadataTabularSectionProperties {
                 tooltip,
                 fill_checking,
-                line_number_fill_checking: if line_number_fill_value.is_some() {
+                line_number_fill_checking: if line_number.fill_value.is_some() {
                     "DontCheck"
                 } else {
                     ""
                 },
-                line_number_fill_value,
-                line_number_synonym,
+                line_number_fill_value: line_number.fill_value,
+                line_number_synonym: line_number.synonym,
+                line_number_format: line_number.format,
+                line_number_edit_format: line_number.edit_format,
                 use_mode: section_envelope.use_mode,
                 line_number_length: section_envelope.line_number_length,
             }),
@@ -23230,7 +23290,7 @@ fn parse_strict_catalog_properties_from_text(
         &METADATA_BASED_ON_PREFIXES,
     )?;
     let characteristics = decode_owner_characteristics(
-        owner_graph::OwnerGraphFamily::Catalog,
+        owner_graph::CharacteristicsOwnerFamily::Catalog,
         fields,
         type_index,
         metadata_object_refs,
@@ -23250,7 +23310,9 @@ fn parse_strict_catalog_properties_from_text(
         level_count: parse_exchange_plan_u32(fields.get(10)?)?,
         folders_on_top: information_register_bool(fields.get(13)?)?,
         owners: Some(owners),
-        subordination_use: Some("ToItems"),
+        subordination_use: Some(catalog_subordination_use_xml(parse_exchange_plan_u32(
+            fields.get(39)?,
+        )?)?),
         use_standard_commands: information_register_bool(fields.get(31)?)?,
         code_length: parse_exchange_plan_u32(fields.get(17)?)?,
         description_length: parse_exchange_plan_u32(fields.get(19)?)?,
@@ -23907,7 +23969,7 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
         return Some(("Begin", "DontUse", "Directly"));
     }
     let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3 || fields.get(2)?.trim() != "0" {
+    if fields.len() != 3 {
         return None;
     }
     Some((
@@ -23926,7 +23988,17 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
             "2" => "DontUse",
             _ => return None,
         },
-        "Directly",
+        // The third slot is ChoiceDataGetModeOnInputByString, not a constant
+        // either. `do` `Catalogs/АдресатыПочтовыхСообщений` writes `{1,2,1}`
+        // and the platform exports
+        // `<ChoiceDataGetModeOnInputByString>Background</...>`; it is the one
+        // object of the stand that does, against 584 that write `Directly`
+        // with a `0` there. Pinning the slot lost that object whole.
+        match fields.get(2)?.trim() {
+            "0" => "Directly",
+            "1" => "Background",
+            _ => return None,
+        },
     ))
 }
 
@@ -24513,7 +24585,7 @@ fn parse_document_properties_from_text(
         owner_graph_diagnostic,
     )?;
     let characteristics = decode_owner_characteristics(
-        owner_graph::OwnerGraphFamily::Document,
+        owner_graph::CharacteristicsOwnerFamily::Document,
         fields,
         type_index,
         metadata_object_refs,
@@ -25350,6 +25422,7 @@ fn parse_business_process_properties_from_text(
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
     owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<BusinessProcessProperties> {
     let owner_graph = decode_owner_graph_for_family_parser(
@@ -25390,16 +25463,6 @@ fn parse_business_process_properties_from_text(
         owner_graph::OwnerCollectionRole::TabularSection,
         owner_graph_diagnostic,
     )?;
-    if !template_collection.items.is_empty() {
-        *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
-            owner_graph::OwnerGraphFamily::BusinessProcess,
-            owner_graph::OwnerCollectionRole::Template,
-            0,
-            owner_graph::OwnerGraphReference::OwnedTemplate,
-        ));
-        return None;
-    }
-
     let generated_types = owner_graph
         .generated_types
         .iter()
@@ -25432,6 +25495,22 @@ fn parse_business_process_properties_from_text(
         *owner_graph_diagnostic = Some(diagnostic);
         return None;
     }
+    let template_uuids = parse_owner_graph_child_uuid_collection(
+        &template_collection.items,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Template,
+        owner_graph::OwnerGraphReference::OwnedTemplate,
+        owner_graph_diagnostic,
+    )?;
+    validate_owner_graph_owned_templates(
+        &template_uuids,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        &header.name,
+        template_refs,
+        owner_graph_diagnostic,
+    )?;
+    let child_templates =
+        parse_business_process_child_templates(&header.name, &template_uuids, template_refs)?;
 
     let direct_attribute_uuids =
         parse_document_attribute_collection_indexed(&direct_attribute_collection.items, &[2, 3])
@@ -25565,9 +25644,14 @@ fn parse_business_process_properties_from_text(
         choice_data_get_mode_on_input_by_string,
     ) = parse_owner_input_modes(fields.get(44)?)?;
 
-    if !task_characteristics_is_empty(fields.get(41)?) {
-        return None;
-    }
+    let characteristics = decode_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::BusinessProcess,
+        fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        owner_graph_diagnostic,
+    )?;
 
     let mut identities = owner_graph.identities.clone();
     record_owner_graph_child_ids(
@@ -25616,6 +25700,7 @@ fn parse_business_process_properties_from_text(
 
     Some(BusinessProcessProperties {
         generated_types,
+        characteristics,
         use_standard_commands: information_register_bool(fields.get(2)?)?,
         edit_type: match fields.get(16)?.trim() {
             "1" => "InDialog",
@@ -25668,11 +25753,7 @@ fn parse_business_process_properties_from_text(
             _ => return None,
         },
         number_length: parse_exchange_plan_u32(fields.get(18)?)?,
-        number_allowed_length: match fields.get(28)?.trim() {
-            "0" => "Fixed",
-            "1" => "Variable",
-            _ => return None,
-        },
+        number_allowed_length: parse_business_process_number_allowed_length(fields)?,
         check_unique: information_register_bool(fields.get(20)?)?,
         standard_attributes: parse_business_process_standard_attributes(
             fields.get(30)?,
@@ -25688,7 +25769,7 @@ fn parse_business_process_properties_from_text(
         task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")??,
         create_task_in_privileged_mode: information_register_bool(fields.get(29)?)?,
         data_lock_fields,
-        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(40)?)?,
+        data_lock_control_mode: parse_business_process_data_lock_control_mode(fields)?,
         include_help_in_contents: information_register_bool(fields.get(26)?)?,
         full_text_search: register_child_full_text_search_xml(fields.get(42)?.trim())?,
         object_presentation: parse_information_register_owner_localized_value(fields.get(35)?)?,
@@ -25708,8 +25789,68 @@ fn parse_business_process_properties_from_text(
         child_attributes,
         child_tabular_sections,
         child_forms,
+        child_templates,
         child_commands,
     })
+}
+
+/// Which owner slot carries `NumberAllowedLength`.
+///
+/// Slot 40, not slot 28. Census of every business process on the stand -- 40
+/// objects across `do`, `uh`, `ut`, `ssl` and `sslbase` -- against the XML the
+/// platform writes for the same object: slot 40 partitions `Fixed` (5) from
+/// `Variable` (35) exactly, slot 28 misreads three of them.
+const BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT: usize = 40;
+
+/// Which owner slot carries `DataLockControlMode`.
+///
+/// Slot 28, not slot 40 -- the same census: slot 28 partitions `Automatic` (2)
+/// from `Managed` (38) exactly. The two slots were simply read the wrong way
+/// round, and every corpus but `uh` and `ut` agrees on both values, so nothing
+/// but the full census separates them.
+const BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT: usize = 28;
+
+fn parse_business_process_number_allowed_length(fields: &[&str]) -> Option<&'static str> {
+    match fields
+        .get(BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT)?
+        .trim()
+    {
+        "0" => Some("Fixed"),
+        "1" => Some("Variable"),
+        _ => None,
+    }
+}
+
+fn parse_business_process_data_lock_control_mode(fields: &[&str]) -> Option<&'static str> {
+    information_register_data_lock_control_mode_xml(
+        fields.get(BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT)?,
+    )
+}
+
+fn parse_business_process_child_templates(
+    owner_name: &str,
+    template_uuids: &[String],
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let references = template_refs
+        .iter()
+        .map(|(uuid, template_ref)| owner_graph::OwnedTemplateReference {
+            uuid,
+            kind: template_ref.kind,
+            relative_path: &template_ref.relative_path,
+            canonical_reference: template_source_reference_name(template_ref),
+        })
+        .collect::<Vec<_>>();
+    let family = owner_graph::OwnerGraphFamily::BusinessProcess.as_str();
+    owner_graph::resolve_owned_template_names(
+        family,
+        metadata_source_folder_for_kind(family)?,
+        owner_name,
+        OWNER_GRAPH_TEMPLATE_FOLDER,
+        OWNER_GRAPH_TEMPLATE_KIND,
+        template_uuids,
+        &references,
+    )
 }
 
 fn validate_business_process_owner_graph_child_objects(
@@ -26149,10 +26290,7 @@ fn parse_task_properties_from_text(
         .iter()
         .map(|collection| collection.marker.clone())
         .collect::<BTreeSet<_>>();
-    if collection_markers.len() != collections.len()
-        || !collections.first()?.items.is_empty()
-        || !collections.get(4)?.items.is_empty()
-    {
+    if collection_markers.len() != collections.len() || !collections.first()?.items.is_empty() {
         return None;
     }
 
@@ -26181,6 +26319,32 @@ fn parse_task_properties_from_text(
         metadata_object_refs,
         form_refs,
     )?;
+    // The fifth root collection carries the owned tabular sections. It is the
+    // same record every other owner family writes -- envelope `{1,<payload>,
+    // <LineNumberLength>}`, payload code 11, nested attribute group
+    // `888744e1-…` -- so it is read by the shared reader rather than a table
+    // of its own. Two objects on the stand own one: `do`
+    // `Task.ЗадачаИсполнителя` and `uh` `Task.БюджетнаяЗадача`.
+    let mut section_generated_ids = BTreeSet::new();
+    let mut section_child_ids = BTreeSet::new();
+    let child_tabular_sections = parse_cct_tabular_sections_indexed(
+        &collections.get(4)?.items,
+        "Task",
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        &mut section_generated_ids,
+        &mut section_child_ids,
+    )
+    .map_err(|failure| {
+        *owner_graph_diagnostic = Some(owner_collection_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            owner_graph::OwnerCollectionRole::TabularSection,
+            failure,
+        ));
+    })
+    .ok()?;
     let child_commands = parse_task_commands(
         &collections.get(5)?.items,
         text,
@@ -26276,16 +26440,28 @@ fn parse_task_properties_from_text(
     // reusing a stale assumption.
     if fields.get(45)?.trim() != "1"
         || fields.get(20)?.trim() != "1"
-        || !task_characteristics_is_empty(fields.get(44)?)
         || !owner_graph::task_reserved_tail_is_zero(&fields)
     {
         return None;
     }
 
+    let characteristics = decode_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::Task,
+        &fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        owner_graph_diagnostic,
+    )?;
+
     let mut child_uuids = BTreeSet::new();
     if form_uuids
         .iter()
         .chain(child_attributes.iter().map(|child| &child.header.uuid))
+        .chain(child_tabular_sections.iter().flat_map(|section| {
+            std::iter::once(&section.header.uuid)
+                .chain(section.child_objects.iter().map(|child| &child.header.uuid))
+        }))
         .chain(
             addressing_attributes
                 .iter()
@@ -26301,6 +26477,7 @@ fn parse_task_properties_from_text(
 
     Some(TaskProperties {
         generated_types,
+        characteristics,
         internal_uuid_slots: TaskInternalUuidSlots {
             field_13: internal_uuid_slots.field_13,
             field_14: internal_uuid_slots.field_14,
@@ -26356,7 +26533,7 @@ fn parse_task_properties_from_text(
         data_lock_fields,
         data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(33)?)?
             .xml_value(),
-        full_text_search: parse_task_full_text_search_slot(fields.get(33)?)?.xml_value(),
+        full_text_search: parse_task_full_text_search_slot(fields.get(32)?)?.xml_value(),
         object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
             fields.get(39)?,
@@ -26370,6 +26547,7 @@ fn parse_task_properties_from_text(
         update_data_history_immediately_after_write: false,
         execute_after_write_data_history_version_processing: false,
         child_attributes,
+        child_tabular_sections,
         child_forms,
         addressing_attributes,
         child_commands,
@@ -26408,10 +26586,6 @@ fn parse_owner_input_modes(value: &str) -> Option<(&'static str, &'static str, &
         && fields.get(1)?.trim() == "2"
         && fields.get(2)?.trim() == "0")
         .then_some(("Begin", "DontUse", "Directly"))
-}
-
-fn task_characteristics_is_empty(value: &str) -> bool {
-    exchange_plan_characteristics_is_empty(value)
 }
 
 struct TaskRootCollection<'a> {
@@ -28349,6 +28523,38 @@ fn catalog_code_allowed_length_xml(value: u32) -> Option<&'static str> {
     }
 }
 
+/// `<SubordinationUse>` rides owner field 39.
+///
+/// All three values are attested against the platform's own XML for the same
+/// object: 2 470 catalogs of the stand write `ToItems` and store `0`, `do`
+/// `Catalogs/ТемыОбсуждений` writes `ToFolders` and stores `1`, and `uh`
+/// `Catalogs/ХранимыеФайлыОрганизаций` writes `ToFoldersAndItems` and
+/// stores `2`. The field used to be pinned to `0` as reserved, which refused
+/// the other two objects whole.
+fn catalog_subordination_use_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("ToItems"),
+        1 => Some("ToFolders"),
+        2 => Some("ToFoldersAndItems"),
+        _ => None,
+    }
+}
+
+/// `<CodeSeries>` of a characteristic-type plan rides owner field 35.
+///
+/// Field 24, which this used to be read from, is `"1"` on all 47 plans of the
+/// stand and so distinguishes nothing. Field 35 is `"1"` on exactly the one
+/// plan that writes `WithinSubordination` -- `do`
+/// `ChartsOfCharacteristicTypes/ВидыДоступа` -- and `"0"` on the 46 that write
+/// `WholeCharacteristicKind`.
+fn cct_code_series_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("WholeCharacteristicKind"),
+        "1" => Some("WithinSubordination"),
+        _ => None,
+    }
+}
+
 fn catalog_code_series_xml(value: u32) -> Option<&'static str> {
     match value {
         0 => Some("WholeCatalog"),
@@ -28393,6 +28599,13 @@ fn parse_constant_properties_from_text(
 ) -> Option<ConstantProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
+    // A constant may declare more than one type -- `do`
+    // `Constants/ОтветственныйЗаУдалениеНеактивныхВерсий` and
+    // `СотрудникДляЗаданияРаспознавания` each name two catalogs, and the
+    // platform writes both inside one `<Type>` element -- but the canonical
+    // model this writer routes through carries a single type, so a set still
+    // fails closed there. Of the 3 378 constants on the stand those two are
+    // the only ones with more than one.
     let mut value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
     if value_types.len() != 1 {
         return None;
@@ -28408,6 +28621,17 @@ fn parse_constant_properties_from_text(
     let use_standard_commands = parse_1c_bool_flag(constant_fields.get(7)?.trim())?;
     let default_form = parse_catalog_form_ref(constant_fields.get(10).copied(), form_refs);
     let password_mode = parse_1c_bool_flag(constant_detail_fields.get(2)?.trim())?;
+    // The constant's detail record is the project's ordinary 23-field code-27
+    // payload, so these ride the slots that payload always uses. The writer
+    // pinned all three; the census of the stand's 3 378 constants shows each
+    // varying in exactly one object -- `MultiLine` in `do`
+    // `ИспользоватьСинхронизациюКалендарей` (slot 7 `"1"`),
+    // `ChoiceFoldersAndItems` in `uh` `ГруппаОтчетовКИК` (slot 10 `"1"`) and
+    // `QuickChoice` in `uh` `ПериодичностьОтчетностиМСФО` (slot 12 `"0"`).
+    let multi_line = parse_1c_bool_flag(constant_detail_fields.get(7)?.trim())?;
+    let choice_folders_and_items =
+        catalog_choice_folders_and_items_xml(constant_detail_fields.get(10)?.trim())?;
+    let quick_choice = catalog_quick_choice_xml(constant_detail_fields.get(12)?.trim())?;
     let format = parse_1c_synonyms(constant_detail_fields.get(3).copied().unwrap_or("{0}"));
     let edit_format = parse_1c_synonyms(constant_detail_fields.get(18).copied().unwrap_or("{0}"));
     let mask = constant_detail_fields
@@ -28429,6 +28653,13 @@ fn parse_constant_properties_from_text(
     let data_lock_control_mode = match constant_fields.get(6).map(|field| field.trim()) {
         Some("0") => "Automatic",
         _ => "Managed",
+    };
+    // Owner slot 12, the one object of the stand that writes `Use`:
+    // `uh` `Constants/РежимАктуализацииГрафикаПриИзмененииПервичныхДокументов`.
+    let data_history = match constant_fields.get(12).map(|field| field.trim()) {
+        Some("0") => "DontUse",
+        Some("1") => "Use",
+        _ => return None,
     };
     let header = parse_metadata_header_from_text(text, uuid)?;
     let mut generated_types = Vec::new();
@@ -28475,6 +28706,10 @@ fn parse_constant_properties_from_text(
         choice_parameters,
         choice_history_on_input,
         data_lock_control_mode,
+        multi_line,
+        choice_folders_and_items,
+        quick_choice,
+        data_history,
     })
 }
 
@@ -28984,9 +29219,22 @@ fn common_attribute_separated_data_use_xml(value: &str) -> Option<&'static str> 
     }
 }
 
+/// `<Indexing>` of a common attribute rides owner field 3.
+///
+/// The table knew only `DontIndex`, and an unknown code drops the whole
+/// separation block from the written XML -- eleven elements at the end of
+/// `<Properties>`, so the object is written but differs. Census of the common
+/// attributes of the stand: `DontIndex` 38, `Index` 3 (`do`
+/// `CommonAttributes/{ИдентификаторОтметкиВремени,УзелОбработки,
+/// УдалитьОтметкиВремениИдентификаторНабораЗаписей}`, all three storing `"1"`),
+/// `IndexWithAdditionalOrder` 13 -- the last is the shape
+/// `parse_common_attribute_additional_order_tail` already reads, and it
+/// requires `"2"` in this very field.
 fn common_attribute_indexing_xml(value: &str) -> Option<&'static str> {
     match value {
         "0" => Some("DontIndex"),
+        "1" => Some("Index"),
+        "2" => Some("IndexWithAdditionalOrder"),
         _ => None,
     }
 }
@@ -30979,7 +31227,7 @@ fn parse_event_subscription_properties_from_text(
         .map(|(event, _)| event)
         .unwrap_or(raw_event.as_str())
         .to_string();
-    let source_types = parse_event_subscription_type_pattern(fields.get(2)?, type_index, &event)?;
+    let source_types = parse_event_subscription_type_pattern(fields.get(2)?, type_index)?;
     let module_uuid = parse_uuid_field(fields.get(4)?.trim())?;
     let module_ref = object_refs.get(&module_uuid)?;
     let method = fields
@@ -31319,6 +31567,14 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         23 => Some("web:DarkBlue"),
         33 => Some("web:DarkRed"),
         37 => Some("web:DarkSlateGray"),
+        // Four indexes the style items of the stand attest and this table did
+        // not carry. Each is read off the platform's own `<Value>` for the
+        // same object: `43` on `do` `StyleItems/ИзбранныйЭлемент` and two more,
+        // `62` on `СерияДиаграммыВиджетаРозовый`, `77` on
+        // `ПользовательБезУчетнойЗаписи`, `143` on `МК_ЦветТекстаАкцентнойКнопки`
+        // and two more. `43` and `143` are the same values the form palette
+        // already carried in front of this table.
+        43 => Some("web:DodgerBlue"),
         44 => Some("web:FireBrick"),
         45 => Some("web:FloralWhite"),
         46 => Some("web:ForestGreen"),
@@ -31330,7 +31586,11 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
         61 => Some("web:Lavender"),
-        64 => Some("web:LightCoral"),
+        62 => Some("web:LavenderBlush"),
+        // `uh` `StyleItems/ИзмененнаяНастройка` writes `web:LemonChiffon`
+        // for index 64; the table read it as `LightCoral`, a name it already
+        // gives 66.
+        64 => Some("web:LemonChiffon"),
         65 => Some("web:LightBlue"),
         66 => Some("web:LightCoral"),
         67 => Some("web:LightCyan"),
@@ -31338,6 +31598,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         69 => Some("web:LightGoldenRodYellow"),
         71 => Some("web:LightGray"),
         72 => Some("web:LightPink"),
+        77 => Some("web:LightSlateGray"),
         78 => Some("web:LightSteelBlue"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
@@ -31364,6 +31625,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         134 => Some("web:SteelBlue"),
         140 => Some("web:Violet"),
         141 => Some("web:VioletRed"),
+        143 => Some("web:White"),
         144 => Some("web:WhiteSmoke"),
         145 => Some("web:Yellow"),
         _ => None,
@@ -31376,9 +31638,21 @@ fn style_system_color_name(code: i32) -> Option<&'static str> {
         -3 => Some("style:FormTextColor"),
         -11 => Some("style:FieldTextColor"),
         -15 => Some("style:ButtonTextColor"),
-        -7 => Some("style:FieldBackColor"),
+        // `uh` `StyleItems/ЦветФонаТолькоПросмотр` writes
+        // `style:ButtonBackColor` for index `-7`; the form palette reads it the
+        // same way on 68 occurrences.
+        -7 => Some("style:ButtonBackColor"),
         -13 => Some("style:FieldTextColor"),
-        -21 => Some("style:FieldSelectionBackColor"),
+        // `-21` is `ButtonTextColor`, read off the platform's own `<Value>`
+        // for `do` `StyleItems/ЦветКалендаряПодпись` and
+        // `ЗаголовокКалендаряБроньЦветТекста`. The form palette
+        // (`form_control_system_color_name`) reads the same code the same way
+        // on 951 occurrences of the native form dumps of УТ 11.5.27.75, so the
+        // two palettes agree here rather than differ. Every style-palette code
+        // the style items of the stand exercise -- `-3`, `-16`, `-21`, `-23`,
+        // `-42` -- agrees with the form palette; the codes where the two
+        // tables still differ are exercised by neither.
+        -21 => Some("style:ButtonTextColor"),
         -10 => Some("style:FieldSelectedTextColor"),
         -14 => Some("style:FieldAlternativeBackColor"),
         -23 => Some("style:ToolTipBackColor"),
@@ -31603,46 +31877,8 @@ fn parse_metadata_type_pattern_with_builtin(
 fn parse_event_subscription_type_pattern(
     value: &str,
     type_index: &BTreeMap<String, String>,
-    event: &str,
 ) -> Option<Vec<ConstantValueType>> {
-    let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != r#""Pattern""# {
-        return None;
-    }
-    let type_ids = fields
-        .iter()
-        .skip(1)
-        .map(|field| metadata_type_pattern_field_type_id(field))
-        .collect::<Option<Vec<_>>>()?;
-    fields
-        .iter()
-        .skip(1)
-        .map(|field| {
-            parse_event_subscription_type_pattern_element(field, type_index, event, &type_ids)
-        })
-        .collect()
-}
-
-fn parse_event_subscription_type_pattern_element(
-    value: &str,
-    type_index: &BTreeMap<String, String>,
-    event: &str,
-    pattern_type_ids: &[String],
-) -> Option<ConstantValueType> {
-    let element = split_1c_braced_fields(value, 0)?;
-    if element.first()?.trim() == r##""#""## && element.len() >= 2 {
-        let type_id = parse_uuid_field(element.get(1)?.trim())?;
-        let reference = type_index
-            .get(&type_id)
-            .cloned()
-            .or_else(|| {
-                event_subscription_builtin_type_reference(event, pattern_type_ids, &type_id)
-                    .map(ToOwned::to_owned)
-            })
-            .or_else(|| builtin_type_reference(&type_id).map(ToOwned::to_owned))?;
-        return Some(ConstantValueType::Reference { reference });
-    }
-    parse_metadata_type_pattern_element(value, type_index)
+    parse_metadata_type_pattern(value, type_index)
 }
 
 fn parse_metadata_type_pattern_element(
@@ -31719,41 +31955,6 @@ fn metadata_type_pattern_field_type_id(value: &str) -> Option<String> {
     }
 }
 
-fn event_subscription_builtin_type_reference(
-    event: &str,
-    pattern_type_ids: &[String],
-    type_id: &str,
-) -> Option<&'static str> {
-    if event == "FillCheckProcessing" {
-        return match type_id {
-            "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:BusinessProcessObject"),
-            _ => None,
-        };
-    }
-    if pattern_type_ids.len() == 4
-        && pattern_type_ids
-            == [
-                "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed",
-                "30b100d6-b29f-47ac-aec7-cb8ca8a54767",
-                "82a1b659-b220-4d94-a9bd-14d757b95a48",
-                "cf4abea6-37b2-11d4-940f-008048da11f9",
-            ]
-    {
-        return match type_id {
-            "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:ChartOfAccountsObject"),
-            _ => None,
-        };
-    }
-    if pattern_type_ids.len() == 1
-        && pattern_type_ids.first().map(String::as_str)
-            == Some("fcd3404e-1523-48ce-9bc0-ecdb822684a1")
-        && matches!(event, "BeforeWrite" | "OnSetNewNumber")
-    {
-        return Some("cfg:BusinessProcessObject");
-    }
-    None
-}
-
 pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
     match type_id {
         "acf6192e-81ca-46ef-93a6-5a6968b78663" => Some("v8:ValueTable"),
@@ -31774,13 +31975,35 @@ pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63" => Some("cfg:AnyIBRef"),
         "0195e80c-b157-11d4-9435-004095e12fc7" => Some("cfg:ConstantValueManager"),
         "061d872a-5787-460e-95ac-ed74ea3a3e84" => Some("cfg:DocumentObject"),
-        "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:BusinessProcessObject"),
+        // Three object-family identifiers were rotated among themselves.
+        // Event subscriptions decide them: an `<Event>` whose `Source` names a
+        // single family pins that family's identifier outright. Census of the
+        // subscriptions of `do`, `ssl`, `sslbase`, `mdm`, `ws` and `wms`,
+        // pattern against the XML the platform writes for the same object:
+        // `fcd3404e` is alone in the pattern of twelve subscriptions and every
+        // one of them is written `cfg:BusinessProcessObject`; `do`
+        // `ОбменДаннымиДО20ДО21ПередЗаписью` carries exactly
+        // `{3e63355c, cf4abea6, fcd3404e}` against
+        // `{BusinessProcessObject, CatalogObject, TaskObject}`, which leaves
+        // `3e63355c` = `cfg:TaskObject`; and `do`
+        // `ОбработкаПредопределенныхЭлементовПередЗаписью` carries
+        // `{238e7e88, 30b100d6, 82a1b659, cf4abea6}` against
+        // `{CatalogObject, ChartOfAccountsObject, ChartOfCalculationTypesObject,
+        // ChartOfCharacteristicTypesObject}`, which leaves `238e7e88` =
+        // `cfg:ChartOfAccountsObject`.
+        //
+        // The rotation was invisible for a long time because the platform
+        // writes a subscription's type sets in one canonical order, so a
+        // permutation of the same three names still produced the same bytes.
+        // It shows only where the pattern carries some of the three and not
+        // all: nine subscriptions of `do` and four of `uh`.
+        "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:ChartOfAccountsObject"),
         "30b100d6-b29f-47ac-aec7-cb8ca8a54767" => Some("cfg:ChartOfCalculationTypesObject"),
-        "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:ChartOfAccountsObject"),
+        "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:TaskObject"),
         "82a1b659-b220-4d94-a9bd-14d757b95a48" => Some("cfg:ChartOfCharacteristicTypesObject"),
         "857c4a91-e5f4-4fac-86ec-787626f1c108" => Some("cfg:ExchangePlanObject"),
         "cf4abea6-37b2-11d4-940f-008048da11f9" => Some("cfg:CatalogObject"),
-        "fcd3404e-1523-48ce-9bc0-ecdb822684a1" => Some("cfg:TaskObject"),
+        "fcd3404e-1523-48ce-9bc0-ecdb822684a1" => Some("cfg:BusinessProcessObject"),
         "13134201-f60b-11d5-a3c7-0050bae0a776" => Some("cfg:InformationRegisterRecordSet"),
         "2deed9b8-0056-4ffe-a473-c20a6c32a0bc" => Some("cfg:AccountingRegisterRecordSet"),
         "b64d9a40-1642-11d6-a3c7-0050bae0a776" => Some("cfg:AccumulationRegisterRecordSet"),
@@ -31807,7 +32030,17 @@ pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         // mapping here instead makes the one table serve every pattern reader,
         // which is what the register reader itself falls back to.
         "474c3bf6-08b5-4ddc-a2ad-989cedf11583" => Some("cfg:EnumRef"),
-        _ => None,
+        // The reference-family protocol identifiers live in one table. This
+        // reader carried five of them and the DCS reader ten, and the two
+        // overlapping copies were already reconciled once, for `cfg:EnumRef`
+        // just above. `do` `BusinessProcess.КомплексныйПроцесс` writes
+        // `{"Pattern",{"#",11e5f865-…}}` for its `ТочкаМаршрута` attribute --
+        // `cfg:BusinessProcessRoutePointRef`, a name only the other copy knew,
+        // so the object failed closed on an identifier the project already
+        // resolves elsewhere. One table now answers both readers.
+        _ => DCS_BUILTIN_REFERENCE_TYPE_SETS
+            .iter()
+            .find_map(|(candidate, reference)| (*candidate == type_id).then_some(*reference)),
     }
 }
 
@@ -34358,7 +34591,7 @@ fn format_business_process_source_xml(
     header: &MetadataHeader,
     business_process: &BusinessProcessProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     let mut xml = format_full_metadata_source_xml("BusinessProcess", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&business_process.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
@@ -34428,9 +34661,11 @@ fn format_business_process_source_xml(
             &mut properties,
             &business_process.standard_attributes,
         );
+        properties.push_str(
+            &render_metadata_characteristics_xml(&business_process.characteristics).ok()?,
+        );
         properties.push_str(&format!(
-            "\t\t\t<Characteristics/>\r\n\
-\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
+            "\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
             xml_bool(business_process.autonumbering),
         ));
         push_task_based_on_xml(&mut properties, &business_process.based_on);
@@ -34499,6 +34734,7 @@ fn format_business_process_source_xml(
         if business_process.child_attributes.is_empty()
             && business_process.child_tabular_sections.is_empty()
             && business_process.child_forms.is_empty()
+            && business_process.child_templates.is_empty()
             && business_process.child_commands.is_empty()
         {
             xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
@@ -34516,6 +34752,12 @@ fn format_business_process_source_xml(
                     escape_xml_element_text(form)
                 ));
             }
+            for template in &business_process.child_templates {
+                child_objects.push_str(&format!(
+                    "\t\t\t<Template>{}</Template>\r\n",
+                    escape_xml_element_text(template)
+                ));
+            }
             for command in &business_process.child_commands {
                 push_metadata_child_command_xml(&mut child_objects, command);
             }
@@ -34523,14 +34765,14 @@ fn format_business_process_source_xml(
             xml.insert_str(index, &child_objects);
         }
     }
-    xml
+    Some(xml)
 }
 
 fn format_task_source_xml(
     header: &MetadataHeader,
     task: &TaskProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     task.internal_uuid_slots.acknowledge_internal_only();
     let mut xml = format_full_metadata_source_xml("Task", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&task.generated_types);
@@ -34569,7 +34811,7 @@ fn format_task_source_xml(
         );
         push_task_based_on_xml(&mut properties, &task.based_on);
         push_metadata_standard_attributes_xml(&mut properties, &task.standard_attributes);
-        properties.push_str("\t\t\t<Characteristics/>\r\n");
+        properties.push_str(&render_metadata_characteristics_xml(&task.characteristics).ok()?);
         properties.push_str(&format!(
             "\t\t\t<DefaultPresentation>{}</DefaultPresentation>\r\n\
 \t\t\t<EditType>{}</EditType>\r\n",
@@ -34669,6 +34911,7 @@ fn format_task_source_xml(
     }
     if let Some(index) = xml.find("\t</Task>") {
         if task.child_attributes.is_empty()
+            && task.child_tabular_sections.is_empty()
             && task.child_forms.is_empty()
             && task.addressing_attributes.is_empty()
             && task.child_commands.is_empty()
@@ -34677,6 +34920,9 @@ fn format_task_source_xml(
         } else {
             let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
             for child in &task.child_attributes {
+                push_metadata_child_object_xml(&mut child_objects, child);
+            }
+            for child in &task.child_tabular_sections {
                 push_metadata_child_object_xml(&mut child_objects, child);
             }
             for form in &task.child_forms {
@@ -34695,7 +34941,7 @@ fn format_task_source_xml(
             xml.insert_str(index, &child_objects);
         }
     }
-    xml
+    Some(xml)
 }
 
 fn push_task_based_on_xml(xml: &mut String, references: &[String]) {
@@ -34750,11 +34996,12 @@ fn push_metadata_standard_attributes_xml(
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
         xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Format", &attribute.format);
-        xml.push_str(
+        xml.push_str(&format!(
             "\t\t\t\t\t<xr:ChoiceForm/>\r\n\
 \t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n",
-        );
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
+            attribute.choice_history_on_input,
+        ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "EditFormat", &attribute.edit_format);
         xml.push_str(&format!(
             "\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
@@ -35411,7 +35658,8 @@ fn push_register_standard_attributes_xml_with_indent(
         xml.push_str(&format!(
             "{property_indent}<xr:ChoiceForm/>\r\n\
 {property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-{property_indent}<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n"
+{property_indent}<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
+            attribute.choice_history_on_input,
         ));
         push_xr_localized_property_xml(xml, &property_indent, "EditFormat", &attribute.edit_format);
         xml.push_str(&format!(
@@ -36330,13 +36578,7 @@ fn push_metadata_tabular_section_properties_xml(
         properties.fill_checking
     ));
     if !properties.line_number_fill_checking.is_empty() {
-        push_metadata_line_number_standard_attribute_xml(
-            xml,
-            indent,
-            properties.line_number_fill_checking,
-            properties.line_number_fill_value.as_ref(),
-            &properties.line_number_synonym,
-        );
+        push_metadata_line_number_standard_attribute_xml(xml, indent, properties);
     }
     if let Some(use_mode) = properties.use_mode {
         xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
@@ -36351,10 +36593,11 @@ fn push_metadata_tabular_section_properties_xml(
 fn push_metadata_line_number_standard_attribute_xml(
     xml: &mut String,
     indent: &str,
-    fill_checking: &str,
-    fill_value: Option<&MetadataChildFillValue>,
-    synonym: &[(String, String)],
+    properties: &MetadataTabularSectionProperties,
 ) {
+    let fill_checking = properties.line_number_fill_checking;
+    let fill_value = properties.line_number_fill_value.as_ref();
+    let child_indent = format!("{indent}\t\t");
     xml.push_str(&format!(
         "{indent}<StandardAttributes>\r\n\
 {indent}\t<xr:StandardAttribute name=\"LineNumber\">\r\n\
@@ -36366,18 +36609,32 @@ fn push_metadata_line_number_standard_attribute_xml(
 {indent}\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
 {indent}\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
 {indent}\t\t<xr:ToolTip/>\r\n\
-{indent}\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
-{indent}\t\t<xr:Format/>\r\n\
-{indent}\t\t<xr:ChoiceForm/>\r\n\
+{indent}\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n"
+    ));
+    push_xr_localized_property_xml(xml, &child_indent, "Format", &properties.line_number_format);
+    xml.push_str(&format!(
+        "{indent}\t\t<xr:ChoiceForm/>\r\n\
 {indent}\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-{indent}\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
-{indent}\t\t<xr:EditFormat/>\r\n\
-{indent}\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+{indent}\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n"
+    ));
+    push_xr_localized_property_xml(
+        xml,
+        &child_indent,
+        "EditFormat",
+        &properties.line_number_edit_format,
+    );
+    xml.push_str(&format!(
+        "{indent}\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
 {indent}\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
 {indent}\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
 {indent}\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n"
     ));
-    push_xr_localized_property_xml(xml, &format!("{indent}\t\t"), "Synonym", synonym);
+    push_xr_localized_property_xml(
+        xml,
+        &child_indent,
+        "Synonym",
+        &properties.line_number_synonym,
+    );
     xml.push_str(&format!(
         "{indent}\t\t<xr:Comment/>\r\n\
 {indent}\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
@@ -36815,19 +37072,19 @@ fn format_event_subscription_source_xml(
 fn sorted_event_subscription_source_types(
     source_types: &[ConstantValueType],
 ) -> Vec<&ConstantValueType> {
+    // The canonical family order is the platform's, and it does not depend on
+    // whether the source also names individual objects: `do`
+    // `БизнесСобытияПередЗаписьюОбъекта` writes seven `<v8:Type>` catalogs and
+    // then `BusinessProcessObject`, `TaskObject` -- family order, not pattern
+    // order. The order used to be applied only to all-type-set sources, which
+    // hid the rotation of the three object-family identifiers rather than
+    // exposing it.
     let mut indexed = source_types.iter().enumerate().collect::<Vec<_>>();
-    let all_type_sets = indexed.iter().all(|(_, source_type)| {
-        event_subscription_source_type_tag(&metadata_type_xml_name(source_type)) == "TypeSet"
-    });
     indexed.sort_by_key(|(index, source_type)| {
         let reference = metadata_type_xml_name(source_type);
         let tag = event_subscription_source_type_tag(&reference);
         let tag_rank = if tag == "Type" { 0usize } else { 1usize };
-        let type_set_rank = if all_type_sets {
-            event_subscription_type_set_order(&reference).unwrap_or(usize::MAX)
-        } else {
-            usize::MAX
-        };
+        let type_set_rank = event_subscription_type_set_order(&reference).unwrap_or(usize::MAX);
         (tag_rank, type_set_rank, *index)
     });
     indexed
@@ -36961,29 +37218,33 @@ fn format_constant_source_xml(
     insert.push_str(&format!(
         "\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
 \t\t\t{}\r\n\
-\t\t\t<MultiLine>false</MultiLine>\r\n\
+\t\t\t<MultiLine>{}</MultiLine>\r\n\
 \t\t\t<ExtendedEdit>false</ExtendedEdit>\r\n\
 \t\t\t{}\r\n\
 \t\t\t{}\r\n\
 \t\t\t<FillChecking>{}</FillChecking>\r\n\
-\t\t\t<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>\r\n\
+\t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
 \t\t\t<ChoiceParameterLinks/>\r\n\
 \t\t\t{}\r\n\
-\t\t\t<QuickChoice>Auto</QuickChoice>\r\n\
+\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<ChoiceForm/>\r\n\
 \t\t\t<LinkByType/>\r\n\
 \t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
 \t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
-\t\t\t<DataHistory>DontUse</DataHistory>\r\n\
+\t\t\t<DataHistory>{}</DataHistory>\r\n\
 \t\t\t<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
 \t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
         format_simple_property_xml("Mask", &constant.mask),
+        xml_bool(constant.multi_line),
         format_constant_bound_xml("MinValue", constant.min_value.as_deref()),
         format_constant_bound_xml("MaxValue", constant.max_value.as_deref()),
         constant.fill_checking,
+        constant.choice_folders_and_items,
         format_choice_parameters_xml(&constant.choice_parameters),
+        constant.quick_choice,
         constant.choice_history_on_input,
-        constant.data_lock_control_mode
+        constant.data_lock_control_mode,
+        constant.data_history
     ));
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {

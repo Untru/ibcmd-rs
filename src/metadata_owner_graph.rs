@@ -132,8 +132,7 @@ pub(crate) const CHARACTERISTICS_ROLE_TOKENS: [&str; 13] = [
     "multiple_values_key_field",
     "multiple_values_order_field",
 ];
-pub(crate) const CHARACTERISTICS_REASON_TOKENS: [&str; 10] = [
-    "unsupported_family",
+pub(crate) const CHARACTERISTICS_REASON_TOKENS: [&str; 9] = [
     "invalid_envelope",
     "invalid_count",
     "invalid_type_tag",
@@ -178,6 +177,8 @@ impl CharacteristicsFieldRole {
 pub(crate) enum CharacteristicsTagKind {
     Item,
     StringFill,
+    Boolean,
+    Undefined,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -292,6 +293,8 @@ impl CharacteristicsPhysicalSchema {
         match decoded {
             "#" => Some(CharacteristicsTagKind::Item),
             "S" => Some(CharacteristicsTagKind::StringFill),
+            "B" => Some(CharacteristicsTagKind::Boolean),
+            "U" => Some(CharacteristicsTagKind::Undefined),
             _ => None,
         }
     }
@@ -318,26 +321,23 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) const fn standard_attribute(
-        family: OwnerGraphFamily,
-        role: CharacteristicsFieldRole,
+    /// Which standard attribute a resolved marker may name, given the shape of
+    /// the source it is read against. A tabular section exposes only its
+    /// owner's `Ref`; an object source exposes its family's whole
+    /// standard-attribute table. Which marker spells `Ref` is not decided here
+    /// -- it comes from the source family's own table.
+    pub(crate) fn standard_attribute(
         shape: CharacteristicsSourceShape,
-        marker: i32,
+        name: &str,
     ) -> Option<CharacteristicsStandardAttributeKind> {
-        if matches!(family, OwnerGraphFamily::Document) {
-            if matches!(role, CharacteristicsFieldRole::ObjectField) && marker == -5 {
-                return Some(CharacteristicsStandardAttributeKind::Ref);
+        match shape {
+            CharacteristicsSourceShape::TabularSection => {
+                (name == "Ref").then_some(CharacteristicsStandardAttributeKind::Ref)
             }
-            return None;
+            CharacteristicsSourceShape::Object => {
+                Some(CharacteristicsStandardAttributeKind::FamilyTable)
+            }
         }
-        if matches!(shape, CharacteristicsSourceShape::TabularSection) {
-            return if marker == -8 {
-                Some(CharacteristicsStandardAttributeKind::Ref)
-            } else {
-                None
-            };
-        }
-        Some(CharacteristicsStandardAttributeKind::FamilyTable)
     }
 
     pub(crate) fn standard_attribute_path(source: &str, name: &str) -> String {
@@ -522,6 +522,43 @@ pub(crate) enum OwnerGraphFamily {
     ChartOfCharacteristicTypes,
 }
 
+/// The owner families whose record declares a `Characteristics` slot.
+///
+/// It is a separate vocabulary from [`OwnerGraphFamily`] on purpose: `Task`
+/// carries the property but is not decoded through the owner graph at all, and
+/// giving it an owner-graph layout it does not have would be inventing one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CharacteristicsOwnerFamily {
+    Catalog,
+    Document,
+    ChartOfCharacteristicTypes,
+    BusinessProcess,
+    Task,
+}
+
+impl CharacteristicsOwnerFamily {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Catalog => "Catalog",
+            Self::Document => "Document",
+            Self::ChartOfCharacteristicTypes => "ChartOfCharacteristicTypes",
+            Self::BusinessProcess => "BusinessProcess",
+            Self::Task => "Task",
+        }
+    }
+}
+
+impl From<OwnerGraphFamily> for CharacteristicsOwnerFamily {
+    fn from(family: OwnerGraphFamily) -> Self {
+        match family {
+            OwnerGraphFamily::Catalog => Self::Catalog,
+            OwnerGraphFamily::Document => Self::Document,
+            OwnerGraphFamily::BusinessProcess => Self::BusinessProcess,
+            OwnerGraphFamily::ChartOfCharacteristicTypes => Self::ChartOfCharacteristicTypes,
+        }
+    }
+}
+
 /// A semantically named child collection in an owner record.
 ///
 /// The physical ordering belongs to the native record layout, but consumers
@@ -575,7 +612,13 @@ impl OwnerGraphFamily {
                 owner_header_slot: 9,
                 owner_header_encoding: OwnerHeaderEncoding::Wrapped,
                 owner_header_unique: true,
-                owner_reserved_fields: &[(39, "0")],
+                // Owner field 39 is not reserved: it carries
+                // `<SubordinationUse>`. Pinning it to `"0"` refused every
+                // catalog that subordinates anything but items -- two on the
+                // stand, `do` `ТемыОбсуждений` (`"1"`, `ToFolders`) and `uh`
+                // `ХранимыеФайлыОрганизаций` (`"2"`, `ToFoldersAndItems`),
+                // against 2 470 that write `ToItems` with `"0"`.
+                owner_reserved_fields: &[],
                 generated_types: CATALOG_GENERATED_TYPES,
                 root_collection_count_token: "5",
                 collection_markers: &[
@@ -1986,12 +2029,24 @@ mod tests {
         );
         assert_eq!(
             CharacteristicsPhysicalSchema::standard_attribute(
-                OwnerGraphFamily::Document,
-                CharacteristicsFieldRole::ObjectField,
-                CharacteristicsSourceShape::Object,
-                -5,
+                CharacteristicsSourceShape::TabularSection,
+                "Ref",
             ),
             Some(CharacteristicsStandardAttributeKind::Ref)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::standard_attribute(
+                CharacteristicsSourceShape::TabularSection,
+                "Parent",
+            ),
+            None
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::standard_attribute(
+                CharacteristicsSourceShape::Object,
+                "Parent",
+            ),
+            Some(CharacteristicsStandardAttributeKind::FamilyTable)
         );
         assert!(!CharacteristicsPhysicalSchema::outer(Some(1), 2));
         assert_eq!(CharacteristicsPhysicalSchema::tag("unknown"), None);

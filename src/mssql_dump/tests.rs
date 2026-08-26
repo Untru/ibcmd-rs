@@ -2,8 +2,8 @@ use super::characteristics::*;
 use super::*;
 use crate::metadata_owner_graph::{
     CATALOG_ATTRIBUTE_GROUP_UUID, CATALOG_COMMAND_COLLECTION_UUID, CATALOG_FORM_COLLECTION_UUID,
-    CATALOG_TABULAR_SECTION_COLLECTION_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
-    DOCUMENT_COMMAND_COLLECTION_UUID, DOCUMENT_FORM_COLLECTION_UUID,
+    CATALOG_TABULAR_SECTION_COLLECTION_UUID, CharacteristicsOwnerFamily,
+    DOCUMENT_ATTRIBUTE_GROUP_UUID, DOCUMENT_COMMAND_COLLECTION_UUID, DOCUMENT_FORM_COLLECTION_UUID,
     DOCUMENT_TABULAR_SECTION_COLLECTION_UUID, METADATA_TEMPLATE_COLLECTION_UUID, OwnerGraphFamily,
 };
 use flate2::Compression;
@@ -1804,7 +1804,7 @@ const EXPECTED_OWNER_GRAPH_LAYOUTS: &[ExpectedOwnerGraphLayout] = &[
         owner_discriminators: &["56", "57"],
         owner_header_slot: 9,
         owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
-        owner_reserved_fields: &[(39, "0")],
+        owner_reserved_fields: &[],
         generated_types: &[
             ExpectedOwnerGraphGeneratedType {
                 type_slot: 1,
@@ -2027,9 +2027,7 @@ fn owner_graph_fixture_for_test(
     for (field_index, value) in expected.owner_reserved_fields {
         fields[*field_index] = (*value).to_owned();
     }
-    if let Ok(slot) = characteristics::characteristics_slot(expected.family) {
-        fields[slot] = "{0,{0}}".to_owned();
-    }
+    fields[characteristics::characteristics_slot(expected.family.into())] = "{0,{0}}".to_owned();
     let collections = expected
         .collection_markers
         .iter()
@@ -2536,6 +2534,8 @@ fn catalog_and_document_validators_keep_second_tabular_property_failure_location
         line_number_fill_checking: "",
         line_number_fill_value: None,
         line_number_synonym: Vec::new(),
+        line_number_format: Vec::new(),
+        line_number_edit_format: Vec::new(),
         use_mode: None,
         line_number_length: Some(5),
     };
@@ -2814,21 +2814,27 @@ fn business_process_and_cct_reject_a_misordered_marker_at_each_native_role() {
 }
 
 #[test]
-fn cct_command_and_bp_template_are_exact_typed_unsupported() {
+fn cct_command_and_bp_template_stay_typed_and_redacted() {
+    // The chart of characteristic types still refuses an owned command
+    // outright. The business process no longer refuses an owned template --
+    // it reads them (`parse_business_process_child_templates`) -- so a payload
+    // that is not a child uuid is an invariant refusal there rather than an
+    // unsupported one. What has to hold for both is what this test is for: the
+    // refusal is typed, and it carries no native payload.
     let cases = [
         (
             &EXPECTED_OWNER_GRAPH_LAYOUTS[2],
             owner_graph::OwnerCollectionRole::Template,
-            "owned_template",
+            None,
         ),
         (
             &EXPECTED_OWNER_GRAPH_LAYOUTS[3],
             owner_graph::OwnerCollectionRole::Command,
-            "owned_command",
+            Some("owned_command"),
         ),
     ];
     let secret = "native-payload-must-stay-redacted";
-    for (expected, role, reference) in cases {
+    for (expected, role, unsupported_reference) in cases {
         let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
         let role_index = expected
             .family
@@ -2859,6 +2865,12 @@ fn cct_command_and_bp_template_are_exact_typed_unsupported() {
                 expected.family
             ),
         };
+        assert_ne!(diagnostic.class, MetadataSourceFailureClass::Unknown);
+        assert_ne!(diagnostic.parser_stage, "legacy_option_none");
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+        let Some(reference) = unsupported_reference else {
+            continue;
+        };
         assert_eq!(diagnostic.class, MetadataSourceFailureClass::Unsupported);
         assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
         assert_eq!(
@@ -2868,7 +2880,6 @@ fn cct_command_and_bp_template_are_exact_typed_unsupported() {
         assert_eq!(diagnostic.collection_role.as_deref(), Some(role.as_str()));
         assert_eq!(diagnostic.collection_index, Some(0));
         assert_eq!(diagnostic.offending_reference.as_deref(), Some(reference));
-        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
     }
 }
 
@@ -3524,6 +3535,7 @@ fn cct_tabular_late_failure_rolls_back_all_staged_ids_and_corrected_item_commits
     let mut child_ids = BTreeSet::from(["child-seed".to_owned()]);
     let failure = match parse_cct_tabular_sections_indexed(
         &[first.as_str(), second_invalid.as_str()],
+        "ChartOfCharacteristicTypes",
         "Owner",
         &BTreeMap::new(),
         &refs,
@@ -3564,6 +3576,7 @@ fn cct_tabular_late_failure_rolls_back_all_staged_ids_and_corrected_item_commits
 
     let corrected = parse_cct_tabular_sections_indexed(
         &[second_corrected.as_str()],
+        "ChartOfCharacteristicTypes",
         "Owner",
         &BTreeMap::new(),
         &refs,
@@ -6562,7 +6575,7 @@ fn writes_constant_module_text_to_source_layout_when_metadata_is_present() {
     let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
     let metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},\r\n{{0}},00000000-0000-0000-0000-000000000000,0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,0}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -25723,7 +25736,7 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
     let mut characteristics_diagnostic = None;
     assert!(
         decode_owner_characteristics(
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
             &fields,
             &type_index,
             &object_refs,
@@ -27596,6 +27609,221 @@ fn detects_previously_unmapped_style_web_colors_from_real_objects() {
     }
 }
 
+/// The same evidence shape as the test above, for Документооборот КОРП
+/// 3.0.21.3: every `(code, name)` pair is the object's own raw braced colour
+/// value paired with the exact name the platform's own exported XML carries
+/// for that object. Four web indexes the table did not carry left eight
+/// `StyleItems` refused whole, and the style index `-21` was read as
+/// `FieldSelectionBackColor` where the platform writes `ButtonTextColor`.
+/// Verbatim bytes of `do` `Constants/ИспользоватьСинхронизациюКалендарей`,
+/// the one constant of the stand that writes `<MultiLine>true</MultiLine>`.
+/// The four slots the writer used to pin are substituted, so each is read
+/// where the corpus proves it: `MultiLine` in the detail's slot 7 (this
+/// object), `ChoiceFoldersAndItems` in slot 10 (`uh` `ГруппаОтчетовКИК`),
+/// `QuickChoice` in slot 12 (`uh` `ПериодичностьОтчетностиМСФО`) and
+/// `DataHistory` in the owner's slot 12 (`uh`
+/// `РежимАктуализацииГрафикаПриИзмененииПервичныхДокументов`). All four are
+/// single-object variations across the 3 378 constants of the stand.
+fn constant_record_for_test(multi_line: &str, folders: &str, quick: &str, history: &str) -> String {
+    RECORD_LITERAL
+        .replace("{MULTILINE}", multi_line)
+        .replace("{FOLDERS}", folders)
+        .replace("{QUICK}", quick)
+        .replace("{HISTORY}", history)
+}
+
+const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},0,\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},0,\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,1,1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
+
+#[test]
+fn common_attribute_indexing_names_every_code_the_corpus_stores() {
+    // An unknown code here drops the whole separation block from the written
+    // XML -- eleven elements at the end of `<Properties>` -- so the object is
+    // written but differs. Census of the common attributes of the stand:
+    // `DontIndex` 38, `Index` 3, `IndexWithAdditionalOrder` 13.
+    assert_eq!(common_attribute_indexing_xml("0"), Some("DontIndex"));
+    assert_eq!(common_attribute_indexing_xml("1"), Some("Index"));
+    assert_eq!(
+        common_attribute_indexing_xml("2"),
+        Some("IndexWithAdditionalOrder")
+    );
+    assert_eq!(common_attribute_indexing_xml("3"), None);
+}
+
+#[test]
+fn catalog_choice_data_get_mode_and_cct_code_series_ride_the_slots_the_corpus_names() {
+    // The third slot of a catalog's input-mode envelope carries
+    // `<ChoiceDataGetModeOnInputByString>`; it used to be pinned to `0` and the
+    // property printed `Directly`. `do` `Catalogs/АдресатыПочтовыхСообщений`
+    // writes `{1,2,1}` and the platform exports `Background` -- the one object
+    // of the stand that does, against 584 that write `Directly`.
+    assert_eq!(
+        parse_catalog_input_modes("{1,2,0}"),
+        Some(("Begin", "DontUse", "Directly"))
+    );
+    assert_eq!(
+        parse_catalog_input_modes("{1,2,1}"),
+        Some(("Begin", "DontUse", "Background"))
+    );
+    assert_eq!(parse_catalog_input_modes("{1,2,2}"), None);
+    assert_eq!(
+        parse_catalog_input_modes("{2,1,1}"),
+        Some(("AnyPart", "Use", "Background"))
+    );
+
+    // A characteristic-type plan's `<CodeSeries>` rides owner field 35, not
+    // field 24: field 24 is `"1"` on all 47 plans of the stand, while field 35
+    // is `"1"` on exactly the one plan that writes `WithinSubordination`.
+    assert_eq!(cct_code_series_xml("0"), Some("WholeCharacteristicKind"));
+    assert_eq!(cct_code_series_xml("1"), Some("WithinSubordination"));
+    assert_eq!(cct_code_series_xml("2"), None);
+}
+
+#[test]
+fn standard_attribute_choice_history_on_input_is_read_not_pinned_to_auto() {
+    // The reader refused any standard attribute whose `ChoiceHistoryOnInput`
+    // was not `Auto`, and the writer printed `Auto` unconditionally. Three
+    // objects of the stand write `DontUse` -- the `Date` standard attribute of
+    // `do` `Documents/ДанныеДокументаМЭДО`, `КвитанцияМЭДО` and
+    // `УведомлениеМЭДО` -- against 61 900 attributes that write `Auto`.
+    assert_eq!(metadata_choice_history_on_input_xml("0"), Some("Auto"));
+    assert_eq!(metadata_choice_history_on_input_xml("1"), Some("DontUse"));
+    assert_eq!(metadata_choice_history_on_input_xml("2"), None);
+
+    let render = |choice_history_on_input| {
+        let mut attribute =
+            register_standard_attribute("Date", "ShowError", &BTreeMap::new(), None);
+        attribute.choice_history_on_input = choice_history_on_input;
+        let mut xml = String::new();
+        push_metadata_standard_attributes_xml(
+            &mut xml,
+            &[MetadataStandardAttribute {
+                attribute,
+                comment: String::new(),
+                type_reduction_mode: "TransformValues",
+                choice_parameter_links: Vec::new(),
+            }],
+        );
+        xml
+    };
+    assert!(
+        render("Auto").contains("<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>"),
+        "{}",
+        render("Auto")
+    );
+    assert!(
+        render("DontUse").contains("<xr:ChoiceHistoryOnInput>DontUse</xr:ChoiceHistoryOnInput>"),
+        "{}",
+        render("DontUse")
+    );
+}
+
+#[test]
+fn catalog_subordination_use_is_read_where_it_was_pinned_reserved() {
+    // Owner field 39 carries `<SubordinationUse>`, and the owner-graph layout
+    // used to declare it reserved with the value `"0"`, which refused every
+    // catalog that subordinates anything but items. All three values are
+    // attested against the platform's own XML for the same object: 2 470
+    // catalogs of the stand write `ToItems` and store `0`, `do`
+    // `Catalogs/ТемыОбсуждений` writes `ToFolders` and stores `1`, and `uh`
+    // `Catalogs/ХранимыеФайлыОрганизаций` writes `ToFoldersAndItems` and
+    // stores `2`.
+    assert_eq!(catalog_subordination_use_xml(0), Some("ToItems"));
+    assert_eq!(catalog_subordination_use_xml(1), Some("ToFolders"));
+    assert_eq!(catalog_subordination_use_xml(2), Some("ToFoldersAndItems"));
+    // A fourth value is not named by anything, so it still refuses.
+    assert_eq!(catalog_subordination_use_xml(3), None);
+    assert!(
+        owner_graph::OwnerGraphFamily::Catalog
+            .layout()
+            .owner_reserved_fields
+            .iter()
+            .all(|(index, _)| *index != 39)
+    );
+}
+
+#[test]
+fn constant_reads_the_four_properties_the_writer_used_to_pin() {
+    const UUID: &str = "1d3d0d77-e5da-484f-9bb6-f25b74778d2f";
+    let parse = |text: &str| {
+        parse_constant_properties_from_text(
+            text,
+            UUID,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+    };
+    let plain = parse(&constant_record_for_test("0", "0", "2", "0")).expect("plain constant");
+    assert!(!plain.multi_line);
+    assert_eq!(plain.choice_folders_and_items, "Items");
+    assert_eq!(plain.quick_choice, "Auto");
+    assert_eq!(plain.data_history, "DontUse");
+
+    let varied = parse(&constant_record_for_test("1", "1", "0", "1")).expect("varied constant");
+    assert!(varied.multi_line);
+    assert_eq!(varied.choice_folders_and_items, "Folders");
+    assert_eq!(varied.quick_choice, "DontUse");
+    assert_eq!(varied.data_history, "Use");
+
+    // Values outside the closed sets still refuse the whole object.
+    assert!(parse(&constant_record_for_test("2", "0", "2", "0")).is_none());
+    assert!(parse(&constant_record_for_test("0", "9", "2", "0")).is_none());
+    assert!(parse(&constant_record_for_test("0", "0", "9", "0")).is_none());
+    assert!(parse(&constant_record_for_test("0", "0", "2", "9")).is_none());
+}
+
+#[test]
+fn detects_style_colors_the_document_management_objects_attest() {
+    let web: &[(&str, i32, &str)] = &[
+        ("ИзбранныйЭлемент", 43, "web:DodgerBlue"),
+        ("ЦветПерсональногоШаблонаБП", 43, "web:DodgerBlue"),
+        ("ЦветПерсональнойКатегории", 43, "web:DodgerBlue"),
+        ("СерияДиаграммыВиджетаРозовый", 62, "web:LavenderBlush"),
+        ("ПользовательБезУчетнойЗаписи", 77, "web:LightSlateGray"),
+        ("МК_ЦветТекстаАкцентнойКнопки", 143, "web:White"),
+        ("МК_ЦветФонаГруппы", 143, "web:White"),
+        ("ЦветКалендаряФонПустойЯчейкиВсегоДня", 143, "web:White"),
+    ];
+    for (name, code, expected) in web {
+        let value =
+            format!(r##"{{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{{3,2,{{{code}}}}}}}"##);
+        assert_eq!(
+            parse_style_color_value(&value).as_deref(),
+            Some(*expected),
+            "object {name} (code {code})"
+        );
+    }
+    // `-21` names the same colour in the style palette that the form palette
+    // reads for it on 951 occurrences of the native form dumps of
+    // УТ 11.5.27.75, so the two agree here rather than differ.
+    for name in ["ЦветКалендаряПодпись", "ЗаголовокКалендаряБроньЦветТекста"]
+    {
+        let value = r##"{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{3,3,{-21}}}"##;
+        assert_eq!(
+            parse_style_color_value(value).as_deref(),
+            Some("style:ButtonTextColor"),
+            "object {name}"
+        );
+    }
+    // `uh` attests two more indexes the table read wrong: `64` is
+    // `web:LemonChiffon`, not the `web:LightCoral` the table already gives 66,
+    // and `-7` is `style:ButtonBackColor`, not `FieldBackColor`.
+    assert_eq!(style_web_color_name(64), Some("web:LemonChiffon"));
+    assert_eq!(style_system_color_name(-7), Some("style:ButtonBackColor"));
+    // Every style-palette index the style items of the stand exercise agrees
+    // with the form palette.
+    for code in [-3, -7, -11, -16, -21, -23, -42] {
+        assert_eq!(
+            style_system_color_name(code),
+            form_body::form_control_system_color_name(code),
+            "style index {code}"
+        );
+    }
+    // An index neither palette names still refuses the whole object.
+    assert_eq!(style_system_color_name(-99), None);
+    assert_eq!(style_web_color_name(9_999), None);
+}
+
 #[test]
 fn writes_style_item_metadata_xml_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
@@ -28159,6 +28387,84 @@ fn keeps_event_subscription_specific_types_before_type_sets() {
             "cfg:CatalogObject.Users",
             "cfg:CatalogObject.ExternalUsers",
             "cfg:ExchangePlanObject"
+        ]
+    );
+}
+
+#[test]
+fn object_family_identifiers_are_the_ones_the_subscriptions_pin() {
+    // Three identifiers were rotated among themselves. An event subscription
+    // whose `Source` names a single family pins that family outright: twelve
+    // subscriptions across the stand carry `fcd3404e` alone and every one is
+    // written `cfg:BusinessProcessObject`.
+    assert_eq!(
+        builtin_type_reference("fcd3404e-1523-48ce-9bc0-ecdb822684a1"),
+        Some("cfg:BusinessProcessObject")
+    );
+    // `do` `ОбменДаннымиДО20ДО21ПередЗаписью` carries exactly these three
+    // identifiers against exactly these three names.
+    assert_eq!(
+        [
+            "3e63355c-1378-4953-be9b-1deb5fb6bec5",
+            "cf4abea6-37b2-11d4-940f-008048da11f9",
+            "fcd3404e-1523-48ce-9bc0-ecdb822684a1",
+        ]
+        .map(|id| builtin_type_reference(id).expect("identifier is named")),
+        [
+            "cfg:TaskObject",
+            "cfg:CatalogObject",
+            "cfg:BusinessProcessObject",
+        ]
+    );
+    // `do` `ОбработкаПредопределенныхЭлементовПередЗаписью` carries these four.
+    assert_eq!(
+        [
+            "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed",
+            "30b100d6-b29f-47ac-aec7-cb8ca8a54767",
+            "82a1b659-b220-4d94-a9bd-14d757b95a48",
+            "cf4abea6-37b2-11d4-940f-008048da11f9",
+        ]
+        .map(|id| builtin_type_reference(id).expect("identifier is named")),
+        [
+            "cfg:ChartOfAccountsObject",
+            "cfg:ChartOfCalculationTypesObject",
+            "cfg:ChartOfCharacteristicTypesObject",
+            "cfg:CatalogObject",
+        ]
+    );
+}
+
+#[test]
+fn event_subscription_family_order_holds_when_the_source_also_names_objects() {
+    // `do` `БизнесСобытияПередЗаписьюОбъекта` writes seven catalog objects and
+    // then `BusinessProcessObject`, `TaskObject` -- the canonical family order,
+    // not the order the physical pattern stores them in. The order used to be
+    // applied only when every source entry was a type set.
+    let source_types = vec![
+        ConstantValueType::Reference {
+            reference: "cfg:CatalogObject.Проекты".to_string(),
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:TaskObject".to_string(),
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:CatalogObject.Файлы".to_string(),
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:BusinessProcessObject".to_string(),
+        },
+    ];
+    let actual = sorted_event_subscription_source_types(&source_types)
+        .into_iter()
+        .map(metadata_type_xml_name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        vec![
+            "cfg:CatalogObject.Проекты",
+            "cfg:CatalogObject.Файлы",
+            "cfg:BusinessProcessObject",
+            "cfg:TaskObject",
         ]
     );
 }
@@ -29048,6 +29354,8 @@ fn formats_data_processor_tabular_section_defaults_without_use_or_line_number_le
             line_number_fill_checking: "DontCheck",
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: None,
             line_number_length: None,
         },
@@ -29072,6 +29380,8 @@ fn formats_tabular_section_with_distinct_line_number_fill_checking() {
             line_number_fill_checking: "DontCheck",
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: None,
             line_number_length: None,
         },
@@ -41220,13 +41530,6 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
                 "1",
             ),
         ),
-        (
-            12,
-            information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-                "1",
-            ),
-        ),
         (14, "{\"B\",1}".to_string()),
         (16, "{\"B\",1}".to_string()),
         (17, "{\"N\",0}".to_string()),
@@ -41255,6 +41558,34 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
             "immutable property {index} was accepted"
         );
     }
+
+    // Property 12 is `ChoiceHistoryOnInput`, and it is not immutable: the
+    // stand writes `DontUse` for it on the `Date` standard attribute of `do`
+    // `Documents/{ДанныеДокументаМЭДО,КвитанцияМЭДО,УведомлениеМЭДО}`. It is
+    // read now instead of refused; a value outside the closed pair still
+    // refuses the attribute.
+    for (stored, expected) in [("0", Some("Auto")), ("1", Some("DontUse"))] {
+        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        values[12] = information_register_standard_attribute_direct_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+            stored,
+        );
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert_eq!(
+            parse_information_register_standard_attribute("Active", &bag)
+                .map(|attribute| attribute.choice_history_on_input),
+            expected
+        );
+    }
+    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    values[12] = information_register_standard_attribute_direct_enum_for_test(
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+        "2",
+    );
+    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
 }
 
 #[test]
@@ -47099,7 +47430,7 @@ fn extracts_constant_xml_from_metadata_blob() {
     let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
     let blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},\r\n{{0}},00000000-0000-0000-0000-000000000000,0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,0}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -47208,6 +47539,10 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
         choice_parameters: Vec::new(),
         choice_history_on_input: "Auto",
         data_lock_control_mode: "Managed",
+        multi_line: false,
+        choice_folders_and_items: "Items",
+        quick_choice: "Auto",
+        data_history: "DontUse",
     }
 }
 
@@ -47402,7 +47737,7 @@ fn extracts_constant_xml_with_builtin_uuid_types() {
     ] {
         let blob = deflate_for_test(
                 format!(
-                    "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"#\",{type_uuid}}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                    "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"#\",{type_uuid}}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},\r\n{{0}},00000000-0000-0000-0000-000000000000,0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,0}}\r\n}}\r\n}}"
                 )
                 .as_bytes(),
             );
@@ -55384,7 +55719,20 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
             .len(),
         8
     );
-    assert!(task_characteristics_is_empty(fields[44]));
+    let mut characteristics_diagnostic = None;
+    assert!(
+        decode_owner_characteristics(
+            owner_graph::CharacteristicsOwnerFamily::Task,
+            &fields,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &mut characteristics_diagnostic,
+        )
+        .expect("Task characteristics")
+        .is_empty()
+    );
+    assert!(characteristics_diagnostic.is_none());
     assert!(owner_graph::task_reserved_tail_is_zero(&fields));
     assert_eq!(
         parse_owner_input_modes(fields[47]),
@@ -66358,8 +66706,9 @@ fn references() -> BTreeMap<String, String> {
 }
 
 fn decode(value: &str) -> Result<Characteristics, CharacteristicsDiagnostic> {
-    decode_characteristics(
-        OwnerGraphFamily::Catalog,
+    decode_characteristics_with_owner_code(
+        CharacteristicsOwnerFamily::Catalog,
+        None,
         value,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -66433,19 +66782,28 @@ fn characteristics_mutation_matrix_reports_typed_stage_role_and_reason() {
 }
 
 #[test]
-fn characteristics_slot_matrix_is_closed_to_three_owner_families() {
-    assert_eq!(characteristics_slot(OwnerGraphFamily::Catalog), Ok(52));
-    assert_eq!(characteristics_slot(OwnerGraphFamily::Document), Ok(45));
+fn characteristics_slot_matrix_covers_every_owner_family_that_declares_the_property() {
+    // Every slot index was read off real bytes: the payload of the slot is the
+    // one whose items carry the platform's Characteristic type uuid, and its
+    // declared count matches the number of `<xr:Characteristic>` elements the
+    // platform writes for the same object.
     assert_eq!(
-        characteristics_slot(OwnerGraphFamily::ChartOfCharacteristicTypes),
-        Ok(50)
+        characteristics_slot(CharacteristicsOwnerFamily::Catalog),
+        52
     );
     assert_eq!(
-        characteristics_slot(OwnerGraphFamily::BusinessProcess)
-            .unwrap_err()
-            .reason,
-        CharacteristicsReason::UnsupportedFamily
+        characteristics_slot(CharacteristicsOwnerFamily::Document),
+        45
     );
+    assert_eq!(
+        characteristics_slot(CharacteristicsOwnerFamily::ChartOfCharacteristicTypes),
+        50
+    );
+    assert_eq!(
+        characteristics_slot(CharacteristicsOwnerFamily::BusinessProcess),
+        41
+    );
+    assert_eq!(characteristics_slot(CharacteristicsOwnerFamily::Task), 44);
 }
 
 #[test]
@@ -66487,25 +66845,71 @@ fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes
 }
 
 #[test]
-fn characteristics_document_schema_marker_is_closed_to_object_field() {
-    let values = CharacteristicReference::new("Document.Values", None).unwrap();
-    assert!(
-        decode_field(
-            OwnerGraphFamily::Document,
-            0,
-            &field("-5"),
+fn characteristics_standard_attribute_marker_follows_the_source_family() {
+    // Real bytes, ДО КОРП 3.0.21.3: one `BusinessProcess.Исполнение`
+    // characteristic reads its types out of a Catalog tabular section with
+    // marker `-8` and its values out of its own tabular section with marker
+    // `-5`, and the platform spells both `.StandardAttribute.Ref`. Which
+    // number spells `Ref` is therefore declared by the family of the object
+    // the reference points at, not by the family that owns the property and
+    // not by the field's role.
+    let cases = [
+        ("Catalog.Types.TabularSection.Rows", -8, "Ref"),
+        ("Document.Values.TabularSection.Rows", -5, "Ref"),
+        ("BusinessProcess.Values.TabularSection.Rows", -5, "Ref"),
+        ("Task.Values.TabularSection.Rows", -5, "Ref"),
+        (
+            "ChartOfCharacteristicTypes.Types.TabularSection.Rows",
+            -2,
+            "Ref",
+        ),
+        ("Catalog.Values", -4, "Parent"),
+        ("ChartOfCharacteristicTypes.Types", -2, "Ref"),
+    ];
+    for (source, marker, name) in cases {
+        let reference = CharacteristicReference::new(source, None).unwrap();
+        for role in [
             CharacteristicRole::ObjectField,
-            &values,
-            &BTreeMap::new(),
-        )
-        .is_ok()
-    );
+            CharacteristicRole::TypeField,
+            CharacteristicRole::KeyField,
+        ] {
+            let decoded = decode_field(
+                CharacteristicsOwnerFamily::Catalog,
+                0,
+                &field(&marker.to_string()),
+                role,
+                &reference,
+                &BTreeMap::new(),
+            )
+            .unwrap_or_else(|error| panic!("{source} marker {marker} refused: {error:?}"));
+            assert_eq!(
+                decoded.reference().map(CharacteristicReference::path),
+                Some(format!("{source}.StandardAttribute.{name}").as_str())
+            );
+        }
+    }
+    // A tabular-section source exposes only its owner's `Ref`; every other
+    // entry of the family table stays closed there.
+    let rows = CharacteristicReference::new("Catalog.Values.TabularSection.Rows", None).unwrap();
     let failure = decode_field(
-        OwnerGraphFamily::Document,
+        CharacteristicsOwnerFamily::Catalog,
         0,
-        &field("-5"),
-        CharacteristicRole::TypeField,
-        &values,
+        &field("-4"),
+        CharacteristicRole::ObjectField,
+        &rows,
+        &BTreeMap::new(),
+    )
+    .unwrap_err();
+    assert_eq!(failure.reason, CharacteristicsReason::UnsupportedMarker);
+    // A family with no standard-attribute table of its own fails closed
+    // instead of borrowing the owner's numbering.
+    let register = CharacteristicReference::new("InformationRegister.Values", None).unwrap();
+    let failure = decode_field(
+        CharacteristicsOwnerFamily::Catalog,
+        0,
+        &field("-8"),
+        CharacteristicRole::ObjectField,
+        &register,
         &BTreeMap::new(),
     )
     .unwrap_err();
@@ -66513,11 +66917,53 @@ fn characteristics_document_schema_marker_is_closed_to_object_field() {
 }
 
 #[test]
+fn characteristics_filter_value_union_covers_undefined_and_boolean_members() {
+    // Real bytes: `{"U"}` is the union member the platform spells
+    // `<xr:TypesFilterValue xsi:nil="true"/>` (8 occurrences across ДО КОРП
+    // 3.0.21.3 and ERP УХ 3.2.12.6), and `{"B",1}` the one it spells
+    // `xsi:type="xs:boolean">true` (3 occurrences on ERP УХ). Neither carries
+    // a payload shaped like the string or design-time-ref members.
+    let undefined = decode(&collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"U"}"#,
+    )))
+    .unwrap();
+    assert_eq!(
+        undefined.items()[0].types().types_filter_value(),
+        &CharacteristicFilterValue::Undefined
+    );
+    let boolean = decode(&collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"B",1}"#,
+    )))
+    .unwrap();
+    assert_eq!(
+        boolean.items()[0].types().types_filter_value(),
+        &CharacteristicFilterValue::Boolean(true)
+    );
+    for malformed in [r#"{"U",1}"#, r#"{"B"}"#, r#"{"B",2}"#, r#"{"B",1,1}"#] {
+        let diagnostic = decode(&collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            malformed,
+        )))
+        .unwrap_err();
+        assert_eq!(
+            diagnostic.reason,
+            CharacteristicsReason::UnsupportedFilterUnion,
+            "accepted malformed filter {malformed:?}"
+        );
+    }
+}
+
+#[test]
 fn characteristics_uuid_field_outside_source_fails_ancestry() {
     let source = CharacteristicReference::new("Catalog.Values", None).unwrap();
     let raw = format!("{{1,{{0,{FIELD_UUID}}},0}}");
     let failure = decode_field(
-        OwnerGraphFamily::Catalog,
+        CharacteristicsOwnerFamily::Catalog,
         0,
         &raw,
         CharacteristicRole::ValueField,
@@ -66544,8 +66990,14 @@ fn characteristics_nonempty_design_time_ref_retains_value_uuid_provenance() {
             "Catalog.Filter.Item".to_owned(),
         ),
     ]);
-    let value =
-        decode_filter_value(OwnerGraphFamily::Catalog, 0, &raw, &BTreeMap::new(), &refs).unwrap();
+    let value = decode_filter_value(
+        CharacteristicsOwnerFamily::Catalog,
+        0,
+        &raw,
+        &BTreeMap::new(),
+        &refs,
+    )
+    .unwrap();
     let CharacteristicFilterValue::DesignTimeRef(Some(reference)) = value else {
         panic!("expected nonempty design-time reference");
     };
@@ -66568,13 +67020,13 @@ fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed(
         OwnerGraphFamily::Document,
         OwnerGraphFamily::ChartOfCharacteristicTypes,
     ] {
-        let slot = characteristics_slot(family).unwrap();
+        let slot = characteristics_slot(family.into());
         let mut owned_fields = vec!["0".to_owned(); family.layout().owner_field_count];
         owned_fields[slot] = raw.clone();
         let fields = owned_fields.iter().map(String::as_str).collect::<Vec<_>>();
         let mut diagnostic = None;
         let model = decode_owner_characteristics(
-            family,
+            family.into(),
             &fields,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -66605,7 +67057,7 @@ fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed(
     }
 
     let family = OwnerGraphFamily::ChartOfCharacteristicTypes;
-    let slot = characteristics_slot(family).unwrap();
+    let slot = characteristics_slot(family.into());
     let invalid = collection(&item(
         "4",
         "00000000-0000-0000-0000-000000000000",
@@ -66617,7 +67069,7 @@ fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed(
     let mut diagnostic = None;
     assert!(
         decode_owner_characteristics(
-            family,
+            family.into(),
             &fields,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -70758,7 +71210,7 @@ fn characteristics_tabular_section_object_field_takes_the_family_ref_marker() {
         "ChartOfCharacteristicTypes.СтатьиАктивовПассивов.TabularSection.ДополнительныеРеквизиты";
     let source = CharacteristicReference::new(SECTION, None).unwrap();
     let decoded = decode_field(
-        OwnerGraphFamily::ChartOfCharacteristicTypes,
+        CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
         0,
         &field("-2"),
         CharacteristicRole::ObjectField,
@@ -70776,7 +71228,7 @@ fn characteristics_tabular_section_object_field_takes_the_family_ref_marker() {
     for marker in ["-8", "-9", "-6"] {
         assert_eq!(
             decode_field(
-                OwnerGraphFamily::ChartOfCharacteristicTypes,
+                CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
                 0,
                 &field(marker),
                 CharacteristicRole::ObjectField,
@@ -70796,7 +71248,7 @@ fn characteristics_tabular_section_object_field_takes_the_family_ref_marker() {
             .unwrap();
     assert_eq!(
         decode_field(
-            OwnerGraphFamily::ChartOfCharacteristicTypes,
+            CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
             0,
             &field("-9"),
             CharacteristicRole::ObjectField,
@@ -70872,6 +71324,391 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
         .unwrap()[0]
             .data_path,
         "Catalog.Products.StandardAttribute.Ref"
+    );
+}
+
+/// Builds the `LineNumber` standard-attribute record a tabular section
+/// stores, with the three localized properties the reader looks at.
+fn line_number_standard_attributes_for_test(
+    format: &str,
+    edit_format: &str,
+    synonym: &str,
+) -> String {
+    let localized = |content: &str| {
+        format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{content}}}")
+    };
+    let mut pairs = Vec::new();
+    for key in INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS {
+        let value = match key {
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID => localized(format),
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID => {
+                localized(edit_format)
+            }
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => localized(synonym),
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID => {
+                r#"{"U"}"#.to_owned()
+            }
+            _ => "{0}".to_owned(),
+        };
+        pairs.push(format!("{key},{value}"));
+    }
+    let bag = format!("{{14,25,{}}}", pairs.join(","));
+    format!("{{1,{{1,1,{{-10}},{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID},{bag}}}}}")
+}
+
+#[test]
+fn tabular_section_line_number_format_and_edit_format_are_read_not_assumed_empty() {
+    // The writer printed `<xr:Format/>` and `<xr:EditFormat/>` unconditionally.
+    // Across the 11 534 `LineNumber` standard attributes of the stand exactly
+    // one section writes them non-empty -- `do`
+    // `BusinessProcess.КомплексныйПроцесс`, section `Этапы`, both `ЧЦ=2` --
+    // and its bytes carry the value in the ordinary localized-property slots.
+    let record =
+        line_number_standard_attributes_for_test(r#"{1,"ru","ЧЦ=2"}"#, r#"{1,"ru","ЧЦ=2"}"#, "{0}");
+    let line_number =
+        parse_exact_tabular_section_standard_attributes_presence("BusinessProcess", &record)
+            .expect("record decodes")
+            .expect("record is present");
+    assert_eq!(
+        line_number.format,
+        vec![("ru".to_owned(), "ЧЦ=2".to_owned())]
+    );
+    assert_eq!(
+        line_number.edit_format,
+        vec![("ru".to_owned(), "ЧЦ=2".to_owned())]
+    );
+    assert!(line_number.synonym.is_empty());
+
+    let mut xml = String::new();
+    push_metadata_tabular_section_properties_xml(
+        &mut xml,
+        "\t\t\t\t",
+        &MetadataTabularSectionProperties {
+            tooltip: Vec::new(),
+            fill_checking: "ShowError",
+            line_number_fill_checking: "DontCheck",
+            line_number_fill_value: line_number.fill_value,
+            line_number_synonym: line_number.synonym,
+            line_number_format: line_number.format,
+            line_number_edit_format: line_number.edit_format,
+            use_mode: None,
+            line_number_length: Some(5),
+        },
+    );
+    for element in ["Format", "EditFormat"] {
+        assert!(!xml.contains(&format!("<xr:{element}/>")), "{xml}");
+        let open = format!("<xr:{element}>\r\n");
+        let start = xml.find(&open).unwrap_or_else(|| panic!("{xml}")) + open.len();
+        let end = xml[start..]
+            .find(&format!("</xr:{element}>"))
+            .unwrap_or_else(|| panic!("{xml}"));
+        let body = xml[start..start + end]
+            .split_whitespace()
+            .collect::<String>();
+        assert_eq!(
+            body, "<v8:item><v8:lang>ru</v8:lang><v8:content>ЧЦ=2</v8:content></v8:item>",
+            "{xml}"
+        );
+    }
+    // The empty record keeps the self-closing spelling the other 11 533
+    // sections are written with.
+    let empty = line_number_standard_attributes_for_test("{0}", "{0}", "{0}");
+    let line_number =
+        parse_exact_tabular_section_standard_attributes_presence("BusinessProcess", &empty)
+            .expect("record decodes")
+            .expect("record is present");
+    let mut xml = String::new();
+    push_metadata_tabular_section_properties_xml(
+        &mut xml,
+        "\t\t\t\t",
+        &MetadataTabularSectionProperties {
+            tooltip: Vec::new(),
+            fill_checking: "DontCheck",
+            line_number_fill_checking: "DontCheck",
+            line_number_fill_value: line_number.fill_value,
+            line_number_synonym: line_number.synonym,
+            line_number_format: line_number.format,
+            line_number_edit_format: line_number.edit_format,
+            use_mode: None,
+            line_number_length: Some(5),
+        },
+    );
+    assert!(xml.contains("<xr:Format/>"), "{xml}");
+    assert!(xml.contains("<xr:EditFormat/>"), "{xml}");
+    assert!(xml.contains("<xr:Synonym/>"), "{xml}");
+}
+
+#[test]
+fn every_reference_family_protocol_identifier_answers_both_readers() {
+    // The reference-family identifiers are protocol constants, and two copies
+    // of the table disagreed: this reader carried five rows, the DCS reader
+    // ten. `do` `BusinessProcess.КомплексныйПроцесс` writes
+    // `{"Pattern",{"#",11e5f865-1501-40c6-b4d4-022095a296a5}}` for its
+    // `ТочкаМаршрута` attribute, and the platform prints
+    // `<v8:TypeSet>cfg:BusinessProcessRoutePointRef</v8:TypeSet>` for it.
+    assert_eq!(
+        builtin_type_reference("11e5f865-1501-40c6-b4d4-022095a296a5"),
+        Some("cfg:BusinessProcessRoutePointRef")
+    );
+    for (identifier, reference) in DCS_BUILTIN_REFERENCE_TYPE_SETS {
+        assert_eq!(builtin_type_reference(identifier), Some(*reference));
+    }
+    // A reference family with no object name of its own is a type SET, so the
+    // decoded leaf carries that spelling rather than the plain `<v8:Type>`.
+    let value_types = stable_partition_metadata_types(classify_metadata_reference_type_sets(
+        parse_metadata_type_pattern(
+            r##"{"Pattern",{"#",11e5f865-1501-40c6-b4d4-022095a296a5}}"##,
+            &BTreeMap::new(),
+        )
+        .expect("route-point pattern must parse"),
+    ));
+    assert!(
+        format_metadata_types_xml(&value_types)
+            .contains("<v8:TypeSet>cfg:BusinessProcessRoutePointRef</v8:TypeSet>"),
+        "{}",
+        format_metadata_types_xml(&value_types)
+    );
+    // An identifier neither table names still fails closed.
+    assert_eq!(
+        builtin_type_reference("00000000-0000-4000-8000-000000000000"),
+        None
+    );
+}
+
+#[test]
+fn task_tabular_sections_are_read_by_the_shared_owned_section_reader() {
+    // `do` `Task.ЗадачаИсполнителя` owns two tabular sections; the record is
+    // the ordinary owned-section record, envelope `{1,<payload>,
+    // <LineNumberLength>}` -- the same envelope a business process and an
+    // exchange plan write. Uuids and names are verbatim from that object.
+    const SECTION_UUID: &str = "c5df6318-30da-440e-a628-4a86d171ee1c";
+    const ATTRIBUTE_UUID: &str = "5de857b7-61d6-487e-9f4b-f108aade2cd5";
+    const GENERATED: [&str; 4] = [
+        "a53e1e00-925c-42e8-bc08-d707be6ffbbd",
+        "0bb6a85d-6468-4eff-96db-aca1ca67b070",
+        "3b7d8f9d-e8cc-4603-91e8-ba56d70af1cb",
+        "9bf269dd-c72a-49ea-9bf0-1a80d4820bac",
+    ];
+    assert_eq!(
+        tabular_section_envelope_spec("Task"),
+        tabular_section_envelope_spec("BusinessProcess")
+    );
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let nested = cct_attribute_item_for_test(ATTRIBUTE_UUID, "Свойство", true);
+    let payload = format!(
+        "{{11,{},{},{},{},{{0,{{3,{{1,0,{SECTION_UUID}}},\"ДополнительныеРеквизиты\",{{0}},\"\",0,0,{zero},0}}}},0,{{0}},{{0}}}}",
+        GENERATED[0], GENERATED[1], GENERATED[2], GENERATED[3]
+    );
+    let item =
+        format!("{{{{1,{payload},5}},1,{{{CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID},1,{nested}}}}}");
+    let refs = BTreeMap::from([
+        (
+            SECTION_UUID.to_owned(),
+            "Task.ЗадачаИсполнителя.TabularSection.ДополнительныеРеквизиты".to_owned(),
+        ),
+        (
+            ATTRIBUTE_UUID.to_owned(),
+            "Task.ЗадачаИсполнителя.TabularSection.ДополнительныеРеквизиты.Attribute.Свойство"
+                .to_owned(),
+        ),
+    ]);
+    let mut generated_ids = BTreeSet::new();
+    let mut child_ids = BTreeSet::new();
+    let sections = parse_cct_tabular_sections_indexed(
+        &[item.as_str()],
+        "Task",
+        "ЗадачаИсполнителя",
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &mut generated_ids,
+        &mut child_ids,
+    )
+    .expect("Task tabular section");
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0].header.name, "ДополнительныеРеквизиты");
+    assert_eq!(sections[0].child_objects.len(), 1);
+    assert_eq!(
+        sections[0]
+            .generated_types
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "TaskTabularSection.ЗадачаИсполнителя.ДополнительныеРеквизиты",
+            "TaskTabularSectionRow.ЗадачаИсполнителя.ДополнительныеРеквизиты",
+        ]
+    );
+    let properties = sections[0]
+        .tabular_section_properties
+        .as_ref()
+        .expect("tabular-section properties");
+    assert_eq!(properties.line_number_length, Some(5));
+    assert_eq!(properties.use_mode, None);
+
+    // The owner is what keeps a foreign section out: the same record under
+    // another task name resolves to nothing.
+    let mut generated_ids = BTreeSet::new();
+    let mut child_ids = BTreeSet::new();
+    assert!(
+        parse_cct_tabular_sections_indexed(
+            &[item.as_str()],
+            "Task",
+            "БюджетнаяЗадача",
+            &BTreeMap::new(),
+            &refs,
+            &BTreeMap::new(),
+            &mut generated_ids,
+            &mut child_ids,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_census_names() {
+    // The two slots were read the wrong way round. Census of every business
+    // process on the stand -- 40 objects across `do`, `uh`, `ut`, `ssl` and
+    // `sslbase` -- against the XML the platform writes for the same object:
+    // slot 40 partitions `NumberAllowedLength` exactly (Fixed 5 / Variable 35)
+    // and slot 28 partitions `DataLockControlMode` exactly (Automatic 2 /
+    // Managed 38); the reversed reading misses three objects.
+    assert_ne!(
+        BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT,
+        BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT
+    );
+    // Verbatim slot pairs: `do` `Согласование` (28="1", 40="0") is written
+    // `Fixed`+`Managed`, `do` `Исполнение` (28="1", 40="1") `Variable`+
+    // `Managed`, and `uh`/`ut` `ТиповаяПродажа` (28="0", 40="0")
+    // `Fixed`+`Automatic`.
+    for (slot28, slot40, allowed_length, lock_mode) in [
+        ("1", "0", "Fixed", "Managed"),
+        ("1", "1", "Variable", "Managed"),
+        ("0", "0", "Fixed", "Automatic"),
+        ("0", "1", "Variable", "Automatic"),
+    ] {
+        let mut owned = vec!["0".to_owned(); 49];
+        owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = slot28.to_owned();
+        owned[BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT] = slot40.to_owned();
+        let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+        assert_eq!(
+            parse_business_process_number_allowed_length(&fields),
+            Some(allowed_length)
+        );
+        assert_eq!(
+            parse_business_process_data_lock_control_mode(&fields),
+            Some(lock_mode)
+        );
+    }
+    // Neither slot admits a value outside its closed pair.
+    let mut owned = vec!["0".to_owned(); 49];
+    owned[BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT] = "2".to_owned();
+    let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(parse_business_process_number_allowed_length(&fields), None);
+    let mut owned = vec!["0".to_owned(); 49];
+    owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = "2".to_owned();
+    let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(parse_business_process_data_lock_control_mode(&fields), None);
+}
+
+#[test]
+fn business_process_owned_templates_resolve_like_every_other_owner_family() {
+    // `BusinessProcess.Ознакомление` owns one template, and the platform
+    // writes it as a `<Template>` child after the forms. The collection is the
+    // ordinary owned-template collection, so it resolves through the shared
+    // reference index; the family folder is what keeps a foreign owner out.
+    const TEMPLATE_UUID: &str = "eff65b8a-0da0-4e63-b021-36eeb9818f66";
+    const NAME: &str = "ПФ_MXL_ЛистОзнакомления";
+    let refs = BTreeMap::from([(
+        TEMPLATE_UUID.to_owned(),
+        TemplateSourceReference {
+            relative_path: PathBuf::from(format!(
+                "BusinessProcesses/Ознакомление/Templates/{NAME}.xml"
+            )),
+            kind: "Template",
+            template_type: "SpreadsheetDocument",
+        },
+    )]);
+    assert_eq!(
+        parse_business_process_child_templates("Ознакомление", &[TEMPLATE_UUID.to_owned()], &refs),
+        Some(vec![NAME.to_owned()])
+    );
+    // Another business process may not claim it, and neither may another
+    // family whose folder happens to hold a template of the same name.
+    assert_eq!(
+        parse_business_process_child_templates("Согласование", &[TEMPLATE_UUID.to_owned()], &refs),
+        None
+    );
+    let foreign = BTreeMap::from([(
+        TEMPLATE_UUID.to_owned(),
+        TemplateSourceReference {
+            relative_path: PathBuf::from(format!("Documents/Ознакомление/Templates/{NAME}.xml")),
+            kind: "Template",
+            template_type: "SpreadsheetDocument",
+        },
+    )]);
+    assert_eq!(
+        parse_business_process_child_templates(
+            "Ознакомление",
+            &[TEMPLATE_UUID.to_owned()],
+            &foreign
+        ),
+        None
+    );
+}
+
+#[test]
+fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_process() {
+    // `BusinessProcess.Исполнение.TabularSection.ДополнительныеРеквизиты
+    // .Attribute.Значение` slot 14, verbatim. The record is the same shape the
+    // chart of characteristic types writes, so the owner scope is what decides
+    // whether it can be read, not the family of the caller.
+    const SECTION_UUID: &str = "05cef2f3-ae17-42a3-858d-e60f3c994a79";
+    const ATTRIBUTE_UUID: &str = "2e4c6ef4-f74a-4357-b1df-d1049b27d678";
+    const SECTION: &str = "BusinessProcess.Исполнение.TabularSection.ДополнительныеРеквизиты";
+    let links =
+        format!("{{5006,1,\"Отбор.Владелец\",2,{{0,{SECTION_UUID}}},{{0,{ATTRIBUTE_UUID}}},0}}");
+    let object_refs = BTreeMap::from([
+        (SECTION_UUID.to_owned(), SECTION.to_owned()),
+        (
+            ATTRIBUTE_UUID.to_owned(),
+            format!("{SECTION}.Attribute.Свойство"),
+        ),
+    ]);
+    let parsed = parse_owner_choice_parameter_links(
+        &links,
+        "BusinessProcess",
+        "Исполнение",
+        true,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].name, "Отбор.Владелец");
+    assert_eq!(parsed[0].data_path, format!("{SECTION}.Attribute.Свойство"));
+    assert_eq!(parsed[0].value_change, "Clear");
+
+    // A path that leaves the owner is still refused, and a bare standard
+    // attribute code stays unnamed outside the catalog table.
+    assert!(
+        parse_owner_choice_parameter_links(
+            &links,
+            "BusinessProcess",
+            "Согласование",
+            true,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_owner_choice_parameter_links(
+            "{5006,1,\"Отбор\",1,{-8},0}",
+            "BusinessProcess",
+            "Исполнение",
+            false,
+            &object_refs,
+        )
+        .is_none()
     );
 }
 

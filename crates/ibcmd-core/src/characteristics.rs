@@ -118,6 +118,11 @@ pub enum CharacteristicFilterValue {
     String(Box<str>),
     /// `None` represents the exact empty DesignTimeRef.
     DesignTimeRef(Option<CharacteristicReference>),
+    Boolean(bool),
+    /// The union member that carries no value at all. It is a distinct member
+    /// of the union, not an absent property: the platform still writes the
+    /// element, spelled `xsi:nil="true"`.
+    Undefined,
 }
 
 impl CharacteristicFilterValue {
