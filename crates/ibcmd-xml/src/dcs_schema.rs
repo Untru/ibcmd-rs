@@ -4328,8 +4328,7 @@ fn rewrite_tokens(
                         // `appIndex`'s place, and the indentation that led up
                         // to it is trimmed with it, exactly as the bare
                         // self-closed `appearance` above is dropped.
-                        let trimmed_len =
-                            out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                        let trimmed_len = out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
                         out.truncate(trimmed_len);
                     } else {
                         out.push('<');

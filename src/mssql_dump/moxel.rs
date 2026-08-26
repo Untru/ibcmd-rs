@@ -3275,7 +3275,9 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
     if !matches!(format_fields.len(), 3 | 4)
         || format_fields.first()?.trim() != "16"
         || format_fields.get(2)?.trim() != note_text_field
-        || format_fields.get(3).is_some_and(|field| field.trim() != "0")
+        || format_fields
+            .get(3)
+            .is_some_and(|field| field.trim() != "0")
         || parse_moxel_localized_note_text(format_fields.get(2)?.trim())? != text
     {
         return None;

@@ -1921,12 +1921,8 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     // platform exports `ref="v8ui:УспешнаяПроверка
                     // НаличияГосИС"`.
                     .or_else(|| {
-                        data_composition_object_ref_name(
-                            &value,
-                            self.object_refs,
-                            "CommonPicture.",
-                        )
-                        .map(|name| format!("v8ui:{name}"))
+                        data_composition_object_ref_name(&value, self.object_refs, "CommonPicture.")
+                            .map(|name| format!("v8ui:{name}"))
                     })
                     .unwrap_or(value)
             } else if attr_name == "ref"
