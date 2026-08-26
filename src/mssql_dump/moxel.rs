@@ -5089,25 +5089,43 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         "0" => "DontUse",
         _ => return None,
     };
-    // `elementsIsInit` gates a cluster of design-time-only cache slots
-    // (`tail[84]`, `[86]`, `[87]`, `[88]`, `[90]`, `[92]`, `[93]`) that carry
-    // real geometry when set and a uniform `"0"` when clear, none of which
-    // any observation ties to XML content -- see
-    // `validate_moxel_chart_v74_front`. The flag itself is `tail[84]`
-    // (not-`"0"` for `true`): all six pre-existing `series_count == 0`
-    // fixtures plus `АнализЖурналаРегистрации/...` (`elementsIsInit ==
-    // true`) store a nonzero value there (`"1.6875e-1"` on five of the six,
-    // a different populated value on `АнализЖурналаРегистрации/...`'s
-    // touched-layout record and on `empty-legend-none` -- see below),
-    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
-    // is the only observation storing `"0"`. `tail[89]` is a *different*
-    // flag this reader used to derive `elementsIsInit` from directly in an
-    // earlier revision -- wrong, because it is actually `isShowLegend &&
-    // elementsIsInit` (`"0"` only when both hold): `empty-legend-none`
-    // (`isShowLegend == false`, `elementsIsInit == true`) proves the two
-    // are independent, storing `"1"` at `tail[89]` despite `elementsIsInit
-    // == true`.
-    let elements_is_init = tail.get(84)?.trim() != "0";
+    // `elementsIsInit` is `post[20]`: `"0"` for `true`, `"2"` for `false`.
+    //
+    // The slot this reader used before -- `tail[84]`, read as "not `"0"`" --
+    // is a geometry cache, not the flag, and 1С:УТ 11.5.27.75's own charts
+    // disprove it. All twelve `Chart` records of
+    // `DataProcessors/ПроверкаКонтрагента/Templates/ФинансовыйАнализ` and
+    // `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ` store `"0"` at
+    // `tail[84]`, yet every one of them publishes
+    // `<d3p1:elementsIsInit>true</d3p1:elementsIsInit>` in the native export,
+    // beside populated `elementsLegend`/`elementsTitle` rectangles and the
+    // `legendPlacement`/`titleAreaPlacement` pair that only an initialized
+    // record publishes at all. Under `tail[84]` all twelve read `false`, the
+    // reader then demanded the `elementsIsInit == false` cache pattern,
+    // failed to find it, and refused the whole drawing -- which is why both
+    // templates lost all six of their charts.
+    //
+    // Over the twenty chart records now observed -- those twelve, the six
+    // `moxel-chart-series-count-zero` seeds, and both `GanttChart`
+    // templates' embedded charts -- `post[20]` separates the one
+    // `elementsIsInit == false` record
+    // (`ДлительностьОтложенногоОбновления/ДиаграммаГанта`, `"2"`) from the
+    // nineteen `true` ones (`"0"`) exactly, while `tail[84]` puts thirteen
+    // of the nineteen on the wrong side. The whole `tail[84]`, `[86]`,
+    // `[87]`, `[88]`, `[90]`, `[92]`, `[93]` cluster reads `0,0,0,1,0,1,1`
+    // in the twelve УТ records just as it does in the `false` one, so it
+    // tracks whether the *legend and title geometry* was ever computed, not
+    // whether the elements were initialized; nothing in the published XML
+    // depends on it either way (see `validate_moxel_chart_v74_front`).
+    //
+    // `tail[89]` stays the independent cross-check it was: `"0"` exactly
+    // when `isShowLegend && elementsIsInit`, which holds on all twenty
+    // records under this reading.
+    let elements_is_init = match tail.get(post_start.checked_add(20)?)?.trim() {
+        "0" => true,
+        "2" => false,
+        _ => return None,
+    };
     if (tail.get(89)?.trim() == "0") != (is_show_legend && elements_is_init) {
         return None;
     }
@@ -5992,31 +6010,15 @@ fn validate_moxel_chart_v74_front(tail: &[&str], elements_is_init: bool) -> Opti
     // `tail[84]`, `[86]`, `[87]`, `[88]`, `[90]`, `[92]`, `[93]` are a
     // design-time-only cache cluster no observation ties to any XML content
     // (same treatment as `post[41..43]`, see `parse_moxel_chart`'s doc
-    // comment): `elementsIsInit == true` (the pre-existing corpus and
-    // `АнализЖурналаРегистрации/...`) populates it with real, otherwise
-    // uninterpreted values, while `elementsIsInit == false`
-    // (`ДлительностьОтложенногоОбновления/...`, the only observation) resets
-    // it to this exact fixed pattern.
-    if !elements_is_init {
-        let reset_pattern = [
-            (84, "0"),
-            (86, "0"),
-            (87, "0"),
-            (88, "1"),
-            (90, "0"),
-            (92, "1"),
-            (93, "1"),
-        ];
-        if !reset_pattern.iter().all(|(index, value)| {
-            tail.get(*index)
-                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
-        }) {
-            return None;
-        }
-    } else {
-        for index in [84, 86, 87, 88, 90, 92, 93] {
-            tail.get(index)?;
-        }
+    // comment). It is not gated on `elementsIsInit`: it carries real
+    // geometry on records whose legend and title areas were ever laid out
+    // (the six seeds and `АнализЖурналаРегистрации/...`) and the fixed
+    // `0,0,0,1,0,1,1` reset on records where they were not -- which covers
+    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
+    // and all twelve of 1С:УТ 11.5.27.75's `ФинансовыйАнализ` charts
+    // (`elementsIsInit == true`) alike. Only existence is required.
+    for index in [84, 86, 87, 88, 90, 92, 93] {
+        tail.get(index)?;
     }
     Some(())
 }
@@ -6047,18 +6049,12 @@ fn validate_moxel_chart_v74_post_prefix(
     post: &[&str],
     has_extended_scales: bool,
     is_title_init: bool,
-    elements_is_init: bool,
 ) -> Option<()> {
     let leading = if has_extended_scales { "0" } else { "14" };
     let following = if has_extended_scales { "0" } else { "2" };
     let trio = if is_title_init { "1" } else { "0" };
-    // `post[20]` is another member of the `elementsIsInit`-gated
-    // design-time-only cluster documented on `validate_moxel_chart_v74_front`
-    // -- the pre-existing corpus and `АнализЖурналаРегистрации/...`
-    // (`elementsIsInit == true`) both store `"0"`,
-    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
-    // stores `"2"`.
-    let elements_cache_20 = if elements_is_init { "0" } else { "2" };
+    // `post[20]` is where `elements_is_init` itself is read from (see
+    // `parse_moxel_chart`), so it is not re-checked here.
     let expected = [
         (0, leading),
         (1, following),
@@ -6075,7 +6071,6 @@ fn validate_moxel_chart_v74_post_prefix(
         (17, "{3,0,{0}}"),
         (18, "2"),
         (19, "255"),
-        (20, elements_cache_20),
         (22, "00000000-0000-0000-0000-000000000000"),
     ];
     expected
@@ -6216,12 +6211,7 @@ fn validate_moxel_chart_v74_post(
     axes_position: usize,
     rectangle_start: usize,
 ) -> Option<()> {
-    validate_moxel_chart_v74_post_prefix(
-        post,
-        has_extended_scales,
-        is_title_init,
-        elements_is_init,
-    )?;
+    validate_moxel_chart_v74_post_prefix(post, has_extended_scales, is_title_init)?;
     validate_moxel_chart_v74_scale_id_list(post, series_count)?;
     validate_moxel_chart_v74_post_axes_tail(post, axes_position)?;
     validate_moxel_chart_v74_rectangle_check(post, elements_is_init, rectangle_start)
