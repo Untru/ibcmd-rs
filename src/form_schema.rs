@@ -4776,6 +4776,7 @@ impl FormChildItemVisibleSchema {
         item_tag: &str,
         direct_discriminator: Option<&str>,
         top_level_offset: usize,
+        button_top_level_offset: usize,
     ) -> Option<Self> {
         let slot = match (wrapper, item_tag, direct_discriminator) {
             ("22", "CommandBar", Some("0"))
@@ -4794,7 +4795,24 @@ impl FormChildItemVisibleSchema {
             {
                 21
             }
-            ("31", "Button", _) if field_count == 52 => 26,
+            // The conditional `UserVisible` prefix takes the button's name slot
+            // and pushes every later member of the record along by one, so a
+            // shifted button is a 53-member record whose `Visible` code sits at
+            // 27, not 26.  Spelling the length and the slot at offset 0 alone
+            // declined the shifted record outright and the element went
+            // unwritten.
+            //
+            // Census over both configurations whose form layouts were dumped,
+            // pairing each `31` record with the native `<Button>` of the same
+            // name: ERP УХ 3.2.12.6 has 80 430 unshifted buttons and 4 916
+            // shifted ones, Документооборот КОРП 3.0.21.3 15 076 and 91.  Slot
+            // `26 + offset` is a total function of the native spelling in every
+            // one of the four groups -- `0` on all 5 395 + 166 + 524 + 0 that
+            // carry `<Visible>false</Visible>` and `1` on all the rest -- with
+            // no third code and no counter-example.
+            ("31", "Button", _) if field_count == 52 + button_top_level_offset => {
+                26 + button_top_level_offset
+            }
             // Preserve the three wrapper-48 field owners decoded by the legacy path.
             ("48", "LabelField", Some("1"))
             | ("48", "InputField", Some("2"))
@@ -6914,6 +6932,7 @@ impl FormTableSearchStringLocation {
 pub(crate) enum FormTableViewStatusLocation {
     None,
     Top,
+    Bottom,
 }
 
 impl FormTableViewStatusLocation {
@@ -6921,6 +6940,7 @@ impl FormTableViewStatusLocation {
         match self {
             Self::None => "None",
             Self::Top => "Top",
+            Self::Bottom => "Bottom",
         }
     }
 }
@@ -7240,9 +7260,19 @@ impl FormTableSchema {
         let slot = fields
             .len()
             .checked_sub(Self::VIEW_STATUS_LOCATION_REVERSE_OFFSET)?;
+        // The code is a total function of the native spelling over both
+        // configurations whose form layouts were censused, and neither
+        // contradicts the other.  Документооборот КОРП 3.0.21.3, 1 551 tables
+        // paired with their layout record by the item's own name: `0` on the
+        // 903 that write nothing, `1` on all 619 that say `None`, `2` on all 18
+        // that say `Top` and `3` on all 11 that say `Bottom`.  ERP УХ 3.2.12.6,
+        // 7 967 tables: `0` on 5 362, `1` on 2 529 and `2` on 76, with the same
+        // spellings and no `3` at all.  `3` had no spelling, so those 11 tables
+        // lost the element.
         match fields.get(slot)?.trim() {
             "1" => Some(FormTableViewStatusLocation::None),
             "2" => Some(FormTableViewStatusLocation::Top),
+            "3" => Some(FormTableViewStatusLocation::Bottom),
             _ => None,
         }
     }
@@ -7376,8 +7406,16 @@ impl FormTableSchema {
         let slot = fields
             .len()
             .checked_sub(Self::REFRESH_REQUEST_REVERSE_OFFSET)?;
+        // Same pairing, same two configurations.  Документооборот КОРП
+        // 3.0.21.3, 1 551 tables: `0` on the 1 503 that write nothing, `1` on
+        // all 43 that say `PullFromTop` and `3` on all 5 that say
+        // `PullFromTopOrBottom`.  ERP УХ 3.2.12.6, 7 967 tables: `0` on 7 627
+        // and `1` on all 30 that say `PullFromTop`, with no `3`.  Code `2` is
+        // observed nowhere and stays unspelled rather than being guessed into
+        // the run.
         match fields.get(slot)?.trim() {
             "1" => Some("PullFromTop"),
+            "3" => Some("PullFromTopOrBottom"),
             _ => None,
         }
     }

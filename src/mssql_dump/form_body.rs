@@ -10646,6 +10646,7 @@ fn parse_form_child_item_with_metadata_owners(
             tag,
             direct_discriminator,
             input_field_top_level_offset,
+            button_top_level_offset,
         )
         .and_then(|schema| schema.visible(&fields)),
         enabled: field_schema_and_options
