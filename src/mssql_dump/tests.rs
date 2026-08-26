@@ -30111,6 +30111,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
             cells: Vec::new(),
         }],
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: vec![MoxelMerge {
             row: -1,
             column: 5,
@@ -30506,6 +30507,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
             cells: Vec::new(),
         }],
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -31010,6 +31012,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
             }],
         }],
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -31100,6 +31103,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -31341,7 +31345,7 @@ fn formats_moxel_trims_trailing_empty_rows_outside_named_areas() {
 
 #[test]
 fn parses_and_formats_moxel_vertical_groups() {
-    let groups = parse_moxel_vertical_groups(&[
+    let (groups, columns) = parse_moxel_row_column_groups(&[
         "3",
         "{1,5,0,{1,0},0,0}",
         "-1",
@@ -31354,6 +31358,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         "0",
     ]);
 
+    assert!(columns.is_empty());
     assert_eq!(groups.len(), 3);
     assert_eq!(groups[0].begin_row, 1);
     assert_eq!(groups[0].end_row, 5);
@@ -31403,6 +31408,7 @@ fn parses_and_formats_moxel_vertical_groups() {
             }],
         }],
         vertical_groups: groups,
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -31460,7 +31466,7 @@ fn parses_and_formats_moxel_vertical_groups() {
 /// where even one group carried a label, not merely that group.
 #[test]
 fn moxel_vertical_group_label_publishes_as_t() {
-    let groups = parse_moxel_vertical_groups(&[
+    let (groups, columns) = parse_moxel_row_column_groups(&[
         "1",
         "{0,813,0,{1,1,\r\n{\"#\",\"ГО\"}\r\n},0,0}",
         "-1",
@@ -31469,6 +31475,7 @@ fn moxel_vertical_group_label_publishes_as_t() {
         "0",
     ]);
 
+    assert!(columns.is_empty());
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].begin_row, 0);
     assert_eq!(groups[0].end_row, 813);
@@ -31481,7 +31488,7 @@ fn moxel_vertical_group_label_publishes_as_t() {
     );
 
     let mut xml = String::new();
-    push_moxel_vertical_group_xml(&mut xml, &groups[0]);
+    push_moxel_group_xml(&mut xml, "vg", &groups[0]);
     assert_eq!(
         xml,
         "\t<vg>\r\n\t\t<b>0</b>\r\n\t\t<e>813</e>\r\n\t\t<t>\r\n\t\t\t<v8:item>\r\n\
@@ -32122,6 +32129,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
             cells: Vec::new(),
         }],
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -32229,6 +32237,7 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
             }],
         }],
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -32291,7 +32300,9 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
             level: 0,
             open: true,
             text: Vec::new(),
+            group_begin: false,
         }],
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -33120,6 +33131,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             source_formats: Vec::new(),
             rows: Vec::new(),
             vertical_groups: Vec::new(),
+            horizontal_groups: Vec::new(),
             merges: Vec::new(),
             horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
@@ -33237,6 +33249,7 @@ fn formats_moxel_minus21_slot_uses_button_text_color() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -33286,6 +33299,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -33335,6 +33349,7 @@ fn formats_moxel_minus13_slot_uses_field_alternative_back_color() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -33384,6 +33399,7 @@ fn formats_moxel_button_text_color_style() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -33465,6 +33481,7 @@ fn formats_moxel_report_back_color_styles() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -33719,6 +33736,7 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -33770,6 +33788,7 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -34862,6 +34881,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -34965,6 +34985,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),
@@ -35056,6 +35077,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         source_formats: Vec::new(),
         rows: Vec::new(),
         vertical_groups: Vec::new(),
+        horizontal_groups: Vec::new(),
         merges: Vec::new(),
         horizontal_unmerges: Vec::new(),
         vertical_unmerges: Vec::new(),

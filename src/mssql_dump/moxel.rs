@@ -48,6 +48,7 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) source_formats: Vec<MoxelFormat>,
     pub(super) rows: Vec<MoxelRow>,
     pub(super) vertical_groups: Vec<MoxelVerticalGroup>,
+    pub(super) horizontal_groups: Vec<MoxelVerticalGroup>,
     pub(super) merges: Vec<MoxelMerge>,
     pub(super) horizontal_unmerges: Vec<MoxelMerge>,
     pub(super) vertical_unmerges: Vec<MoxelMerge>,
@@ -493,6 +494,20 @@ pub(super) struct MoxelVerticalGroup {
     /// own localized-value member (field 3) declares zero items -- see
     /// `parse_moxel_vertical_group`.
     pub(super) text: Vec<MoxelLocalizedValue>,
+    /// The record's sixth member, published as `<g>Begin</g>` when set.
+    ///
+    /// Evidence (native ERP УХ 3.2.12.6): `<g>` occurs six times in the whole
+    /// stand -- all six inside
+    /// `Reports/ИсполнениеКонтрактовГОЗ/Templates/ИсполнениеКонтрактов`,
+    /// whose seven row groups store `1` in six records and `0` in the
+    /// seventh, and whose one column group stores `0`. The platform publishes
+    /// `<g>Begin</g>` for exactly the six that store `1`, and nothing for the
+    /// other two. Every other group in the five corpora -- 223 332 `<vg>` on
+    /// ERP УХ, 1 703 on 1С:УТ, 1 424 on Документооборот КОРП and 3 on БСП
+    /// демо -- publishes no `<g>` at all, so a member the reader ignored
+    /// entirely was right everywhere except in that one document. Only `0`
+    /// and `1` are observed; another value is a typed refusal.
+    pub(super) group_begin: bool,
 }
 
 #[derive(Clone)]
@@ -1332,7 +1347,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     if rows.is_empty() {
         return None;
     }
-    let vertical_groups = parse_moxel_vertical_groups(&fields);
+    let (vertical_groups, horizontal_groups) = parse_moxel_row_column_groups(&fields);
     let (merges, horizontal_unmerges, vertical_unmerges) = parse_moxel_merge_regions(&fields);
     let named_items = parse_moxel_named_items(&fields);
     let areas = named_items
@@ -1368,6 +1383,25 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let header_footer_slots = parse_moxel_header_footer_slots(&fields);
     let header_footer_format_ref = parse_moxel_uniform_header_footer_format_ref(&fields);
     let drawings = parse_moxel_drawings(&fields);
+    // A cell note is a drawing record of its own -- `drawingType` `Comment`,
+    // its own `<formatIndex>` -- and the format it names *can* be a drawing
+    // format: of the 23 `<format>` elements that publish `<print>` across the
+    // five corpora, eleven sit in documents with no `<drawing>` at all, and
+    // in each the format they name is exactly a `<note>`'s `<formatIndex>`.
+    // In `Reports/РасчетСтоимостиЧистыхАктивов/Templates/
+    // РасчетСтоимостиЧистыхАктивов` the whole `<formatIndex>` set is
+    // `{1..8, 31}`, disjoint from the `<f>` set the cells cite, and format 31
+    // is the one that publishes `<print>false</print>`.
+    //
+    // Feeding those indexes into this set is NOT enough, though, and is left
+    // undone: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
+    // ЗагрузкаИзФайла` and four documents like it share one format between a
+    // note and their report header, and the platform renders it as a cell
+    // format there. Excluding the formats the rows and cells name does not
+    // separate them -- the shared format is reached some other way (a column
+    // set's own default, the header/footer reference) -- and the naive
+    // version broke those five documents on ut and fourteen on uh while
+    // gaining five. See docs/evidence/mxl-template-body-remainder-20260826.md.
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
@@ -1399,6 +1433,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         && style_refs.iter().all(Option::is_none)
         && declared_sheet_height.unwrap_or(0) == 0
         && vertical_groups.is_empty()
+        && horizontal_groups.is_empty()
         && merges.is_empty()
         && horizontal_unmerges.is_empty()
         && vertical_unmerges.is_empty()
@@ -1896,6 +1931,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         source_formats,
         rows,
         vertical_groups,
+        horizontal_groups,
         merges,
         horizontal_unmerges,
         vertical_unmerges,
@@ -2108,51 +2144,97 @@ fn moxel_source_column_format_refs_in_set_order(
     ordered
 }
 
-pub(super) fn parse_moxel_vertical_groups(fields: &[&str]) -> Vec<MoxelVerticalGroup> {
+/// One count-prefixed group run: `{count, (record, -1) * count}`.
+///
+/// Returns the decoded records and the index just past the run. The count is
+/// the record's own declared one; the only bound on it is the one the field
+/// list itself proves, since every record costs two fields.
+fn parse_moxel_group_run(
+    fields: &[&str],
+    count_index: usize,
+) -> Option<(Vec<MoxelVerticalGroup>, usize)> {
+    let count = fields.get(count_index)?.trim().parse::<usize>().ok()?;
+    let run_end = count_index
+        .checked_add(count.checked_mul(2)?)?
+        .checked_add(1)?;
+    if run_end > fields.len() {
+        return None;
+    }
+    let mut groups = Vec::with_capacity(count);
+    let mut cursor = count_index + 1;
+    for _ in 0..count {
+        groups.push(parse_moxel_vertical_group(fields.get(cursor)?)?);
+        if fields.get(cursor + 1)?.trim() != "-1" {
+            return None;
+        }
+        cursor += 2;
+    }
+    Some((groups, cursor))
+}
+
+/// The document's row and column grouping block.
+///
+/// Shape: `{rowCount, (row group, -1) * rowCount, columnCount,
+/// (column group, -1) * columnCount, 0, 0}`, published as the `<vg>` run
+/// followed by the `<hg>` run.
+///
+/// The column run is what the previous reading missed: it demanded the three
+/// literals `0, 0, 0` right behind the row run, which is exactly what the
+/// block looks like when the column count is zero -- true of every document
+/// on the stand but two.
+/// `Reports/ИсполнениеКонтрактовГОЗ/Templates/ИсполнениеКонтрактов`
+/// (ERP УХ 3.2.12.6) stores seven row groups followed by `1` and one column
+/// group, and `Catalogs/НастройкиДоступностиПоСостоянию/Templates/
+/// НастройкиПолейКомандДокументПредприятия` (Документооборот КОРП 3.0.21.3)
+/// stores no row group at all followed by `2` and two column groups. Both
+/// published their whole grouping block as nothing, because the literal
+/// behind the row run was a column count rather than `0`.
+///
+/// The other half of the loss was a flat `count > 2048` cap on the row run:
+/// ERP УХ's three
+/// `Reports/РегламентированныйОтчетСтатистикаФорма85К/Templates/СхемаВыгрузкиXML*`
+/// declare **2 289** row groups each and lost all of them. Nothing in the
+/// format caps a document's group count; the run's own arithmetic
+/// (`count * 2 + 1` fields) is the only bound the record proves, and it is
+/// the one this reader now uses.
+pub(super) fn parse_moxel_row_column_groups(
+    fields: &[&str],
+) -> (Vec<MoxelVerticalGroup>, Vec<MoxelVerticalGroup>) {
+    // A document whose row count is non-zero carries its own decoy: the `0`
+    // that sits right in front of that count reads as an empty row run
+    // followed by the real run taken as the column one, and it comes first.
+    // The row run is therefore looked for on its own terms before the
+    // rowless shape is considered at all -- which is exactly the order the
+    // previous reading enforced by refusing a zero count outright.
+    scan_moxel_row_column_groups(fields, true)
+        .or_else(|| scan_moxel_row_column_groups(fields, false))
+        .unwrap_or_default()
+}
+
+fn scan_moxel_row_column_groups(
+    fields: &[&str],
+    require_vertical: bool,
+) -> Option<(Vec<MoxelVerticalGroup>, Vec<MoxelVerticalGroup>)> {
     for index in 0..fields.len() {
-        let Some(count) = fields
-            .get(index)
-            .and_then(|field| field.trim().parse::<usize>().ok())
-        else {
+        let Some((vertical, cursor)) = parse_moxel_group_run(fields, index) else {
             continue;
         };
-        if count == 0 || count > 2048 {
+        if require_vertical && vertical.is_empty() {
             continue;
         }
-        let Some(last_group_field) = index.checked_add(count * 2) else {
+        let Some((horizontal, cursor)) = parse_moxel_group_run(fields, cursor) else {
             continue;
         };
-        if last_group_field + 3 >= fields.len() {
+        if vertical.is_empty() && horizontal.is_empty() {
             continue;
         }
-        let mut groups = Vec::with_capacity(count);
-        let mut cursor = index + 1;
-        let mut valid = true;
-        for _ in 0..count {
-            let Some(group) = fields
-                .get(cursor)
-                .and_then(|field| parse_moxel_vertical_group(field))
-            else {
-                valid = false;
-                break;
-            };
-            if fields.get(cursor + 1).map(|field| field.trim()) != Some("-1") {
-                valid = false;
-                break;
-            }
-            groups.push(group);
-            cursor += 2;
-        }
-        if valid
-            && !groups.is_empty()
-            && fields.get(cursor).map(|field| field.trim()) == Some("0")
+        if fields.get(cursor).map(|field| field.trim()) == Some("0")
             && fields.get(cursor + 1).map(|field| field.trim()) == Some("0")
-            && fields.get(cursor + 2).map(|field| field.trim()) == Some("0")
         {
-            return groups;
+            return Some((vertical, horizontal));
         }
     }
-    Vec::new()
+    None
 }
 
 pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGroup> {
@@ -2173,12 +2255,18 @@ pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGrou
     // any document where even one group carried a label -- the whole
     // `<vg>`/`<vgLevels>` construction, not just the labelled groups.
     let text_items = parse_moxel_localized_values(fields.get(3)?)?;
+    let group_begin = match fields.get(5)?.trim() {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
     Some(MoxelVerticalGroup {
         begin_row: fields.first()?.trim().parse::<usize>().ok()?,
         end_row: fields.get(1)?.trim().parse::<usize>().ok()?,
         level: fields.get(2)?.trim().parse::<usize>().ok()?,
         open: fields.get(4)?.trim().parse::<usize>().ok()? == 0,
         text: text_items,
+        group_begin,
     })
 }
 
@@ -5134,25 +5222,43 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         "0" => "DontUse",
         _ => return None,
     };
-    // `elementsIsInit` gates a cluster of design-time-only cache slots
-    // (`tail[84]`, `[86]`, `[87]`, `[88]`, `[90]`, `[92]`, `[93]`) that carry
-    // real geometry when set and a uniform `"0"` when clear, none of which
-    // any observation ties to XML content -- see
-    // `validate_moxel_chart_v74_front`. The flag itself is `tail[84]`
-    // (not-`"0"` for `true`): all six pre-existing `series_count == 0`
-    // fixtures plus `АнализЖурналаРегистрации/...` (`elementsIsInit ==
-    // true`) store a nonzero value there (`"1.6875e-1"` on five of the six,
-    // a different populated value on `АнализЖурналаРегистрации/...`'s
-    // touched-layout record and on `empty-legend-none` -- see below),
-    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
-    // is the only observation storing `"0"`. `tail[89]` is a *different*
-    // flag this reader used to derive `elementsIsInit` from directly in an
-    // earlier revision -- wrong, because it is actually `isShowLegend &&
-    // elementsIsInit` (`"0"` only when both hold): `empty-legend-none`
-    // (`isShowLegend == false`, `elementsIsInit == true`) proves the two
-    // are independent, storing `"1"` at `tail[89]` despite `elementsIsInit
-    // == true`.
-    let elements_is_init = tail.get(84)?.trim() != "0";
+    // `elementsIsInit` is `post[20]`: `"0"` for `true`, `"2"` for `false`.
+    //
+    // The slot this reader used before -- `tail[84]`, read as "not `"0"`" --
+    // is a geometry cache, not the flag, and 1С:УТ 11.5.27.75's own charts
+    // disprove it. All twelve `Chart` records of
+    // `DataProcessors/ПроверкаКонтрагента/Templates/ФинансовыйАнализ` and
+    // `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ` store `"0"` at
+    // `tail[84]`, yet every one of them publishes
+    // `<d3p1:elementsIsInit>true</d3p1:elementsIsInit>` in the native export,
+    // beside populated `elementsLegend`/`elementsTitle` rectangles and the
+    // `legendPlacement`/`titleAreaPlacement` pair that only an initialized
+    // record publishes at all. Under `tail[84]` all twelve read `false`, the
+    // reader then demanded the `elementsIsInit == false` cache pattern,
+    // failed to find it, and refused the whole drawing -- which is why both
+    // templates lost all six of their charts.
+    //
+    // Over the twenty chart records now observed -- those twelve, the six
+    // `moxel-chart-series-count-zero` seeds, and both `GanttChart`
+    // templates' embedded charts -- `post[20]` separates the one
+    // `elementsIsInit == false` record
+    // (`ДлительностьОтложенногоОбновления/ДиаграммаГанта`, `"2"`) from the
+    // nineteen `true` ones (`"0"`) exactly, while `tail[84]` puts thirteen
+    // of the nineteen on the wrong side. The whole `tail[84]`, `[86]`,
+    // `[87]`, `[88]`, `[90]`, `[92]`, `[93]` cluster reads `0,0,0,1,0,1,1`
+    // in the twelve УТ records just as it does in the `false` one, so it
+    // tracks whether the *legend and title geometry* was ever computed, not
+    // whether the elements were initialized; nothing in the published XML
+    // depends on it either way (see `validate_moxel_chart_v74_front`).
+    //
+    // `tail[89]` stays the independent cross-check it was: `"0"` exactly
+    // when `isShowLegend && elementsIsInit`, which holds on all twenty
+    // records under this reading.
+    let elements_is_init = match tail.get(post_start.checked_add(20)?)?.trim() {
+        "0" => true,
+        "2" => false,
+        _ => return None,
+    };
     if (tail.get(89)?.trim() == "0") != (is_show_legend && elements_is_init) {
         return None;
     }
@@ -5178,7 +5284,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
             series.marker = "Auto";
         }
     }
-    validate_moxel_chart_v74_front(tail, elements_is_init)?;
+    validate_moxel_chart_v74_front(tail)?;
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
     // Evidence: the same target record publishes
@@ -5963,7 +6069,7 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
 /// `parse_moxel_chart`) -- the two `GanttChart` templates each diverge from
 /// the pre-existing corpus's shared default at a different subset of them,
 /// which a single hard-coded literal cannot spell for both at once.
-fn validate_moxel_chart_v74_front(tail: &[&str], elements_is_init: bool) -> Option<()> {
+fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
     let expected = [
         (3, "0"),
         (4, "\", \""),
@@ -6037,31 +6143,15 @@ fn validate_moxel_chart_v74_front(tail: &[&str], elements_is_init: bool) -> Opti
     // `tail[84]`, `[86]`, `[87]`, `[88]`, `[90]`, `[92]`, `[93]` are a
     // design-time-only cache cluster no observation ties to any XML content
     // (same treatment as `post[41..43]`, see `parse_moxel_chart`'s doc
-    // comment): `elementsIsInit == true` (the pre-existing corpus and
-    // `АнализЖурналаРегистрации/...`) populates it with real, otherwise
-    // uninterpreted values, while `elementsIsInit == false`
-    // (`ДлительностьОтложенногоОбновления/...`, the only observation) resets
-    // it to this exact fixed pattern.
-    if !elements_is_init {
-        let reset_pattern = [
-            (84, "0"),
-            (86, "0"),
-            (87, "0"),
-            (88, "1"),
-            (90, "0"),
-            (92, "1"),
-            (93, "1"),
-        ];
-        if !reset_pattern.iter().all(|(index, value)| {
-            tail.get(*index)
-                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
-        }) {
-            return None;
-        }
-    } else {
-        for index in [84, 86, 87, 88, 90, 92, 93] {
-            tail.get(index)?;
-        }
+    // comment). It is not gated on `elementsIsInit`: it carries real
+    // geometry on records whose legend and title areas were ever laid out
+    // (the six seeds and `АнализЖурналаРегистрации/...`) and the fixed
+    // `0,0,0,1,0,1,1` reset on records where they were not -- which covers
+    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
+    // and all twelve of 1С:УТ 11.5.27.75's `ФинансовыйАнализ` charts
+    // (`elementsIsInit == true`) alike. Only existence is required.
+    for index in [84, 86, 87, 88, 90, 92, 93] {
+        tail.get(index)?;
     }
     Some(())
 }
@@ -6092,18 +6182,12 @@ fn validate_moxel_chart_v74_post_prefix(
     post: &[&str],
     has_extended_scales: bool,
     is_title_init: bool,
-    elements_is_init: bool,
 ) -> Option<()> {
     let leading = if has_extended_scales { "0" } else { "14" };
     let following = if has_extended_scales { "0" } else { "2" };
     let trio = if is_title_init { "1" } else { "0" };
-    // `post[20]` is another member of the `elementsIsInit`-gated
-    // design-time-only cluster documented on `validate_moxel_chart_v74_front`
-    // -- the pre-existing corpus and `АнализЖурналаРегистрации/...`
-    // (`elementsIsInit == true`) both store `"0"`,
-    // `ДлительностьОтложенногоОбновления/...` (`elementsIsInit == false`)
-    // stores `"2"`.
-    let elements_cache_20 = if elements_is_init { "0" } else { "2" };
+    // `post[20]` is where `elements_is_init` itself is read from (see
+    // `parse_moxel_chart`), so it is not re-checked here.
     let expected = [
         (0, leading),
         (1, following),
@@ -6120,7 +6204,6 @@ fn validate_moxel_chart_v74_post_prefix(
         (17, "{3,0,{0}}"),
         (18, "2"),
         (19, "255"),
-        (20, elements_cache_20),
         (22, "00000000-0000-0000-0000-000000000000"),
     ];
     expected
@@ -6261,12 +6344,7 @@ fn validate_moxel_chart_v74_post(
     axes_position: usize,
     rectangle_start: usize,
 ) -> Option<()> {
-    validate_moxel_chart_v74_post_prefix(
-        post,
-        has_extended_scales,
-        is_title_init,
-        elements_is_init,
-    )?;
+    validate_moxel_chart_v74_post_prefix(post, has_extended_scales, is_title_init)?;
     validate_moxel_chart_v74_scale_id_list(post, series_count)?;
     validate_moxel_chart_v74_post_axes_tail(post, axes_position)?;
     validate_moxel_chart_v74_rectangle_check(post, elements_is_init, rectangle_start)
@@ -7722,9 +7800,46 @@ pub(super) fn spreadsheet_number_format_hint_from_text(
         column_sets
     };
     let drawings = parse_moxel_drawings(&fields);
+    // A cell note is a drawing record of its own -- `drawingType` `Comment`,
+    // its own `<formatIndex>` -- so the format it names is a drawing format,
+    // and that format's members 1, 3 and 4 are `drawingBorder`,
+    // `drawingHave*Border` and `print` rather than
+    // `leftBorder`/`rightBorder`/`bottomBorder`. This set was built from the
+    // `<drawing>` list alone, which left every note-only format read as a
+    // cell one.
+    //
+    // Evidence: of the 23 `<format>` elements that publish `<print>` across
+    // ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, Документооборот КОРП 3.0.21.3 and
+    // БСП demo/base, eleven sit in documents that carry no `<drawing>` at
+    // all, and in every one the format they name is exactly the
+    // `<formatIndex>` of a `<note>`. In
+    // `Reports/РасчетСтоимостиЧистыхАктивов/Templates/РасчетСтоимостиЧистыхАктивов`
+    // the whole `<formatIndex>` set is `{1..8, 31}`, disjoint from the `<f>`
+    // set the cells cite, and format 31 is the one that publishes
+    // `<print>false</print>`.
+    //
+    // A note-named format is only a drawing format where **no cell names it
+    // too**: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
+    // ЗагрузкаИзФайла` and four documents like it share one format between a
+    // note and their own report-header cells, and the platform renders it as
+    // a cell format there -- `leftBorder`/`rightBorder` and no
+    // `drawingBorder`. In `РасчетСтоимостиЧистыхАктивов` the two sets are
+    // disjoint, which is what makes format 31 a drawing format.
+    let cell_format_indices = rows
+        .iter()
+        .flat_map(|row| {
+            std::iter::once(row.format_index).chain(row.cells.iter().map(|cell| cell.format_index))
+        })
+        .collect::<BTreeSet<_>>();
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
+        .chain(
+            rows.iter()
+                .flat_map(|row| row.cells.iter())
+                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
+                .filter(|index| !cell_format_indices.contains(index)),
+        )
         .collect::<BTreeSet<_>>();
     let column_format_slots = moxel_column_format_slots(&column_sets, column_count);
     let _sparse_source_format_refs = moxel_uses_sparse_source_format_refs(
@@ -8655,15 +8770,63 @@ pub(super) fn moxel_embedded_style_ref_for_uuid(
 /// `СервисShare/.../ТранспортныйКонтейнер` - and the fourteen formats that name
 /// it publish `d3p1:ButtonShadow` in the Windows colour namespace. No other
 /// ordinal appears, so no other ordinal is spelled.
+/// The Windows system-colour palette slot's own enumeration.
+///
+/// Measured the same way as `parse_moxel_web_color`: the palette's kind-1
+/// slots are paired with the names the platform publishes under the
+/// `.../colors/windows` namespace for the same document, counting format-record
+/// citations per slot against publications per name.
+///
+/// | code | name | documents | citations |
+/// | ---: | --- | ---: | --- |
+/// | 2 | `ActiveTitleBar` | 5 | 4, 8, 4, 4, 2 |
+/// | 4 | `MenuBar` | 2 | 1, 1 |
+/// | 11 | `InactiveBorder` | 6 | 1 each |
 fn parse_moxel_windows_color(value: &str) -> Option<String> {
     match value.parse::<u32>().ok()? {
+        2 => Some("windows:ActiveTitleBar".to_string()),
+        4 => Some("windows:MenuBar".to_string()),
+        11 => Some("windows:InactiveBorder".to_string()),
         16 => Some("windows:ButtonShadow".to_string()),
         _ => None,
     }
 }
 
+/// The web-colour palette slot's own enumeration.
+///
+/// Measured per document by pairing the palette's kind-2 slots with the
+/// `d3p1:` names the platform publishes for the same document: a format
+/// record cites a palette slot by index in members 5, 10, 11 and 13, so
+/// counting citations per slot and names per name gives two multisets that
+/// have to agree. Where the slots whose code this table already knew account
+/// for their names exactly, the remaining slot and the remaining name pair
+/// uniquely.
+///
+/// Eight codes were added that way on ERP УХ 3.2.12.6, each from at least
+/// one document where the pairing is unambiguous, with no conflict between
+/// documents:
+///
+/// | code | name | documents | citations |
+/// | ---: | --- | ---: | --- |
+/// | 2 | `AntiqueWhite` | 1 | 5 |
+/// | 5 | `Azure` | 2 | 1, 5 |
+/// | 49 | `GhostWhite` | 2 | 5, 5 |
+/// | 54 | `GreenYellow` | 2 | 3, 2 |
+/// | 59 | `Ivory` | 2 | 7, 7 |
+/// | 61 | `Lavender` | 1 | 9 |
+/// | 88 | `MediumGreen` | 2 | 11, 5 |
+/// | 93 | `MediumSpringGreen` | 1 | 1 |
+///
+/// (`РасшифровкаАктаСверкиСФНС_5_03_АктНеЕНП` cites codes 2 and 5 the same
+/// number of times and cannot separate them on its own; the two documents
+/// above that carry one each do, and this one then agrees with them.)
+///
+/// A code the corpus does not spell stays a typed refusal: an unresolvable
+/// slot makes the whole palette unusable rather than being guessed at.
 pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
     let name = match value.parse::<u32>().ok()? {
+        2 => "AntiqueWhite",
+        5 => "Azure",
         6 => "Beige",
         8 => "Black",
         10 => "Blue",
@@ -8679,9 +8842,13 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         45 => "FloralWhite",
         46 => "ForestGreen",
         48 => "Gainsboro",
+        49 => "GhostWhite",
         52 => "Gray",
         53 => "Green",
+        54 => "GreenYellow",
         55 => "HoneyDew",
+        59 => "Ivory",
+        61 => "Lavender",
         64 => "LemonChiffon",
         67 => "LightCyan",
         68 => "LightGoldenRod",
@@ -8692,6 +8859,8 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         84 => "Maroon",
         86 => "MediumBlue",
         87 => "MediumGray",
+        88 => "MediumGreen",
+        93 => "MediumSpringGreen",
         97 => "MintCream",
         98 => "MistyRose",
         108 => "PaleGoldenrod",
@@ -8782,10 +8951,6 @@ pub(super) fn moxel_format_pattern(value: usize) -> Option<&'static str> {
     } else {
         PATTERNS.get(value).copied()
     }
-}
-
-pub(super) fn moxel_explicit_zero(value: usize) -> Option<usize> {
-    (value == 0).then_some(0)
 }
 
 pub(super) fn moxel_false_only(value: usize) -> Option<bool> {
@@ -8918,10 +9083,41 @@ pub(super) fn moxel_picture_vertical_alignment(value: usize) -> Option<&'static 
     }
 }
 
+/// Member 39 of the format record.
+///
+/// Measured on ERP УХ 3.2.12.6 by pairing each document's stored member-39
+/// values with the `<textPosition>` values the platform publishes for the
+/// same document. Every one of the 16 `Template.xml` that publish a
+/// non-`Auto` position was decoded out of `cf extract`'s `unpacked.bin`, and
+/// in each the two multisets agree exactly, with no unpaired stored value and
+/// no unpaired published one:
+///
+/// | code | published | documents | occurrences |
+/// | ---: | --- | ---: | ---: |
+/// | 0 | `Left` | 1 | 1 |
+/// | 1 | `Right` | 5 | 13 |
+/// | 2 | `Top` | 1 | 2 |
+/// | 3 | `Bottom` | 2 | 2 |
+/// | 4 | `OnTop` | 7 | 7 |
+/// | 5 | `Auto` | 1 | 1 |
+///
+/// `ОбменСКонтрагентами/ШтампПЭП_ru` is the one document that mixes two
+/// codes (`5` and `1`) and publishes exactly one `Auto` and one `Right`, so
+/// the pairing is not an artefact of one code per document. `Auto` is
+/// otherwise published 513 times across the corpus, in documents this writer
+/// already reproduces byte for byte.
+///
+/// Codes 2, 3 and 4 were absent from this table, and the format member was
+/// dropped whole wherever they occurred, taking 7 ERP УХ documents' whole
+/// `<format>` element with it. A code the corpus does not spell stays a typed
+/// refusal.
 pub(super) fn moxel_text_position(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Left"),
         1 => Some("Right"),
+        2 => Some("Top"),
+        3 => Some("Bottom"),
+        4 => Some("OnTop"),
         5 => Some("Auto"),
         _ => None,
     }
@@ -9466,7 +9662,18 @@ fn render_moxel_spreadsheet_xml(
     }
     xml.push_str(&format!("\t<vgRows>{}</vgRows>\r\n", spreadsheet.height));
     for group in &spreadsheet.vertical_groups {
-        push_moxel_vertical_group_xml(&mut xml, group);
+        push_moxel_group_xml(&mut xml, "vg", group);
+    }
+    // The column groups follow the row groups, with no count element of
+    // their own: neither `Reports/ИсполнениеКонтрактовГОЗ/Templates/
+    // ИсполнениеКонтрактов` (ERP УХ, one column group behind seven row
+    // groups) nor `Catalogs/НастройкиДоступностиПоСостоянию/Templates/
+    // НастройкиПолейКомандДокументПредприятия` (Документооборот КОРП, two
+    // column groups and no row group) publishes an `hgLevels`/`hgColumns`
+    // counterpart to `<vgLevels>`/`<vgRows>`, and all three column groups
+    // store level 0.
+    for group in &spreadsheet.horizontal_groups {
+        push_moxel_group_xml(&mut xml, "hg", group);
     }
     for merge in &spreadsheet.merges {
         push_moxel_merge_xml(&mut xml, merge);
@@ -12209,8 +12416,17 @@ pub(super) fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
     xml.push_str("\t</merge>\r\n");
 }
 
-pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerticalGroup) {
-    xml.push_str("\t<vg>\r\n");
+/// One `<vg>`/`<hg>` element.
+///
+/// The member order is the record's own -- begin, end, label, open, group
+/// marker. `<b>`, `<e>` and `<t>` are pinned by the corpus (745 labelled
+/// groups), `<o>` by the ten 1С:УТ records that publish `<o>false</o>`, and
+/// `<g>` by the six ERP УХ records that publish `<g>Begin</g>`. No document
+/// on the stand publishes `<g>` beside `<t>` or `<o>`, so their relative
+/// order is unobserved and this writer follows the storage record rather
+/// than inventing one.
+pub(super) fn push_moxel_group_xml(xml: &mut String, tag: &str, group: &MoxelVerticalGroup) {
+    xml.push_str(&format!("\t<{tag}>\r\n"));
     xml.push_str(&format!("\t\t<b>{}</b>\r\n", group.begin_row));
     if group.end_row != group.begin_row {
         xml.push_str(&format!("\t\t<e>{}</e>\r\n", group.end_row));
@@ -12234,7 +12450,10 @@ pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerti
     if !group.open {
         xml.push_str("\t\t<o>false</o>\r\n");
     }
-    xml.push_str("\t</vg>\r\n");
+    if group.group_begin {
+        xml.push_str("\t\t<g>Begin</g>\r\n");
+    }
+    xml.push_str(&format!("\t</{tag}>\r\n"));
 }
 
 pub(super) fn push_moxel_vertical_unmerge_xml(xml: &mut String, merge: &MoxelMerge) {
@@ -13255,6 +13474,7 @@ mod moxel_exact_parity_tests {
             source_formats: Vec::new(),
             rows: Vec::new(),
             vertical_groups: Vec::new(),
+            horizontal_groups: Vec::new(),
             merges: Vec::new(),
             horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
