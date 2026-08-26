@@ -3653,10 +3653,18 @@ fn parse_form_attribute_with_dcs_type_index(
                     }
                 }
             }
+            let secondary_by_item_id =
+                parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields);
             Some(
                 field_name_by_item_id
                     .into_iter()
-                    .filter(|(_, field_name)| !universe.contains(field_name))
+                    .filter(|(item_id, field_name)| {
+                        !form_dynamic_list_field_name_is_resolvable(
+                            field_name,
+                            secondary_by_item_id.get(item_id).map(String::as_str),
+                            &universe,
+                        )
+                    })
                     .map(|(item_id, _)| item_id)
                     .collect::<BTreeSet<String>>(),
             )
@@ -4709,6 +4717,8 @@ pub(super) fn parse_form_attribute_use_always(
             }
         }
     }
+    let secondary_by_item_id =
+        parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields);
     let has_main_table = settings.is_some_and(|settings| settings.main_table.is_some());
     let universe = form_dynamic_list_use_always_universe(settings, &settings_fields, object_refs);
     let mut parsed = Vec::new();
@@ -4718,6 +4728,7 @@ pub(super) fn parse_form_attribute_use_always(
             attribute_name,
             &item_id,
             &field_name_by_item_id,
+            &secondary_by_item_id,
             has_main_table,
             universe.as_ref(),
         ) else {
@@ -4736,6 +4747,63 @@ pub(super) fn parse_form_dynamic_list_field_name_by_item_id(
     parse_form_dynamic_list_field_map_items(settings_fields)
         .into_iter()
         .filter_map(|field| field.item_id.map(|item_id| (item_id, field.field)))
+        .collect()
+}
+
+/// The localized twin the field map records beside a field's own name.
+///
+/// A standard attribute of the list's source is remembered under its English
+/// name, with the Russian spelling kept next to it as
+/// `FieldsMapItemSecondaryName{N}` — `Code`/`Код`, `Ref`/`Ссылка`. Both name
+/// the same field of the list, so a remembered field is resolvable when either
+/// spelling is; and when neither is, the platform writes the pair out in full,
+/// `~<attr>.<name>~<attr>.<twin>`.
+///
+/// Evidence: the whole stand. Of the 5 359 required-field records that carry a
+/// twin, 5 358 are written without the marker — the single exception is
+/// `Documents/Лот/Forms/ФормаСписка`, whose remembered `Owner`/`Владелец` pair
+/// names a standard attribute no document has. Nine records in ERP УХ 3.2.12.6
+/// write the doubled spelling, and every one of them is a remembered pair whose
+/// two names are both unresolvable.
+pub(super) fn parse_form_dynamic_list_field_secondary_name_by_item_id(
+    settings_fields: &[&str],
+) -> BTreeMap<String, String> {
+    let mut item_id_by_suffix = BTreeMap::<String, String>::new();
+    let mut secondary_by_suffix = BTreeMap::<String, String>::new();
+    let mut collect = |key_field: &str, value_field: &str| {
+        let key = parse_1c_quoted_string_with_len(key_field.trim())
+            .map(|(value, _)| value)
+            .unwrap_or_default();
+        if let Some(suffix) = key
+            .strip_prefix("FiledsMapItemSecondaryName")
+            .or_else(|| key.strip_prefix("FieldsMapItemSecondaryName"))
+        {
+            if let Some(name) = parse_form_setting_scalar_string(value_field)
+                && !name.is_empty()
+            {
+                secondary_by_suffix.insert(suffix.to_string(), name);
+            }
+            return;
+        }
+        if let Some(suffix) = key
+            .strip_prefix("FiledsMapItemId")
+            .or_else(|| key.strip_prefix("FieldsMapItemId"))
+            && let Some(item_id) = parse_form_setting_number(value_field)
+        {
+            item_id_by_suffix.insert(suffix.to_string(), item_id);
+        }
+    };
+    for pair in settings_fields.chunks_exact(2) {
+        collect(pair[0], pair[1]);
+        collect(pair[1], pair[0]);
+    }
+    secondary_by_suffix
+        .into_iter()
+        .filter_map(|(suffix, secondary)| {
+            item_id_by_suffix
+                .get(&suffix)
+                .map(|item_id| (item_id.clone(), secondary))
+        })
         .collect()
 }
 
@@ -4885,14 +4953,18 @@ pub(super) fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]
 /// context (see that function's doc comment) -- a different code path, same
 /// platform-declared name for the marker.
 ///
-/// A field resolved through the map is prefixed with `~` exactly when its name
-/// is not in the list's resolvable-field universe (see
+/// A field resolved through the map is prefixed with `~` exactly when neither
+/// of the names the map remembers for it — its own and the localized twin of
+/// [`parse_form_dynamic_list_field_secondary_name_by_item_id`] — is in the
+/// list's resolvable-field universe (see
 /// [`form_dynamic_list_use_always_universe`]); with no universe no marker is
-/// ever added.
+/// ever added. A marked field that remembers a twin is written under both
+/// names, each carrying its own marker.
 pub(super) fn form_dynamic_list_use_always_field_name(
     attribute_name: &str,
     item_id: &str,
     field_name_by_item_id: &BTreeMap<String, String>,
+    secondary_name_by_item_id: &BTreeMap<String, String>,
     has_main_table: bool,
     universe: Option<&BTreeSet<String>>,
 ) -> Option<String> {
@@ -4903,15 +4975,41 @@ pub(super) fn form_dynamic_list_use_always_field_name(
         "-3" => None,
         "-1" if has_main_table => Some(format!("{}.Order", attribute_name)),
         "-1" => None,
-        _ => field_name_by_item_id
-            .get(item_id)
-            .map(|field_name| match universe {
-                Some(universe) if !universe.contains(field_name) => {
-                    format!("~{}.{}", attribute_name, field_name)
+        _ => field_name_by_item_id.get(item_id).map(|field_name| {
+            let secondary = secondary_name_by_item_id.get(item_id);
+            match universe {
+                Some(universe)
+                    if !form_dynamic_list_field_name_is_resolvable(
+                        field_name,
+                        secondary.map(String::as_str),
+                        universe,
+                    ) =>
+                {
+                    match secondary {
+                        Some(secondary) if secondary != field_name => {
+                            format!("~{attribute_name}.{field_name}~{attribute_name}.{secondary}")
+                        }
+                        _ => format!("~{attribute_name}.{field_name}"),
+                    }
                 }
-                _ => format!("{}.{}", attribute_name, field_name),
-            }),
+                _ => format!("{attribute_name}.{field_name}"),
+            }
+        }),
     }
+}
+
+/// Whether a remembered field name resolves against the list's field universe.
+///
+/// The map remembers a standard attribute under its English name and keeps the
+/// Russian spelling beside it; both name the same field, so either one
+/// resolving is enough.
+pub(super) fn form_dynamic_list_field_name_is_resolvable(
+    field_name: &str,
+    secondary_name: Option<&str>,
+    universe: &BTreeSet<String>,
+) -> bool {
+    universe.contains(field_name)
+        || secondary_name.is_some_and(|secondary| universe.contains(secondary))
 }
 
 /// The names a dynamic list can resolve against its data source, or `None` when
@@ -4919,9 +5017,12 @@ pub(super) fn form_dynamic_list_use_always_field_name(
 /// which is the pre-existing behavior.
 ///
 /// The model is measured against the platform's own `~` markers over the whole
-/// UT 11.5.27.75 tree: 4 356 of 4 357 `<UseAlways>` field observations agree
-/// with "`~` iff the name is not in this universe", and the single disagreement
-/// is the `-3` grouping pseudo field, which has its own rule. The universe is:
+/// stand — a remembered field is marked exactly when neither the name the field
+/// map keeps for it nor its localized twin is in this universe (see
+/// [`form_dynamic_list_field_name_is_resolvable`]). On ERP УХ 3.2.12.6 the
+/// model agrees with the platform on 8 776 of the 8 864 dynamic-list records,
+/// on UT 11.5.27.75 on 1 931 of 1 936, and on БСП demo and base on all of them.
+/// The universe is:
 ///
 /// * `ManualQuery=0`: the standard attributes of the main table's family
 ///   (Russian and English spellings, see
@@ -4930,9 +5031,8 @@ pub(super) fn form_dynamic_list_use_always_field_name(
 /// * `ManualQuery=1` with `AutoFillAvailableFields` unset or true: the result
 ///   column names of the query's final `SELECT` batch, plus the main table's
 ///   standard attributes and register dimensions the platform re-adds on its
-///   own — each unless the query already selects that main-table field under a
-///   different alias — plus the English twin of every standard attribute the
-///   query selects from a metadata source under its own Russian name.
+///   own — each under the Russian spelling only, and each unless the query
+///   already selects that main-table field under a different alias.
 /// * `ManualQuery=1` with `AutoFillAvailableFields=false`: only the names the
 ///   query's `{ВЫБРАТЬ ...}` extension lists.
 /// * In every mode: the `dataPath` of each `CalculatedField` the list's
@@ -4957,10 +5057,6 @@ pub(super) fn form_dynamic_list_use_always_universe(
                 return None;
             }
             universe = selection.aliases.clone();
-            universe.extend(form_dynamic_list_selected_standard_twins(
-                &selection,
-                object_refs,
-            ));
             if let Some(main_table) = settings.main_table.as_deref() {
                 universe.extend(form_dynamic_list_main_table_auto_fields(
                     main_table,
@@ -5260,6 +5356,21 @@ const FORM_DYNAMIC_LIST_REGISTER_KINDS: &[&str] = &[
 /// for a register — each unless the query already selects that very
 /// main-table field under a different alias. `None` when the family is
 /// unknown: an unresolvable main table is a refusal, not a guess.
+///
+/// The fields are added under the Russian spelling the query language uses and
+/// nothing else. A manual query's available-field list is named by what the
+/// query itself produces, so the English spelling of a standard attribute is
+/// not a name of the list — a remembered field that carries the English one
+/// resolves through the localized twin the field map stores beside it (see
+/// [`parse_form_dynamic_list_field_secondary_name_by_item_id`]), not through
+/// this set.
+///
+/// Evidence: ERP УХ 3.2.12.6 — 39 dynamic lists whose `<UseAlways>` the added
+/// English spellings resolved and the platform marked, among them
+/// `DocumentJournals/ПротоколыЗакупочныхПроцедур/Forms/ФормаСписка`, which
+/// writes `~Список.Ref` beside a plain `Список.Ссылка` for a query that selects
+/// `Ссылка КАК Ссылка`. Not one list on any of the eight configurations of the
+/// stand needs an English spelling from here.
 fn form_dynamic_list_main_table_auto_fields(
     main_table: &str,
     selection: &FormDynamicListQuerySelection,
@@ -5271,16 +5382,13 @@ fn form_dynamic_list_main_table_auto_fields(
         [kind, name, _virtual_table] => format!("{kind}.{name}"),
         _ => main_table.to_string(),
     };
-    let mut candidates: Vec<(String, Option<&'static str>)> = pairs
-        .iter()
-        .map(|(ru, en)| ((*ru).to_string(), Some(*en)))
-        .collect();
+    let mut candidates: Vec<String> = pairs.iter().map(|(ru, _)| (*ru).to_string()).collect();
     if FORM_DYNAMIC_LIST_REGISTER_KINDS.contains(&kind) {
-        for dimension in
-            form_dynamic_list_main_table_children(&base_table, object_refs, &["Dimension"])
-        {
-            candidates.push((dimension, None));
-        }
+        candidates.extend(form_dynamic_list_main_table_children(
+            &base_table,
+            object_refs,
+            &["Dimension"],
+        ));
     }
     let main_table_alias = selection.sources.iter().find_map(|(reference, alias)| {
         (reference.as_deref() == Some(main_table))
@@ -5288,61 +5396,16 @@ fn form_dynamic_list_main_table_auto_fields(
             .flatten()
     });
     let mut fields = BTreeSet::new();
-    for (name, twin) in candidates {
+    for name in candidates {
         if let Some(alias) = &main_table_alias
             && let Some(selected_as) = selection.paths.get(&(alias.clone(), name.clone()))
             && selected_as != &name
         {
             continue;
         }
-        if let Some(twin) = twin {
-            fields.insert(twin.to_string());
-        }
         fields.insert(name);
     }
     Some(fields)
-}
-
-/// English twins of standard attributes the query selects from a metadata
-/// source under their own Russian names: `Алиас.Ссылка` (or `... КАК Ссылка`)
-/// from a catalog source makes `Ref` resolvable too, and so on through the
-/// family's standard-attribute table.
-fn form_dynamic_list_selected_standard_twins(
-    selection: &FormDynamicListQuerySelection,
-    object_refs: &BTreeMap<String, String>,
-) -> BTreeSet<String> {
-    let mut twins = BTreeSet::new();
-    for ((source_alias, field), selected_as) in &selection.paths {
-        if selected_as != field {
-            continue;
-        }
-        let Some(reference) = selection.sources.iter().find_map(|(reference, alias)| {
-            (alias.as_deref() == Some(source_alias.as_str()))
-                .then(|| reference.clone())
-                .flatten()
-        }) else {
-            continue;
-        };
-        let Some((kind, rest)) = reference.split_once('.') else {
-            continue;
-        };
-        if rest.contains('.') {
-            continue;
-        }
-        let Some(pairs) = form_dynamic_list_std_attribute_pairs(kind) else {
-            continue;
-        };
-        if !object_refs
-            .values()
-            .any(|candidate| candidate == &reference)
-        {
-            continue;
-        }
-        if let Some((_, en)) = pairs.iter().find(|(ru, _)| ru == field) {
-            twins.insert((*en).to_string());
-        }
-    }
-    twins
 }
 
 /// What the final `SELECT` of a dynamic-list query names, read with the query
