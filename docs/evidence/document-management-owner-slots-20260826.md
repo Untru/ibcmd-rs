@@ -3,8 +3,8 @@
 База: `8cc12dc`. Стенд: `$D = /Users/untru/Documents/ChatGPT/ibcmd-stand`,
 эталоны `$D/cap/<ключ>/src`, неизменяемые снимки `$D/baselines/8cc12dc/`.
 
-Ключ `do`: **exact 25 201 → 25 240** (+39), сломано 0, лишних 0 на всех
-восьми ключах.
+Ключ `do`: **exact 25 201 → 25 243** (99,045 % → 99,210 %), сломано 0,
+лишних 0 на всех восьми ключах.
 
 ## Общая форма дефекта
 
@@ -34,6 +34,7 @@
 | Constant | 12 детали | `QuickChoice` | литерал `Auto` | читается | те же 3 378, DontUse 1 |
 | Constant | 12 владельца | `DataHistory` | литерал `DontUse` | читается | те же 3 378, Use 1 |
 | стандартный реквизит | свойство `7ba608f2` | `ChoiceHistoryOnInput` | требовалось `Auto` | читается | 61 900 элементов, DontUse 3 |
+| CommonAttribute | 3 | `Indexing` | знался один код `DontIndex` | все три кода | 54 общих реквизита, DontIndex 38 / Index 3 / IndexWithAdditionalOrder 13 |
 | табличная часть | `580c29e2`, `88149a78` | `Format`, `EditFormat` реквизита `LineNumber` | литерал `<xr:Format/>` | читается | 11 534 реквизита `LineNumber`, непустых 1 |
 
 ## Отказы, снятые чтением того, что уже лежит в записи
@@ -89,7 +90,7 @@
 
 ## Что осталось на `do`
 
-14 отсутствующих и 190 расходящихся файлов:
+14 отсутствующих и 187 расходящихся файлов:
 
 * 165 тел форм и 16 тел макетов — чужие участки;
 * 7 `FilterCriteria`: слот 8 владельца несёт `DefaultForm`, а требовался
@@ -98,7 +99,9 @@
   ровно один;
 * `Styles/Основной/Ext/Style.xml` не разбирается («failed to parse style
   body»), 2 `Ext/CommandInterface.xml`, `Roles/.../Ext/Rights.xml`,
-  `ConfigDumpInfo.xml`, `Configuration.xml`, `ru.html`, 3 общих реквизита.
+  `ConfigDumpInfo.xml`, `Configuration.xml`, `ru.html`,
+  `Ext/ClientApplicationInterface.xml`, `Ext/HomePageWorkArea.xml`,
+  один регистр сведений и одно хранилище настроек.
 
 Известное расхождение, оставленное намеренно: у плана видов характеристик
 носитель `<CreateOnInput>` не найден — 46 планов пишут `DontUse`, один
