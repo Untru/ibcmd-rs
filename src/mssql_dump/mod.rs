@@ -2405,6 +2405,10 @@ struct DumpRowContext<'a> {
     field_type_refs: &'a Arc<BTreeMap<String, String>>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
     information_register_master_dimensions: &'a Arc<InformationRegisterMasterDimensionIndex>,
+    /// What every table declares about the existence of its own standard
+    /// attributes, and which tables each common attribute is a field of. A
+    /// dynamic list's resolvable-field universe is built from these.
+    metadata_field_declarations: &'a MetadataFieldDeclarationIndex,
     functional_option_refs: &'a BTreeMap<String, String>,
     help_refs: &'a BTreeMap<String, String>,
     standalone_refs: &'a StandaloneContentReferences,
@@ -2688,6 +2692,11 @@ fn dump_table_rows_with_options_mode(
     } else {
         InformationRegisterMasterDimensionIndex::new()
     });
+    let metadata_field_declarations = if extract_metadata_xml {
+        build_metadata_field_declaration_index_from_texts(&metadata_texts, &object_refs)
+    } else {
+        MetadataFieldDeclarationIndex::default()
+    };
     let functional_option_refs = if extract_metadata_xml {
         build_functional_option_reference_index_from_texts(
             &metadata_texts,
@@ -2882,6 +2891,7 @@ fn dump_table_rows_with_options_mode(
         field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
         information_register_master_dimensions: &information_register_master_dimensions,
+        metadata_field_declarations: &metadata_field_declarations,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
         standalone_refs: &standalone_refs,
@@ -3767,6 +3777,11 @@ fn dump_table_rows_streamed(
             InformationRegisterMasterDimensionIndex::new()
         },
     );
+    let metadata_field_declarations = if extract_metadata_xml && source_reference_needs.field_refs {
+        build_metadata_field_declaration_index_from_texts(&index_metadata_texts, &object_refs)
+    } else {
+        MetadataFieldDeclarationIndex::default()
+    };
     timings.prepare_field_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let functional_option_refs =
@@ -4036,6 +4051,7 @@ fn dump_table_rows_streamed(
         field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
         information_register_master_dimensions: &information_register_master_dimensions,
+        metadata_field_declarations: &metadata_field_declarations,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
         standalone_refs: &standalone_refs,
@@ -14406,6 +14422,16 @@ fn parse_exchange_plan_standard_attributes(value: &str) -> Option<Vec<RegisterSt
     Some(attributes)
 }
 
+/// Logical owner-field slot carrying an information register's
+/// `<InformationRegisterPeriodicity>`.
+///
+/// Named here once and read from two places: the register's own properties
+/// parser below, and
+/// [`refs::build_metadata_field_declaration_index_from_texts`] -- a
+/// non-periodical register has no `Period` field for a dynamic list to resolve
+/// against.
+const INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY: usize = 4;
+
 fn parse_information_register_owner_properties(
     fields: &InformationRegisterOwnerFields<'_>,
     header: &MetadataHeader,
@@ -14422,7 +14448,9 @@ fn parse_information_register_owner_properties(
             &header.name,
             form_refs,
         )?,
-        periodicity: information_register_periodicity_xml(fields.get(4)?)?,
+        periodicity: information_register_periodicity_xml(
+            fields.get(INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY)?,
+        )?,
         write_mode: information_register_write_mode_xml(fields.get(5)?)?,
         edit_type: information_register_edit_type_xml(fields.get(6)?)?,
         use_standard_commands: information_register_bool(fields.get(7)?)?,
@@ -22989,6 +23017,48 @@ fn parse_cct_tabular_sections_indexed(
     Ok(result)
 }
 
+/// Owner-field slots of a `Catalog` that decide whether a standard attribute of
+/// the family is a field of the table at all.
+///
+/// They are named here once and read from two places: the catalog's own
+/// properties parser below, and
+/// [`refs::build_metadata_field_declaration_index_from_texts`], which hands the
+/// same declaration to the form decoder so a dynamic list resolves its
+/// remembered field names against the fields the table actually has. One
+/// declaration, one naming site -- not a second table of the same fact.
+const CATALOG_OWNER_FIELD_OWNERS: usize = 12;
+const CATALOG_OWNER_FIELD_CODE_LENGTH: usize = 17;
+const CATALOG_OWNER_FIELD_DESCRIPTION_LENGTH: usize = 19;
+const CATALOG_OWNER_FIELD_HIERARCHY_TYPE: usize = 36;
+const CATALOG_OWNER_FIELD_HIERARCHICAL: usize = 37;
+
+/// Metadata kinds a catalog's `<Owners>` collection may name.
+const CATALOG_OWNER_REFERENCE_PREFIXES: &[&str] = &["Catalog.", "ChartOfCharacteristicTypes."];
+
+fn catalog_hierarchy_type_xml(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("HierarchyFoldersAndItems"),
+        "1" => Some("HierarchyOfItems"),
+        _ => None,
+    }
+}
+
+/// The declared length of a metadata object-reference collection, read off its
+/// own counter rather than off how many of its members resolve. `<Owners/>` is
+/// a declared zero; an owner whose reference the index cannot name is still a
+/// declared owner.
+fn metadata_reference_collection_len(value: &str) -> Option<usize> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    Some(count)
+}
+
 fn parse_strict_catalog_properties_from_text(
     text: &str,
     uuid: &str,
@@ -23280,9 +23350,9 @@ fn parse_strict_catalog_properties_from_text(
         )?;
 
     let owners = parse_document_reference_collection(
-        fields.get(12)?,
+        fields.get(CATALOG_OWNER_FIELD_OWNERS)?,
         object_refs,
-        &["Catalog.", "ChartOfCharacteristicTypes."],
+        CATALOG_OWNER_REFERENCE_PREFIXES,
     )?;
     let based_on = parse_document_reference_collection(
         fields.get(32)?,
@@ -23300,12 +23370,10 @@ fn parse_strict_catalog_properties_from_text(
 
     Some(CatalogProperties {
         generated_types,
-        hierarchical: information_register_bool(fields.get(37)?)?,
-        hierarchy_type: match fields.get(36)?.trim() {
-            "0" => "HierarchyFoldersAndItems",
-            "1" => "HierarchyOfItems",
-            _ => return None,
-        },
+        hierarchical: information_register_bool(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?)?,
+        hierarchy_type: catalog_hierarchy_type_xml(
+            fields.get(CATALOG_OWNER_FIELD_HIERARCHY_TYPE)?,
+        )?,
         limit_level_count: information_register_bool(fields.get(38)?)?,
         level_count: parse_exchange_plan_u32(fields.get(10)?)?,
         folders_on_top: information_register_bool(fields.get(13)?)?,
@@ -23314,8 +23382,10 @@ fn parse_strict_catalog_properties_from_text(
             fields.get(39)?,
         )?)?),
         use_standard_commands: information_register_bool(fields.get(31)?)?,
-        code_length: parse_exchange_plan_u32(fields.get(17)?)?,
-        description_length: parse_exchange_plan_u32(fields.get(19)?)?,
+        code_length: parse_exchange_plan_u32(fields.get(CATALOG_OWNER_FIELD_CODE_LENGTH)?)?,
+        description_length: parse_exchange_plan_u32(
+            fields.get(CATALOG_OWNER_FIELD_DESCRIPTION_LENGTH)?,
+        )?,
         code_type: Some(catalog_code_type_xml(parse_exchange_plan_u32(
             fields.get(18)?,
         )?)?),
@@ -25292,14 +25362,10 @@ fn parse_document_reference_collection(
     object_refs: &BTreeMap<String, String>,
     allowed_prefixes: &[&str],
 ) -> Option<Vec<String>> {
+    // The same declared counter the field-declaration index reads off this
+    // very slot, so `<Owners/>` means the same zero on both sides.
+    metadata_reference_collection_len(value)?;
     let fields = split_information_register_braced_fields(value)?;
-    if fields.first()?.trim() != "0" {
-        return None;
-    }
-    let count = parse_information_register_usize(fields.get(1)?)?;
-    if fields.len() != count.checked_add(2)? {
-        return None;
-    }
     let mut seen = BTreeSet::new();
     fields[2..]
         .iter()
@@ -28971,23 +29037,7 @@ fn parse_common_attribute_properties_from_text(
     let use_fields = fields
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0));
-    let auto_use = use_fields
-        .as_deref()
-        .and_then(parse_common_attribute_auto_use)
-        .or_else(|| {
-            if fields.len() != 15
-                || use_fields
-                    .as_deref()
-                    .and_then(|content_fields| content_fields.first())
-                    .map(|field| field.trim())
-                    != Some("3")
-            {
-                return None;
-            }
-            fields
-                .get(11)
-                .and_then(|field| common_attribute_auto_use_xml(field.trim()))
-        })
+    let auto_use = parse_common_attribute_declared_auto_use(&fields, use_fields.as_deref())
         .unwrap_or("DontUse");
     let content = use_fields
         .as_deref()
@@ -29170,6 +29220,33 @@ fn parse_common_attribute_optional_ref(
         .get(1)
         .and_then(|field| parse_non_zero_uuid(field.trim()))?;
     object_refs.get(&uuid).cloned()
+}
+
+/// `<AutoUse>` as the common attribute's own record declares it, or `None` when
+/// neither shape of the record names it.
+///
+/// The writer below defaults an unreadable declaration to `DontUse`; the
+/// field-declaration index refuses it instead, because there a missing
+/// declaration must withhold nothing -- see
+/// [`refs::MetadataCommonAttributeContent`].
+fn parse_common_attribute_declared_auto_use(
+    fields: &[&str],
+    use_fields: Option<&[&str]>,
+) -> Option<&'static str> {
+    if let Some(auto_use) = use_fields.and_then(parse_common_attribute_auto_use) {
+        return Some(auto_use);
+    }
+    if fields.len() != 15
+        || use_fields
+            .and_then(|content_fields| content_fields.first())
+            .map(|field| field.trim())
+            != Some("3")
+    {
+        return None;
+    }
+    fields
+        .get(11)
+        .and_then(|field| common_attribute_auto_use_xml(field.trim()))
 }
 
 fn parse_common_attribute_auto_use(fields: &[&str]) -> Option<&'static str> {

@@ -11629,6 +11629,7 @@ fn extracts_form_attribute_use_always_from_native_fields_map_without_settings() 
         r##"{0,16,"FieldsMapItemId0",{"N",6},"FieldsMapItemName0",{"S","Номер"},"FiledsMapItemId0",{"N",6},"FiledsMapItemName0",{"S","Номер"},"FieldsMapItemId1",{"N",8},"FieldsMapItemName1",{"S","Дата"},"FiledsMapItemId1",{"N",8},"FiledsMapItemName1",{"S","Дата"},"FieldsMapItemId2",{"N",32},"FieldsMapItemName2",{"S","Организация"},"FiledsMapItemId2",{"N",32},"FiledsMapItemName2",{"S","Организация"},"FieldsMapItemId3",{"N",88},"FieldsMapItemName3",{"S","Склад"},"FiledsMapItemId3",{"N",88},"FiledsMapItemName3",{"S","Склад"},"FieldsMapItemId4",{"N",113},"FieldsMapItemName4",{"S","Подразделение"},"FiledsMapItemId4",{"N",113},"FiledsMapItemName4",{"S","Подразделение"},"FieldsMapItemId5",{"N",148},"FieldsMapItemName5",{"S","Комментарий"},"FiledsMapItemId5",{"N",148},"FiledsMapItemName5",{"S","Комментарий"},"FieldsMapItemId6",{"N",154},"FieldsMapItemName6",{"S","Менеджер"},"FiledsMapItemId6",{"N",154},"FiledsMapItemName6",{"S","Менеджер"},"ReqMapFieldId0",{"B",1},"ReqMapFieldId1",{"N",6},"ReqMapFieldId2",{"N",8},"ReqMapFieldId3",{"N",32},"ReqMapFieldId4",{"N",88},"ReqMapFieldId5",{"N",113},"ReqMapFieldId6",{"N",148},"ReqMapFieldId7",{"N",154}}"##,
         None,
         &BTreeMap::new(),
+        None,
     );
 
     assert_eq!(
@@ -11690,6 +11691,102 @@ fn marks_use_always_fields_outside_an_auto_list_main_table() {
             "Список.Реквизит".to_string(),
         ]
     );
+}
+
+#[test]
+fn marks_use_always_standard_attributes_the_main_table_does_not_declare() {
+    let record = r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,14,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Code"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Code"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","Owner"},"FiledsMapItemId1",{"N",2},"FiledsMapItemName1",{"S","Owner"},"FieldsMapItemId2",{"N",3},"FieldsMapItemName2",{"S","Общий"},"FiledsMapItemId2",{"N",3},"FiledsMapItemName2",{"S","Общий"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",2},"ReqMapFieldId2",{"N",3}},{0,0}}"##;
+    let object_refs = BTreeMap::from([
+        (
+            "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+            "Catalog.Тест".to_string(),
+        ),
+        (
+            "9d1b0e6f-6f0d-4a2b-bb9e-9a52a35b5f5e".to_string(),
+            "CommonAttribute.Общий".to_string(),
+        ),
+    ]);
+
+    // With no declaration index the family's whole standard-attribute table and
+    // every common attribute of the configuration stay resolvable.
+    let undeclared = parse_form_attribute(record, &BTreeMap::new(), &object_refs).unwrap();
+    assert_eq!(
+        undeclared.use_always,
+        vec![
+            "Список.Code".to_string(),
+            "Список.Owner".to_string(),
+            "Список.Общий".to_string(),
+        ]
+    );
+
+    // The catalog declares neither a code nor an owner, and the common
+    // attribute's content does not name the table: all three are marked.
+    let declarations = MetadataFieldDeclarationIndex::default()
+        .with_table(
+            "Catalog.Тест",
+            MetadataTableStandardAttributes::default()
+                .with_code_length(0)
+                .with_owners(false),
+        )
+        .with_common_attribute(
+            "Общий",
+            MetadataCommonAttributeContent::declared(false, &[("Catalog.Другой", true)]),
+        );
+    let declared = parse_form_attribute_with_declarations(
+        record,
+        &BTreeMap::new(),
+        &object_refs,
+        &declarations,
+    )
+    .unwrap();
+    assert_eq!(
+        declared.use_always,
+        vec![
+            "~Список.Code".to_string(),
+            "~Список.Owner".to_string(),
+            "~Список.Общий".to_string(),
+        ]
+    );
+
+    // A declaration that names the table puts the common attribute back, and a
+    // declared code length keeps `Code`.
+    let declarations = MetadataFieldDeclarationIndex::default()
+        .with_table(
+            "Catalog.Тест",
+            MetadataTableStandardAttributes::default()
+                .with_code_length(9)
+                .with_owners(true),
+        )
+        .with_common_attribute(
+            "Общий",
+            MetadataCommonAttributeContent::declared(false, &[("Catalog.Тест", true)]),
+        );
+    let declared = parse_form_attribute_with_declarations(
+        record,
+        &BTreeMap::new(),
+        &object_refs,
+        &declarations,
+    )
+    .unwrap();
+    assert_eq!(
+        declared.use_always,
+        vec![
+            "Список.Code".to_string(),
+            "Список.Owner".to_string(),
+            "Список.Общий".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn a_common_attribute_auto_use_covers_every_table_its_content_does_not_exclude() {
+    let auto_used = MetadataCommonAttributeContent::declared(true, &[("Catalog.Другой", false)]);
+    assert!(auto_used.covers("Catalog.Тест"));
+    assert!(!auto_used.covers("Catalog.Другой"));
+
+    let opted_in = MetadataCommonAttributeContent::declared(false, &[("Catalog.Тест", true)]);
+    assert!(opted_in.covers("Catalog.Тест"));
+    assert!(!opted_in.covers("Catalog.Другой"));
 }
 
 #[test]

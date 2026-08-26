@@ -149,6 +149,13 @@ pub(super) struct FormParseContext<'a> {
     /// `MetadataCommandReference::use_standard_commands`. `None` (the default)
     /// behaves as an empty index: every target resolves as before.
     metadata_command_refs: Option<&'a BTreeMap<String, MetadataCommandReference>>,
+    /// What the configuration's tables declare about the existence of their own
+    /// standard attributes, and which tables each common attribute is a field
+    /// of. A dynamic list's resolvable-field universe is built from these:
+    /// without them (the default) the universe admits a family's whole
+    /// standard-attribute table and every common attribute of the
+    /// configuration, which is the pre-existing behaviour.
+    metadata_field_declarations: Option<&'a MetadataFieldDeclarationIndex>,
     dcs_source_profile: ProfileId,
     dcs_target_profile: ProfileId,
     trace_sink: Option<&'a dyn FormItemTraceSink>,
@@ -202,6 +209,7 @@ impl<'a> FormParseContext<'a> {
             form_owner_reference,
             form_reference_index: None,
             metadata_command_refs: None,
+            metadata_field_declarations: None,
             dcs_source_profile: ProfileId::parse("provider:mssql-legacy")
                 .expect("static MSSQL provider profile is valid"),
             dcs_target_profile: ProfileId::parse("xml-2.20").expect("static XML profile is valid"),
@@ -222,6 +230,14 @@ impl<'a> FormParseContext<'a> {
         metadata_command_refs: &'a BTreeMap<String, MetadataCommandReference>,
     ) -> Self {
         self.metadata_command_refs = Some(metadata_command_refs);
+        self
+    }
+
+    pub(super) fn with_metadata_field_declarations(
+        mut self,
+        metadata_field_declarations: &'a MetadataFieldDeclarationIndex,
+    ) -> Self {
+        self.metadata_field_declarations = Some(metadata_field_declarations);
         self
     }
 
@@ -341,6 +357,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         context.type_index,
         context.dcs_type_index,
         context.object_refs,
+        context.metadata_field_declarations,
     );
     let attribute_save_field_bindings = extract_form_body_attribute_save_field_bindings(
         &body.trailing,
@@ -3381,6 +3398,7 @@ fn extract_form_body_attributes_with_dcs_type_index(
     type_index: &BTreeMap<String, String>,
     dcs_type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
 ) -> Vec<FormAttribute> {
     let Some(fields) = trailing
         .first()
@@ -3400,7 +3418,13 @@ fn extract_form_body_attributes_with_dcs_type_index(
         .skip(2)
         .take(attribute_count)
         .filter_map(|field| {
-            parse_form_attribute_with_dcs_type_index(field, type_index, dcs_type_index, object_refs)
+            parse_form_attribute_with_dcs_type_index(
+                field,
+                type_index,
+                dcs_type_index,
+                object_refs,
+                declarations,
+            )
         })
         .collect()
 }
@@ -3539,7 +3563,29 @@ pub(super) fn parse_form_attribute(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormAttribute> {
-    parse_form_attribute_with_dcs_type_index(field, type_index, &DcsTypeIndex::new(), object_refs)
+    parse_form_attribute_with_dcs_type_index(
+        field,
+        type_index,
+        &DcsTypeIndex::new(),
+        object_refs,
+        None,
+    )
+}
+
+#[cfg(test)]
+pub(super) fn parse_form_attribute_with_declarations(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    declarations: &MetadataFieldDeclarationIndex,
+) -> Option<FormAttribute> {
+    parse_form_attribute_with_dcs_type_index(
+        field,
+        type_index,
+        &DcsTypeIndex::new(),
+        object_refs,
+        Some(declarations),
+    )
 }
 
 fn parse_form_attribute_with_dcs_type_index(
@@ -3547,6 +3593,7 @@ fn parse_form_attribute_with_dcs_type_index(
     type_index: &BTreeMap<String, String>,
     dcs_type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
 ) -> Option<FormAttribute> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.first().map(|value| value.trim()) != Some("9") {
@@ -3651,10 +3698,9 @@ fn parse_form_attribute_with_dcs_type_index(
             .map(String::as_str),
         exact_single_type_uuid.as_deref(),
     );
-    if let Some(dynamic_list_use_always) = fields
-        .get(14)
-        .map(|field| parse_form_attribute_use_always(&name, field, settings.as_ref(), object_refs))
-    {
+    if let Some(dynamic_list_use_always) = fields.get(14).map(|field| {
+        parse_form_attribute_use_always(&name, field, settings.as_ref(), object_refs, declarations)
+    }) {
         let mut seen = use_always.iter().cloned().collect::<BTreeSet<_>>();
         for field_name in dynamic_list_use_always {
             if seen.insert(field_name.clone()) {
@@ -3677,6 +3723,7 @@ fn parse_form_attribute_with_dcs_type_index(
                 settings.as_ref(),
                 &settings_fields,
                 object_refs,
+                declarations,
             )?;
             let mut field_name_by_item_id =
                 parse_form_dynamic_list_field_name_by_item_id(&settings_fields);
@@ -4735,6 +4782,7 @@ pub(super) fn parse_form_attribute_use_always(
     settings_field: &str,
     settings: Option<&FormDynamicListSettings>,
     object_refs: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
 ) -> Vec<String> {
     let Some(settings_fields) = split_1c_braced_fields(settings_field.trim(), 0) else {
         return Vec::new();
@@ -4756,7 +4804,12 @@ pub(super) fn parse_form_attribute_use_always(
     let secondary_by_item_id =
         parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields);
     let main_table = settings.and_then(|settings| settings.main_table.as_deref());
-    let universe = form_dynamic_list_use_always_universe(settings, &settings_fields, object_refs);
+    let universe = form_dynamic_list_use_always_universe(
+        settings,
+        &settings_fields,
+        object_refs,
+        declarations,
+    );
     let mut parsed = Vec::new();
     let mut seen = BTreeSet::<String>::new();
     for item_id in required_item_ids {
@@ -5084,6 +5137,7 @@ pub(super) fn form_dynamic_list_use_always_universe(
     settings: Option<&FormDynamicListSettings>,
     settings_fields: &[&str],
     object_refs: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
 ) -> Option<BTreeSet<String>> {
     let settings = settings?;
     let mut universe;
@@ -5102,6 +5156,7 @@ pub(super) fn form_dynamic_list_use_always_universe(
                     main_table,
                     &selection,
                     object_refs,
+                    declarations,
                 )?);
             }
         }
@@ -5129,7 +5184,9 @@ pub(super) fn form_dynamic_list_use_always_universe(
             return None;
         }
         universe = BTreeSet::new();
-        for (ru, en) in pairs {
+        for (ru, en) in
+            form_dynamic_list_declared_std_attribute_pairs(pairs, main_table, declarations)
+        {
             universe.insert((*ru).to_string());
             universe.insert((*en).to_string());
         }
@@ -5138,17 +5195,18 @@ pub(super) fn form_dynamic_list_use_always_universe(
             object_refs,
             FORM_DYNAMIC_LIST_MAIN_TABLE_CHILD_KINDS,
         ));
-        // Every common attribute is a field of the tables it is attached to,
-        // and its name is spelled the same on all of them. The index carries
-        // the common attributes themselves but not the per-table content, so
-        // the universe admits all of their names: a name that no table of the
-        // configuration carries is still resolvable somewhere, and admitting
-        // one too many only withholds a marker -- it never invents one.
+        // A common attribute is a field of the tables its own `<Content>`
+        // puts it on, spelled the same on all of them. A configuration whose
+        // common attributes this reader cannot decode admits all of their
+        // names, as it did before it could read the content at all.
         universe.extend(
             object_refs
                 .values()
                 .filter_map(|reference| reference.strip_prefix("CommonAttribute."))
                 .filter(|name| !name.is_empty() && !name.contains('.'))
+                .filter(|name| {
+                    form_dynamic_list_table_carries_common_attribute(declarations, main_table, name)
+                })
                 .map(str::to_string),
         );
     }
@@ -5158,6 +5216,47 @@ pub(super) fn form_dynamic_list_use_always_universe(
         ));
     }
     Some(universe)
+}
+
+/// The family's standard attributes filtered down to the ones the main table
+/// declares -- a catalog with `<CodeLength>0</CodeLength>` has no `Code` for a
+/// list to resolve `Code` or `Код` against, and the platform marks it.
+///
+/// Evidence, ERP УХ 3.2.12.6: `Catalog.КатегорииЗакупок` and
+/// `Catalog.УдалитьПанелиОтчетов` (`CodeLength` 0),
+/// `Catalog.КодыВидовРасхода` (`DescriptionLength` 0),
+/// `Catalog.ИнтервалыЗадолженностей` and
+/// `Catalog.РазделыИнвестиционныхПрограмм` (empty `<Owners/>`),
+/// `Catalog.ОбщероссийскийКлассификаторОсновныхФондов` (`HierarchyOfItems`,
+/// so no `IsFolder`) and the non-periodical
+/// `InformationRegister.НоменклатураАккредитованыхПоставщиков`; Документооборот
+/// КОРП 3.0.21.3 `Catalog.СостоянияЧатБота` (`HierarchyOfItems`). Every one is
+/// written with the platform's `~` marker and was written plain before.
+///
+/// A table the declaration index does not carry keeps the whole family table,
+/// which is what the reader did before it could read a declaration at all.
+fn form_dynamic_list_declared_std_attribute_pairs<'a>(
+    pairs: &'a [(&'static str, &'static str)],
+    main_table: &'a str,
+    declarations: Option<&'a MetadataFieldDeclarationIndex>,
+) -> impl Iterator<Item = &'a (&'static str, &'static str)> {
+    let declared = declarations.and_then(|index| index.table(main_table));
+    pairs
+        .iter()
+        .filter(move |(_, en)| declared.is_none_or(|declared| declared.declares(en)))
+}
+
+/// Whether a common attribute is a field of `main_table`, by its own declared
+/// `<Content>`. A common attribute the declaration index does not carry is a
+/// field of every table, as before.
+fn form_dynamic_list_table_carries_common_attribute(
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+    main_table: &str,
+    name: &str,
+) -> bool {
+    declarations
+        .and_then(|index| index.common_attribute(name))
+        .is_none_or(|content| content.covers(main_table))
 }
 
 /// `AutoFillAvailableFields` as the list-settings bag spells it; absent means
@@ -5415,6 +5514,7 @@ fn form_dynamic_list_main_table_auto_fields(
     main_table: &str,
     selection: &FormDynamicListQuerySelection,
     object_refs: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
 ) -> Option<BTreeSet<String>> {
     let kind = main_table.split('.').next()?;
     let pairs = form_dynamic_list_std_attribute_pairs(kind)?;
@@ -5422,7 +5522,10 @@ fn form_dynamic_list_main_table_auto_fields(
         [kind, name, _virtual_table] => format!("{kind}.{name}"),
         _ => main_table.to_string(),
     };
-    let mut candidates: Vec<String> = pairs.iter().map(|(ru, _)| (*ru).to_string()).collect();
+    let mut candidates: Vec<String> =
+        form_dynamic_list_declared_std_attribute_pairs(pairs, &base_table, declarations)
+            .map(|(ru, _)| (*ru).to_string())
+            .collect();
     if FORM_DYNAMIC_LIST_REGISTER_KINDS.contains(&kind) {
         candidates.extend(form_dynamic_list_main_table_children(
             &base_table,

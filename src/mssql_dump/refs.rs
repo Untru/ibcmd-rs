@@ -66,6 +66,260 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
     information_register_bool(graph.owner_fields.get(31)?)
 }
 
+/// What a metadata table declares about the existence of its own standard
+/// attributes.
+///
+/// A dynamic list resolves a remembered field name against the fields its main
+/// table has, and a standard attribute the table does not declare is not one of
+/// them: a catalog has no `Code` when `<CodeLength>` is zero, no `Description`
+/// when `<DescriptionLength>` is, no `Owner` when `<Owners>` names nobody, no
+/// `Parent` when it is not hierarchical and no `IsFolder` unless its hierarchy
+/// holds folders; an information register has no `Period` when it is
+/// `Nonperiodical`.
+///
+/// Every property is `None` when this reader could not name it, and an unread
+/// property withholds nothing: the attribute stays in the list's universe
+/// exactly as before, so a family this index does not decode behaves as it did.
+///
+/// Refused rather than guessed: `Number` on a document, business process or
+/// task whose `<NumberLength>` is zero, and `Recorder`/`LineNumber` on an
+/// independent information register. Both are the same shape as the rules
+/// above, and neither has a single platform observation on the stand -- over
+/// the whole corpus the two would have withdrawn a name from 446 ERP УХ and 240
+/// Документооборот lists without changing one written marker.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(super) struct MetadataTableStandardAttributes {
+    code_length: Option<u32>,
+    description_length: Option<u32>,
+    /// Whether `<Owners>` declares at least one owner.
+    owned: Option<bool>,
+    hierarchical: Option<bool>,
+    /// Whether `<HierarchyType>` is `HierarchyFoldersAndItems`.
+    folder_hierarchy: Option<bool>,
+    /// Whether `<InformationRegisterPeriodicity>` is anything but
+    /// `Nonperiodical`.
+    periodical: Option<bool>,
+}
+
+impl MetadataTableStandardAttributes {
+    /// Whether the table declares the standard attribute its family spells
+    /// `english`. A name this index knows no property for is declared.
+    pub(super) fn declares(&self, english: &str) -> bool {
+        match english {
+            "Code" => self.code_length != Some(0),
+            "Description" => self.description_length != Some(0),
+            "Owner" => self.owned != Some(false),
+            "Parent" => self.hierarchical != Some(false),
+            "IsFolder" => self.hierarchical != Some(false) && self.folder_hierarchy != Some(false),
+            "Period" => self.periodical != Some(false),
+            _ => true,
+        }
+    }
+}
+
+/// A common attribute's declared content: the tables it is a field of.
+///
+/// `<Content>` names the tables that opt in or out one by one and `<AutoUse>`
+/// settles the rest. A common attribute is a field of a dynamic list's main
+/// table only when the content puts it there -- ERP УХ 3.2.12.6 marks
+/// `~Список.КлассВНА` on `Catalog.ГруппыВНАМСФО`,
+/// `Document.ИзменениеПараметровВНАМСФО` and
+/// `Document.ВводНачальныхОстатковВНАМСФО`, none of which
+/// `CommonAttribute.КлассВНА` lists, and `~Список.НСИ_НеАктивный` on
+/// `Catalog.ПроизвольныйКлассификаторУХ` for the same reason.
+///
+/// An `<AutoUse>` this reader cannot name is a refusal: the declaration is left
+/// out of the index entirely and the attribute is admitted everywhere, as
+/// before.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(super) struct MetadataCommonAttributeContent {
+    auto_use: bool,
+    content: BTreeMap<String, bool>,
+}
+
+impl MetadataCommonAttributeContent {
+    pub(super) fn covers(&self, table: &str) -> bool {
+        self.content.get(table).copied().unwrap_or(self.auto_use)
+    }
+}
+
+/// The declarations a dynamic list's resolvable-field universe is built from.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(super) struct MetadataFieldDeclarationIndex {
+    tables: BTreeMap<String, MetadataTableStandardAttributes>,
+    common_attributes: BTreeMap<String, MetadataCommonAttributeContent>,
+}
+
+impl MetadataFieldDeclarationIndex {
+    pub(super) fn table(&self, reference: &str) -> Option<&MetadataTableStandardAttributes> {
+        self.tables.get(reference)
+    }
+
+    pub(super) fn common_attribute(&self, name: &str) -> Option<&MetadataCommonAttributeContent> {
+        self.common_attributes.get(name)
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_table(
+        mut self,
+        reference: &str,
+        declared: MetadataTableStandardAttributes,
+    ) -> Self {
+        self.tables.insert(reference.to_string(), declared);
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_common_attribute(
+        mut self,
+        name: &str,
+        content: MetadataCommonAttributeContent,
+    ) -> Self {
+        self.common_attributes.insert(name.to_string(), content);
+        self
+    }
+}
+
+#[cfg(test)]
+impl MetadataTableStandardAttributes {
+    pub(super) fn with_code_length(mut self, code_length: u32) -> Self {
+        self.code_length = Some(code_length);
+        self
+    }
+
+    pub(super) fn with_owners(mut self, owned: bool) -> Self {
+        self.owned = Some(owned);
+        self
+    }
+}
+
+#[cfg(test)]
+impl MetadataCommonAttributeContent {
+    pub(super) fn declared(auto_use: bool, content: &[(&str, bool)]) -> Self {
+        Self {
+            auto_use,
+            content: content
+                .iter()
+                .map(|(table, used)| ((*table).to_string(), *used))
+                .collect(),
+        }
+    }
+}
+
+/// Reads the declarations above off the same metadata records the rest of the
+/// dump is written from.
+pub(super) fn build_metadata_field_declaration_index_from_texts(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+) -> MetadataFieldDeclarationIndex {
+    let mut index = MetadataFieldDeclarationIndex::default();
+    for row in rows {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        match kind {
+            "Catalog" => {
+                if let Some(declared) = catalog_declared_standard_attributes(&row.text, header) {
+                    index
+                        .tables
+                        .insert(format!("Catalog.{}", header.name), declared);
+                }
+            }
+            "InformationRegister" => {
+                if let Some(declared) =
+                    information_register_declared_standard_attributes(&row.text, header)
+                {
+                    index
+                        .tables
+                        .insert(format!("InformationRegister.{}", header.name), declared);
+                }
+            }
+            "CommonAttribute" => {
+                if let Some(content) = common_attribute_declared_content(&row.text, object_refs) {
+                    index.common_attributes.insert(header.name.clone(), content);
+                }
+            }
+            _ => {}
+        }
+    }
+    index
+}
+
+/// Catalog properties read off the very slots
+/// `parse_strict_catalog_properties_from_text` reads for the catalog's own
+/// `Catalogs/<name>.xml`.
+fn catalog_declared_standard_attributes(
+    text: &str,
+    header: &MetadataHeader,
+) -> Option<MetadataTableStandardAttributes> {
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        text,
+        header,
+        &mut diagnostic,
+    )?;
+    let fields = &graph.owner_fields;
+    Some(MetadataTableStandardAttributes {
+        code_length: parse_exchange_plan_u32(fields.get(CATALOG_OWNER_FIELD_CODE_LENGTH)?),
+        description_length: parse_exchange_plan_u32(
+            fields.get(CATALOG_OWNER_FIELD_DESCRIPTION_LENGTH)?,
+        ),
+        owned: metadata_reference_collection_len(fields.get(CATALOG_OWNER_FIELD_OWNERS)?)
+            .map(|count| count > 0),
+        hierarchical: information_register_bool(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?),
+        folder_hierarchy: catalog_hierarchy_type_xml(
+            fields.get(CATALOG_OWNER_FIELD_HIERARCHY_TYPE)?,
+        )
+        .map(|hierarchy_type| hierarchy_type == "HierarchyFoldersAndItems"),
+        periodical: None,
+    })
+}
+
+/// The register's `<InformationRegisterPeriodicity>`, off the slot
+/// `parse_information_register_owner_properties` reads for the register's own
+/// `InformationRegisters/<name>.xml`.
+fn information_register_declared_standard_attributes(
+    text: &str,
+    header: &MetadataHeader,
+) -> Option<MetadataTableStandardAttributes> {
+    let fields = parse_information_register_owner_fields(text, header)?;
+    let periodicity = information_register_periodicity_xml(
+        fields.get(INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY)?,
+    )?;
+    Some(MetadataTableStandardAttributes {
+        periodical: Some(periodicity != "Nonperiodical"),
+        ..MetadataTableStandardAttributes::default()
+    })
+}
+
+/// `<AutoUse>` and `<Content>` off the same record
+/// `parse_common_attribute_properties_from_text` writes them from.
+fn common_attribute_declared_content(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataCommonAttributeContent> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("5") {
+        return None;
+    }
+    let use_fields = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0));
+    let auto_use = match parse_common_attribute_declared_auto_use(&fields, use_fields.as_deref())? {
+        "Use" => true,
+        "DontUse" => false,
+        // `AutoUse` itself is unobserved on the stand and its meaning for a
+        // table the content does not name is unevidenced: refused, not guessed.
+        _ => return None,
+    };
+    let content = parse_common_attribute_content(use_fields.as_deref()?, object_refs)
+        .into_iter()
+        .map(|item| (item.metadata, item.use_mode == "Use"))
+        .collect();
+    Some(MetadataCommonAttributeContent { auto_use, content })
+}
+
 #[allow(dead_code)]
 pub(super) fn build_metadata_object_reference_index(
     rows: &[ConfigRow],
