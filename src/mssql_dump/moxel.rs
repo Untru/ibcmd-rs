@@ -2664,7 +2664,7 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
         // guess whose "best length wins" comparison must not be inflated by
         // manufactured gap rows.
         let allow_forward_gap = Some(index) == anchored_row_block;
-        let mut rows = Vec::new();
+        let mut rows: Vec<MoxelRow> = Vec::new();
         let mut cursor = index + 3;
         let mut expected_row_index = 0usize;
         let mut explicit_count = 0usize;
@@ -2687,12 +2687,33 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
                 if row.index - expected_row_index > MAX_MOXEL_ROW_GAP {
                     break;
                 }
+                // A row the stream skips is a row at the ambient default
+                // format, which is exactly what a stored `0` format field
+                // means -- so it is manufactured with the same shape a stored
+                // row would have (`format_index` 1, `source_format_index`
+                // `Some(1)`) rather than with no source index at all.
+                //
+                // That matters because `compact_moxel_empty_row_ranges` is
+                // what turns adjacent cell-less rows with the same payload
+                // into one `<indexTo>` item, and it compares the source index
+                // too: a gap row carrying `None` never compared equal to the
+                // stored empty row in front of it, so the run was published
+                // one item per index.
+                // `Catalog.ГорячиеКлавиши.Template.ПФ_MXL_ГорячиеКлавиши`
+                // stores nine records and steps 3 -> 5; the platform publishes
+                // the empty record 3 as `<index>3</index><indexTo>4</indexTo>`
+                // and we published 3 and 4 separately. Where the row in front
+                // does carry a format the run must stay separate, and the same
+                // comparison keeps it separate -- see
+                // `Catalog.АналитическиеПанели.Template.ШаблонВиджета`, whose
+                // formatted empty row 7 is published alone and whose gap 8
+                // follows as its own item.
                 for gap_index in expected_row_index..row.index {
                     rows.push(MoxelRow {
                         index: gap_index,
                         index_to: None,
                         format_index: 1,
-                        source_format_index: None,
+                        source_format_index: Some(1),
                         columns_id: None,
                         cells: Vec::new(),
                     });
@@ -2982,13 +3003,26 @@ const MOXCEL_CELL_KNOWN_MASK: usize = (1 << MOXCEL_CELL_CONTROL_BIT)
 
 /// One typed value stored in a cell member.
 ///
-/// Evidence: the corpus stores five spellings — `{"U"}`, `{"S",text}`,
-/// `{"N",number}`, `{"D",yyyymmddhhmmss}` and `{"#",type,{index}}` — and the
-/// platform publishes them as `xsi:nil`, `xs:string`, `xs:decimal`,
-/// `xs:dateTime` and a bare `<r>` reference respectively.
+/// Evidence: the corpus stores `{"U"}`, `{"B",0|1}`, `{"S",text}`,
+/// `{"N",number}`, `{"D",yyyymmddhhmmss}` and `{"#",type,{index}}`, and the
+/// platform publishes them as `xsi:nil`, `xs:boolean`, `xs:string`,
+/// `xs:decimal`, `xs:dateTime` and a bare `<r>` reference respectively.
+///
+/// `"B"` was missing, and its cost was not one cell: a cell this reader
+/// refuses fails its row, and a failed row truncates the whole anchored row
+/// stream from that point on. `Report.
+/// РегламентированноеУведомлениеВозвратНДФЛНПДБиоресурсы.Template.
+/// Титульная_2026` declares 41 rows and published 21 -- it stops on
+/// `{2,32,{"B",0}}` at row 21, and native publishes exactly
+/// `<v xsi:type="xs:boolean">false</v>` there. ERP УХ 3.2.12.6 publishes 1,346
+/// booleans, every one of them `false`; `1` is unobserved on the stand, and is
+/// read as `true` because that is the same `0`/`1` spelling every other
+/// boolean in this format uses -- refusing it would truncate a row stream over
+/// a value the format plainly allows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum MoxelCellValue {
     Nil,
+    Boolean(bool),
     Text(String),
     Number(String),
     DateTime(String),
@@ -2999,6 +3033,11 @@ pub(super) fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
     let fields = split_1c_braced_fields(text, 0)?;
     match (parse_1c_string(fields.first()?)?.as_str(), fields.len()) {
         ("U", 1) => Some(MoxelCellValue::Nil),
+        ("B", 2) => match fields.get(1)?.trim() {
+            "0" => Some(MoxelCellValue::Boolean(false)),
+            "1" => Some(MoxelCellValue::Boolean(true)),
+            _ => None,
+        },
         ("S", 2) => Some(MoxelCellValue::Text(parse_1c_string(fields.get(1)?)?)),
         ("N", 2) => {
             let number = fields.get(1)?.trim();
@@ -3051,8 +3090,9 @@ fn parse_moxel_cell_control(text: &str) -> Option<String> {
 /// Storage order is fixed and is not the publication order: the control blob,
 /// the value, the detail value, the detail parameter and the picture parameter
 /// come first, then the cell's text list, then the note triple, and the text
-/// list's own trailing "formatted" flag closes the record. All 2 025 751
-/// records of the corpus are consumed exactly by this walk.
+/// list's own trailing "formatted" flag closes the record -- when the record
+/// carries it at all; see the flag's own note below. All 2 025 751 records of
+/// the 1С:УТ 11.5.27.75 corpus are consumed exactly by this walk.
 pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
     let fields = split_1c_braced_fields(text, 0)?;
     let mask = fields.first()?.trim().parse::<usize>().ok()?;
@@ -3083,7 +3123,22 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     // The flag opens one more field, which carries the record's own formatted
     // rendering of the same text.
     let formatted_at = match formatted_flag_at.and_then(|at| fields.get(at)) {
-        None => None,
+        None => {
+            // The flag is the record's last member, and a record may simply
+            // stop in front of it. Measured on ERP УХ 3.2.12.6: the cells of
+            // `Catalog.ВариантыНаладки.Template.Палитра` are
+            // `{16,<format>,<text list>}` with no flag at all, and native
+            // publishes their text as plain `<tl>` -- the file carries ten
+            // `<tl>` and no `<tfl>`. Requiring the flag refused every one of
+            // those cells, which failed their rows and truncated the row
+            // stream to a single row against the ten the body declares.
+            // Only a record that stops exactly here is accepted; any other
+            // arity is still refused.
+            if formatted_flag_at.is_some() {
+                expected -= 1;
+            }
+            None
+        }
         Some(flag) => match flag.trim() {
             "0" => None,
             "1" => {
@@ -6458,11 +6513,6 @@ fn moxel_config_type_ref(uuid: &str, generated_types: &BTreeMap<String, String>)
     generated_types.get(&uuid.to_ascii_lowercase()).cloned()
 }
 
-/// Fixed root trailer every MOXCEL body ends with: `0, 0, 1, 0, 0, 0`.
-/// Constant across all 683 spreadsheet templates, which is what makes the
-/// variable-length table in front of it addressable from the end.
-const MOXEL_ROOT_TRAILER_FIELDS: usize = 6;
-
 /// Decodes the document's input-mask table - a count-prefixed run of localized
 /// values sitting directly in front of the fixed root trailer.
 ///
@@ -6471,8 +6521,33 @@ const MOXEL_ROOT_TRAILER_FIELDS: usize = 6;
 /// count that equals the run length, and resolving format member 34 through
 /// the run reproduces every published `<mask>` - 1416 references over 683
 /// documents, zero mismatches. 618 documents declare the empty table (`0`).
+/// Where the root's variable-length tail table ends: right after the last
+/// braced root field, i.e. in front of the run of plain scalars the body ends
+/// with.
+///
+/// That run is not a fixed length. It was measured at six on
+/// 1С:УТ 11.5.27.75 (`0, 0, 1, 0, 0, 0`) and hardcoded as such; ERP УХ
+/// 3.2.12.6 writes five -- e.g. `Document.ЗаявлениеОВвозеТоваров.Template.
+/// СтатФормаУчетаПеремещенияТоваров2016Кв1` ends
+/// `…,1,{1,2,{"ru","999"},{"en","999"}},0,0,1,0,0`. Subtracting a fixed six
+/// there lands one field short of the table, the count check fails, and the
+/// whole mask table is dropped: across the ERP УХ templates still differing on
+/// the gate, native publishes 2,094 non-empty `<mask>` and 2,190 `<mask/>`
+/// against our 606 and 535.
+///
+/// Anchoring on the last braced field instead reads both shapes and needs no
+/// constant. A table whose count is `0` has no braced entry of its own, so the
+/// anchor lands in front of some earlier field and the count check below
+/// rejects it -- which is the same empty result the fixed offset produced.
+fn moxel_root_table_end(fields: &[&str]) -> Option<usize> {
+    fields
+        .iter()
+        .rposition(|field| field.trim_start().starts_with('{'))
+        .map(|index| index + 1)
+}
+
 pub(super) fn parse_moxel_mask_refs(fields: &[&str]) -> Vec<Vec<MoxelLocalizedValue>> {
-    let Some(end) = fields.len().checked_sub(MOXEL_ROOT_TRAILER_FIELDS) else {
+    let Some(end) = moxel_root_table_end(fields) else {
         return Vec::new();
     };
     let mut start = end;
@@ -12343,6 +12418,12 @@ fn push_moxel_cell_value_xml(xml: &mut String, element: &str, value: &MoxelCellV
         MoxelCellValue::Nil => {
             xml.push_str(&format!("\t\t\t\t\t<{element} xsi:nil=\"true\"/>\r\n"));
         }
+        MoxelCellValue::Boolean(value) => {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<{element} xsi:type=\"xs:boolean\">{}</{element}>\r\n",
+                if *value { "true" } else { "false" }
+            ));
+        }
         MoxelCellValue::Text(text) if text.is_empty() => {
             xml.push_str(&format!(
                 "\t\t\t\t\t<{element} xsi:type=\"xs:string\"/>\r\n"
@@ -12800,7 +12881,25 @@ mod moxel_exact_parity_tests {
         // not match the mask, are both refusals rather than a shifted read.
         assert!(parse_moxel_cell("{128,3,\"Расшифровка\"}", 0).is_none());
         assert!(parse_moxel_cell("{8,3,\"Расшифровка\",\"Поставщик\"}", 0).is_none());
-        assert!(parse_moxel_cell("{16,2,{1,0}}", 0).is_none());
+        // Two fields short of the mask is still a refusal.
+        assert!(parse_moxel_cell("{16,2}", 0).is_none());
+        // One field short is not: the trailing "formatted" flag is the
+        // record's last member and a record may stop in front of it. This
+        // assertion used to run the other way; ERP УХ 3.2.12.6 overturned it
+        // (see `parse_moxel_cell`), and the shape below is what
+        // `Catalog.ВариантыНаладки.Template.Палитра` stores in every one of
+        // its cells -- native publishes them as plain `<tl>`.
+        let flagless = parse_moxel_cell("{16,2,{1,1,{\"ru\",\"text\"}}}", 0)
+            .expect("a text record without its trailing flag is a real record");
+        assert!(!flagless.formatted_text);
+        assert_eq!(
+            flagless
+                .text
+                .iter()
+                .map(|value| value.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["text"]
+        );
     }
 
     /// A bilingual configuration declares one `v8:item` per configured
