@@ -1670,12 +1670,11 @@ impl FormFieldHeaderPictureSchema {
         self.picture_slot
     }
 
-    pub(crate) const fn kind(self) -> FormPictureValueKind {
-        self.value.kind()
-    }
-
-    pub(crate) const fn load_transparent(self) -> bool {
-        self.value.load_transparent()
+    /// The whole picture value, so a reader of this schema answers about the
+    /// transparent pixel from the same record it answers about the reference
+    /// and the transparency flag.
+    pub(crate) const fn picture(self) -> FormPictureValueSchema {
+        self.value
     }
 }
 
@@ -1683,11 +1682,18 @@ impl FormFieldHeaderPictureSchema {
 pub(crate) enum FormFieldHeaderPictureXmlProperty {
     Value,
     LoadTransparent,
+    TransparentPixel,
 }
 
+/// `<xr:TransparentPixel>` closes a picture element, behind
+/// `<xr:LoadTransparent>`, exactly as the stand-alone `ExtPicture` writer and
+/// the form command's own picture writer already spell it.  Over the 63 449
+/// picture elements of the five reference trees no picture writes the pixel
+/// anywhere but last.
 pub(crate) const FORM_FIELD_HEADER_PICTURE_XML_ORDER: &[FormFieldHeaderPictureXmlProperty] = &[
     FormFieldHeaderPictureXmlProperty::Value,
     FormFieldHeaderPictureXmlProperty::LoadTransparent,
+    FormFieldHeaderPictureXmlProperty::TransparentPixel,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

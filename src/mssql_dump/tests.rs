@@ -20617,6 +20617,7 @@ fn formats_table_search_additions_as_direct_sections() {
         footer_picture_ref: None,
         footer_picture_file_name: None,
         footer_picture_load_transparent: false,
+        footer_picture_transparent_pixel: None,
         picture_transparent_pixel: None,
         html_document_output: None,
         button_check: None,
@@ -20687,6 +20688,7 @@ fn formats_table_search_additions_as_direct_sections() {
         rows_picture_ref: None,
         rows_picture_file_name: None,
         rows_picture_load_transparent: false,
+        rows_picture_transparent_pixel: None,
         top_level_parent_nil: None,
         update_on_data_change: None,
         user_settings_group: None,
@@ -20827,6 +20829,7 @@ fn formats_table_search_additions_as_direct_sections() {
         choice_button_representation: None,
         choice_button_picture_ref: None,
         choice_button_picture_load_transparent: false,
+        choice_button_picture_transparent_pixel: None,
         drop_list_width: None,
         choice_history_on_input: None,
         auto_show_open_button_mode: None,
@@ -20837,6 +20840,7 @@ fn formats_table_search_additions_as_direct_sections() {
         header_picture_ref: None,
         header_picture_file_name: None,
         header_picture_load_transparent: false,
+        header_picture_transparent_pixel: None,
         picture_size: None,
         nonselected_picture_text: Vec::new(),
         picture_file_name: None,
@@ -20865,6 +20869,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_ref: None,
                 footer_picture_file_name: None,
                 footer_picture_load_transparent: false,
+                footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
                 html_document_output: None,
                 button_check: None,
@@ -20935,6 +20940,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 rows_picture_ref: None,
                 rows_picture_file_name: None,
                 rows_picture_load_transparent: false,
+                rows_picture_transparent_pixel: None,
                 top_level_parent_nil: None,
                 update_on_data_change: None,
                 user_settings_group: None,
@@ -21075,6 +21081,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
                 choice_button_picture_load_transparent: false,
+                choice_button_picture_transparent_pixel: None,
                 drop_list_width: None,
                 choice_history_on_input: None,
                 auto_show_open_button_mode: None,
@@ -21085,6 +21092,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 header_picture_ref: None,
                 header_picture_file_name: None,
                 header_picture_load_transparent: false,
+                header_picture_transparent_pixel: None,
                 picture_size: None,
                 nonselected_picture_text: Vec::new(),
                 picture_file_name: None,
@@ -21114,6 +21122,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_ref: None,
                 footer_picture_file_name: None,
                 footer_picture_load_transparent: false,
+                footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
                 html_document_output: None,
                 button_check: None,
@@ -21184,6 +21193,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 rows_picture_ref: None,
                 rows_picture_file_name: None,
                 rows_picture_load_transparent: false,
+                rows_picture_transparent_pixel: None,
                 top_level_parent_nil: None,
                 update_on_data_change: None,
                 user_settings_group: None,
@@ -21324,6 +21334,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
                 choice_button_picture_load_transparent: false,
+                choice_button_picture_transparent_pixel: None,
                 drop_list_width: None,
                 choice_history_on_input: None,
                 auto_show_open_button_mode: None,
@@ -21334,6 +21345,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 header_picture_ref: None,
                 header_picture_file_name: None,
                 header_picture_load_transparent: false,
+                header_picture_transparent_pixel: None,
                 picture_size: None,
                 nonselected_picture_text: Vec::new(),
                 picture_file_name: None,
@@ -22648,7 +22660,16 @@ fn rejects_form_item_assets_from_nearby_or_unrecognized_slots() {
 
 #[test]
 fn extracts_picture_decoration_from_wrapper_12() {
-    let field = r#"{12,{165,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СостояниеКартинка",{1,0},{1,0},{#base64:R0lGODlh}}"#;
+    // The payload rides the decoration's picture *value*, not a bare member of
+    // its record: over all 12 895 ERP УХ 3.2.12.6 and 1 738 Документооборот
+    // КОРП 3.0.21.3 form layouts every one of the 344 `#base64:` picture
+    // payloads sits at slot 7 of a ten-member `{4,3,{0},"",x,y,lt,…}` value and
+    // not one is a member of an item record, so the value is what this test
+    // states.  The value is also the only thing that knows the transparency
+    // flag and the transparent pixel; the previous spelling had the payload
+    // bare and no way to answer either, which is why the flag used to be a
+    // hardcoded `false`.
+    let field = r#"{12,{165,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СостояниеКартинка",{1,0},{1,0},{4,{4,3,{0},"",3,7,1,{{#base64:R0lGODlh}},0,""},0,2,0}}"#;
     let item = parse_form_child_item(
         field,
         None,
@@ -22669,7 +22690,8 @@ fn extracts_picture_decoration_from_wrapper_12() {
 
     assert!(xml.contains(r#"<PictureDecoration name="СостояниеКартинка" id="165">"#));
     assert!(xml.contains("<xr:Abs>Picture.gif</xr:Abs>"));
-    assert!(xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"));
+    assert!(xml.contains("<xr:LoadTransparent>true</xr:LoadTransparent>"));
+    assert!(xml.contains(r#"<xr:TransparentPixel x="3" y="7"/>"#));
     assert!(!xml.contains("<ExtendedTooltip"));
 
     let form_body = form_item_asset_test_body(&[
@@ -69969,11 +69991,15 @@ fn a_column_group_reads_its_header_picture_from_the_header_container() {
     }
 
     // A common picture resolves through the configuration's own reference index.
+    // A uuid the index does not carry names nothing in that configuration, and
+    // the platform writes such a reference as `<code>:<uuid>` rather than
+    // dropping the picture -- so an empty index yields the dangling spelling,
+    // not silence.
     const COMMON: &str = r#"{4,1,{0,9f600542-06a7-4fbb-abc0-e9961b2d454f},"",-1,-1,0,0,""}"#;
     assert_eq!(
-        parse(COMMON).header_picture_ref,
-        None,
-        "without the index there is no name"
+        parse(COMMON).header_picture_ref.as_deref(),
+        Some("0:9f600542-06a7-4fbb-abc0-e9961b2d454f"),
+        "a uuid no index carries is written as the dangling reference"
     );
     let group = parse_with(
         COMMON,

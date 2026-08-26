@@ -30447,6 +30447,30 @@ fn parse_common_command_picture_value(
             {
                 return Some((Some(reference.clone()), load_transparent));
             }
+            // A uuid that names nothing in the configuration is still a
+            // reference the platform writes: it spells it `<code>:<uuid>` --
+            // the descriptor's own two members, joined -- rather than dropping
+            // the picture.  Answering `None` here dropped the whole `<Picture>`
+            // element, not just the name.
+            //
+            // Census over ERP УХ 3.2.12.6, Документооборот КОРП 3.0.21.3,
+            // УТ 11.5.27.75, БСП демо и БСП базовая: of the 63 449 `<xr:Ref>`
+            // values those five trees write, exactly three spellings occur --
+            // 39 566 `CommonPicture.<name>`, 23 873 `StdPicture.<name>` and 16
+            // of this shape, all of them `0:<uuid>`, all in ERP УХ, over 10
+            // distinct uuids.  Every one of those uuids occurs *only* inside
+            // form bodies and names no object anywhere in the configuration,
+            // which is why the lookups above cannot answer them; the one that
+            // also occurs outside a form body is an equally dangling
+            // `<xr:Item xsi:type="xr:MDObjectRef">` of a subsystem's content
+            // list, written there as the bare uuid.
+            //
+            // Restricted to a uuid the object index does not carry at all: a
+            // uuid that does resolve, to something that is not a common
+            // picture, is a different question this corpus does not observe.
+            if !object_refs.contains_key(uuid) {
+                return Some((Some(format!("0:{uuid}")), load_transparent));
+            }
         }
     }
     Some((None, load_transparent))

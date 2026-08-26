@@ -1281,6 +1281,7 @@ pub(super) struct FormChildItem {
     pub(super) rows_picture_ref: Option<String>,
     pub(super) rows_picture_file_name: Option<String>,
     pub(super) rows_picture_load_transparent: bool,
+    pub(super) rows_picture_transparent_pixel: Option<(i64, i64)>,
     pub(super) top_level_parent_nil: Option<bool>,
     pub(super) update_on_data_change: Option<&'static str>,
     pub(super) user_settings_group: Option<String>,
@@ -1423,6 +1424,7 @@ pub(super) struct FormChildItem {
     pub(super) choice_button_representation: Option<&'static str>,
     pub(super) choice_button_picture_ref: Option<String>,
     pub(super) choice_button_picture_load_transparent: bool,
+    pub(super) choice_button_picture_transparent_pixel: Option<(i64, i64)>,
     pub(super) drop_list_width: Option<String>,
     pub(super) choice_history_on_input: Option<&'static str>,
     pub(super) auto_show_open_button_mode: Option<&'static str>,
@@ -1433,9 +1435,11 @@ pub(super) struct FormChildItem {
     pub(super) header_picture_ref: Option<String>,
     pub(super) header_picture_file_name: Option<String>,
     pub(super) header_picture_load_transparent: bool,
+    pub(super) header_picture_transparent_pixel: Option<(i64, i64)>,
     pub(super) footer_picture_ref: Option<String>,
     pub(super) footer_picture_file_name: Option<String>,
     pub(super) footer_picture_load_transparent: bool,
+    pub(super) footer_picture_transparent_pixel: Option<(i64, i64)>,
     pub(super) picture_size: Option<&'static str>,
     pub(super) zoomable: Option<bool>,
     pub(super) image_scale: Option<String>,
@@ -9975,6 +9979,44 @@ fn parse_form_child_item_with_metadata_owners(
     } else {
         None
     };
+    // A `PictureDecoration` used to answer about its picture three times over:
+    // a reference scan that knew nothing about payloads, a payload scan that
+    // knew nothing about the record it sat in -- so the transparency flag it
+    // reported was a hardcoded `false` -- and no answer at all about the
+    // transparent pixel.  One schema read answers all three, from the one
+    // record, so the three cannot disagree.
+    let picture_decoration_picture = (tag == "PictureDecoration")
+        .then(|| parse_form_picture_decoration_picture(&fields, object_refs))
+        .flatten();
+    // The transparent pixel of the picture a `Button`, a `PictureField`, a
+    // `Popup` or a `Page` names by reference, read from the same slot the
+    // reference itself came from.
+    let reference_picture_transparent_pixel =
+        if tag == "Button" && form_button_layout_is_extended(fields) {
+            fields
+                .get(25 + button_top_level_offset)
+                .and_then(|field| form_picture_value_transparent_pixel(field))
+        } else if tag == "PictureField" {
+            picture_field_options
+                .as_deref()
+                .and_then(|options| options.get(5))
+                .and_then(|field| form_picture_value_transparent_pixel(field))
+        } else if tag == "Popup" {
+            fields
+                .get(20)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+                .and_then(|nested| {
+                    nested
+                        .get(1)
+                        .and_then(|field| form_picture_value_transparent_pixel(field))
+                })
+        } else if tag == "Page" {
+            page_picture
+                .as_ref()
+                .and_then(|picture| picture.transparent_pixel)
+        } else {
+            None
+        };
     let mut item = FormChildItem {
         tag,
         id: id.to_string(),
@@ -10325,6 +10367,9 @@ fn parse_form_child_item_with_metadata_owners(
         rows_picture_load_transparent: rows_picture
             .as_ref()
             .is_some_and(|picture| picture.load_transparent),
+        rows_picture_transparent_pixel: rows_picture
+            .as_ref()
+            .and_then(|picture| picture.transparent_pixel),
         top_level_parent_nil: if table_schema.is_some() {
             strict_table_root_properties.top_level_parent_nil
         } else if tag == "Table" && !ordinary_table_layout {
@@ -11754,6 +11799,9 @@ fn parse_form_child_item_with_metadata_owners(
         choice_button_picture_load_transparent: choice_button_picture
             .as_ref()
             .is_some_and(|picture| picture.load_transparent),
+        choice_button_picture_transparent_pixel: choice_button_picture
+            .as_ref()
+            .and_then(|picture| picture.transparent_pixel),
         drop_list_width: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| parse_form_input_field_drop_list_width(*schema, options)),
@@ -11811,8 +11859,9 @@ fn parse_form_child_item_with_metadata_owners(
             parse_form_picture_field_value(picture_field_options.as_deref(), object_refs)
                 .map(|(reference, _)| reference)
         } else if tag == "PictureDecoration" {
-            parse_form_picture_decoration_picture_value(&fields, object_refs)
-                .map(|(reference, _)| reference)
+            picture_decoration_picture
+                .as_ref()
+                .and_then(|picture| picture.reference.clone())
         } else if tag == "Popup" {
             fields
                 .get(20)
@@ -11846,9 +11895,9 @@ fn parse_form_child_item_with_metadata_owners(
                 })
                 .unwrap_or(false)
         } else if tag == "PictureDecoration" {
-            parse_form_picture_decoration_picture_value(&fields, object_refs)
-                .map(|(_, load_transparent)| load_transparent)
-                .unwrap_or(false)
+            picture_decoration_picture
+                .as_ref()
+                .is_some_and(|picture| picture.load_transparent)
         } else if tag == "Popup" {
             fields
                 .get(20)
@@ -11871,6 +11920,9 @@ fn parse_form_child_item_with_metadata_owners(
         header_picture_load_transparent: header_picture
             .as_ref()
             .is_some_and(|picture| picture.load_transparent),
+        header_picture_transparent_pixel: header_picture
+            .as_ref()
+            .and_then(|picture| picture.transparent_pixel),
         footer_picture_ref: footer_picture
             .as_ref()
             .and_then(|picture| picture.reference.clone()),
@@ -11880,6 +11932,9 @@ fn parse_form_child_item_with_metadata_owners(
         footer_picture_load_transparent: footer_picture
             .as_ref()
             .is_some_and(|picture| picture.load_transparent),
+        footer_picture_transparent_pixel: footer_picture
+            .as_ref()
+            .and_then(|picture| picture.transparent_pixel),
         picture_size: if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_size(&fields)
         } else if tag == "PictureField" {
@@ -11931,15 +11986,29 @@ fn parse_form_child_item_with_metadata_owners(
             Vec::new()
         },
         picture_file_name: if tag == "PictureDecoration" {
-            parse_form_picture_decoration_file_name(&fields).map(str::to_string)
+            picture_decoration_picture
+                .as_ref()
+                .and_then(|picture| picture.file_name.clone())
         } else {
             embedded_picture
                 .as_ref()
                 .map(|picture| picture.file_name.clone())
         },
-        picture_transparent_pixel: embedded_picture
-            .as_ref()
-            .and_then(|picture| picture.transparent_pixel),
+        picture_transparent_pixel: if tag == "PictureDecoration" {
+            picture_decoration_picture
+                .as_ref()
+                .and_then(|picture| picture.transparent_pixel)
+        } else {
+            embedded_picture
+                .as_ref()
+                .and_then(|picture| picture.transparent_pixel)
+                .or_else(|| {
+                    // A reference picture declares the pixel in the very
+                    // members the schema reads for the transparency flag, so
+                    // the owner that reads the reference answers about it too.
+                    reference_picture_transparent_pixel
+                })
+        },
         title,
         usual_group_shortcut: extended_group_options
             .as_ref()
@@ -14837,14 +14906,7 @@ fn parse_form_input_field_choice_button_picture(
     }
     let value = split_1c_braced_fields(raw, 0)?;
     let picture = schema.choice_button_picture(&value)?;
-    parse_form_owned_picture(
-        raw,
-        &value,
-        picture.kind(),
-        picture.load_transparent(),
-        "ChoiceButtonPicture",
-        object_refs,
-    )
+    parse_form_owned_picture(raw, &value, picture, "ChoiceButtonPicture", object_refs)
 }
 
 fn parse_form_input_field_drop_list_width(
@@ -17227,14 +17289,6 @@ pub(super) fn is_form_extended_tooltip_name(name: &str) -> bool {
         })
 }
 
-pub(super) fn parse_form_picture_decoration_file_name(fields: &[&str]) -> Option<&'static str> {
-    fields.iter().find_map(|field| {
-        let payload = extract_base64_payload(field)?;
-        let content = decode_base64_mime(payload)?;
-        is_form_item_picture_content(&content).then(|| ext_picture_file_name(&content))
-    })
-}
-
 /// The `<xr:Abs>` file name and transparency of a picture the control carries
 /// inline, read from that control's own picture slot.
 ///
@@ -17283,13 +17337,27 @@ struct FormEmbeddedPicture {
     transparent_pixel: Option<(i64, i64)>,
 }
 
-pub(super) fn parse_form_picture_decoration_picture_value(
+/// The whole picture of a `PictureDecoration`, read through the picture-value
+/// schema rather than by scanning for a reference and, separately, for a
+/// payload.
+///
+/// A decoration keeps its picture one level down, as member 1 of the container
+/// its slot holds -- the same nesting a `Popup`'s picture uses -- and the
+/// schema is what says whether that record is a reference, a payload or empty,
+/// what its transparency flag is and whether it declares a transparent pixel.
+/// The container is found by shape, as the reference scan already did, because
+/// the decoration's own record is variable-length.
+fn parse_form_picture_decoration_picture(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
-) -> Option<(String, bool)> {
-    fields
-        .iter()
-        .find_map(|field| parse_form_popup_picture_value(field.trim(), object_refs))
+) -> Option<FormOwnedPicture> {
+    fields.iter().find_map(|field| {
+        let container = split_1c_braced_fields(field.trim(), 0)?;
+        let raw = container.get(1)?.trim();
+        let value = split_1c_braced_fields(raw, 0)?;
+        let schema = FormPictureValueSchema::from_raw_layout(&value)?;
+        parse_form_owned_picture(raw, &value, schema, "Picture", object_refs)
+    })
 }
 
 /// `PictureSize` code table for managed-form controls.
@@ -17370,6 +17438,20 @@ struct FormOwnedPicture {
     reference: Option<String>,
     file_name: Option<String>,
     load_transparent: bool,
+    transparent_pixel: Option<(i64, i64)>,
+}
+
+/// The transparent pixel a picture value declares, read by the one schema that
+/// owns the picture-value shape.
+///
+/// Members 4 and 5 of the value are the pixel's coordinates and `-1, -1` when
+/// there is none; `FormPictureValueSchema` has read them since the pair became
+/// part of the shape test, but the per-owner readers that address a picture by
+/// its reference dropped them on the way out, so a picture that declares a
+/// pixel lost it in every owner but the two that read the schema directly.
+fn form_picture_value_transparent_pixel(field: &str) -> Option<(i64, i64)> {
+    let value = split_1c_braced_fields(field.trim(), 0)?;
+    FormPictureValueSchema::from_raw_layout(&value)?.transparent_pixel()
 }
 
 fn parse_form_page_picture(
@@ -17380,14 +17462,7 @@ fn parse_form_page_picture(
     let raw = options.get(schema.picture_option_slot())?.trim();
     let value = split_1c_braced_fields(raw, 0)?;
     let value_schema = schema.picture(&value)?;
-    parse_form_owned_picture(
-        raw,
-        &value,
-        value_schema.kind(),
-        value_schema.load_transparent(),
-        "Picture",
-        object_refs,
-    )
+    parse_form_owned_picture(raw, &value, value_schema, "Picture", object_refs)
 }
 
 fn parse_form_field_header_picture(
@@ -17410,14 +17485,7 @@ fn parse_form_field_header_picture(
     if schema.picture_slot() != picture_slot {
         return None;
     }
-    parse_form_owned_picture(
-        raw,
-        &value,
-        schema.kind(),
-        schema.load_transparent(),
-        "HeaderPicture",
-        object_refs,
-    )
+    parse_form_owned_picture(raw, &value, schema.picture(), "HeaderPicture", object_refs)
 }
 
 /// `FooterPicture` of a field, read from the slot behind its header picture.
@@ -17441,14 +17509,7 @@ fn parse_form_field_footer_picture(
     if schema.picture_slot() != picture_slot {
         return None;
     }
-    parse_form_owned_picture(
-        raw,
-        &value,
-        schema.kind(),
-        schema.load_transparent(),
-        "FooterPicture",
-        object_refs,
-    )
+    parse_form_owned_picture(raw, &value, schema.picture(), "FooterPicture", object_refs)
 }
 
 /// `HeaderPicture` of a `ColumnGroup`, read one level down from the header
@@ -17475,14 +17536,7 @@ fn parse_form_column_group_header_picture(
     if schema.picture_slot() != FormFieldHeaderPictureSchema::COLUMN_GROUP_PICTURE_SLOT {
         return None;
     }
-    parse_form_owned_picture(
-        raw,
-        &value,
-        schema.kind(),
-        schema.load_transparent(),
-        "HeaderPicture",
-        object_refs,
-    )
+    parse_form_owned_picture(raw, &value, schema.picture(), "HeaderPicture", object_refs)
 }
 
 fn parse_form_table_rows_picture(
@@ -17493,25 +17547,19 @@ fn parse_form_table_rows_picture(
     let raw = fields.get(schema.rows_picture_slot())?.trim();
     let value = split_1c_braced_fields(raw, 0)?;
     let value_schema = schema.rows_picture(&value)?;
-    parse_form_owned_picture(
-        raw,
-        &value,
-        value_schema.kind(),
-        value_schema.load_transparent(),
-        "RowsPicture",
-        object_refs,
-    )
+    parse_form_owned_picture(raw, &value, value_schema, "RowsPicture", object_refs)
 }
 
 fn parse_form_owned_picture(
     raw: &str,
     value: &[&str],
-    kind: FormPictureValueKind,
-    expected_load_transparent: bool,
+    schema: FormPictureValueSchema,
     property_name: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormOwnedPicture> {
-    match kind {
+    let expected_load_transparent = schema.load_transparent();
+    let transparent_pixel = schema.transparent_pixel();
+    match schema.kind() {
         FormPictureValueKind::Empty => None,
         FormPictureValueKind::Reference => {
             let reference_fields = split_1c_braced_fields(value.get(2)?.trim(), 0)?;
@@ -17532,6 +17580,7 @@ fn parse_form_owned_picture(
                 reference: Some(reference?),
                 file_name: None,
                 load_transparent,
+                transparent_pixel,
             })
         }
         FormPictureValueKind::Embedded => {
@@ -17546,6 +17595,7 @@ fn parse_form_owned_picture(
                 reference: None,
                 file_name: Some(form_item_picture_file_name(property_name, &content)),
                 load_transparent: expected_load_transparent,
+                transparent_pixel,
             })
         }
     }
@@ -23150,24 +23200,14 @@ fn format_form_table_property_xml(
             if item.rows_picture_ref.is_none() && item.rows_picture_file_name.is_none() {
                 String::new()
             } else {
-                let mut xml = format!("{tab}<RowsPicture>\r\n");
-                if let Some(reference) = &item.rows_picture_ref {
-                    xml.push_str(&format!(
-                        "{tab}\t<xr:Ref>{}</xr:Ref>\r\n",
-                        escape_xml_text(reference)
-                    ));
-                } else if let Some(file_name) = &item.rows_picture_file_name {
-                    xml.push_str(&format!(
-                        "{tab}\t<xr:Abs>{}</xr:Abs>\r\n",
-                        escape_xml_text(file_name)
-                    ));
-                }
-                xml.push_str(&format!(
-                    "{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}</RowsPicture>\r\n",
-                    xml_bool(item.rows_picture_load_transparent)
-                ));
-                xml
+                format_form_picture_element(
+                    "RowsPicture",
+                    item.rows_picture_ref.as_deref(),
+                    item.rows_picture_file_name.as_deref(),
+                    item.rows_picture_load_transparent,
+                    item.rows_picture_transparent_pixel,
+                    indent,
+                )
             }
         }
         FormTableXmlProperty::BackColor => item
@@ -24467,13 +24507,13 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "Button"
         && let Some(reference) = &item.picture_ref
     {
-        xml.push_str(&format!(
-            "{tab}\t<Picture>\r\n\
-{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</Picture>\r\n",
-            escape_xml_text(reference),
-            xml_bool(item.picture_load_transparent)
+        xml.push_str(&format_form_picture_element(
+            "Picture",
+            Some(reference),
+            None,
+            item.picture_load_transparent,
+            item.picture_transparent_pixel,
+            indent + 1,
         ));
     }
     // The inline payload occupies the same slot and the same position as the
@@ -24483,13 +24523,13 @@ pub(super) fn format_form_child_item_xml(
         && item.picture_ref.is_none()
         && let Some(file_name) = &item.picture_file_name
     {
-        xml.push_str(&format!(
-            "{tab}\t<Picture>\r\n\
-{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</Picture>\r\n",
-            escape_xml_text(file_name),
-            xml_bool(item.picture_load_transparent)
+        xml.push_str(&format_form_picture_element(
+            "Picture",
+            None,
+            Some(file_name),
+            item.picture_load_transparent,
+            item.picture_transparent_pixel,
+            indent + 1,
         ));
     }
     // `LabelField` keeps `Hiperlink` behind its stretch pair and behind
@@ -24688,32 +24728,14 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if item.tag == "PictureField" {
-        if let Some(reference) = &item.picture_ref {
-            xml.push_str(&format!(
-                "{tab}\t<ValuesPicture>\r\n\
-{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</ValuesPicture>\r\n",
-                escape_xml_text(reference),
-                xml_bool(item.picture_load_transparent)
-            ));
-        } else if let Some(file_name) = &item.picture_file_name {
-            xml.push_str(&format!(
-                "{tab}\t<ValuesPicture>\r\n\
-{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
-                escape_xml_text(file_name),
-                xml_bool(item.picture_load_transparent)
-            ));
-            // The transparent pixel closes the picture, exactly as the
-            // stand-alone `ExtPicture` writer already spells it.
-            if let Some((x, y)) = item.picture_transparent_pixel {
-                xml.push_str(&format!(
-                    "{tab}\t\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
-                ));
-            }
-            xml.push_str(&format!("{tab}\t</ValuesPicture>\r\n"));
-        }
+        xml.push_str(&format_form_picture_element(
+            "ValuesPicture",
+            item.picture_ref.as_deref(),
+            item.picture_file_name.as_deref(),
+            item.picture_load_transparent,
+            item.picture_transparent_pixel,
+            indent + 1,
+        ));
         // A `PictureField` writes `BorderColor` between its `ValuesPicture` and
         // its `Border`. UT 11.5.27.75 native tree, all 24 picture fields that
         // carry one: `ValuesPicture` (24), `DataPath` (24), `TitleLocation`
@@ -24846,13 +24868,13 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if let Some(reference) = &item.choice_button_picture_ref {
-        xml.push_str(&format!(
-            "{tab}\t<ChoiceButtonPicture>\r\n\
-{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</ChoiceButtonPicture>\r\n",
-            escape_xml_text(reference),
-            xml_bool(item.choice_button_picture_load_transparent)
+        xml.push_str(&format_form_picture_element(
+            "ChoiceButtonPicture",
+            Some(reference),
+            None,
+            item.choice_button_picture_load_transparent,
+            item.choice_button_picture_transparent_pixel,
+            indent + 1,
         ));
     }
     if let Some(value) = &item.input_min_value {
@@ -25406,25 +25428,14 @@ pub(super) fn format_form_child_item_xml(
                 &item.nonselected_picture_text,
                 indent + 1,
             ));
-            if let Some(reference) = &item.picture_ref {
-                xml.push_str(&format!(
-                    "{tab}\t<Picture>\r\n\
-{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</Picture>\r\n",
-                    escape_xml_text(reference),
-                    xml_bool(item.picture_load_transparent)
-                ));
-            }
-            if let Some(file_name) = &item.picture_file_name {
-                xml.push_str(&format!(
-                    "{tab}\t<Picture>\r\n\
-{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
-{tab}\t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
-{tab}\t</Picture>\r\n",
-                    escape_xml_text(file_name)
-                ));
-            }
+            xml.push_str(&format_form_picture_element(
+                "Picture",
+                item.picture_ref.as_deref(),
+                item.picture_file_name.as_deref(),
+                item.picture_load_transparent,
+                item.picture_transparent_pixel,
+                indent + 1,
+            ));
             // The drag pair closes the decoration's scalar run: on the 4
             // native decorations that carry `EnableDrag` it trails
             // `HorizontalStretch` (4), `Font` (4), `Title` (4), `Hyperlink`
@@ -25587,13 +25598,13 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "Popup"
         && let Some(reference) = &item.picture_ref
     {
-        xml.push_str(&format!(
-            "{tab}\t<Picture>\r\n\
-{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</Picture>\r\n",
-            escape_xml_text(reference),
-            xml_bool(item.picture_load_transparent)
+        xml.push_str(&format_form_picture_element(
+            "Picture",
+            Some(reference),
+            None,
+            item.picture_load_transparent,
+            item.picture_transparent_pixel,
+            indent + 1,
         ));
     }
     if item.tag == "Popup"
@@ -26092,13 +26103,13 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
             }
             FormPageXmlProperty::Picture => {
                 if let Some(reference) = &item.picture_ref {
-                    xml.push_str(&format!(
-                        "{tab}<Picture>\r\n\
-{tab}\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}</Picture>\r\n",
-                        escape_xml_text(reference),
-                        xml_bool(item.picture_load_transparent)
+                    xml.push_str(&format_form_picture_element(
+                        "Picture",
+                        Some(reference),
+                        None,
+                        item.picture_load_transparent,
+                        item.picture_transparent_pixel,
+                        indent,
                     ));
                 }
             }
@@ -26721,6 +26732,47 @@ fn format_form_tooltip_representation_xml(
         .unwrap_or_default()
 }
 
+/// One picture element for every owner that names a picture inline.
+///
+/// The value member is `<xr:Ref>` for a reference and `<xr:Abs>` for a payload
+/// the control carries itself -- a record is one or the other and never both --
+/// followed by the transparency flag and, when the record declares one, the
+/// transparent pixel.  Every owner used to spell this out for itself, and each
+/// spelling that predated the pixel dropped it; with one writer a picture
+/// cannot be written two ways.
+fn format_form_picture_element(
+    element: &str,
+    reference: Option<&str>,
+    file_name: Option<&str>,
+    load_transparent: bool,
+    transparent_pixel: Option<(i64, i64)>,
+    indent: usize,
+) -> String {
+    let tab = "\t".repeat(indent);
+    let value = match (reference, file_name) {
+        (Some(reference), _) => {
+            format!("{tab}\t<xr:Ref>{}</xr:Ref>\r\n", escape_xml_text(reference))
+        }
+        (None, Some(file_name)) => {
+            format!("{tab}\t<xr:Abs>{}</xr:Abs>\r\n", escape_xml_text(file_name))
+        }
+        (None, None) => return String::new(),
+    };
+    let mut xml = format!(
+        "{tab}<{element}>\r\n\
+{value}\
+{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+        xml_bool(load_transparent)
+    );
+    if let Some((x, y)) = transparent_pixel {
+        xml.push_str(&format!(
+            "{tab}\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+        ));
+    }
+    xml.push_str(&format!("{tab}</{element}>\r\n"));
+    xml
+}
+
 fn format_form_field_header_picture_xml(item: &FormChildItem, indent: usize) -> String {
     if item.header_picture_ref.is_none() && item.header_picture_file_name.is_none() {
         return String::new();
@@ -26747,6 +26799,13 @@ fn format_form_field_header_picture_xml(item: &FormChildItem, indent: usize) -> 
                     "{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
                     xml_bool(item.header_picture_load_transparent)
                 ));
+            }
+            FormFieldHeaderPictureXmlProperty::TransparentPixel => {
+                if let Some((x, y)) = item.header_picture_transparent_pixel {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+                    ));
+                }
             }
         }
     }
@@ -26782,6 +26841,13 @@ fn format_form_field_footer_picture_xml(item: &FormChildItem, indent: usize) -> 
                     "{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
                     xml_bool(item.footer_picture_load_transparent)
                 ));
+            }
+            FormFieldHeaderPictureXmlProperty::TransparentPixel => {
+                if let Some((x, y)) = item.footer_picture_transparent_pixel {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+                    ));
+                }
             }
         }
     }
