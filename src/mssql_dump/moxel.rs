@@ -8863,10 +8863,41 @@ pub(super) fn moxel_picture_vertical_alignment(value: usize) -> Option<&'static 
     }
 }
 
+/// Member 39 of the format record.
+///
+/// Measured on ERP УХ 3.2.12.6 by pairing each document's stored member-39
+/// values with the `<textPosition>` values the platform publishes for the
+/// same document. Every one of the 16 `Template.xml` that publish a
+/// non-`Auto` position was decoded out of `cf extract`'s `unpacked.bin`, and
+/// in each the two multisets agree exactly, with no unpaired stored value and
+/// no unpaired published one:
+///
+/// | code | published | documents | occurrences |
+/// | ---: | --- | ---: | ---: |
+/// | 0 | `Left` | 1 | 1 |
+/// | 1 | `Right` | 5 | 13 |
+/// | 2 | `Top` | 1 | 2 |
+/// | 3 | `Bottom` | 2 | 2 |
+/// | 4 | `OnTop` | 7 | 7 |
+/// | 5 | `Auto` | 1 | 1 |
+///
+/// `ОбменСКонтрагентами/ШтампПЭП_ru` is the one document that mixes two
+/// codes (`5` and `1`) and publishes exactly one `Auto` and one `Right`, so
+/// the pairing is not an artefact of one code per document. `Auto` is
+/// otherwise published 513 times across the corpus, in documents this writer
+/// already reproduces byte for byte.
+///
+/// Codes 2, 3 and 4 were absent from this table, and the format member was
+/// dropped whole wherever they occurred, taking 7 ERP УХ documents' whole
+/// `<format>` element with it. A code the corpus does not spell stays a typed
+/// refusal.
 pub(super) fn moxel_text_position(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Left"),
         1 => Some("Right"),
+        2 => Some("Top"),
+        3 => Some("Bottom"),
+        4 => Some("OnTop"),
         5 => Some("Auto"),
         _ => None,
     }
