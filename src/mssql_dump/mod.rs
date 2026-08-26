@@ -7404,6 +7404,7 @@ fn parse_information_register_child_command_properties_from_fields(
     }
     let (picture_ref, picture_load_transparent) =
         parse_information_register_command_picture_descriptor(fields.get(1)?, object_refs)?;
+    let picture_transparent_pixel = parse_metadata_picture_transparent_pixel(fields.get(1)?);
     let header_fields = split_1c_braced_fields(fields.get(9)?, 0)?;
     let header_has_trailing_default = match header_fields.len() {
         9 => true,
@@ -7458,6 +7459,7 @@ fn parse_information_register_child_command_properties_from_fields(
         representation,
         picture_ref,
         picture_load_transparent,
+        picture_transparent_pixel,
         tooltip: parse_information_register_localized_value(fields.get(3)?)?,
         shortcut,
         include_help_in_contents: false,
@@ -7990,6 +7992,7 @@ struct SubsystemProperties {
     explanation: Vec<(String, String)>,
     picture_ref: Option<String>,
     picture_load_transparent: bool,
+    picture_transparent_pixel: Option<(i32, i32)>,
     content: Vec<String>,
     child_subsystems: Vec<String>,
 }
@@ -8884,6 +8887,7 @@ struct CommonCommandProperties {
     representation: &'static str,
     picture_ref: Option<String>,
     picture_load_transparent: bool,
+    picture_transparent_pixel: Option<(i32, i32)>,
     tooltip: Vec<(String, String)>,
     shortcut: Option<String>,
     include_help_in_contents: bool,
@@ -8898,6 +8902,7 @@ struct CommandGroupProperties {
     representation: &'static str,
     picture_ref: Option<String>,
     picture_load_transparent: bool,
+    picture_transparent_pixel: Option<(i32, i32)>,
     tooltip: Vec<(String, String)>,
     category: &'static str,
 }
@@ -11467,6 +11472,7 @@ fn parse_subsystem_properties_from_text(
     let root_fields = split_1c_braced_fields(text, 0)?;
     let (picture_ref, picture_load_transparent) =
         parse_command_group_picture_value(fields.get(5)?, object_refs)?;
+    let picture_transparent_pixel = parse_metadata_picture_transparent_pixel(fields.get(5)?);
     Some(SubsystemProperties {
         include_help_in_contents: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(false),
         include_in_command_interface: parse_1c_bool_field(fields.get(4).copied()).unwrap_or(true),
@@ -11477,6 +11483,7 @@ fn parse_subsystem_properties_from_text(
             .unwrap_or_default(),
         picture_ref,
         picture_load_transparent,
+        picture_transparent_pixel,
         content: parse_subsystem_content(fields.get(7).copied(), object_refs),
         child_subsystems: parse_subsystem_child_references(
             root_fields.get(3).copied(),
@@ -30862,6 +30869,7 @@ fn parse_command_group_properties_from_text(
     }
     let (picture_ref, picture_load_transparent) =
         parse_command_group_picture_value(fields.get(1)?, object_refs)?;
+    let picture_transparent_pixel = parse_metadata_picture_transparent_pixel(fields.get(1)?);
     let category = command_group_category_xml(fields.get(2)?.trim().parse().ok()?);
     let representation = command_group_representation_xml(fields.get(3)?.trim().parse().ok()?);
     let tooltip = parse_1c_synonyms(fields.get(4).copied().unwrap_or("{0}"));
@@ -30870,6 +30878,7 @@ fn parse_command_group_properties_from_text(
         representation,
         picture_ref,
         picture_load_transparent,
+        picture_transparent_pixel,
         tooltip,
         category,
     })
@@ -30925,6 +30934,7 @@ fn parse_common_command_properties_from_text(
     }
     let (picture_ref, picture_load_transparent) =
         parse_common_command_picture_value(fields.get(1)?, object_refs)?;
+    let picture_transparent_pixel = parse_metadata_picture_transparent_pixel(fields.get(1)?);
     let representation = common_command_representation_xml(fields.get(2)?.trim().parse().ok()?);
     let tooltip = parse_1c_synonyms(fields.get(3).copied().unwrap_or("{0}"));
     let shortcut = fields
@@ -30965,6 +30975,7 @@ fn parse_common_command_properties_from_text(
         representation,
         picture_ref,
         picture_load_transparent,
+        picture_transparent_pixel,
         tooltip,
         shortcut,
         include_help_in_contents,
@@ -30974,6 +30985,41 @@ fn parse_common_command_properties_from_text(
         modifies_data,
         on_main_server_unavailable_behavior,
     })
+}
+
+/// The transparent-pixel coordinates a metadata `Picture` descriptor carries.
+///
+/// The descriptor is the nine-member tuple
+/// `{4,<kind>,<ref>,"",<x>,<y>,<load transparent>,0,""}` -- the same one
+/// `parse_common_command_picture_value`, `parse_command_group_picture_value`
+/// and `parse_information_register_command_picture_descriptor` all read their
+/// reference and `LoadTransparent` out of. Members 4 and 5 are the pixel, and
+/// `-1,-1` is the absence the platform writes no `<xr:TransparentPixel>` for.
+/// They were read as a constant `-1` (or not at all), so every descriptor that
+/// actually names a pixel lost the element: ERP УХ 3.2.12.6 spells six
+/// (`CommonCommands/ПротоколОшибок` `12,2`, `Catalogs/ВидыОтчетов` four
+/// commands, three `Subsystems/…` and `ExchangePlans/НалоговыйМониторинг`
+/// `7,5`), and no other configuration on the stand spells one at all.
+fn parse_metadata_picture_transparent_pixel(value: &str) -> Option<(i32, i32)> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    let x = fields.get(4)?.trim().parse::<i32>().ok()?;
+    let y = fields.get(5)?.trim().parse::<i32>().ok()?;
+    (x >= 0 && y >= 0).then_some((x, y))
+}
+
+fn push_metadata_picture_transparent_pixel_xml(
+    xml: &mut String,
+    indent: &str,
+    pixel: Option<(i32, i32)>,
+) {
+    if let Some((x, y)) = pixel {
+        xml.push_str(&format!(
+            "{indent}<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+        ));
+    }
 }
 
 fn parse_command_group_picture_value(
@@ -33357,11 +33403,16 @@ fn format_subsystem_source_xml(
             properties.push_str(&format!(
                 "\t\t\t<Picture>\r\n\
 \t\t\t\t<xr:Ref>{}</xr:Ref>\r\n\
-\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-\t\t\t</Picture>\r\n",
+\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
                 escape_xml_text(reference),
                 xml_bool(subsystem.picture_load_transparent)
             ));
+            push_metadata_picture_transparent_pixel_xml(
+                &mut properties,
+                "\t\t\t\t",
+                subsystem.picture_transparent_pixel,
+            );
+            properties.push_str("\t\t\t</Picture>\r\n");
         } else {
             properties.push_str("\t\t\t<Picture/>\r\n");
         }
@@ -37428,6 +37479,11 @@ fn format_common_command_picture_xml_with_indent(
         "{indent}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
         xml_bool(properties.picture_load_transparent)
     ));
+    push_metadata_picture_transparent_pixel_xml(
+        xml,
+        &format!("{indent}\t"),
+        properties.picture_transparent_pixel,
+    );
     xml.push_str(&format!("{indent}</Picture>\r\n"));
 }
 
@@ -37524,10 +37580,15 @@ fn format_command_group_source_xml(
                 escape_xml_text(reference)
             ));
             insert.push_str(&format!(
-                "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-\t\t\t</Picture>\r\n",
+                "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
                 xml_bool(properties.picture_load_transparent)
             ));
+            push_metadata_picture_transparent_pixel_xml(
+                &mut insert,
+                "\t\t\t\t",
+                properties.picture_transparent_pixel,
+            );
+            insert.push_str("\t\t\t</Picture>\r\n");
         }
         None => insert.push_str("\t\t\t<Picture/>\r\n"),
     }
