@@ -3897,7 +3897,13 @@ impl FormFieldSchema {
         options: &[&str],
     ) -> Option<FormSpreadsheetDocumentFieldProperties> {
         self.spreadsheet_document_options
-            .then(|| FormSpreadsheetDocumentFieldProperties::from_raw_layout(fields, options))
+            .then(|| {
+                FormSpreadsheetDocumentFieldProperties::from_raw_layout(
+                    fields,
+                    options,
+                    self.top_level_offset,
+                )
+            })
             .flatten()
     }
 
@@ -7554,9 +7560,20 @@ impl FormTableSchema {
 }
 
 impl FormSpreadsheetDocumentFieldProperties {
-    fn from_raw_layout(fields: &[&str], options: &[&str]) -> Option<Self> {
-        if fields.len() != 59
-            || fields.get(5).map(|field| field.trim()) != Some("6")
+    /// The conditional `UserVisible`-common prefix shifts every top-level
+    /// member of the record by one, and this reader addresses three of them --
+    /// the record length, the discriminator and the `DefaultItem` flag.  Its
+    /// guard used to spell all three at offset `0`, so a shifted record was
+    /// refused outright and the field lost `VerticalScrollBar`,
+    /// `HorizontalScrollBar`, `ViewScalingMode`, `Output`, `Protection`, the
+    /// geometry pair and everything else this tuple carries -- 27 ERP УХ forms
+    /// whose whole remaining diff is exactly that.  The offset is the one
+    /// `FormFieldSchema` already computed and stored to reach this tuple at
+    /// all (`OPTIONS_BASE_SLOT + offset`); the *option* slots do not shift,
+    /// because the shift is on the record, not inside the tuple.
+    fn from_raw_layout(fields: &[&str], options: &[&str], top_level_offset: usize) -> Option<Self> {
+        if fields.len() != 59 + top_level_offset
+            || fields.get(5 + top_level_offset).map(|field| field.trim()) != Some("6")
             || options.len() != 32
             || options.first().map(|field| field.trim()) != Some("13")
         {
@@ -7579,7 +7596,7 @@ impl FormSpreadsheetDocumentFieldProperties {
         };
 
         Some(Self {
-            default_item: (fields.get(16)?.trim() == "1").then_some(true),
+            default_item: (fields.get(16 + top_level_offset)?.trim() == "1").then_some(true),
             width: dimension(1, "50"),
             height: dimension(2, "10"),
             auto_max_width: explicit_false(20),
