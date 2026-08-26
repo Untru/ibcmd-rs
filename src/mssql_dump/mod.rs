@@ -31814,7 +31814,17 @@ pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         // mapping here instead makes the one table serve every pattern reader,
         // which is what the register reader itself falls back to.
         "474c3bf6-08b5-4ddc-a2ad-989cedf11583" => Some("cfg:EnumRef"),
-        _ => None,
+        // The reference-family protocol identifiers live in one table. This
+        // reader carried five of them and the DCS reader ten, and the two
+        // overlapping copies were already reconciled once, for `cfg:EnumRef`
+        // just above. `do` `BusinessProcess.КомплексныйПроцесс` writes
+        // `{"Pattern",{"#",11e5f865-…}}` for its `ТочкаМаршрута` attribute --
+        // `cfg:BusinessProcessRoutePointRef`, a name only the other copy knew,
+        // so the object failed closed on an identifier the project already
+        // resolves elsewhere. One table now answers both readers.
+        _ => DCS_BUILTIN_REFERENCE_TYPE_SETS
+            .iter()
+            .find_map(|(candidate, reference)| (*candidate == type_id).then_some(*reference)),
     }
 }
 

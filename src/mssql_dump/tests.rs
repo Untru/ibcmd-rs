@@ -70875,6 +70875,43 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
 }
 
 #[test]
+fn every_reference_family_protocol_identifier_answers_both_readers() {
+    // The reference-family identifiers are protocol constants, and two copies
+    // of the table disagreed: this reader carried five rows, the DCS reader
+    // ten. `do` `BusinessProcess.КомплексныйПроцесс` writes
+    // `{"Pattern",{"#",11e5f865-1501-40c6-b4d4-022095a296a5}}` for its
+    // `ТочкаМаршрута` attribute, and the platform prints
+    // `<v8:TypeSet>cfg:BusinessProcessRoutePointRef</v8:TypeSet>` for it.
+    assert_eq!(
+        builtin_type_reference("11e5f865-1501-40c6-b4d4-022095a296a5"),
+        Some("cfg:BusinessProcessRoutePointRef")
+    );
+    for (identifier, reference) in DCS_BUILTIN_REFERENCE_TYPE_SETS {
+        assert_eq!(builtin_type_reference(identifier), Some(*reference));
+    }
+    // A reference family with no object name of its own is a type SET, so the
+    // decoded leaf carries that spelling rather than the plain `<v8:Type>`.
+    let value_types = stable_partition_metadata_types(classify_metadata_reference_type_sets(
+        parse_metadata_type_pattern(
+            r##"{"Pattern",{"#",11e5f865-1501-40c6-b4d4-022095a296a5}}"##,
+            &BTreeMap::new(),
+        )
+        .expect("route-point pattern must parse"),
+    ));
+    assert!(
+        format_metadata_types_xml(&value_types)
+            .contains("<v8:TypeSet>cfg:BusinessProcessRoutePointRef</v8:TypeSet>"),
+        "{}",
+        format_metadata_types_xml(&value_types)
+    );
+    // An identifier neither table names still fails closed.
+    assert_eq!(
+        builtin_type_reference("00000000-0000-4000-8000-000000000000"),
+        None
+    );
+}
+
+#[test]
 fn task_tabular_sections_are_read_by_the_shared_owned_section_reader() {
     // `do` `Task.ЗадачаИсполнителя` owns two tabular sections; the record is
     // the ordinary owned-section record, envelope `{1,<payload>,
