@@ -16642,6 +16642,39 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
         ],
         &["AddChart", "AddNestedSchema", "UserSettings"],
     );
+    // The six a settings table excludes beside those three, and only ever
+    // beside them. Evidence: ERP УХ 3.2.12.6,
+    // `Catalogs/АналитическиеПанели/Forms/ФормаНастройкиСКДОбласти`, whose one
+    // excluded-command list declares seventeen uuids and which the platform
+    // writes as seventeen names. Eight uuids this table names on its own, three
+    // are the group above, and the remaining six are these -- against exactly
+    // the six names left over: `AddTable`, `Group`, `LoadSettings`,
+    // `SaveSettings`, `StandardSettings` and `Ungroup`. Each of the six occurs
+    // in that one list and nowhere else in any of the eight corpora, neither in
+    // another excluded-command list nor as a button's `<CommandName>`, so which
+    // name belongs to which uuid is unobserved and the group is named as a
+    // group. The element list the platform writes is a sorted set, so the group
+    // reproduces it exactly without claiming the pairing.
+    extend_joint_form_excluded_commands(
+        &mut commands,
+        uuids,
+        &[
+            "23802256-7145-47c7-b379-8d60ca1b1262",
+            "33ff70c9-5df3-4907-9611-7649411f9180",
+            "358196aa-1061-458a-8fba-e9cd11081205",
+            "3bd8cc97-31ca-4fad-acf4-cc8f4d648a95",
+            "46647493-f1bf-4cd6-9110-6bfab80b62de",
+            "49a25ff2-06bc-4547-a119-a428f60bdfbf",
+        ],
+        &[
+            "AddTable",
+            "Group",
+            "LoadSettings",
+            "SaveSettings",
+            "StandardSettings",
+            "Ungroup",
+        ],
+    );
     commands
 }
 
@@ -21369,7 +21402,20 @@ fn form_standard_command_suffix(uuid: &str) -> Option<&'static str> {
         "4c569466-1af5-4fc1-9b63-7bf6493097bf" => Some("Post"),
         "441362c1-0c86-4f73-bf50-6e1048a2db73" => Some("UndoPosting"),
         // New to every table.
+        //
+        // `45bea91e-…`: the corpus-wide button join names it
+        // `Form.StandardCommand.CompactViewMode` on one record, and three ERP УХ
+        // report forms carry it in an excluded-command list.
+        //
+        // `77fe7401-…`: six ERP УХ report forms -- among them
+        // `Reports/МониторингЗаказа/Forms/ФормаОтчета` and
+        // `Reports/МатрицаЭкземпляровОтчетов/Forms/ФормаОтчета` -- carry it in
+        // the form's own excluded-command list, it is the only uuid of that
+        // list this table could not name in any of the six, and
+        // `<ExcludedCommand>ClearChartAppearance` is the only name native
+        // writes there that the export did not. One uuid, one name, six times.
         "45bea91e-d9e5-4756-b5e6-375ab84b6903" => Some("CompactViewMode"),
+        "77fe7401-0b78-44e2-be82-9a5b2b760070" => Some("ClearChartAppearance"),
         _ => None,
     }
 }
