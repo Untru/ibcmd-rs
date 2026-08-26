@@ -35233,6 +35233,14 @@ fn format_settings_storage_source_xml(
         properties.push_str("\t\t\t<AuxiliaryLoadForm/>\r\n");
         xml.insert_str(index, &properties);
     }
+    // A settings storage always declares the element, self-closed when it
+    // owns no form: Документооборот КОРП 3.0.21.3's
+    // `SettingsStorages/НастройкиОбработкиОценкаПроизводительности` owns none
+    // and native still writes `<ChildObjects/>`. The owned-form pass fills
+    // this in when there are forms (see `insert_metadata_child_objects_xml`).
+    if let Some(index) = xml.find("\t</SettingsStorage>\r\n") {
+        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+    }
     xml
 }
 
@@ -35976,6 +35984,17 @@ fn insert_metadata_child_objects_xml(xml: &mut String, owner_kind: &str, child_o
     }
     if let Some(index) = xml.rfind("\t\t</ChildObjects>") {
         xml.insert_str(index, child_objects);
+        return;
+    }
+    // A writer that already declared an empty `<ChildObjects/>` gets it
+    // filled in, not doubled: without this the fallthrough below appended a
+    // second, populated element after the self-closed one.
+    const EMPTY_CHILD_OBJECTS: &str = "\t\t<ChildObjects/>\r\n";
+    if let Some(index) = xml.rfind(EMPTY_CHILD_OBJECTS) {
+        xml.replace_range(
+            index..index + EMPTY_CHILD_OBJECTS.len(),
+            &format!("\t\t<ChildObjects>\r\n{child_objects}\t\t</ChildObjects>\r\n"),
+        );
         return;
     }
     let marker = format!("\t</{owner_kind}>");
