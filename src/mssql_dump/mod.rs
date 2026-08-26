@@ -9253,9 +9253,21 @@ fn build_moxel_generated_type_index(
         .iter()
         .filter(|(type_id, _)| !type_index_collisions.contains(*type_id))
         .filter_map(|(type_id, reference)| {
+            // A MOXCEL `{"#",<uuid>}` value type names a *reference* type, and
+            // the index already spells which kind each generated type is, so
+            // the kind is read rather than listed. Admitting only
+            // `DocumentRef.` left every other family on `<v8:TypeId>`: over the
+            // MOXCEL templates of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75,
+            // Документооборот КОРП 3.0.21.3 and БСП demo the platform resolves
+            // 22 `CatalogRef`, 2 `DocumentRef` and 1 `EnumRef`, and the only
+            // `<v8:TypeId>` it publishes anywhere in those trees is a uuid that
+            // names no configuration type at all.
             reference
                 .strip_prefix("cfg:")
-                .filter(|name| name.starts_with("DocumentRef."))
+                .filter(|name| {
+                    name.split_once('.')
+                        .is_some_and(|(kind, _)| kind.ends_with("Ref"))
+                })
                 .map(|name| (type_id.clone(), name.to_string()))
         })
         .collect()
