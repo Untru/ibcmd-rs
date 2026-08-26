@@ -1396,19 +1396,53 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     // `{1..8, 31}`, disjoint from the `<f>` set the cells cite, and format 31
     // is the one that publishes `<print>false</print>`.
     //
-    // Feeding those indexes into this set is NOT enough, though, and is left
-    // undone: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
+    // A note's format only reads that way while nothing *else* names it.
+    // 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
     // ЗагрузкаИзФайла` and four documents like it share one format between a
     // note and their report header, and the platform renders it as a cell
-    // format there. Excluding the formats the rows and cells name does not
-    // separate them -- the shared format is reached some other way (a column
-    // set's own default, the header/footer reference) -- and the naive
-    // version broke those five documents on ut and fourteen on uh while
-    // gaining five. See docs/evidence/mxl-template-body-remainder-20260826.md.
-    let drawing_format_indices = drawings
+    // format there; an earlier pass that took every note format as a drawing
+    // format broke those five on ut and fourteen on uh. Excluding only the
+    // formats the rows and cells name did not separate them either - the
+    // shared entry is reached through a column set's own default or the
+    // header/footer reference. Every other namer of the source table is
+    // therefore excluded here: rows, cells, columns, both spellings of a
+    // column set's default, the uniform header/footer reference and each
+    // header/footer slot's own.
+    let mut drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
         .collect::<BTreeSet<_>>();
+    let mut cell_format_indices = BTreeSet::new();
+    for row in &rows {
+        cell_format_indices.insert(row.format_index);
+        for cell in &row.cells {
+            cell_format_indices.insert(cell.format_index);
+        }
+    }
+    for column_set in &column_sets {
+        cell_format_indices.insert(column_set.raw_default_format_index);
+        if let Some(default_format_index) = column_set.default_format_index {
+            cell_format_indices.insert(default_format_index);
+        }
+        for column in &column_set.columns {
+            cell_format_indices.insert(column.format_index);
+        }
+    }
+    if let Some(source_format_ref) = header_footer_format_ref {
+        cell_format_indices.insert(source_format_ref);
+    }
+    for slot in header_footer_slots.iter().flatten().flatten() {
+        cell_format_indices.insert(slot.source_format_ref);
+    }
+    for note_format_index in rows.iter().flat_map(|row| {
+        row.cells
+            .iter()
+            .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
+    }) {
+        if note_format_index > 0 && !cell_format_indices.contains(&note_format_index) {
+            drawing_format_indices.insert(note_format_index);
+        }
+    }
     let zero_column_format_table_is_width_only =
         parse_moxel_format_table(&fields, 0, &style_refs, &drawing_format_indices, &[])
             .is_some_and(|formats| {
