@@ -25679,11 +25679,7 @@ fn parse_business_process_properties_from_text(
             _ => return None,
         },
         number_length: parse_exchange_plan_u32(fields.get(18)?)?,
-        number_allowed_length: match fields.get(28)?.trim() {
-            "0" => "Fixed",
-            "1" => "Variable",
-            _ => return None,
-        },
+        number_allowed_length: parse_business_process_number_allowed_length(fields)?,
         check_unique: information_register_bool(fields.get(20)?)?,
         standard_attributes: parse_business_process_standard_attributes(
             fields.get(30)?,
@@ -25699,7 +25695,7 @@ fn parse_business_process_properties_from_text(
         task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")??,
         create_task_in_privileged_mode: information_register_bool(fields.get(29)?)?,
         data_lock_fields,
-        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(40)?)?,
+        data_lock_control_mode: parse_business_process_data_lock_control_mode(fields)?,
         include_help_in_contents: information_register_bool(fields.get(26)?)?,
         full_text_search: register_child_full_text_search_xml(fields.get(42)?.trim())?,
         object_presentation: parse_information_register_owner_localized_value(fields.get(35)?)?,
@@ -25722,6 +25718,39 @@ fn parse_business_process_properties_from_text(
         child_templates,
         child_commands,
     })
+}
+
+/// Which owner slot carries `NumberAllowedLength`.
+///
+/// Slot 40, not slot 28. Census of every business process on the stand -- 40
+/// objects across `do`, `uh`, `ut`, `ssl` and `sslbase` -- against the XML the
+/// platform writes for the same object: slot 40 partitions `Fixed` (5) from
+/// `Variable` (35) exactly, slot 28 misreads three of them.
+const BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT: usize = 40;
+
+/// Which owner slot carries `DataLockControlMode`.
+///
+/// Slot 28, not slot 40 -- the same census: slot 28 partitions `Automatic` (2)
+/// from `Managed` (38) exactly. The two slots were simply read the wrong way
+/// round, and every corpus but `uh` and `ut` agrees on both values, so nothing
+/// but the full census separates them.
+const BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT: usize = 28;
+
+fn parse_business_process_number_allowed_length(fields: &[&str]) -> Option<&'static str> {
+    match fields
+        .get(BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT)?
+        .trim()
+    {
+        "0" => Some("Fixed"),
+        "1" => Some("Variable"),
+        _ => None,
+    }
+}
+
+fn parse_business_process_data_lock_control_mode(fields: &[&str]) -> Option<&'static str> {
+    information_register_data_lock_control_mode_xml(
+        fields.get(BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT)?,
+    )
 }
 
 fn parse_business_process_child_templates(

@@ -70873,6 +70873,52 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
 }
 
 #[test]
+fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_census_names() {
+    // The two slots were read the wrong way round. Census of every business
+    // process on the stand -- 40 objects across `do`, `uh`, `ut`, `ssl` and
+    // `sslbase` -- against the XML the platform writes for the same object:
+    // slot 40 partitions `NumberAllowedLength` exactly (Fixed 5 / Variable 35)
+    // and slot 28 partitions `DataLockControlMode` exactly (Automatic 2 /
+    // Managed 38); the reversed reading misses three objects.
+    assert_ne!(
+        BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT,
+        BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT
+    );
+    // Verbatim slot pairs: `do` `Согласование` (28="1", 40="0") is written
+    // `Fixed`+`Managed`, `do` `Исполнение` (28="1", 40="1") `Variable`+
+    // `Managed`, and `uh`/`ut` `ТиповаяПродажа` (28="0", 40="0")
+    // `Fixed`+`Automatic`.
+    for (slot28, slot40, allowed_length, lock_mode) in [
+        ("1", "0", "Fixed", "Managed"),
+        ("1", "1", "Variable", "Managed"),
+        ("0", "0", "Fixed", "Automatic"),
+        ("0", "1", "Variable", "Automatic"),
+    ] {
+        let mut owned = vec!["0".to_owned(); 49];
+        owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = slot28.to_owned();
+        owned[BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT] = slot40.to_owned();
+        let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+        assert_eq!(
+            parse_business_process_number_allowed_length(&fields),
+            Some(allowed_length)
+        );
+        assert_eq!(
+            parse_business_process_data_lock_control_mode(&fields),
+            Some(lock_mode)
+        );
+    }
+    // Neither slot admits a value outside its closed pair.
+    let mut owned = vec!["0".to_owned(); 49];
+    owned[BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT] = "2".to_owned();
+    let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(parse_business_process_number_allowed_length(&fields), None);
+    let mut owned = vec!["0".to_owned(); 49];
+    owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = "2".to_owned();
+    let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(parse_business_process_data_lock_control_mode(&fields), None);
+}
+
+#[test]
 fn business_process_owned_templates_resolve_like_every_other_owner_family() {
     // `BusinessProcess.Ознакомление` owns one template, and the platform
     // writes it as a `<Template>` child after the forms. The collection is the
