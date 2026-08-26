@@ -1481,6 +1481,51 @@ where
         .collect()
 }
 
+/// Decode a *primary-only* native link collection, and resolve each typed
+/// reference, with no `5007` mirror to compare it against.
+///
+/// The mirror check the two entrypoints above enforce is a property of the
+/// canonical `InputField` option-tuple revision (66 members): the platform's
+/// older 62-member revision has no slot for a duplicate copy at all, so
+/// `ibcmd-rs`'s normalizer marks that slot absent rather than fabricating a
+/// value to compare against. Requiring a mirror there would reject every real
+/// link the short revision carries. Evidence: ERP УХ MDM_Management
+/// `Catalogs/ТипыБазДанных/Forms/ФормаЭлемента`, `InputField`
+/// "ВИБПоУмолчанию" -- a 62-member option tuple whose sole `5006` marker
+/// decodes to the platform's one `<xr:Link>` on `Отбор.ТипБД`, with no `5007`
+/// slot in the record at all.
+pub fn parse_form_choice_parameter_links_primary_only_with_reference_resolver<F>(
+    primary: &str,
+    mut resolve: F,
+) -> Result<Vec<FormChoiceParameterLink>, FormChoiceParameterLinksParseError>
+where
+    F: FnMut(&FormChoiceParameterLinkReference) -> Option<String>,
+{
+    let primary = parse_raw_form_choice_parameter_links(primary, "5006", false)
+        .ok_or(FormChoiceParameterLinksParseError::PrimaryMalformed)?;
+    primary
+        .into_iter()
+        .map(|link| {
+            let unresolved = match &link.reference {
+                FormChoiceParameterLinkReference::FormAttribute { attribute_id, .. } => {
+                    attribute_id.clone()
+                }
+                FormChoiceParameterLinkReference::TableCurrentData { table_id, .. } => {
+                    table_id.to_string()
+                }
+            };
+            let data_path = resolve(&link.reference).ok_or(
+                FormChoiceParameterLinksParseError::UnresolvedAttribute(unresolved),
+            )?;
+            Ok(FormChoiceParameterLink::new(
+                link.name,
+                data_path,
+                link.value_change,
+            ))
+        })
+        .collect()
+}
+
 fn parse_raw_form_choice_parameter_links(
     raw: &str,
     marker: &str,

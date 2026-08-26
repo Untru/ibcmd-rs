@@ -68,6 +68,7 @@ use ibcmd_schema::{
     bundled_dcs_conditional_appearance_policy, bundled_dcs_form_server_state_policy,
     bundled_writer_rules, form_choice_parameter_cluster_order,
     form_text_document_context_menu_owner_fields, parse_form_choice_list,
+    parse_form_choice_parameter_links_primary_only_with_reference_resolver as parse_schema_form_choice_parameter_links_primary_only_with_reference_resolver,
     parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
@@ -9437,6 +9438,16 @@ fn parse_form_child_item_with_metadata_owners(
                 .flatten()
         })
         .and_then(|options| {
+            // The block carries its own declared length as its leading member,
+            // same as the item record it sits inside: a short `InputField`
+            // revision (`32` at 62 members, `form_input_field_extended_options`
+            // already normalizes it for the `ChoiceParameterLinks`/`ChoiceList`
+            // readers that scan for it directly) reaches `FormFieldSchema`
+            // unnormalized here, so its `options.len() != 66` /
+            // `options.first() != Some("36")` guard always rejected it and the
+            // schema this block also gates (`ChoiceParameters`, `AvailableTypes`,
+            // width/height/colour slots, ...) went unread on every short record.
+            let options = normalize_form_property_bag_revision(&options).unwrap_or(options);
             FormFieldSchema::from_raw_layout(
                 wrapper,
                 fields.len(),
@@ -13671,6 +13682,126 @@ fn form_choice_parameter_link_standard_terminal_member(
         })
 }
 
+/// Resolve one typed `ChoiceParameterLinks` reference to its final XML data
+/// path. Shared by the mirror-required and primary-only entrypoints below,
+/// which differ only in whether a `5007` duplicate exists to validate the
+/// `5006` primary against -- the resolution logic itself does not care.
+fn resolve_form_input_field_choice_parameter_link_reference(
+    reference: &FormChoiceParameterLinkReference,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    match reference {
+        FormChoiceParameterLinkReference::FormAttribute {
+            attribute_id,
+            terminal,
+        } => match terminal {
+            FormChoiceParameterLinkTerminal::Absent => {
+                attribute_names_by_id.get(attribute_id).cloned()
+            }
+            FormChoiceParameterLinkTerminal::Standard(standard) => {
+                let member = form_choice_parameter_link_standard_terminal_member(
+                    attribute_id,
+                    *standard,
+                    attribute_metadata_owners_by_id,
+                )?;
+                attribute_names_by_id
+                    .get(attribute_id)
+                    .map(|attribute| format!("{attribute}.{member}"))
+            }
+            FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
+                match resolve_form_owner_scoped_metadata_uuid_data_path_status(
+                    attribute_id,
+                    "0",
+                    uuid,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                ) {
+                    FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+                    FormMetadataDataPathResolution::NotMetadata
+                    | FormMetadataDataPathResolution::ReferenceAbsent
+                    | FormMetadataDataPathResolution::Invalid
+                    | FormMetadataDataPathResolution::ForeignOwner => None,
+                }
+            }
+        },
+        FormChoiceParameterLinkReference::TableCurrentData { table_id, terminal } => {
+            let table_id = table_id.to_string();
+            match terminal {
+                FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(column_id) => {
+                    let column_id = column_id.to_string();
+                    type_link_data_path_by_table_column
+                        .get(&(table_id.clone(), column_id.clone()))
+                        .cloned()
+                        .or_else(|| {
+                            resolve_form_item_current_data_path(
+                                &table_id,
+                                &column_id,
+                                table_name_by_id,
+                                table_column_names_by_id,
+                                data_path_by_binding_key,
+                            )
+                        })
+                }
+                FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
+                    type_link_data_path_by_table_column
+                        .get(&(table_id.clone(), format!("0|{uuid}")))
+                        .cloned()
+                        .or_else(|| {
+                            resolve_form_table_current_data_metadata_uuid_path(
+                                &table_id,
+                                uuid,
+                                table_name_by_id,
+                                object_refs,
+                            )
+                        })
+                }
+                FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
+                    binding_id,
+                    uuid,
+                } => {
+                    let binding_id = binding_id.to_string();
+                    let uuid_route = type_link_data_path_by_table_column
+                        .get(&(table_id.clone(), format!("{binding_id}|{uuid}")))
+                        .cloned();
+                    let numeric_route = type_link_data_path_by_table_column
+                        .get(&(table_id.clone(), binding_id.clone()))
+                        .cloned()
+                        .or_else(|| {
+                            resolve_form_item_current_data_path(
+                                &table_id,
+                                &binding_id,
+                                table_name_by_id,
+                                table_column_names_by_id,
+                                data_path_by_binding_key,
+                            )
+                        });
+                    // The UUID here is the fixed value-table-column binding
+                    // marker, so `{column_id, marker}` addresses the very
+                    // column `{column_id}` alone addresses: the two keys are
+                    // one reference written two ways, not two references.
+                    // The route table is keyed by both spellings, but only
+                    // the bare numeric key carries the route the layout
+                    // states outright; the `id|uuid` key is filled in by the
+                    // supplemental `AdditionalColumns` representation, whose
+                    // documented precedence is *below* the layout route.
+                    // Requiring the supplemental key and condemning a
+                    // disagreement inverted that precedence, so 17 links
+                    // whose layout route the platform writes were rejected
+                    // in favour of an `AdditionalColumns` name the platform
+                    // never writes there.
+                    numeric_route.or(uuid_route)
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     primary: &str,
     duplicate: &str,
@@ -13685,109 +13816,48 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     parse_schema_form_choice_parameter_links_with_reference_resolver(
         primary,
         duplicate,
-        |reference| match reference {
-            FormChoiceParameterLinkReference::FormAttribute {
-                attribute_id,
-                terminal,
-            } => match terminal {
-                FormChoiceParameterLinkTerminal::Absent => {
-                    attribute_names_by_id.get(attribute_id).cloned()
-                }
-                FormChoiceParameterLinkTerminal::Standard(standard) => {
-                    let member = form_choice_parameter_link_standard_terminal_member(
-                        attribute_id,
-                        *standard,
-                        attribute_metadata_owners_by_id,
-                    )?;
-                    attribute_names_by_id
-                        .get(attribute_id)
-                        .map(|attribute| format!("{attribute}.{member}"))
-                }
-                FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
-                    match resolve_form_owner_scoped_metadata_uuid_data_path_status(
-                        attribute_id,
-                        "0",
-                        uuid,
-                        attribute_metadata_owners_by_id,
-                        object_refs,
-                    ) {
-                        FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
-                        FormMetadataDataPathResolution::NotMetadata
-                        | FormMetadataDataPathResolution::ReferenceAbsent
-                        | FormMetadataDataPathResolution::Invalid
-                        | FormMetadataDataPathResolution::ForeignOwner => None,
-                    }
-                }
-            },
-            FormChoiceParameterLinkReference::TableCurrentData { table_id, terminal } => {
-                let table_id = table_id.to_string();
-                match terminal {
-                    FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(column_id) => {
-                        let column_id = column_id.to_string();
-                        type_link_data_path_by_table_column
-                            .get(&(table_id.clone(), column_id.clone()))
-                            .cloned()
-                            .or_else(|| {
-                                resolve_form_item_current_data_path(
-                                    &table_id,
-                                    &column_id,
-                                    table_name_by_id,
-                                    table_column_names_by_id,
-                                    data_path_by_binding_key,
-                                )
-                            })
-                    }
-                    FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
-                        type_link_data_path_by_table_column
-                            .get(&(table_id.clone(), format!("0|{uuid}")))
-                            .cloned()
-                            .or_else(|| {
-                                resolve_form_table_current_data_metadata_uuid_path(
-                                    &table_id,
-                                    uuid,
-                                    table_name_by_id,
-                                    object_refs,
-                                )
-                            })
-                    }
-                    FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
-                        binding_id,
-                        uuid,
-                    } => {
-                        let binding_id = binding_id.to_string();
-                        let uuid_route = type_link_data_path_by_table_column
-                            .get(&(table_id.clone(), format!("{binding_id}|{uuid}")))
-                            .cloned();
-                        let numeric_route = type_link_data_path_by_table_column
-                            .get(&(table_id.clone(), binding_id.clone()))
-                            .cloned()
-                            .or_else(|| {
-                                resolve_form_item_current_data_path(
-                                    &table_id,
-                                    &binding_id,
-                                    table_name_by_id,
-                                    table_column_names_by_id,
-                                    data_path_by_binding_key,
-                                )
-                            });
-                        // The UUID here is the fixed value-table-column binding
-                        // marker, so `{column_id, marker}` addresses the very
-                        // column `{column_id}` alone addresses: the two keys are
-                        // one reference written two ways, not two references.
-                        // The route table is keyed by both spellings, but only
-                        // the bare numeric key carries the route the layout
-                        // states outright; the `id|uuid` key is filled in by the
-                        // supplemental `AdditionalColumns` representation, whose
-                        // documented precedence is *below* the layout route.
-                        // Requiring the supplemental key and condemning a
-                        // disagreement inverted that precedence, so 17 links
-                        // whose layout route the platform writes were rejected
-                        // in favour of an `AdditionalColumns` name the platform
-                        // never writes there.
-                        numeric_route.or(uuid_route)
-                    }
-                }
-            }
+        |reference| {
+            resolve_form_input_field_choice_parameter_link_reference(
+                reference,
+                attribute_names_by_id,
+                attribute_metadata_owners_by_id,
+                table_name_by_id,
+                table_column_names_by_id,
+                type_link_data_path_by_table_column,
+                data_path_by_binding_key,
+                object_refs,
+            )
+        },
+    )
+}
+
+/// Same decode as `parse_form_input_field_choice_parameter_links_with_metadata`,
+/// for the short (revision-`32`) `InputField` option tuple that has no `5007`
+/// duplicate slot to mirror-check the `5006` primary against. See
+/// `parse_form_choice_parameter_links_primary_only_with_reference_resolver`.
+pub(super) fn parse_form_input_field_choice_parameter_links_primary_only_with_metadata(
+    primary: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<Vec<ibcmd_schema::FormChoiceParameterLink>, FormChoiceParameterLinksParseError> {
+    parse_schema_form_choice_parameter_links_primary_only_with_reference_resolver(
+        primary,
+        |reference| {
+            resolve_form_input_field_choice_parameter_link_reference(
+                reference,
+                attribute_names_by_id,
+                attribute_metadata_owners_by_id,
+                table_name_by_id,
+                table_column_names_by_id,
+                type_link_data_path_by_table_column,
+                data_path_by_binding_key,
+                object_refs,
+            )
         },
     )
 }
@@ -13858,17 +13928,61 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
             },
         });
     };
-    match parse_form_input_field_choice_parameter_links_with_metadata(
-        primary,
-        duplicate,
-        attribute_names_by_id,
-        attribute_metadata_owners_by_id,
-        table_name_by_id,
-        table_column_names_by_id,
-        type_link_data_path_by_table_column,
-        data_path_by_binding_key,
-        object_refs,
-    ) {
+    // `normalize_form_property_bag_revision` pads a short (revision-`32`)
+    // `InputField` option tuple's newly-added trailing members -- this
+    // duplicate slot among them -- with the unparseable absent-member
+    // sentinel, because the platform's own 62-member record never wrote a
+    // real value there. Feeding that sentinel to the mirror-required decoder
+    // below would always fail it as `DuplicateMalformed`; the primary-only
+    // decoder is the one the short revision actually needs.
+    if duplicate == FORM_ITEM_ABSENT_MEMBER {
+        // The short 62-member tuple was only ever proven to carry a *real*
+        // `5006`-marked `ChoiceParameterLinks` primary at this coordinate
+        // once (ERP УХ MDM_Management's `ВИБПоУмолчанию`, see
+        // `parse_form_input_field_choice_parameter_links_primary_only_with_metadata`'s
+        // doc comment). ERP УХ's own `1cv8.cf`
+        // `Documents/НастраиваемыйОтчет/Forms/ФормаИзмененияПоказателейНО`
+        // item `АналитикиАналитика` proves the same coordinate also carries
+        // an unrelated `5004`-marked record (`ChoiceParameters`'s own
+        // marker) on a field whose native XML writes neither
+        // `<ChoiceParameterLinks>` nor `<ChoiceParameters>` at all -- so a
+        // marker other than `5006` here is not malformed
+        // `ChoiceParameterLinks` data, it is a different feature occupying
+        // the same short-revision coordinate, and the record genuinely has
+        // no `ChoiceParameterLinks`. Treating it as `Opaque` (which fails
+        // the whole form write, see `format_form_choice_parameter_cluster_xml`'s
+        // caller) rather than `Absent` was wrong on real bytes.
+        let primary_marker = split_1c_braced_fields(primary.trim(), 0)
+            .and_then(|fields| fields.first().map(|field| field.trim().to_string()));
+        if primary_marker.as_deref() != Some("5006") {
+            return FormChoiceParameterLinks::Absent;
+        }
+    }
+    let result = if duplicate == FORM_ITEM_ABSENT_MEMBER {
+        parse_form_input_field_choice_parameter_links_primary_only_with_metadata(
+            primary,
+            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            type_link_data_path_by_table_column,
+            data_path_by_binding_key,
+            object_refs,
+        )
+    } else {
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            primary,
+            duplicate,
+            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            type_link_data_path_by_table_column,
+            data_path_by_binding_key,
+            object_refs,
+        )
+    };
+    match result {
         Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
         Ok(links) => FormChoiceParameterLinks::Typed(links),
         Err(error) => FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
