@@ -88,6 +88,56 @@ files came out byte-exact against the platform on the first pass, 68 came out
 
 ## Still open
 
-The 68 `differing` revision-3 forms have not been diffed field by field yet.
-They are now visible to the normal `differing` workflow, which they were not
-while the container reader refused them.
+The 68 `differing` revision-3 forms were diffed against native line by line:
+1 723 changed lines, median 18 per file, min 1, max 121. The differences are
+not one class and are not about the container:
+
+| tag touched | files (of 68) |
+|---|---:|
+| `Button` / `CommandName` / `Type` / `ExtendedTooltip` | 51 |
+| `ChildItems` | 45 |
+| `Representation` | 43 |
+| `DefaultButton` | 33 |
+| `AutoCommandBar` | 13 |
+| `CheckBoxType` | 12 |
+| `Title` (+ `v8:item`/`v8:lang`/`v8:content`) | 12 / 16 |
+
+The dominant signature is an auto-command-bar the platform fills with buttons
+and we render empty, e.g.
+`Reports/РегламентированныйОтчетРСВ2/Forms/ФормаВводаДокументПредставителя`:
+
+```
+native:  <AutoCommandBar name="ФормаКоманднаяПанель" id="-1">
+             <Button name="ФормаОК" id="14">...Form.Command.ОК...</Button>
+             <Button name="ФормаЗакрыть" id="13">...Form.StandardCommand.Close...</Button>
+         </AutoCommandBar>
+ours:    <AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+```
+
+Four files differ by a single missing `<Representation>` and two by a single
+`<CheckBoxType>`.
+
+**A sharp lead, measured, not fixed.** Splitting every managed `uh` form by
+container revision and by whether its native `Form.xml` has any
+`<AutoCommandBar>` with `<Button>` children:
+
+| container revision | populated command bar | exact | differing | missing |
+|---:|---|---:|---:|---:|
+| 4 | no | 4 375 | 559 | 14 |
+| 4 | **yes** | **7 080** | 822 | 45 |
+| 3 | no | 34 | 27 | 0 |
+| 3 | **yes** | **0** | **41** | 0 |
+
+Under revision 4 a populated command bar is rendered right 7 080 times.
+Under revision 3 it is rendered right zero times out of 41. So the leftover
+is not diffuse rendering debt: it is one concentrated defect that revision-3
+bodies expose. The buttons are present in the stored body -- in
+`InformationRegisters/ФайлыСведенийРОКИ/Forms/ФормаСписка` the class-22
+command-bar record `{22,{3,<uuid>},0,0,0,9,"СписокКоманднаяПанель",...}`
+carries `...{0,0,1},1,a9f3b1ac-f51b-431e-b102-55a69acdecad,{29,{14,<uuid>},
+0,0,0,"КнопкаДействияФормыОчистить",...}` -- and the reader walks past them.
+The same file also drops a `<CheckBoxType>Auto</CheckBoxType>` the platform
+writes explicitly. This is the form-item record shape, not the container, and
+it belongs with `uh-form-item-tree-revision-map-20260825.md`. These 102 forms
+are now visible to that workflow, which they were not while the container
+reader refused them.
