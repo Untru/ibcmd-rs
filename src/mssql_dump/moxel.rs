@@ -3249,11 +3249,18 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
         return None;
     }
 
+    // The note's own leading record is `{16, <format>, <text>}` -- the mask
+    // names one member, the localized text, and the record may stop right
+    // behind it or spend one more field on a trailing `0`, exactly as the cell
+    // record may stop in front of its own trailing flag. Requiring the trailing
+    // field refused every note in 21 ERP УХ 3.2.12.6 templates; all 37 of their
+    // note records stop at three members, while the records this reader already
+    // accepted carry the fourth.
     let format_fields = split_1c_braced_fields(note_fields.first()?.trim(), 0)?;
-    if format_fields.len() != 4
+    if !matches!(format_fields.len(), 3 | 4)
         || format_fields.first()?.trim() != "16"
         || format_fields.get(2)?.trim() != note_text_field
-        || format_fields.get(3)?.trim() != "0"
+        || format_fields.get(3).is_some_and(|field| field.trim() != "0")
         || parse_moxel_localized_note_text(format_fields.get(2)?.trim())? != text
     {
         return None;
