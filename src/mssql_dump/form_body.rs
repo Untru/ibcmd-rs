@@ -13560,7 +13560,18 @@ fn form_document_field_geometry_options<'a>(
     let layout = FORM_DOCUMENT_FIELD_GEOMETRY
         .iter()
         .find_map(|(candidate, layout)| (*candidate == tag).then_some(layout))?;
-    let options = split_1c_braced_fields(fields.get(39)?.trim(), 0)?;
+    // The option bag sits at the field class's own options base, which the
+    // conditional-appearance prefix pushes along with the rest of the record.
+    // Spelling the unprefixed slot alone made a prefixed document field miss
+    // the bag entirely and lose its geometry -- `<Height>` on the two
+    // `TextDocumentField` items of ERP УХ 3.2.12.6
+    // `Catalogs/РасширенияПанелиНалоговогоМониторинга/Forms/ФормаЭлемента`.
+    // The bag's own discriminator and length are still checked, so the offset
+    // only decides where to look.
+    let offset = form_input_field_layout_is_extended(fields)
+        .then(|| form_input_field_top_level_offset(fields))
+        .unwrap_or(0);
+    let options = split_1c_braced_fields(fields.get(39 + offset)?.trim(), 0)?;
     (options.first()?.trim() == layout.discriminator && options.len() == layout.len)
         .then_some((layout, options))
 }
