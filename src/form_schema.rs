@@ -1,3 +1,14 @@
+/// Placeholder for a trailing member a short record or property-bag revision
+/// does not carry.  Deliberately unparseable as a 1C scalar, quoted string or
+/// block, so a reader that reaches one refuses (doctrine point 2) instead of
+/// reading a fabricated default (doctrine point 6).
+///
+/// It lives here rather than beside the normalizer that writes it because the
+/// schema has to recognize it too: a slot addressed by a schema that the short
+/// revision does not reach is *absent*, which is a different answer from
+/// *malformed*.
+pub(crate) const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormChildItemKind {
     UsualGroup,
@@ -3907,6 +3918,14 @@ impl FormFieldSchema {
             .flatten()
     }
 
+    /// The member of the field's option tuple a slot names, or `None` when the
+    /// tuple does not carry it.
+    ///
+    /// A tuple normalized up from a short revision holds
+    /// [`FORM_ABSENT_MEMBER`] in every member that revision does not carry.
+    /// That is an absence, not a value: a reader that got the placeholder
+    /// through would report the property malformed rather than missing, and a
+    /// malformed choice-parameter member is a hard writer refusal.
     pub(crate) fn input_field_option<'a>(
         self,
         options: &'a [&'a str],
@@ -3915,6 +3934,7 @@ impl FormFieldSchema {
         self.input_field_options
             .then(|| options.get(slot.index()).copied())
             .flatten()
+            .filter(|member| *member != FORM_ABSENT_MEMBER)
     }
 
     pub(crate) fn choice_button_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {

@@ -13860,6 +13860,16 @@ pub(super) fn canonical_form_input_field_choice_parameter_links(
     let primary = schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinks);
     let duplicate =
         schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate);
+    // A member the record's own revision does not carry is *absent*, not
+    // malformed: the short `32`/62 revision of the `InputField` option tuple
+    // ends four members before the `5007` mirror this reader cross-checks
+    // against, so the collection cannot be read here at all.  Reporting it
+    // malformed instead made the writer refuse the whole form.
+    if options.get(primary_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
+        || options.get(duplicate_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
+    {
+        return FormChoiceParameterLinks::Absent;
+    }
     let (Some(primary), Some(duplicate)) = (primary, duplicate) else {
         return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
             primary_raw: primary.map(str::to_owned),
@@ -13902,6 +13912,16 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     let primary = schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinks);
     let duplicate =
         schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate);
+    // A member the record's own revision does not carry is *absent*, not
+    // malformed: the short `32`/62 revision of the `InputField` option tuple
+    // ends four members before the `5007` mirror this reader cross-checks
+    // against, so the collection cannot be read here at all.  Reporting it
+    // malformed instead made the writer refuse the whole form.
+    if options.get(primary_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
+        || options.get(duplicate_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
+    {
+        return FormChoiceParameterLinks::Absent;
+    }
     let (Some(primary), Some(duplicate)) = (primary, duplicate) else {
         return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
             primary_raw: primary.map(str::to_owned),
@@ -16439,10 +16459,9 @@ fn form_conditional_table_schema(
 }
 
 /// Placeholder for a trailing member a short item-record revision does not
-/// carry.  Deliberately unparseable as a 1C scalar, quoted string or block, so
-/// a reader that reaches one refuses (doctrine point 2) instead of reading a
-/// fabricated default (doctrine point 6).
-const FORM_ITEM_ABSENT_MEMBER: &str = "\u{1}absent";
+/// carry; defined once, in `form_schema`, because the schema has to recognize
+/// it as an absence too.
+use crate::form_schema::FORM_ABSENT_MEMBER as FORM_ITEM_ABSENT_MEMBER;
 
 /// The canonical revision of an item record whose own leading member declares
 /// a shorter one, and how many trailing members that shorter revision drops.
