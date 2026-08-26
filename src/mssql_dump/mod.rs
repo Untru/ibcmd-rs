@@ -9149,6 +9149,15 @@ struct CommonAttributeProperties {
 struct CommonAttributePropertyDetails {
     fill_value: Option<CommonAttributeFillValue>,
     fill_checking: &'static str,
+    /// `<ToolTip>`. Read at typed slot 4, the localized value the record puts
+    /// between the format pair and `MarkNegatives`. The writer used to spell a
+    /// constant `<ToolTip/>` there, so a common attribute that carries one lost
+    /// it. Census of ERP УХ 3.2.12.6, all 20 common attributes: slot 4 reads
+    /// the bare `{0}` on exactly the 19 the platform writes `<ToolTip/>` for
+    /// and `{1,"ru",…}` on the one it writes a tooltip for
+    /// (`УдалитьПараметрыУчетаФИ`), with no third shape. No common attribute of
+    /// UT, Документооборот or БСП demo carries one at all.
+    tooltip: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -29597,9 +29606,14 @@ fn parse_common_attribute_property_details(
         .get(19)
         .and_then(|field| parse_common_attribute_fill_value(field));
     let fill_checking = metadata_fill_checking_xml(typed_fields.get(20).copied());
+    let tooltip = typed_fields
+        .get(4)
+        .map(|field| parse_1c_synonyms(field))
+        .unwrap_or_default();
     (fields.len() > 3 || fill_value.is_some()).then_some(CommonAttributePropertyDetails {
         fill_value,
         fill_checking,
+        tooltip,
     })
 }
 
@@ -38162,17 +38176,19 @@ fn format_common_attribute_property_details_xml(
 ) -> String {
     let mut xml = "\t\t\t<PasswordMode>false</PasswordMode>\r\n\
 \t\t\t<Format/>\r\n\
-\t\t\t<EditFormat/>\r\n\
-\t\t\t<ToolTip/>\r\n\
-\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
+\t\t\t<EditFormat/>\r\n"
+        .to_string();
+    push_localized_property(&mut xml, "\t\t\t", "ToolTip", &details.tooltip);
+    xml.push_str(
+        "\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
 \t\t\t<Mask/>\r\n\
 \t\t\t<MultiLine>false</MultiLine>\r\n\
 \t\t\t<ExtendedEdit>false</ExtendedEdit>\r\n\
 \t\t\t<MinValue xsi:nil=\"true\"/>\r\n\
 \t\t\t<MaxValue xsi:nil=\"true\"/>\r\n\
 \t\t\t<FillFromFillingValue>false</FillFromFillingValue>\r\n\
-\t\t\t"
-        .to_string();
+\t\t\t",
+    );
     if let Some(fill_value) = &details.fill_value {
         xml.push_str(&format_common_attribute_fill_value_xml(fill_value));
         xml.push_str("\r\n\t\t\t");
