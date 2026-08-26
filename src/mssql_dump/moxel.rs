@@ -1400,13 +1400,28 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     // the whole `<formatIndex>` set is `{1..8, 31}`, disjoint from the `<f>`
     // set the cells cite, and format 31 is the one that publishes
     // `<print>false</print>`.
+    //
+    // A note-named format is only a drawing format where **no cell names it
+    // too**: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
+    // ЗагрузкаИзФайла` and four documents like it share one format between a
+    // note and their own report-header cells, and the platform renders it as
+    // a cell format there -- `leftBorder`/`rightBorder` and no
+    // `drawingBorder`. In `РасчетСтоимостиЧистыхАктивов` the two sets are
+    // disjoint, which is what makes format 31 a drawing format.
+    let cell_format_indices = rows
+        .iter()
+        .flat_map(|row| {
+            std::iter::once(row.format_index).chain(row.cells.iter().map(|cell| cell.format_index))
+        })
+        .collect::<BTreeSet<_>>();
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
         .chain(
             rows.iter()
                 .flat_map(|row| row.cells.iter())
-                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index)),
+                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
+                .filter(|index| !cell_format_indices.contains(index)),
         )
         .collect::<BTreeSet<_>>();
     let zero_column_format_table_is_width_only =
@@ -7775,13 +7790,28 @@ pub(super) fn spreadsheet_number_format_hint_from_text(
     // the whole `<formatIndex>` set is `{1..8, 31}`, disjoint from the `<f>`
     // set the cells cite, and format 31 is the one that publishes
     // `<print>false</print>`.
+    //
+    // A note-named format is only a drawing format where **no cell names it
+    // too**: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
+    // ЗагрузкаИзФайла` and four documents like it share one format between a
+    // note and their own report-header cells, and the platform renders it as
+    // a cell format there -- `leftBorder`/`rightBorder` and no
+    // `drawingBorder`. In `РасчетСтоимостиЧистыхАктивов` the two sets are
+    // disjoint, which is what makes format 31 a drawing format.
+    let cell_format_indices = rows
+        .iter()
+        .flat_map(|row| {
+            std::iter::once(row.format_index).chain(row.cells.iter().map(|cell| cell.format_index))
+        })
+        .collect::<BTreeSet<_>>();
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
         .chain(
             rows.iter()
                 .flat_map(|row| row.cells.iter())
-                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index)),
+                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
+                .filter(|index| !cell_format_indices.contains(index)),
         )
         .collect::<BTreeSet<_>>();
     let column_format_slots = moxel_column_format_slots(&column_sets, column_count);
