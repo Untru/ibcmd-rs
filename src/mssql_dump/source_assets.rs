@@ -1814,12 +1814,13 @@ pub(super) fn write_source_asset(
         }
         SourceAssetKind::HomePageWorkArea => {
             let work_area =
-                parse_home_page_work_area_blob(bytes, context.form_refs).with_context(|| {
-                    format!(
-                        "failed to extract home page work area from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+                parse_home_page_work_area_blob(bytes, context.form_refs, context.metadata_refs)
+                    .with_context(|| {
+                        format!(
+                            "failed to extract home page work area from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)

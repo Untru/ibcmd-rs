@@ -67,6 +67,9 @@ pub(super) struct HomePageWorkAreaItem {
     pub(super) form: String,
     pub(super) height: String,
     pub(super) common: bool,
+    /// The per-role overrides the item's visibility atom declares, in blob
+    /// order -- the same adjustable shape a command's visibility carries.
+    pub(super) values: Vec<CommandInterfaceVisibilityValue>,
 }
 
 pub(super) struct ClientApplicationInterface {
@@ -438,15 +441,21 @@ pub(super) fn command_interface_subsystem_name(
 pub(super) fn parse_home_page_work_area_blob(
     bytes: &[u8],
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<HomePageWorkArea> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
-    parse_home_page_work_area_text(text.trim_start_matches('\u{feff}'), form_refs)
+    parse_home_page_work_area_text(
+        text.trim_start_matches('\u{feff}'),
+        form_refs,
+        metadata_refs,
+    )
 }
 
 pub(super) fn parse_home_page_work_area_text(
     text: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<HomePageWorkArea> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "1" {
@@ -454,8 +463,10 @@ pub(super) fn parse_home_page_work_area_text(
     }
     let template = home_page_work_area_template_name(fields.get(1)?.trim())?;
     let mut index = 2usize;
-    let left_column = parse_home_page_work_area_column(&fields, &mut index, form_refs)?;
-    let right_column = parse_home_page_work_area_column(&fields, &mut index, form_refs)?;
+    let left_column =
+        parse_home_page_work_area_column(&fields, &mut index, form_refs, metadata_refs)?;
+    let right_column =
+        parse_home_page_work_area_column(&fields, &mut index, form_refs, metadata_refs)?;
 
     Some(HomePageWorkArea {
         template,
@@ -475,12 +486,13 @@ pub(super) fn parse_home_page_work_area_column(
     fields: &[&str],
     index: &mut usize,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<Vec<HomePageWorkAreaItem>> {
     let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
     *index += 1;
     let mut items = Vec::with_capacity(count);
     for _ in 0..count {
-        let item = parse_home_page_work_area_item(fields.get(*index)?, form_refs)?;
+        let item = parse_home_page_work_area_item(fields.get(*index)?, form_refs, metadata_refs)?;
         *index += 1;
         items.push(item);
     }
@@ -490,6 +502,7 @@ pub(super) fn parse_home_page_work_area_column(
 pub(super) fn parse_home_page_work_area_item(
     field: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<HomePageWorkAreaItem> {
     let fields = split_1c_braced_fields(field, 0)?;
     let form_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
@@ -499,12 +512,23 @@ pub(super) fn parse_home_page_work_area_item(
         .and_then(form_source_reference_name)
         .unwrap_or(form_uuid);
     let height = fields.get(2)?.trim().to_string();
-    let common = parse_command_interface_common_flag(fields.get(3)?)?;
+    // The item's visibility slot is the same adjustable atom a command's is
+    // (`{0,{0,{"B",c},N,<role uuid>,{"B",v},…}}`), and the platform prints
+    // its per-role overrides the same way. Reading only the common flag lost
+    // every one of them -- Документооборот КОРП 3.0.21.3's
+    // `Ext/HomePageWorkArea.xml` declares 62 across its two columns.
+    let visibility = fields.get(3)?;
+    let (common, values) =
+        match parse_command_interface_adjustable_visibility(visibility, metadata_refs) {
+            Some(parsed) => parsed,
+            None => (parse_command_interface_common_flag(visibility)?, Vec::new()),
+        };
 
     Some(HomePageWorkAreaItem {
         form,
         height,
         common,
+        values,
     })
 }
 
@@ -844,13 +868,22 @@ pub(super) fn push_home_page_work_area_column_xml(
 \t\t\t<Form>{}</Form>\r\n\
 \t\t\t<Height>{}</Height>\r\n\
 \t\t\t<Visibility>\r\n\
-\t\t\t\t<xr:Common>{}</xr:Common>\r\n\
-\t\t\t</Visibility>\r\n\
-\t\t</Item>\r\n",
+\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
             escape_xml_element_text(&item.form),
             escape_xml_element_text(&item.height),
             xml_bool(item.common)
         ));
+        for value in &item.values {
+            xml.push_str(&format!(
+                "\t\t\t\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+                escape_xml_text(&value.name),
+                xml_bool(value.value)
+            ));
+        }
+        xml.push_str(
+            "\t\t\t</Visibility>\r\n\
+\t\t</Item>\r\n",
+        );
     }
     xml.push_str(&format!("\t</{tag}>\r\n"));
 }

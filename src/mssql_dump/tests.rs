@@ -5915,7 +5915,7 @@ fn extracts_home_page_work_area_with_form_references() {
         },
     )]);
 
-    let work_area = parse_home_page_work_area_blob(&body, &form_refs).unwrap();
+    let work_area = parse_home_page_work_area_blob(&body, &form_refs, &BTreeMap::new()).unwrap();
     let xml = format_home_page_work_area_xml(&work_area, InfobaseConfigSourceVersion::V2_20);
 
     assert!(xml.contains("<WorkingAreaTemplate>TwoColumnsVariableWidth</WorkingAreaTemplate>"));
