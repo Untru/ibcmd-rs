@@ -1383,9 +1383,31 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let header_footer_slots = parse_moxel_header_footer_slots(&fields);
     let header_footer_format_ref = parse_moxel_uniform_header_footer_format_ref(&fields);
     let drawings = parse_moxel_drawings(&fields);
+    // A cell note is a drawing record of its own -- `drawingType` `Comment`,
+    // its own `<formatIndex>` -- so the format it names is a drawing format,
+    // and that format's members 1, 3 and 4 are `drawingBorder`,
+    // `drawingHave*Border` and `print` rather than
+    // `leftBorder`/`rightBorder`/`bottomBorder`. This set was built from the
+    // `<drawing>` list alone, which left every note-only format read as a
+    // cell one.
+    //
+    // Evidence: of the 23 `<format>` elements that publish `<print>` across
+    // ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, Документооборот КОРП 3.0.21.3 and
+    // БСП demo/base, eleven sit in documents that carry no `<drawing>` at
+    // all, and in every one the format they name is exactly the
+    // `<formatIndex>` of a `<note>`. In
+    // `Reports/РасчетСтоимостиЧистыхАктивов/Templates/РасчетСтоимостиЧистыхАктивов`
+    // the whole `<formatIndex>` set is `{1..8, 31}`, disjoint from the `<f>`
+    // set the cells cite, and format 31 is the one that publishes
+    // `<print>false</print>`.
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
+        .chain(
+            rows.iter()
+                .flat_map(|row| row.cells.iter())
+                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index)),
+        )
         .collect::<BTreeSet<_>>();
     let zero_column_format_table_is_width_only =
         parse_moxel_format_table(&fields, 0, &style_refs, &drawing_format_indices, &[])
@@ -7736,9 +7758,31 @@ pub(super) fn spreadsheet_number_format_hint_from_text(
         column_sets
     };
     let drawings = parse_moxel_drawings(&fields);
+    // A cell note is a drawing record of its own -- `drawingType` `Comment`,
+    // its own `<formatIndex>` -- so the format it names is a drawing format,
+    // and that format's members 1, 3 and 4 are `drawingBorder`,
+    // `drawingHave*Border` and `print` rather than
+    // `leftBorder`/`rightBorder`/`bottomBorder`. This set was built from the
+    // `<drawing>` list alone, which left every note-only format read as a
+    // cell one.
+    //
+    // Evidence: of the 23 `<format>` elements that publish `<print>` across
+    // ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, Документооборот КОРП 3.0.21.3 and
+    // БСП demo/base, eleven sit in documents that carry no `<drawing>` at
+    // all, and in every one the format they name is exactly the
+    // `<formatIndex>` of a `<note>`. In
+    // `Reports/РасчетСтоимостиЧистыхАктивов/Templates/РасчетСтоимостиЧистыхАктивов`
+    // the whole `<formatIndex>` set is `{1..8, 31}`, disjoint from the `<f>`
+    // set the cells cite, and format 31 is the one that publishes
+    // `<print>false</print>`.
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
+        .chain(
+            rows.iter()
+                .flat_map(|row| row.cells.iter())
+                .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index)),
+        )
         .collect::<BTreeSet<_>>();
     let column_format_slots = moxel_column_format_slots(&column_sets, column_count);
     let _sparse_source_format_refs = moxel_uses_sparse_source_format_refs(
