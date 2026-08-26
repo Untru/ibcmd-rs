@@ -66,6 +66,9 @@ pub(super) struct MoxelSpreadsheet {
     /// be built from, which leaves the pool on its previous path.
     pub(super) first_use_pool: Option<Vec<usize>>,
     pub(super) print_area: Option<MoxelArea>,
+    /// The repeating band `<repeatRows>` names, read from the first four of
+    /// the ten scalars behind the print-area record.
+    pub(super) repeat_rows: Option<MoxelArea>,
     /// `groupsBackColor`, `groupsColor`, `headersBackColor`, `headersColor`, in
     /// publication order, each `None` where the document leaves the role at its
     /// default.
@@ -1393,19 +1396,58 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     // `{1..8, 31}`, disjoint from the `<f>` set the cells cite, and format 31
     // is the one that publishes `<print>false</print>`.
     //
-    // Feeding those indexes into this set is NOT enough, though, and is left
-    // undone: 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
+    // A note's format only reads that way while nothing *else* names it.
+    // 1С:УТ 11.5.27.75's `Documents/ИзменениеАссортимента/Templates/
     // ЗагрузкаИзФайла` and four documents like it share one format between a
     // note and their report header, and the platform renders it as a cell
-    // format there. Excluding the formats the rows and cells name does not
-    // separate them -- the shared format is reached some other way (a column
-    // set's own default, the header/footer reference) -- and the naive
-    // version broke those five documents on ut and fourteen on uh while
-    // gaining five. See docs/evidence/mxl-template-body-remainder-20260826.md.
-    let drawing_format_indices = drawings
+    // format there; an earlier pass that took every note format as a drawing
+    // format broke those five on ut and fourteen on uh. Excluding only the
+    // formats the rows and cells name did not separate them either - the
+    // shared entry is reached through a column set's own default or the
+    // header/footer reference. Every other namer of the source table is
+    // therefore excluded here: rows, cells, columns, both spellings of a
+    // column set's default, the uniform header/footer reference and each
+    // header/footer slot's own.
+    let mut drawing_format_indices = drawings
         .iter()
         .map(|drawing| drawing.format_index)
         .collect::<BTreeSet<_>>();
+    // The positional split that lifts trailing drawing formats out of the
+    // column half keeps naming the drawings alone: a note's format sits
+    // wherever the table put it, and no observation says the split treats it
+    // the way it treats a drawing's own trailing entry.
+    let trailing_drawing_indices = drawing_format_indices.clone();
+    let mut cell_format_indices = BTreeSet::new();
+    for row in &rows {
+        cell_format_indices.insert(row.format_index);
+        for cell in &row.cells {
+            cell_format_indices.insert(cell.format_index);
+        }
+    }
+    for column_set in &column_sets {
+        cell_format_indices.insert(column_set.raw_default_format_index);
+        if let Some(default_format_index) = column_set.default_format_index {
+            cell_format_indices.insert(default_format_index);
+        }
+        for column in &column_set.columns {
+            cell_format_indices.insert(column.format_index);
+        }
+    }
+    if let Some(source_format_ref) = header_footer_format_ref {
+        cell_format_indices.insert(source_format_ref);
+    }
+    for slot in header_footer_slots.iter().flatten().flatten() {
+        cell_format_indices.insert(slot.source_format_ref);
+    }
+    for note_format_index in rows.iter().flat_map(|row| {
+        row.cells
+            .iter()
+            .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
+    }) {
+        if note_format_index > 0 && !cell_format_indices.contains(&note_format_index) {
+            drawing_format_indices.insert(note_format_index);
+        }
+    }
     let zero_column_format_table_is_width_only =
         parse_moxel_format_table(&fields, 0, &style_refs, &drawing_format_indices, &[])
             .is_some_and(|formats| {
@@ -1580,6 +1622,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         &source_column_format_order,
         &style_refs,
         &drawing_format_indices,
+        &trailing_drawing_indices,
         &number_format_refs,
     );
     // The same table the split above consumed, kept in the order the body
@@ -1940,6 +1983,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         internal_sources,
         first_use_pool,
         print_area,
+        repeat_rows: parse_moxel_repeat_rows(&fields),
         group_header_colors: parse_moxel_group_header_colors(&fields, &style_refs),
         print_settings,
         lines,
@@ -1967,7 +2011,107 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     {
         remap_moxel_source_fonts(&source_font_map, &mut spreadsheet);
     }
+    normalize_moxel_lines_to_published_citation_order(&mut spreadsheet);
     Some(spreadsheet)
+}
+
+/// The line references one published `<format>` element names, in the order the
+/// element writes them.
+///
+/// `push_moxel_format_body_xml` writes `drawingBorder` ahead of `border`, and
+/// writes the four side references only where `border` is absent - a stored
+/// side reference behind a `border` is never published at all. Reading the
+/// stored members in their struct order instead would cite a line the document
+/// does not cite.
+fn moxel_published_line_citations(format: &MoxelFormat) -> Vec<usize> {
+    if format.is_empty() {
+        return Vec::new();
+    }
+    let mut cited = Vec::new();
+    if let Some(index) = format.drawing_border {
+        cited.push(index);
+    }
+    if let Some(index) = format.border {
+        cited.push(index);
+        return cited;
+    }
+    for value in [
+        format.left_border,
+        format.top_border,
+        format.right_border,
+        format.bottom_border,
+    ] {
+        if let Some(index) = value {
+            cited.push(index);
+        }
+    }
+    cited
+}
+
+/// The published `<line>` table is exactly the entries the published `<format>`
+/// pool cites, in first-citation order.
+///
+/// Evidence (every `Templates/*/Ext/Template.xml` of ERP УХ 3.2.12.6,
+/// 1С:УТ 11.5.27.75, Документооборот КОРП 3.0.21.3 and БСП demo/base that
+/// publishes a line table - 12 414 documents): walking the published `<format>`
+/// elements in document order and reading their `border`/`leftBorder`/
+/// `topBorder`/`rightBorder`/`bottomBorder`/`drawingBorder` references in
+/// publication order, the first mention of each new index is always exactly one
+/// past the previous one, and the number of distinct mentioned indexes always
+/// equals the number of `<line>` elements. Zero counterexamples.
+///
+/// `compact_moxel_line_table` runs before the pool exists and can only walk the
+/// internal `column_formats ++ formats ++ default_format` concatenation, which
+/// is not the published order wherever `moxel_output_format_indices` reorders
+/// the pool - nor the published member order. This pass runs once the pool is
+/// known and is a no-op on any document whose table already satisfies the fact
+/// above, so it can only move a document the walk disagrees with.
+fn normalize_moxel_lines_to_published_citation_order(spreadsheet: &mut MoxelSpreadsheet) {
+    if spreadsheet.lines.is_empty() {
+        return;
+    }
+    let mut order = Vec::new();
+    let mut seen = BTreeSet::new();
+    for format_index in moxel_output_format_indices(spreadsheet) {
+        for index in
+            moxel_published_line_citations(&moxel_format_for_index(spreadsheet, format_index))
+        {
+            if seen.insert(index) {
+                order.push(index);
+            }
+        }
+    }
+    // This pass decides order, never membership: which entries survive is
+    // `compact_moxel_line_table`'s call, made against its own coverage
+    // evidence. A walk that does not name every entry of the table it was
+    // handed - or names one the table cannot answer - is therefore not this
+    // pass's case and leaves the table exactly as it found it.
+    if order.len() != spreadsheet.lines.len()
+        || order.iter().any(|index| *index >= spreadsheet.lines.len())
+    {
+        return;
+    }
+    if order.iter().copied().eq(0..spreadsheet.lines.len()) {
+        return;
+    }
+    let remap = order
+        .iter()
+        .enumerate()
+        .map(|(published, stored)| (*stored, published))
+        .collect::<BTreeMap<_, _>>();
+    let lines = order
+        .iter()
+        .map(|stored| spreadsheet.lines[*stored].clone())
+        .collect::<Vec<_>>();
+    for format in spreadsheet
+        .column_formats
+        .iter_mut()
+        .chain(spreadsheet.formats.iter_mut())
+    {
+        remap_moxel_format_line_refs(format, &remap);
+    }
+    remap_moxel_format_line_refs(&mut spreadsheet.default_format, &remap);
+    spreadsheet.lines = lines;
 }
 
 pub(super) fn normalize_moxel_fonts(fonts: &mut Vec<MoxelFont>, formats: &[MoxelFormat]) {
@@ -3589,6 +3733,50 @@ fn moxel_print_area_anchor(fields: &[&str]) -> Option<usize> {
     })
 }
 
+/// The repeating band, the first four of the ten scalars behind the print-area
+/// record. `<repeatRows>` is the only repeat element the stand publishes.
+///
+/// Evidence (Документооборот КОРП 3.0.21.3, the only configuration of the stand
+/// that publishes the element at all): all seven documents that publish
+/// `<repeatRows>` carry a non-zero pair in the first two slots and zero in the
+/// next two, and the published `<beginRow>`/`<endRow>` are exactly that pair -
+/// `ПФ_MXL_ИтоговаяЗапись` 6/9, `ПФ_MXL_ВнутренняяОпись` 7/9,
+/// `ПФ_MXL_НоменклатураДел` 9/11, `ПФ_MXL_РеестрЭД` 10/12,
+/// `ПФ_MXL_НоменклатураДелПодразделения` 11/13, `ПФ_MXL_Опись` 12/14,
+/// `ПФ_MXL_Акт` 19/21 - each with `<beginColumn>0</beginColumn>` and
+/// `<endColumn>0</endColumn>`. Every other document of the configuration stores
+/// `0,0,0,0` there and publishes nothing.
+///
+/// No document of the stand stores a non-zero third or fourth slot, so what the
+/// platform writes for one is not measured here: such a record is left unspelled
+/// rather than guessed into a `<repeatRows>` band of its own.
+const MOXEL_REPEAT_ROWS_SLOT_OFFSET: usize = 1;
+
+pub(super) fn parse_moxel_repeat_rows(fields: &[&str]) -> Option<MoxelArea> {
+    let anchor = moxel_print_area_anchor(fields)?;
+    let mut slots = [0i32; 4];
+    for (offset, slot) in slots.iter_mut().enumerate() {
+        *slot = fields
+            .get(anchor + MOXEL_REPEAT_ROWS_SLOT_OFFSET + offset)?
+            .trim()
+            .parse::<i32>()
+            .ok()?;
+    }
+    let [begin_row, end_row, begin_column, end_column] = slots;
+    if (begin_row == 0 && end_row == 0) || begin_column != 0 || end_column != 0 {
+        return None;
+    }
+    Some(MoxelArea {
+        name: String::new(),
+        area_type: "Rows",
+        begin_column,
+        begin_row,
+        end_column,
+        end_row,
+        columns_id: None,
+    })
+}
+
 pub(super) fn parse_moxel_group_header_colors(
     fields: &[&str],
     style_refs: &[Option<String>],
@@ -3885,7 +4073,7 @@ const MAX_MOXEL_LINE_WIDTH: usize = 1024;
 
 /// Decodes the document's shared line table from its own root slot.
 ///
-/// Shape: `{count, (1, {4,0,{0},style,width,0,kind,0}, 0) * count}`.
+/// Shape: `{count, (1, {4,0,{0},style,width,slot,kind,0}, 0) * count}`.
 ///
 /// Evidence (native 1С:УТ 11.5.27.75, all 604 spreadsheet templates the dump
 /// emits): the declared count equals the published `<line>` count in every one
@@ -3919,7 +4107,6 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
             || descriptor.first()?.trim() != "4"
             || descriptor.get(1)?.trim() != "0"
             || descriptor.get(2)?.trim() != "{0}"
-            || descriptor.get(5)?.trim() != "0"
             || descriptor.get(7)?.trim() != "0"
         {
             return None;
@@ -3928,6 +4115,17 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
         if width > MAX_MOXEL_LINE_WIDTH {
             return None;
         }
+        // Member 5 is read as a number and not interpreted. It held `0` in
+        // every 1С:УТ 11.5.27.75 descriptor, which is where the literal `0`
+        // this used to demand came from; ERP УХ 3.2.12.6 disagrees. Seven
+        // `ChartsOfCharacteristicTypes/ВидыКонтроляДокументов` templates store
+        // `{4,0,{0},1,1,3,f527dc88-…,0}` as their first descriptor, and the
+        // platform publishes it as the same `Solid`/`1` cell line every other
+        // `1`/`1` descriptor publishes - the member changes nothing about the
+        // element. Demanding the literal refused the whole table over it and
+        // sent those documents down the reconstruction path, which lost the
+        // third line and renumbered every border reference.
+        descriptor.get(5)?.trim().parse::<i64>().ok()?;
         let kind = descriptor.get(6)?.trim();
         let line_type = match kind {
             MOXEL_CELL_LINE_KIND => "v8ui:SpreadsheetDocumentCellLineType",
@@ -5025,7 +5223,6 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
 }
 
 const MAX_MOXEL_CHART_BYTES: usize = 1024 * 1024;
-const MAX_MOXEL_CHART_SERIES: usize = 64;
 const MAX_MOXEL_CHART_POINTS: usize = 1024;
 const MAX_MOXEL_CHART_LOCALIZED_VALUES: usize = 64;
 const MAX_MOXEL_CHART_DECIMAL_BYTES: usize = 4096;
@@ -5067,7 +5264,25 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         return None;
     }
     let data = split_1c_braced_fields(payload.get(1)?, 0)?;
-    if data.first()?.trim() != "74" || data.len() > MAX_MOXEL_CHART_POINTS * 16 {
+    // The record's own version. `post`'s fixed part is six slots shorter in
+    // 73 than in 74, and nothing else about the record moves.
+    //
+    // Evidence: ERP УХ 3.2.12.6's `Reports/ДосьеКонтрагента/Templates/
+    // ФинансовыйАнализ` and 1С:УТ 11.5.27.75's report of the same name carry
+    // the same `Gauge` chart, one stored as 73 and one as 74; walked member
+    // for member the two records agree from the version onward and diverge
+    // only at the end, where 74 carries six trailing `0` members 73 does not.
+    // Over every chart record of the stand (ERP УХ, 1С:УТ and Документооборот
+    // КОРП 3.0.21.3, both versions, `series_count` 0, 1 and 75) `post.len()`
+    // is `base + 3*series + points + series*points` with `base` 91 for 73 and
+    // 97 for 74, with no exception; the highest `post` slot this reader ever
+    // reads is `rectangle_start + 11`, far ahead of the six.
+    let post_base_len = match data.first()?.trim() {
+        "73" => 91usize,
+        "74" => 97usize,
+        _ => return None,
+    };
+    if data.len() > MAX_MOXEL_CHART_POINTS * 16 {
         return None;
     }
     let series_cur_id = parse_moxel_chart_usize(data.get(1)?)?;
@@ -5103,7 +5318,12 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // series) is what both seed pairs and the pre-existing 13-record corpus
     // (all `series_count == 1`) agree on.
     let series_count = parse_moxel_chart_usize(data.get(4)?)?;
-    if series_count > MAX_MOXEL_CHART_SERIES {
+    // The record's own length is the bound: each series owns eleven members
+    // of it, so a count past `data.len()` names members the record does not
+    // have. The flat 64 this used to carry was below a real document -
+    // ERP УХ's `DataProcessors/ДокументооборотСКонтролирующимиОрганами/
+    // Templates/ДиагностикаОтчетности_Подсказки` stores 75.
+    if series_count.checked_mul(11)? > data.len() {
         return None;
     }
 
@@ -5137,13 +5357,6 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let real_data_count = series_count.checked_mul(point_count)?;
     let real_data_slots = real_data_count.checked_mul(3)?;
     let post_start = 100usize.checked_add(real_data_slots)?;
-    // `series_count` is proven at 0 (the empty template chart above) and 1
-    // (all thirteen populated charts the corpus otherwise carries, plus the
-    // seed pairs cited above); 2+ series is not this reader's case yet and
-    // refuses rather than guessing at a layout no observation has confirmed.
-    if series_count > 1 {
-        return None;
-    }
     // `post.len()` and therefore `expected_tail_len` are not a function of
     // `point_count` alone: the scale-item id-list pair (`N = 1 +
     // series_count` records) and the per-scale legend list (`point_count +
@@ -5151,7 +5364,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // by the seed evidence above -- reducing to the pre-existing
     // `200 + point_count * 5` at `series_count == 1`.
     let series_point_product = series_count.checked_mul(point_count)?;
-    let post_len = 97usize
+    let post_len = post_base_len
         .checked_add(3usize.checked_mul(series_count)?)?
         .checked_add(point_count)?
         .checked_add(series_point_product)?;
@@ -6230,7 +6443,8 @@ fn validate_moxel_chart_v74_post_prefix(
 /// interpreted.
 fn validate_moxel_chart_v74_scale_id_list(post: &[&str], series_count: usize) -> Option<()> {
     let n = post.get(23)?.trim().parse::<usize>().ok()?;
-    if n != series_count.checked_add(1)? || n > MAX_MOXEL_CHART_SERIES {
+    // The list's own length bounds `N`: it spends `2*N + 2` slots of `post`.
+    if n != series_count.checked_add(1)? || n.checked_mul(2)? > post.len() {
         return None;
     }
     for k in 0..n {
@@ -7101,6 +7315,7 @@ fn parse_moxel_formats_with_source_map(
     source_column_format_order: &[usize],
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
+    trailing_drawing_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (
     Vec<MoxelFormat>,
@@ -7146,6 +7361,7 @@ fn parse_moxel_formats_with_source_map(
             source_column_format_refs,
             style_refs,
             drawing_format_indices,
+            trailing_drawing_indices,
             number_format_refs,
         );
     (
@@ -7174,6 +7390,7 @@ pub(super) fn parse_moxel_formats(
         source_column_format_refs,
         style_refs,
         drawing_format_indices,
+        drawing_format_indices,
         number_format_refs,
     );
     (column_formats, formats)
@@ -7186,6 +7403,7 @@ fn parse_moxel_formats_with_layout(
     source_column_format_refs: &[usize],
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
+    trailing_drawing_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, Vec<usize>, bool) {
     let all_formats = parse_moxel_format_table(
@@ -7223,13 +7441,13 @@ fn parse_moxel_formats_with_layout(
             formats,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         let sources = split_moxel_formats_for_output(
             sources,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         return (
             column_formats,
@@ -7251,13 +7469,13 @@ fn parse_moxel_formats_with_layout(
             formats,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         let sources = split_moxel_formats_for_output(
             sources,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         return (
             column_formats,
@@ -7323,7 +7541,7 @@ pub(super) fn parse_moxel_format_table(
                 formats.clear();
                 break;
             };
-            if drawing_format_indices.contains(&(format_offset + 1)) {
+            if drawing_format_indices.contains(&(format_offset + 1)) && format.width.is_none() {
                 let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
                 normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
             }
@@ -7393,7 +7611,7 @@ pub(super) fn parse_moxel_nested_format_table(
         let Some(mut format) = parse_moxel_format(field, style_refs, number_format_refs) else {
             return None;
         };
-        if drawing_format_indices.contains(&(format_offset + 1)) {
+        if drawing_format_indices.contains(&(format_offset + 1)) && format.width.is_none() {
             let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
             normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
         }
@@ -7651,12 +7869,12 @@ pub(super) fn split_moxel_formats_for_output<T>(
     mut formats: Vec<T>,
     column_count: usize,
     sparse_source_format_refs: bool,
-    drawing_format_indices: &BTreeSet<usize>,
+    trailing_drawing_indices: &BTreeSet<usize>,
 ) -> (Vec<T>, Vec<T>) {
     if sparse_source_format_refs {
         let trailing_drawing_count = (1..=formats.len())
             .rev()
-            .take_while(|format_index| drawing_format_indices.contains(format_index))
+            .take_while(|format_index| trailing_drawing_indices.contains(format_index))
             .count();
         let column_start = formats
             .len()
@@ -7669,7 +7887,7 @@ pub(super) fn split_moxel_formats_for_output<T>(
     }
     let trailing_drawing_count = (1..=formats.len())
         .rev()
-        .take_while(|format_index| drawing_format_indices.contains(format_index))
+        .take_while(|format_index| trailing_drawing_indices.contains(format_index))
         .count();
     let column_start = formats
         .len()
@@ -9696,7 +9914,13 @@ fn render_moxel_spreadsheet_xml(
         push_moxel_print_settings_xml(&mut xml, print_settings);
     }
     if let Some(print_area) = &spreadsheet.print_area {
-        push_moxel_print_area_xml(&mut xml, print_area);
+        push_moxel_document_area_xml(&mut xml, "printArea", print_area);
+    }
+    // No document of the stand publishes both, so their relative order is not
+    // measured; `<repeatRows>` is placed where the seven documents that publish
+    // it put it - behind `<printSettings>`, ahead of the group/header colours.
+    if let Some(repeat_rows) = &spreadsheet.repeat_rows {
+        push_moxel_document_area_xml(&mut xml, "repeatRows", repeat_rows);
     }
     for (role, (tag, _)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
         if let Some(color) = &spreadsheet.group_header_colors[role] {
@@ -12573,8 +12797,8 @@ pub(super) fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
     xml.push_str("\t</namedItem>\r\n");
 }
 
-pub(super) fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
-    xml.push_str("\t<printArea>\r\n");
+pub(super) fn push_moxel_document_area_xml(xml: &mut String, tag: &str, area: &MoxelArea) {
+    xml.push_str(&format!("\t<{tag}>\r\n"));
     xml.push_str(&format!("\t\t<type>{}</type>\r\n", area.area_type));
     xml.push_str(&format!("\t\t<beginRow>{}</beginRow>\r\n", area.begin_row));
     xml.push_str(&format!("\t\t<endRow>{}</endRow>\r\n", area.end_row));
@@ -12592,7 +12816,7 @@ pub(super) fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
             escape_xml_text(columns_id)
         ));
     }
-    xml.push_str("\t</printArea>\r\n");
+    xml.push_str(&format!("\t</{tag}>\r\n"));
 }
 
 pub(super) fn push_moxel_row_xml(
@@ -13483,6 +13707,7 @@ mod moxel_exact_parity_tests {
             internal_sources: Vec::new(),
             first_use_pool: None,
             print_area: None,
+            repeat_rows: None,
             group_header_colors: [None, None, None, None],
             print_settings: None,
             lines: Vec::new(),
