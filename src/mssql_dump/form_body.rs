@@ -2010,7 +2010,7 @@ fn emit_form_choice_parameter_available_types(
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct FormTypeLink {
     pub(super) data_path: String,
-    pub(super) link_item: &'static str,
+    pub(super) link_item: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14695,11 +14695,21 @@ pub(super) fn parse_form_input_field_type_link(
     // The one-member owner `{1}` and the two-member terminals are all readable;
     // only the arms that demanded a two-member owner and a one-member terminal
     // were not.
-    let link_item = match fields.last()?.trim() {
-        "0" => "0",
-        "1" => "1",
-        _ => return None,
-    };
+    // The frame's trailing member is the ext-dimension index the linked type is
+    // taken from, written out as it stands: `Субконто2` links item `2` and
+    // `Субконто3` item `3` on ERP УХ 3.2.12.6
+    // `Catalogs/ПараметрыУчетаФИРСБУ/Forms/СчетаУчетаДокумента`. Admitting only
+    // `0` and `1` was a flat bound with no origin -- over the eight stand
+    // corpora the platform writes 207 `0`, 5 `1`, one `2` and one `3`, and the
+    // two it writes above the bound were the two the reader dropped the whole
+    // `<TypeLink>` for. It is read as the canonical decimal it is, so a member
+    // that is not one still declines.
+    let link_item = fields.last()?.trim();
+    let link_item = link_item
+        .parse::<u32>()
+        .ok()
+        .filter(|value| value.to_string() == link_item)?
+        .to_string();
     if fields.len() < 3 {
         return None;
     }
@@ -28220,7 +28230,7 @@ fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String 
 {tab}\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
 {tab}</TypeLink>\r\n",
         escape_xml_text(&type_link.data_path),
-        escape_xml_text(type_link.link_item)
+        escape_xml_text(&type_link.link_item)
     )
 }
 
