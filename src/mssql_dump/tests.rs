@@ -51677,8 +51677,12 @@ fn extracts_sfc_metadata_family_xml_from_blob_shapes() {
             ),
             (
                 "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                // Six generated-type uuids, the header, an empty `Documents`
+                // and `RegisterRecords`, `MoveBoundaryOnPosting`,
+                // `DataLockControlMode`, and an empty dimension collection -
+                // the shape every retained `Sequence` root is written in.
                 deflate_for_test(
-                    b"{1,\r\n{6,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{0,\r\n{3,\r\n{1,0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},\"CompanyDocuments\",{1,\"en\",\"Company documents\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}\r\n},{0}},0}",
+                    b"{1,\r\n{6,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,\r\n{0,\r\n{3,\r\n{1,0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},\"CompanyDocuments\",{1,\"en\",\"Company documents\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}\r\n},{0,0},{0,0},0,1},1,\r\n{437488c0-35e2-11d6-a3c7-0050bae0a776,0}\r\n}",
                 ),
                 "Sequence",
                 PathBuf::from("Sequences").join("CompanyDocuments.xml"),

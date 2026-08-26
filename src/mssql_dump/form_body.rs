@@ -19629,12 +19629,14 @@ fn walk_form_bound_chain_members(
                 // A built-in value list numbers its own four members the same
                 // way wherever it is reached, and they are declared by the
                 // type, so the declared-column index of the attribute the
-                // chain is rooted at cannot spell them. Evidence: `ssl`-demo
-                // `DataProcessors/_ДемоВыборОбъектовМетаданных/Forms/Форма`,
-                // Table `ОбъектыМетаданных` whose row picture carries `{3}`
-                // past `{0,1669f593-…}` - the `ОбъектыМетаданных` attribute of
-                // type `v8:ValueListType` - and the platform writes
-                // `Объект.ОбъектыМетаданных.Picture`.
+                // chain is rooted at cannot spell them. Evidence: the one
+                // `ssl`-demo data-processor form whose Table row picture
+                // carries `{3}` past `{0,1669f593-…}`, an attribute declared
+                // `v8:ValueListType`; the platform writes that attribute's own
+                // name followed by `.Picture`, and wrote nothing at all here
+                // before. Owner names stay out of this file on purpose - the
+                // branch is chosen by the declared type, never by whose form
+                // it is.
                 let name = form_value_list_member_name(column_id.trim())?;
                 for target in [&mut path, &mut key] {
                     target.push('.');
