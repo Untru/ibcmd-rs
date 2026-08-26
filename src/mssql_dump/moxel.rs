@@ -4769,10 +4769,19 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
         match kind_code {
             "5" => {
                 let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
+                // Code 3 is `Tile`. Evidence (native ERP УХ 3.2.12.6): over the
+                // 25 templates that publish a tiled picture, pairing each
+                // `<drawing>` with the stored record that carries its `<id>`
+                // gives 42 records with code 3 and every one of them is
+                // published `Tile`, beside 64 code-1 `Stretch` and 9 code-0
+                // `RealSize` in the same files, with no counterexample.
+                // Refusing the code cost the whole drawing and renumbered the
+                // `<zOrder>` of every drawing behind it.
                 let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
                     0 => "RealSize",
                     1 => "Stretch",
                     2 => "Proportionally",
+                    3 => "Tile",
                     4 => "AutoSize",
                     7 => "ByFontSize",
                     _ => return None,
