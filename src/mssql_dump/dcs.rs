@@ -1941,7 +1941,30 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         data_composition_object_ref_name(&value, self.object_refs, "CommonPicture.")
                             .map(|name| format!("v8ui:{name}"))
                     })
-                    .unwrap_or(value)
+                    // A picture the *platform* owns is stored by the same
+                    // `0:<uuid>` spelling and resolves through no
+                    // configuration object at all. Its identifier is a
+                    // platform constant -- the same table the command and
+                    // help picture readers already use -- and the platform
+                    // publishes it under the same `v8ui` prefix as a
+                    // configuration picture:
+                    // `Reports/КонтрольРассылкиОтчетов/Templates/
+                    // ОсновнаяСхемаКомпоновкиДанных` stores
+                    // `ref="0:7a9cd2fd-…"`/`ref="0:b2202798-…"` and the
+                    // platform exports `ref="v8ui:AppearanceCheckBox"`/
+                    // `ref="v8ui:AppearanceCross"`. Across the
+                    // `Templates/*/Ext/Template.xml` trees of ERP УХ
+                    // 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base 3.1.12.297
+                    // and Документооборот КОРП 3.0.21.3 every one of the 742
+                    // published `v8ui:Picture` refs is a `v8ui:` name and not
+                    // one is a raw uuid, so a uuid that names no picture at
+                    // all is refused rather than passed through.
+                    .or_else(|| {
+                        let uuid = value.trim().strip_prefix("0:")?;
+                        let name = common_command_standard_picture_name(uuid)?
+                            .strip_prefix("StdPicture.")?;
+                        Some(format!("v8ui:{name}"))
+                    })?
             } else if attr_name == "ref"
                 && matches!(
                     *mode,
