@@ -41461,13 +41461,6 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
                 "1",
             ),
         ),
-        (
-            12,
-            information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-                "1",
-            ),
-        ),
         (14, "{\"B\",1}".to_string()),
         (16, "{\"B\",1}".to_string()),
         (17, "{\"N\",0}".to_string()),
@@ -41496,6 +41489,34 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
             "immutable property {index} was accepted"
         );
     }
+
+    // Property 12 is `ChoiceHistoryOnInput`, and it is not immutable: the
+    // stand writes `DontUse` for it on the `Date` standard attribute of `do`
+    // `Documents/{ДанныеДокументаМЭДО,КвитанцияМЭДО,УведомлениеМЭДО}`. It is
+    // read now instead of refused; a value outside the closed pair still
+    // refuses the attribute.
+    for (stored, expected) in [("0", Some("Auto")), ("1", Some("DontUse"))] {
+        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        values[12] = information_register_standard_attribute_direct_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+            stored,
+        );
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert_eq!(
+            parse_information_register_standard_attribute("Active", &bag)
+                .map(|attribute| attribute.choice_history_on_input),
+            expected
+        );
+    }
+    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    values[12] = information_register_standard_attribute_direct_enum_for_test(
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+        "2",
+    );
+    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
 }
 
 #[test]
