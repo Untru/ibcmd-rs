@@ -5183,7 +5183,6 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
 }
 
 const MAX_MOXEL_CHART_BYTES: usize = 1024 * 1024;
-const MAX_MOXEL_CHART_SERIES: usize = 64;
 const MAX_MOXEL_CHART_POINTS: usize = 1024;
 const MAX_MOXEL_CHART_LOCALIZED_VALUES: usize = 64;
 const MAX_MOXEL_CHART_DECIMAL_BYTES: usize = 4096;
@@ -5225,7 +5224,25 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         return None;
     }
     let data = split_1c_braced_fields(payload.get(1)?, 0)?;
-    if data.first()?.trim() != "74" || data.len() > MAX_MOXEL_CHART_POINTS * 16 {
+    // The record's own version. `post`'s fixed part is six slots shorter in
+    // 73 than in 74, and nothing else about the record moves.
+    //
+    // Evidence: ERP УХ 3.2.12.6's `Reports/ДосьеКонтрагента/Templates/
+    // ФинансовыйАнализ` and 1С:УТ 11.5.27.75's report of the same name carry
+    // the same `Gauge` chart, one stored as 73 and one as 74; walked member
+    // for member the two records agree from the version onward and diverge
+    // only at the end, where 74 carries six trailing `0` members 73 does not.
+    // Over every chart record of the stand (ERP УХ, 1С:УТ and Документооборот
+    // КОРП 3.0.21.3, both versions, `series_count` 0, 1 and 75) `post.len()`
+    // is `base + 3*series + points + series*points` with `base` 91 for 73 and
+    // 97 for 74, with no exception; the highest `post` slot this reader ever
+    // reads is `rectangle_start + 11`, far ahead of the six.
+    let post_base_len = match data.first()?.trim() {
+        "73" => 91usize,
+        "74" => 97usize,
+        _ => return None,
+    };
+    if data.len() > MAX_MOXEL_CHART_POINTS * 16 {
         return None;
     }
     let series_cur_id = parse_moxel_chart_usize(data.get(1)?)?;
@@ -5261,7 +5278,12 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // series) is what both seed pairs and the pre-existing 13-record corpus
     // (all `series_count == 1`) agree on.
     let series_count = parse_moxel_chart_usize(data.get(4)?)?;
-    if series_count > MAX_MOXEL_CHART_SERIES {
+    // The record's own length is the bound: each series owns eleven members
+    // of it, so a count past `data.len()` names members the record does not
+    // have. The flat 64 this used to carry was below a real document -
+    // ERP УХ's `DataProcessors/ДокументооборотСКонтролирующимиОрганами/
+    // Templates/ДиагностикаОтчетности_Подсказки` stores 75.
+    if series_count.checked_mul(11)? > data.len() {
         return None;
     }
 
@@ -5295,13 +5317,6 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let real_data_count = series_count.checked_mul(point_count)?;
     let real_data_slots = real_data_count.checked_mul(3)?;
     let post_start = 100usize.checked_add(real_data_slots)?;
-    // `series_count` is proven at 0 (the empty template chart above) and 1
-    // (all thirteen populated charts the corpus otherwise carries, plus the
-    // seed pairs cited above); 2+ series is not this reader's case yet and
-    // refuses rather than guessing at a layout no observation has confirmed.
-    if series_count > 1 {
-        return None;
-    }
     // `post.len()` and therefore `expected_tail_len` are not a function of
     // `point_count` alone: the scale-item id-list pair (`N = 1 +
     // series_count` records) and the per-scale legend list (`point_count +
@@ -5309,7 +5324,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // by the seed evidence above -- reducing to the pre-existing
     // `200 + point_count * 5` at `series_count == 1`.
     let series_point_product = series_count.checked_mul(point_count)?;
-    let post_len = 97usize
+    let post_len = post_base_len
         .checked_add(3usize.checked_mul(series_count)?)?
         .checked_add(point_count)?
         .checked_add(series_point_product)?;
@@ -6388,7 +6403,8 @@ fn validate_moxel_chart_v74_post_prefix(
 /// interpreted.
 fn validate_moxel_chart_v74_scale_id_list(post: &[&str], series_count: usize) -> Option<()> {
     let n = post.get(23)?.trim().parse::<usize>().ok()?;
-    if n != series_count.checked_add(1)? || n > MAX_MOXEL_CHART_SERIES {
+    // The list's own length bounds `N`: it spends `2*N + 2` slots of `post`.
+    if n != series_count.checked_add(1)? || n.checked_mul(2)? > post.len() {
         return None;
     }
     for k in 0..n {
