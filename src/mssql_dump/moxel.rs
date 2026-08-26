@@ -414,7 +414,7 @@ pub(super) struct MoxelCell {
 pub(super) struct MoxelNote {
     pub(super) format_index: usize,
     pub(super) source_format_index: usize,
-    pub(super) text: MoxelLocalizedValue,
+    pub(super) text: Vec<MoxelLocalizedValue>,
     pub(super) begin_row: i32,
     pub(super) begin_row_offset: i32,
     pub(super) end_row: i32,
@@ -3234,7 +3234,13 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
     }
 
     let note_text_field = fields.get(note_text_index)?.trim();
-    let text = parse_moxel_single_localized_value(note_text_field)?;
+    // The note's text is the same declared-count localized container the cell
+    // text uses: `{1,<count>,{<lang>,<content>},…}`. Reading one pair and
+    // dropping the rest cost every bilingual note in the corpus -- measured on
+    // ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base and Документооборот
+    // КОРП 3.0.21.3, 1 899 notes carry 1 576 two-language texts against 323
+    // one-language ones, and the platform publishes every declared item.
+    let text = parse_moxel_localized_note_text(note_text_field)?;
     let note_fields = split_1c_braced_fields(fields.get(note_text_index + 2)?.trim(), 0)?;
     if note_fields.len() != 12
         || note_fields.get(1)?.trim() != "6"
@@ -3248,7 +3254,7 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
         || format_fields.first()?.trim() != "16"
         || format_fields.get(2)?.trim() != note_text_field
         || format_fields.get(3)?.trim() != "0"
-        || parse_moxel_single_localized_value(format_fields.get(2)?.trim())? != text
+        || parse_moxel_localized_note_text(format_fields.get(2)?.trim())? != text
     {
         return None;
     }
@@ -3284,19 +3290,34 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
     })
 }
 
-fn parse_moxel_single_localized_value(text: &str) -> Option<MoxelLocalizedValue> {
+/// The note's localized text container `{1, <count>, {<lang>,<content>}, …}`.
+///
+/// The count is the record's own declaration of how many pairs follow, and the
+/// record must carry exactly that many and at least one: a note the platform
+/// publishes always publishes a `<text>` with items in it.
+fn parse_moxel_localized_note_text(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 3 || fields.first()?.trim() != "1" || fields.get(1)?.trim() != "1" {
+    if fields.first()?.trim() != "1" {
         return None;
     }
-    let pair = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    if pair.len() != 2 {
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count == 0 || fields.len() != count.checked_add(2)? {
         return None;
     }
-    Some(MoxelLocalizedValue {
-        lang: parse_1c_string(pair.first()?)?,
-        content: parse_1c_string(pair.get(1)?)?,
-    })
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| {
+            let pair = split_1c_braced_fields(field, 0)?;
+            if pair.len() != 2 {
+                return None;
+            }
+            Some(MoxelLocalizedValue {
+                lang: parse_1c_string(pair.first()?)?,
+                content: parse_1c_string(pair.get(1)?)?,
+            })
+        })
+        .collect()
 }
 
 /// The formatted tail `{1, <text list>, 1}` of a cell record.
@@ -12480,16 +12501,18 @@ fn push_moxel_note_xml(
         "\t\t\t\t\t\t<formatIndex>{format_index}</formatIndex>\r\n"
     ));
     xml.push_str("\t\t\t\t\t\t<text>\r\n");
-    xml.push_str("\t\t\t\t\t\t\t<v8:item>\r\n");
-    xml.push_str(&format!(
-        "\t\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-        escape_xml_element_text(&note.text.lang)
-    ));
-    xml.push_str(&format!(
-        "\t\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-        escape_xml_element_text(&note.text.content)
-    ));
-    xml.push_str("\t\t\t\t\t\t\t</v8:item>\r\n");
+    for item in &note.text {
+        xml.push_str("\t\t\t\t\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(&item.lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&item.content)
+        ));
+        xml.push_str("\t\t\t\t\t\t\t</v8:item>\r\n");
+    }
     xml.push_str("\t\t\t\t\t\t</text>\r\n");
     xml.push_str(&format!(
         "\t\t\t\t\t\t<beginRow>{}</beginRow>\r\n",
