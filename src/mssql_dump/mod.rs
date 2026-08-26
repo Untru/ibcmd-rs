@@ -8151,6 +8151,22 @@ struct RecalculationDimension {
     register_dimension: String,
 }
 
+struct SequenceProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+    move_boundary_on_posting: &'static str,
+    documents: Vec<String>,
+    register_records: Vec<String>,
+    data_lock_control_mode: &'static str,
+    dimensions: Vec<SequenceDimension>,
+}
+
+struct SequenceDimension {
+    header: MetadataHeader,
+    value_types: Vec<ConstantValueType>,
+    document_map: Vec<String>,
+    register_records_map: Vec<String>,
+}
+
 #[derive(Clone)]
 struct MetadataChildObject {
     tag: &'static str,
@@ -10693,6 +10709,10 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         format_bot_source_xml(&header, &bot, source_version).into_bytes()
     } else if kind == "Role" {
         format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
+    } else if kind == "Sequence" {
+        let sequence =
+            parse_sequence_properties_from_text(text, uuid, &header, type_index, object_refs)?;
+        format_sequence_source_xml(&header, &sequence, source_version).into_bytes()
     } else if kind == "Catalog" {
         let catalog = parse_strict_catalog_properties_from_text(
             text,
@@ -12267,6 +12287,173 @@ fn parse_recalculation_properties_from_text(
         generated_types,
         data_lock_control_mode,
         dimensions,
+    })
+}
+
+/// Collection uuid the dimensions of a `Sequence` are listed under, the same
+/// way every other family's child collection is introduced by its own uuid.
+const SEQUENCE_DIMENSION_LIST_MARKER: &str = "437488c0-35e2-11d6-a3c7-0050bae0a776";
+
+/// The three generated types a `Sequence` declares, in the slot order the
+/// record spells them and the document order the platform writes them in.
+const SEQUENCE_GENERATED_TYPE_SLOTS: [(usize, usize, &str, &str); 3] = [
+    (1, 2, "SequenceRecord", "Record"),
+    (3, 4, "SequenceManager", "Manager"),
+    (5, 6, "SequenceRecordSet", "RecordSet"),
+];
+
+/// Families a `Sequence` may name in its `RegisterRecords` list — the register
+/// families whose movements a document's posting can bound, exactly the set the
+/// document's own `RegisterRecords` property admits.
+const SEQUENCE_REGISTER_RECORD_PREFIXES: [&str; 4] = [
+    "InformationRegister.",
+    "AccumulationRegister.",
+    "AccountingRegister.",
+    "CalculationRegister.",
+];
+
+/// Reads one `Sequence` root.
+///
+/// The record is `{1,{6,<six generated-type uuids>,<header>,<Documents>,
+/// <RegisterRecords>,<MoveBoundaryOnPosting>,<DataLockControlMode>},1,
+/// {<dimension collection>}}`. Three roots are retained across the corpora —
+/// БСП демо `_ДемоДвижениеТоваров` and ERP УХ `ДокументыДвиженияИнвестиций`
+/// and `ДокументыОрганизаций` — and they pin every slot: the two boundary
+/// spellings (`0` where the platform writes `Move` on the first two, `1` where
+/// it writes `DontMove` on the third), an empty and a two-item
+/// `RegisterRecords`, an empty and a populated dimension collection, and both
+/// header revisions (`{2,…}` and `{3,…}`).
+fn parse_sequence_properties_from_text(
+    text: &str,
+    uuid: &str,
+    header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<SequenceProperties> {
+    let root_fields = split_1c_braced_fields(text, 0)?;
+    if root_fields.len() != 4
+        || root_fields.first()?.trim() != "1"
+        || root_fields.get(2)?.trim() != "1"
+    {
+        return None;
+    }
+    let fields = split_1c_braced_fields(root_fields.get(1)?, 0)?;
+    if fields.len() != 12
+        || fields.first()?.trim() != "6"
+        || metadata_header_field_index(&fields, uuid) != Some(7)
+    {
+        return None;
+    }
+    let generated_types = SEQUENCE_GENERATED_TYPE_SLOTS
+        .into_iter()
+        .map(|(type_index_slot, value_index_slot, prefix, category)| {
+            Some(GeneratedTypeEntry {
+                name: format!("{prefix}.{}", header.name),
+                category,
+                type_id: parse_non_zero_uuid(fields.get(type_index_slot)?.trim())?,
+                value_id: parse_non_zero_uuid(fields.get(value_index_slot)?.trim())?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let documents =
+        parse_metadata_object_reference_collection(fields.get(8)?, object_refs, |reference| {
+            reference
+                .strip_prefix("Document.")
+                .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+        })?;
+    let register_records =
+        parse_metadata_object_reference_collection(fields.get(9)?, object_refs, |reference| {
+            SEQUENCE_REGISTER_RECORD_PREFIXES.iter().any(|prefix| {
+                reference
+                    .strip_prefix(prefix)
+                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+            })
+        })?;
+    let move_boundary_on_posting = match fields.get(10)?.trim() {
+        "0" => "Move",
+        "1" => "DontMove",
+        _ => return None,
+    };
+    let data_lock_control_mode = information_register_data_lock_control_mode_xml(fields.get(11)?)?;
+    let dimensions = parse_sequence_dimensions(root_fields.get(3)?, type_index, object_refs)?;
+    Some(SequenceProperties {
+        generated_types,
+        move_boundary_on_posting,
+        documents,
+        register_records,
+        data_lock_control_mode,
+        dimensions,
+    })
+}
+
+fn parse_sequence_dimensions(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<SequenceDimension>> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != SEQUENCE_DIMENSION_LIST_MARKER {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| parse_sequence_dimension(field, type_index, object_refs))
+        .collect()
+}
+
+fn parse_sequence_dimension(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<SequenceDimension> {
+    let wrapper = split_1c_braced_fields(field, 0)?;
+    if wrapper.len() != 2 || wrapper.get(1)?.trim() != "0" {
+        return None;
+    }
+    let fields = split_1c_braced_fields(wrapper.first()?, 0)?;
+    if fields.len() != 4 || fields.first()?.trim() != "0" {
+        return None;
+    }
+    // The head declares how many members follow it: the metadata header and
+    // the dimension's type pattern.
+    let head = split_1c_braced_fields(fields.get(1)?, 0)?;
+    let declared = parse_information_register_usize(head.first()?)?;
+    if head.len() != declared.checked_add(1)? || declared != 2 {
+        return None;
+    }
+    let header_field = head.get(1)?;
+    let dimension_uuid = uuid_like_values_in_text_order(header_field)
+        .into_iter()
+        .next()?;
+    let header = parse_metadata_header_from_text(header_field, &dimension_uuid)?;
+    let value_types = parse_information_register_type_pattern(head.get(2)?, type_index)?;
+    // A map entry names a member of a document or of a register record set,
+    // not the object itself, so its reference is a whole member path.
+    let member_of = |prefixes: &[&str], reference: &str| {
+        prefixes.iter().any(|prefix| {
+            reference
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.contains('.'))
+        })
+    };
+    let document_map =
+        parse_metadata_object_reference_collection(fields.get(2)?, object_refs, |reference| {
+            member_of(&["Document."], reference)
+        })?;
+    let register_records_map =
+        parse_metadata_object_reference_collection(fields.get(3)?, object_refs, |reference| {
+            member_of(&SEQUENCE_REGISTER_RECORD_PREFIXES, reference)
+        })?;
+    Some(SequenceDimension {
+        header,
+        value_types,
+        document_map,
+        register_records_map,
     })
 }
 
@@ -25413,8 +25600,30 @@ fn parse_document_reference_collection(
     object_refs: &BTreeMap<String, String>,
     allowed_prefixes: &[&str],
 ) -> Option<Vec<String>> {
+    parse_metadata_object_reference_collection(value, object_refs, |reference| {
+        allowed_prefixes.iter().any(|prefix| {
+            reference
+                .strip_prefix(prefix)
+                .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+        })
+    })
+}
+
+/// One counted `{0,<n>,{"#",<MDObjectRef uuid>,{1,<uuid>}},…}` list of
+/// metadata references, with the caller deciding which references the property
+/// admits. The physical grammar is one fact; which family or member path a
+/// given property may name is another, and only the caller knows it.
+fn parse_metadata_object_reference_collection(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    accepts: impl Fn(&str) -> bool,
+) -> Option<Vec<String>> {
     // The same declared counter the field-declaration index reads off this
-    // very slot, so `<Owners/>` means the same zero on both sides.
+    // very slot, so `<Owners/>` means the same zero on both sides. It lives
+    // in the physical grammar every one of these properties shares, not in
+    // one caller: reading the count is what proves the members begin at
+    // field 2 at all, so a caller that skipped it would index a malformed
+    // slot past its end.
     metadata_reference_collection_len(value)?;
     let fields = split_information_register_braced_fields(value)?;
     let mut seen = BTreeSet::new();
@@ -25434,12 +25643,8 @@ fn parse_document_reference_collection(
             }
             let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
             let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-            let valid = allowed_prefixes.iter().any(|prefix| {
-                reference
-                    .strip_prefix(prefix)
-                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
-            });
-            (valid && seen.insert(reference.to_ascii_lowercase())).then_some(reference)
+            (accepts(&reference) && seen.insert(reference.to_ascii_lowercase()))
+                .then_some(reference)
         })
         .collect()
 }
@@ -33208,6 +33413,92 @@ fn format_exchange_plan_internal_info_xml(exchange_plan: &ExchangePlanProperties
     }
     xml.push_str("\t\t</InternalInfo>\r\n");
     xml
+}
+
+fn format_sequence_source_xml(
+    header: &MetadataHeader,
+    sequence: &SequenceProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Sequence", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&sequence.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties = format!(
+            "\t\t\t<MoveBoundaryOnPosting>{}</MoveBoundaryOnPosting>\r\n",
+            sequence.move_boundary_on_posting
+        );
+        push_document_reference_collection_xml(&mut properties, "Documents", &sequence.documents);
+        push_document_reference_collection_xml(
+            &mut properties,
+            "RegisterRecords",
+            &sequence.register_records,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n",
+            sequence.data_lock_control_mode
+        ));
+        xml.insert_str(index, &properties);
+    }
+    if let Some(index) = xml.find("\t</Sequence>") {
+        if sequence.dimensions.is_empty() {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        } else {
+            let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+            for dimension in &sequence.dimensions {
+                push_sequence_dimension_xml(&mut child_objects, dimension);
+            }
+            child_objects.push_str("\t\t</ChildObjects>\r\n");
+            xml.insert_str(index, &child_objects);
+        }
+    }
+    xml
+}
+
+fn push_sequence_dimension_xml(xml: &mut String, dimension: &SequenceDimension) {
+    xml.push_str(&format!(
+        "\t\t\t<Dimension uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&dimension.header.uuid),
+        escape_xml_element_text(&dimension.header.name),
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &dimension.header.synonyms);
+    if dimension.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&dimension.header.comment)
+        ));
+    }
+    xml.push_str(&format_metadata_types_xml_with_indent(
+        &dimension.value_types,
+        "\t\t\t\t\t",
+    ));
+    for (name, references) in [
+        ("DocumentMap", &dimension.document_map),
+        ("RegisterRecordsMap", &dimension.register_records_map),
+    ] {
+        if references.is_empty() {
+            xml.push_str(&format!("\t\t\t\t\t<{name}/>\r\n"));
+            continue;
+        }
+        xml.push_str(&format!("\t\t\t\t\t<{name}>\r\n"));
+        for reference in references {
+            xml.push_str(&format!(
+                "\t\t\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                escape_xml_element_text(reference)
+            ));
+        }
+        xml.push_str(&format!("\t\t\t\t\t</{name}>\r\n"));
+    }
+    xml.push_str(
+        "\t\t\t\t</Properties>\r\n\
+\t\t\t</Dimension>\r\n",
+    );
 }
 
 fn format_recalculation_source_xml(
