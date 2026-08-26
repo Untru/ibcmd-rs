@@ -8223,8 +8223,20 @@ struct MetadataTabularSectionProperties {
     line_number_fill_checking: &'static str,
     line_number_fill_value: Option<MetadataChildFillValue>,
     line_number_synonym: Vec<(String, String)>,
+    line_number_format: Vec<(String, String)>,
+    line_number_edit_format: Vec<(String, String)>,
     use_mode: Option<&'static str>,
     line_number_length: Option<u32>,
+}
+
+/// The stored properties of a tabular section's `LineNumber` standard
+/// attribute that the platform actually varies.
+#[derive(Clone, Default)]
+struct LineNumberStandardAttribute {
+    fill_value: Option<MetadataChildFillValue>,
+    synonym: Vec<(String, String)>,
+    format: Vec<(String, String)>,
+    edit_format: Vec<(String, String)>,
 }
 
 struct ExactMetadataTabularSection {
@@ -17218,12 +17230,9 @@ fn parse_exact_metadata_tabular_section(
         "1" => "ShowError",
         _ => return None,
     };
-    let (line_number_fill_value, line_number_synonym) =
-        match parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?
-        {
-            Some((fill_value, synonym)) => (Some(fill_value), synonym),
-            None => (None, Vec::new()),
-        };
+    let line_number =
+        parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?
+            .unwrap_or_default();
     let tooltip = parse_information_register_owner_localized_value(fields.get(8)?)?;
     let TabularSectionEnvelope {
         use_mode,
@@ -17248,13 +17257,15 @@ fn parse_exact_metadata_tabular_section(
         properties: MetadataTabularSectionProperties {
             tooltip,
             fill_checking,
-            line_number_fill_checking: if line_number_fill_value.is_some() {
+            line_number_fill_checking: if line_number.fill_value.is_some() {
                 "DontCheck"
             } else {
                 ""
             },
-            line_number_fill_value,
-            line_number_synonym,
+            line_number_fill_value: line_number.fill_value,
+            line_number_synonym: line_number.synonym,
+            line_number_format: line_number.format,
+            line_number_edit_format: line_number.edit_format,
             use_mode,
             line_number_length,
         },
@@ -17264,7 +17275,7 @@ fn parse_exact_metadata_tabular_section(
 fn parse_exact_tabular_section_standard_attributes_presence(
     owner_kind: &str,
     value: &str,
-) -> Option<Option<(MetadataChildFillValue, Vec<(String, String)>)>> {
+) -> Option<Option<LineNumberStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
     match outer.as_slice() {
         [marker] if marker.trim() == "0" => Some(None),
@@ -17318,7 +17329,24 @@ fn parse_exact_tabular_section_standard_attributes_presence(
             let synonym = parse_information_register_standard_attribute_localized(
                 bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
             )?;
-            Some(Some((fill_value, synonym)))
+            // `Format` and `EditFormat` are stored the way `Synonym` is, and
+            // the writer used to print both as the empty element on the
+            // strength of every observed section writing them empty. `do`
+            // `BusinessProcess.КомплексныйПроцесс`, section `Этапы`, writes
+            // `ЧЦ=2` in both; the census of all 11 534 `LineNumber` standard
+            // attributes on the stand shows exactly that one section doing so.
+            let format = parse_information_register_standard_attribute_localized(
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID)?,
+            )?;
+            let edit_format = parse_information_register_standard_attribute_localized(
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID)?,
+            )?;
+            Some(Some(LineNumberStandardAttribute {
+                fill_value: Some(fill_value),
+                synonym,
+                format,
+                edit_format,
+            }))
         }
         _ => None,
     }
@@ -20536,6 +20564,8 @@ fn parse_metadata_tabular_section_properties(
             line_number_fill_checking: fill_checking,
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: fields
                 .get(header_index + 4)
                 .and_then(|field| metadata_attribute_use_mode_xml(field.trim())),
@@ -20552,6 +20582,8 @@ fn parse_metadata_tabular_section_properties(
             line_number_fill_checking: "DontCheck",
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: None,
             line_number_length: None,
         });
@@ -20576,6 +20608,8 @@ fn parse_data_processor_tabular_section_properties_from_fields(
         line_number_fill_checking: "DontCheck",
         line_number_fill_value: None,
         line_number_synonym: Vec::new(),
+        line_number_format: Vec::new(),
+        line_number_edit_format: Vec::new(),
         use_mode: None,
         line_number_length: None,
     })
@@ -22797,10 +22831,7 @@ fn parse_cct_tabular_sections_indexed(
                 owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
             )
         })?;
-        let (line_number_fill_value, line_number_synonym) = match standard_attributes {
-            Some((fill_value, synonym)) => (Some(fill_value), synonym),
-            None => (None, Vec::new()),
-        };
+        let line_number = standard_attributes.unwrap_or_default();
         let nested_items = parse_cct_collection(
             fields.get(2).copied().unwrap_or_default(),
             CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
@@ -22897,13 +22928,15 @@ fn parse_cct_tabular_sections_indexed(
             tabular_section_properties: Some(MetadataTabularSectionProperties {
                 tooltip,
                 fill_checking,
-                line_number_fill_checking: if line_number_fill_value.is_some() {
+                line_number_fill_checking: if line_number.fill_value.is_some() {
                     "DontCheck"
                 } else {
                     ""
                 },
-                line_number_fill_value,
-                line_number_synonym,
+                line_number_fill_value: line_number.fill_value,
+                line_number_synonym: line_number.synonym,
+                line_number_format: line_number.format,
+                line_number_edit_format: line_number.edit_format,
                 use_mode: section_envelope.use_mode,
                 line_number_length: section_envelope.line_number_length,
             }),
@@ -36360,13 +36393,7 @@ fn push_metadata_tabular_section_properties_xml(
         properties.fill_checking
     ));
     if !properties.line_number_fill_checking.is_empty() {
-        push_metadata_line_number_standard_attribute_xml(
-            xml,
-            indent,
-            properties.line_number_fill_checking,
-            properties.line_number_fill_value.as_ref(),
-            &properties.line_number_synonym,
-        );
+        push_metadata_line_number_standard_attribute_xml(xml, indent, properties);
     }
     if let Some(use_mode) = properties.use_mode {
         xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
@@ -36381,10 +36408,11 @@ fn push_metadata_tabular_section_properties_xml(
 fn push_metadata_line_number_standard_attribute_xml(
     xml: &mut String,
     indent: &str,
-    fill_checking: &str,
-    fill_value: Option<&MetadataChildFillValue>,
-    synonym: &[(String, String)],
+    properties: &MetadataTabularSectionProperties,
 ) {
+    let fill_checking = properties.line_number_fill_checking;
+    let fill_value = properties.line_number_fill_value.as_ref();
+    let child_indent = format!("{indent}\t\t");
     xml.push_str(&format!(
         "{indent}<StandardAttributes>\r\n\
 {indent}\t<xr:StandardAttribute name=\"LineNumber\">\r\n\
@@ -36396,18 +36424,32 @@ fn push_metadata_line_number_standard_attribute_xml(
 {indent}\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
 {indent}\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
 {indent}\t\t<xr:ToolTip/>\r\n\
-{indent}\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
-{indent}\t\t<xr:Format/>\r\n\
-{indent}\t\t<xr:ChoiceForm/>\r\n\
+{indent}\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n"
+    ));
+    push_xr_localized_property_xml(xml, &child_indent, "Format", &properties.line_number_format);
+    xml.push_str(&format!(
+        "{indent}\t\t<xr:ChoiceForm/>\r\n\
 {indent}\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-{indent}\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
-{indent}\t\t<xr:EditFormat/>\r\n\
-{indent}\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+{indent}\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n"
+    ));
+    push_xr_localized_property_xml(
+        xml,
+        &child_indent,
+        "EditFormat",
+        &properties.line_number_edit_format,
+    );
+    xml.push_str(&format!(
+        "{indent}\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
 {indent}\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
 {indent}\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
 {indent}\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n"
     ));
-    push_xr_localized_property_xml(xml, &format!("{indent}\t\t"), "Synonym", synonym);
+    push_xr_localized_property_xml(
+        xml,
+        &child_indent,
+        "Synonym",
+        &properties.line_number_synonym,
+    );
     xml.push_str(&format!(
         "{indent}\t\t<xr:Comment/>\r\n\
 {indent}\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\

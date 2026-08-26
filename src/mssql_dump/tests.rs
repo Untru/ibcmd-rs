@@ -2534,6 +2534,8 @@ fn catalog_and_document_validators_keep_second_tabular_property_failure_location
         line_number_fill_checking: "",
         line_number_fill_value: None,
         line_number_synonym: Vec::new(),
+        line_number_format: Vec::new(),
+        line_number_edit_format: Vec::new(),
         use_mode: None,
         line_number_length: Some(5),
     };
@@ -29016,6 +29018,8 @@ fn formats_data_processor_tabular_section_defaults_without_use_or_line_number_le
             line_number_fill_checking: "DontCheck",
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: None,
             line_number_length: None,
         },
@@ -29040,6 +29044,8 @@ fn formats_tabular_section_with_distinct_line_number_fill_checking() {
             line_number_fill_checking: "DontCheck",
             line_number_fill_value: None,
             line_number_synonym: Vec::new(),
+            line_number_format: Vec::new(),
+            line_number_edit_format: Vec::new(),
             use_mode: None,
             line_number_length: None,
         },
@@ -70872,6 +70878,117 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
             .data_path,
         "Catalog.Products.StandardAttribute.Ref"
     );
+}
+
+/// Builds the `LineNumber` standard-attribute record a tabular section
+/// stores, with the three localized properties the reader looks at.
+fn line_number_standard_attributes_for_test(
+    format: &str,
+    edit_format: &str,
+    synonym: &str,
+) -> String {
+    let localized = |content: &str| {
+        format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{content}}}")
+    };
+    let mut pairs = Vec::new();
+    for key in INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS {
+        let value = match key {
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID => localized(format),
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID => {
+                localized(edit_format)
+            }
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => localized(synonym),
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID => {
+                r#"{"U"}"#.to_owned()
+            }
+            _ => "{0}".to_owned(),
+        };
+        pairs.push(format!("{key},{value}"));
+    }
+    let bag = format!("{{14,25,{}}}", pairs.join(","));
+    format!("{{1,{{1,1,{{-10}},{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID},{bag}}}}}")
+}
+
+#[test]
+fn tabular_section_line_number_format_and_edit_format_are_read_not_assumed_empty() {
+    // The writer printed `<xr:Format/>` and `<xr:EditFormat/>` unconditionally.
+    // Across the 11 534 `LineNumber` standard attributes of the stand exactly
+    // one section writes them non-empty -- `do`
+    // `BusinessProcess.КомплексныйПроцесс`, section `Этапы`, both `ЧЦ=2` --
+    // and its bytes carry the value in the ordinary localized-property slots.
+    let record =
+        line_number_standard_attributes_for_test(r#"{1,"ru","ЧЦ=2"}"#, r#"{1,"ru","ЧЦ=2"}"#, "{0}");
+    let line_number =
+        parse_exact_tabular_section_standard_attributes_presence("BusinessProcess", &record)
+            .expect("record decodes")
+            .expect("record is present");
+    assert_eq!(
+        line_number.format,
+        vec![("ru".to_owned(), "ЧЦ=2".to_owned())]
+    );
+    assert_eq!(
+        line_number.edit_format,
+        vec![("ru".to_owned(), "ЧЦ=2".to_owned())]
+    );
+    assert!(line_number.synonym.is_empty());
+
+    let mut xml = String::new();
+    push_metadata_tabular_section_properties_xml(
+        &mut xml,
+        "\t\t\t\t",
+        &MetadataTabularSectionProperties {
+            tooltip: Vec::new(),
+            fill_checking: "ShowError",
+            line_number_fill_checking: "DontCheck",
+            line_number_fill_value: line_number.fill_value,
+            line_number_synonym: line_number.synonym,
+            line_number_format: line_number.format,
+            line_number_edit_format: line_number.edit_format,
+            use_mode: None,
+            line_number_length: Some(5),
+        },
+    );
+    for element in ["Format", "EditFormat"] {
+        assert!(!xml.contains(&format!("<xr:{element}/>")), "{xml}");
+        let open = format!("<xr:{element}>\r\n");
+        let start = xml.find(&open).unwrap_or_else(|| panic!("{xml}")) + open.len();
+        let end = xml[start..]
+            .find(&format!("</xr:{element}>"))
+            .unwrap_or_else(|| panic!("{xml}"));
+        let body = xml[start..start + end]
+            .split_whitespace()
+            .collect::<String>();
+        assert_eq!(
+            body, "<v8:item><v8:lang>ru</v8:lang><v8:content>ЧЦ=2</v8:content></v8:item>",
+            "{xml}"
+        );
+    }
+    // The empty record keeps the self-closing spelling the other 11 533
+    // sections are written with.
+    let empty = line_number_standard_attributes_for_test("{0}", "{0}", "{0}");
+    let line_number =
+        parse_exact_tabular_section_standard_attributes_presence("BusinessProcess", &empty)
+            .expect("record decodes")
+            .expect("record is present");
+    let mut xml = String::new();
+    push_metadata_tabular_section_properties_xml(
+        &mut xml,
+        "\t\t\t\t",
+        &MetadataTabularSectionProperties {
+            tooltip: Vec::new(),
+            fill_checking: "DontCheck",
+            line_number_fill_checking: "DontCheck",
+            line_number_fill_value: line_number.fill_value,
+            line_number_synonym: line_number.synonym,
+            line_number_format: line_number.format,
+            line_number_edit_format: line_number.edit_format,
+            use_mode: None,
+            line_number_length: Some(5),
+        },
+    );
+    assert!(xml.contains("<xr:Format/>"), "{xml}");
+    assert!(xml.contains("<xr:EditFormat/>"), "{xml}");
+    assert!(xml.contains("<xr:Synonym/>"), "{xml}");
 }
 
 #[test]
