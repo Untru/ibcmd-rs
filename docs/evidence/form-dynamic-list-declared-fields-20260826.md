@@ -1,5 +1,6 @@
 # Dynamic-list `~`: the fields the main table actually declares, 20260826
 
+Base of the measurement below: `dd1fd72`; the package now sits on `7bc966c`.
 Status: the two named residues of
 [`form-dynamic-list-field-twin-20260826.md`](form-dynamic-list-field-twin-20260826.md)
 are closed. Base `dd1fd72`, measured over every dynamic-list record `cf export`
@@ -95,7 +96,11 @@ zero code length is not in the index at all, so it keeps the whole family table
 
 ## Result
 
-Exact-set difference against `$D/baselines/dd1fd72/<key>.parity.json`:
+Exact-set difference against `$D/baselines/dd1fd72/<key>.parity.json`, this
+package alone, measured on base `dd1fd72` before the branch moved to `7bc966c`.
+The combined result of the three `~` packages against `$D/baselines/7bc966c/` is
+in
+[`form-dynamic-list-claim-and-compile-20260826.md`](form-dynamic-list-claim-and-compile-20260826.md).
 
 | key       |    было |    стало | прибавилось | сломано | лишних |
 |-----------|--------:|---------:|------------:|--------:|-------:|
