@@ -3110,10 +3110,24 @@ pub(super) fn collect_form_body_events(
 
 pub(super) fn is_form_child_item_fields(fields: &[&str]) -> bool {
     let revision_fields = normalize_form_item_record_revision(fields);
-    let fields = revision_fields.as_deref().unwrap_or(fields);
-    let Some(wrapper) = fields.first().map(|value| value.trim()) else {
+    let raw_fields = revision_fields.as_deref().unwrap_or(fields);
+    let Some(wrapper) = raw_fields.first().map(|value| value.trim()) else {
         return false;
     };
+    // Same normalization the item reader applies, from the same source of
+    // truth: a record whose conditional-`UserVisible` prefix shifts the
+    // discriminator is still an item record, and answering otherwise here lets
+    // `collect_form_body_events` descend into it and hoist its own events into
+    // the form root. See `form_child_item_conditional_prefix_slot`.
+    let normalized_fields =
+        form_child_item_conditional_prefix_slot(wrapper, raw_fields).map(|prefix_slot| {
+            raw_fields
+                .iter()
+                .enumerate()
+                .filter_map(|(index, field)| (index != prefix_slot).then_some(*field))
+                .collect::<Vec<_>>()
+        });
+    let fields = normalized_fields.as_deref().unwrap_or(raw_fields);
     form_child_item_tag(wrapper, fields).is_some()
 }
 
@@ -9746,7 +9760,6 @@ fn parse_form_child_item_with_metadata_owners(
     let raw_fields = revision_fields.as_deref().unwrap_or(&split_fields);
     let wrapper = raw_fields.first()?.trim();
     let conditional_group_schema = form_conditional_group_schema(wrapper, raw_fields);
-    let conditional_table_schema = form_conditional_table_schema(wrapper, raw_fields);
     // The conditional prefix carries the flag both ways: `false` is the
     // non-default state the platform writes `<UserVisible>` for, and `true` is
     // the default state it writes nothing for. Every previously evidenced
@@ -9772,32 +9785,21 @@ fn parse_form_child_item_with_metadata_owners(
     // "offset shifted implies false" fallback below and wrote a spurious
     // `<UserVisible><xr:Common>false</xr:Common></UserVisible>` in place of
     // its `<Title>`.
-    let wrapper35_prefix_slot = (wrapper == "35"
-        && raw_fields.get(4).map(|value| value.trim()) == Some("1")
-        && raw_fields
-            .get(5)
-            .is_some_and(|value| parse_form_conditional_user_visible_common(value).is_some()))
-    .then_some(5usize);
+    let conditional_prefix_slot = form_child_item_conditional_prefix_slot(wrapper, raw_fields);
     // `Some(None)` -- a prefix was read and it holds the platform's default --
     // is a different answer from `None`, which means no prefix was read at
     // all: the first suppresses the positional fallback further down, the
     // second lets it fire.  Collapsing the two made every record whose prefix
     // reads the default state pick up a fabricated
     // `<UserVisible><xr:Common>false</xr:Common></UserVisible>`.
-    let conditional_user_visible: Option<Option<FormRightsSetting>> = (conditional_group_schema
+    let conditional_user_visible: Option<Option<FormRightsSetting>> = conditional_prefix_slot
         .is_some()
-        || conditional_table_schema.is_some()
-        || wrapper35_prefix_slot.is_some())
-    .then(|| {
-        raw_fields
-            .get(5)
-            .and_then(|field| parse_form_rights_setting(field, object_refs))
-    })
-    .flatten();
-    let conditional_prefix_slot = conditional_group_schema
-        .map(|schema| schema.prefix_slot())
-        .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()))
-        .or(wrapper35_prefix_slot);
+        .then(|| {
+            raw_fields
+                .get(5)
+                .and_then(|field| parse_form_rights_setting(field, object_refs))
+        })
+        .flatten();
     let normalized_fields = conditional_prefix_slot.map(|prefix_slot| {
         raw_fields
             .iter()
@@ -17181,6 +17183,49 @@ fn form_conditional_table_schema(
     )
 }
 
+/// The slot an item record's optional conditional-`UserVisible` prefix member
+/// occupies, or `None` when the record carries no such prefix.
+///
+/// The prefix is one extra member inserted ahead of the discriminator, so every
+/// positional reading of the record has to be taken with it removed. This is
+/// the single place that decides whether a record carries one: the reader that
+/// builds the item (`parse_form_child_item_fields`) and the recognizer that
+/// merely asks whether a nested record *is* an item (`is_form_child_item_fields`)
+/// must not be able to disagree about it.
+///
+/// They did disagree: the recognizer read the discriminator at its unshifted
+/// slot, so every prefixed record answered "not an item" there while the reader
+/// happily built it. `collect_form_body_events` uses the recognizer to decide
+/// where to stop descending, so it walked straight into those items and hoisted
+/// their own `<Events>` into the form root's list -- ERP УХ MDM_Management's
+/// `Documents/ЗаявкаНаИзменениеНСИ/Forms/ФормаДокумента` grew a root
+/// `<Event name="11707a99-…">ДекорацияРодительНажатие</Event>` that belongs to
+/// its `LabelDecoration ДекорацияРодитель`, which the same file already writes
+/// as that decoration's own `<Event name="Click">`.
+fn form_child_item_conditional_prefix_slot(wrapper: &str, raw_fields: &[&str]) -> Option<usize> {
+    if let Some(schema) = form_conditional_group_schema(wrapper, raw_fields) {
+        return Some(schema.prefix_slot());
+    }
+    if let Some(schema) = form_conditional_table_schema(wrapper, raw_fields) {
+        return Some(schema.prefix_slot());
+    }
+    // A `Table`'s own implicit display field (wrapper `35`, see
+    // `form_child_item_tag`) carries the identical prefix tuple at the
+    // identical slot 5, but `FormConditionalGroupSchema`/`FormConditionalTableSchema`
+    // only ever learned wrapper `22`/`73`/`55`/`12` shapes, so this wrapper
+    // needs its own recognition. Detected by the tuple's own value shape (as
+    // `parse_form_child_item_extended_tooltip` already does for its
+    // differently-sized wrapper-`12` case) rather than by a hardcoded total
+    // field count, since a leaf `LabelField` here has no reason to share a
+    // length with any evidenced group/table shape.
+    (wrapper == "35"
+        && raw_fields.get(4).map(|value| value.trim()) == Some("1")
+        && raw_fields
+            .get(5)
+            .is_some_and(|value| parse_form_conditional_user_visible_common(value).is_some()))
+    .then_some(5usize)
+}
+
 /// Placeholder for a trailing member a short item-record revision does not
 /// carry; defined once, in `form_schema`, because the schema has to recognize
 /// it as an absence too.
@@ -23206,7 +23251,25 @@ pub(super) fn parse_form_command_interface_command(
             if !form_command_interface_target_use_standard_commands(&uuid, context) {
                 return Some(format!("{kind}:{uuid}"));
             }
-            resolve_information_register_open_by_value_command(kind, target, context)
+            if let Some(name) =
+                resolve_information_register_open_by_value_command(kind, target, context)
+            {
+                return Some(name);
+            }
+            // A well-formed uuid that names nothing in this configuration is
+            // the second case the platform cannot construct a name for, and it
+            // keeps the raw `kind:uuid` sentinel for it too -- the same
+            // fallback kind `0` already documents, and the same spelling the
+            // `UseStandardCommands` gate just above writes. ERP УХ
+            // MDM_Management's `Documents/ЗаявкаНаИзменениеНСИ/Forms/ФормаДокумента`
+            // carries `5:85128f52-4d52-496d-b679-83a44b512923`, whose uuid
+            // occurs nowhere else in the exported tree -- so the gate above
+            // cannot answer for it (an unknown uuid reads as "declares
+            // standard commands") -- and native writes it literally. Refusing
+            // it here did not merely drop the item: it was the only item of
+            // that form's `<NavigationPanel>`, so the whole container went
+            // unwritten.
+            (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
         }
         _ => None,
     }
