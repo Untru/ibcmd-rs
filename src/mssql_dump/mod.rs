@@ -29216,9 +29216,22 @@ fn common_attribute_separated_data_use_xml(value: &str) -> Option<&'static str> 
     }
 }
 
+/// `<Indexing>` of a common attribute rides owner field 3.
+///
+/// The table knew only `DontIndex`, and an unknown code drops the whole
+/// separation block from the written XML -- eleven elements at the end of
+/// `<Properties>`, so the object is written but differs. Census of the common
+/// attributes of the stand: `DontIndex` 38, `Index` 3 (`do`
+/// `CommonAttributes/{ИдентификаторОтметкиВремени,УзелОбработки,
+/// УдалитьОтметкиВремениИдентификаторНабораЗаписей}`, all three storing `"1"`),
+/// `IndexWithAdditionalOrder` 13 -- the last is the shape
+/// `parse_common_attribute_additional_order_tail` already reads, and it
+/// requires `"2"` in this very field.
 fn common_attribute_indexing_xml(value: &str) -> Option<&'static str> {
     match value {
         "0" => Some("DontIndex"),
+        "1" => Some("Index"),
+        "2" => Some("IndexWithAdditionalOrder"),
         _ => None,
     }
 }

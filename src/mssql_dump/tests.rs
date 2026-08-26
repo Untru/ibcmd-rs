@@ -27603,6 +27603,21 @@ fn constant_record_for_test(multi_line: &str, folders: &str, quick: &str, histor
 const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},0,\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},0,\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,1,1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
 
 #[test]
+fn common_attribute_indexing_names_every_code_the_corpus_stores() {
+    // An unknown code here drops the whole separation block from the written
+    // XML -- eleven elements at the end of `<Properties>` -- so the object is
+    // written but differs. Census of the common attributes of the stand:
+    // `DontIndex` 38, `Index` 3, `IndexWithAdditionalOrder` 13.
+    assert_eq!(common_attribute_indexing_xml("0"), Some("DontIndex"));
+    assert_eq!(common_attribute_indexing_xml("1"), Some("Index"));
+    assert_eq!(
+        common_attribute_indexing_xml("2"),
+        Some("IndexWithAdditionalOrder")
+    );
+    assert_eq!(common_attribute_indexing_xml("3"), None);
+}
+
+#[test]
 fn catalog_choice_data_get_mode_and_cct_code_series_ride_the_slots_the_corpus_names() {
     // The third slot of a catalog's input-mode envelope carries
     // `<ChoiceDataGetModeOnInputByString>`; it used to be pinned to `0` and the
