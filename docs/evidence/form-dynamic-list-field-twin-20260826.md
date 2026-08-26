@@ -170,10 +170,10 @@ of 4 432, `do` 808 → 812 of 813, `ut` 1 931 of 1 936 unchanged, `ssl` and
    available-field collection, not by name. Reconstructing that numbering is
    unattempted — the model writes both plain and is wrong on one of the two.
 
-The rest are the pre-existing residues of the query reader (the
-`Reports/РегламентированныйОтчетАлко*` templated queries, 74 under-marks) and
-of calculated fields the `ServerState` fragment declares (12 over-marks),
-neither of which this package touches.
+The rest is the pre-existing residue of the query reader — the
+`Reports/РегламентированныйОтчетАлко*` templated queries, 74 lists on which
+the platform marks a field the query reader resolves — which this package
+does not touch.
 
 ## Reproduction
 

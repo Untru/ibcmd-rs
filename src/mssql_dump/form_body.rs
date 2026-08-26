@@ -8019,13 +8019,14 @@ fn collect_form_attribute_data_path_columns(
         // `DefaultPicture` is a platform column, not a field-map entry, so the
         // remembered-field pass above never reaches it; a list whose default
         // picture sits outside its main table carries the same `~` marker on a
-        // data path onto it as the row-picture slot already writes.
-        if form_dynamic_list_default_picture_is_out_of_table(
-            attribute
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.main_table.as_deref()),
-        ) {
+        // data path onto it as the row-picture slot already writes. An
+        // attribute typed as a dynamic list but carrying no settings bag at all
+        // declares no main table to test, and the shape is unobserved: it is
+        // left unmarked rather than guessed, exactly as the row-picture reader
+        // leaves it.
+        if let Some(settings) = attribute.settings.as_ref()
+            && form_dynamic_list_default_picture_is_out_of_table(settings.main_table.as_deref())
+        {
             owner_scoped_bindings
                 .unresolvable_columns
                 .insert(FormAttributeColumnKey {
