@@ -3183,7 +3183,7 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     // text list and of the note are read as before, so a member this reader
     // cannot spell out is dropped rather than costing the cell.
     let localized = text_at.and_then(|at| parse_moxel_localized_cell_value(fields.get(at)?));
-    let empty_text = matches!(localized.as_deref(), Some([]));
+    let has_text_member = localized.is_some();
     // An empty language on the leading item marks a parameter reference
     // rather than a text list (see `MoxelDrawingMembers::text`, the same
     // container); a parameter is always the sole item, everything else is
@@ -3193,9 +3193,24 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
             Vec::new(),
             items.into_iter().next().map(|item| item.content),
         ),
-        Some(items) => (items, None),
+        // An item whose content is empty is not published. Evidence: over the
+        // whole `Templates/*/Ext/Template.xml` corpus of ERP УХ 3.2.12.6,
+        // 1С:УТ 11.5.27.75 and Документооборот КОРП 3.0.21.3 -- 10 163 199
+        // `<tl>` and 1 610 230 `<tl/>` -- there is not one
+        // `<v8:content></v8:content>` or `<v8:content/>`, so a list whose only
+        // declared item is `{"ru",""}` is published as the self-closed `<tl/>`.
+        // (No stored list mixes empty and non-empty content: 36 267 lists over
+        // 88 decoded bodies are either wholly empty or wholly not.)
+        Some(items) => (
+            items
+                .into_iter()
+                .filter(|item| !item.content.is_empty())
+                .collect::<Vec<_>>(),
+            None,
+        ),
         None => (Vec::new(), None),
     };
+    let empty_text = has_text_member && text.is_empty() && parameter.is_none();
     // Where the record carries a formatted tail, that tail is the text the
     // platform publishes; the plain copy beside it is the same content with its
     // markup stripped. Evidence (native 1С:УТ 11.5.27.75): 16 cells in the
