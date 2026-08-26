@@ -2235,25 +2235,14 @@ pub(super) fn extract_form_command_set_excluded_commands(
             Some("BusinessProcess" | "Task")
         )
     });
-    let mut commands = map_known_form_excluded_commands(&command_set, |uuid| {
+    // The second `.or_else` used to re-read the command-name table through a
+    // `strip_prefix`; the two tables are one table now, so the excluded reader
+    // reads it directly and the joint `Post`/`UndoPosting` group is gone with
+    // it -- both uuids are named individually in that one table.
+    map_known_form_excluded_commands(&command_set, |uuid| {
         form_standard_excluded_command_name(uuid, business_process_or_task)
             .or_else(|| form_root_table_excluded_command_name(uuid))
-            // The older excluded-command table predates several root form
-            // standard commands.  The canonical command name is available
-            // from the shared Form.StandardCommand table, so retain its
-            // suffix rather than handling individual UUIDs here.
-            .or_else(|| form_standard_command_name(uuid)?.strip_prefix("Form.StandardCommand."))
-    });
-    extend_joint_form_excluded_commands(
-        &mut commands,
-        &command_set,
-        &[
-            "441362c1-0c86-4f73-bf50-6e1048a2db73",
-            "4c569466-1af5-4fc1-9b63-7bf6493097bf",
-        ],
-        &["Post", "UndoPosting"],
-    );
-    commands
+    })
 }
 
 fn form_root_table_excluded_command_name(uuid: &str) -> Option<&'static str> {
@@ -2842,6 +2831,13 @@ pub(super) fn form_root_property_bag_entry<'a>(
     Some(found)
 }
 
+/// The bare-suffix spelling of the one fact table, plus the one name that is
+/// not a property of the uuid at all.
+///
+/// `32df4349-…` is `WriteAndClose` everywhere except on a business process or a
+/// task, where the platform writes `ExecuteAndClose` for the same uuid. That is
+/// a property of the owner, not of the uuid, so it stays here rather than being
+/// pushed into the table of uuid facts.
 pub(super) fn form_standard_excluded_command_name(
     uuid: &str,
     business_process_or_task: bool,
@@ -2849,77 +2845,7 @@ pub(super) fn form_standard_excluded_command_name(
     if business_process_or_task && uuid == "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" {
         return Some("ExecuteAndClose");
     }
-    match uuid {
-        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("No"),
-        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Tree"),
-        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromStandaloneServer"),
-        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("ReportSettings"),
-        "174e58ce-82ad-4787-b956-9367937f7971" => Some("ChangeHistory"),
-        "198ea630-fda2-4cda-8a23-f999f4c67ee6" => Some("CustomizeForm"),
-        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("ListSettings"),
-        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Delete"),
-        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Reread"),
-        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("SaveValues"),
-        "2cacadf7-8fb3-4ec6-ae2b-0ca3fd311c9e" => Some("Execute"),
-        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("SetDeletionMark"),
-        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("WriteAndClose"),
-        "3328a951-c3c8-4f22-b99e-814f7cea6b82" => Some("ReadChanges"),
-        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Copy"),
-        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Close"),
-        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("UndoPosting"),
-        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Help"),
-        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("MoveItem"),
-        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("ShowInList"),
-        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Post"),
-        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Delete"),
-        "3ea8bf45-5f33-4545-a3bb-29f80666b627" => Some("ChangeSettingsStructure"),
-        "3f01ed62-97f8-465b-b4f7-6517ac2bc994" => Some("Abort"),
-        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Create"),
-        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Retry"),
-        "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromMainServer"),
-        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Yes"),
-        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Cancel"),
-        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Change"),
-        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Copy"),
-        "6f959e83-23ec-4991-901d-575d7ea98868" => Some("Activate"),
-        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("RestoreValues"),
-        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("EndEdit"),
-        "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("SaveReportSettings"),
-        "8149a06a-dbf3-4d4d-a275-5385a4196fc7" => Some("CancelEdit"),
-        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("SetDeletionMark"),
-        "87317f86-057f-477e-9045-2da4e4980199" => Some("PostAndClose"),
-        "8b81add7-25af-4df7-a69c-144e3e3e4c8e" => Some("WriteChanges"),
-        "952c2984-9955-415a-8235-5c710aabe732" => Some("LoadDynamicListSettings"),
-        "96e0bc70-f8ff-4732-8119-060923203629" => Some("CancelSearch"),
-        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("OutputList"),
-        "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("SaveVariant"),
-        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => Some("ShowMultipleSelection"),
-        "a29c4f3a-3b41-480a-a31e-5f9f73aa3216" => Some("WriteChanges"),
-        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("List"),
-        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("LevelDown"),
-        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("LoadVariant"),
-        "b0c9afb6-320c-4e36-be21-8f6d48116415" => Some("LoadReportSettings"),
-        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("FindByCurrentValue"),
-        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Generate"),
-        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Find"),
-        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Delete"),
-        "c8f1bd8c-b4d1-46d5-97b3-929b5606b6c3" => Some("StandardSettings"),
-        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("ChangeHistory"),
-        "d5c3842d-7252-4370-9174-756a6cc553e5" => Some("SaveDynamicListSettings"),
-        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => Some("DynamicListStandardSettings"),
-        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Ignore"),
-        "d82e191e-f052-40ee-8691-00cac5b34629" => Some("CreateInitialImage"),
-        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("CreateFolder"),
-        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("LevelUp"),
-        "e7ae2a27-60a2-44ae-ab1d-f307d11c85bf" => Some("ReadChanges"),
-        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("OK"),
-        "f4613f71-5449-48ed-aea5-de005b272a1d" => Some("SwitchActivity"),
-        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("ChangeVariant"),
-        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Refresh"),
-        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Write"),
-        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("HierarchicalList"),
-        _ => None,
-    }
+    form_standard_command_suffix(uuid)
 }
 
 pub(super) fn extract_form_auto_command_bar(
@@ -21045,10 +20971,8 @@ pub(super) fn parse_form_button_command_name(
     }
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
-        if let Some(command_name) =
-            form_standard_button_command_name(&uuid).or_else(|| form_standard_command_name(&uuid))
-        {
-            return Some(command_name.to_owned());
+        if let Some(command_name) = form_standard_command_name(&uuid) {
+            return Some(command_name);
         }
         if let Some(command_name) = object_refs.get(&uuid) {
             return Some(form_object_reference_command_name(command_name));
@@ -21210,75 +21134,97 @@ fn form_command_interface_target_use_standard_commands(
         .is_none_or(|metadata| metadata.use_standard_commands)
 }
 
-pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
+/// Every `Form.StandardCommand` the corpus names, keyed by the uuid the record
+/// declares, as ONE table of facts.
+///
+/// Three tables used to hold this fact -- the button reader's own two-row
+/// table, the command-name table, and the excluded-command table, the latter
+/// spelling the same fact as a bare suffix. They agreed on all 54 uuids they
+/// shared and differed only in what each was missing, which is the shape every
+/// twinned table in this series has had just before it drifted. The fact is
+/// the uuid-to-name pairing; where the name is spelled in full and where as a
+/// suffix is the caller's business, so the callers spell it and the table
+/// states it once.
+///
+/// Collapsing them is not a widening on paper only. Five of the fourteen uuids
+/// only the excluded table carried are evidenced at a *button* by the platform
+/// itself, in the corpus-wide join of every button command record the reader
+/// could not name against the native `<Button>` at the same output path and id
+/// (259 records over the eight stand corpora; 155 named, 104 kept as the raw
+/// sentinel, none unexplained):
+///   * `c8f1bd8c-…` -> `Form.StandardCommand.StandardSettings`, 5 records;
+///   * `573e81b7-…` -> `…OpenFromMainServer`, 2;
+///   * `f4613f71-…` -> `…SwitchActivity`, 1;
+///   * `4c569466-…` -> `…Post` and `441362c1-…` -> `…UndoPosting`, 2 each.
+///
+/// The last two dissolve a joint group. The pair was named as a group because
+/// no observation separated its members; the button join separates them, and
+/// ERP УХ `Documents/АмортизацияОС2_4/Forms/ФормаСписка` corroborates it from
+/// the other side -- its excluded-command list carries `4c569466-…` without
+/// `441362c1-…` and the platform writes exactly one `<ExcludedCommand>Post`.
+///
+/// `45bea91e-…` is new to every table: the same button join names it
+/// `Form.StandardCommand.CompactViewMode` on one record, and three ERP УХ
+/// report forms carry it in an excluded-command list.
+fn form_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
-        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
-        "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => Some("Form.StandardCommand.CreateByParameter"),
-        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Form.StandardCommand.Refresh"),
-        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Form.StandardCommand.Delete"),
-        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Form.StandardCommand.Delete"),
-        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Form.StandardCommand.Delete"),
-        "8d7bcd38-1bbb-4dc1-a9ad-cc9d5966ca8e" => Some("Form.StandardCommand.Start"),
-        "e6a9041f-4d43-4f06-8e17-e95753531565" => Some("Form.StandardCommand.StartAndClose"),
-        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("Form.StandardCommand.UndoPosting"),
-        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("Form.StandardCommand.FindByCurrentValue"),
-        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("Form.StandardCommand.ChangeHistory"),
-        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("Form.StandardCommand.List"),
-        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("Form.StandardCommand.HierarchicalList"),
-        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Form.StandardCommand.Tree"),
-        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("Form.StandardCommand.MoveItem"),
-        "eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111" => Some("Form.StandardCommand.SetDateInterval"),
-        "62778a6d-6114-471c-93f7-e1ccd54bd266" => Some("Form.StandardCommand.CreateInitialImage"),
-        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("Form.StandardCommand.LoadVariant"),
-        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("Form.StandardCommand.ReportSettings"),
-        "8149a06a-dbf3-4d4d-a275-5385a4196fc7" => Some("Form.StandardCommand.CancelEdit"),
-        "b0c9afb6-320c-4e36-be21-8f6d48116415" => Some("Form.StandardCommand.LoadReportSettings"),
-        "03df6ee5-883c-4cc6-b319-d886d1a9b2c8" => Some("Form.StandardCommand.NewWindow"),
-        "a11fe36e-0b45-4c07-80b3-2346b660a51e" => Some("Form.StandardCommand.Print"),
-        "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("Form.StandardCommand.SaveReportSettings"),
-        "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("Form.StandardCommand.SaveVariant"),
-        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => {
-            Some("Form.StandardCommand.ShowMultipleSelection")
-        }
-        "9885f4b6-d830-435f-a0e3-6b70ffe0f85c" => Some("Form.StandardCommand.GetURL"),
-        "a6d73055-3730-42e7-8934-3145ee987141" => Some("Form.StandardCommand.Save"),
-        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Form.StandardCommand.Yes"),
-        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("Form.StandardCommand.No"),
-        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Form.StandardCommand.Copy"),
-        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Form.StandardCommand.Copy"),
-        "87317f86-057f-477e-9045-2da4e4980199" => Some("Form.StandardCommand.PostAndClose"),
-        "96e0bc70-f8ff-4732-8119-060923203629" => Some("Form.StandardCommand.CancelSearch"),
-        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("Form.StandardCommand.OutputList"),
-        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("Form.StandardCommand.ListSettings"),
-        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Form.StandardCommand.Reread"),
-        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("Form.StandardCommand.ShowInList"),
-        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
-        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Form.StandardCommand.Close"),
-        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Form.StandardCommand.Change"),
-        "8e2b82cf-d1ea-46b2-afdf-a8d64e66ea2b" => Some("Form.StandardCommand.Choose"),
-        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Form.StandardCommand.Find"),
-        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Form.StandardCommand.Post"),
-        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("Form.StandardCommand.SetDeletionMark"),
-        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("Form.StandardCommand.SetDeletionMark"),
-        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
-        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Form.StandardCommand.Cancel"),
-        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("Form.StandardCommand.WriteAndClose"),
-        "952c2984-9955-415a-8235-5c710aabe732" => {
-            Some("Form.StandardCommand.LoadDynamicListSettings")
-        }
-        "d5c3842d-7252-4370-9174-756a6cc553e5" => {
-            Some("Form.StandardCommand.SaveDynamicListSettings")
-        }
-        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => {
-            Some("Form.StandardCommand.DynamicListStandardSettings")
-        }
-        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("Form.StandardCommand.CreateFolder"),
-        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("Form.StandardCommand.OK"),
-        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Form.StandardCommand.Write"),
-        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => {
-            Some("Form.StandardCommand.OpenFromStandaloneServer")
-        }
-        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Form.StandardCommand.Retry"),
+        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("CustomizeForm"),
+        "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => Some("CreateByParameter"),
+        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Refresh"),
+        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Delete"),
+        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Delete"),
+        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Delete"),
+        "8d7bcd38-1bbb-4dc1-a9ad-cc9d5966ca8e" => Some("Start"),
+        "e6a9041f-4d43-4f06-8e17-e95753531565" => Some("StartAndClose"),
+        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("UndoPosting"),
+        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("FindByCurrentValue"),
+        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("ChangeHistory"),
+        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("List"),
+        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("HierarchicalList"),
+        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Tree"),
+        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("MoveItem"),
+        "eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111" => Some("SetDateInterval"),
+        "62778a6d-6114-471c-93f7-e1ccd54bd266" => Some("CreateInitialImage"),
+        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("LoadVariant"),
+        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("ReportSettings"),
+        "8149a06a-dbf3-4d4d-a275-5385a4196fc7" => Some("CancelEdit"),
+        "b0c9afb6-320c-4e36-be21-8f6d48116415" => Some("LoadReportSettings"),
+        "03df6ee5-883c-4cc6-b319-d886d1a9b2c8" => Some("NewWindow"),
+        "a11fe36e-0b45-4c07-80b3-2346b660a51e" => Some("Print"),
+        "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("SaveReportSettings"),
+        "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("SaveVariant"),
+        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => Some("ShowMultipleSelection"),
+        "9885f4b6-d830-435f-a0e3-6b70ffe0f85c" => Some("GetURL"),
+        "a6d73055-3730-42e7-8934-3145ee987141" => Some("Save"),
+        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Yes"),
+        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("No"),
+        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Copy"),
+        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Copy"),
+        "87317f86-057f-477e-9045-2da4e4980199" => Some("PostAndClose"),
+        "96e0bc70-f8ff-4732-8119-060923203629" => Some("CancelSearch"),
+        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("OutputList"),
+        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("ListSettings"),
+        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Reread"),
+        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("ShowInList"),
+        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Create"),
+        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Close"),
+        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Change"),
+        "8e2b82cf-d1ea-46b2-afdf-a8d64e66ea2b" => Some("Choose"),
+        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Find"),
+        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Post"),
+        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("SetDeletionMark"),
+        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("SetDeletionMark"),
+        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Help"),
+        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Cancel"),
+        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("WriteAndClose"),
+        "952c2984-9955-415a-8235-5c710aabe732" => Some("LoadDynamicListSettings"),
+        "d5c3842d-7252-4370-9174-756a6cc553e5" => Some("SaveDynamicListSettings"),
+        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => Some("DynamicListStandardSettings"),
+        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("CreateFolder"),
+        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("OK"),
+        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Write"),
+        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromStandaloneServer"),
+        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Retry"),
         // Seven form standard commands the table did not carry.  Each was read
         // off the platform's own answer: the instrumented export joined all
         // 27 773 button command records in the UT 11.5.27.75 tree to the native
@@ -21287,15 +21233,43 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         // share of the drops, with the name native writes at that position.
         // `ChangeHistory` already has a second uuid above, as `Delete`, `Copy`
         // and `SetDeletionMark` each already do.
-        "174e58ce-82ad-4787-b956-9367937f7971" => Some("Form.StandardCommand.ChangeHistory"),
-        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Form.StandardCommand.Generate"),
-        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("Form.StandardCommand.ChangeVariant"),
-        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("Form.StandardCommand.LevelDown"),
-        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("Form.StandardCommand.LevelUp"),
-        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Form.StandardCommand.Ignore"),
-        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("Form.StandardCommand.EndEdit"),
+        "174e58ce-82ad-4787-b956-9367937f7971" => Some("ChangeHistory"),
+        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Generate"),
+        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("ChangeVariant"),
+        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("LevelDown"),
+        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("LevelUp"),
+        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Ignore"),
+        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("EndEdit"),
+        // The fourteen uuids only the excluded-command table used to carry.
+        // Five of them are evidenced at a button as well (see above); the
+        // other nine are the same fact stated once instead of twice.
+        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("SaveValues"),
+        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("RestoreValues"),
+        "2cacadf7-8fb3-4ec6-ae2b-0ca3fd311c9e" => Some("Execute"),
+        "3328a951-c3c8-4f22-b99e-814f7cea6b82" => Some("ReadChanges"),
+        "e7ae2a27-60a2-44ae-ab1d-f307d11c85bf" => Some("ReadChanges"),
+        "8b81add7-25af-4df7-a69c-144e3e3e4c8e" => Some("WriteChanges"),
+        "a29c4f3a-3b41-480a-a31e-5f9f73aa3216" => Some("WriteChanges"),
+        "3ea8bf45-5f33-4545-a3bb-29f80666b627" => Some("ChangeSettingsStructure"),
+        "3f01ed62-97f8-465b-b4f7-6517ac2bc994" => Some("Abort"),
+        "6f959e83-23ec-4991-901d-575d7ea98868" => Some("Activate"),
+        "d82e191e-f052-40ee-8691-00cac5b34629" => Some("CreateInitialImage"),
+        "c8f1bd8c-b4d1-46d5-97b3-929b5606b6c3" => Some("StandardSettings"),
+        "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromMainServer"),
+        "f4613f71-5449-48ed-aea5-de005b272a1d" => Some("SwitchActivity"),
+        // The joint `Post`/`UndoPosting` group, separated by the button join
+        // and by the one form that excludes `Post` alone.
+        "4c569466-1af5-4fc1-9b63-7bf6493097bf" => Some("Post"),
+        "441362c1-0c86-4f73-bf50-6e1048a2db73" => Some("UndoPosting"),
+        // New to every table.
+        "45bea91e-d9e5-4756-b5e6-375ab84b6903" => Some("CompactViewMode"),
         _ => None,
     }
+}
+
+/// The full `Form.StandardCommand.<name>` spelling of the one fact table.
+pub(super) fn form_standard_command_name(uuid: &str) -> Option<String> {
+    form_standard_command_suffix(uuid).map(|suffix| format!("Form.StandardCommand.{suffix}"))
 }
 
 pub(super) fn form_object_reference_command_name(reference: &str) -> String {
@@ -21309,14 +21283,6 @@ pub(super) fn form_object_reference_command_name(reference: &str) -> String {
     match standard {
         Some(standard) => format!("{reference}.StandardCommand.{standard}"),
         None => reference.to_string(),
-    }
-}
-
-pub(super) fn form_standard_button_command_name(uuid: &str) -> Option<&'static str> {
-    match uuid {
-        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("Form.StandardCommand.SaveValues"),
-        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("Form.StandardCommand.RestoreValues"),
-        _ => None,
     }
 }
 
@@ -22155,11 +22121,7 @@ pub(super) fn parse_form_command_interface_command(
                             reference.clone()
                         }
                     })
-                    .or_else(|| {
-                        form_standard_button_command_name(&uuid)
-                            .or_else(|| form_standard_command_name(&uuid))
-                            .map(ToOwned::to_owned)
-                    })
+                    .or_else(|| form_standard_command_name(&uuid))
                     // Nothing named this target: the platform still writes the
                     // item, as the raw `kind:uuid` sentinel rather than a name it
                     // cannot construct -- the object-level

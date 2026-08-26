@@ -20217,7 +20217,7 @@ fn maps_document_journal_command_aliases() {
         Some("CreateByParameter")
     );
     assert_eq!(
-        form_standard_command_name("9fea4ba9-7d33-47d4-a271-cb54df4a9b74"),
+        form_standard_command_name("9fea4ba9-7d33-47d4-a271-cb54df4a9b74").as_deref(),
         Some("Form.StandardCommand.ShowMultipleSelection")
     );
 }
@@ -69952,7 +69952,7 @@ fn resolves_the_seven_missing_form_standard_command_uuids() {
     ];
     for (uuid, expected) in cases {
         assert_eq!(
-            form_standard_command_name(uuid),
+            form_standard_command_name(uuid).as_deref(),
             Some(expected),
             "{uuid} is not named by the shared standard-command table"
         );
@@ -69971,7 +69971,7 @@ fn resolves_the_seven_missing_form_standard_command_uuids() {
     // `ChangeHistory` keeps the uuid it already had; two uuids for one name is the
     // shape `Delete`, `Copy` and `SetDeletionMark` already have in this table.
     assert_eq!(
-        form_standard_command_name("c9abb6b0-eafd-4505-8312-9a7b6888cbf3"),
+        form_standard_command_name("c9abb6b0-eafd-4505-8312-9a7b6888cbf3").as_deref(),
         Some("Form.StandardCommand.ChangeHistory")
     );
 }
