@@ -15262,6 +15262,27 @@ const ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES: [(&str, &str); 4] = [
     ("-3", "Recorder"),
     ("-2", "Period"),
 ];
+
+/// The standard attribute an accumulation register's record set spells for a
+/// marker a form binding names it by.
+///
+/// The turnovers table is a proper subset of the balance one and the two agree
+/// on every marker they share, so one lookup answers both kinds: a turnovers
+/// register simply never carries `-9`, the only marker the balance kind adds.
+/// That is what lets this read the marker without first proving which kind the
+/// register is.
+pub(super) fn accumulation_register_record_set_standard_attribute_name(
+    marker: &str,
+) -> Option<&'static str> {
+    debug_assert!(
+        ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES
+            .iter()
+            .all(|entry| ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES.contains(entry))
+    );
+    ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES
+        .iter()
+        .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+}
 const CALCULATION_REGISTER_STANDARD_ATTRIBUTES: [(&str, &str); 11] = [
     ("-13", "RegistrationPeriod"),
     ("-11", "ReversingEntry"),

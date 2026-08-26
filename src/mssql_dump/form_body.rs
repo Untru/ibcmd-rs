@@ -18464,6 +18464,17 @@ pub(super) fn parse_form_child_item_data_path(
             // platform writes `СписокМаркетплейсOzon.Filter`.
             .or_else(|| {
                 resolve_form_dynamic_list_member_data_path(field, attribute_metadata_owners_by_id)
+            })
+            // A register-records chain reaches a whole register, not a member
+            // of the document, so it is read before the metadata route -- which
+            // sees a bare `AccumulationRegister.X` where it expects a member
+            // path and condemns the slot as ambiguous.
+            .or_else(|| {
+                resolve_form_document_register_records_data_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                )
             }),
         );
         if !matches!(chain, FormOwnerScopedDataPath::Unknown) {
@@ -19036,6 +19047,116 @@ fn form_bound_chain_segment_fields(field: &str) -> Option<Vec<&str>> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let (count, segments) = fields.split_first()?;
     (count.trim().parse::<usize>().ok()? == segments.len()).then(|| segments.to_vec())
+}
+
+/// The record set of one register a document object writes its movements into.
+///
+/// The chain is `{K,{attribute},{-8},{0,<register uuid>}[,{terminal}]}`: the
+/// attribute holds a document object, `-8` is that object's `RegisterRecords`
+/// collection — the same code and the same name the use-always route already
+/// reads it as — and the uuid names the register whose record set the chain
+/// stands on. Nothing states the register's name; the reference the uuid
+/// resolves to does.
+///
+/// Neither the collection nor the record set is reachable any other way: the
+/// binding indexes carry no entry for `-8`, and a bare `AccumulationRegister.X`
+/// is not a member path, so the metadata route condemned the slot as ambiguous
+/// and the item was written with no `<DataPath>` at all. Evidence: `ssl`-demo
+/// `Documents/_ДемоКорректировкаОстатковТоваровВМестахХранения/Forms/ФормаДокумента`,
+/// whose Table carries `{3,{1},{-8},{0,44947459-…}}` and whose eight fields
+/// carry the same three segments plus one terminal; the platform writes
+/// `Объект.RegisterRecords._ДемоОстаткиТоваровВМестахХранения` and, under it,
+/// `Period`, `RecordType`, `LineNumber` and the register's own dimensions and
+/// resources.
+fn resolve_form_document_register_records_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let (root, members) = segments.split_first()?;
+    let [attribute_id] = root.as_slice() else {
+        return None;
+    };
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
+    let value_type = attribute.exact_single_type_reference.as_deref()?;
+    let [collection, register, rest @ ..] = members else {
+        return None;
+    };
+    let [collection_marker] = collection.as_slice() else {
+        return None;
+    };
+    let collection_name = form_object_standard_property_name(
+        value_type,
+        collection_marker.trim().parse::<i64>().ok()?,
+    )?;
+    let [register_marker, register_uuid] = register.as_slice() else {
+        return None;
+    };
+    register_marker.trim().parse::<i64>().ok()?;
+    let register_uuid = parse_non_zero_uuid(register_uuid.trim())?;
+    let register_reference = object_refs.get(&register_uuid)?;
+    let (register_family, register_name) = register_reference.split_once('.')?;
+    if register_name.contains('.') || !form_register_family_holds_document_records(register_family)
+    {
+        return None;
+    }
+    let path = format!("{}.{collection_name}.{register_name}", attribute.name);
+    match rest {
+        [] => Some(path),
+        [terminal] => {
+            let member = match terminal.as_slice() {
+                [marker] => form_register_record_set_standard_attribute_name(
+                    register_family,
+                    marker.trim(),
+                )?
+                .to_string(),
+                [marker, uuid] => {
+                    marker.trim().parse::<i64>().ok()?;
+                    let uuid = parse_non_zero_uuid(uuid.trim())?;
+                    let reference = object_refs.get(&uuid)?;
+                    let (owner_reference, relative_path) =
+                        form_metadata_data_path_route(reference)?;
+                    // The member has to belong to the very register the chain
+                    // has reached; a field of some other register named by the
+                    // same marker would spell a path that register has no
+                    // column for.
+                    if owner_reference != *register_reference {
+                        return None;
+                    }
+                    relative_path
+                }
+                _ => return None,
+            };
+            Some(format!("{path}.{member}"))
+        }
+        _ => None,
+    }
+}
+
+/// The register families a document's `RegisterRecords` collection can name.
+fn form_register_family_holds_document_records(family: &str) -> bool {
+    matches!(
+        family,
+        "AccumulationRegister"
+            | "AccountingRegister"
+            | "InformationRegister"
+            | "CalculationRegister"
+    )
+}
+
+/// The standard attribute a register's record set spells for a marker, read
+/// from the same per-family table the register's own metadata compiler reads.
+/// A family whose table is not evidenced here answers nothing, leaving the slot
+/// unresolved rather than spelling a name no platform bytes state.
+fn form_register_record_set_standard_attribute_name(
+    family: &str,
+    marker: &str,
+) -> Option<&'static str> {
+    match family {
+        "AccumulationRegister" => accumulation_register_record_set_standard_attribute_name(marker),
+        _ => None,
+    }
 }
 
 /// Peels a metadata-attribute leaf off a bound slot, returning the slot one
