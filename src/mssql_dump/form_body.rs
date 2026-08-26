@@ -2884,10 +2884,22 @@ pub(super) fn parse_form_auto_command_bar_fields(
     });
     let fields = normalized_fields.as_deref().unwrap_or(raw_fields);
     let schema = FormRootAutoCommandBarSchema::from_raw_layout(wrapper, id, fields)?;
+    // An empty name is a name the platform writes, not a reason to refuse the
+    // record.  Every one of the 21 711 native forms of ERP УХ 3.2.12.6,
+    // Документооборот КОРП 3.0.21.3, УТ 11.5.27.75 and БСП demo opens with an
+    // `<AutoCommandBar>`; on 75 of them it reads `name="" id="-1"` (68 as an
+    // empty element, 7 with child items).  Refusing those made the recursive
+    // search walk past the form's own bar and either write nothing at all (19
+    // ERP УХ forms) or promote a *nested* bar -- a list table's own
+    // `СписокКоманднаяПанель` -- into the root position, name, id, `Autofill`
+    // and all (42 forms).
+    //
+    // The refusal cannot be traded for a "named bars only" rule either way
+    // round: over the same four trees an empty name occurs on the root bar and
+    // nowhere else.  All 18 421 nested `<AutoCommandBar>` elements are named
+    // and none carries id `-1`; all 75 empty-named ones are the root child and
+    // all carry id `-1`.
     let (name, _) = parse_1c_quoted_string_with_len(fields.get(6)?.trim())?;
-    if name.trim().is_empty() {
-        return None;
-    }
     Some(FormAutoCommandBar {
         id: id.to_string(),
         name,
