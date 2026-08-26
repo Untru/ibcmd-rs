@@ -16548,7 +16548,9 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
                 marker_start,
                 &header.uuid,
                 parent_tabular_section.is_some(),
+                owner_name,
                 type_index,
+                object_refs,
                 metadata_object_refs,
             )
         } else if tag == "Attribute" {
@@ -22471,7 +22473,11 @@ fn parse_cct_attribute(
         &wrapper,
         nested,
         true,
-        Some((owner_name, object_refs)),
+        Some((
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            owner_name,
+            object_refs,
+        )),
         type_index,
         metadata_object_refs,
     )?;
@@ -22509,7 +22515,7 @@ fn parse_cct_attribute_properties(
     wrapper: &[&str],
     nested: bool,
     direct_use_mode: bool,
-    owner_scope: Option<(&str, &BTreeMap<String, String>)>,
+    owner_scope: Option<(&str, &str, &BTreeMap<String, String>)>,
     type_index: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
@@ -22524,12 +22530,12 @@ fn parse_cct_attribute_properties(
         metadata_object_refs,
     )?;
     // The links carry data paths, so they can only be resolved inside a named
-    // owner with its reference index. The business-process caller has neither,
-    // and there only the empty record is admitted.
+    // owner with its reference index. Without that scope only the empty record
+    // is admitted, because there is nothing to resolve a path against.
     let choice_parameter_links = match owner_scope {
-        Some((owner_name, object_refs)) => parse_owner_choice_parameter_links(
+        Some((owner_kind, owner_name, object_refs)) => parse_owner_choice_parameter_links(
             payload.get(14)?,
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            owner_kind,
             owner_name,
             nested,
             object_refs,
@@ -22629,7 +22635,9 @@ fn parse_business_process_child_properties(
     marker_start: usize,
     child_uuid: &str,
     expected_nested: bool,
+    owner_name: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
     let mut layouts =
@@ -22653,7 +22661,11 @@ fn parse_business_process_child_properties(
         &wrapper,
         expected_nested,
         false,
-        None,
+        Some((
+            owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
+            owner_name,
+            object_refs,
+        )),
         type_index,
         metadata_object_refs,
     )

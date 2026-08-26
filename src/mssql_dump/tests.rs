@@ -70873,6 +70873,61 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
 }
 
 #[test]
+fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_process() {
+    // `BusinessProcess.Исполнение.TabularSection.ДополнительныеРеквизиты
+    // .Attribute.Значение` slot 14, verbatim. The record is the same shape the
+    // chart of characteristic types writes, so the owner scope is what decides
+    // whether it can be read, not the family of the caller.
+    const SECTION_UUID: &str = "05cef2f3-ae17-42a3-858d-e60f3c994a79";
+    const ATTRIBUTE_UUID: &str = "2e4c6ef4-f74a-4357-b1df-d1049b27d678";
+    const SECTION: &str = "BusinessProcess.Исполнение.TabularSection.ДополнительныеРеквизиты";
+    let links =
+        format!("{{5006,1,\"Отбор.Владелец\",2,{{0,{SECTION_UUID}}},{{0,{ATTRIBUTE_UUID}}},0}}");
+    let object_refs = BTreeMap::from([
+        (SECTION_UUID.to_owned(), SECTION.to_owned()),
+        (
+            ATTRIBUTE_UUID.to_owned(),
+            format!("{SECTION}.Attribute.Свойство"),
+        ),
+    ]);
+    let parsed = parse_owner_choice_parameter_links(
+        &links,
+        "BusinessProcess",
+        "Исполнение",
+        true,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].name, "Отбор.Владелец");
+    assert_eq!(parsed[0].data_path, format!("{SECTION}.Attribute.Свойство"));
+    assert_eq!(parsed[0].value_change, "Clear");
+
+    // A path that leaves the owner is still refused, and a bare standard
+    // attribute code stays unnamed outside the catalog table.
+    assert!(
+        parse_owner_choice_parameter_links(
+            &links,
+            "BusinessProcess",
+            "Согласование",
+            true,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_owner_choice_parameter_links(
+            "{5006,1,\"Отбор\",1,{-8},0}",
+            "BusinessProcess",
+            "Исполнение",
+            false,
+            &object_refs,
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn task_direct_attribute_wrapper_is_the_code_three_form_the_platform_writes() {
     // All fourteen direct attributes of `Task.ЗадачаИсполнителя` are written
     // `[3, payload27, indexing, fullTextSearch, dataHistory, 0, {1,<nil uuid>}]`;
