@@ -82,15 +82,13 @@ message and was rewritten against the new one (doctrine 8);
 
 `uh`: all 102 revision-3 bodies are now read. 34 of their `Ext/Form.xml`
 files came out byte-exact against the platform on the first pass, 68 came out
-`differing` -- ordinary parity work of the same kind as the corpus's other
-1 381 `differing` managed forms, not a decode failure. `BROKEN = 0` and
+`differing`; "Still open" below measures what the 68 are. `BROKEN = 0` and
 `extra = 0` on all eight corpora.
 
 ## Still open
 
 The 68 `differing` revision-3 forms were diffed against native line by line:
-1 723 changed lines, median 18 per file, min 1, max 121. The differences are
-not one class and are not about the container:
+1 723 changed lines, median 18 per file, min 1, max 121, by tag touched:
 
 | tag touched | files (of 68) |
 |---|---:|
@@ -131,13 +129,27 @@ container revision and by whether its native `Form.xml` has any
 Under revision 4 a populated command bar is rendered right 7 080 times.
 Under revision 3 it is rendered right zero times out of 41. So the leftover
 is not diffuse rendering debt: it is one concentrated defect that revision-3
-bodies expose. The buttons are present in the stored body -- in
-`InformationRegisters/ФайлыСведенийРОКИ/Forms/ФормаСписка` the class-22
-command-bar record `{22,{3,<uuid>},0,0,0,9,"СписокКоманднаяПанель",...}`
-carries `...{0,0,1},1,a9f3b1ac-f51b-431e-b102-55a69acdecad,{29,{14,<uuid>},
-0,0,0,"КнопкаДействияФормыОчистить",...}` -- and the reader walks past them.
-The same file also drops a `<CheckBoxType>Auto</CheckBoxType>` the platform
-writes explicitly. This is the form-item record shape, not the container, and
-it belongs with `uh-form-item-tree-revision-map-20260825.md`. These 102 forms
-are now visible to that workflow, which they were not while the container
-reader refused them.
+bodies expose.
+
+The buttons are present in the stored body. In
+`InformationRegisters/ФайлыСведенийРОКИ/Forms/ФормаСписка`
+(uuid `02233d20-09a7-4e35-b9ba-9a674c044e5c`) the class-22 command-bar item
+record -- `{3,<owner-uuid>}` is the item's `{id, owner}` pair, matching
+`<AutoCommandBar name="СписокКоманднаяПанель" id="3">`, not a revision --
+reads:
+
+```
+{22,{3,02023637-…},0,0,0,9,"СписокКоманднаяПанель",{1,0},{1,0},0,1,0,0,0,2,2,
+ {3,4,{0}},{7,3,0,1,100},{0,0,0},1,
+ {0,0,1},1,a9f3b1ac-f51b-431e-b102-55a69acdecad,
+ {29,{14,02023637-…},0,0,0,"КнопкаДействияФормыОчистить",…}}
+```
+
+The sibling context menu two records earlier ends `…{0,0,0},1,{1,1},0,1,…`
+where this one carries `{0,0,1},1,<uuid>,{29,…}` -- the child list -- and the
+reader walks past it, emitting an empty `<AutoCommandBar>`. The same file also
+drops a `<CheckBoxType>Auto</CheckBoxType>` the platform writes explicitly.
+
+This is the form-item record shape, not the container, and it belongs with
+`uh-form-item-tree-revision-map-20260825.md`. These 102 forms are now visible
+to that workflow, which they were not while the container reader refused them.
