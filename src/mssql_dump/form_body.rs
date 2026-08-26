@@ -69,7 +69,7 @@ use ibcmd_schema::{
     bundled_dcs_conditional_appearance_policy, bundled_dcs_form_server_state_policy,
     bundled_writer_rules, form_choice_parameter_cluster_order,
     form_text_document_context_menu_owner_fields, parse_form_choice_list,
-    parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
+    parse_form_choice_parameter_links_with_optional_mirror as parse_schema_form_choice_parameter_links_with_optional_mirror,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
     parse_generated_metadata_owner, parse_metadata_data_path,
@@ -14192,7 +14192,7 @@ fn form_choice_parameter_link_standard_terminal_member(
 
 pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     primary: &str,
-    duplicate: &str,
+    duplicate: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
@@ -14201,10 +14201,8 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     data_path_by_binding_key: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Result<Vec<ibcmd_schema::FormChoiceParameterLink>, FormChoiceParameterLinksParseError> {
-    parse_schema_form_choice_parameter_links_with_reference_resolver(
-        primary,
-        duplicate,
-        |reference| match reference {
+    parse_schema_form_choice_parameter_links_with_optional_mirror(primary, duplicate, |reference| {
+        match reference {
             FormChoiceParameterLinkReference::FormAttribute {
                 attribute_id,
                 terminal,
@@ -14307,8 +14305,8 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                     }
                 }
             }
-        },
-    )
+        }
+    })
 }
 
 #[cfg(test)]
@@ -14375,27 +14373,40 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     let duplicate =
         schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate);
     // A member the record's own revision does not carry is *absent*, not
-    // malformed: the short `32`/62 revision of the `InputField` option tuple
-    // ends four members before the `5007` mirror this reader cross-checks
-    // against, so the collection cannot be read here at all.  Reporting it
-    // malformed instead made the writer refuse the whole form.
-    if options.get(primary_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
-        || options.get(duplicate_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
-    {
+    // malformed. The collection itself lives at slot 26, which every observed
+    // revision carries; it is the `5007` mirror at slot 64 that the short
+    // `32`/62 revision ends before. The mirror is a duplicate of the same
+    // collection -- both sides are parsed independently and compared, and every
+    // field the caller gets comes from the primary -- so a revision without one
+    // still states the links in full, and the reader drops the cross-check it
+    // cannot run rather than the collection it can read. Only an absent
+    // *primary* leaves nothing to read.
+    if options.get(primary_slot) == Some(&FORM_ITEM_ABSENT_MEMBER) {
         return FormChoiceParameterLinks::Absent;
     }
-    let (Some(primary), Some(duplicate)) = (primary, duplicate) else {
+    let mirror_absent = options.get(duplicate_slot) == Some(&FORM_ITEM_ABSENT_MEMBER);
+    let Some(primary) = primary else {
         return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
-            primary_raw: primary.map(str::to_owned),
+            primary_raw: None,
             duplicate_raw: duplicate.map(str::to_owned),
             primary_slot,
             duplicate_slot,
-            error: if primary.is_none() {
-                FormChoiceParameterLinksParseError::PrimaryMalformed
-            } else {
-                FormChoiceParameterLinksParseError::DuplicateMalformed
-            },
+            error: FormChoiceParameterLinksParseError::PrimaryMalformed,
         });
+    };
+    let duplicate = if mirror_absent {
+        None
+    } else {
+        let Some(duplicate) = duplicate else {
+            return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+                primary_raw: Some(primary.to_owned()),
+                duplicate_raw: None,
+                primary_slot,
+                duplicate_slot,
+                error: FormChoiceParameterLinksParseError::DuplicateMalformed,
+            });
+        };
+        Some(duplicate)
     };
     match parse_form_input_field_choice_parameter_links_with_metadata(
         primary,
@@ -14410,9 +14421,20 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     ) {
         Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
         Ok(links) => FormChoiceParameterLinks::Typed(links),
+        // On a revision that carries the mirror an unreadable collection is a
+        // hard writer refusal, and stays one. On a revision that does not, the
+        // reader has only just started looking at a member it used to answer
+        // `Absent` for outright, and an opaque answer here would turn every
+        // record it cannot yet read into a form the export stops writing: 279
+        // ERP УХ forms, 199 of them previously byte-exact, when this arm was
+        // first shipped without the distinction. Widening a refusal from the
+        // node to the whole form is the failure this project has already
+        // reverted packages over, so the unmirrored arm keeps the answer it had
+        // before and reads only what it can.
+        Err(_) if duplicate.is_none() => FormChoiceParameterLinks::Absent,
         Err(error) => FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
             primary_raw: Some(primary.to_owned()),
-            duplicate_raw: Some(duplicate.to_owned()),
+            duplicate_raw: duplicate.map(str::to_owned),
             primary_slot,
             duplicate_slot,
             error,
