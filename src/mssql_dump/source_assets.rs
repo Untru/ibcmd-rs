@@ -1625,6 +1625,23 @@ pub(super) fn write_source_asset(
                 })?;
                 &owned_body
             };
+            // PROBE (temporary, removed with this pass): dump the raw layout of
+            // every form body whose container declares revision 3.
+            if let Ok(dir) = std::env::var("IBCMD_FORM_LAYOUT_DUMP") {
+                let want =
+                    std::env::var("IBCMD_FORM_LAYOUT_DUMP_REV").unwrap_or_else(|_| "3".to_string());
+                let marker = body.revision.declared_marker();
+                if want.split(',').any(|value| value.trim() == marker) {
+                    let name = asset
+                        .primary_path
+                        .to_string_lossy()
+                        .replace(['/', '\\'], "__");
+                    let dir = std::path::Path::new(&dir).join(marker);
+                    let _ = std::fs::create_dir_all(&dir);
+                    let _ =
+                        std::fs::write(dir.join(format!("{name}.layout")), body.layout.as_bytes());
+                }
+            }
             let adapter = MssqlLegacyAdapter::from_legacy_selector(context.source_version);
             let dcs_target_profile =
                 ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
