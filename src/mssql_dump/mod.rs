@@ -8612,6 +8612,10 @@ struct FilterCriterionFullProperties {
     value_types: Vec<ConstantValueType>,
     use_standard_commands: bool,
     content: Vec<String>,
+    default_form: Option<String>,
+    auxiliary_form: Option<String>,
+    child_forms: Vec<String>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -8693,6 +8697,8 @@ impl FilterCriterionDecodeReason {
 enum FilterCriterionCollectionRole {
     Pattern,
     Content,
+    Form,
+    Command,
 }
 
 impl FilterCriterionCollectionRole {
@@ -8700,6 +8706,8 @@ impl FilterCriterionCollectionRole {
         match self {
             Self::Pattern => owner_graph::FilterCriterionDiagnosticTokens::pattern_role(),
             Self::Content => owner_graph::FilterCriterionDiagnosticTokens::content_role(),
+            Self::Form => owner_graph::FilterCriterionDiagnosticTokens::form_role(),
+            Self::Command => owner_graph::FilterCriterionDiagnosticTokens::command_role(),
         }
     }
 }
@@ -10615,7 +10623,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml")
     };
-    let nested_commands = if metadata_kind_can_own_commands(kind)
+    let mut nested_commands = if metadata_kind_can_own_commands(kind)
         && !matches!(
             kind,
             "Report"
@@ -10842,6 +10850,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             type_index,
             type_index_collisions,
             object_ref_resolutions,
+            object_refs,
+            form_refs,
             source_version,
         ) {
             Ok(Some(properties)) => properties,
@@ -10851,6 +10861,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                 return None;
             }
         };
+        if matches!(filter_criterion, FilterCriterionProperties::StrictFull(_)) {
+            // The strict decoder writes `<ChildObjects>` itself, from the
+            // criterion's own declared form and command collections. Leaving
+            // the generic text-scanning command pass armed on top of that
+            // wrote every owned command twice.
+            nested_commands = Vec::new();
+        }
         format_filter_criterion_source_xml(&header, &filter_criterion, source_version).into_bytes()
     } else if kind == "ChartOfAccounts" {
         match parse_chart_of_accounts_properties_from_text(
@@ -28224,6 +28241,10 @@ fn metadata_source_folder_for_kind(kind: &str) -> Option<&'static str> {
         "ChartOfAccounts" => Some("ChartsOfAccounts"),
         "ChartOfCalculationTypes" => Some("ChartsOfCalculationTypes"),
         "ChartOfCharacteristicTypes" => Some("ChartsOfCharacteristicTypes"),
+        // The inverse mapping (`metadata_kind_for_source_folder`) has always
+        // carried this pair; only the forward one was missing, because until
+        // now no filter criterion needed its own owned-form folder resolved.
+        "FilterCriterion" => Some("FilterCriteria"),
         _ => None,
     }
 }
@@ -37507,12 +37528,15 @@ fn format_xdto_package_source_xml(
     xml
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_filter_criterion_properties_from_text(
     text: &str,
     expected_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
     source_version: InfobaseConfigSourceVersion,
 ) -> std::result::Result<Option<FilterCriterionProperties>, FilterCriterionDecodeError> {
     let root_fields = split_information_register_braced_fields(text).ok_or_else(|| {
@@ -37651,26 +37675,6 @@ fn parse_filter_criterion_properties_from_text(
             )
         })?;
 
-    for index in [8usize, 9] {
-        let uuid = parse_filter_criterion_uuid(
-            owner_fields.get(index).ok_or_else(|| {
-                FilterCriterionDecodeError::new(
-                    FilterCriterionDecodeStage::Owner,
-                    FilterCriterionDecodeReason::Shape,
-                )
-            })?,
-            FilterCriterionDecodeStage::Owner,
-            None,
-            None,
-            false,
-        )?;
-        if !information_register_uuid_is_zero(&uuid) {
-            return Err(FilterCriterionDecodeError::new(
-                FilterCriterionDecodeStage::Owner,
-                FilterCriterionDecodeReason::Shape,
-            ));
-        }
-    }
     for index in [10usize, 11, 12] {
         let fields = owner_fields
             .get(index)
@@ -37693,26 +37697,65 @@ fn parse_filter_criterion_properties_from_text(
         }
     }
 
-    let first_collection =
-        parse_filter_criterion_empty_collection(root_fields.get(3).ok_or_else(|| {
+    let form_items = parse_filter_criterion_child_collection(
+        root_fields.get(3).ok_or_else(|| {
             FilterCriterionDecodeError::new(
                 FilterCriterionDecodeStage::Tail,
                 FilterCriterionDecodeReason::Shape,
             )
-        })?)?;
-    let second_collection =
-        parse_filter_criterion_empty_collection(root_fields.get(4).ok_or_else(|| {
+        })?,
+        owner_graph::FILTER_CRITERION_FORM_COLLECTION_UUID,
+        FilterCriterionCollectionRole::Form,
+    )?;
+    let command_items = parse_filter_criterion_child_collection(
+        root_fields.get(4).ok_or_else(|| {
             FilterCriterionDecodeError::new(
                 FilterCriterionDecodeStage::Tail,
                 FilterCriterionDecodeReason::Shape,
             )
-        })?)?;
-    if first_collection.eq_ignore_ascii_case(&second_collection) {
-        return Err(FilterCriterionDecodeError::new(
-            FilterCriterionDecodeStage::Tail,
-            FilterCriterionDecodeReason::DuplicateUuid,
-        ));
-    }
+        })?,
+        owner_graph::FILTER_CRITERION_COMMAND_COLLECTION_UUID,
+        FilterCriterionCollectionRole::Command,
+    )?;
+
+    let form_uuids = parse_filter_criterion_owned_form_uuids(&form_items)?;
+    let child_forms =
+        parse_filter_criterion_child_form_names(&form_uuids, &expected_header.name, form_refs)?;
+    // Slots 8 and 9 are `DefaultForm` and `AuxiliaryForm`, not reserved zeros:
+    // every filter criterion that owns a form writes that form's uuid in slot
+    // 8 (`do` 3.0.21.3 has seven, ERP УХ 3.2.12.6 three more), and the ones
+    // that own none write the zero uuid there, which is what the earlier
+    // zeros-only reading mistook for the whole rule.
+    let default_form = parse_filter_criterion_owner_form_ref(
+        owner_fields.get(8).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        &form_uuids,
+        &expected_header.name,
+        form_refs,
+    )?;
+    let auxiliary_form = parse_filter_criterion_owner_form_ref(
+        owner_fields.get(9).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        &form_uuids,
+        &expected_header.name,
+        form_refs,
+    )?;
+
+    let child_commands = parse_filter_criterion_child_commands(
+        &command_items,
+        text,
+        &expected_header.uuid,
+        type_index,
+        object_refs,
+    )?;
 
     Ok(Some(FilterCriterionProperties::StrictFull(
         FilterCriterionFullProperties {
@@ -37733,8 +37776,265 @@ fn parse_filter_criterion_properties_from_text(
             value_types,
             use_standard_commands,
             content,
+            default_form,
+            auxiliary_form,
+            child_forms,
+            child_commands,
         },
     )))
+}
+
+/// One owned-child collection of a filter criterion's record tail.
+///
+/// The class uuid is checked, then the *declared* member count decides how
+/// many members follow -- a collection whose declaration and body disagree is
+/// refused rather than trimmed to whichever is shorter.
+fn parse_filter_criterion_child_collection<'a>(
+    value: &'a str,
+    expected_class_uuid: &str,
+    role: FilterCriterionCollectionRole,
+) -> std::result::Result<Vec<&'a str>, FilterCriterionDecodeError> {
+    let fields = split_information_register_braced_fields(value).ok_or_else(|| {
+        FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Shape,
+        )
+    })?;
+    let class_uuid = parse_filter_criterion_uuid(
+        fields.first().ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        FilterCriterionDecodeStage::Tail,
+        Some(role),
+        None,
+        true,
+    )?;
+    if !class_uuid.eq_ignore_ascii_case(expected_class_uuid) {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::InvalidReference,
+        ));
+    }
+    let declared = fields
+        .get(1)
+        .and_then(|value| parse_information_register_usize(value))
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?;
+    if fields.len() != declared + 2 {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Count,
+        ));
+    }
+    Ok(fields[2..].to_vec())
+}
+
+fn parse_filter_criterion_owned_form_uuids(
+    items: &[&str],
+) -> std::result::Result<Vec<String>, FilterCriterionDecodeError> {
+    let mut seen = BTreeSet::new();
+    let mut uuids = Vec::with_capacity(items.len());
+    for (item_index, value) in items.iter().enumerate() {
+        let uuid = parse_filter_criterion_uuid(
+            value,
+            FilterCriterionDecodeStage::Tail,
+            Some(FilterCriterionCollectionRole::Form),
+            Some(item_index),
+            true,
+        )?
+        .to_ascii_lowercase();
+        if !seen.insert(uuid.clone()) {
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::DuplicateUuid,
+                FilterCriterionCollectionRole::Form,
+                item_index,
+                Some(uuid),
+            ));
+        }
+        uuids.push(uuid);
+    }
+    Ok(uuids)
+}
+
+fn parse_filter_criterion_child_form_names(
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> std::result::Result<Vec<String>, FilterCriterionDecodeError> {
+    let prefix = format!("FilterCriterion.{owner_name}.Form.");
+    let mut names = Vec::with_capacity(form_uuids.len());
+    for (item_index, uuid) in form_uuids.iter().enumerate() {
+        let reference =
+            filter_criterion_owned_form_reference(uuid, owner_name, form_refs, item_index)?;
+        let name = reference.strip_prefix(&prefix).ok_or_else(|| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                FilterCriterionDecodeReason::InvalidReference,
+                FilterCriterionCollectionRole::Form,
+                item_index,
+                Some(uuid.clone()),
+            )
+        })?;
+        names.push(name.to_string());
+    }
+    Ok(names)
+}
+
+fn filter_criterion_owned_form_reference(
+    uuid: &str,
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    item_index: usize,
+) -> std::result::Result<String, FilterCriterionDecodeError> {
+    let fail = |reason: FilterCriterionDecodeReason| {
+        FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Resolver,
+            reason,
+            FilterCriterionCollectionRole::Form,
+            item_index,
+            Some(uuid.to_string()),
+        )
+    };
+    let mut matches = form_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+    let (_, form) = matches
+        .next()
+        .ok_or_else(|| fail(FilterCriterionDecodeReason::MissingReference))?;
+    if matches.next().is_some() {
+        return Err(fail(FilterCriterionDecodeReason::AmbiguousReference));
+    }
+    if form.kind != "Form"
+        || !is_owned_metadata_child_path(
+            &form.relative_path,
+            metadata_source_folder_for_kind("FilterCriterion")
+                .ok_or_else(|| fail(FilterCriterionDecodeReason::InvalidReference))?,
+            owner_name,
+            "Forms",
+        )
+    {
+        return Err(fail(FilterCriterionDecodeReason::InvalidReference));
+    }
+    let reference =
+        form_source_reference_name(form).ok_or_else(|| fail(FilterCriterionDecodeReason::Shape))?;
+    let prefix = format!("FilterCriterion.{owner_name}.Form.");
+    match reference.strip_prefix(&prefix) {
+        Some(name) if !name.is_empty() && !name.contains('.') => Ok(reference),
+        _ => Err(fail(FilterCriterionDecodeReason::InvalidReference)),
+    }
+}
+
+/// `DefaultForm` / `AuxiliaryForm`: the zero uuid means the property is left
+/// unset; any other value must name one of the criterion's own declared forms.
+fn parse_filter_criterion_owner_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> std::result::Result<Option<String>, FilterCriterionDecodeError> {
+    let uuid =
+        parse_filter_criterion_uuid(value, FilterCriterionDecodeStage::Owner, None, None, false)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Ok(None);
+    }
+    let uuid = uuid.to_ascii_lowercase();
+    let item_index = form_uuids
+        .iter()
+        .position(|candidate| candidate == &uuid)
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                FilterCriterionDecodeReason::MissingReference,
+                FilterCriterionCollectionRole::Form,
+                0,
+                Some(uuid.clone()),
+            )
+        })?;
+    filter_criterion_owned_form_reference(&uuid, owner_name, form_refs, item_index).map(Some)
+}
+
+fn parse_filter_criterion_child_commands(
+    items: &[&str],
+    text: &str,
+    owner_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> std::result::Result<Vec<MetadataChildCommand>, FilterCriterionDecodeError> {
+    let mut slots = Vec::with_capacity(items.len());
+    let mut identities = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let mut value_uuid = None::<String>;
+    for (item_index, value) in items.iter().enumerate() {
+        let fail = |reason: FilterCriterionDecodeReason| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Tail,
+                reason,
+                FilterCriterionCollectionRole::Command,
+                item_index,
+                None,
+            )
+        };
+        let slot = parse_owner_graph_command_identity_slot(value)
+            .ok_or_else(|| fail(FilterCriterionDecodeReason::Shape))?;
+        if !identities.insert(slot.identity_uuid.to_ascii_lowercase())
+            || !names.insert(slot.header.name.to_lowercase())
+        {
+            return Err(fail(FilterCriterionDecodeReason::DuplicateUuid));
+        }
+        if value_uuid
+            .as_ref()
+            .is_some_and(|shared| !shared.eq_ignore_ascii_case(&slot.value_uuid))
+        {
+            return Err(fail(FilterCriterionDecodeReason::InvalidReference));
+        }
+        value_uuid.get_or_insert_with(|| slot.value_uuid.clone());
+        slots.push(slot);
+    }
+
+    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    if commands.len() != slots.len() {
+        return Err(FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Count,
+            FilterCriterionCollectionRole::Command,
+            commands.len().min(slots.len()),
+            None,
+        ));
+    }
+    for (item_index, (command, slot)) in commands.iter().zip(&slots).enumerate() {
+        let reason = if command.properties.is_none() {
+            Some(FilterCriterionDecodeReason::Shape)
+        } else if !command
+            .header
+            .uuid
+            .eq_ignore_ascii_case(&slot.identity_uuid)
+            || command.header.name != slot.header.name
+            || command.header.synonyms != slot.header.synonyms
+            || command.header.comment != slot.header.comment
+        {
+            Some(FilterCriterionDecodeReason::HeaderMismatch)
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Tail,
+                reason,
+                FilterCriterionCollectionRole::Command,
+                item_index,
+                Some(slot.identity_uuid.clone()),
+            ));
+        }
+    }
+    Ok(commands)
 }
 
 fn filter_criterion_legacy_direct_header_is_valid(
@@ -38209,38 +38509,6 @@ fn filter_criterion_content_reference_is_valid(reference: &str) -> bool {
         )
 }
 
-fn parse_filter_criterion_empty_collection(
-    value: &str,
-) -> std::result::Result<String, FilterCriterionDecodeError> {
-    let fields = split_information_register_braced_fields(value).ok_or_else(|| {
-        FilterCriterionDecodeError::new(
-            FilterCriterionDecodeStage::Tail,
-            FilterCriterionDecodeReason::Shape,
-        )
-    })?;
-    let count = fields
-        .get(1)
-        .and_then(|value| parse_information_register_usize(value));
-    if fields.len() != 2 || count != Some(0) {
-        return Err(FilterCriterionDecodeError::new(
-            FilterCriterionDecodeStage::Tail,
-            FilterCriterionDecodeReason::Shape,
-        ));
-    }
-    parse_filter_criterion_uuid(
-        fields.first().ok_or_else(|| {
-            FilterCriterionDecodeError::new(
-                FilterCriterionDecodeStage::Tail,
-                FilterCriterionDecodeReason::Shape,
-            )
-        })?,
-        FilterCriterionDecodeStage::Tail,
-        None,
-        None,
-        true,
-    )
-}
-
 fn filter_criterion_extraction_diagnostic(
     error: FilterCriterionDecodeError,
 ) -> MetadataSourceExtractionDiagnostic {
@@ -38296,18 +38564,50 @@ fn format_filter_criterion_source_xml(
         }
         insert.push_str("\t\t\t</Content>\r\n");
     }
+    push_filter_criterion_form_property_xml(&mut insert, "DefaultForm", &properties.default_form);
+    push_filter_criterion_form_property_xml(
+        &mut insert,
+        "AuxiliaryForm",
+        &properties.auxiliary_form,
+    );
     insert.push_str(
-        "\t\t\t<DefaultForm/>\r\n\
-\t\t\t<AuxiliaryForm/>\r\n\
-\t\t\t<ListPresentation/>\r\n\
+        "\t\t\t<ListPresentation/>\r\n\
 \t\t\t<ExtendedListPresentation/>\r\n\
 \t\t\t<Explanation/>\r\n",
     );
     insert_metadata_properties_xml(&mut xml, &insert);
+    let mut child_objects = String::new();
+    for form in &properties.child_forms {
+        child_objects.push_str(&format!(
+            "\t\t\t<Form>{}</Form>\r\n",
+            escape_xml_element_text(form)
+        ));
+    }
+    for command in &properties.child_commands {
+        push_metadata_child_command_xml(&mut child_objects, command);
+    }
     if let Some(index) = xml.find("\t</FilterCriterion>\r\n") {
-        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        if child_objects.is_empty() {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        } else {
+            xml.insert_str(
+                index,
+                &format!("\t\t<ChildObjects>\r\n{child_objects}\t\t</ChildObjects>\r\n"),
+            );
+        }
     }
     xml
+}
+
+fn push_filter_criterion_form_property_xml(xml: &mut String, name: &str, value: &Option<String>) {
+    match value {
+        Some(value) => xml.push_str(&format!(
+            "\t\t\t<{name}>{}</{name}>\r\n",
+            escape_xml_element_text(value),
+            name = name
+        )),
+        None => xml.push_str(&format!("\t\t\t<{name}/>\r\n")),
+    }
 }
 
 fn insert_metadata_properties_xml(xml: &mut String, insert: &str) {
