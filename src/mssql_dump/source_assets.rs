@@ -2610,7 +2610,10 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
             offset = uuid_start;
             continue;
         };
-        let Some(reference) = refs.get(uuid) else {
+        let Some(reference) = refs
+            .get(uuid)
+            .filter(|_| help_link_marker_is_anchor(&text, start))
+        else {
             output.push_str(&text[offset..uuid_end]);
             offset = uuid_end;
             continue;
@@ -2633,6 +2636,35 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
     }
     output.push_str(&text[offset..]);
     output.replace("\r\n", "\n").into_bytes()
+}
+
+/// Whether a stored `../id…` marker sits inside an `<a …>` start tag.
+///
+/// The platform requalifies a stored help link to `<Reference>/Help` only on an
+/// anchor. Census of the whole stand (ERP УХ, UT, Документооборот, БСП demo and
+/// base): of 20 322 requalified `…/Help` links every single one is on an `<a>`,
+/// and of the 442 markers the platform left raw, 316 are on an `<area>` inside
+/// an image map -- not one `<area>` anywhere carries a requalified link. Our
+/// rewriter was attribute-blind and requalified whichever markers it could
+/// resolve, so an image map with a resolvable target lost its raw link: 27 pages
+/// of ERP УХ 3.2.12.6 (`DataProcessors/СхемыСправки` and its forms,
+/// `DataProcessors/УправлениеОтклонениями`, two
+/// `Documents/ВерсияСоглашения*`) differ for that reason alone.
+fn help_link_marker_is_anchor(text: &str, marker_start: usize) -> bool {
+    let Some(tag_start) = text[..marker_start].rfind('<') else {
+        return false;
+    };
+    // A `>` between the tag's own `<` and the marker means the marker is in
+    // element content, not in that start tag's attributes.
+    if text[tag_start..marker_start].contains('>') {
+        return false;
+    }
+    let mut name = text[tag_start + 1..marker_start].chars();
+    name.next()
+        .is_some_and(|first| first.eq_ignore_ascii_case(&'a'))
+        && name
+            .next()
+            .is_some_and(|second| second.is_whitespace() || second == '>' || second == '/')
 }
 
 pub(super) fn rewrite_help_picture_refs(text: &str, refs: &BTreeMap<String, String>) -> String {

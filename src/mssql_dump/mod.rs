@@ -25057,7 +25057,7 @@ fn parse_document_properties_from_text(
             "1" => "AutoFillOff",
             _ => return None,
         },
-        register_records: parse_document_reference_collection(
+        register_records: parse_document_register_records_collection(
             fields.get(24)?,
             object_refs,
             &[
@@ -25663,6 +25663,42 @@ fn parse_document_reference_collection(
     })
 }
 
+/// A document's `<RegisterRecords>`, ordered the way the platform writes it:
+/// ascending by the target register's own uuid, not in the order the record
+/// happens to store the members in.
+///
+/// The two orders normally agree, which is why reading the storage order
+/// reproduced the platform on all but five documents of the stand. They part
+/// company when a register is added to an existing document: the member lands
+/// at the end of the stored list while the platform keeps writing the list
+/// sorted. ERP УХ 3.2.12.6 `Documents/ВыбытиеВекселей` stores 20 members, 19 of
+/// them already ascending and `AccumulationRegister.ПрочиеДоходы`
+/// (`5a5e80e0-…`) appended last; the platform writes it tenth, exactly where
+/// its uuid sorts.
+///
+/// Census: of the 717 `<RegisterRecords>` lists with more than one member in
+/// the platform's own trees (529 ERP УХ, 185 UT, 3 БСП demo) every single one
+/// is ascending by target uuid, with no exception. The sort belongs to this
+/// property alone and not to the shared collection grammar -- `<BasedOn>` (118
+/// lists, 91 of them not ascending) and a sequence's `<Documents>` (2 lists,
+/// neither ascending) keep the stored order.
+fn parse_document_register_records_collection(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    allowed_prefixes: &[&str],
+) -> Option<Vec<String>> {
+    let mut pairs =
+        parse_metadata_object_reference_collection_with_uuids(value, object_refs, |reference| {
+            allowed_prefixes.iter().any(|prefix| {
+                reference
+                    .strip_prefix(prefix)
+                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+            })
+        })?;
+    pairs.sort_by(|left, right| left.0.cmp(&right.0));
+    Some(pairs.into_iter().map(|(_, reference)| reference).collect())
+}
+
 /// One counted `{0,<n>,{"#",<MDObjectRef uuid>,{1,<uuid>}},…}` list of
 /// metadata references, with the caller deciding which references the property
 /// admits. The physical grammar is one fact; which family or member path a
@@ -25672,6 +25708,18 @@ fn parse_metadata_object_reference_collection(
     object_refs: &BTreeMap<String, String>,
     accepts: impl Fn(&str) -> bool,
 ) -> Option<Vec<String>> {
+    parse_metadata_object_reference_collection_with_uuids(value, object_refs, accepts)
+        .map(|pairs| pairs.into_iter().map(|(_, reference)| reference).collect())
+}
+
+/// The same list, keeping each member's target uuid beside the reference for a
+/// property whose written order is a function of the uuid rather than of the
+/// storage order.
+fn parse_metadata_object_reference_collection_with_uuids(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    accepts: impl Fn(&str) -> bool,
+) -> Option<Vec<(String, String)>> {
     // The same declared counter the field-declaration index reads off this
     // very slot, so `<Owners/>` means the same zero on both sides. It lives
     // in the physical grammar every one of these properties shares, not in
@@ -25698,7 +25746,7 @@ fn parse_metadata_object_reference_collection(
             let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
             let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
             (accepts(&reference) && seen.insert(reference.to_ascii_lowercase()))
-                .then_some(reference)
+                .then_some((uuid, reference))
         })
         .collect()
 }
