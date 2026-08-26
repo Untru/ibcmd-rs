@@ -9,6 +9,7 @@ pub(super) struct CommandInterface {
     pub(super) groups_order: Vec<String>,
     pub(super) commands_visibility: Vec<CommandInterfaceVisibilityEntry>,
     pub(super) subsystems_order: Vec<String>,
+    pub(super) subsystems_visibility: Vec<CommandInterfaceVisibilityEntry>,
 }
 
 impl CommandInterface {
@@ -30,6 +31,7 @@ impl CommandInterface {
             && self.groups_order.is_empty()
             && self.commands_visibility.is_empty()
             && self.subsystems_order.is_empty()
+            && self.subsystems_visibility.is_empty()
     }
 }
 
@@ -167,6 +169,7 @@ pub(super) fn parse_command_interface_sectioned_fields(
             groups_order: Vec::new(),
             commands_visibility,
             subsystems_order: Vec::new(),
+            subsystems_visibility: Vec::new(),
         });
     }
 
@@ -231,7 +234,35 @@ pub(super) fn parse_command_interface_sectioned_fields(
         index += 1;
     }
 
-    if fields.get(index)?.trim() != "0" || index + 1 != fields.len() {
+    // The sixth section is subsystem visibility, not a mandatory trailing
+    // zero: it carries `<uuid>,<visibility atom>` pairs in the same
+    // adjustable shape command visibility uses. Reading it as a terminator
+    // worked only because every record observed so far left it absent -- the
+    // marker is then `0` and the record ends there, which is also why the
+    // all-empty shape is six zeros rather than five and a tail. Документооборот
+    // КОРП 3.0.21.3's Configuration record populates it, and the whole
+    // `Ext/CommandInterface.xml` was refused over the leftover check.
+    let count = parse_command_interface_section_count(fields, &mut index)?;
+    let mut subsystems_visibility = Vec::with_capacity(count);
+    for _ in 0..count {
+        let uuid = parse_non_zero_uuid(fields.get(index)?.trim())?;
+        let name = command_interface_subsystem_name(&uuid, metadata_refs, subsystem_refs);
+        index += 1;
+        let field = fields.get(index)?;
+        let (common, values) =
+            match parse_command_interface_adjustable_visibility(field, metadata_refs) {
+                Some(parsed) => parsed,
+                None => (parse_command_interface_common_flag(field)?, Vec::new()),
+            };
+        index += 1;
+        subsystems_visibility.push(CommandInterfaceVisibilityEntry {
+            name,
+            common,
+            values,
+        });
+    }
+
+    if index != fields.len() {
         return None;
     }
 
@@ -241,6 +272,7 @@ pub(super) fn parse_command_interface_sectioned_fields(
         groups_order,
         commands_visibility,
         subsystems_order,
+        subsystems_visibility,
     })
 }
 
@@ -719,6 +751,33 @@ pub(super) fn format_command_interface_xml(command_interface: &CommandInterface)
             ));
         }
         xml.push_str("\t</CommandsOrder>\r\n");
+    }
+    // Position taken from the one native file on the stand that carries the
+    // section, Документооборот КОРП 3.0.21.3's `Ext/CommandInterface.xml`:
+    // `<SubsystemsVisibility>` precedes `<SubsystemsOrder>`.
+    if !command_interface.subsystems_visibility.is_empty() {
+        xml.push_str("\t<SubsystemsVisibility>\r\n");
+        for entry in &command_interface.subsystems_visibility {
+            xml.push_str(&format!(
+                "\t\t<Subsystem name=\"{}\">\r\n\
+\t\t\t<Visibility>\r\n\
+\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
+                escape_xml_text(&entry.name),
+                xml_bool(entry.common)
+            ));
+            for value in &entry.values {
+                xml.push_str(&format!(
+                    "\t\t\t\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+                    escape_xml_text(&value.name),
+                    xml_bool(value.value)
+                ));
+            }
+            xml.push_str(
+                "\t\t\t</Visibility>\r\n\
+\t\t</Subsystem>\r\n",
+            );
+        }
+        xml.push_str("\t</SubsystemsVisibility>\r\n");
     }
     if !command_interface.subsystems_order.is_empty() {
         xml.push_str("\t<SubsystemsOrder>\r\n");
