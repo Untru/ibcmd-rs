@@ -16472,16 +16472,15 @@ pub(super) fn form_table_property_bag_value<'a>(
     })
 }
 
+/// A table's standard commands, as one table of facts.
+///
+/// The six rows this function used to hold ahead of the shared table are in
+/// that table now. They name the same commands the same table owner has, and
+/// holding them apart meant a button naming one of them went out without a
+/// `<CommandName>` while an excluded-command list naming the very same uuid was
+/// written -- the drift a twinned table always ends in.
 fn form_table_excluded_command_name(_schema: FormTableSchema, uuid: &str) -> Option<&'static str> {
-    match uuid {
-        "11761e12-cf32-4826-a175-b23213e3b229" => Some("ChangeHistory"),
-        "7d4db5ed-0981-4020-b3b8-886b7165ba05" => Some("SetPresentation"),
-        "8af6ebff-cd02-4bfe-a984-44a292623708" => Some("ShowRowRearrangement"),
-        "d96b0c03-b209-4d01-a3fc-17a14f873b64" => Some("SearchHistory"),
-        "e6900951-1a42-4397-bf00-cabb2cd7ad6d" => Some("Detailed"),
-        "ec576e13-1e76-4c33-98aa-a33204514227" => Some("Delete"),
-        _ => form_table_standard_command_suffix(uuid),
-    }
+    form_table_standard_command_suffix(uuid)
 }
 
 fn parse_form_table_counted_uuid_list(field: &str) -> Option<Vec<&str>> {
@@ -16555,24 +16554,6 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
     let mut commands = map_known_form_excluded_commands(uuids, |uuid| {
         form_table_excluded_command_name(schema, uuid)
     });
-    extend_joint_form_excluded_commands(
-        &mut commands,
-        uuids,
-        &[
-            "48e12019-0fd6-46eb-aab6-2acba716a623",
-            "fc120c02-7f39-469b-b357-b2dd8d4b0765",
-        ],
-        &["AddAutoOrderItem", "Expand"],
-    );
-    extend_joint_form_excluded_commands(
-        &mut commands,
-        uuids,
-        &[
-            "15664824-eedc-4a92-9f6b-c89a2dead157",
-            "d77e5787-b130-4355-8f8f-01ecec82f843",
-        ],
-        &["Choose", "ChooseAll"],
-    );
     // The three standard commands a settings table excludes beside
     // `UserSettingItemProperties`.  Evidence: UT 11.5.27.75,
     // `DataProcessors/СверкаПродажЛьготныхТоваровОплаченныхЭСФСС/Forms/Форма`
@@ -21351,11 +21332,53 @@ pub(super) fn form_pdf_document_standard_command_suffix(uuid: &str) -> Option<&'
     }
 }
 
+/// The standard commands a graphical-schema field owns, by the uuid its command
+/// record names.
+///
+/// The table carried three of them and dropped every button that named one of
+/// the other twenty-five, which is what a graphical-schema editor is almost
+/// entirely made of.
+///
+/// Evidence: the corpus-wide button join -- every button command record the
+/// reader could not name, matched against the native `<Button>` at the same
+/// output path and id, over the eight stand corpora. Each uuid below appears
+/// on three or four records, always under an item the owner index calls a
+/// graphical schema and always against the same name; no uuid is ever seen
+/// against two names. The records sit under four different item ids (1, 4,
+/// 1404, 2069) in four different Документооборот КОРП forms -- among them
+/// `CommonForms/КарточкаСхемыОбработкиОбъекта` and
+/// `BusinessProcesses/КомплексныйПроцесс/Forms/ФормаБизнесПроцесса` -- so the
+/// pairing is the uuid's, not one form's accident.
 pub(super) fn form_graphical_schema_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
         "e2d6f793-b786-4640-a91b-8d77f73860f1" => Some("Print"),
         "1d13f9a3-402a-46cb-9c68-1709356840f2" => Some("Preview"),
         "01db2225-b62d-4112-a4b6-d39d627bf79f" => Some("PageSetup"),
+        "abaddb09-44e1-4d85-b473-cd3db79f5fa3" => Some("InsertItemStart"),
+        "c54de1e2-eadf-4ad7-ba5e-f165ed302c29" => Some("InsertItemCompletion"),
+        "c58155b0-29dc-4905-a0c0-1ed2d6f88c4c" => Some("InsertItemProcessing"),
+        "d80a7ec0-3dc2-4777-9752-8fec196eb655" => Some("InsertItemCondition"),
+        "e915596d-e318-452b-9ba9-95cf99432b2c" => Some("InsertItemSplit"),
+        "d80be1de-253f-4a06-8c1a-b3920137e0ac" => Some("InsertItemJoin"),
+        "494c5e0a-f4f0-4184-9d10-2b57e780e428" => Some("InsertItemDecoration"),
+        "5eee88e8-c2c7-45b1-8303-049edb58170d" => Some("InsertItemDecorativeLine"),
+        "c4ac110c-99d4-4c75-882e-f2a5b9c199ad" => Some("AlignLeft"),
+        "1c7ec5be-53a6-43cc-8bc8-9a73ca72a44e" => Some("AlignCenter"),
+        "767690d6-cf3b-4f04-a28c-f91fb83a6a0a" => Some("AlignRight"),
+        "3ddfe26e-81bc-453f-bd88-5185aca5b2f0" => Some("AlignTop"),
+        "e22c2307-5585-4491-a106-3fca57a987ac" => Some("AlignMiddle"),
+        "ea0bafc6-647c-46eb-bb8b-6417593546cc" => Some("AlignBottom"),
+        "23176829-e3f7-46dc-af32-6af1f6d67643" => Some("DistributeHorizontally"),
+        "56f9684a-d741-44c0-bf84-652b987507dd" => Some("DistributeVertically"),
+        "3667f2a8-3912-4b56-a3b5-d69a1b7eec5d" => Some("EqualWidth"),
+        "356928f8-1b7d-4579-9813-d19699de6b76" => Some("EqualHeight"),
+        "89a42f51-7f8b-4efe-a257-94a623242a0a" => Some("EqualSize"),
+        "bfd14d15-932b-4f08-8090-395e4816e174" => Some("BringToFront"),
+        "5f8efacc-cd77-4bc9-8ae8-74af39dc5535" => Some("SendForward"),
+        "b4a65823-eb91-4b2c-9be6-a349566d9a63" => Some("SendBackward"),
+        "a5a41937-c459-438d-b2f5-81b561dc67c5" => Some("BringToBack"),
+        "87ddfbaa-b8e9-4f2b-884a-88c203115854" => Some("Group"),
+        "f27f75fc-027d-4c8e-9f7d-337f985f0ee9" => Some("Ungroup"),
         _ => None,
     }
 }
@@ -21535,6 +21558,43 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         // list, so the two tables were disagreeing about one uuid.
         "0e36114c-5b59-4005-9426-374a6c067e4a" => Some("GetURL"),
         "ec576e13-1e76-4c33-98aa-a33204514227" => Some("Delete"),
+        // The five rows the excluded-command reader used to hold ahead of this
+        // table. Three of them the corpus-wide button join names at a button
+        // as well, under an item the owner index calls a table:
+        // `11761e12-…` -> `ChangeHistory` on 5 records in three configurations,
+        // `7d4db5ed-…` -> `SetPresentation` on 2 and
+        // `e6900951-…` -> `Detailed` on 1. The other two are the same fact
+        // stated once instead of twice.
+        "11761e12-cf32-4826-a175-b23213e3b229" => Some("ChangeHistory"),
+        "7d4db5ed-0981-4020-b3b8-886b7165ba05" => Some("SetPresentation"),
+        "8af6ebff-cd02-4bfe-a984-44a292623708" => Some("ShowRowRearrangement"),
+        "d96b0c03-b209-4d01-a3fc-17a14f873b64" => Some("SearchHistory"),
+        "e6900951-1a42-4397-bf00-cabb2cd7ad6d" => Some("Detailed"),
+        // Two joint groups, separated. Each was named as a group because no
+        // observation separated its members; each now has two independent
+        // separations.
+        //
+        // `Choose`/`ChooseAll`: the button join names `d77e5787-…` ->
+        // `Form.Item.ДоступныеПоляВыбора.StandardCommand.Choose` (4 records)
+        // and `15664824-…` -> `….ChooseAll` (3), and ERP УХ
+        // `DataProcessors/НастраиваемыеПечатныеФормыЗарплатаКадры/Forms/
+        // ФормаНастройкиПечатнойФормы` excludes `15664824-…` without its
+        // partner and gets exactly one `<ExcludedCommand>ChooseAll`.
+        //
+        // `AddAutoOrderItem`/`Expand`: ERP УХ `DataProcessors/
+        // АналитическийБланк/Forms/ФормаНастроекМакетаРаскрытия` excludes
+        // `48e12019-…` alone and the platform writes exactly one
+        // `<ExcludedCommand>AddAutoOrderItem`; the group's name set then pins
+        // `fc120c02-…` to `Expand` on the other 18 forms, where the two always
+        // occur together.
+        "d77e5787-b130-4355-8f8f-01ecec82f843" => Some("Choose"),
+        "15664824-eedc-4a92-9f6b-c89a2dead157" => Some("ChooseAll"),
+        "48e12019-0fd6-46eb-aab6-2acba716a623" => Some("AddAutoOrderItem"),
+        "fc120c02-7f39-469b-b357-b2dd8d4b0765" => Some("Expand"),
+        // New to the table: the button join names it
+        // `Form.Item.КомпоновщикНастроекНастройки.StandardCommand.AddGroup` on
+        // ERP УХ `Catalogs/АналитическиеПанели/Forms/ФормаНастройкиСКДОбласти`.
+        "7b70c79a-199e-4e87-a7eb-29dea9a5ad69" => Some("AddGroup"),
         _ => None,
     }
 }
