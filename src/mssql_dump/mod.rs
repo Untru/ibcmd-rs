@@ -22011,6 +22011,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     }
 
     let code_length = fields.get(21)?.trim().parse::<u32>().ok()?;
+    // Field 24 is `"1"` on every characteristic-type plan of the stand. It used
+    // to be read as `<CodeSeries>`, which distinguished nothing; kept as a
+    // validated constant so an unobserved value fails closed instead of being
+    // read as something it has never been.
+    if fields.get(24)?.trim() != "1" {
+        return None;
+    }
     Some(ChartOfCharacteristicTypesProperties {
         generated_types,
         use_standard_commands: information_register_bool(fields.get(14)?)?,
@@ -22031,7 +22038,15 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             _ => return None,
         },
         description_length: fields.get(23)?.trim().parse::<u32>().ok()?,
-        code_series: (fields.get(24)?.trim() == "1").then_some("WholeCharacteristicKind")?,
+        // `<CodeSeries>` rides owner field 35, not field 24. Field 24 is `"1"`
+        // on all 47 characteristic-type plans of the stand and so distinguishes
+        // nothing; field 35 is `"1"` on exactly the one plan that writes
+        // `WithinSubordination` -- `do`
+        // `ChartsOfCharacteristicTypes/ВидыДоступа` -- and `"0"` on the 46 that
+        // write `WholeCharacteristicKind`. The old reading refused that object
+        // whole, because field 35 was also the slot `CreateOnInput` was pinned
+        // against.
+        code_series: cct_code_series_xml(fields.get(35)?.trim())?,
         check_unique: information_register_bool(fields.get(34)?)?,
         autonumbering: information_register_bool(fields.get(22)?)?,
         default_presentation: (fields.get(25)?.trim() == "1").then_some("AsDescription")?,
@@ -22049,7 +22064,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         edit_type: (fields.get(31)?.trim() == "2").then_some("InDialog")?,
         quick_choice: information_register_bool(fields.get(32)?)?,
         input_by_string: parse_cct_input_by_string(fields.get(33)?, &header.name)?,
-        create_on_input: (fields.get(35)?.trim() == "0").then_some("DontUse")?,
+        // The carrier of `<CreateOnInput>` is not known for this family: 46
+        // plans of the stand write `DontUse` and one, `uh`
+        // `ОперацииФинансовыхИнструментов`, writes `Use`, and no owner slot
+        // separates them -- field 35, against which this used to be pinned,
+        // is `"0"` for both. The constant is kept, and that one plan stays a
+        // known difference rather than an invented field attribution.
+        create_on_input: "DontUse",
         choice_history_on_input: match fields.get(55)?.trim() {
             "0" => "Auto",
             "1" => "DontUse",
@@ -23945,7 +23966,7 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
         return Some(("Begin", "DontUse", "Directly"));
     }
     let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3 || fields.get(2)?.trim() != "0" {
+    if fields.len() != 3 {
         return None;
     }
     Some((
@@ -23964,7 +23985,17 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
             "2" => "DontUse",
             _ => return None,
         },
-        "Directly",
+        // The third slot is ChoiceDataGetModeOnInputByString, not a constant
+        // either. `do` `Catalogs/АдресатыПочтовыхСообщений` writes `{1,2,1}`
+        // and the platform exports
+        // `<ChoiceDataGetModeOnInputByString>Background</...>`; it is the one
+        // object of the stand that does, against 584 that write `Directly`
+        // with a `0` there. Pinning the slot lost that object whole.
+        match fields.get(2)?.trim() {
+            "0" => "Directly",
+            "1" => "Background",
+            _ => return None,
+        },
     ))
 }
 
@@ -28502,6 +28533,21 @@ fn catalog_subordination_use_xml(value: u32) -> Option<&'static str> {
         0 => Some("ToItems"),
         1 => Some("ToFolders"),
         2 => Some("ToFoldersAndItems"),
+        _ => None,
+    }
+}
+
+/// `<CodeSeries>` of a characteristic-type plan rides owner field 35.
+///
+/// Field 24, which this used to be read from, is `"1"` on all 47 plans of the
+/// stand and so distinguishes nothing. Field 35 is `"1"` on exactly the one
+/// plan that writes `WithinSubordination` -- `do`
+/// `ChartsOfCharacteristicTypes/ВидыДоступа` -- and `"0"` on the 46 that write
+/// `WholeCharacteristicKind`.
+fn cct_code_series_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("WholeCharacteristicKind"),
+        "1" => Some("WithinSubordination"),
         _ => None,
     }
 }
