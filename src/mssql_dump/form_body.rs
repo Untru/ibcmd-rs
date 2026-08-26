@@ -3738,13 +3738,17 @@ fn parse_form_attribute_with_dcs_type_index(
             }
             let secondary_by_item_id =
                 parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields);
+            let shadowed_item_ids =
+                parse_form_dynamic_list_shadowed_field_item_ids(&settings_fields);
             Some(
                 field_name_by_item_id
                     .into_iter()
                     .filter(|(item_id, field_name)| {
-                        !form_dynamic_list_field_name_is_resolvable(
+                        !form_dynamic_list_field_item_is_resolvable(
+                            item_id,
                             field_name,
                             secondary_by_item_id.get(item_id).map(String::as_str),
+                            &shadowed_item_ids,
                             &universe,
                         )
                     })
@@ -4803,6 +4807,7 @@ pub(super) fn parse_form_attribute_use_always(
     }
     let secondary_by_item_id =
         parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields);
+    let shadowed_item_ids = parse_form_dynamic_list_shadowed_field_item_ids(&settings_fields);
     let main_table = settings.and_then(|settings| settings.main_table.as_deref());
     let universe = form_dynamic_list_use_always_universe(
         settings,
@@ -4818,6 +4823,7 @@ pub(super) fn parse_form_attribute_use_always(
             &item_id,
             &field_name_by_item_id,
             &secondary_by_item_id,
+            &shadowed_item_ids,
             main_table,
             universe.as_ref(),
         ) else {
@@ -5004,6 +5010,72 @@ pub(super) fn form_attribute_use_always_segment_name(
     }
 }
 
+/// Field-map ids whose remembered name an earlier entry of the same map already
+/// remembers.
+///
+/// The list's available-field collection holds one entry per name: the first
+/// remembered id binds to it, and a later id remembering the same name binds to
+/// nothing, so the platform writes that one marked -- beside the plain spelling
+/// the first id produced, in the same `<UseAlways>` block.
+///
+/// Evidence: ERP УХ 3.2.12.6 `Catalogs/Лоты/Forms/ФормаСписка` and
+/// `Documents/Лот/Forms/ФормаСписка`, the only two dynamic lists on the whole
+/// stand whose field map remembers one name under two ids that are both
+/// required. Both remember `Ref`/`Ссылка` under ids 534 and 756 and
+/// `DeletionMark`/`ПометкаУдаления` under 645 and 807, and both native
+/// `<UseAlways>` blocks carry `Список.Ref` and `~Список.Ref~Список.Ссылка` side
+/// by side, plus `Список.DeletionMark` and
+/// `~Список.DeletionMark~Список.ПометкаУдаления`. Four further lists on the
+/// stand remember a name twice without requiring both ids; they write one entry
+/// and are unaffected.
+///
+/// The order is the map's own suffix numbering. In both observations the map is
+/// stored with ascending item ids, so the suffix order and the id order name
+/// the same first entry; nothing here distinguishes them.
+pub(super) fn parse_form_dynamic_list_shadowed_field_item_ids(
+    settings_fields: &[&str],
+) -> BTreeSet<String> {
+    let mut field_name_by_suffix = BTreeMap::<String, String>::new();
+    let mut item_id_by_suffix = BTreeMap::<String, String>::new();
+    for pair in settings_fields.chunks_exact(2) {
+        collect_form_dynamic_list_field_map_item(
+            pair[0],
+            pair[1],
+            &mut field_name_by_suffix,
+            &mut item_id_by_suffix,
+        );
+        collect_form_dynamic_list_field_map_item(
+            pair[1],
+            pair[0],
+            &mut field_name_by_suffix,
+            &mut item_id_by_suffix,
+        );
+    }
+    let mut declared = field_name_by_suffix
+        .iter()
+        .filter_map(|(suffix, field_name)| {
+            let position = suffix.parse::<u64>().ok()?;
+            let item_id = item_id_by_suffix.get(suffix)?;
+            Some((position, item_id.as_str(), field_name.as_str()))
+        })
+        .collect::<Vec<_>>();
+    declared.sort_unstable();
+    let mut claimed = BTreeMap::<&str, &str>::new();
+    let mut shadowed = BTreeSet::new();
+    for (_, item_id, field_name) in declared {
+        match claimed.get(field_name) {
+            Some(owner) if *owner != item_id => {
+                shadowed.insert(item_id.to_string());
+            }
+            Some(_) => {}
+            None => {
+                claimed.insert(field_name, item_id);
+            }
+        }
+    }
+    shadowed
+}
+
 pub(super) fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]) -> Vec<String> {
     let mut parsed = Vec::new();
     for window in settings_fields.windows(2) {
@@ -5047,14 +5119,17 @@ pub(super) fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]
 /// of the names the map remembers for it — its own and the localized twin of
 /// [`parse_form_dynamic_list_field_secondary_name_by_item_id`] — is in the
 /// list's resolvable-field universe (see
-/// [`form_dynamic_list_use_always_universe`]); with no universe no marker is
-/// ever added. A marked field that remembers a twin is written under both
-/// names, each carrying its own marker.
+/// [`form_dynamic_list_use_always_universe`]), or when an earlier entry of the
+/// map already claimed that name (see
+/// [`parse_form_dynamic_list_shadowed_field_item_ids`]); with no universe no
+/// marker is ever added. A marked field that remembers a twin is written under
+/// both names, each carrying its own marker.
 pub(super) fn form_dynamic_list_use_always_field_name(
     attribute_name: &str,
     item_id: &str,
     field_name_by_item_id: &BTreeMap<String, String>,
     secondary_name_by_item_id: &BTreeMap<String, String>,
+    shadowed_item_ids: &BTreeSet<String>,
     main_table: Option<&str>,
     universe: Option<&BTreeSet<String>>,
 ) -> Option<String> {
@@ -5070,25 +5145,41 @@ pub(super) fn form_dynamic_list_use_always_field_name(
         "-1" => None,
         _ => field_name_by_item_id.get(item_id).map(|field_name| {
             let secondary = secondary_name_by_item_id.get(item_id);
-            match universe {
-                Some(universe)
-                    if !form_dynamic_list_field_name_is_resolvable(
-                        field_name,
-                        secondary.map(String::as_str),
-                        universe,
-                    ) =>
-                {
-                    match secondary {
-                        Some(secondary) if secondary != field_name => {
-                            format!("~{attribute_name}.{field_name}~{attribute_name}.{secondary}")
-                        }
-                        _ => format!("~{attribute_name}.{field_name}"),
+            let unresolvable = universe.is_some_and(|universe| {
+                !form_dynamic_list_field_item_is_resolvable(
+                    item_id,
+                    field_name,
+                    secondary.map(String::as_str),
+                    shadowed_item_ids,
+                    universe,
+                )
+            });
+            if unresolvable {
+                match secondary {
+                    Some(secondary) if secondary != field_name => {
+                        format!("~{attribute_name}.{field_name}~{attribute_name}.{secondary}")
                     }
+                    _ => format!("~{attribute_name}.{field_name}"),
                 }
-                _ => format!("{attribute_name}.{field_name}"),
+            } else {
+                format!("{attribute_name}.{field_name}")
             }
         }),
     }
+}
+
+/// Whether a remembered field-map entry resolves against the list's fields: its
+/// name must be one of them, and no earlier entry of the map may have claimed
+/// that name already.
+pub(super) fn form_dynamic_list_field_item_is_resolvable(
+    item_id: &str,
+    field_name: &str,
+    secondary_name: Option<&str>,
+    shadowed_item_ids: &BTreeSet<String>,
+    universe: &BTreeSet<String>,
+) -> bool {
+    !shadowed_item_ids.contains(item_id)
+        && form_dynamic_list_field_name_is_resolvable(field_name, secondary_name, universe)
 }
 
 /// Whether a remembered field name resolves against the list's field universe.
