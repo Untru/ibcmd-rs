@@ -1412,6 +1412,11 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .iter()
         .map(|drawing| drawing.format_index)
         .collect::<BTreeSet<_>>();
+    // The positional split that lifts trailing drawing formats out of the
+    // column half keeps naming the drawings alone: a note's format sits
+    // wherever the table put it, and no observation says the split treats it
+    // the way it treats a drawing's own trailing entry.
+    let trailing_drawing_indices = drawing_format_indices.clone();
     let mut cell_format_indices = BTreeSet::new();
     for row in &rows {
         cell_format_indices.insert(row.format_index);
@@ -1617,6 +1622,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         &source_column_format_order,
         &style_refs,
         &drawing_format_indices,
+        &trailing_drawing_indices,
         &number_format_refs,
     );
     // The same table the split above consumed, kept in the order the body
@@ -7309,6 +7315,7 @@ fn parse_moxel_formats_with_source_map(
     source_column_format_order: &[usize],
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
+    trailing_drawing_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (
     Vec<MoxelFormat>,
@@ -7354,6 +7361,7 @@ fn parse_moxel_formats_with_source_map(
             source_column_format_refs,
             style_refs,
             drawing_format_indices,
+            trailing_drawing_indices,
             number_format_refs,
         );
     (
@@ -7382,6 +7390,7 @@ pub(super) fn parse_moxel_formats(
         source_column_format_refs,
         style_refs,
         drawing_format_indices,
+        drawing_format_indices,
         number_format_refs,
     );
     (column_formats, formats)
@@ -7394,6 +7403,7 @@ fn parse_moxel_formats_with_layout(
     source_column_format_refs: &[usize],
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
+    trailing_drawing_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, Vec<usize>, bool) {
     let all_formats = parse_moxel_format_table(
@@ -7431,13 +7441,13 @@ fn parse_moxel_formats_with_layout(
             formats,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         let sources = split_moxel_formats_for_output(
             sources,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         return (
             column_formats,
@@ -7459,13 +7469,13 @@ fn parse_moxel_formats_with_layout(
             formats,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         let sources = split_moxel_formats_for_output(
             sources,
             column_count,
             sparse_source_format_refs,
-            drawing_format_indices,
+            trailing_drawing_indices,
         );
         return (
             column_formats,
@@ -7531,7 +7541,7 @@ pub(super) fn parse_moxel_format_table(
                 formats.clear();
                 break;
             };
-            if drawing_format_indices.contains(&(format_offset + 1)) {
+            if drawing_format_indices.contains(&(format_offset + 1)) && format.width.is_none() {
                 let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
                 normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
             }
@@ -7601,7 +7611,7 @@ pub(super) fn parse_moxel_nested_format_table(
         let Some(mut format) = parse_moxel_format(field, style_refs, number_format_refs) else {
             return None;
         };
-        if drawing_format_indices.contains(&(format_offset + 1)) {
+        if drawing_format_indices.contains(&(format_offset + 1)) && format.width.is_none() {
             let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
             normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
         }
@@ -7859,12 +7869,12 @@ pub(super) fn split_moxel_formats_for_output<T>(
     mut formats: Vec<T>,
     column_count: usize,
     sparse_source_format_refs: bool,
-    drawing_format_indices: &BTreeSet<usize>,
+    trailing_drawing_indices: &BTreeSet<usize>,
 ) -> (Vec<T>, Vec<T>) {
     if sparse_source_format_refs {
         let trailing_drawing_count = (1..=formats.len())
             .rev()
-            .take_while(|format_index| drawing_format_indices.contains(format_index))
+            .take_while(|format_index| trailing_drawing_indices.contains(format_index))
             .count();
         let column_start = formats
             .len()
@@ -7877,7 +7887,7 @@ pub(super) fn split_moxel_formats_for_output<T>(
     }
     let trailing_drawing_count = (1..=formats.len())
         .rev()
-        .take_while(|format_index| drawing_format_indices.contains(format_index))
+        .take_while(|format_index| trailing_drawing_indices.contains(format_index))
         .count();
     let column_start = formats
         .len()
