@@ -421,7 +421,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
-    let auto_command_bar = extract_form_auto_command_bar(
+    let mut auto_command_bar = extract_form_auto_command_bar(
         &form_fields,
         &commands,
         context.object_refs,
@@ -487,6 +487,32 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &mut child_items,
         context.form_reference_index.unwrap_or(context.object_refs),
     );
+    {
+        let attribute_names_by_id = attributes
+            .iter()
+            .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let empty_metadata_command_refs = BTreeMap::new();
+        let register_context = FormCommandInterfaceParseContext {
+            commands: &commands,
+            object_refs: context.object_refs,
+            information_register_field_refs: context.information_register_field_refs,
+            information_register_master_dimensions: context.information_register_master_dimensions,
+            form_owner_reference: context.form_owner_reference,
+            attribute_names_by_id: &attribute_names_by_id,
+            child_item_indexes: &child_item_indexes,
+            metadata_command_refs: context
+                .metadata_command_refs
+                .unwrap_or(&empty_metadata_command_refs),
+        };
+        resolve_form_button_register_command_names(&mut child_items, &register_context);
+        if let Some(command_bar) = auto_command_bar.as_mut() {
+            resolve_form_button_register_command_names(
+                &mut command_bar.child_items,
+                &register_context,
+            );
+        }
+    }
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_child_items_cpu_ms +=
             child_item_indexes_cpu_ms + elapsed_ms(started);
@@ -15617,6 +15643,46 @@ pub(super) fn parse_form_input_field_choice_form(
     parse_non_zero_uuid(raw)
 }
 
+/// Names the register "open by value" commands a button's `{kind, uuid}` record
+/// spells, over the finished items rather than inside the item reader.
+///
+/// The rule needs three configuration-wide indexes -- the register field
+/// references, the master dimensions and the form's own owner -- and the item
+/// reader carries none of them; threading them through every item signature to
+/// reach one slot of one tag is how a reader becomes unreadable. Nothing is
+/// lost by deferring: the sentinel the item reader leaves behind is the record
+/// verbatim, `kind:uuid`, so this pass reads exactly what that reader read.
+/// This is the same shape `resolve_form_choice_form_references` already has for
+/// `<ChoiceForm>`, and the naming itself is the command-interface reader's own
+/// function, so the two readers cannot disagree about the same record.
+///
+/// Evidence, ERP УХ 3.2.12.6, from the corpus-wide button join: 25 button
+/// records resolve here and the platform names every one of them --
+/// `{3,6771911c-…}` -> `InformationRegister.СвязанныеДоговоры.StandardCommand.
+/// OpenByValue.БазовыйДоговор` (8 records), `{4,6771911c-…}` -> the same
+/// register's `…OpenByValue.СвязанныйДоговор` (8), `{3,842c2730-…}` ->
+/// `InformationRegister.ОбъектыПоФИ.…OpenByValue.ФИ` (8) and `{3,2d2bc347-…}`
+/// (1). Slots 3 and 4 are the observed ones; the slot set is the register
+/// grammar's own, as the command-interface reader spells it, rather than a
+/// second list that could drift from it.
+fn resolve_form_button_register_command_names(
+    items: &mut [FormChildItem],
+    context: &FormCommandInterfaceParseContext<'_>,
+) {
+    for item in items.iter_mut() {
+        if let Some(command_name) = item.command_name.as_deref()
+            && let Some((kind, uuid)) = command_name.split_once(':')
+            && matches!(kind, "3" | "4" | "5" | "6" | "7")
+            && parse_non_zero_uuid(uuid).is_some()
+            && let Some(named) =
+                resolve_information_register_open_by_value_command(kind, uuid, context)
+        {
+            item.command_name = Some(named);
+        }
+        resolve_form_button_register_command_names(&mut item.child_items, context);
+    }
+}
+
 /// Names every `<ChoiceForm>` identifier through the form reference index.
 ///
 /// An identifier the index does not know stays as it is, which is the
@@ -20958,7 +21024,7 @@ pub(super) fn parse_form_button_command_name(
         if let Some(command_name) = object_refs.get(&uuid) {
             return Some(form_object_reference_command_name(command_name));
         }
-        return None;
+        return Some(form_command_record_sentinel(kind, &uuid));
     }
     if let Some(command_name) = commands
         .iter()
@@ -21001,8 +21067,38 @@ pub(super) fn parse_form_button_command_name(
             owner.name
         ));
     }
-    let reference = object_refs.get(&uuid)?;
-    form_object_family_standard_command_name(kind, reference, FormCommandRecordReader::Button)
+    if let Some(reference) = object_refs.get(&uuid)
+        && let Some(command_name) = form_object_family_standard_command_name(
+            kind,
+            reference,
+            FormCommandRecordReader::Button,
+        )
+    {
+        return Some(command_name);
+    }
+    Some(form_command_record_sentinel(kind, &uuid))
+}
+
+/// What the platform writes for a `{kind, uuid}` command record no name fits.
+///
+/// Not a guess and not a refusal: it is the platform's own spelling. The
+/// corpus-wide button join -- every button command record this reader could not
+/// name, matched against the native `<Button>` at the same output path and id
+/// over the eight stand corpora -- has 259 records, and every single one of them
+/// carries a `<CommandName>` in the native document. 155 carry a name this
+/// package now constructs; the remaining 104 carry exactly `kind:uuid`, the
+/// same dangling spelling the command-interface reader has kept for its own
+/// `kind == 0` records since `e712d9a` and the same shape a picture the reader
+/// cannot name keeps. Not one of the 259 is written without a `<CommandName>`,
+/// so dropping the element was never the platform's behaviour for any of them.
+///
+/// The 104 are not one accident either: they span `kind` `0` (unknown form
+/// standard commands), item ids whose item is not a standard-command owner at
+/// all (`{135,1ba33890-…}`, `{276,…}` -- twenty-two formatted-document uuids
+/// under an item that owns none of them), and family selectors whose uuid names
+/// no metadata object.
+fn form_command_record_sentinel(kind: &str, uuid: &str) -> String {
+    format!("{kind}:{uuid}")
 }
 
 /// Which of the two places a `{kind, uuid}` command record was read from.
@@ -21066,7 +21162,15 @@ fn form_object_family_standard_command_name(
         ) && reference.matches('.').count() == 1
     };
     let standard = match kind {
-        "1" if top_level("Catalog") => match reader {
+        // A document's slot 1 is `Create` for a button on its one observation,
+        // ERP УХ `DocumentJournals/ДвижениеИнвестиций/Forms/
+        // ФормаРеестраИнвестиций`, where `{1,e4e13098-…}` resolves to
+        // `Document.ПоступлениеИнвестиций` and the platform writes
+        // `Document.ПоступлениеИнвестиций.StandardCommand.Create`. It shares the
+        // row with the catalogue rather than getting one of its own because the
+        // two observations say the same thing about the same slot; the reader is
+        // still named, because neither datum generalises across readers.
+        "1" if top_level("Catalog") || top_level("Document") => match reader {
             FormCommandRecordReader::Button => "Create",
             FormCommandRecordReader::CommandInterfaceItem => return None,
         },

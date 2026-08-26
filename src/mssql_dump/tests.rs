@@ -15457,8 +15457,10 @@ fn resolves_document_standard_commands_only_for_their_structural_owner_kind() {
                     &BTreeMap::new(),
                     &indexes.standard_command_owner_name_by_id,
                 ),
-                None,
-                "{uuid} resolved for owner {wrong_owner_id}"
+                // Not a name: the platform's own dangling spelling of the very
+                // record, which is what it writes wherever no name fits.
+                Some(format!("{wrong_owner_id}:{uuid}")),
+                "{uuid} was named for owner {wrong_owner_id}"
             );
         }
     }
@@ -15545,8 +15547,8 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
             ),
-            None,
-            "{uuid} resolved for GraphicalSchema"
+            Some(format!("102:{uuid}")),
+            "{uuid} was named for GraphicalSchema"
         );
         assert_eq!(
             parse_form_button_command_name(
@@ -15555,8 +15557,8 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
             ),
-            None,
-            "{uuid} resolved for Table"
+            Some(format!("104:{uuid}")),
+            "{uuid} was named for Table"
         );
 
         // `form_formatted_document_standard_command_suffix` (form_body.rs)
@@ -15576,7 +15578,8 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
                 | "f20eefc2-f819-4ab1-be67-87b3ca2e26e6"
                 | "85bd789b-0047-46f9-9b2e-845907fc1b1d"
         )
-        .then(|| format!("Form.Item.TextRenamed.StandardCommand.{suffix}"));
+        .then(|| format!("Form.Item.TextRenamed.StandardCommand.{suffix}"))
+        .or_else(|| Some(format!("103:{uuid}")));
         assert_eq!(
             parse_form_button_command_name(
                 &format!("{{103,{uuid}}}"),
@@ -15638,8 +15641,8 @@ fn shares_only_observed_standard_commands_between_tables_and_spreadsheets() {
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
             ),
-            None,
-            "table-only command {uuid} resolved for SpreadsheetDocument"
+            Some(format!("101:{uuid}")),
+            "table-only command {uuid} was named for SpreadsheetDocument"
         );
     }
 }
@@ -15697,8 +15700,8 @@ fn resolves_report_form_standard_commands_only_for_kind_zero() {
                     &BTreeMap::new(),
                     &indexes.standard_command_owner_name_by_id,
                 ),
-                None,
-                "form command {uuid} resolved for owner {owner_id}"
+                Some(format!("{owner_id}:{uuid}")),
+                "form command {uuid} was named for owner {owner_id}"
             );
         }
     }
@@ -70050,7 +70053,11 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
             register,
             Some("InformationRegister.RegisterProbe.StandardCommand.OpenByRecorder"),
         ),
-        ("1", document, None),
+        // Slot 1 also names `Create` for a document, for a button: ERP УХ
+        // `DocumentJournals/ДвижениеИнвестиций/Forms/ФормаРеестраИнвестиций`
+        // writes `Document.ПоступлениеИнвестиций.StandardCommand.Create` at
+        // `{1,e4e13098-…}`. Asserted per reader below, beside the catalogue's
+        // own slot-1 row.
         // Slot 2: CreateBasedOn for every family but an information register,
         // which names its recorder command instead.
         (
@@ -70106,6 +70113,12 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
         ("99", document, None),
     ];
     for (kind, uuid, expected) in cases {
+        // The button reader never drops the record: where no name fits it keeps
+        // the platform's own `kind:uuid` spelling, so "names nothing" is
+        // asserted as that spelling rather than as an absent element.
+        let button_expected = expected
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("{kind}:{uuid}"));
         assert_eq!(
             parse_form_button_command_name(
                 &format!("{{{kind},{uuid}}}"),
@@ -70114,7 +70127,7 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
                 &BTreeMap::new(),
             )
             .as_deref(),
-            expected,
+            Some(button_expected.as_str()),
             "button slot {kind} resolved {uuid} wrongly"
         );
         assert_eq!(
@@ -70135,26 +70148,34 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
     // nothing there, a negative an earlier package measured for that reader and
     // that this corpus offers nothing to overturn.  One datum is not generalised
     // across readers, and the disagreement lives in one table rather than two.
-    assert_eq!(
-        parse_form_button_command_name(
-            &format!("{{1,{catalog}}}"),
-            &[],
-            &object_refs,
-            &BTreeMap::new(),
-        )
-        .as_deref(),
-        Some("Catalog.СезонныеГруппы.StandardCommand.Create")
-    );
-    assert_eq!(
-        parse_form_command_interface_command_for_test(
-            &format!("{{1,{catalog}}}"),
-            &object_refs,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            "Catalog.Партнеры",
+    for (uuid, expected) in [
+        (catalog, "Catalog.СезонныеГруппы.StandardCommand.Create"),
+        (
+            document,
+            "Document.ВозвратПодарочныхСертификатов.StandardCommand.Create",
         ),
-        None
-    );
+    ] {
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{1,{uuid}}}"),
+                &[],
+                &object_refs,
+                &BTreeMap::new(),
+            )
+            .as_deref(),
+            Some(expected)
+        );
+        assert_eq!(
+            parse_form_command_interface_command_for_test(
+                &format!("{{1,{uuid}}}"),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "Catalog.Партнеры",
+            ),
+            None
+        );
+    }
     // Slot 3's command-reference passthrough belongs to the command-interface
     // reader alone and is untouched: a reference that already names a command is
     // handed straight back rather than having a suffix pasted onto it.
@@ -70175,8 +70196,9 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
             &[],
             &object_refs,
             &BTreeMap::new(),
-        ),
-        None
+        )
+        .as_deref(),
+        Some(format!("3:{nested}").as_str())
     );
 }
 
