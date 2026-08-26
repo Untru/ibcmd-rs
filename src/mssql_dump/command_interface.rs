@@ -75,7 +75,22 @@ pub(super) struct HomePageWorkAreaItem {
 pub(super) struct ClientApplicationInterface {
     pub(super) top: Vec<ClientApplicationInterfaceNode>,
     pub(super) left: Vec<ClientApplicationInterfaceNode>,
-    pub(super) panel_defs: Vec<String>,
+    pub(super) bottom: Vec<ClientApplicationInterfaceNode>,
+    pub(super) panel_defs: Vec<ClientApplicationPanelDef>,
+}
+
+pub(super) struct ClientApplicationPanelDef {
+    pub(super) id: String,
+    /// The panel's command representation, when the record states one.
+    ///
+    /// One occurrence on the whole stand: Документооборот КОРП 3.0.21.3's
+    /// `Ext/ClientApplicationInterface.xml` writes `{<uuid>,2,4}` and names
+    /// it `<spr>PictureOnLeftAndText</spr>`. Every other panel def of every
+    /// corpus writes `{<uuid>,0}` (or, once in БСП демо 3.1.12.297,
+    /// `{<uuid>,1,""}`) and the platform renders it self-closed, which is
+    /// what an unrecognized tail keeps doing here rather than inventing a
+    /// name for it.
+    pub(super) spr: Option<&'static str>,
 }
 
 pub(super) struct ClientApplicationInterfaceGroup {
@@ -550,6 +565,7 @@ pub(super) fn parse_client_application_interface_text(
 
     let mut top = Vec::new();
     let mut left = Vec::new();
+    let mut bottom = Vec::new();
     let mut index = 1usize;
     while index < fields.len() {
         let Some(area_fields) = fields
@@ -565,6 +581,14 @@ pub(super) fn parse_client_application_interface_text(
         let group = parse_client_application_interface_area(area_fields.get(2)?)?;
         match area_code {
             "1" => top = group,
+            // Area 2 is the bottom band. Its only populated occurrence on the
+            // stand is Документооборот КОРП 3.0.21.3's, whose native
+            // `Ext/ClientApplicationInterface.xml` writes `<bottom>` right
+            // after `<left>`; ERP УХ and УТ leave it empty and write
+            // `<top>` before `<left>`, so the file order is top, left,
+            // bottom. Area 4 stays unread: it is empty in every corpus, so
+            // nothing observed says what it renders as.
+            "2" => bottom = group,
             "3" => left = group,
             _ => {}
         }
@@ -578,16 +602,32 @@ pub(super) fn parse_client_application_interface_text(
             break;
         }
         let panel_def_fields = split_1c_braced_fields(fields.get(index + 1)?, 0)?;
-        let panel_uuid = parse_non_zero_uuid(panel_def_fields.first()?.trim())?;
-        panel_defs.push(panel_uuid);
+        let id = parse_non_zero_uuid(panel_def_fields.first()?.trim())?;
+        panel_defs.push(ClientApplicationPanelDef {
+            id,
+            spr: client_application_panel_def_spr(&panel_def_fields),
+        });
         index += 2;
     }
 
     Some(ClientApplicationInterface {
         top,
         left,
+        bottom,
         panel_defs,
     })
+}
+
+/// The `<spr>` a panel definition states, if it states one this reader can
+/// name. See [`ClientApplicationPanelDef::spr`] for what the stand proves.
+fn client_application_panel_def_spr(panel_def_fields: &[&str]) -> Option<&'static str> {
+    match panel_def_fields.get(1)?.trim() {
+        "2" => match panel_def_fields.get(2)?.trim() {
+            "4" => Some("PictureOnLeftAndText"),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 pub(super) fn parse_client_application_interface_area(
@@ -901,11 +941,20 @@ pub(super) fn format_client_application_interface_xml(
     if !interface.left.is_empty() {
         push_client_application_interface_area_xml(&mut xml, "left", &interface.left);
     }
+    if !interface.bottom.is_empty() {
+        push_client_application_interface_area_xml(&mut xml, "bottom", &interface.bottom);
+    }
     for panel_def in &interface.panel_defs {
-        xml.push_str(&format!(
-            "\t<panelDef id=\"{}\"/>\r\n",
-            escape_xml_text(panel_def)
-        ));
+        match panel_def.spr {
+            Some(spr) => xml.push_str(&format!(
+                "\t<panelDef id=\"{}\">\r\n\t\t<spr>{spr}</spr>\r\n\t</panelDef>\r\n",
+                escape_xml_text(&panel_def.id)
+            )),
+            None => xml.push_str(&format!(
+                "\t<panelDef id=\"{}\"/>\r\n",
+                escape_xml_text(&panel_def.id)
+            )),
+        }
     }
     xml.push_str("</ClientApplicationInterface>");
     xml
