@@ -8713,8 +8713,23 @@ pub(super) fn moxel_embedded_style_ref_for_uuid(
 /// `СервисShare/.../ТранспортныйКонтейнер` - and the fourteen formats that name
 /// it publish `d3p1:ButtonShadow` in the Windows colour namespace. No other
 /// ordinal appears, so no other ordinal is spelled.
+/// The Windows system-colour palette slot's own enumeration.
+///
+/// Measured the same way as `parse_moxel_web_color`: the palette's kind-1
+/// slots are paired with the names the platform publishes under the
+/// `.../colors/windows` namespace for the same document, counting format-record
+/// citations per slot against publications per name.
+///
+/// | code | name | documents | citations |
+/// | ---: | --- | ---: | --- |
+/// | 2 | `ActiveTitleBar` | 5 | 4, 8, 4, 4, 2 |
+/// | 4 | `MenuBar` | 2 | 1, 1 |
+/// | 11 | `InactiveBorder` | 6 | 1 each |
 fn parse_moxel_windows_color(value: &str) -> Option<String> {
     match value.parse::<u32>().ok()? {
+        2 => Some("windows:ActiveTitleBar".to_string()),
+        4 => Some("windows:MenuBar".to_string()),
+        11 => Some("windows:InactiveBorder".to_string()),
         16 => Some("windows:ButtonShadow".to_string()),
         _ => None,
     }
