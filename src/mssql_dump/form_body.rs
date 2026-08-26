@@ -31,11 +31,11 @@ use crate::form_schema::{
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
     FormPictureValueSchema, FormPopupColorSchema, FormPopupSchema,
     FormPopupShapeRepresentationSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
-    FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
-    FormRootCustomizableSchema, FormRootEnabledSchema, FormRootGroupSchema, FormRootGroupingSchema,
+    FormRootConversationsRepresentationSchema, FormRootCustomizableSchema, FormRootEnabledSchema,
+    FormRootGroupSchema, FormRootGroupingSchema, FormRootItemReferenceSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema,
-    FormRootVariantAppearanceSchema, FormRootVerticalAlign, FormRootVerticalAlignSchema,
-    FormRootVerticalScrollSchema, FormSearchStringAdditionProperties,
+    FormRootSettingsStorageSchema, FormRootVariantAppearanceSchema, FormRootVerticalAlign,
+    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema, FormSearchStringAdditionProperties,
     FormSearchStringAdditionSchema, FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
@@ -406,6 +406,15 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     );
     properties.custom_settings_folder =
         extract_form_custom_settings_folder(&form_fields, &child_item_indexes.item_name_by_id);
+    properties.group_list =
+        extract_form_group_list(&form_fields, &child_item_indexes.item_name_by_id);
+    properties.settings_storage = extract_form_settings_storage(
+        &form_fields,
+        context.form_reference_index.unwrap_or(context.object_refs),
+    );
+    properties.use_for_folders_and_items = properties
+        .use_for_folders_and_items
+        .or_else(|| form_default_use_for_folders_and_items(&form_fields, &attributes));
     let child_item_indexes_cpu_ms = elapsed_ms(started);
 
     let started = Instant::now();
@@ -429,7 +438,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
-    let auto_command_bar = extract_form_auto_command_bar(
+    let mut auto_command_bar = extract_form_auto_command_bar(
         &form_fields,
         &commands,
         context.object_refs,
@@ -495,6 +504,32 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &mut child_items,
         context.form_reference_index.unwrap_or(context.object_refs),
     );
+    {
+        let attribute_names_by_id = attributes
+            .iter()
+            .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let empty_metadata_command_refs = BTreeMap::new();
+        let register_context = FormCommandInterfaceParseContext {
+            commands: &commands,
+            object_refs: context.object_refs,
+            information_register_field_refs: context.information_register_field_refs,
+            information_register_master_dimensions: context.information_register_master_dimensions,
+            form_owner_reference: context.form_owner_reference,
+            attribute_names_by_id: &attribute_names_by_id,
+            child_item_indexes: &child_item_indexes,
+            metadata_command_refs: context
+                .metadata_command_refs
+                .unwrap_or(&empty_metadata_command_refs),
+        };
+        resolve_form_button_register_command_names(&mut child_items, &register_context);
+        if let Some(command_bar) = auto_command_bar.as_mut() {
+            resolve_form_button_register_command_names(
+                &mut command_bar.child_items,
+                &register_context,
+            );
+        }
+    }
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_child_items_cpu_ms +=
             child_item_indexes_cpu_ms + elapsed_ms(started);
@@ -776,6 +811,7 @@ pub(super) struct FormBodyProperties {
     pub(super) auto_title: Option<bool>,
     pub(super) auto_url: Option<bool>,
     pub(super) save_data_in_settings: Option<&'static str>,
+    pub(super) settings_storage: Option<String>,
     pub(super) auto_save_data_in_settings: Option<&'static str>,
     pub(super) group: Option<&'static str>,
     pub(super) scaling_mode: Option<&'static str>,
@@ -806,6 +842,7 @@ pub(super) struct FormBodyProperties {
     pub(super) variant_appearance: Option<String>,
     pub(super) auto_show_state: Option<&'static str>,
     pub(super) custom_settings_folder: Option<String>,
+    pub(super) group_list: Option<String>,
     pub(super) report_result_view_mode: Option<&'static str>,
     pub(super) view_mode_application_on_set_report_result: Option<&'static str>,
 }
@@ -2038,6 +2075,7 @@ pub(super) fn extract_form_body_properties(
         auto_title: extract_form_auto_title(fields),
         auto_url: extract_form_auto_url(fields),
         save_data_in_settings: extract_form_save_data_in_settings(fields),
+        settings_storage: None,
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
         scaling_mode: extract_form_scaling_mode(fields),
@@ -2073,6 +2111,7 @@ pub(super) fn extract_form_body_properties(
         variant_appearance: None,
         auto_show_state: extract_form_auto_show_state(fields),
         custom_settings_folder: None,
+        group_list: None,
         report_result_view_mode: extract_form_report_result_view_mode(fields),
         view_mode_application_on_set_report_result:
             extract_form_view_mode_application_on_set_report_result(fields),
@@ -2239,25 +2278,14 @@ pub(super) fn extract_form_command_set_excluded_commands(
             Some("BusinessProcess" | "Task")
         )
     });
-    let mut commands = map_known_form_excluded_commands(&command_set, |uuid| {
+    // The second `.or_else` used to re-read the command-name table through a
+    // `strip_prefix`; the two tables are one table now, so the excluded reader
+    // reads it directly and the joint `Post`/`UndoPosting` group is gone with
+    // it -- both uuids are named individually in that one table.
+    map_known_form_excluded_commands(&command_set, |uuid| {
         form_standard_excluded_command_name(uuid, business_process_or_task)
             .or_else(|| form_root_table_excluded_command_name(uuid))
-            // The older excluded-command table predates several root form
-            // standard commands.  The canonical command name is available
-            // from the shared Form.StandardCommand table, so retain its
-            // suffix rather than handling individual UUIDs here.
-            .or_else(|| form_standard_command_name(uuid)?.strip_prefix("Form.StandardCommand."))
-    });
-    extend_joint_form_excluded_commands(
-        &mut commands,
-        &command_set,
-        &[
-            "441362c1-0c86-4f73-bf50-6e1048a2db73",
-            "4c569466-1af5-4fc1-9b63-7bf6493097bf",
-        ],
-        &["Post", "UndoPosting"],
-    );
-    commands
+    })
 }
 
 fn form_root_table_excluded_command_name(uuid: &str) -> Option<&'static str> {
@@ -2428,8 +2456,64 @@ pub(super) fn extract_form_report_attribute_ref(
 }
 
 pub(super) fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
-    let value = form_root_property_bag_value(fields, "0")?;
+    let value = form_root_property_bag_value(fields, FORM_USE_FOR_FOLDERS_AND_ITEMS_BAG_KEY)?;
     parse_form_choice_folders_and_items_value(value)
+}
+
+pub(super) const FORM_USE_FOR_FOLDERS_AND_ITEMS_BAG_KEY: &str = "0";
+
+/// Which metadata families own a `UseForFoldersAndItems` at all.
+const FORM_FOLDERS_AND_ITEMS_OBJECT_PREFIXES: [&str; 2] =
+    ["CatalogObject.", "ChartOfCharacteristicTypesObject."];
+
+/// Whether the form's main attribute is typed as an object of a family that
+/// owns `UseForFoldersAndItems`.
+///
+/// Census over the eight stand corpora, all 22 637 native `Form.xml`
+/// documents: a form carries `<UseForFoldersAndItems>` on exactly the 1 771
+/// whose main attribute declares a `CatalogObject.…` or a
+/// `ChartOfCharacteristicTypesObject.…` among its types, and on none of the
+/// other 20 866 -- a total function with no counter-example in either
+/// direction. The main attribute is not always singly typed: 217 of the 1 771
+/// declare the object type beside two to sixty-one others, so the test is
+/// membership rather than an exact single type.
+fn form_main_attribute_owns_folders_and_items(attributes: &[FormAttribute]) -> bool {
+    attributes
+        .iter()
+        .filter(|attribute| attribute.main_attribute)
+        .any(|attribute| {
+            attribute.value_types.iter().any(|value_type| {
+                let ConstantValueType::Reference { reference } = value_type else {
+                    return false;
+                };
+                let reference = reference.strip_prefix("cfg:").unwrap_or(reference);
+                FORM_FOLDERS_AND_ITEMS_OBJECT_PREFIXES
+                    .iter()
+                    .any(|prefix| reference.starts_with(prefix))
+            })
+        })
+}
+
+/// The `UseForFoldersAndItems` an owning form writes when its property bag
+/// carries no entry for the property.
+///
+/// A default is not an absence. Across the eight corpora the bag names the
+/// value on 1 764 of the 1 771 owning forms (`0` on 1 595 of them and `1` on
+/// 169) and carries no key `0` at all on the remaining seven, every one of
+/// which the platform still writes -- as `Items`, the same value code `0`
+/// names. The seven are ERP УХ `49` roots whose bag is declared empty, so the
+/// entry is not merely unread: the bag says there is nothing to read.
+///
+/// The bag must be readable for the default to apply: an unreadable bag is
+/// "unknown", not "empty", and keeps the property unwritten.
+fn form_default_use_for_folders_and_items(
+    fields: &[&str],
+    attributes: &[FormAttribute],
+) -> Option<&'static str> {
+    if form_root_property_bag_entry(fields, FORM_USE_FOR_FOLDERS_AND_ITEMS_BAG_KEY)?.is_some() {
+        return None;
+    }
+    form_main_attribute_owns_folders_and_items(attributes).then_some("Items")
 }
 
 fn parse_form_choice_folders_and_items_value(value: &str) -> Option<&'static str> {
@@ -2572,17 +2656,68 @@ pub(super) fn extract_form_conversations_representation(fields: &[&str]) -> Opti
     .conversations_representation(trailer)
 }
 
+/// A form-root property that names one of the form's own items by id.
+///
+/// The name comes from the form's own item table; an id the table does not
+/// carry keeps the platform's dangling `<id>:<form-item class uuid>` spelling
+/// rather than dropping the property, exactly as a picture or a command the
+/// reader cannot name does. See `FormRootItemReferenceSchema` for the corpus.
+fn extract_form_root_item_reference(
+    fields: &[&str],
+    property_bag_key: &'static str,
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let schema = FormRootItemReferenceSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        property_bag_key,
+    )?;
+    let value = form_root_property_bag_value(fields, schema.property_bag_key())?;
+    let value_fields = split_1c_braced_fields(value.trim(), 0)?;
+    let item_id = schema.item_id(&value_fields)?;
+    Some(
+        item_name_by_id
+            .get(&item_id)
+            .cloned()
+            .unwrap_or_else(|| format!("{item_id}:{FORM_ITEM_TYPE_UUID}")),
+    )
+}
+
+/// The metadata object or form root field 8 names as the form's settings
+/// storage. A uuid the reference index does not carry stays unread rather than
+/// being spelled out: every one of the 20 evidenced roots resolves, so a miss
+/// is unproven rather than a dangling reference the platform would spell.
+pub(super) fn extract_form_settings_storage(
+    fields: &[&str],
+    reference_index: &BTreeMap<String, String>,
+) -> Option<String> {
+    let schema = FormRootSettingsStorageSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        fields.len(),
+    )?;
+    let uuid = parse_non_zero_uuid(fields.get(schema.slot())?.trim())?;
+    reference_index.get(&uuid).cloned()
+}
+
 pub(super) fn extract_form_custom_settings_folder(
     fields: &[&str],
     item_name_by_id: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let schema =
-        FormRootCustomSettingsFolderSchema::from_raw_layout(fields.first().map(|f| f.trim()))?;
-    let value =
-        form_root_property_bag_value(fields, FormRootCustomSettingsFolderSchema::PROPERTY_BAG_KEY)?;
-    let value_fields = split_1c_braced_fields(value.trim(), 0)?;
-    let item_id = schema.item_id(&value_fields)?;
-    item_name_by_id.get(&item_id).cloned()
+    extract_form_root_item_reference(
+        fields,
+        FormRootItemReferenceSchema::CUSTOM_SETTINGS_FOLDER_KEY,
+        item_name_by_id,
+    )
+}
+
+pub(super) fn extract_form_group_list(
+    fields: &[&str],
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    extract_form_root_item_reference(
+        fields,
+        FormRootItemReferenceSchema::GROUP_LIST_KEY,
+        item_name_by_id,
+    )
 }
 
 pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
@@ -2706,6 +2841,18 @@ pub(super) fn form_root_property_bag_value<'a>(
     fields: &'a [&str],
     property_key: &str,
 ) -> Option<&'a str> {
+    form_root_property_bag_entry(fields, property_key).flatten()
+}
+
+/// The bag walk, keeping "the bag is unreadable" apart from "the bag is
+/// readable and has no such key". The two are the same answer to a reader of
+/// one value and different answers to a reader that has a default to apply:
+/// a default belongs to an entry the bag declares absent, never to a bag
+/// nobody could read.
+pub(super) fn form_root_property_bag_entry<'a>(
+    fields: &'a [&str],
+    property_key: &str,
+) -> Option<Option<&'a str>> {
     let schema = FormRootPropertyBagSchema::from_raw_layout(
         fields.get(FormRootPropertyBagSchema::COUNT_SLOT).copied(),
         fields.len(),
@@ -2724,9 +2871,16 @@ pub(super) fn form_root_property_bag_value<'a>(
             found = Some(*fields.get(key_slot + 1)?);
         }
     }
-    found
+    Some(found)
 }
 
+/// The bare-suffix spelling of the one fact table, plus the one name that is
+/// not a property of the uuid at all.
+///
+/// `32df4349-…` is `WriteAndClose` everywhere except on a business process or a
+/// task, where the platform writes `ExecuteAndClose` for the same uuid. That is
+/// a property of the owner, not of the uuid, so it stays here rather than being
+/// pushed into the table of uuid facts.
 pub(super) fn form_standard_excluded_command_name(
     uuid: &str,
     business_process_or_task: bool,
@@ -2734,77 +2888,7 @@ pub(super) fn form_standard_excluded_command_name(
     if business_process_or_task && uuid == "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" {
         return Some("ExecuteAndClose");
     }
-    match uuid {
-        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("No"),
-        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Tree"),
-        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromStandaloneServer"),
-        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("ReportSettings"),
-        "174e58ce-82ad-4787-b956-9367937f7971" => Some("ChangeHistory"),
-        "198ea630-fda2-4cda-8a23-f999f4c67ee6" => Some("CustomizeForm"),
-        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("ListSettings"),
-        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Delete"),
-        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Reread"),
-        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("SaveValues"),
-        "2cacadf7-8fb3-4ec6-ae2b-0ca3fd311c9e" => Some("Execute"),
-        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("SetDeletionMark"),
-        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("WriteAndClose"),
-        "3328a951-c3c8-4f22-b99e-814f7cea6b82" => Some("ReadChanges"),
-        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Copy"),
-        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Close"),
-        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("UndoPosting"),
-        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Help"),
-        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("MoveItem"),
-        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("ShowInList"),
-        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Post"),
-        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Delete"),
-        "3ea8bf45-5f33-4545-a3bb-29f80666b627" => Some("ChangeSettingsStructure"),
-        "3f01ed62-97f8-465b-b4f7-6517ac2bc994" => Some("Abort"),
-        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Create"),
-        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Retry"),
-        "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromMainServer"),
-        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Yes"),
-        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Cancel"),
-        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Change"),
-        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Copy"),
-        "6f959e83-23ec-4991-901d-575d7ea98868" => Some("Activate"),
-        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("RestoreValues"),
-        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("EndEdit"),
-        "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("SaveReportSettings"),
-        "8149a06a-dbf3-4d4d-a275-5385a4196fc7" => Some("CancelEdit"),
-        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("SetDeletionMark"),
-        "87317f86-057f-477e-9045-2da4e4980199" => Some("PostAndClose"),
-        "8b81add7-25af-4df7-a69c-144e3e3e4c8e" => Some("WriteChanges"),
-        "952c2984-9955-415a-8235-5c710aabe732" => Some("LoadDynamicListSettings"),
-        "96e0bc70-f8ff-4732-8119-060923203629" => Some("CancelSearch"),
-        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("OutputList"),
-        "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("SaveVariant"),
-        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => Some("ShowMultipleSelection"),
-        "a29c4f3a-3b41-480a-a31e-5f9f73aa3216" => Some("WriteChanges"),
-        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("List"),
-        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("LevelDown"),
-        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("LoadVariant"),
-        "b0c9afb6-320c-4e36-be21-8f6d48116415" => Some("LoadReportSettings"),
-        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("FindByCurrentValue"),
-        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Generate"),
-        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Find"),
-        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Delete"),
-        "c8f1bd8c-b4d1-46d5-97b3-929b5606b6c3" => Some("StandardSettings"),
-        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("ChangeHistory"),
-        "d5c3842d-7252-4370-9174-756a6cc553e5" => Some("SaveDynamicListSettings"),
-        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => Some("DynamicListStandardSettings"),
-        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Ignore"),
-        "d82e191e-f052-40ee-8691-00cac5b34629" => Some("CreateInitialImage"),
-        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("CreateFolder"),
-        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("LevelUp"),
-        "e7ae2a27-60a2-44ae-ab1d-f307d11c85bf" => Some("ReadChanges"),
-        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("OK"),
-        "f4613f71-5449-48ed-aea5-de005b272a1d" => Some("SwitchActivity"),
-        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("ChangeVariant"),
-        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Refresh"),
-        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Write"),
-        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("HierarchicalList"),
-        _ => None,
-    }
+    form_standard_command_suffix(uuid)
 }
 
 pub(super) fn extract_form_auto_command_bar(
@@ -15831,6 +15915,47 @@ pub(super) fn parse_form_input_field_choice_form(
     parse_non_zero_uuid(raw)
 }
 
+/// Names the register "open by value" commands a button's `{kind, uuid}` record
+/// spells, over the finished items rather than inside the item reader.
+///
+/// The rule needs three configuration-wide indexes -- the register field
+/// references, the master dimensions and the form's own owner -- and the item
+/// reader carries none of them; threading them through every item signature to
+/// reach one slot of one tag is how a reader becomes unreadable. Nothing is
+/// lost by deferring: the sentinel the item reader leaves behind is the record
+/// verbatim, `kind:uuid`, so this pass reads exactly what that reader read.
+/// This is the same shape `resolve_form_choice_form_references` already has for
+/// `<ChoiceForm>`, and the naming itself is the command-interface reader's own
+/// function, so the two readers cannot disagree about the same record.
+///
+/// Evidence, ERP УХ 3.2.12.6, from the corpus-wide button join: 25 button
+/// records resolve here and the platform names every one of them --
+/// `{3,6771911c-…}` -> `InformationRegister.СвязанныеДоговоры.StandardCommand.
+/// OpenByValue.БазовыйДоговор` (8 records), `{4,6771911c-…}` -> the same
+/// register's `…OpenByValue.СвязанныйДоговор` (8), `{3,842c2730-…}` ->
+/// `InformationRegister.ОбъектыПоФИ.…OpenByValue.ФИ` (8) and `{3,2d2bc347-…}`
+/// (1). Slots 3 and 4 are the observed ones; the slot set is the register
+/// grammar's own, as the command-interface reader spells it, rather than a
+/// second list that could drift from it.
+fn resolve_form_button_register_command_names(
+    items: &mut [FormChildItem],
+    context: &FormCommandInterfaceParseContext<'_>,
+) {
+    for item in items.iter_mut() {
+        if let Some(command_name) = item.command_name.as_deref()
+            && let Some((kind, uuid)) = command_name.split_once(':')
+            && matches!(kind, "3" | "4" | "5" | "6" | "7")
+            && let Some(parsed) = parse_non_zero_uuid(uuid)
+            && form_command_interface_target_use_standard_commands(&parsed, context)
+            && let Some(named) =
+                resolve_information_register_open_by_value_command(kind, uuid, context)
+        {
+            item.command_name = Some(named);
+        }
+        resolve_form_button_register_command_names(&mut item.child_items, context);
+    }
+}
+
 /// Names every `<ChoiceForm>` identifier through the form reference index.
 ///
 /// An identifier the index does not know stays as it is, which is the
@@ -16686,16 +16811,15 @@ pub(super) fn form_table_property_bag_value<'a>(
     })
 }
 
+/// A table's standard commands, as one table of facts.
+///
+/// The six rows this function used to hold ahead of the shared table are in
+/// that table now. They name the same commands the same table owner has, and
+/// holding them apart meant a button naming one of them went out without a
+/// `<CommandName>` while an excluded-command list naming the very same uuid was
+/// written -- the drift a twinned table always ends in.
 fn form_table_excluded_command_name(_schema: FormTableSchema, uuid: &str) -> Option<&'static str> {
-    match uuid {
-        "11761e12-cf32-4826-a175-b23213e3b229" => Some("ChangeHistory"),
-        "7d4db5ed-0981-4020-b3b8-886b7165ba05" => Some("SetPresentation"),
-        "8af6ebff-cd02-4bfe-a984-44a292623708" => Some("ShowRowRearrangement"),
-        "d96b0c03-b209-4d01-a3fc-17a14f873b64" => Some("SearchHistory"),
-        "e6900951-1a42-4397-bf00-cabb2cd7ad6d" => Some("Detailed"),
-        "ec576e13-1e76-4c33-98aa-a33204514227" => Some("Delete"),
-        _ => form_table_standard_command_suffix(uuid),
-    }
+    form_table_standard_command_suffix(uuid)
 }
 
 fn parse_form_table_counted_uuid_list(field: &str) -> Option<Vec<&str>> {
@@ -16769,24 +16893,6 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
     let mut commands = map_known_form_excluded_commands(uuids, |uuid| {
         form_table_excluded_command_name(schema, uuid)
     });
-    extend_joint_form_excluded_commands(
-        &mut commands,
-        uuids,
-        &[
-            "48e12019-0fd6-46eb-aab6-2acba716a623",
-            "fc120c02-7f39-469b-b357-b2dd8d4b0765",
-        ],
-        &["AddAutoOrderItem", "Expand"],
-    );
-    extend_joint_form_excluded_commands(
-        &mut commands,
-        uuids,
-        &[
-            "15664824-eedc-4a92-9f6b-c89a2dead157",
-            "d77e5787-b130-4355-8f8f-01ecec82f843",
-        ],
-        &["Choose", "ChooseAll"],
-    );
     // The three standard commands a settings table excludes beside
     // `UserSettingItemProperties`.  Evidence: UT 11.5.27.75,
     // `DataProcessors/СверкаПродажЛьготныхТоваровОплаченныхЭСФСС/Forms/Форма`
@@ -16807,6 +16913,39 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
             "e809ae75-11b6-480d-bc87-caf93b28236d",
         ],
         &["AddChart", "AddNestedSchema", "UserSettings"],
+    );
+    // The six a settings table excludes beside those three, and only ever
+    // beside them. Evidence: ERP УХ 3.2.12.6,
+    // `Catalogs/АналитическиеПанели/Forms/ФормаНастройкиСКДОбласти`, whose one
+    // excluded-command list declares seventeen uuids and which the platform
+    // writes as seventeen names. Eight uuids this table names on its own, three
+    // are the group above, and the remaining six are these -- against exactly
+    // the six names left over: `AddTable`, `Group`, `LoadSettings`,
+    // `SaveSettings`, `StandardSettings` and `Ungroup`. Each of the six occurs
+    // in that one list and nowhere else in any of the eight corpora, neither in
+    // another excluded-command list nor as a button's `<CommandName>`, so which
+    // name belongs to which uuid is unobserved and the group is named as a
+    // group. The element list the platform writes is a sorted set, so the group
+    // reproduces it exactly without claiming the pairing.
+    extend_joint_form_excluded_commands(
+        &mut commands,
+        uuids,
+        &[
+            "23802256-7145-47c7-b379-8d60ca1b1262",
+            "33ff70c9-5df3-4907-9611-7649411f9180",
+            "358196aa-1061-458a-8fba-e9cd11081205",
+            "3bd8cc97-31ca-4fad-acf4-cc8f4d648a95",
+            "46647493-f1bf-4cd6-9110-6bfab80b62de",
+            "49a25ff2-06bc-4547-a119-a428f60bdfbf",
+        ],
+        &[
+            "AddTable",
+            "Group",
+            "LoadSettings",
+            "SaveSettings",
+            "StandardSettings",
+            "Ungroup",
+        ],
     );
     commands
 }
@@ -21456,20 +21595,18 @@ pub(super) fn parse_form_button_command_name(
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let kind = fields.first()?.trim();
-    if fields.len() == 1 && kind == "0" {
-        return Some("0".to_string());
+    if let Some(name) = form_command_record_single_field_name(&fields) {
+        return Some(name);
     }
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
-        if let Some(command_name) =
-            form_standard_button_command_name(&uuid).or_else(|| form_standard_command_name(&uuid))
-        {
-            return Some(command_name.to_owned());
+        if let Some(command_name) = form_standard_command_name(&uuid) {
+            return Some(command_name);
         }
         if let Some(command_name) = object_refs.get(&uuid) {
             return Some(form_object_reference_command_name(command_name));
         }
-        return None;
+        return Some(form_command_record_sentinel(kind, &uuid));
     }
     if let Some(command_name) = commands
         .iter()
@@ -21512,8 +21649,59 @@ pub(super) fn parse_form_button_command_name(
             owner.name
         ));
     }
-    let reference = object_refs.get(&uuid)?;
-    form_object_family_standard_command_name(kind, reference, FormCommandRecordReader::Button)
+    if let Some(reference) = object_refs.get(&uuid)
+        && let Some(command_name) = form_object_family_standard_command_name(
+            kind,
+            reference,
+            FormCommandRecordReader::Button,
+        )
+    {
+        return Some(command_name);
+    }
+    Some(form_command_record_sentinel(kind, &uuid))
+}
+
+/// What a command record that carries nothing but its own kind spells.
+///
+/// The record is `{N}` with no target at all, and the platform writes the bare
+/// `N`. Census of every `<Command>` a native `<CommandInterface>` item carries
+/// across the eight stand corpora: 865 read `0`, three read `4` and two read
+/// `3`, and the export's own record census finds exactly 635 `{0}` records,
+/// three `{4}` and two `{3}` at those positions -- equal multisets, and the
+/// five non-zero ones were the only records of the shape the reader dropped.
+/// Nothing but a bare number is ever written for such a record.
+///
+/// Both readers of the record grammar go through this one function. No button
+/// carries a record of this shape other than `{0}` anywhere in the corpus, so
+/// sharing it changes nothing there; it removes the second place for the two to
+/// disagree, which is what every twinned reader in this file has eventually
+/// done.
+fn form_command_record_single_field_name(fields: &[&str]) -> Option<String> {
+    let [only] = fields else { return None };
+    let only = only.trim();
+    only.parse::<u64>().ok().map(|_| only.to_string())
+}
+
+/// What the platform writes for a `{kind, uuid}` command record no name fits.
+///
+/// Not a guess and not a refusal: it is the platform's own spelling. The
+/// corpus-wide button join -- every button command record this reader could not
+/// name, matched against the native `<Button>` at the same output path and id
+/// over the eight stand corpora -- has 259 records, and every single one of them
+/// carries a `<CommandName>` in the native document. 155 carry a name this
+/// package now constructs; the remaining 104 carry exactly `kind:uuid`, the
+/// same dangling spelling the command-interface reader has kept for its own
+/// `kind == 0` records since `e712d9a` and the same shape a picture the reader
+/// cannot name keeps. Not one of the 259 is written without a `<CommandName>`,
+/// so dropping the element was never the platform's behaviour for any of them.
+///
+/// The 104 are not one accident either: they span `kind` `0` (unknown form
+/// standard commands), item ids whose item is not a standard-command owner at
+/// all (`{135,1ba33890-…}`, `{276,…}` -- twenty-two formatted-document uuids
+/// under an item that owns none of them), and family selectors whose uuid names
+/// no metadata object.
+fn form_command_record_sentinel(kind: &str, uuid: &str) -> String {
+    format!("{kind}:{uuid}")
 }
 
 /// Which of the two places a `{kind, uuid}` command record was read from.
@@ -21577,7 +21765,15 @@ fn form_object_family_standard_command_name(
         ) && reference.matches('.').count() == 1
     };
     let standard = match kind {
-        "1" if top_level("Catalog") => match reader {
+        // A document's slot 1 is `Create` for a button on its one observation,
+        // ERP УХ `DocumentJournals/ДвижениеИнвестиций/Forms/
+        // ФормаРеестраИнвестиций`, where `{1,e4e13098-…}` resolves to
+        // `Document.ПоступлениеИнвестиций` and the platform writes
+        // `Document.ПоступлениеИнвестиций.StandardCommand.Create`. It shares the
+        // row with the catalogue rather than getting one of its own because the
+        // two observations say the same thing about the same slot; the reader is
+        // still named, because neither datum generalises across readers.
+        "1" if top_level("Catalog") || top_level("Document") => match reader {
             FormCommandRecordReader::Button => "Create",
             FormCommandRecordReader::CommandInterfaceItem => return None,
         },
@@ -21626,75 +21822,97 @@ fn form_command_interface_target_use_standard_commands(
         .is_none_or(|metadata| metadata.use_standard_commands)
 }
 
-pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
+/// Every `Form.StandardCommand` the corpus names, keyed by the uuid the record
+/// declares, as ONE table of facts.
+///
+/// Three tables used to hold this fact -- the button reader's own two-row
+/// table, the command-name table, and the excluded-command table, the latter
+/// spelling the same fact as a bare suffix. They agreed on all 54 uuids they
+/// shared and differed only in what each was missing, which is the shape every
+/// twinned table in this series has had just before it drifted. The fact is
+/// the uuid-to-name pairing; where the name is spelled in full and where as a
+/// suffix is the caller's business, so the callers spell it and the table
+/// states it once.
+///
+/// Collapsing them is not a widening on paper only. Five of the fourteen uuids
+/// only the excluded table carried are evidenced at a *button* by the platform
+/// itself, in the corpus-wide join of every button command record the reader
+/// could not name against the native `<Button>` at the same output path and id
+/// (259 records over the eight stand corpora; 155 named, 104 kept as the raw
+/// sentinel, none unexplained):
+///   * `c8f1bd8c-…` -> `Form.StandardCommand.StandardSettings`, 5 records;
+///   * `573e81b7-…` -> `…OpenFromMainServer`, 2;
+///   * `f4613f71-…` -> `…SwitchActivity`, 1;
+///   * `4c569466-…` -> `…Post` and `441362c1-…` -> `…UndoPosting`, 2 each.
+///
+/// The last two dissolve a joint group. The pair was named as a group because
+/// no observation separated its members; the button join separates them, and
+/// ERP УХ `Documents/АмортизацияОС2_4/Forms/ФормаСписка` corroborates it from
+/// the other side -- its excluded-command list carries `4c569466-…` without
+/// `441362c1-…` and the platform writes exactly one `<ExcludedCommand>Post`.
+///
+/// `45bea91e-…` is new to every table: the same button join names it
+/// `Form.StandardCommand.CompactViewMode` on one record, and three ERP УХ
+/// report forms carry it in an excluded-command list.
+fn form_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
-        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
-        "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => Some("Form.StandardCommand.CreateByParameter"),
-        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Form.StandardCommand.Refresh"),
-        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Form.StandardCommand.Delete"),
-        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Form.StandardCommand.Delete"),
-        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Form.StandardCommand.Delete"),
-        "8d7bcd38-1bbb-4dc1-a9ad-cc9d5966ca8e" => Some("Form.StandardCommand.Start"),
-        "e6a9041f-4d43-4f06-8e17-e95753531565" => Some("Form.StandardCommand.StartAndClose"),
-        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("Form.StandardCommand.UndoPosting"),
-        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("Form.StandardCommand.FindByCurrentValue"),
-        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("Form.StandardCommand.ChangeHistory"),
-        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("Form.StandardCommand.List"),
-        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("Form.StandardCommand.HierarchicalList"),
-        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Form.StandardCommand.Tree"),
-        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("Form.StandardCommand.MoveItem"),
-        "eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111" => Some("Form.StandardCommand.SetDateInterval"),
-        "62778a6d-6114-471c-93f7-e1ccd54bd266" => Some("Form.StandardCommand.CreateInitialImage"),
-        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("Form.StandardCommand.LoadVariant"),
-        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("Form.StandardCommand.ReportSettings"),
-        "8149a06a-dbf3-4d4d-a275-5385a4196fc7" => Some("Form.StandardCommand.CancelEdit"),
-        "b0c9afb6-320c-4e36-be21-8f6d48116415" => Some("Form.StandardCommand.LoadReportSettings"),
-        "03df6ee5-883c-4cc6-b319-d886d1a9b2c8" => Some("Form.StandardCommand.NewWindow"),
-        "a11fe36e-0b45-4c07-80b3-2346b660a51e" => Some("Form.StandardCommand.Print"),
-        "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("Form.StandardCommand.SaveReportSettings"),
-        "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("Form.StandardCommand.SaveVariant"),
-        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => {
-            Some("Form.StandardCommand.ShowMultipleSelection")
-        }
-        "9885f4b6-d830-435f-a0e3-6b70ffe0f85c" => Some("Form.StandardCommand.GetURL"),
-        "a6d73055-3730-42e7-8934-3145ee987141" => Some("Form.StandardCommand.Save"),
-        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Form.StandardCommand.Yes"),
-        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("Form.StandardCommand.No"),
-        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Form.StandardCommand.Copy"),
-        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Form.StandardCommand.Copy"),
-        "87317f86-057f-477e-9045-2da4e4980199" => Some("Form.StandardCommand.PostAndClose"),
-        "96e0bc70-f8ff-4732-8119-060923203629" => Some("Form.StandardCommand.CancelSearch"),
-        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("Form.StandardCommand.OutputList"),
-        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("Form.StandardCommand.ListSettings"),
-        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Form.StandardCommand.Reread"),
-        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("Form.StandardCommand.ShowInList"),
-        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
-        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Form.StandardCommand.Close"),
-        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Form.StandardCommand.Change"),
-        "8e2b82cf-d1ea-46b2-afdf-a8d64e66ea2b" => Some("Form.StandardCommand.Choose"),
-        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Form.StandardCommand.Find"),
-        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Form.StandardCommand.Post"),
-        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("Form.StandardCommand.SetDeletionMark"),
-        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("Form.StandardCommand.SetDeletionMark"),
-        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
-        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Form.StandardCommand.Cancel"),
-        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("Form.StandardCommand.WriteAndClose"),
-        "952c2984-9955-415a-8235-5c710aabe732" => {
-            Some("Form.StandardCommand.LoadDynamicListSettings")
-        }
-        "d5c3842d-7252-4370-9174-756a6cc553e5" => {
-            Some("Form.StandardCommand.SaveDynamicListSettings")
-        }
-        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => {
-            Some("Form.StandardCommand.DynamicListStandardSettings")
-        }
-        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("Form.StandardCommand.CreateFolder"),
-        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("Form.StandardCommand.OK"),
-        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Form.StandardCommand.Write"),
-        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => {
-            Some("Form.StandardCommand.OpenFromStandaloneServer")
-        }
-        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Form.StandardCommand.Retry"),
+        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("CustomizeForm"),
+        "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => Some("CreateByParameter"),
+        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Refresh"),
+        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Delete"),
+        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Delete"),
+        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Delete"),
+        "8d7bcd38-1bbb-4dc1-a9ad-cc9d5966ca8e" => Some("Start"),
+        "e6a9041f-4d43-4f06-8e17-e95753531565" => Some("StartAndClose"),
+        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("UndoPosting"),
+        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("FindByCurrentValue"),
+        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("ChangeHistory"),
+        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("List"),
+        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("HierarchicalList"),
+        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Tree"),
+        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("MoveItem"),
+        "eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111" => Some("SetDateInterval"),
+        "62778a6d-6114-471c-93f7-e1ccd54bd266" => Some("CreateInitialImage"),
+        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("LoadVariant"),
+        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("ReportSettings"),
+        "8149a06a-dbf3-4d4d-a275-5385a4196fc7" => Some("CancelEdit"),
+        "b0c9afb6-320c-4e36-be21-8f6d48116415" => Some("LoadReportSettings"),
+        "03df6ee5-883c-4cc6-b319-d886d1a9b2c8" => Some("NewWindow"),
+        "a11fe36e-0b45-4c07-80b3-2346b660a51e" => Some("Print"),
+        "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("SaveReportSettings"),
+        "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("SaveVariant"),
+        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => Some("ShowMultipleSelection"),
+        "9885f4b6-d830-435f-a0e3-6b70ffe0f85c" => Some("GetURL"),
+        "a6d73055-3730-42e7-8934-3145ee987141" => Some("Save"),
+        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Yes"),
+        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("No"),
+        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Copy"),
+        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Copy"),
+        "87317f86-057f-477e-9045-2da4e4980199" => Some("PostAndClose"),
+        "96e0bc70-f8ff-4732-8119-060923203629" => Some("CancelSearch"),
+        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("OutputList"),
+        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("ListSettings"),
+        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Reread"),
+        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("ShowInList"),
+        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Create"),
+        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Close"),
+        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Change"),
+        "8e2b82cf-d1ea-46b2-afdf-a8d64e66ea2b" => Some("Choose"),
+        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Find"),
+        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Post"),
+        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("SetDeletionMark"),
+        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("SetDeletionMark"),
+        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Help"),
+        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Cancel"),
+        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("WriteAndClose"),
+        "952c2984-9955-415a-8235-5c710aabe732" => Some("LoadDynamicListSettings"),
+        "d5c3842d-7252-4370-9174-756a6cc553e5" => Some("SaveDynamicListSettings"),
+        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => Some("DynamicListStandardSettings"),
+        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("CreateFolder"),
+        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("OK"),
+        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Write"),
+        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromStandaloneServer"),
+        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Retry"),
         // Seven form standard commands the table did not carry.  Each was read
         // off the platform's own answer: the instrumented export joined all
         // 27 773 button command records in the UT 11.5.27.75 tree to the native
@@ -21703,15 +21921,56 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         // share of the drops, with the name native writes at that position.
         // `ChangeHistory` already has a second uuid above, as `Delete`, `Copy`
         // and `SetDeletionMark` each already do.
-        "174e58ce-82ad-4787-b956-9367937f7971" => Some("Form.StandardCommand.ChangeHistory"),
-        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Form.StandardCommand.Generate"),
-        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("Form.StandardCommand.ChangeVariant"),
-        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("Form.StandardCommand.LevelDown"),
-        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("Form.StandardCommand.LevelUp"),
-        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Form.StandardCommand.Ignore"),
-        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("Form.StandardCommand.EndEdit"),
+        "174e58ce-82ad-4787-b956-9367937f7971" => Some("ChangeHistory"),
+        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Generate"),
+        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("ChangeVariant"),
+        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("LevelDown"),
+        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("LevelUp"),
+        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Ignore"),
+        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("EndEdit"),
+        // The fourteen uuids only the excluded-command table used to carry.
+        // Five of them are evidenced at a button as well (see above); the
+        // other nine are the same fact stated once instead of twice.
+        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("SaveValues"),
+        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("RestoreValues"),
+        "2cacadf7-8fb3-4ec6-ae2b-0ca3fd311c9e" => Some("Execute"),
+        "3328a951-c3c8-4f22-b99e-814f7cea6b82" => Some("ReadChanges"),
+        "e7ae2a27-60a2-44ae-ab1d-f307d11c85bf" => Some("ReadChanges"),
+        "8b81add7-25af-4df7-a69c-144e3e3e4c8e" => Some("WriteChanges"),
+        "a29c4f3a-3b41-480a-a31e-5f9f73aa3216" => Some("WriteChanges"),
+        "3ea8bf45-5f33-4545-a3bb-29f80666b627" => Some("ChangeSettingsStructure"),
+        "3f01ed62-97f8-465b-b4f7-6517ac2bc994" => Some("Abort"),
+        "6f959e83-23ec-4991-901d-575d7ea98868" => Some("Activate"),
+        "d82e191e-f052-40ee-8691-00cac5b34629" => Some("CreateInitialImage"),
+        "c8f1bd8c-b4d1-46d5-97b3-929b5606b6c3" => Some("StandardSettings"),
+        "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromMainServer"),
+        "f4613f71-5449-48ed-aea5-de005b272a1d" => Some("SwitchActivity"),
+        // The joint `Post`/`UndoPosting` group, separated by the button join
+        // and by the one form that excludes `Post` alone.
+        "4c569466-1af5-4fc1-9b63-7bf6493097bf" => Some("Post"),
+        "441362c1-0c86-4f73-bf50-6e1048a2db73" => Some("UndoPosting"),
+        // New to every table.
+        //
+        // `45bea91e-…`: the corpus-wide button join names it
+        // `Form.StandardCommand.CompactViewMode` on one record, and three ERP УХ
+        // report forms carry it in an excluded-command list.
+        //
+        // `77fe7401-…`: six ERP УХ report forms -- among them
+        // `Reports/МониторингЗаказа/Forms/ФормаОтчета` and
+        // `Reports/МатрицаЭкземпляровОтчетов/Forms/ФормаОтчета` -- carry it in
+        // the form's own excluded-command list, it is the only uuid of that
+        // list this table could not name in any of the six, and
+        // `<ExcludedCommand>ClearChartAppearance` is the only name native
+        // writes there that the export did not. One uuid, one name, six times.
+        "45bea91e-d9e5-4756-b5e6-375ab84b6903" => Some("CompactViewMode"),
+        "77fe7401-0b78-44e2-be82-9a5b2b760070" => Some("ClearChartAppearance"),
         _ => None,
     }
+}
+
+/// The full `Form.StandardCommand.<name>` spelling of the one fact table.
+pub(super) fn form_standard_command_name(uuid: &str) -> Option<String> {
+    form_standard_command_suffix(uuid).map(|suffix| format!("Form.StandardCommand.{suffix}"))
 }
 
 pub(super) fn form_object_reference_command_name(reference: &str) -> String {
@@ -21725,14 +21984,6 @@ pub(super) fn form_object_reference_command_name(reference: &str) -> String {
     match standard {
         Some(standard) => format!("{reference}.StandardCommand.{standard}"),
         None => reference.to_string(),
-    }
-}
-
-pub(super) fn form_standard_button_command_name(uuid: &str) -> Option<&'static str> {
-    match uuid {
-        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("Form.StandardCommand.SaveValues"),
-        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("Form.StandardCommand.RestoreValues"),
-        _ => None,
     }
 }
 
@@ -21801,11 +22052,53 @@ pub(super) fn form_pdf_document_standard_command_suffix(uuid: &str) -> Option<&'
     }
 }
 
+/// The standard commands a graphical-schema field owns, by the uuid its command
+/// record names.
+///
+/// The table carried three of them and dropped every button that named one of
+/// the other twenty-five, which is what a graphical-schema editor is almost
+/// entirely made of.
+///
+/// Evidence: the corpus-wide button join -- every button command record the
+/// reader could not name, matched against the native `<Button>` at the same
+/// output path and id, over the eight stand corpora. Each uuid below appears
+/// on three or four records, always under an item the owner index calls a
+/// graphical schema and always against the same name; no uuid is ever seen
+/// against two names. The records sit under four different item ids (1, 4,
+/// 1404, 2069) in four different Документооборот КОРП forms -- among them
+/// `CommonForms/КарточкаСхемыОбработкиОбъекта` and
+/// `BusinessProcesses/КомплексныйПроцесс/Forms/ФормаБизнесПроцесса` -- so the
+/// pairing is the uuid's, not one form's accident.
 pub(super) fn form_graphical_schema_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
         "e2d6f793-b786-4640-a91b-8d77f73860f1" => Some("Print"),
         "1d13f9a3-402a-46cb-9c68-1709356840f2" => Some("Preview"),
         "01db2225-b62d-4112-a4b6-d39d627bf79f" => Some("PageSetup"),
+        "abaddb09-44e1-4d85-b473-cd3db79f5fa3" => Some("InsertItemStart"),
+        "c54de1e2-eadf-4ad7-ba5e-f165ed302c29" => Some("InsertItemCompletion"),
+        "c58155b0-29dc-4905-a0c0-1ed2d6f88c4c" => Some("InsertItemProcessing"),
+        "d80a7ec0-3dc2-4777-9752-8fec196eb655" => Some("InsertItemCondition"),
+        "e915596d-e318-452b-9ba9-95cf99432b2c" => Some("InsertItemSplit"),
+        "d80be1de-253f-4a06-8c1a-b3920137e0ac" => Some("InsertItemJoin"),
+        "494c5e0a-f4f0-4184-9d10-2b57e780e428" => Some("InsertItemDecoration"),
+        "5eee88e8-c2c7-45b1-8303-049edb58170d" => Some("InsertItemDecorativeLine"),
+        "c4ac110c-99d4-4c75-882e-f2a5b9c199ad" => Some("AlignLeft"),
+        "1c7ec5be-53a6-43cc-8bc8-9a73ca72a44e" => Some("AlignCenter"),
+        "767690d6-cf3b-4f04-a28c-f91fb83a6a0a" => Some("AlignRight"),
+        "3ddfe26e-81bc-453f-bd88-5185aca5b2f0" => Some("AlignTop"),
+        "e22c2307-5585-4491-a106-3fca57a987ac" => Some("AlignMiddle"),
+        "ea0bafc6-647c-46eb-bb8b-6417593546cc" => Some("AlignBottom"),
+        "23176829-e3f7-46dc-af32-6af1f6d67643" => Some("DistributeHorizontally"),
+        "56f9684a-d741-44c0-bf84-652b987507dd" => Some("DistributeVertically"),
+        "3667f2a8-3912-4b56-a3b5-d69a1b7eec5d" => Some("EqualWidth"),
+        "356928f8-1b7d-4579-9813-d19699de6b76" => Some("EqualHeight"),
+        "89a42f51-7f8b-4efe-a257-94a623242a0a" => Some("EqualSize"),
+        "bfd14d15-932b-4f08-8090-395e4816e174" => Some("BringToFront"),
+        "5f8efacc-cd77-4bc9-8ae8-74af39dc5535" => Some("SendForward"),
+        "b4a65823-eb91-4b2c-9be6-a349566d9a63" => Some("SendBackward"),
+        "a5a41937-c459-438d-b2f5-81b561dc67c5" => Some("BringToBack"),
+        "87ddfbaa-b8e9-4f2b-884a-88c203115854" => Some("Group"),
+        "f27f75fc-027d-4c8e-9f7d-337f985f0ee9" => Some("Ungroup"),
         _ => None,
     }
 }
@@ -21985,6 +22278,43 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         // list, so the two tables were disagreeing about one uuid.
         "0e36114c-5b59-4005-9426-374a6c067e4a" => Some("GetURL"),
         "ec576e13-1e76-4c33-98aa-a33204514227" => Some("Delete"),
+        // The five rows the excluded-command reader used to hold ahead of this
+        // table. Three of them the corpus-wide button join names at a button
+        // as well, under an item the owner index calls a table:
+        // `11761e12-…` -> `ChangeHistory` on 5 records in three configurations,
+        // `7d4db5ed-…` -> `SetPresentation` on 2 and
+        // `e6900951-…` -> `Detailed` on 1. The other two are the same fact
+        // stated once instead of twice.
+        "11761e12-cf32-4826-a175-b23213e3b229" => Some("ChangeHistory"),
+        "7d4db5ed-0981-4020-b3b8-886b7165ba05" => Some("SetPresentation"),
+        "8af6ebff-cd02-4bfe-a984-44a292623708" => Some("ShowRowRearrangement"),
+        "d96b0c03-b209-4d01-a3fc-17a14f873b64" => Some("SearchHistory"),
+        "e6900951-1a42-4397-bf00-cabb2cd7ad6d" => Some("Detailed"),
+        // Two joint groups, separated. Each was named as a group because no
+        // observation separated its members; each now has two independent
+        // separations.
+        //
+        // `Choose`/`ChooseAll`: the button join names `d77e5787-…` ->
+        // `Form.Item.ДоступныеПоляВыбора.StandardCommand.Choose` (4 records)
+        // and `15664824-…` -> `….ChooseAll` (3), and ERP УХ
+        // `DataProcessors/НастраиваемыеПечатныеФормыЗарплатаКадры/Forms/
+        // ФормаНастройкиПечатнойФормы` excludes `15664824-…` without its
+        // partner and gets exactly one `<ExcludedCommand>ChooseAll`.
+        //
+        // `AddAutoOrderItem`/`Expand`: ERP УХ `DataProcessors/
+        // АналитическийБланк/Forms/ФормаНастроекМакетаРаскрытия` excludes
+        // `48e12019-…` alone and the platform writes exactly one
+        // `<ExcludedCommand>AddAutoOrderItem`; the group's name set then pins
+        // `fc120c02-…` to `Expand` on the other 18 forms, where the two always
+        // occur together.
+        "d77e5787-b130-4355-8f8f-01ecec82f843" => Some("Choose"),
+        "15664824-eedc-4a92-9f6b-c89a2dead157" => Some("ChooseAll"),
+        "48e12019-0fd6-46eb-aab6-2acba716a623" => Some("AddAutoOrderItem"),
+        "fc120c02-7f39-469b-b357-b2dd8d4b0765" => Some("Expand"),
+        // New to the table: the button join names it
+        // `Form.Item.КомпоновщикНастроекНастройки.StandardCommand.AddGroup` on
+        // ERP УХ `Catalogs/АналитическиеПанели/Forms/ФормаНастройкиСКДОбласти`.
+        "7b70c79a-199e-4e87-a7eb-29dea9a5ad69" => Some("AddGroup"),
         _ => None,
     }
 }
@@ -22549,6 +22879,9 @@ pub(super) fn parse_form_command_interface_command(
     {
         return Some(format!("Form.Command.{}", command.name));
     }
+    if let Some(name) = form_command_record_single_field_name(&fields) {
+        return Some(name);
+    }
     match kind {
         "0" => {
             let Some(target) = target else {
@@ -22564,18 +22897,31 @@ pub(super) fn parse_form_command_interface_command(
                     .map(|reference| {
                         // A filter criterion carries no command of its own, so this
                         // slot names its "open by value" standard command; every
-                        // other target in this slot is already a command reference.
+                        // other target in this slot is named by the same function
+                        // the button reader uses.
+                        //
+                        // The slot is not "already a command reference": most of
+                        // its targets are, and those the function returns
+                        // unchanged, but a target that is a metadata object
+                        // itself needs that object's own standard command
+                        // spelled. Census of every `<Command>` a native
+                        // `<CommandInterface>` item carries across the eight
+                        // stand corpora -- 15 705 of them -- finds not one bare
+                        // metadata reference: every one is a command reference,
+                        // a `.StandardCommand.` name, a bare number or the raw
+                        // `kind:uuid` sentinel. Writing the reference bare was
+                        // therefore always wrong, and it is what the four items
+                        // ERP УХ writes as `Document.ПредложениеПоставщика.
+                        // StandardCommand.OpenList`,
+                        // `DocumentJournal.ДвижениеИнвестиций.…OpenList` and two
+                        // catalogue `…OpenList` names were coming out as.
                         if is_top_level_reference_of_kind(reference, "FilterCriterion") {
                             format!("{reference}.StandardCommand.OpenByValue")
                         } else {
-                            reference.clone()
+                            form_object_reference_command_name(reference)
                         }
                     })
-                    .or_else(|| {
-                        form_standard_button_command_name(&uuid)
-                            .or_else(|| form_standard_command_name(&uuid))
-                            .map(ToOwned::to_owned)
-                    })
+                    .or_else(|| form_standard_command_name(&uuid))
                     // Nothing named this target: the platform still writes the
                     // item, as the raw `kind:uuid` sentinel rather than a name it
                     // cannot construct -- the object-level
@@ -22611,16 +22957,27 @@ pub(super) fn parse_form_command_interface_command(
         }
         "3" => {
             let target = target?;
+            let uuid = parse_non_zero_uuid(target)?;
+            // The gate runs first, ahead of the register rule and not behind
+            // it. A target with no standard commands has no "open by value"
+            // either, and the rule was naming one anyway on every slot it
+            // reached before the gate. ERP УХ 3.2.12.6: all fifteen registers
+            // this reader named through the rule and the platform left as the
+            // raw sentinel declare `UseStandardCommands=false` --
+            // `ОбработанныеОбъектыБД` (13 items), `ИзмененныеОбъектыДляВыгрузки`
+            // (6), `НастройкиОповещений` (5), `СверкаВГОЗакрыта`,
+            // `ОбъектыХранимыхФайлов`, `ПроцедурыРасчетов`,
+            // `ИменаФайловИКаталогов` and eight more, one item each. Not one
+            // register the platform does name through the rule declares it.
+            if !form_command_interface_target_use_standard_commands(&uuid, context) {
+                return Some(format!("{kind}:{uuid}"));
+            }
             if let Some(name) =
                 resolve_information_register_open_by_value_command(kind, target, context)
             {
                 return Some(name);
             }
-            let uuid = parse_non_zero_uuid(target)?;
             let reference = context.object_refs.get(&uuid)?;
-            if !form_command_interface_target_use_standard_commands(&uuid, context) {
-                return Some(format!("{kind}:{uuid}"));
-            }
             // A catalog names its "create based on" command from slot 3, where a
             // document or business process names the same command from slot 2.
             form_object_family_standard_command_name(
@@ -22648,11 +23005,19 @@ pub(super) fn parse_form_command_interface_command(
             .or_else(|| resolve_information_register_open_by_value_command(kind, target, context))
         }
         // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
-        // theirs with the object commands handled above. Unlike those, this
-        // grammar never touches `object_refs`, so `UseStandardCommands` has no
-        // uuid to gate here.
+        // theirs with the object commands handled above. The gate belongs here
+        // too: the rule resolves its target through `object_refs` like every
+        // other, and ERP УХ leaves `5:1c2ef491-…`, `6:1c2ef491-…`,
+        // `5:917a207a-…`, `6:917a207a-…`, `5:67b0794f-…`, `5:9f6e69eb-…` and
+        // `5:1f15119b-…` raw -- every one of them a register that declares
+        // `UseStandardCommands=false`.
         "5" | "6" | "7" => {
-            resolve_information_register_open_by_value_command(kind, target?, context)
+            let target = target?;
+            let uuid = parse_non_zero_uuid(target)?;
+            if !form_command_interface_target_use_standard_commands(&uuid, context) {
+                return Some(format!("{kind}:{uuid}"));
+            }
+            resolve_information_register_open_by_value_command(kind, target, context)
         }
         _ => None,
     }
@@ -22983,6 +23348,20 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(value)
         ));
     }
+    // `SettingsStorage` follows the two settings flags and leads everything
+    // else. The twenty native forms that carry it across the eight stand
+    // corpora put `SaveDataInSettings` (14), `AutoSaveDataInSettings` (12),
+    // `Title` (4) and `WindowOpeningMode` (2) before it and `AutoTitle` (11),
+    // `VerticalScroll` (9), `CommandBarLocation` (7), `CommandSet` (4),
+    // `Customizable` (3), `UseForFoldersAndItems` (3), the report run (4 each),
+    // `Group`, `ScalingMode`, `AutoFillCheck` and the document trio (1 each)
+    // and every collection after it, with no pair counted both ways.
+    if let Some(value) = &properties.settings_storage {
+        xml.push_str(&format!(
+            "\t<SettingsStorage>{}</SettingsStorage>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     if properties.save_window_settings == Some(false) {
         xml.push_str("\t<SaveWindowSettings>false</SaveWindowSettings>\r\n");
     }
@@ -23207,6 +23586,21 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(value) = properties.view_mode_application_on_set_report_result {
         xml.push_str(&format!(
             "\t<ViewModeApplicationOnSetReportResult>{}</ViewModeApplicationOnSetReportResult>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // `GroupList` closes the scalar run, immediately ahead of the collections.
+    // The twelve native forms that carry it across the eight stand corpora put
+    // `AutoCommandBar` (12), `ChildItems` (12), `Attributes` (12), `Events`
+    // (9), `Commands` (7), `Parameters` (5) and `CommandInterface` (1) after
+    // it and `AutoTitle` (6), `VerticalScroll` (6), `CommandBarLocation` (5),
+    // `Title` (4), `CommandSet` (4), `Width` (3) and `WindowOpeningMode` (3)
+    // before it, and no pair is counted in both directions. It never shares a
+    // form with any report property, so it takes the last scalar slot rather
+    // than claiming a place inside a run it has never been observed in.
+    if let Some(value) = &properties.group_list {
+        xml.push_str(&format!(
+            "\t<GroupList>{}</GroupList>\r\n",
             escape_xml_text(value)
         ));
     }

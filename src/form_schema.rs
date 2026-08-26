@@ -5427,22 +5427,90 @@ impl FormRootVariantAppearanceSchema {
     }
 }
 
-/// `CustomSettingsFolder` is property-bag key 23: an `{"N", id}` reference to
-/// one of the form's own items, with `0` standing for "no folder".
+/// `SettingsStorage` sits alone in root field 8: the uuid of the metadata
+/// object the form saves its user settings into, or the nil uuid when it saves
+/// them where it saves them by default.
 ///
-/// UT 11.5.27.75 native tree: 56 of the 5 075 attributable roots carry key 23.
-/// It reads `{"N",0}` in the 42 whose native document omits the property, and a
-/// non-zero item id in the 14 that carry it - and in all 14 the id resolves
-/// through the form's own item table to exactly the native folder name. No
-/// counter-example either way.
+/// The field is not a bag entry, which is why the bag-keyed readers never found
+/// it: it sits between the `AutoSaveDataInSettings` flag (field 7) and the
+/// title (field 10), ahead of the bag's own count in field 18.
+///
+/// Evidence: the eight stand corpora, all 22 632 native `Form.xml` roots read
+/// through the export's own root census. Field 8 holds a non-nil uuid on
+/// exactly the 20 roots whose native document carries `<SettingsStorage>` and
+/// the nil uuid on the other 22 612 - a total function with no counter-example
+/// in either direction, over both the `49` and the `50` discriminator. The
+/// uuid names either a settings-storage object (`SettingsStorage.Общие` on 13
+/// roots, `SettingsStorage.ХранилищеВариантовОтчетов` on 3) or a form
+/// (`Report.<…>.Form.<…>` on 4, each of them the naming form itself), so it is
+/// read through the reference index that carries both.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootCustomSettingsFolderSchema;
+pub(crate) struct FormRootSettingsStorageSchema {
+    slot: usize,
+}
 
-impl FormRootCustomSettingsFolderSchema {
-    pub(crate) const PROPERTY_BAG_KEY: &'static str = "23";
+impl FormRootSettingsStorageSchema {
+    const SLOT: usize = 8;
 
-    pub(crate) fn from_raw_layout(root_discriminator: Option<&str>) -> Option<Self> {
-        (root_discriminator == Some("50")).then_some(Self)
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        field_count: usize,
+    ) -> Option<Self> {
+        (matches!(root_discriminator, Some("49") | Some("50")) && field_count > Self::SLOT)
+            .then_some(Self { slot: Self::SLOT })
+    }
+
+    pub(crate) const fn slot(self) -> usize {
+        self.slot
+    }
+}
+
+/// A form-root property that names one of the form's own items: an `{"N", id}`
+/// property-bag value, with `0` standing for "no item".
+///
+/// Two properties are written in exactly this shape and are read through one
+/// schema rather than two, so the pair cannot drift apart the way this series
+/// has watched twinned tables drift four times already:
+///
+///   * `CustomSettingsFolder`, property-bag key 23;
+///   * `GroupList`, property-bag key 1.
+///
+/// Evidence, the eight stand corpora (22 632 native `Form.xml` roots read
+/// through the export's own root census):
+///
+///   * key 23 reads `{"N",0}` on every root whose native document omits
+///     `<CustomSettingsFolder>` (169 of them) and a non-zero id on every root
+///     that carries it (30), and no root carries the property without the key.
+///     ERP УХ contributes 16 of the 30 on a `49` root, which is why the
+///     discriminator gate below admits `49` beside `50`: gating on `50` alone
+///     dropped every one of them;
+///   * key 1 reads `{"N",0}` or nothing at all on all 22 620 roots whose
+///     native document omits `<GroupList>` and a non-zero id on all 12 that
+///     carry it, again across both discriminators.
+///
+/// An id the form's own item table does not know is not a refusal: the platform
+/// writes the dangling `<id>:<form-item class uuid>` spelling instead, the same
+/// spelling it uses for a picture or a command it cannot name. Three ERP УХ
+/// roots spell `<CustomSettingsFolder>3:02023637-…` and two spell
+/// `<GroupList>5:02023637-…`, at ids that no item of those forms declares.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootItemReferenceSchema {
+    property_bag_key: &'static str,
+}
+
+impl FormRootItemReferenceSchema {
+    pub(crate) const CUSTOM_SETTINGS_FOLDER_KEY: &'static str = "23";
+    pub(crate) const GROUP_LIST_KEY: &'static str = "1";
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        property_bag_key: &'static str,
+    ) -> Option<Self> {
+        matches!(root_discriminator, Some("49") | Some("50")).then_some(Self { property_bag_key })
+    }
+
+    pub(crate) const fn property_bag_key(self) -> &'static str {
+        self.property_bag_key
     }
 
     pub(crate) fn item_id(self, value_fields: &[&str]) -> Option<String> {
