@@ -1,3 +1,14 @@
+/// Placeholder for a trailing member a short record or property-bag revision
+/// does not carry.  Deliberately unparseable as a 1C scalar, quoted string or
+/// block, so a reader that reaches one refuses (doctrine point 2) instead of
+/// reading a fabricated default (doctrine point 6).
+///
+/// It lives here rather than beside the normalizer that writes it because the
+/// schema has to recognize it too: a slot addressed by a schema that the short
+/// revision does not reach is *absent*, which is a different answer from
+/// *malformed*.
+pub(crate) const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormChildItemKind {
     UsualGroup,
@@ -1659,12 +1670,11 @@ impl FormFieldHeaderPictureSchema {
         self.picture_slot
     }
 
-    pub(crate) const fn kind(self) -> FormPictureValueKind {
-        self.value.kind()
-    }
-
-    pub(crate) const fn load_transparent(self) -> bool {
-        self.value.load_transparent()
+    /// The whole picture value, so a reader of this schema answers about the
+    /// transparent pixel from the same record it answers about the reference
+    /// and the transparency flag.
+    pub(crate) const fn picture(self) -> FormPictureValueSchema {
+        self.value
     }
 }
 
@@ -1672,11 +1682,18 @@ impl FormFieldHeaderPictureSchema {
 pub(crate) enum FormFieldHeaderPictureXmlProperty {
     Value,
     LoadTransparent,
+    TransparentPixel,
 }
 
+/// `<xr:TransparentPixel>` closes a picture element, behind
+/// `<xr:LoadTransparent>`, exactly as the stand-alone `ExtPicture` writer and
+/// the form command's own picture writer already spell it.  Over the 63 449
+/// picture elements of the five reference trees no picture writes the pixel
+/// anywhere but last.
 pub(crate) const FORM_FIELD_HEADER_PICTURE_XML_ORDER: &[FormFieldHeaderPictureXmlProperty] = &[
     FormFieldHeaderPictureXmlProperty::Value,
     FormFieldHeaderPictureXmlProperty::LoadTransparent,
+    FormFieldHeaderPictureXmlProperty::TransparentPixel,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -2273,6 +2290,8 @@ pub(crate) struct FormPictureDecorationProperties {
 
 impl FormPictureDecorationSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
+    /// `BorderColor` of the decoration, inside its own option tuple.
+    pub(crate) const BORDER_COLOR_SLOT: usize = 6;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -3899,10 +3918,24 @@ impl FormFieldSchema {
         options: &[&str],
     ) -> Option<FormSpreadsheetDocumentFieldProperties> {
         self.spreadsheet_document_options
-            .then(|| FormSpreadsheetDocumentFieldProperties::from_raw_layout(fields, options))
+            .then(|| {
+                FormSpreadsheetDocumentFieldProperties::from_raw_layout(
+                    fields,
+                    options,
+                    self.top_level_offset,
+                )
+            })
             .flatten()
     }
 
+    /// The member of the field's option tuple a slot names, or `None` when the
+    /// tuple does not carry it.
+    ///
+    /// A tuple normalized up from a short revision holds
+    /// [`FORM_ABSENT_MEMBER`] in every member that revision does not carry.
+    /// That is an absence, not a value: a reader that got the placeholder
+    /// through would report the property malformed rather than missing, and a
+    /// malformed choice-parameter member is a hard writer refusal.
     pub(crate) fn input_field_option<'a>(
         self,
         options: &'a [&'a str],
@@ -3911,6 +3944,7 @@ impl FormFieldSchema {
         self.input_field_options
             .then(|| options.get(slot.index()).copied())
             .flatten()
+            .filter(|member| *member != FORM_ABSENT_MEMBER)
     }
 
     pub(crate) fn choice_button_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
@@ -4482,14 +4516,21 @@ impl FormChildItemUserVisibleSchema {
     /// which of the two values it holds, so both are read through here
     /// instead of only the one value the original two tags happened to show,
     /// and the caller gets the value itself rather than a presence marker.
-    pub(crate) fn from_raw_layout(
+    ///
+    /// The payload is whatever the caller read out of the prefix tuple, not a
+    /// bare flag: the envelope is the platform's rights tuple
+    /// `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<value>},…}}`, whose
+    /// declared member `<n>` may name roles that override the common answer.
+    /// This function validates the record shape that puts a tuple at that
+    /// slot and passes the caller's reading of it straight through.
+    pub(crate) fn from_raw_layout<T>(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
         top_level_offset: usize,
         conditional_marker: Option<&str>,
-        user_visible_common: Option<bool>,
-    ) -> Option<bool> {
+        user_visible: Option<T>,
+    ) -> Option<T> {
         match (
             wrapper,
             field_count,
@@ -4505,7 +4546,7 @@ impl FormChildItemUserVisibleSchema {
                 | "TextDocumentField",
                 1,
                 Some("1"),
-            ) => user_visible_common,
+            ) => user_visible,
             _ => None,
         }
     }
@@ -4769,6 +4810,7 @@ impl FormChildItemVisibleSchema {
         item_tag: &str,
         direct_discriminator: Option<&str>,
         top_level_offset: usize,
+        button_top_level_offset: usize,
     ) -> Option<Self> {
         let slot = match (wrapper, item_tag, direct_discriminator) {
             ("22", "CommandBar", Some("0"))
@@ -4787,7 +4829,24 @@ impl FormChildItemVisibleSchema {
             {
                 21
             }
-            ("31", "Button", _) if field_count == 52 => 26,
+            // The conditional `UserVisible` prefix takes the button's name slot
+            // and pushes every later member of the record along by one, so a
+            // shifted button is a 53-member record whose `Visible` code sits at
+            // 27, not 26.  Spelling the length and the slot at offset 0 alone
+            // declined the shifted record outright and the element went
+            // unwritten.
+            //
+            // Census over both configurations whose form layouts were dumped,
+            // pairing each `31` record with the native `<Button>` of the same
+            // name: ERP УХ 3.2.12.6 has 80 430 unshifted buttons and 4 916
+            // shifted ones, Документооборот КОРП 3.0.21.3 15 076 and 91.  Slot
+            // `26 + offset` is a total function of the native spelling in every
+            // one of the four groups -- `0` on all 5 395 + 166 + 524 + 0 that
+            // carry `<Visible>false</Visible>` and `1` on all the rest -- with
+            // no third code and no counter-example.
+            ("31", "Button", _) if field_count == 52 + button_top_level_offset => {
+                26 + button_top_level_offset
+            }
             // Preserve the three wrapper-48 field owners decoded by the legacy path.
             ("48", "LabelField", Some("1"))
             | ("48", "InputField", Some("2"))
@@ -6918,6 +6977,7 @@ impl FormTableSearchStringLocation {
 pub(crate) enum FormTableViewStatusLocation {
     None,
     Top,
+    Bottom,
 }
 
 impl FormTableViewStatusLocation {
@@ -6925,6 +6985,7 @@ impl FormTableViewStatusLocation {
         match self {
             Self::None => "None",
             Self::Top => "Top",
+            Self::Bottom => "Bottom",
         }
     }
 }
@@ -7255,9 +7316,19 @@ impl FormTableSchema {
         let slot = fields
             .len()
             .checked_sub(Self::VIEW_STATUS_LOCATION_REVERSE_OFFSET)?;
+        // The code is a total function of the native spelling over both
+        // configurations whose form layouts were censused, and neither
+        // contradicts the other.  Документооборот КОРП 3.0.21.3, 1 551 tables
+        // paired with their layout record by the item's own name: `0` on the
+        // 903 that write nothing, `1` on all 619 that say `None`, `2` on all 18
+        // that say `Top` and `3` on all 11 that say `Bottom`.  ERP УХ 3.2.12.6,
+        // 7 967 tables: `0` on 5 362, `1` on 2 529 and `2` on 76, with the same
+        // spellings and no `3` at all.  `3` had no spelling, so those 11 tables
+        // lost the element.
         match fields.get(slot)?.trim() {
             "1" => Some(FormTableViewStatusLocation::None),
             "2" => Some(FormTableViewStatusLocation::Top),
+            "3" => Some(FormTableViewStatusLocation::Bottom),
             _ => None,
         }
     }
@@ -7413,8 +7484,16 @@ impl FormTableSchema {
         let slot = fields
             .len()
             .checked_sub(Self::REFRESH_REQUEST_REVERSE_OFFSET)?;
+        // Same pairing, same two configurations.  Документооборот КОРП
+        // 3.0.21.3, 1 551 tables: `0` on the 1 503 that write nothing, `1` on
+        // all 43 that say `PullFromTop` and `3` on all 5 that say
+        // `PullFromTopOrBottom`.  ERP УХ 3.2.12.6, 7 967 tables: `0` on 7 627
+        // and `1` on all 30 that say `PullFromTop`, with no `3`.  Code `2` is
+        // observed nowhere and stays unspelled rather than being guessed into
+        // the run.
         match fields.get(slot)?.trim() {
             "1" => Some("PullFromTop"),
+            "3" => Some("PullFromTopOrBottom"),
             _ => None,
         }
     }
@@ -7623,9 +7702,20 @@ impl FormTableSchema {
 }
 
 impl FormSpreadsheetDocumentFieldProperties {
-    fn from_raw_layout(fields: &[&str], options: &[&str]) -> Option<Self> {
-        if fields.len() != 59
-            || fields.get(5).map(|field| field.trim()) != Some("6")
+    /// The conditional `UserVisible`-common prefix shifts every top-level
+    /// member of the record by one, and this reader addresses three of them --
+    /// the record length, the discriminator and the `DefaultItem` flag.  Its
+    /// guard used to spell all three at offset `0`, so a shifted record was
+    /// refused outright and the field lost `VerticalScrollBar`,
+    /// `HorizontalScrollBar`, `ViewScalingMode`, `Output`, `Protection`, the
+    /// geometry pair and everything else this tuple carries -- 27 ERP УХ forms
+    /// whose whole remaining diff is exactly that.  The offset is the one
+    /// `FormFieldSchema` already computed and stored to reach this tuple at
+    /// all (`OPTIONS_BASE_SLOT + offset`); the *option* slots do not shift,
+    /// because the shift is on the record, not inside the tuple.
+    fn from_raw_layout(fields: &[&str], options: &[&str], top_level_offset: usize) -> Option<Self> {
+        if fields.len() != 59 + top_level_offset
+            || fields.get(5 + top_level_offset).map(|field| field.trim()) != Some("6")
             || options.len() != 32
             || options.first().map(|field| field.trim()) != Some("13")
         {
@@ -7648,7 +7738,7 @@ impl FormSpreadsheetDocumentFieldProperties {
         };
 
         Some(Self {
-            default_item: (fields.get(16)?.trim() == "1").then_some(true),
+            default_item: (fields.get(16 + top_level_offset)?.trim() == "1").then_some(true),
             width: dimension(1, "50"),
             height: dimension(2, "10"),
             auto_max_width: explicit_false(20),

@@ -7497,12 +7497,15 @@ fn parse_information_register_command_picture_descriptor(
     }
 }
 
+/// A register command's picture uuid, which is the same platform table every
+/// other owner reads.
+///
+/// The two uuids this table used to carry ahead of the common one are both in
+/// the common table now -- `caf2e58b-…` was added there earlier and
+/// `46598f81-…` arrives with the nineteen read off the ERP УХ bodies -- and a
+/// second copy of an entry is a second place for it to drift.
 fn information_register_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
-    match uuid.to_ascii_lowercase().as_str() {
-        "46598f81-5f95-4485-9b33-bfe4fd1276d0" => Some("StdPicture.SpreadsheetShowHeaders"),
-        "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb" => Some("StdPicture.Setting"),
-        _ => common_command_standard_picture_name(uuid),
-    }
+    common_command_standard_picture_name(uuid)
 }
 
 fn parse_information_register_command_shortcut(value: &str) -> Option<Option<String>> {
@@ -30405,6 +30408,33 @@ fn parse_common_command_picture_value(
         if ref_fields.first()?.trim() == "-16" {
             return Some((Some("StdPicture.ZoomIn".to_string()), load_transparent));
         }
+        // The last two codes the reference trees observe and this table did not
+        // carry.  Census over all 12 895 ERP УХ 3.2.12.6 form layouts and all
+        // 1 738 Документооборот КОРП 3.0.21.3 ones, pairing each layout's
+        // one-member negative reference descriptors against the
+        // `StdPicture.*` names the native body of the same form writes and
+        // subtracting the codes this table already spells: exactly two codes
+        // are left unspelled anywhere, `-6` in 3 records and `-200` in 6, and
+        // exactly two names are left unexplained, `StdPicture.
+        // InputFieldCalculator` and `StdPicture.Clear`, each alone with its
+        // code in every form that carries it and never seen beside the other.
+        // `-6` also has a second, independent authority inside this crate:
+        // `spreadsheet_standard_picture_ref` already writes it for
+        // `StdPicture.InputFieldCalculator` on the packing side.
+        //
+        // `-200` is off the ordinal run the codes above form, which is why it
+        // is spelled out rather than interpolated: nothing between `-17` and
+        // `-199` occurs in any reference tree, so the run says nothing about
+        // what those codes would mean.
+        if ref_fields.first()?.trim() == "-6" {
+            return Some((
+                Some("StdPicture.InputFieldCalculator".to_string()),
+                load_transparent,
+            ));
+        }
+        if ref_fields.first()?.trim() == "-200" {
+            return Some((Some("StdPicture.Clear".to_string()), load_transparent));
+        }
         if ref_fields.first()?.trim() == "0" {
             // Same bare-index reference the register table admits; reading past
             // the end of a one-element reference used to abort the whole
@@ -30419,6 +30449,30 @@ fn parse_common_command_picture_value(
                 && reference.starts_with("CommonPicture.")
             {
                 return Some((Some(reference.clone()), load_transparent));
+            }
+            // A uuid that names nothing in the configuration is still a
+            // reference the platform writes: it spells it `<code>:<uuid>` --
+            // the descriptor's own two members, joined -- rather than dropping
+            // the picture.  Answering `None` here dropped the whole `<Picture>`
+            // element, not just the name.
+            //
+            // Census over ERP УХ 3.2.12.6, Документооборот КОРП 3.0.21.3,
+            // УТ 11.5.27.75, БСП демо и БСП базовая: of the 63 449 `<xr:Ref>`
+            // values those five trees write, exactly three spellings occur --
+            // 39 566 `CommonPicture.<name>`, 23 873 `StdPicture.<name>` and 16
+            // of this shape, all of them `0:<uuid>`, all in ERP УХ, over 10
+            // distinct uuids.  Every one of those uuids occurs *only* inside
+            // form bodies and names no object anywhere in the configuration,
+            // which is why the lookups above cannot answer them; the one that
+            // also occurs outside a form body is an equally dangling
+            // `<xr:Item xsi:type="xr:MDObjectRef">` of a subsystem's content
+            // list, written there as the bare uuid.
+            //
+            // Restricted to a uuid the object index does not carry at all: a
+            // uuid that does resolve, to something that is not a common
+            // picture, is a different question this corpus does not observe.
+            if !object_refs.contains_key(uuid) {
+                return Some((Some(format!("0:{uuid}")), load_transparent));
             }
         }
     }
@@ -30725,6 +30779,31 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "fe740df0-d828-4241-a12f-7414e12302e8" => Some("StdPicture.QueryWizardTableParameters"), // 1
         "01743054-d102-4e7c-bf15-5ed7fd84441b" => Some("StdPicture.LevelDown"), // 1
         "0bac63da-5b4e-48af-b593-7c5d29663e83" => Some("StdPicture.FilterByType"), // 1
+        // The last nineteen platform picture uuids the reference trees name and
+        // this table did not carry.  Each was read off the ERP УХ 3.2.12.6
+        // native bodies directly: at the very position where our export writes
+        // the dangling `0:<uuid>` spelling the platform writes the name below,
+        // over 58 aligned occurrences in 41 form bodies, and no uuid is ever
+        // seen against two different names.
+        "73af51dd-6cda-48be-a093-5a7161c60c77" => Some("StdPicture.FilterAndSort"), // 19
+        "ccb3d8f7-6da2-4c65-aba6-17b2ffbba78c" => Some("StdPicture.ChartOfAccounts"), // 9
+        "835db646-1531-494b-b7c1-3239b0080bcb" => Some("StdPicture.Parameters"),    // 8
+        "46598f81-5f95-4485-9b33-bfe4fd1276d0" => Some("StdPicture.SpreadsheetShowHeaders"), // 3
+        "52b637e5-f95f-4c70-9a72-2a4b5a9df449" => Some("StdPicture.NestedTable"),   // 2
+        "584b470d-ba34-4b25-9620-8de4066ffeaa" => Some("StdPicture.Previous"),      // 2
+        "fa67cb81-8d56-4534-90bd-b62fb0dbf5f0" => Some("StdPicture.GanttChart"),    // 2
+        "f3b8f300-5a54-4eea-8136-5798413a479c" => Some("StdPicture.CalculationRegister"), // 2
+        "92e24ce1-3917-4ee4-bbde-adce48b6c96b" => Some("StdPicture.AppearanceUpInclineArrowGray"), // 1
+        "20b82e97-5fcc-4c68-8e0d-d01060847520" => Some("StdPicture.AppearanceRightArrowGray"), // 1
+        "a30ab2ef-6076-457d-9293-44edc7c6767e" => Some("StdPicture.AppearanceDownInclineArrowGray"), // 1
+        "ba592483-bc90-4e26-ba4d-2126359c6529" => Some("StdPicture.AppearanceBoxesFilled"), // 1
+        "3689585c-a3e2-45d0-a302-caeb31b78835" => Some("StdPicture.AppearanceStarFilled"),  // 1
+        "d66b6f73-53b8-49b9-8efc-33c54aa06e3f" => Some("StdPicture.Notify"),                // 1
+        "702a9e16-0bb6-4efb-af11-10faf1e6ee87" => Some("StdPicture.SpreadsheetShowGroups"), // 1
+        "e96de06b-fa83-48cf-b033-190a249855c9" => Some("StdPicture.GraphicalSchema"),       // 1
+        "a594c8a1-7218-420a-860f-7b493c5e65c4" => Some("StdPicture.Sort"),                  // 1
+        "093dd4ed-e03c-4fc6-a95a-01f51379cccf" => Some("StdPicture.ActivateTask"),          // 1
+        "26518e18-e364-475a-8026-e41134658b2a" => Some("StdPicture.SpreadsheetInsertPageBreak"), // 1
         _ => None,
     }
 }

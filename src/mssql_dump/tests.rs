@@ -12437,6 +12437,7 @@ fn formatter_emits_form_command_children_in_native_order() {
         tooltip: Vec::new(),
         picture_ref: None,
         picture_load_transparent: false,
+        picture_transparent_pixel: None,
         shortcut: None,
         action: "ЗаписатьИЗакрытьВыполнить".to_string(),
         representation: Some("TextPicture"),
@@ -20538,6 +20539,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
         tooltip: Vec::new(),
         picture_ref: None,
         picture_load_transparent: false,
+        picture_transparent_pixel: None,
         shortcut: None,
         action: String::new(),
         representation: None,
@@ -20615,6 +20617,7 @@ fn formats_table_search_additions_as_direct_sections() {
         footer_picture_ref: None,
         footer_picture_file_name: None,
         footer_picture_load_transparent: false,
+        footer_picture_transparent_pixel: None,
         picture_transparent_pixel: None,
         html_document_output: None,
         button_check: None,
@@ -20686,6 +20689,7 @@ fn formats_table_search_additions_as_direct_sections() {
         rows_picture_ref: None,
         rows_picture_file_name: None,
         rows_picture_load_transparent: false,
+        rows_picture_transparent_pixel: None,
         top_level_parent_nil: None,
         update_on_data_change: None,
         user_settings_group: None,
@@ -20714,7 +20718,7 @@ fn formats_table_search_additions_as_direct_sections() {
         item_height: None,
         table_vertical_scroll_bar: None,
         show_in_header: None,
-        user_visible_common: None,
+        user_visible: None,
         visible: None,
         enabled: None,
         read_only: None,
@@ -20826,6 +20830,7 @@ fn formats_table_search_additions_as_direct_sections() {
         choice_button_representation: None,
         choice_button_picture_ref: None,
         choice_button_picture_load_transparent: false,
+        choice_button_picture_transparent_pixel: None,
         drop_list_width: None,
         choice_history_on_input: None,
         auto_show_open_button_mode: None,
@@ -20836,6 +20841,7 @@ fn formats_table_search_additions_as_direct_sections() {
         header_picture_ref: None,
         header_picture_file_name: None,
         header_picture_load_transparent: false,
+        header_picture_transparent_pixel: None,
         picture_size: None,
         nonselected_picture_text: Vec::new(),
         picture_file_name: None,
@@ -20864,6 +20870,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_ref: None,
                 footer_picture_file_name: None,
                 footer_picture_load_transparent: false,
+                footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
                 html_document_output: None,
                 button_check: None,
@@ -20935,6 +20942,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 rows_picture_ref: None,
                 rows_picture_file_name: None,
                 rows_picture_load_transparent: false,
+                rows_picture_transparent_pixel: None,
                 top_level_parent_nil: None,
                 update_on_data_change: None,
                 user_settings_group: None,
@@ -20963,7 +20971,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 item_height: None,
                 table_vertical_scroll_bar: None,
                 show_in_header: None,
-                user_visible_common: None,
+                user_visible: None,
                 visible: None,
                 enabled: None,
                 read_only: None,
@@ -21075,6 +21083,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
                 choice_button_picture_load_transparent: false,
+                choice_button_picture_transparent_pixel: None,
                 drop_list_width: None,
                 choice_history_on_input: None,
                 auto_show_open_button_mode: None,
@@ -21085,6 +21094,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 header_picture_ref: None,
                 header_picture_file_name: None,
                 header_picture_load_transparent: false,
+                header_picture_transparent_pixel: None,
                 picture_size: None,
                 nonselected_picture_text: Vec::new(),
                 picture_file_name: None,
@@ -21114,6 +21124,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_ref: None,
                 footer_picture_file_name: None,
                 footer_picture_load_transparent: false,
+                footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
                 html_document_output: None,
                 button_check: None,
@@ -21185,6 +21196,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 rows_picture_ref: None,
                 rows_picture_file_name: None,
                 rows_picture_load_transparent: false,
+                rows_picture_transparent_pixel: None,
                 top_level_parent_nil: None,
                 update_on_data_change: None,
                 user_settings_group: None,
@@ -21213,7 +21225,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 item_height: None,
                 table_vertical_scroll_bar: None,
                 show_in_header: None,
-                user_visible_common: None,
+                user_visible: None,
                 visible: None,
                 enabled: None,
                 read_only: None,
@@ -21325,6 +21337,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
                 choice_button_picture_load_transparent: false,
+                choice_button_picture_transparent_pixel: None,
                 drop_list_width: None,
                 choice_history_on_input: None,
                 auto_show_open_button_mode: None,
@@ -21335,6 +21348,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 header_picture_ref: None,
                 header_picture_file_name: None,
                 header_picture_load_transparent: false,
+                header_picture_transparent_pixel: None,
                 picture_size: None,
                 nonselected_picture_text: Vec::new(),
                 picture_file_name: None,
@@ -22649,7 +22663,16 @@ fn rejects_form_item_assets_from_nearby_or_unrecognized_slots() {
 
 #[test]
 fn extracts_picture_decoration_from_wrapper_12() {
-    let field = r#"{12,{165,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СостояниеКартинка",{1,0},{1,0},{#base64:R0lGODlh}}"#;
+    // The payload rides the decoration's picture *value*, not a bare member of
+    // its record: over all 12 895 ERP УХ 3.2.12.6 and 1 738 Документооборот
+    // КОРП 3.0.21.3 form layouts every one of the 344 `#base64:` picture
+    // payloads sits at slot 7 of a ten-member `{4,3,{0},"",x,y,lt,…}` value and
+    // not one is a member of an item record, so the value is what this test
+    // states.  The value is also the only thing that knows the transparency
+    // flag and the transparent pixel; the previous spelling had the payload
+    // bare and no way to answer either, which is why the flag used to be a
+    // hardcoded `false`.
+    let field = r#"{12,{165,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СостояниеКартинка",{1,0},{1,0},{4,{4,3,{0},"",3,7,1,{{#base64:R0lGODlh}},0,""},0,2,0}}"#;
     let item = parse_form_child_item(
         field,
         None,
@@ -22670,7 +22693,8 @@ fn extracts_picture_decoration_from_wrapper_12() {
 
     assert!(xml.contains(r#"<PictureDecoration name="СостояниеКартинка" id="165">"#));
     assert!(xml.contains("<xr:Abs>Picture.gif</xr:Abs>"));
-    assert!(xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"));
+    assert!(xml.contains("<xr:LoadTransparent>true</xr:LoadTransparent>"));
+    assert!(xml.contains(r#"<xr:TransparentPixel x="3" y="7"/>"#));
     assert!(!xml.contains("<ExtendedTooltip"));
 
     let form_body = form_item_asset_test_body(&[
@@ -44200,30 +44224,17 @@ fn parses_detailed_information_register_command_picture_and_parameter_types() {
         Some("StdPicture.Print")
     );
     assert!(print_properties.picture_load_transparent);
-    // `common_uuid` is the picture uuid's presence in
-    // `common_command_standard_picture_name`'s own evidence-backed table
-    // (mod.rs:27969): still absent for SpreadsheetShowHeaders, but
-    // "caf2e58b-..." (StdPicture.Setting) has since been added there too
-    // (mod.rs:28069) — it's resolved by both the narrower
-    // `information_register_command_standard_picture_name` (mod.rs:6173)
-    // and the common table now, so the old blanket "not in the common
-    // table" precondition is stale for this entry.
-    for (uuid, expected, common_uuid) in [
+    // Both uuids are in the common table now, so a register command resolves
+    // them through the one table every other picture owner reads rather than
+    // through a private copy of two entries.
+    for (uuid, expected) in [
         (
             "46598f81-5f95-4485-9b33-bfe4fd1276d0",
             "StdPicture.SpreadsheetShowHeaders",
-            false,
         ),
-        (
-            "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb",
-            "StdPicture.Setting",
-            true,
-        ),
+        ("caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb", "StdPicture.Setting"),
     ] {
-        assert_eq!(
-            common_command_standard_picture_name(uuid),
-            common_uuid.then_some(expected)
-        );
+        assert_eq!(common_command_standard_picture_name(uuid), Some(expected));
         let descriptor = format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,1,0,\"\"}}");
         let properties = parse_command(&descriptor, &BTreeMap::new()).unwrap();
         assert_eq!(properties.picture_ref.as_deref(), Some(expected));
@@ -66700,7 +66711,10 @@ fn form_field_default_item_trails_visible_and_user_visible() {
     for tag in ["LabelField", "InputField", "CheckBoxField"] {
         let mut item = form_child_item_for_order_test(tag);
         item.visible = Some(false);
-        item.user_visible_common = Some(false);
+        item.user_visible = Some(FormRightsSetting {
+            common: false,
+            role_values: Vec::new(),
+        });
         item.default_item = Some(true);
         let xml = format_form_child_item_xml(&item, 1, false);
         assert_xml_order(
@@ -69611,7 +69625,10 @@ fn a_button_writes_its_properties_in_the_native_order() {
     button.group_vertical_align = Some("Bottom");
     button.visible = Some(false);
     button.title_height = Some("3".to_string());
-    button.user_visible_common = Some(false);
+    button.user_visible = Some(FormRightsSetting {
+        common: false,
+        role_values: Vec::new(),
+    });
     button.button_representation = Some("Text");
     button.font_xml = Some("<Font faceName=\"Arial\"/>".to_string());
     button.picture_ref = Some("StdPicture.Delete".to_string());
@@ -69654,6 +69671,73 @@ fn a_button_writes_its_properties_in_the_native_order() {
     for name in ["<AutoMaxHeight>", "<MaxHeight>", "<UserVisible>", "<Font "] {
         assert_eq!(xml.matches(name).count(), 1, "{name} repeats in {xml}");
     }
+}
+
+/// An item's conditional `UserVisible` prefix is the platform's rights tuple,
+/// roles and all -- not a bare common flag.
+///
+/// The prefix carries `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<value>},…}}`,
+/// the very envelope a command-interface item's `<Visible>` uses, and `<n>` is
+/// a declared member count.  Reading it as a lone flag and requiring `<n>` to
+/// be `0` dropped every role override *and*, because `<n>` non-zero made the
+/// slot unrecognizable, dropped the whole `<UserVisible>` element whenever a
+/// role carried it while the common answer stayed at its default `true`.
+///
+/// The record below is Документооборот КОРП 3.0.21.3
+/// `Catalogs/Должности/Forms/ФормаЭлемента` item `Склонения` verbatim (wrapper
+/// `31`, 53 members, marker `1` at slot 3, tuple at slot 4), which the platform
+/// writes with a `true` common answer and one `Role.Локализация` override.
+#[test]
+fn an_item_user_visible_prefix_carries_its_declared_role_overrides() {
+    let role = "a57286c4-06de-4cb6-a694-3b177963b145";
+    let object_refs = BTreeMap::from([(role.to_string(), "Role.Локализация".to_string())]);
+    let item = parse_form_child_item(
+        r#"{31,{11,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,{0,{0,{"B",1},1,a57286c4-06de-4cb6-a694-3b177963b145,{"B",1} } },2,"Склонения",{1,1,{"ru","Склонения"} },1,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},3,0,0,0,2,2,0,0,0,{3,4,{0} },{3,4,{0} },{3,4,{0} },{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{12,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СклоненияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0} },{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0} },{3,4,{0} },{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e} },0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,2,0,0,0,1,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .expect("the observed button record parses");
+    assert_eq!(item.tag, "Button");
+    let rights = item
+        .user_visible
+        .as_ref()
+        .expect("a role override is not the default state");
+    assert!(rights.common);
+    assert_eq!(
+        rights.role_values,
+        vec![("Role.Локализация".to_string(), true)]
+    );
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(
+        xml.contains("<UserVisible>\r\n\t\t\t\t<xr:Common>true</xr:Common>\r\n\t\t\t\t<xr:Value name=\"Role.Локализация\">true</xr:Value>\r\n\t\t\t</UserVisible>"),
+        "got {xml}"
+    );
+}
+
+/// The same tuple at its default value still writes nothing.
+///
+/// `<n>` `0` with a `true` common answer is the state the platform writes no
+/// `<UserVisible>` element for at all, so widening the reader to the declared
+/// count must not start writing one.
+#[test]
+fn an_item_user_visible_prefix_at_its_default_writes_no_element() {
+    let item = parse_form_child_item(
+        r#"{31,{11,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,{0,{0,{"B",1},0}},2,"Склонения",{1,1, {"ru","Склонения"} },1,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},3,0,0,0,2,2,0,0,0,{3,4, {0} },{3,4, {0} },{3,4, {0} },{7,3,0,1,100},{0,0,0},0,{4,0, {0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12, {12,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СклоненияРасширеннаяПодсказка", {1,0}, {1,0},1,0,0,2,2, {3,4, {0} }, {7,3,0,1,100}, {0,0,0},1, {5,0,0,3,0, {0,1,0}, {3,4, {0} }, {3,4, {0} }, {3,0, {0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e} },0,1,2, {1, {1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,2,0,0,0,1,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("the observed button record parses");
+    assert!(item.user_visible.is_none());
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(!xml.contains("<UserVisible>"), "got {xml}");
 }
 
 /// A `ColumnGroup` closes its scalar run with `FixingInTable`, not opens it.
@@ -69902,11 +69986,15 @@ fn a_column_group_reads_its_header_picture_from_the_header_container() {
     }
 
     // A common picture resolves through the configuration's own reference index.
+    // A uuid the index does not carry names nothing in that configuration, and
+    // the platform writes such a reference as `<code>:<uuid>` rather than
+    // dropping the picture -- so an empty index yields the dangling spelling,
+    // not silence.
     const COMMON: &str = r#"{4,1,{0,9f600542-06a7-4fbb-abc0-e9961b2d454f},"",-1,-1,0,0,""}"#;
     assert_eq!(
-        parse(COMMON).header_picture_ref,
-        None,
-        "without the index there is no name"
+        parse(COMMON).header_picture_ref.as_deref(),
+        Some("0:9f600542-06a7-4fbb-abc0-e9961b2d454f"),
+        "a uuid no index carries is written as the dangling reference"
     );
     let group = parse_with(
         COMMON,
