@@ -215,12 +215,18 @@ pub(super) fn parse_command_interface_sectioned_fields(
     let count = parse_command_interface_section_count(fields, &mut index)?;
     let mut subsystems_order = Vec::with_capacity(count);
     for _ in 0..count {
-        let uuid = parse_non_zero_uuid(fields.get(index)?.trim())?;
-        subsystems_order.push(command_interface_subsystem_name(
-            &uuid,
-            metadata_refs,
-            subsystem_refs,
-        ));
+        // A slot in the declared order can be the zero uuid: it names no
+        // subsystem, and the platform still writes it, as a self-closed
+        // `<Subsystem/>` holding the position. Документооборот КОРП
+        // 3.0.21.3's `Subsystems/НастройкаИАдминистрирование` writes one
+        // among its fourteen. Refusing it cost the whole file.
+        let raw = fields.get(index)?.trim();
+        let uuid = parse_uuid_field(raw)?;
+        subsystems_order.push(if information_register_uuid_is_zero(&uuid) {
+            String::new()
+        } else {
+            command_interface_subsystem_name(&uuid, metadata_refs, subsystem_refs)
+        });
         index += 1;
     }
 
@@ -782,6 +788,10 @@ pub(super) fn format_command_interface_xml(command_interface: &CommandInterface)
     if !command_interface.subsystems_order.is_empty() {
         xml.push_str("\t<SubsystemsOrder>\r\n");
         for subsystem in &command_interface.subsystems_order {
+            if subsystem.is_empty() {
+                xml.push_str("\t\t<Subsystem/>\r\n");
+                continue;
+            }
             xml.push_str(&format!(
                 "\t\t<Subsystem>{}</Subsystem>\r\n",
                 escape_xml_text(subsystem)
