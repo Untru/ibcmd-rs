@@ -2927,12 +2927,7 @@ impl FormFieldTitleLocationSchema {
             "PDFDocumentField" => "20",
             _ => return None,
         };
-        // Same class-`35`/`37`/`48` equivalence as `FormFieldSchema` above:
-        // `TitleLocation` sits at the same absolute slot regardless of which
-        // sibling revision the record declares, so admitting `35` alongside
-        // `37`/`48` costs nothing and reproduces what
-        // ERP УХ MDM_Management writes.
-        if !matches!(wrapper, "35" | "37" | "48")
+        if !matches!(wrapper, "37" | "48")
             || field_count <= 20
             || top_level_offset > 1
             || direct_discriminator != Some(discriminator)
@@ -3478,25 +3473,11 @@ impl FormFieldSchema {
             "PDFDocumentField" => ("20", 14, "1", None, None, None),
             _ => return None,
         };
-        // The wrapper carries the record's own declared length -- `form_child_item_tag`,
-        // `parse_form_child_item_name` and the title/tooltip finders already
-        // treat `35`/`37`/`48` as siblings with identical positional slots, so
-        // the base member count this schema needs is `wrapper + 22` (`+23` for
-        // the one-member-longer `PDFDocumentField`, evidenced only under `37`),
-        // not the `37`-only literal `59`/`60` this schema used to require.
-        // ERP УХ MDM_Management writes `InputField` "ВИБПоУмолчанию" and
-        // `RadioButtonField` "ОбменДаннымиКонтроляНСИ" under wrapper `35` at 57
-        // fields (35 + 22): the old literal rejected both, dropping their
-        // `<ChoiceParameterLinks>`/other extended-option elements whole.
-        let Ok(wrapper_num) = wrapper.parse::<usize>() else {
-            return None;
+        let field_count_base = if item_tag == "PDFDocumentField" {
+            60
+        } else {
+            59
         };
-        let field_count_base = wrapper_num
-            + if item_tag == "PDFDocumentField" {
-                23
-            } else {
-                22
-            };
         // `top_level_offset == 1` was accepted for four kinds, then a fifth
         // (`RadioButtonField`), even though the offset itself
         // (`input_field_top_level_offset` at the one call site) is already
@@ -3539,7 +3520,7 @@ impl FormFieldSchema {
         //   native `DetailProcessing` occurrences across ssl/sslbase/ut/mdm/
         //   ws, none of them previously offset 1). Native writes `<Events>`
         //   with this one `DetailProcessing` entry.
-        if !matches!(wrapper, "35" | "37" | "48")
+        if wrapper != "37"
             || field_count != field_count_base + top_level_offset
             || top_level_offset > 1
             || (top_level_offset == 1
