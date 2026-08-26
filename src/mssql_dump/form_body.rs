@@ -9889,6 +9889,7 @@ fn parse_form_child_item_with_metadata_owners(
         wrapper,
         &fields,
         field_schema_and_options.as_ref().map(|(schema, _)| *schema),
+        input_field_top_level_offset,
     );
     let footer_text = field_schema_and_options
         .as_ref()
@@ -9918,6 +9919,7 @@ fn parse_form_child_item_with_metadata_owners(
         field_schema_and_options.as_ref().map(|(schema, _)| *schema),
         check_box_field_layout.as_ref().map(|(schema, _)| *schema),
         table_schema,
+        input_field_top_level_offset,
     );
     let tooltip_representation =
         parse_form_field_tooltip_representation(wrapper, tag, &fields, table_schema);
@@ -16734,6 +16736,7 @@ pub(super) fn parse_form_child_item_title(
     wrapper: &str,
     fields: &[&str],
     field_schema: Option<FormFieldSchema>,
+    top_level_offset: usize,
 ) -> (Vec<(String, String)>, Option<bool>) {
     if tag == "LabelDecoration"
         && let Some(title) = parse_form_label_decoration_title(fields)
@@ -16767,11 +16770,17 @@ pub(super) fn parse_form_child_item_title(
             None,
         );
     }
+    // `9 + offset` for the field wrappers, the slot
+    // `FormFieldSchema::title_slot` names, rather than one candidate per
+    // offset: at offset 0 the second candidate of the old `[9, 10]` pair is
+    // the *tooltip* slot, so an item with an empty title and a tooltip had the
+    // tooltip text written as its title.
+    let field_title_slot = [9 + top_level_offset];
     let indexes: &[usize] = match (tag, wrapper) {
         ("FormattedDocumentField", "37" | "48") => &[9],
         (_, "73" | "55") => &[9],
         (_, "31" | "34") => &[6, 7],
-        (_, "35" | "37" | "48") => &[9, 10],
+        (_, "35" | "37" | "48") => &field_title_slot,
         _ => &[7],
     };
     let values = indexes
@@ -16837,6 +16846,18 @@ pub(super) fn parse_form_label_decoration_title(
     Some((values, formatted))
 }
 
+/// The tooltip of a child item.
+///
+/// The `top_level_offset` is the shift the conditional `UserVisible`-common
+/// prefix puts on every top-level member of a field record -- the same shift
+/// `FormFieldSchema::tooltip_slot` applies (`10 + offset`).  The positional
+/// fallback below is only reached when that schema declines the record, but
+/// the shift is a property of the record, not of the schema, so it applies to
+/// the fallback too.  Spelling the fallback as the pair `[10, 11]` -- one
+/// candidate per offset, first non-empty wins -- read the *title* on every
+/// shifted record the schema declines, because at offset 1 slot 10 is the
+/// title.  The platform writes no `<ToolTip>` on those items at all, so the
+/// title text was emitted a second time as a tooltip.
 pub(super) fn parse_form_child_item_tooltip(
     tag: &str,
     wrapper: &str,
@@ -16844,6 +16865,7 @@ pub(super) fn parse_form_child_item_tooltip(
     field_schema: Option<FormFieldSchema>,
     check_box_schema: Option<FormCheckBoxFieldSchema>,
     table_schema: Option<FormTableSchema>,
+    top_level_offset: usize,
 ) -> Vec<(String, String)> {
     if let Some(schema) = field_schema {
         return fields
@@ -16872,7 +16894,7 @@ pub(super) fn parse_form_child_item_tooltip(
     .map(|schema| schema.tooltip_slot());
     let indexes: &[usize] = match wrapper {
         "22" => &[8],
-        "37" | "48" => &[10, 11],
+        "35" | "37" | "48" => &[10 + top_level_offset],
         _ => &[],
     };
     decoration_tooltip_slot
