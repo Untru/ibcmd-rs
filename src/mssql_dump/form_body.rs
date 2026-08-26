@@ -9467,18 +9467,25 @@ fn parse_form_child_item_with_metadata_owners(
                 .then(|| split_1c_braced_fields(options_text, 0))
                 .flatten()
         })
-        // Normalized to the canonical revision here, exactly as
-        // `form_input_field_extended_options` already normalizes the same
-        // block for the value readers.  `FormFieldSchema` addresses the block
-        // by its leading member and length, so a record carrying the short
-        // `32`/62 revision of the `InputField` block was refused outright --
-        // and the refusal does not cost one property.  Every reader gated on
-        // this schema goes blind at once: `Enabled`, `TitleLocation`, `Mask`,
-        // `TextColor`, `ToolTipRepresentation`, the geometry pair, the
-        // spreadsheet field's scroll bars and the field's whole `<Events>`
-        // collection, while `parse_form_child_item_title`/`_tooltip` fall back
-        // to a positional guess.
-        .map(|options| normalize_form_property_bag_revision(&options).unwrap_or(options))
+        // NOT normalized to the canonical `36`/66 revision here, although
+        // `form_input_field_extended_options` does exactly that for the value
+        // readers of the same block.  Normalizing here lets `FormFieldSchema`
+        // accept the short `32`/62 revision, which is worth a great deal --
+        // `Enabled`, `TitleLocation`, `Mask`, `TextColor`,
+        // `ToolTipRepresentation`, the geometry pair, the spreadsheet field's
+        // scroll bars and the field's whole `<Events>` collection all hang off
+        // this schema -- but it also lets the choice-list reader reach records
+        // it cannot read: a `ChoiceList` whose items are design-time values of
+        // a platform DCS enumeration, `{"#",<type uuid>,<ordinal>}` under a
+        // three-member value where this decoder's value grammar admits two.
+        // An unreadable choice list is a whole-form refusal, so ten ERP УХ
+        // form bodies stop being emitted and one
+        // `Ext/Form/Items/…/Picture.png` goes with them.  Measured on
+        // `8cc12dc`: `uh` exact 138 467 -> 138 936, missing 138 -> 149, and
+        // that one picture is a file that used to match byte for byte.
+        //
+        // The gate is broken = 0, so the normalization waits on the
+        // design-time enumeration value: see the report of this package.
         .and_then(|options| {
             FormFieldSchema::from_raw_layout(
                 wrapper,
