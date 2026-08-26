@@ -20713,7 +20713,7 @@ fn formats_table_search_additions_as_direct_sections() {
         item_height: None,
         table_vertical_scroll_bar: None,
         show_in_header: None,
-        user_visible_common: None,
+        user_visible: None,
         visible: None,
         enabled: None,
         read_only: None,
@@ -20961,7 +20961,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 item_height: None,
                 table_vertical_scroll_bar: None,
                 show_in_header: None,
-                user_visible_common: None,
+                user_visible: None,
                 visible: None,
                 enabled: None,
                 read_only: None,
@@ -21210,7 +21210,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 item_height: None,
                 table_vertical_scroll_bar: None,
                 show_in_header: None,
-                user_visible_common: None,
+                user_visible: None,
                 visible: None,
                 enabled: None,
                 read_only: None,
@@ -66692,7 +66692,10 @@ fn form_field_default_item_trails_visible_and_user_visible() {
     for tag in ["LabelField", "InputField", "CheckBoxField"] {
         let mut item = form_child_item_for_order_test(tag);
         item.visible = Some(false);
-        item.user_visible_common = Some(false);
+        item.user_visible = Some(FormRightsSetting {
+            common: false,
+            role_values: Vec::new(),
+        });
         item.default_item = Some(true);
         let xml = format_form_child_item_xml(&item, 1, false);
         assert_xml_order(
@@ -69603,7 +69606,10 @@ fn a_button_writes_its_properties_in_the_native_order() {
     button.group_vertical_align = Some("Bottom");
     button.visible = Some(false);
     button.title_height = Some("3".to_string());
-    button.user_visible_common = Some(false);
+    button.user_visible = Some(FormRightsSetting {
+        common: false,
+        role_values: Vec::new(),
+    });
     button.button_representation = Some("Text");
     button.font_xml = Some("<Font faceName=\"Arial\"/>".to_string());
     button.picture_ref = Some("StdPicture.Delete".to_string());
@@ -69646,6 +69652,73 @@ fn a_button_writes_its_properties_in_the_native_order() {
     for name in ["<AutoMaxHeight>", "<MaxHeight>", "<UserVisible>", "<Font "] {
         assert_eq!(xml.matches(name).count(), 1, "{name} repeats in {xml}");
     }
+}
+
+/// An item's conditional `UserVisible` prefix is the platform's rights tuple,
+/// roles and all -- not a bare common flag.
+///
+/// The prefix carries `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<value>},…}}`,
+/// the very envelope a command-interface item's `<Visible>` uses, and `<n>` is
+/// a declared member count.  Reading it as a lone flag and requiring `<n>` to
+/// be `0` dropped every role override *and*, because `<n>` non-zero made the
+/// slot unrecognizable, dropped the whole `<UserVisible>` element whenever a
+/// role carried it while the common answer stayed at its default `true`.
+///
+/// The record below is Документооборот КОРП 3.0.21.3
+/// `Catalogs/Должности/Forms/ФормаЭлемента` item `Склонения` verbatim (wrapper
+/// `31`, 53 members, marker `1` at slot 3, tuple at slot 4), which the platform
+/// writes with a `true` common answer and one `Role.Локализация` override.
+#[test]
+fn an_item_user_visible_prefix_carries_its_declared_role_overrides() {
+    let role = "a57286c4-06de-4cb6-a694-3b177963b145";
+    let object_refs = BTreeMap::from([(role.to_string(), "Role.Локализация".to_string())]);
+    let item = parse_form_child_item(
+        r#"{31,{11,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,{0,{0,{"B",1},1,a57286c4-06de-4cb6-a694-3b177963b145,{"B",1} } },2,"Склонения",{1,1,{"ru","Склонения"} },1,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},3,0,0,0,2,2,0,0,0,{3,4,{0} },{3,4,{0} },{3,4,{0} },{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{12,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СклоненияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0} },{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0} },{3,4,{0} },{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e} },0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,2,0,0,0,1,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .expect("the observed button record parses");
+    assert_eq!(item.tag, "Button");
+    let rights = item
+        .user_visible
+        .as_ref()
+        .expect("a role override is not the default state");
+    assert!(rights.common);
+    assert_eq!(
+        rights.role_values,
+        vec![("Role.Локализация".to_string(), true)]
+    );
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(
+        xml.contains("<UserVisible>\r\n\t\t\t\t<xr:Common>true</xr:Common>\r\n\t\t\t\t<xr:Value name=\"Role.Локализация\">true</xr:Value>\r\n\t\t\t</UserVisible>"),
+        "got {xml}"
+    );
+}
+
+/// The same tuple at its default value still writes nothing.
+///
+/// `<n>` `0` with a `true` common answer is the state the platform writes no
+/// `<UserVisible>` element for at all, so widening the reader to the declared
+/// count must not start writing one.
+#[test]
+fn an_item_user_visible_prefix_at_its_default_writes_no_element() {
+    let item = parse_form_child_item(
+        r#"{31,{11,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,{0,{0,{"B",1},0}},2,"Склонения",{1,1, {"ru","Склонения"} },1,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},3,0,0,0,2,2,0,0,0,{3,4, {0} },{3,4, {0} },{3,4, {0} },{7,3,0,1,100},{0,0,0},0,{4,0, {0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12, {12,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СклоненияРасширеннаяПодсказка", {1,0}, {1,0},1,0,0,2,2, {3,4, {0} }, {7,3,0,1,100}, {0,0,0},1, {5,0,0,3,0, {0,1,0}, {3,4, {0} }, {3,4, {0} }, {3,0, {0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e} },0,1,2, {1, {1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,2,0,0,0,1,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("the observed button record parses");
+    assert!(item.user_visible.is_none());
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(!xml.contains("<UserVisible>"), "got {xml}");
 }
 
 /// A `ColumnGroup` closes its scalar run with `FixingInTable`, not opens it.

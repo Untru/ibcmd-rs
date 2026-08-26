@@ -1302,7 +1302,7 @@ pub(super) struct FormChildItem {
     pub(super) equal_columns_width: Option<bool>,
     pub(super) item_height: Option<String>,
     pub(super) table_vertical_scroll_bar: Option<FormTableHorizontalScrollBar>,
-    pub(super) user_visible_common: Option<bool>,
+    pub(super) user_visible: Option<FormRightsSetting>,
     pub(super) visible: Option<bool>,
     pub(super) enabled: Option<bool>,
     pub(super) read_only: Option<bool>,
@@ -9300,13 +9300,20 @@ fn parse_form_child_item_with_metadata_owners(
             .get(5)
             .is_some_and(|value| parse_form_conditional_user_visible_common(value).is_some()))
     .then_some(5usize);
-    let conditional_user_visible_common = (conditional_group_schema.is_some()
+    // `Some(None)` -- a prefix was read and it holds the platform's default --
+    // is a different answer from `None`, which means no prefix was read at
+    // all: the first suppresses the positional fallback further down, the
+    // second lets it fire.  Collapsing the two made every record whose prefix
+    // reads the default state pick up a fabricated
+    // `<UserVisible><xr:Common>false</xr:Common></UserVisible>`.
+    let conditional_user_visible: Option<Option<FormRightsSetting>> = (conditional_group_schema
+        .is_some()
         || conditional_table_schema.is_some()
         || wrapper35_prefix_slot.is_some())
     .then(|| {
         raw_fields
             .get(5)
-            .and_then(|field| parse_form_conditional_user_visible_common(field))
+            .and_then(|field| parse_form_rights_setting(field, object_refs))
     })
     .flatten();
     let conditional_prefix_slot = conditional_group_schema
@@ -9564,7 +9571,7 @@ fn parse_form_child_item_with_metadata_owners(
             fields.get(3).map(|field| field.trim()),
             fields
                 .get(4)
-                .and_then(|field| parse_form_conditional_user_visible_common(field)),
+                .and_then(|field| parse_form_rights_setting(field, object_refs)),
         )
     } else if matches!(
         tag,
@@ -9583,7 +9590,7 @@ fn parse_form_child_item_with_metadata_owners(
             fields.get(4).map(|field| field.trim()),
             fields
                 .get(5)
-                .and_then(|field| parse_form_conditional_user_visible_common(field)),
+                .and_then(|field| parse_form_rights_setting(field, object_refs)),
         )
     } else {
         None
@@ -10546,7 +10553,7 @@ fn parse_form_child_item_with_metadata_owners(
                     .flatten()
                 })
         },
-        user_visible_common: conditional_user_visible_common
+        user_visible: conditional_user_visible
             .or(user_visible_schema)
             .or_else(|| {
                 (matches!(
@@ -10558,8 +10565,14 @@ fn parse_form_child_item_with_metadata_owners(
                         | "TextDocumentField"
                 ) && form_input_field_layout_is_extended(&fields)
                     && input_field_top_level_offset > 0)
-                    .then_some(false)
-            }),
+                    .then(|| {
+                        Some(FormRightsSetting {
+                            common: false,
+                            role_values: Vec::new(),
+                        })
+                    })
+            })
+            .flatten(),
         visible: FormChildItemVisibleSchema::from_raw_layout(
             wrapper,
             fields.len(),
@@ -16333,27 +16346,24 @@ pub(super) fn parse_form_standard_command_set_excluded_commands(
     })
 }
 
+/// The common answer of an item's conditional `UserVisible` prefix, read
+/// without resolving the roles that may override it.
+///
+/// The prefix is the platform's rights tuple, member for member -- the same
+/// `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<value>},…}}` envelope
+/// `parse_form_command_interface_visibility` reads for a command-interface
+/// item -- so its shape is validated by that one schema rather than by a
+/// second arity table here, and `<n>` is read as the declared member count it
+/// is instead of being required to be `0`.
+///
+/// Role resolution deliberately stays out: this reading decides whether the
+/// slot *is* the prefix, which shifts every later member of the record.  A
+/// role uuid the object index cannot name must not be able to shift a record.
 fn parse_form_conditional_user_visible_common(field: &str) -> Option<bool> {
+    form_command_interface_visibility_schema(field)?;
     let outer = split_1c_braced_fields(field.trim(), 0)?;
-    if outer.len() != 2 || outer.first().map(|value| value.trim()) != Some("0") {
-        return None;
-    }
     let condition = split_1c_braced_fields(outer.get(1)?.trim(), 0)?;
-    if condition.len() != 3
-        || condition.first().map(|value| value.trim()) != Some("0")
-        || condition.get(2).map(|value| value.trim()) != Some("0")
-    {
-        return None;
-    }
-    let value = split_1c_braced_fields(condition.get(1)?.trim(), 0)?;
-    if value.len() != 2 || value.first().and_then(|value| parse_1c_string(value))? != "B" {
-        return None;
-    }
-    match value.get(1).map(|value| value.trim()) {
-        Some("0") => Some(false),
-        Some("1") => Some(true),
-        _ => None,
-    }
+    parse_form_typed_bool(condition.get(1)?)
 }
 
 fn form_conditional_group_schema(
@@ -22733,12 +22743,11 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
-        FormTableXmlProperty::UserVisible => match item.user_visible_common {
-            Some(false) => format!(
-                "{tab}<UserVisible>\r\n{tab}\t<xr:Common>false</xr:Common>\r\n{tab}</UserVisible>\r\n"
-            ),
-            _ => String::new(),
-        },
+        FormTableXmlProperty::UserVisible => item
+            .user_visible
+            .as_ref()
+            .map(|rights| format_form_rights_setting_xml("UserVisible", rights, &tab))
+            .unwrap_or_default(),
         FormTableXmlProperty::Visible => match item.visible {
             Some(false) => format!("{tab}<Visible>false</Visible>\r\n"),
             _ => String::new(),
@@ -23521,9 +23530,13 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_height)
         ));
     }
-    if item.tag == "Button" && item.user_visible_common == Some(false) {
-        xml.push_str(&format!(
-            "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
+    if item.tag == "Button"
+        && let Some(rights) = &item.user_visible
+    {
+        xml.push_str(&format_form_rights_setting_xml(
+            "UserVisible",
+            rights,
+            &format!("{tab}\t"),
         ));
     }
     if item.tag == "Button"
@@ -23587,9 +23600,14 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
-    if item.tag != "Table" && item.tag != "Button" && item.user_visible_common == Some(false) {
-        xml.push_str(&format!(
-            "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
+    if item.tag != "Table"
+        && item.tag != "Button"
+        && let Some(rights) = &item.user_visible
+    {
+        xml.push_str(&format_form_rights_setting_xml(
+            "UserVisible",
+            rights,
+            &format!("{tab}\t"),
         ));
     }
     // `DefaultItem` trails `Visible` and `UserVisible` on every control kind that

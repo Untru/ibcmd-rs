@@ -4450,14 +4450,21 @@ impl FormChildItemUserVisibleSchema {
     /// which of the two values it holds, so both are read through here
     /// instead of only the one value the original two tags happened to show,
     /// and the caller gets the value itself rather than a presence marker.
-    pub(crate) fn from_raw_layout(
+    ///
+    /// The payload is whatever the caller read out of the prefix tuple, not a
+    /// bare flag: the envelope is the platform's rights tuple
+    /// `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<value>},…}}`, whose
+    /// declared member `<n>` may name roles that override the common answer.
+    /// This function validates the record shape that puts a tuple at that
+    /// slot and passes the caller's reading of it straight through.
+    pub(crate) fn from_raw_layout<T>(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
         top_level_offset: usize,
         conditional_marker: Option<&str>,
-        user_visible_common: Option<bool>,
-    ) -> Option<bool> {
+        user_visible: Option<T>,
+    ) -> Option<T> {
         match (
             wrapper,
             field_count,
@@ -4473,7 +4480,7 @@ impl FormChildItemUserVisibleSchema {
                 | "TextDocumentField",
                 1,
                 Some("1"),
-            ) => user_visible_common,
+            ) => user_visible,
             _ => None,
         }
     }
