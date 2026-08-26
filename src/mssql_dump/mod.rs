@@ -31359,6 +31359,14 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         23 => Some("web:DarkBlue"),
         33 => Some("web:DarkRed"),
         37 => Some("web:DarkSlateGray"),
+        // Four indexes the style items of the stand attest and this table did
+        // not carry. Each is read off the platform's own `<Value>` for the
+        // same object: `43` on `do` `StyleItems/ИзбранныйЭлемент` and two more,
+        // `62` on `СерияДиаграммыВиджетаРозовый`, `77` on
+        // `ПользовательБезУчетнойЗаписи`, `143` on `МК_ЦветТекстаАкцентнойКнопки`
+        // and two more. `43` and `143` are the same values the form palette
+        // already carried in front of this table.
+        43 => Some("web:DodgerBlue"),
         44 => Some("web:FireBrick"),
         45 => Some("web:FloralWhite"),
         46 => Some("web:ForestGreen"),
@@ -31370,6 +31378,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
         61 => Some("web:Lavender"),
+        62 => Some("web:LavenderBlush"),
         64 => Some("web:LightCoral"),
         65 => Some("web:LightBlue"),
         66 => Some("web:LightCoral"),
@@ -31378,6 +31387,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         69 => Some("web:LightGoldenRodYellow"),
         71 => Some("web:LightGray"),
         72 => Some("web:LightPink"),
+        77 => Some("web:LightSlateGray"),
         78 => Some("web:LightSteelBlue"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
@@ -31404,6 +31414,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         134 => Some("web:SteelBlue"),
         140 => Some("web:Violet"),
         141 => Some("web:VioletRed"),
+        143 => Some("web:White"),
         144 => Some("web:WhiteSmoke"),
         145 => Some("web:Yellow"),
         _ => None,
@@ -31418,7 +31429,16 @@ fn style_system_color_name(code: i32) -> Option<&'static str> {
         -15 => Some("style:ButtonTextColor"),
         -7 => Some("style:FieldBackColor"),
         -13 => Some("style:FieldTextColor"),
-        -21 => Some("style:FieldSelectionBackColor"),
+        // `-21` is `ButtonTextColor`, read off the platform's own `<Value>`
+        // for `do` `StyleItems/ЦветКалендаряПодпись` and
+        // `ЗаголовокКалендаряБроньЦветТекста`. The form palette
+        // (`form_control_system_color_name`) reads the same code the same way
+        // on 951 occurrences of the native form dumps of УТ 11.5.27.75, so the
+        // two palettes agree here rather than differ. Every style-palette code
+        // the style items of the stand exercise -- `-3`, `-16`, `-21`, `-23`,
+        // `-42` -- agrees with the form palette; the codes where the two
+        // tables still differ are exercised by neither.
+        -21 => Some("style:ButtonTextColor"),
         -10 => Some("style:FieldSelectedTextColor"),
         -14 => Some("style:FieldAlternativeBackColor"),
         -23 => Some("style:ToolTipBackColor"),

@@ -12591,7 +12591,7 @@ fn parse_form_control_color_space(
 /// follows its arm. This is a different palette from the one the style and
 /// spreadsheet decoders read, and the two disagree on six shared codes, so a
 /// form colour never goes through `style_system_color_name`.
-fn form_control_system_color_name(code: i32) -> Option<&'static str> {
+pub(super) fn form_control_system_color_name(code: i32) -> Option<&'static str> {
     match code {
         -1 => Some("style:FormBackColor"),              // 120
         -3 => Some("style:FormTextColor"),              // 339

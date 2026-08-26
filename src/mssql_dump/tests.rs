@@ -27566,6 +27566,59 @@ fn detects_previously_unmapped_style_web_colors_from_real_objects() {
     }
 }
 
+/// The same evidence shape as the test above, for Документооборот КОРП
+/// 3.0.21.3: every `(code, name)` pair is the object's own raw braced colour
+/// value paired with the exact name the platform's own exported XML carries
+/// for that object. Four web indexes the table did not carry left eight
+/// `StyleItems` refused whole, and the style index `-21` was read as
+/// `FieldSelectionBackColor` where the platform writes `ButtonTextColor`.
+#[test]
+fn detects_style_colors_the_document_management_objects_attest() {
+    let web: &[(&str, i32, &str)] = &[
+        ("ИзбранныйЭлемент", 43, "web:DodgerBlue"),
+        ("ЦветПерсональногоШаблонаБП", 43, "web:DodgerBlue"),
+        ("ЦветПерсональнойКатегории", 43, "web:DodgerBlue"),
+        ("СерияДиаграммыВиджетаРозовый", 62, "web:LavenderBlush"),
+        ("ПользовательБезУчетнойЗаписи", 77, "web:LightSlateGray"),
+        ("МК_ЦветТекстаАкцентнойКнопки", 143, "web:White"),
+        ("МК_ЦветФонаГруппы", 143, "web:White"),
+        ("ЦветКалендаряФонПустойЯчейкиВсегоДня", 143, "web:White"),
+    ];
+    for (name, code, expected) in web {
+        let value =
+            format!(r##"{{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{{3,2,{{{code}}}}}}}"##);
+        assert_eq!(
+            parse_style_color_value(&value).as_deref(),
+            Some(*expected),
+            "object {name} (code {code})"
+        );
+    }
+    // `-21` names the same colour in the style palette that the form palette
+    // reads for it on 951 occurrences of the native form dumps of
+    // УТ 11.5.27.75, so the two agree here rather than differ.
+    for name in ["ЦветКалендаряПодпись", "ЗаголовокКалендаряБроньЦветТекста"]
+    {
+        let value = r##"{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{3,3,{-21}}}"##;
+        assert_eq!(
+            parse_style_color_value(value).as_deref(),
+            Some("style:ButtonTextColor"),
+            "object {name}"
+        );
+    }
+    // Every style-palette index the style items of the stand exercise agrees
+    // with the form palette.
+    for code in [-3, -16, -21, -23, -42] {
+        assert_eq!(
+            style_system_color_name(code),
+            form_body::form_control_system_color_name(code),
+            "style index {code}"
+        );
+    }
+    // An index neither palette names still refuses the whole object.
+    assert_eq!(style_system_color_name(-99), None);
+    assert_eq!(style_web_color_name(9_999), None);
+}
+
 #[test]
 fn writes_style_item_metadata_xml_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
