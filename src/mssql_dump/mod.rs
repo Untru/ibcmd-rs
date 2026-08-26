@@ -30498,7 +30498,14 @@ fn parse_common_command_shortcut_value_with_style(
         48..=57 => char::from_u32(u32::from(key_code))?.to_string(),
         65..=90 => char::from_u32(u32::from(key_code))?.to_string(),
         96..=105 => format!("Num {}", key_code - 96),
+        // 106..=111 continue the VK_NUMPAD0..VK_DIVIDE numpad run 96..=105
+        // already maps (VK_MULTIPLY=106, VK_ADD=107, VK_SEPARATOR=108,
+        // VK_SUBTRACT=109, VK_DECIMAL=110 already spelled `Num .`,
+        // VK_DIVIDE=111). Evidenced: `ssl`-demo's `DataProcessors/
+        // КонсольЗапросов/Forms/Форма` carries key_code 111 twice (modifier 8
+        // and 12), native `Cmd+Num /` and `Cmd+Shift+Num /`.
         110 => "Num .".to_string(),
+        111 => "Num /".to_string(),
         112..=123 => format!("F{}", key_code - 111),
         _ => return None,
     };

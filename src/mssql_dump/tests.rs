@@ -26331,6 +26331,7 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,96,0}", "Num 0"),
         ("{0,105,16}", "Alt+Num 9"),
         ("{0,110,0}", "Num ."),
+        ("{0,111,0}", "Num /"),
         ("{0,112,0}", "F1"),
         ("{0,123,0}", "F12"),
         ("{0,83,4}", "Shift+S"),
@@ -26353,6 +26354,11 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,13,8}", "Cmd+Enter"),
         ("{0,49,8}", "Cmd+1"),
         ("{0,105,16}", "Option+Num 9"),
+        // Real bytes: `ssl`-demo's `DataProcessors/КонсольЗапросов/Forms/
+        // Форма` carries key_code 111 (`VK_DIVIDE`) twice, modifier 8 and 12,
+        // native `Cmd+Num /` and `Cmd+Shift+Num /`.
+        ("{0,111,8}", "Cmd+Num /"),
+        ("{0,111,12}", "Cmd+Shift+Num /"),
         ("{0,112,0}", "F1"),
         ("{0,83,4}", "Shift+S"),
         ("{0,83,8}", "Cmd+S"),
@@ -26379,7 +26385,6 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         "{0,95,0}",
         "{0,106,0}",
         "{0,109,0}",
-        "{0,111,0}",
         "{0,124,0}",
         "{0,70,1}",
         "{0,70,32}",
