@@ -22271,6 +22271,18 @@ fn parse_cct_standard_attributes(
     }
 
     let mut attributes = Vec::with_capacity(CCT_STANDARD_ATTRIBUTES.len());
+    // The attribute-property bag comes in two shapes that differ only by
+    // whether the platform build carries the "type reduction" property
+    // (`INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID`,
+    // 24 vs. 25 properties -- see `parse_information_register_standard_attribute_bag`).
+    // Neither shape is more "correct"; `parse_information_register_standard_attributes`
+    // and `parse_exchange_plan_standard_attributes` both already accept either
+    // one and only require every attribute in the same row to agree. Confirmed
+    // on real БСП 3.1.12.297 `ChartOfCharacteristicTypes` rows (sslbase and
+    // ssl demo): all nine standard attributes uniformly carry the 24-property
+    // (no type-reduction) bag, so hard-requiring `has_type_reduction_mode`
+    // here made every one of them opaque.
+    let mut bag_shape = None;
     for ((expected_marker, name), triplet) in CCT_STANDARD_ATTRIBUTES
         .iter()
         .copied()
@@ -22287,9 +22299,10 @@ fn parse_cct_standard_attributes(
             return None;
         }
         let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
-        if !bag.has_type_reduction_mode {
+        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
             return None;
         }
+        bag_shape = Some(bag.has_type_reduction_mode);
         let fill_value = parse_cct_standard_attribute_fill_value(
             bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
             expected_marker,
