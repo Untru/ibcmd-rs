@@ -1252,6 +1252,7 @@ pub(super) struct FormChildItem {
     pub(super) change_row_set: Option<bool>,
     pub(super) change_row_order: Option<bool>,
     pub(super) command_set_excluded_commands: Vec<&'static str>,
+    pub(super) table_behavior_on_horizontal_compression: Option<&'static str>,
     pub(super) table_current_row_use: Option<FormTableCurrentRowUse>,
     pub(super) use_alternation_row_color: Option<bool>,
     pub(super) default_item: Option<bool>,
@@ -10161,6 +10162,8 @@ fn parse_form_child_item_with_metadata_owners(
             .unwrap_or_else(|| {
                 parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
             }),
+        table_behavior_on_horizontal_compression: table_schema
+            .and_then(|schema| schema.behavior_on_horizontal_compression(&fields)),
         table_current_row_use: table_schema.and_then(|schema| schema.current_row_use(&fields)),
         table_search_on_input: table_schema.and_then(|schema| schema.search_on_input(&fields)),
         table_initial_list_view: table_schema.and_then(|schema| schema.initial_list_view(&fields)),
@@ -23111,6 +23114,10 @@ fn format_form_table_property_xml(
                 xml
             }
         }
+        FormTableXmlProperty::BehaviorOnHorizontalCompression => item
+            .table_behavior_on_horizontal_compression
+            .map(|value| format!("{tab}<BehaviorOnHorizontalCompression>{value}</BehaviorOnHorizontalCompression>\r\n"))
+            .unwrap_or_default(),
         FormTableXmlProperty::CurrentRowUse => item
             .table_current_row_use
             .map(|value| {
