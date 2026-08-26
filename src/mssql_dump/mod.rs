@@ -8536,6 +8536,7 @@ struct TaskProperties {
     update_data_history_immediately_after_write: bool,
     execute_after_write_data_history_version_processing: bool,
     child_attributes: Vec<MetadataChildObject>,
+    child_tabular_sections: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     addressing_attributes: Vec<TaskAddressingAttribute>,
     child_commands: Vec<MetadataChildCommand>,
@@ -17278,6 +17279,7 @@ fn parse_exact_tabular_section_standard_attributes_presence(
                 | "Document"
                 | "ExchangePlan"
                 | "ChartOfCharacteristicTypes"
+                | "Task"
                 | OWNER_KIND_BUSINESS_PROCESS => "-10",
                 "Report" | "DataProcessor" => "-3",
                 _ => return None,
@@ -17394,7 +17396,7 @@ fn tabular_section_envelope_spec(owner_kind: &str) -> Option<(u32, bool, bool)> 
         "Catalog" => (2, true, true),
         "Document" => (2, false, true),
         "ChartOfCharacteristicTypes" => (1, true, true),
-        OWNER_KIND_BUSINESS_PROCESS | "ExchangePlan" => (1, false, true),
+        OWNER_KIND_BUSINESS_PROCESS | "ExchangePlan" | "Task" => (1, false, true),
         "Report" | "DataProcessor" => (0, false, false),
         _ => return None,
     })
@@ -21874,6 +21876,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     .ok()?;
     let tabular_sections = parse_cct_tabular_sections_indexed(
         &tabular_section_collection.items,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
         &header.name,
         type_index,
         object_refs,
@@ -22414,6 +22417,7 @@ fn parse_cct_direct_attributes_indexed(
         let child = parse_cct_attribute(
             item,
             false,
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
             owner_name,
             type_index,
             object_refs,
@@ -22446,6 +22450,7 @@ fn parse_cct_direct_attributes_indexed(
 fn parse_cct_attribute(
     value: &str,
     nested: bool,
+    owner_kind: &str,
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
@@ -22475,11 +22480,7 @@ fn parse_cct_attribute(
         &wrapper,
         nested,
         true,
-        Some((
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
-            owner_name,
-            object_refs,
-        )),
+        Some((owner_kind, owner_name, object_refs)),
         type_index,
         metadata_object_refs,
     )?;
@@ -22675,6 +22676,7 @@ fn parse_business_process_child_properties(
 
 fn parse_cct_tabular_sections_indexed(
     items: &[&str],
+    owner_kind: &str,
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
@@ -22713,9 +22715,7 @@ fn parse_cct_tabular_sections_indexed(
                     owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                 )
             })?;
-        let Some(section_envelope) =
-            parse_tabular_section_envelope("ChartOfCharacteristicTypes", &wrapper)
-        else {
+        let Some(section_envelope) = parse_tabular_section_envelope(owner_kind, &wrapper) else {
             return Err(failure(
                 owner_graph::OwnerGraphReference::ChildUuid,
                 owner_graph::OwnerGraphOwnedChildReason::WrongKind,
@@ -22747,11 +22747,8 @@ fn parse_cct_tabular_sections_indexed(
                         owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                     )
                 })?;
-        let expected_reference = format!(
-            "{}.{owner_name}.TabularSection.{}",
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
-            header.name
-        );
+        let expected_reference =
+            format!("{owner_kind}.{owner_name}.TabularSection.{}", header.name);
         if resolve_exchange_plan_index_reference(&header.uuid, object_refs)
             .is_none_or(|reference| reference != expected_reference)
         {
@@ -22791,7 +22788,7 @@ fn parse_cct_tabular_sections_indexed(
             ids.push(uuid);
         }
         let standard_attributes = parse_exact_tabular_section_standard_attributes_presence(
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            owner_kind,
             payload.get(7).copied().unwrap_or_default(),
         )
         .ok_or_else(|| {
@@ -22821,6 +22818,7 @@ fn parse_cct_tabular_sections_indexed(
             let child = parse_cct_attribute(
                 nested_item,
                 true,
+                owner_kind,
                 owner_name,
                 type_index,
                 object_refs,
@@ -22834,10 +22832,8 @@ fn parse_cct_tabular_sections_indexed(
                 )
             })?;
             let expected_reference = format!(
-                "{}.{owner_name}.TabularSection.{}.Attribute.{}",
-                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
-                header.name,
-                child.header.name
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                header.name, child.header.name
             );
             if resolve_exchange_plan_index_reference(&child.header.uuid, object_refs)
                 .is_none_or(|reference| reference != expected_reference)
@@ -22882,19 +22878,13 @@ fn parse_cct_tabular_sections_indexed(
             header: header.clone(),
             generated_types: vec![
                 GeneratedTypeEntry {
-                    name: format!(
-                        "ChartOfCharacteristicTypesTabularSection.{owner_name}.{}",
-                        header.name
-                    ),
+                    name: format!("{owner_kind}TabularSection.{owner_name}.{}", header.name),
                     category: "TabularSection",
                     type_id: ids[0].clone(),
                     value_id: ids[1].clone(),
                 },
                 GeneratedTypeEntry {
-                    name: format!(
-                        "ChartOfCharacteristicTypesTabularSectionRow.{owner_name}.{}",
-                        header.name
-                    ),
+                    name: format!("{owner_kind}TabularSectionRow.{owner_name}.{}", header.name),
                     category: "TabularSectionRow",
                     type_id: ids[2].clone(),
                     value_id: ids[3].clone(),
@@ -26216,10 +26206,7 @@ fn parse_task_properties_from_text(
         .iter()
         .map(|collection| collection.marker.clone())
         .collect::<BTreeSet<_>>();
-    if collection_markers.len() != collections.len()
-        || !collections.first()?.items.is_empty()
-        || !collections.get(4)?.items.is_empty()
-    {
+    if collection_markers.len() != collections.len() || !collections.first()?.items.is_empty() {
         return None;
     }
 
@@ -26248,6 +26235,32 @@ fn parse_task_properties_from_text(
         metadata_object_refs,
         form_refs,
     )?;
+    // The fifth root collection carries the owned tabular sections. It is the
+    // same record every other owner family writes -- envelope `{1,<payload>,
+    // <LineNumberLength>}`, payload code 11, nested attribute group
+    // `888744e1-…` -- so it is read by the shared reader rather than a table
+    // of its own. Two objects on the stand own one: `do`
+    // `Task.ЗадачаИсполнителя` and `uh` `Task.БюджетнаяЗадача`.
+    let mut section_generated_ids = BTreeSet::new();
+    let mut section_child_ids = BTreeSet::new();
+    let child_tabular_sections = parse_cct_tabular_sections_indexed(
+        &collections.get(4)?.items,
+        "Task",
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        &mut section_generated_ids,
+        &mut section_child_ids,
+    )
+    .map_err(|failure| {
+        *owner_graph_diagnostic = Some(owner_collection_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            owner_graph::OwnerCollectionRole::TabularSection,
+            failure,
+        ));
+    })
+    .ok()?;
     let child_commands = parse_task_commands(
         &collections.get(5)?.items,
         text,
@@ -26361,6 +26374,10 @@ fn parse_task_properties_from_text(
     if form_uuids
         .iter()
         .chain(child_attributes.iter().map(|child| &child.header.uuid))
+        .chain(child_tabular_sections.iter().flat_map(|section| {
+            std::iter::once(&section.header.uuid)
+                .chain(section.child_objects.iter().map(|child| &child.header.uuid))
+        }))
         .chain(
             addressing_attributes
                 .iter()
@@ -26432,7 +26449,7 @@ fn parse_task_properties_from_text(
         data_lock_fields,
         data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(33)?)?
             .xml_value(),
-        full_text_search: parse_task_full_text_search_slot(fields.get(33)?)?.xml_value(),
+        full_text_search: parse_task_full_text_search_slot(fields.get(32)?)?.xml_value(),
         object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
             fields.get(39)?,
@@ -26446,6 +26463,7 @@ fn parse_task_properties_from_text(
         update_data_history_immediately_after_write: false,
         execute_after_write_data_history_version_processing: false,
         child_attributes,
+        child_tabular_sections,
         child_forms,
         addressing_attributes,
         child_commands,
@@ -34667,6 +34685,7 @@ fn format_task_source_xml(
     }
     if let Some(index) = xml.find("\t</Task>") {
         if task.child_attributes.is_empty()
+            && task.child_tabular_sections.is_empty()
             && task.child_forms.is_empty()
             && task.addressing_attributes.is_empty()
             && task.child_commands.is_empty()
@@ -34675,6 +34694,9 @@ fn format_task_source_xml(
         } else {
             let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
             for child in &task.child_attributes {
+                push_metadata_child_object_xml(&mut child_objects, child);
+            }
+            for child in &task.child_tabular_sections {
                 push_metadata_child_object_xml(&mut child_objects, child);
             }
             for form in &task.child_forms {

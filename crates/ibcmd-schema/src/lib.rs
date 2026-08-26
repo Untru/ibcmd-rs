@@ -3177,9 +3177,9 @@ impl TaskDataLockControlMode {
 /// `"1"`; `CorpusTask` (`Automatic`), a seed task built by flipping only
 /// `DataLockControlMode` (`Automatic`) and a seed reproducing `CorpusTask`'s
 /// pairing all store `"0"`. Field 33 is the same slot
-/// `parse_task_full_text_search_slot` reads for `FullTextSearch`; that
-/// function's `"0"|"1" => Use` never distinguishes its input either, so
-/// again no contradiction, but its own field attribution is unconfirmed now.
+/// `FullTextSearch` used to be read off this same field 33 with a
+/// `"0"|"1" => Use` mapping that never distinguished its input; it has since
+/// been separated onto field 32 -- see `parse_task_full_text_search_slot`.
 pub fn parse_task_data_lock_control_mode_slot(value: &str) -> Option<TaskDataLockControlMode> {
     match value.trim() {
         "0" => Some(TaskDataLockControlMode::Automatic),
@@ -3191,24 +3191,40 @@ pub fn parse_task_data_lock_control_mode_slot(value: &str) -> Option<TaskDataLoc
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TaskFullTextSearch {
     Use,
+    DontUse,
 }
 
 impl TaskFullTextSearch {
     pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Use => "Use",
+            Self::DontUse => "DontUse",
         }
     }
 }
 
-/// Both `"0"` and `"1"` are attested as decoding to `Use`: field 33 is `"0"`
-/// in the platform-proven `task-basic` diagnostic fixture (CorpusTask) and
-/// `"1"` in all five cross-edition captures of `Tasks/ЗадачаИсполнителя.xml`
-/// -- both native XML outputs read `<FullTextSearch>Use</FullTextSearch>`.
-/// See `parse_task_choice_history_on_input_slot` for the same pattern.
+/// Decode the physical Task owner slot (native tuple field 32, not field 33)
+/// into `FullTextSearch`.
+///
+/// Field 33 was read here as well as for `DataLockControlMode`, and while
+/// every task then known wrote `<FullTextSearch>Use</FullTextSearch>` the two
+/// spellings `"0"` and `"1"` both had to decode to `Use` for that to hold --
+/// a mapping that never distinguished its input, which is the shape of an
+/// unattributed slot rather than of a proven one.
+///
+/// `Task.ЗадачаИсполнителя` of Документооборот КОРП 3.0.21.3 is the first
+/// object on the stand that writes `DontUse`, and it separates the slots.
+/// Census of every task available -- six vendor objects (`do`, `uh` twice,
+/// `ut`, `ssl`, `sslbase`) plus the two platform-proven seeds `ЗадачаА` and
+/// `ЗадачаБ` -- against the XML the platform writes for the same object:
+/// field 32 partitions `DontUse` (1) from `Use` (7) exactly. The only other
+/// slot that partitions it is field 31, and that one is already pinned to
+/// `<TaskNumberAutoPrefix>` by a five-way cross-edition export, where the same
+/// object writes `BusinessProcessNumber` against every other task's `DontUse`.
 pub fn parse_task_full_text_search_slot(value: &str) -> Option<TaskFullTextSearch> {
     match value.trim() {
-        "0" | "1" => Some(TaskFullTextSearch::Use),
+        "0" => Some(TaskFullTextSearch::DontUse),
+        "1" => Some(TaskFullTextSearch::Use),
         _ => None,
     }
 }
@@ -14216,9 +14232,13 @@ mod tests {
                 .xml_value(),
             "Automatic"
         );
+        // `FullTextSearch` rides field 32, not field 33: the two slots were
+        // read as one while `"0"` and `"1"` both had to decode to `Use`, and
+        // `do`'s `Task.ЗадачаИсполнителя` -- the first object on the stand to
+        // write `DontUse` -- separates them.
         assert_eq!(
             parse_task_full_text_search_slot("0").unwrap().xml_value(),
-            "Use"
+            "DontUse"
         );
         assert_eq!(
             parse_task_full_text_search_slot("1").unwrap().xml_value(),

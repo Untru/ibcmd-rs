@@ -3522,6 +3522,7 @@ fn cct_tabular_late_failure_rolls_back_all_staged_ids_and_corrected_item_commits
     let mut child_ids = BTreeSet::from(["child-seed".to_owned()]);
     let failure = match parse_cct_tabular_sections_indexed(
         &[first.as_str(), second_invalid.as_str()],
+        "ChartOfCharacteristicTypes",
         "Owner",
         &BTreeMap::new(),
         &refs,
@@ -3562,6 +3563,7 @@ fn cct_tabular_late_failure_rolls_back_all_staged_ids_and_corrected_item_commits
 
     let corrected = parse_cct_tabular_sections_indexed(
         &[second_corrected.as_str()],
+        "ChartOfCharacteristicTypes",
         "Owner",
         &BTreeMap::new(),
         &refs,
@@ -70869,6 +70871,96 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
         .unwrap()[0]
             .data_path,
         "Catalog.Products.StandardAttribute.Ref"
+    );
+}
+
+#[test]
+fn task_tabular_sections_are_read_by_the_shared_owned_section_reader() {
+    // `do` `Task.ЗадачаИсполнителя` owns two tabular sections; the record is
+    // the ordinary owned-section record, envelope `{1,<payload>,
+    // <LineNumberLength>}` -- the same envelope a business process and an
+    // exchange plan write. Uuids and names are verbatim from that object.
+    const SECTION_UUID: &str = "c5df6318-30da-440e-a628-4a86d171ee1c";
+    const ATTRIBUTE_UUID: &str = "5de857b7-61d6-487e-9f4b-f108aade2cd5";
+    const GENERATED: [&str; 4] = [
+        "a53e1e00-925c-42e8-bc08-d707be6ffbbd",
+        "0bb6a85d-6468-4eff-96db-aca1ca67b070",
+        "3b7d8f9d-e8cc-4603-91e8-ba56d70af1cb",
+        "9bf269dd-c72a-49ea-9bf0-1a80d4820bac",
+    ];
+    assert_eq!(
+        tabular_section_envelope_spec("Task"),
+        tabular_section_envelope_spec("BusinessProcess")
+    );
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let nested = cct_attribute_item_for_test(ATTRIBUTE_UUID, "Свойство", true);
+    let payload = format!(
+        "{{11,{},{},{},{},{{0,{{3,{{1,0,{SECTION_UUID}}},\"ДополнительныеРеквизиты\",{{0}},\"\",0,0,{zero},0}}}},0,{{0}},{{0}}}}",
+        GENERATED[0], GENERATED[1], GENERATED[2], GENERATED[3]
+    );
+    let item =
+        format!("{{{{1,{payload},5}},1,{{{CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID},1,{nested}}}}}");
+    let refs = BTreeMap::from([
+        (
+            SECTION_UUID.to_owned(),
+            "Task.ЗадачаИсполнителя.TabularSection.ДополнительныеРеквизиты".to_owned(),
+        ),
+        (
+            ATTRIBUTE_UUID.to_owned(),
+            "Task.ЗадачаИсполнителя.TabularSection.ДополнительныеРеквизиты.Attribute.Свойство"
+                .to_owned(),
+        ),
+    ]);
+    let mut generated_ids = BTreeSet::new();
+    let mut child_ids = BTreeSet::new();
+    let sections = parse_cct_tabular_sections_indexed(
+        &[item.as_str()],
+        "Task",
+        "ЗадачаИсполнителя",
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &mut generated_ids,
+        &mut child_ids,
+    )
+    .expect("Task tabular section");
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0].header.name, "ДополнительныеРеквизиты");
+    assert_eq!(sections[0].child_objects.len(), 1);
+    assert_eq!(
+        sections[0]
+            .generated_types
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "TaskTabularSection.ЗадачаИсполнителя.ДополнительныеРеквизиты",
+            "TaskTabularSectionRow.ЗадачаИсполнителя.ДополнительныеРеквизиты",
+        ]
+    );
+    let properties = sections[0]
+        .tabular_section_properties
+        .as_ref()
+        .expect("tabular-section properties");
+    assert_eq!(properties.line_number_length, Some(5));
+    assert_eq!(properties.use_mode, None);
+
+    // The owner is what keeps a foreign section out: the same record under
+    // another task name resolves to nothing.
+    let mut generated_ids = BTreeSet::new();
+    let mut child_ids = BTreeSet::new();
+    assert!(
+        parse_cct_tabular_sections_indexed(
+            &[item.as_str()],
+            "Task",
+            "БюджетнаяЗадача",
+            &BTreeMap::new(),
+            &refs,
+            &BTreeMap::new(),
+            &mut generated_ids,
+            &mut child_ids,
+        )
+        .is_err()
     );
 }
 
