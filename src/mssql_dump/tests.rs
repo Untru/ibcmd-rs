@@ -27572,6 +27572,56 @@ fn detects_previously_unmapped_style_web_colors_from_real_objects() {
 /// for that object. Four web indexes the table did not carry left eight
 /// `StyleItems` refused whole, and the style index `-21` was read as
 /// `FieldSelectionBackColor` where the platform writes `ButtonTextColor`.
+/// Verbatim bytes of `do` `Constants/ИспользоватьСинхронизациюКалендарей`,
+/// the one constant of the stand that writes `<MultiLine>true</MultiLine>`.
+/// The four slots the writer used to pin are substituted, so each is read
+/// where the corpus proves it: `MultiLine` in the detail's slot 7 (this
+/// object), `ChoiceFoldersAndItems` in slot 10 (`uh` `ГруппаОтчетовКИК`),
+/// `QuickChoice` in slot 12 (`uh` `ПериодичностьОтчетностиМСФО`) and
+/// `DataHistory` in the owner's slot 12 (`uh`
+/// `РежимАктуализацииГрафикаПриИзмененииПервичныхДокументов`). All four are
+/// single-object variations across the 3 378 constants of the stand.
+fn constant_record_for_test(multi_line: &str, folders: &str, quick: &str, history: &str) -> String {
+    RECORD_LITERAL
+        .replace("{MULTILINE}", multi_line)
+        .replace("{FOLDERS}", folders)
+        .replace("{QUICK}", quick)
+        .replace("{HISTORY}", history)
+}
+
+const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},0,\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},0,\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,1,1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
+
+#[test]
+fn constant_reads_the_four_properties_the_writer_used_to_pin() {
+    const UUID: &str = "1d3d0d77-e5da-484f-9bb6-f25b74778d2f";
+    let parse = |text: &str| {
+        parse_constant_properties_from_text(
+            text,
+            UUID,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+    };
+    let plain = parse(&constant_record_for_test("0", "0", "2", "0")).expect("plain constant");
+    assert!(!plain.multi_line);
+    assert_eq!(plain.choice_folders_and_items, "Items");
+    assert_eq!(plain.quick_choice, "Auto");
+    assert_eq!(plain.data_history, "DontUse");
+
+    let varied = parse(&constant_record_for_test("1", "1", "0", "1")).expect("varied constant");
+    assert!(varied.multi_line);
+    assert_eq!(varied.choice_folders_and_items, "Folders");
+    assert_eq!(varied.quick_choice, "DontUse");
+    assert_eq!(varied.data_history, "Use");
+
+    // Values outside the closed sets still refuse the whole object.
+    assert!(parse(&constant_record_for_test("2", "0", "2", "0")).is_none());
+    assert!(parse(&constant_record_for_test("0", "9", "2", "0")).is_none());
+    assert!(parse(&constant_record_for_test("0", "0", "9", "0")).is_none());
+    assert!(parse(&constant_record_for_test("0", "0", "2", "9")).is_none());
+}
+
 #[test]
 fn detects_style_colors_the_document_management_objects_attest() {
     let web: &[(&str, i32, &str)] = &[
@@ -47309,6 +47359,10 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
         choice_parameters: Vec::new(),
         choice_history_on_input: "Auto",
         data_lock_control_mode: "Managed",
+        multi_line: false,
+        choice_folders_and_items: "Items",
+        quick_choice: "Auto",
+        data_history: "DontUse",
     }
 }
 

@@ -8788,6 +8788,10 @@ struct ConstantProperties {
     choice_parameters: Vec<ChoiceParameter>,
     choice_history_on_input: &'static str,
     data_lock_control_mode: &'static str,
+    multi_line: bool,
+    choice_folders_and_items: &'static str,
+    quick_choice: &'static str,
+    data_history: &'static str,
 }
 
 struct ChoiceParameter {
@@ -28516,6 +28520,13 @@ fn parse_constant_properties_from_text(
 ) -> Option<ConstantProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
+    // A constant may declare more than one type -- `do`
+    // `Constants/ОтветственныйЗаУдалениеНеактивныхВерсий` and
+    // `СотрудникДляЗаданияРаспознавания` each name two catalogs, and the
+    // platform writes both inside one `<Type>` element -- but the canonical
+    // model this writer routes through carries a single type, so a set still
+    // fails closed there. Of the 3 378 constants on the stand those two are
+    // the only ones with more than one.
     let mut value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
     if value_types.len() != 1 {
         return None;
@@ -28531,6 +28542,17 @@ fn parse_constant_properties_from_text(
     let use_standard_commands = parse_1c_bool_flag(constant_fields.get(7)?.trim())?;
     let default_form = parse_catalog_form_ref(constant_fields.get(10).copied(), form_refs);
     let password_mode = parse_1c_bool_flag(constant_detail_fields.get(2)?.trim())?;
+    // The constant's detail record is the project's ordinary 23-field code-27
+    // payload, so these ride the slots that payload always uses. The writer
+    // pinned all three; the census of the stand's 3 378 constants shows each
+    // varying in exactly one object -- `MultiLine` in `do`
+    // `ИспользоватьСинхронизациюКалендарей` (slot 7 `"1"`),
+    // `ChoiceFoldersAndItems` in `uh` `ГруппаОтчетовКИК` (slot 10 `"1"`) and
+    // `QuickChoice` in `uh` `ПериодичностьОтчетностиМСФО` (slot 12 `"0"`).
+    let multi_line = parse_1c_bool_flag(constant_detail_fields.get(7)?.trim())?;
+    let choice_folders_and_items =
+        catalog_choice_folders_and_items_xml(constant_detail_fields.get(10)?.trim())?;
+    let quick_choice = catalog_quick_choice_xml(constant_detail_fields.get(12)?.trim())?;
     let format = parse_1c_synonyms(constant_detail_fields.get(3).copied().unwrap_or("{0}"));
     let edit_format = parse_1c_synonyms(constant_detail_fields.get(18).copied().unwrap_or("{0}"));
     let mask = constant_detail_fields
@@ -28552,6 +28574,13 @@ fn parse_constant_properties_from_text(
     let data_lock_control_mode = match constant_fields.get(6).map(|field| field.trim()) {
         Some("0") => "Automatic",
         _ => "Managed",
+    };
+    // Owner slot 12, the one object of the stand that writes `Use`:
+    // `uh` `Constants/РежимАктуализацииГрафикаПриИзмененииПервичныхДокументов`.
+    let data_history = match constant_fields.get(12).map(|field| field.trim()) {
+        Some("0") => "DontUse",
+        Some("1") => "Use",
+        _ => return None,
     };
     let header = parse_metadata_header_from_text(text, uuid)?;
     let mut generated_types = Vec::new();
@@ -28598,6 +28627,10 @@ fn parse_constant_properties_from_text(
         choice_parameters,
         choice_history_on_input,
         data_lock_control_mode,
+        multi_line,
+        choice_folders_and_items,
+        quick_choice,
+        data_history,
     })
 }
 
@@ -37008,29 +37041,33 @@ fn format_constant_source_xml(
     insert.push_str(&format!(
         "\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
 \t\t\t{}\r\n\
-\t\t\t<MultiLine>false</MultiLine>\r\n\
+\t\t\t<MultiLine>{}</MultiLine>\r\n\
 \t\t\t<ExtendedEdit>false</ExtendedEdit>\r\n\
 \t\t\t{}\r\n\
 \t\t\t{}\r\n\
 \t\t\t<FillChecking>{}</FillChecking>\r\n\
-\t\t\t<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>\r\n\
+\t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
 \t\t\t<ChoiceParameterLinks/>\r\n\
 \t\t\t{}\r\n\
-\t\t\t<QuickChoice>Auto</QuickChoice>\r\n\
+\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<ChoiceForm/>\r\n\
 \t\t\t<LinkByType/>\r\n\
 \t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
 \t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
-\t\t\t<DataHistory>DontUse</DataHistory>\r\n\
+\t\t\t<DataHistory>{}</DataHistory>\r\n\
 \t\t\t<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
 \t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
         format_simple_property_xml("Mask", &constant.mask),
+        xml_bool(constant.multi_line),
         format_constant_bound_xml("MinValue", constant.min_value.as_deref()),
         format_constant_bound_xml("MaxValue", constant.max_value.as_deref()),
         constant.fill_checking,
+        constant.choice_folders_and_items,
         format_choice_parameters_xml(&constant.choice_parameters),
+        constant.quick_choice,
         constant.choice_history_on_input,
-        constant.data_lock_control_mode
+        constant.data_lock_control_mode,
+        constant.data_history
     ));
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
