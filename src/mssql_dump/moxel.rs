@@ -3004,9 +3004,10 @@ const MOXCEL_CELL_KNOWN_MASK: usize = (1 << MOXCEL_CELL_CONTROL_BIT)
 /// One typed value stored in a cell member.
 ///
 /// Evidence: the corpus stores `{"U"}`, `{"B",0|1}`, `{"S",text}`,
-/// `{"N",number}`, `{"D",yyyymmddhhmmss}` and `{"#",type,{index}}`, and the
-/// platform publishes them as `xsi:nil`, `xs:boolean`, `xs:string`,
-/// `xs:decimal`, `xs:dateTime` and a bare `<r>` reference respectively.
+/// `{"N",number}`, `{"D",yyyymmddhhmmss}`, `{"#",type,{index}}` and
+/// `{"#",type,{count,{key,value}...}}`, and the platform publishes them as
+/// `xsi:nil`, `xs:boolean`, `xs:string`, `xs:decimal`, `xs:dateTime`, a bare
+/// `<r>` reference and `xsi:type="v8:Structure"` respectively.
 ///
 /// `"B"` was missing, and its cost was not one cell: a cell this reader
 /// refuses fails its row, and a failed row truncates the whole anchored row
@@ -3019,6 +3020,18 @@ const MOXCEL_CELL_KNOWN_MASK: usize = (1 << MOXCEL_CELL_CONTROL_BIT)
 /// read as `true` because that is the same `0`/`1` spelling every other
 /// boolean in this format uses -- refusing it would truncate a row stream over
 /// a value the format plainly allows.
+///
+/// `Structure` (a named-property bag) shares the `"#"` tag with `Reference`
+/// but is told apart by its payload's own shape, not by its type uuid: a
+/// `Reference` payload is the bare single-element tuple `{index}`, while a
+/// `Structure` payload is `{count, {key,value}, ...}` -- a declared count
+/// followed by exactly that many `{key,value}` pairs, each key itself a `"S"`
+/// (string) value. Evidence: `sslbase`'s and `ssl`-demo's
+/// `DataProcessors/РаботаСРезультатамиОбмена/Templates/БлокируемыеОбъекты`
+/// carries `{"#",4238019d-7e49-4fc9-91db-b6b951d5cf8e,{3,{{"S","ПолученныйОбъект"},{"S","0ed0b319-..."}},{{"S","ПравилоКонвертации"},{"S","Справочник_Контрагенты"}},{{"S","ПричинаДобавления"},{"U"}}}}}`
+/// at row 7's first cell's `detailValue`, and native publishes exactly three
+/// `<v8:Property name="...">` children there, each with the matching
+/// `<v8:Value>` (or `<v8:Value xsi:nil="true"/>` for the `{"U"}` one).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum MoxelCellValue {
     Nil,
@@ -3027,6 +3040,7 @@ pub(super) enum MoxelCellValue {
     Number(String),
     DateTime(String),
     Reference(usize),
+    Structure(Vec<(String, MoxelCellValue)>),
 }
 
 pub(super) fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
@@ -3051,12 +3065,43 @@ pub(super) fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
             (stamp.len() == 14 && stamp.chars().all(|character| character.is_ascii_digit()))
                 .then(|| MoxelCellValue::DateTime(stamp.to_string()))
         }
-        ("#", 3) => split_1c_braced_fields(fields.get(2)?, 0)
-            .filter(|reference| reference.len() == 1)
-            .and_then(|reference| reference.first()?.trim().parse::<usize>().ok())
-            .map(MoxelCellValue::Reference),
+        ("#", 3) => parse_moxel_hash_payload_value(fields.get(2)?),
         _ => None,
     }
+}
+
+/// Parses the payload tuple of a `{"#", type, payload}` value: either the
+/// bare single-element `{index}` a `Reference` carries, or the
+/// `{count, {key,value}...}` a `Structure` carries. See `MoxelCellValue`'s
+/// doc comment for the evidence distinguishing the two shapes.
+fn parse_moxel_hash_payload_value(payload: &str) -> Option<MoxelCellValue> {
+    let entries = split_1c_braced_fields(payload, 0)?;
+    if entries.len() == 1 {
+        return entries
+            .first()?
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .map(MoxelCellValue::Reference);
+    }
+    let count = entries.first()?.trim().parse::<usize>().ok()?;
+    if entries.len() != count.checked_add(1)? {
+        return None;
+    }
+    let mut properties = Vec::with_capacity(count);
+    for entry in &entries[1..] {
+        let pair = split_1c_braced_fields(entry, 0)?;
+        if pair.len() != 2 {
+            return None;
+        }
+        let key = match parse_moxel_cell_value(pair.first()?)? {
+            MoxelCellValue::Text(key) => key,
+            _ => return None,
+        };
+        let value = parse_moxel_cell_value(pair.get(1)?)?;
+        properties.push((key, value));
+    }
+    Some(MoxelCellValue::Structure(properties))
 }
 
 /// The base64 payload of an embedded control blob.
@@ -12493,35 +12538,50 @@ pub(super) fn push_moxel_row_xml(
 /// every other spelling keeps the member's own element name and carries the
 /// XSD type the platform writes for it.
 fn push_moxel_cell_value_xml(xml: &mut String, element: &str, value: &MoxelCellValue) {
+    push_moxel_typed_value_xml(xml, element, value, 5);
+}
+
+/// The shared typed-value writer `push_moxel_cell_value_xml` calls at its
+/// fixed cell-member depth (5 tabs). `Structure` recurses into it one level
+/// deeper per nesting level (`<v8:Property>` at `depth+1`, its own
+/// `<v8:Value>` at `depth+2`) -- evidenced depths for `sslbase`'s and
+/// `ssl`-demo's `БлокируемыеОбъекты` template, whose `<d xsi:type=
+/// "v8:Structure">` sits at the member's own 5 tabs, `<v8:Property>` at 6 and
+/// `<v8:Value>` at 7.
+fn push_moxel_typed_value_xml(
+    xml: &mut String,
+    element: &str,
+    value: &MoxelCellValue,
+    depth: usize,
+) {
+    let indent = "\t".repeat(depth);
     match value {
         MoxelCellValue::Nil => {
-            xml.push_str(&format!("\t\t\t\t\t<{element} xsi:nil=\"true\"/>\r\n"));
+            xml.push_str(&format!("{indent}<{element} xsi:nil=\"true\"/>\r\n"));
         }
         MoxelCellValue::Boolean(value) => {
             xml.push_str(&format!(
-                "\t\t\t\t\t<{element} xsi:type=\"xs:boolean\">{}</{element}>\r\n",
+                "{indent}<{element} xsi:type=\"xs:boolean\">{}</{element}>\r\n",
                 if *value { "true" } else { "false" }
             ));
         }
         MoxelCellValue::Text(text) if text.is_empty() => {
-            xml.push_str(&format!(
-                "\t\t\t\t\t<{element} xsi:type=\"xs:string\"/>\r\n"
-            ));
+            xml.push_str(&format!("{indent}<{element} xsi:type=\"xs:string\"/>\r\n"));
         }
         MoxelCellValue::Text(text) => {
             xml.push_str(&format!(
-                "\t\t\t\t\t<{element} xsi:type=\"xs:string\">{}</{element}>\r\n",
+                "{indent}<{element} xsi:type=\"xs:string\">{}</{element}>\r\n",
                 escape_xml_element_text(text)
             ));
         }
         MoxelCellValue::Number(number) => {
             xml.push_str(&format!(
-                "\t\t\t\t\t<{element} xsi:type=\"xs:decimal\">{number}</{element}>\r\n"
+                "{indent}<{element} xsi:type=\"xs:decimal\">{number}</{element}>\r\n"
             ));
         }
         MoxelCellValue::DateTime(stamp) => {
             xml.push_str(&format!(
-                "\t\t\t\t\t<{element} xsi:type=\"xs:dateTime\">{}-{}-{}T{}:{}:{}</{element}>\r\n",
+                "{indent}<{element} xsi:type=\"xs:dateTime\">{}-{}-{}T{}:{}:{}</{element}>\r\n",
                 &stamp[0..4],
                 &stamp[4..6],
                 &stamp[6..8],
@@ -12531,7 +12591,22 @@ fn push_moxel_cell_value_xml(xml: &mut String, element: &str, value: &MoxelCellV
             ));
         }
         MoxelCellValue::Reference(index) => {
-            xml.push_str(&format!("\t\t\t\t\t<r>{index}</r>\r\n"));
+            xml.push_str(&format!("{indent}<r>{index}</r>\r\n"));
+        }
+        MoxelCellValue::Structure(properties) => {
+            xml.push_str(&format!(
+                "{indent}<{element} xsi:type=\"v8:Structure\">\r\n"
+            ));
+            let property_indent = "\t".repeat(depth + 1);
+            for (key, property_value) in properties {
+                xml.push_str(&format!(
+                    "{property_indent}<v8:Property name=\"{}\">\r\n",
+                    escape_xml_text(key)
+                ));
+                push_moxel_typed_value_xml(xml, "v8:Value", property_value, depth + 2);
+                xml.push_str(&format!("{property_indent}</v8:Property>\r\n"));
+            }
+            xml.push_str(&format!("{indent}</{element}>\r\n"));
         }
     }
 }
