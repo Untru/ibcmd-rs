@@ -2322,10 +2322,29 @@ pub(super) fn parse_configuration_properties_from_text(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<ConfigurationProperties> {
-    let fields = configuration_root_fields(text)?;
-    let configuration_extension_compatibility_mode = fields
-        .get(26)
-        .and_then(|field| configuration_compatibility_mode_xml(field.trim()));
+    let (fields, is_native_68_shape) = configuration_root_fields(text)?;
+    // Field 26 mirroring field 43 (`CompatibilityMode`, below) is proven only
+    // for the genuine `{68,...}` shape -- three corpora, "none match their
+    // own field 43 ... under `configuration_compatibility_mode_xml`'s
+    // formula", i.e. field 26 was the only working coordinate for either
+    // property there. SSL/БСП 3.1.12.297 (the `{67,...}` short revision
+    // `configuration_root_fields` normalizes to this same 61-field shape) is
+    // the first corpus where the two disagree: native writes
+    // `ConfigurationExtensionCompatibilityMode` `Version8_3_27` against
+    // `CompatibilityMode` `Version8_3_24`, while this record's fields 26 and
+    // 43 both hold the raw `CompatibilityMode` value (`80324`) -- field 26 is
+    // not this record's `ConfigurationExtensionCompatibilityMode` at all, and
+    // no other coordinate in the tuple carries `80327`. Restricting the read
+    // to a record that was genuinely `{68,...}` to begin with keeps the
+    // proven three-corpus mapping and fails closed here rather than emitting
+    // the wrong value.
+    let configuration_extension_compatibility_mode = is_native_68_shape
+        .then(|| {
+            fields
+                .get(26)
+                .and_then(|field| configuration_compatibility_mode_xml(field.trim()))
+        })
+        .flatten();
     Some(ConfigurationProperties {
         name_prefix: fields
             .get(2)
@@ -2526,9 +2545,62 @@ fn parse_exact_1c_quoted_string(field: &str) -> Option<String> {
     (consumed == field.len()).then_some(value)
 }
 
-pub(super) fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
-    let start = text.find("{68,")?;
-    split_1c_braced_fields(text, start)
+/// The Configuration root's own `<Properties>` tuple, normalized to the
+/// canonical `{68,...}` (61-field) shape `parse_configuration_properties_from_text`
+/// addresses by fixed index, plus whether the record was genuinely that
+/// shape to begin with (`true`) rather than a short `{67,...}` one this
+/// function normalized (`false`) -- some of that shape's field coordinates
+/// (see `parse_configuration_properties_from_text`) are proven only for the
+/// real `{68,...}` record.
+///
+/// `configuration_root_property_fields` (the uuid-anchored sibling reader)
+/// already proves the second shape: `{67,...}` at 60 fields, evidenced by
+/// SSL/БСП 3.1.12.297 (`ssl`, `sslbase`, both 3.1.12.297). Structurally, every
+/// one of its 60 members lines up field-class-for-field-class (group for
+/// group, quoted for quoted, uuid for uuid, scalar for scalar) against the
+/// evidenced `{68,...}` reference's first 60 members, with no reordering --
+/// only the reference's own trailing 61st member is missing, a tail
+/// truncation like every other short item-record revision this codebase
+/// normalizes. That 61st member's value is not a guess: the sibling reader's
+/// own `("68", 61) if fields.get(60)?.trim() == "1"` acceptance arm already
+/// proves every corpus using the `{68,...}` shape carries literal `"1"`
+/// there, so restoring it for the short `{67,...}` shape reproduces the one
+/// value every other evidenced corpus already has. Before this normalization,
+/// the blind `{68,` search below found nothing at all in an SSL/БСП corpus,
+/// dropping name_prefix/default_run_mode/script_variant/vendor/version/
+/// update_catalog_address/the four settings storages/default_style/
+/// default_language whole -- most of `Configuration.xml`'s remaining diff on
+/// both `ssl` and `sslbase`.
+pub(super) fn configuration_root_fields(text: &str) -> Option<(Vec<&str>, bool)> {
+    if let Some(start) = text.find("{68,") {
+        return Some((split_1c_braced_fields(text, start)?, true));
+    }
+    let start = text.find("{67,")?;
+    let fields = split_1c_braced_fields(text, start)?;
+    Some((
+        normalize_short_configuration_root_property_fields(fields)?,
+        false,
+    ))
+}
+
+/// Rewrite a short `{67,...}` (60-field) Configuration `<Properties>` tuple
+/// into its canonical `{68,...}` (61-field) shape, or return it unchanged if
+/// it is already that shape (or some other one neither reader here has
+/// evidence for). See `configuration_root_fields` for the evidence this
+/// normalization rests on. The leading member is rewritten to `68` too: the
+/// evidenced-default-block comparator (`configuration_properties_evidence.rs`)
+/// requires every one of its `unproven_tuple_fields()` -- index 0 among them
+/// -- to be byte-identical with the reference's, and the reference's own
+/// index 0 is `"68"`.
+fn normalize_short_configuration_root_property_fields(fields: Vec<&str>) -> Option<Vec<&str>> {
+    if fields.first()?.trim() != "67" || fields.len() != 60 {
+        return Some(fields);
+    }
+    let mut normalized = Vec::with_capacity(61);
+    normalized.push("68");
+    normalized.extend(fields[1..].iter().copied());
+    normalized.push("1");
+    Some(normalized)
 }
 
 const CONFIGURATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
@@ -2692,7 +2764,15 @@ fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<V
     if object_ids.next().is_some() {
         return None;
     }
-    is_configuration_root_property_header(fields.get(1)?.trim(), &object_id).then_some(fields)
+    if !is_configuration_root_property_header(fields.get(1)?.trim(), &object_id) {
+        return None;
+    }
+    // Normalize the short `{67,...}` shape to the canonical `{68,...}` one
+    // (see `configuration_root_fields`'s doc comment for the evidence) so
+    // `parse_configuration_properties_evidenced_default_block`'s exact-arity
+    // check against the 61-field evidenced reference sees this corpus's real
+    // shape instead of always refusing it as `UnexpectedTupleArity`.
+    normalize_short_configuration_root_property_fields(fields)
 }
 
 fn is_configuration_root_property_header(field: &str, object_id: &str) -> bool {
