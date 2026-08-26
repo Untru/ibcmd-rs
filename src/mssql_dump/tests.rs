@@ -2814,21 +2814,27 @@ fn business_process_and_cct_reject_a_misordered_marker_at_each_native_role() {
 }
 
 #[test]
-fn cct_command_and_bp_template_are_exact_typed_unsupported() {
+fn cct_command_and_bp_template_stay_typed_and_redacted() {
+    // The chart of characteristic types still refuses an owned command
+    // outright. The business process no longer refuses an owned template --
+    // it reads them (`parse_business_process_child_templates`) -- so a payload
+    // that is not a child uuid is an invariant refusal there rather than an
+    // unsupported one. What has to hold for both is what this test is for: the
+    // refusal is typed, and it carries no native payload.
     let cases = [
         (
             &EXPECTED_OWNER_GRAPH_LAYOUTS[2],
             owner_graph::OwnerCollectionRole::Template,
-            "owned_template",
+            None,
         ),
         (
             &EXPECTED_OWNER_GRAPH_LAYOUTS[3],
             owner_graph::OwnerCollectionRole::Command,
-            "owned_command",
+            Some("owned_command"),
         ),
     ];
     let secret = "native-payload-must-stay-redacted";
-    for (expected, role, reference) in cases {
+    for (expected, role, unsupported_reference) in cases {
         let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
         let role_index = expected
             .family
@@ -2859,6 +2865,12 @@ fn cct_command_and_bp_template_are_exact_typed_unsupported() {
                 expected.family
             ),
         };
+        assert_ne!(diagnostic.class, MetadataSourceFailureClass::Unknown);
+        assert_ne!(diagnostic.parser_stage, "legacy_option_none");
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+        let Some(reference) = unsupported_reference else {
+            continue;
+        };
         assert_eq!(diagnostic.class, MetadataSourceFailureClass::Unsupported);
         assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
         assert_eq!(
@@ -2868,7 +2880,6 @@ fn cct_command_and_bp_template_are_exact_typed_unsupported() {
         assert_eq!(diagnostic.collection_role.as_deref(), Some(role.as_str()));
         assert_eq!(diagnostic.collection_index, Some(0));
         assert_eq!(diagnostic.offending_reference.as_deref(), Some(reference));
-        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
     }
 }
 
@@ -6564,7 +6575,7 @@ fn writes_constant_module_text_to_source_layout_when_metadata_is_present() {
     let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
     let metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},\r\n{{0}},00000000-0000-0000-0000-000000000000,0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,0}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -47250,7 +47261,7 @@ fn extracts_constant_xml_from_metadata_blob() {
     let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
     let blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},\r\n{{0}},00000000-0000-0000-0000-000000000000,0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,0}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -47557,7 +47568,7 @@ fn extracts_constant_xml_with_builtin_uuid_types() {
     ] {
         let blob = deflate_for_test(
                 format!(
-                    "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"#\",{type_uuid}}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                    "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"#\",{type_uuid}}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},\r\n{{0}},00000000-0000-0000-0000-000000000000,0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,0}}\r\n}}\r\n}}"
                 )
                 .as_bytes(),
             );
