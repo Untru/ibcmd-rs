@@ -2589,16 +2589,26 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
         let start = offset + relative_start;
         let uuid_start = start + pattern.len();
         let uuid_end = uuid_start + 36;
-        let Some(uuid) = text.get(uuid_start..uuid_end) else {
-            break;
-        };
-        if parse_non_zero_uuid(uuid).is_none()
+        // A `../id…` that is not followed by a uuid is not the end of the
+        // document, it is just not a link this rewrite owns. The 36-byte
+        // window can also land inside a multi-byte character -- `../idn0"`
+        // followed by Cyrillic link text does exactly that, and Документооборот
+        // КОРП 3.0.21.3's `CommonForms/ВводПароляСОписаниями` help page has
+        // one before two real links, which the old `break` then left
+        // unrewritten along with the whole rest of the page.
+        let uuid = text.get(uuid_start..uuid_end);
+        if uuid.is_none_or(|uuid| parse_non_zero_uuid(uuid).is_none())
             || text.as_bytes().get(uuid_end).copied() != Some(b'/')
         {
             output.push_str(&text[offset..uuid_start]);
             offset = uuid_start;
             continue;
         }
+        let Some(uuid) = uuid else {
+            output.push_str(&text[offset..uuid_start]);
+            offset = uuid_start;
+            continue;
+        };
         let Some(reference) = refs.get(uuid) else {
             output.push_str(&text[offset..uuid_end]);
             offset = uuid_end;
