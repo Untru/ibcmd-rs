@@ -3191,9 +3191,15 @@ enum TypeSortKey {
     /// behind the ordered members. Their own order is storage's, which is
     /// ascending by the family's protocol uuid in all 35 pairs observed.
     Family,
-    /// Nothing in the corpus places this member relative to any other: a
-    /// builtin outside the bounds table, or a type id the configuration
-    /// resolves to no name at all and the platform echoes verbatim.
+    /// A member storage wrote as a literal `Type` whose QName the bounds table
+    /// does not carry: a configuration type storage spelled by QName rather
+    /// than by uuid, an empty `Type`, or a builtin no observed list places.
+    /// It has no key of its own, but it does have a group: storage's own
+    /// `Type` group, which it shares with every builtin.
+    StoredLiteral,
+    /// Nothing in the corpus places this member relative to any other: a type
+    /// id the configuration resolves to no name at all and the platform echoes
+    /// verbatim.
     Unevidenced,
 }
 
@@ -3267,7 +3273,7 @@ pub enum TypeRunMember<'a> {
     /// A reference family -- what storage spells as a `TypeSet`.
     Family,
     /// A member nothing observed places: a type id the configuration resolves
-    /// to no name, or a literal QName the bounds table does not carry.
+    /// to no name and the platform echoes verbatim.
     Unevidenced,
 }
 
@@ -3283,7 +3289,7 @@ pub fn evidenced_type_run_permutation(members: &[TypeRunMember<'_>]) -> Option<V
         .iter()
         .map(|member| match member {
             TypeRunMember::Builtin(qname) => builtin_type_sort_bounds(qname)
-                .map_or(TypeSortKey::Unevidenced, |(lower, upper)| {
+                .map_or(TypeSortKey::StoredLiteral, |(lower, upper)| {
                     TypeSortKey::Builtin { lower, upper }
                 }),
             TypeRunMember::Reference(uuid) => TypeSortKey::Reference((*uuid).to_ascii_lowercase()),
@@ -3296,11 +3302,24 @@ pub fn evidenced_type_run_permutation(members: &[TypeRunMember<'_>]) -> Option<V
 
 fn evidenced_type_sort_order(run: &[TypeSortKey]) -> Result<Vec<usize>, DcsInnerSchemaError> {
     let builtins: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Builtin { .. }));
+    let literals: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::StoredLiteral));
     let references: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Reference(_)));
     let families: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Family));
     let unevidenced: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Unevidenced));
     let identity = || Ok((0..run.len()).collect());
-    if builtins.is_empty() {
+    // Storage writes a type list in two groups: everything it spells as a
+    // literal `Type` first, everything it spells as a `TypeId` after. Only a
+    // run holding both groups lost anything -- inside one group storage's own
+    // order is already the platform's, which is why a run of builtins alone
+    // and a run of references alone both come out byte-exact untouched. A run
+    // that mixes a builtin with a configuration type storage itself spelled by
+    // QName is still one group, so it is left exactly as storage had it: DO
+    // 3.0.21.3 `Reports/ИзменениеУчетныхЗаписей/Templates/Макет` writes
+    // `CatalogRef.ВнешниеПользователи`, `xs:string`,
+    // `CatalogRef.Пользователи` in that order in storage and in that same
+    // order in the platform's own source, and its two other mixed literal runs
+    // agree.
+    if builtins.is_empty() && literals.is_empty() {
         return identity();
     }
     if references.is_empty() && families.is_empty() && unevidenced.is_empty() {
@@ -3310,6 +3329,12 @@ fn evidenced_type_sort_order(run: &[TypeSortKey]) -> Result<Vec<usize>, DcsInner
         return unsupported(
             "a valueType mixes a platform builtin with a type id the configuration resolves \
              to no name, and nothing observed places either before the other",
+        );
+    }
+    if !literals.is_empty() {
+        return unsupported(
+            "a valueType mixes a type id with a literal type the bounds table does not carry, \
+             and nothing observed places either before the other",
         );
     }
     // Stable merge: a builtin goes ahead of the first reference it is
@@ -4031,13 +4056,15 @@ fn rewrite_tokens(
                         }
                     }
                     if let Some(element_start) = state.literal_type_start {
-                        // A builtin the bounds table does not carry places
-                        // itself nowhere, so a run holding one is refused
-                        // rather than ordered on a guess.
+                        // A literal `Type` the bounds table does not carry has
+                        // no key of its own, but it still stands in storage's
+                        // `Type` group; only a run that also holds a `TypeId`
+                        // needs a key from it, and such a run is refused rather
+                        // than ordered on a guess.
                         let key = resolved_type_qname
                             .as_deref()
                             .and_then(builtin_type_sort_bounds)
-                            .map_or(TypeSortKey::Unevidenced, |(lower, upper)| {
+                            .map_or(TypeSortKey::StoredLiteral, |(lower, upper)| {
                                 TypeSortKey::Builtin { lower, upper }
                             });
                         if let Some(parent) = frames.last_mut() {
@@ -4492,12 +4519,13 @@ fn rewrite_tokens(
                     source_scopes.pop();
                     if literal_type {
                         // A `Type` with no content names no type at all, so
-                        // nothing places it among its siblings.
+                        // nothing keys it among its siblings -- but storage
+                        // still wrote it in its `Type` group.
                         if let Some(parent) = frames.last_mut() {
                             parent.type_run.push(TypeRunEntry {
                                 start: element_start,
                                 end: out.len(),
-                                key: TypeSortKey::Unevidenced,
+                                key: TypeSortKey::StoredLiteral,
                             });
                         }
                     }
@@ -4853,9 +4881,48 @@ mod type_run_order_tests {
         );
     }
 
-    /// Fail-closed floor: a builtin the bounds table does not carry, and a
-    /// type id the configuration resolves to no name, are both unplaced, so a
-    /// run mixing either with anything else is refused.
+    /// Storage's grouping loses nothing inside one group. A run of literal
+    /// `Type` siblings that mixes a builtin with configuration types storage
+    /// itself spelled by QName is one group, so its storage order is already
+    /// the platform's and nothing moves.
+    ///
+    /// Evidence: DO 3.0.21.3,
+    /// `Reports/ИзменениеУчетныхЗаписей/Templates/Макет`. Storage writes
+    /// `CatalogRef.ВнешниеПользователи`, `xs:string`,
+    /// `CatalogRef.Пользователи`; the platform's own source writes the same
+    /// three in the same order, and the template's two other mixed literal
+    /// runs agree.
+    #[test]
+    fn a_literal_only_run_is_left_exactly_as_storage_had_it() {
+        assert_eq!(
+            rewritten(&[
+                ("E", TypeSortKey::StoredLiteral),
+                ("s", builtin("xs:string")),
+                ("P", TypeSortKey::StoredLiteral),
+            ])
+            .as_deref(),
+            Ok("E.s.P")
+        );
+    }
+
+    /// Fail-closed floor: a literal type the bounds table does not carry has
+    /// no key, so once a `TypeId` sibling puts it in the group storage did
+    /// reorder, the run is refused instead of ordered on a guess.
+    #[test]
+    fn a_literal_beside_a_type_id_is_refused() {
+        let error = rewritten(&[
+            ("P", TypeSortKey::StoredLiteral),
+            ("R", reference("f455b6b4-582e-4024-adba-c408ea60e8c6")),
+        ])
+        .expect_err("a literal with no key cannot be merged against a type id");
+        assert!(
+            error.contains("the bounds table does not carry"),
+            "the refusal must say the literal has no key: {error}"
+        );
+    }
+
+    /// Fail-closed floor: a type id the configuration resolves to no name is
+    /// unplaced, so a run mixing it with an ordered member is refused.
     #[test]
     fn an_unevidenced_member_beside_a_builtin_is_refused() {
         let error = rewritten(&[("s", builtin("xs:string")), ("O", TypeSortKey::Unevidenced)])
