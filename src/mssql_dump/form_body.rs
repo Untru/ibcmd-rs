@@ -10282,10 +10282,16 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             input_hint
         };
+    // The extended option bag does not move when the record carries the
+    // conditional-appearance prefix -- the shift is on the record, and the bag
+    // is found by scanning the record's tail for its own declared revision, not
+    // by an absolute slot. The audit therefore admits the prefixed record at
+    // its own length, `59 + offset`, instead of the unprefixed length alone;
+    // spelling only the unprefixed one left every prefixed `InputField` with no
+    // `<TypeLink>` at all, which is the sole property this binding feeds.
     let audited_input_field_options = (tag == "InputField"
         && wrapper == "37"
-        && fields.len() == 59
-        && input_field_top_level_offset == 0)
+        && fields.len() == 59 + input_field_top_level_offset)
         .then_some(input_field_extended_options.as_deref())
         .flatten();
     let tooltip = parse_form_child_item_tooltip(
