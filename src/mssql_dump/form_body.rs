@@ -9467,6 +9467,18 @@ fn parse_form_child_item_with_metadata_owners(
                 .then(|| split_1c_braced_fields(options_text, 0))
                 .flatten()
         })
+        // Normalized to the canonical revision here, exactly as
+        // `form_input_field_extended_options` already normalizes the same
+        // block for the value readers.  `FormFieldSchema` addresses the block
+        // by its leading member and length, so a record carrying the short
+        // `32`/62 revision of the `InputField` block was refused outright --
+        // and the refusal does not cost one property.  Every reader gated on
+        // this schema goes blind at once: `Enabled`, `TitleLocation`, `Mask`,
+        // `TextColor`, `ToolTipRepresentation`, the geometry pair, the
+        // spreadsheet field's scroll bars and the field's whole `<Events>`
+        // collection, while `parse_form_child_item_title`/`_tooltip` fall back
+        // to a positional guess.
+        .map(|options| normalize_form_property_bag_revision(&options).unwrap_or(options))
         .and_then(|options| {
             FormFieldSchema::from_raw_layout(
                 wrapper,

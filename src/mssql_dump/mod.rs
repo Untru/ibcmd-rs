@@ -7497,12 +7497,15 @@ fn parse_information_register_command_picture_descriptor(
     }
 }
 
+/// A register command's picture uuid, which is the same platform table every
+/// other owner reads.
+///
+/// The two uuids this table used to carry ahead of the common one are both in
+/// the common table now -- `caf2e58b-…` was added there earlier and
+/// `46598f81-…` arrives with the nineteen read off the ERP УХ bodies -- and a
+/// second copy of an entry is a second place for it to drift.
 fn information_register_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
-    match uuid.to_ascii_lowercase().as_str() {
-        "46598f81-5f95-4485-9b33-bfe4fd1276d0" => Some("StdPicture.SpreadsheetShowHeaders"),
-        "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb" => Some("StdPicture.Setting"),
-        _ => common_command_standard_picture_name(uuid),
-    }
+    common_command_standard_picture_name(uuid)
 }
 
 fn parse_information_register_command_shortcut(value: &str) -> Option<Option<String>> {
@@ -30769,6 +30772,31 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "fe740df0-d828-4241-a12f-7414e12302e8" => Some("StdPicture.QueryWizardTableParameters"), // 1
         "01743054-d102-4e7c-bf15-5ed7fd84441b" => Some("StdPicture.LevelDown"), // 1
         "0bac63da-5b4e-48af-b593-7c5d29663e83" => Some("StdPicture.FilterByType"), // 1
+        // The last nineteen platform picture uuids the reference trees name and
+        // this table did not carry.  Each was read off the ERP УХ 3.2.12.6
+        // native bodies directly: at the very position where our export writes
+        // the dangling `0:<uuid>` spelling the platform writes the name below,
+        // over 58 aligned occurrences in 41 form bodies, and no uuid is ever
+        // seen against two different names.
+        "73af51dd-6cda-48be-a093-5a7161c60c77" => Some("StdPicture.FilterAndSort"), // 19
+        "ccb3d8f7-6da2-4c65-aba6-17b2ffbba78c" => Some("StdPicture.ChartOfAccounts"), // 9
+        "835db646-1531-494b-b7c1-3239b0080bcb" => Some("StdPicture.Parameters"),    // 8
+        "46598f81-5f95-4485-9b33-bfe4fd1276d0" => Some("StdPicture.SpreadsheetShowHeaders"), // 3
+        "52b637e5-f95f-4c70-9a72-2a4b5a9df449" => Some("StdPicture.NestedTable"),   // 2
+        "584b470d-ba34-4b25-9620-8de4066ffeaa" => Some("StdPicture.Previous"),      // 2
+        "fa67cb81-8d56-4534-90bd-b62fb0dbf5f0" => Some("StdPicture.GanttChart"),    // 2
+        "f3b8f300-5a54-4eea-8136-5798413a479c" => Some("StdPicture.CalculationRegister"), // 2
+        "92e24ce1-3917-4ee4-bbde-adce48b6c96b" => Some("StdPicture.AppearanceUpInclineArrowGray"), // 1
+        "20b82e97-5fcc-4c68-8e0d-d01060847520" => Some("StdPicture.AppearanceRightArrowGray"), // 1
+        "a30ab2ef-6076-457d-9293-44edc7c6767e" => Some("StdPicture.AppearanceDownInclineArrowGray"), // 1
+        "ba592483-bc90-4e26-ba4d-2126359c6529" => Some("StdPicture.AppearanceBoxesFilled"), // 1
+        "3689585c-a3e2-45d0-a302-caeb31b78835" => Some("StdPicture.AppearanceStarFilled"),  // 1
+        "d66b6f73-53b8-49b9-8efc-33c54aa06e3f" => Some("StdPicture.Notify"),                // 1
+        "702a9e16-0bb6-4efb-af11-10faf1e6ee87" => Some("StdPicture.SpreadsheetShowGroups"), // 1
+        "e96de06b-fa83-48cf-b033-190a249855c9" => Some("StdPicture.GraphicalSchema"),       // 1
+        "a594c8a1-7218-420a-860f-7b493c5e65c4" => Some("StdPicture.Sort"),                  // 1
+        "093dd4ed-e03c-4fc6-a95a-01f51379cccf" => Some("StdPicture.ActivateTask"),          // 1
+        "26518e18-e364-475a-8026-e41134658b2a" => Some("StdPicture.SpreadsheetInsertPageBreak"), // 1
         _ => None,
     }
 }

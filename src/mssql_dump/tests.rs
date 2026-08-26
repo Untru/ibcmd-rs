@@ -44216,30 +44216,17 @@ fn parses_detailed_information_register_command_picture_and_parameter_types() {
         Some("StdPicture.Print")
     );
     assert!(print_properties.picture_load_transparent);
-    // `common_uuid` is the picture uuid's presence in
-    // `common_command_standard_picture_name`'s own evidence-backed table
-    // (mod.rs:27969): still absent for SpreadsheetShowHeaders, but
-    // "caf2e58b-..." (StdPicture.Setting) has since been added there too
-    // (mod.rs:28069) — it's resolved by both the narrower
-    // `information_register_command_standard_picture_name` (mod.rs:6173)
-    // and the common table now, so the old blanket "not in the common
-    // table" precondition is stale for this entry.
-    for (uuid, expected, common_uuid) in [
+    // Both uuids are in the common table now, so a register command resolves
+    // them through the one table every other picture owner reads rather than
+    // through a private copy of two entries.
+    for (uuid, expected) in [
         (
             "46598f81-5f95-4485-9b33-bfe4fd1276d0",
             "StdPicture.SpreadsheetShowHeaders",
-            false,
         ),
-        (
-            "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb",
-            "StdPicture.Setting",
-            true,
-        ),
+        ("caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb", "StdPicture.Setting"),
     ] {
-        assert_eq!(
-            common_command_standard_picture_name(uuid),
-            common_uuid.then_some(expected)
-        );
+        assert_eq!(common_command_standard_picture_name(uuid), Some(expected));
         let descriptor = format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,1,0,\"\"}}");
         let properties = parse_command(&descriptor, &BTreeMap::new()).unwrap();
         assert_eq!(properties.picture_ref.as_deref(), Some(expected));
