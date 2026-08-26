@@ -3315,12 +3315,58 @@ pub fn evidenced_type_run_permutation(members: &[TypeRunMember<'_>]) -> Option<V
     evidenced_type_sort_order(&keys).ok()
 }
 
+/// The permutation for a run, with the members the source spells `TypeId`
+/// lifted out of the ordering question and put behind the rest.
+///
+/// A type id the configuration resolves to no name is spelled `<v8:TypeId>`
+/// in the source exactly as in storage, and both put every `TypeId` behind
+/// every `Type`. That is what storage's own grouping is, and the platform's
+/// source keeps it: across the five stand configurations every one of the
+/// three runs that mixes the two spellings --
+/// `Reports/КонтрольИсполненияОбязательствСПоставщиком/Templates/ОсновнаяСхемаКомпоновкиДанных`
+/// twice and `DataProcessors/СопоставлениеПланФактОперацийМСФО/Forms/Форма`
+/// once, both UH 3.2.12.6 -- writes every `v8:Type` before every
+/// `v8:TypeId`, and no run anywhere writes one the other way. So such a
+/// member needs no key of its own: it stands behind everything the source
+/// spells `Type`, in storage's own order, and the remaining members are
+/// ordered without it.
+///
+/// Where it stands relative to a `TypeSet` nothing observed says. That pair
+/// is refused -- but only when storage actually puts the family behind it,
+/// since otherwise both candidate rules agree and nothing has to be decided.
 fn evidenced_type_sort_order(run: &[TypeSortKey]) -> Result<Vec<usize>, DcsInnerSchemaError> {
+    let unevidenced: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Unevidenced));
+    if unevidenced.is_empty() {
+        return evidenced_named_type_sort_order(run);
+    }
+    let families: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Family));
+    if let (Some(first), Some(last)) = (unevidenced.first(), families.last())
+        && first < last
+    {
+        return unsupported(
+            "a valueType puts a reference family behind a type id the configuration resolves \
+             to no name, and nothing observed places either before the other",
+        );
+    }
+    let named: Vec<usize> = (0..run.len())
+        .filter(|index| !matches!(run[*index], TypeSortKey::Unevidenced))
+        .collect();
+    let keys: Vec<TypeSortKey> = named.iter().map(|index| run[*index].clone()).collect();
+    let mut ordered: Vec<usize> = evidenced_named_type_sort_order(&keys)?
+        .into_iter()
+        .map(|slot| named[slot])
+        .collect();
+    ordered.extend(unevidenced);
+    Ok(ordered)
+}
+
+/// The permutation for a run none of whose members the source spells
+/// `TypeId`.
+fn evidenced_named_type_sort_order(run: &[TypeSortKey]) -> Result<Vec<usize>, DcsInnerSchemaError> {
     let builtins: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Builtin { .. }));
     let literals: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::StoredLiteral));
     let references: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Reference(_)));
     let families: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Family));
-    let unevidenced: Vec<usize> = indices_of(run, |key| matches!(key, TypeSortKey::Unevidenced));
     let identity = || Ok((0..run.len()).collect());
     // Storage writes a type list in two groups: everything it spells as a
     // literal `Type` first, everything it spells as a `TypeId` after. Only a
@@ -3337,14 +3383,8 @@ fn evidenced_type_sort_order(run: &[TypeSortKey]) -> Result<Vec<usize>, DcsInner
     if builtins.is_empty() && literals.is_empty() {
         return identity();
     }
-    if references.is_empty() && families.is_empty() && unevidenced.is_empty() {
+    if references.is_empty() && families.is_empty() {
         return identity();
-    }
-    if !unevidenced.is_empty() {
-        return unsupported(
-            "a valueType mixes a platform builtin with a type id the configuration resolves \
-             to no name, and nothing observed places either before the other",
-        );
     }
     if !literals.is_empty() {
         return unsupported(
@@ -3437,6 +3477,7 @@ const TABLE_CELL_APPEARANCE_EXPANDED_NAME: &str =
 const DATA_UI_STYLE_NAMESPACE_URI: &str = "http://v8.1c.ru/8.1/data/ui/style";
 const XSI_TYPE_EXPANDED_NAME: &str = "{http://www.w3.org/2001/XMLSchema-instance}type";
 const DATA_UI_COLOR_EXPANDED_NAME: &str = "{http://v8.1c.ru/8.1/data/ui}Color";
+const DATA_CORE_TYPE_EXPANDED_NAME: &str = "{http://v8.1c.ru/8.1/data/core}Type";
 
 /// Expands a prefixed attribute name against the scopes in effect. An
 /// unprefixed attribute is in no namespace, which is never what a caller
@@ -4047,6 +4088,25 @@ fn rewrite_tokens(
                                 let trimmed_len =
                                     out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
                                 out.truncate(trimmed_len);
+                            } else if out[state.start_tag_end_offset..].is_empty() {
+                                // Nothing at all was written between the two
+                                // tags -- either storage spelled the element
+                                // as an empty open/close pair, or an omitted
+                                // child left it that way. The platform never
+                                // writes such a pair: across 865 of its own
+                                // data-composition templates (DO 3.0.21.3,
+                                // BSP demo 3.1.12.297, UT 11.5.27.75) there
+                                // is not one, and a childless element is
+                                // always self-closed. So the opening tag's
+                                // own `>` becomes `/>` and no closing tag
+                                // follows. UH 3.2.12.6
+                                // `Reports/СправкаРасчетАмортизации/Templates/ОсновнаяСхемаКомпоновкиДанных`
+                                // is the case that shows both halves: ten
+                                // `dcsat:tableCell`s whose only child is an
+                                // empty `dcsat:appearance` are written
+                                // `<dcsat:tableCell/>`.
+                                out.truncate(state.start_tag_end_offset - 1);
+                                out.push_str("/>");
                             } else {
                                 if mode == RewriteMode::PrimaryDocument
                                     && name.split_once(':').map_or(name, |(_, local)| local)
@@ -4500,8 +4560,24 @@ fn rewrite_tokens(
                 // Evidenced only for the bare (unprefixed, DCS schema
                 // default-namespace) `appearance`/`inputParameters` shape
                 // with no attributes -- see `RewriteState::omit_if_empty`.
-                let omit_if_empty = element_prefix.is_empty()
-                    && matches!(local, "appearance" | "inputParameters")
+                // The area-template `appearance` is the same placeholder as
+                // the schema-namespace one and is dropped by the same rule:
+                // storage keeps an empty one, and across UH 3.2.12.6, UT
+                // 11.5.27.75, BSP demo 3.1.12.297 and DO 3.0.21.3 the
+                // platform's own source never writes a `dcsat:appearance`
+                // that is empty -- in either spelling, self-closed or as an
+                // open/close pair.
+                // A `nestedSchema` carries its own `settingsVariant` inside
+                // the primary document, so the settings writer's own
+                // `outputParameters` rule (`DcsEmptyElementAction::OmitIfEmpty`
+                // in `src/mssql_dump/dcs.rs`) has to hold here as well: it is
+                // the same element in the same namespace, kept as an empty
+                // placeholder by storage and written by no platform source.
+                let omittable_empty = (element_prefix.is_empty()
+                    && matches!(local, "appearance" | "inputParameters"))
+                    || (uri == DCS_AREA_TEMPLATE_NAMESPACE_URI && local == "appearance")
+                    || (uri == policy.settings_namespace_uri() && local == "outputParameters");
+                let omit_if_empty = omittable_empty
                     && start
                         .attributes
                         .iter()
@@ -4560,6 +4636,29 @@ fn rewrite_tokens(
                     state.text = if uri == policy.data_core_namespace_uri()
                         && (local == "Type" || local == "TypeSet")
                     {
+                        RewriteTextKind::TypeQName
+                    } else if start
+                        .attributes
+                        .iter()
+                        .filter(|(key, _)| *key != "xmlns" && !key.starts_with("xmlns:"))
+                        .any(|(key, value)| {
+                            expanded_attribute_name(&scopes, key).as_deref()
+                                == Some(XSI_TYPE_EXPANDED_NAME)
+                                && expanded_qname(&scopes, value).as_deref()
+                                    == Some(DATA_CORE_TYPE_EXPANDED_NAME)
+                        })
+                    {
+                        // An element declared to *be* a `{data/core}Type`
+                        // holds a type QName, exactly as a `v8:Type` element
+                        // does, and its prefix has to move with the
+                        // declaration this rewrite renumbered. Copying the
+                        // storage spelling through left the prefix unbound:
+                        // UH 3.2.12.6
+                        // `Reports/РегистрыНалоговогоУчета/Templates/РегистрНезавершенноеПроизводство`
+                        // declared `xmlns:d3p1="http://v8.1c.ru/8.2/data/types"`
+                        // on the element and then named `d4p2:Undefined`
+                        // inside it. The platform writes `d3p1:Undefined` --
+                        // the prefix it just declared.
                         RewriteTextKind::TypeQName
                     } else if uri == DCS_CORE_NAMESPACE_URI
                         && local == "value"
@@ -4937,15 +5036,49 @@ mod type_run_order_tests {
         );
     }
 
-    /// Fail-closed floor: a type id the configuration resolves to no name is
-    /// unplaced, so a run mixing it with an ordered member is refused.
+    /// A type id the configuration resolves to no name stays a `TypeId` in
+    /// the source, and every `TypeId` stands behind every `Type`, so it needs
+    /// no key: it goes to the back and the rest is ordered without it.
+    ///
+    /// Evidence: all three runs in the corpus that mix the two spellings --
+    /// UH 3.2.12.6
+    /// `Reports/КонтрольИсполненияОбязательствСПоставщиком/Templates/ОсновнаяСхемаКомпоновкиДанных`
+    /// twice and `DataProcessors/СопоставлениеПланФактОперацийМСФО/Forms/Форма`
+    /// once -- write every `v8:Type` first, and none writes one the other
+    /// way.
     #[test]
-    fn an_unevidenced_member_beside_a_builtin_is_refused() {
-        let error = rewritten(&[("s", builtin("xs:string")), ("O", TypeSortKey::Unevidenced)])
-            .expect_err("an unplaced member cannot be ordered");
+    fn an_unresolved_type_id_falls_behind_every_named_member() {
+        assert_eq!(
+            rewritten(&[
+                ("O", TypeSortKey::Unevidenced),
+                ("s", builtin("xs:string")),
+                ("V", reference("3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab")),
+            ])
+            .as_deref(),
+            Ok("V.s.O")
+        );
+    }
+
+    /// Fail-closed floor: where a reference family stands relative to an
+    /// unresolved type id nothing observed says, so a run whose storage order
+    /// would have to decide it is refused.
+    #[test]
+    fn a_family_behind_an_unresolved_type_id_is_refused() {
+        let error = rewritten(&[("O", TypeSortKey::Unevidenced), ("F", TypeSortKey::Family)])
+            .expect_err("nothing places a family beside an unresolved type id");
         assert!(
-            error.contains("resolves to no name"),
-            "the refusal must say the member is unplaced: {error}"
+            error.contains("reference family behind a type id"),
+            "the refusal must name the undecided pair: {error}"
+        );
+    }
+
+    /// The same pair in the other storage order decides nothing, because both
+    /// candidate rules agree there, so it is left as it stands.
+    #[test]
+    fn a_family_ahead_of_an_unresolved_type_id_is_left_alone() {
+        assert_eq!(
+            rewritten(&[("F", TypeSortKey::Family), ("O", TypeSortKey::Unevidenced)]).as_deref(),
+            Ok("F.O")
         );
     }
 
