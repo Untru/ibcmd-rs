@@ -1,7 +1,7 @@
 # Dynamic-list `~`: the localized twin the field map declares, 20260826
 
 Status: root cause and partial fix for the `~` marker on `<Field>` and
-`<DataPath>` in ERP УХ form bodies. Measured over every dynamic-list record
+`<DataPath>` in ERP УХ form bodies. Commits `71775f3`, `9edd076`, `7290326`. Measured over every dynamic-list record
 `cf export` walks on the stand ($D = `/Users/untru/Documents/ChatGPT/ibcmd-stand`),
 all eight configurations.
 
@@ -126,16 +126,21 @@ main table's, in both spellings.
 
 Exact-set difference against `$D/baselines/8cc12dc/<key>.parity.json`:
 
-| key       | было  | стало | прибавилось | сломано | лишних |
-|-----------|------:|------:|------------:|--------:|-------:|
-| `ws`      |    29 |    29 |           0 |       0 |      0 |
-| `wms`     |   226 |   226 |           0 |       0 |      0 |
-| `mdm`     |   160 |   160 |           0 |       0 |      0 |
-| `sslbase` | 9 614 | 9 614 |           0 |       0 |      0 |
-| `ssl`     |12 692 |12 692 |           0 |       0 |      0 |
-| `do`      |25 201 |25 205 |           4 |       0 |      0 |
-| `ut`      |50 896 |50 896 |           0 |       0 |      0 |
-| `uh`      |138 467|   TBD |         TBD |     TBD |      0 |
+| key       |    было |    стало | прибавилось | сломано | лишних |
+|-----------|--------:|---------:|------------:|--------:|-------:|
+| `ws`      |      29 |       29 |           0 |       0 |      0 |
+| `wms`     |     226 |      226 |           0 |       0 |      0 |
+| `mdm`     |     160 |      160 |           0 |       0 |      0 |
+| `sslbase` |   9 614 |    9 614 |           0 |       0 |      0 |
+| `ssl`     |  12 692 |   12 692 |           0 |       0 |      0 |
+| `do`      |  25 201 |   25 210 |           9 |       0 |      0 |
+| `ut`      |  50 896 |   50 896 |           0 |       0 |      0 |
+| `uh`      | 138 467 |  138 494 |          27 |       0 |      0 |
+
+Marker by marker on ERP УХ, over the 12 473 form bodies whose `<Field>` /
+`<DataPath>` / `<RowPictureDataPath>` sequence lines up with native: 945 → 1 052
+markers agree, 89 → 40 disagree. Form bodies whose *only* difference from
+native is this marker: 33 → 12.
 
 Model agreement per dynamic-list record, before and after: `uh` 4 300 → 4 342
 of 4 432, `do` 808 → 812 of 813, `ut` 1 931 of 1 936 unchanged, `ssl` and
@@ -143,37 +148,46 @@ of 4 432, `do` 808 → 812 of 813, `ut` 1 931 of 1 936 unchanged, `ssl` and
 
 ## What is left
 
-90 of the 4 432 ERP УХ lists still disagree, in three named residues.
+40 marker positions on 21 ERP УХ form bodies still disagree, in two named
+residues plus the query reader's own.
 
-1. **Property-blind standard attributes** (~10 lists plus their item data
-   paths). `form_dynamic_list_std_attribute_pairs` admits a family's whole
-   standard-attribute table regardless of what the object declares, so
-   `Code` stays resolvable on `Catalog.КатегорииЗакупок` (`CodeLength` 0),
-   `Description` on `Catalog.КодыВидовРасхода` (`DescriptionLength` 0),
-   `Owner` on `Catalog.ИнтервалыЗадолженностей` (empty `<Owners/>`),
-   `IsFolder` on `Catalog.ШтатноеРасписание` (`HierarchyOfItems`), `Period`
-   on a non-periodical information register and `Recorder` on an independent
-   one — every one of which the platform marks. Reading the declared
-   properties needs a per-family metadata index the form decoder does not
-   have yet.
+1. **Property-blind standard attributes** — 7 positions on 6 form bodies.
+   `form_dynamic_list_std_attribute_pairs` admits a family's whole
+   standard-attribute table regardless of what the object declares, so on an
+   auto list `Code` stays resolvable on `Catalog.КатегорииЗакупок`
+   (`CodeLength` 0) and `Catalog.УдалитьПанелиОтчетов`, `Description` on
+   `Catalog.КодыВидовРасхода` (`DescriptionLength` 0), `Owner` on
+   `Catalog.ИнтервалыЗадолженностей` and
+   `Catalog.РазделыИнвестиционныхПрограмм` (empty `<Owners/>`), and `Period`
+   on the non-periodical `InformationRegister.НоменклатураАккредитованыхПоставщиков`
+   — every one of which the platform marks, two of them in the doubled
+   spelling. Reading the declared properties needs a per-family metadata index
+   the form decoder does not have yet.
 
-2. **Common attributes admitted everywhere.** The universe admits every
-   `CommonAttribute.<name>` in the configuration, because the object-reference
-   index carries the common attributes but not their `<Content>`. ERP УХ
-   marks `~Список.КлассВНА` on `Catalog.ГруппыВНАМСФО`, whose content list
-   does not include that table (`AutoUse` = `DontUse`).
+2. **Common attributes admitted everywhere** — 5 positions on 5 form bodies.
+   The universe admits every `CommonAttribute.<name>` in the configuration,
+   because the object-reference index carries the common attributes but not
+   their `<Content>`. ERP УХ marks `~Список.КлассВНА` on
+   `Catalog.ГруппыВНАМСФО`, `Document.ИзменениеПараметровВНАМСФО` and
+   `Document.ВводНачальныхОстатковВНАМСФО`, and `~Список.НСИ_НеАктивный` on
+   `Catalog.ПроизвольныйКлассификаторУХ`: none of those tables is in the
+   common attribute's content list, whose `AutoUse` is `DontUse`.
 
-3. **The same pair remembered twice.** `Catalogs/Лоты` and `Documents/Лот`
-   remember `Ref`/`Ссылка` and `DeletionMark`/`ПометкаУдаления` under two
-   different field-map ids each; the platform resolves one and marks the
-   other, so resolution there is by the id's position in the rebuilt
-   available-field collection, not by name. Reconstructing that numbering is
-   unattempted — the model writes both plain and is wrong on one of the two.
+Outside the marker positions, one shape residue is worth naming.
+`Catalogs/Лоты` and `Documents/Лот` remember `Ref`/`Ссылка` and
+`DeletionMark`/`ПометкаУдаления` under **two different field-map ids each**;
+the platform resolves one of each pair and marks the other, writing both a
+plain `Список.Ref` and a doubled `~Список.Ref~Список.Ссылка` in the same
+`<UseAlways>` block. Resolution there is by the id's position in the rebuilt
+available-field collection, not by name, so the reader emits one entry where
+the platform emits two. Reconstructing that numbering is unattempted.
 
-The rest is the pre-existing residue of the query reader — the
-`Reports/РегламентированныйОтчетАлко*` templated queries, 74 lists on which
-the platform marks a field the query reader resolves — which this package
-does not touch.
+The rest is the pre-existing residue of the query reader: nine data paths on
+`DataProcessors/ЛичныйКабинетПоставщика/Forms/ПретензииПоставщика` and eleven
+on `InformationRegisters/ОповещенияПользователей/Forms/ФормаСписка`, whose
+queries the reader resolves where the platform does not, and two lone
+over-marks (`Documents/ПлановаяКалькуляция`, `Documents/НаработкаОбъектовЭксплуатации`).
+None of it is touched here.
 
 ## Reproduction
 
