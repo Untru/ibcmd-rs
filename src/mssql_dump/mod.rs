@@ -30405,6 +30405,33 @@ fn parse_common_command_picture_value(
         if ref_fields.first()?.trim() == "-16" {
             return Some((Some("StdPicture.ZoomIn".to_string()), load_transparent));
         }
+        // The last two codes the reference trees observe and this table did not
+        // carry.  Census over all 12 895 ERP УХ 3.2.12.6 form layouts and all
+        // 1 738 Документооборот КОРП 3.0.21.3 ones, pairing each layout's
+        // one-member negative reference descriptors against the
+        // `StdPicture.*` names the native body of the same form writes and
+        // subtracting the codes this table already spells: exactly two codes
+        // are left unspelled anywhere, `-6` in 3 records and `-200` in 6, and
+        // exactly two names are left unexplained, `StdPicture.
+        // InputFieldCalculator` and `StdPicture.Clear`, each alone with its
+        // code in every form that carries it and never seen beside the other.
+        // `-6` also has a second, independent authority inside this crate:
+        // `spreadsheet_standard_picture_ref` already writes it for
+        // `StdPicture.InputFieldCalculator` on the packing side.
+        //
+        // `-200` is off the ordinal run the codes above form, which is why it
+        // is spelled out rather than interpolated: nothing between `-17` and
+        // `-199` occurs in any reference tree, so the run says nothing about
+        // what those codes would mean.
+        if ref_fields.first()?.trim() == "-6" {
+            return Some((
+                Some("StdPicture.InputFieldCalculator".to_string()),
+                load_transparent,
+            ));
+        }
+        if ref_fields.first()?.trim() == "-200" {
+            return Some((Some("StdPicture.Clear".to_string()), load_transparent));
+        }
         if ref_fields.first()?.trim() == "0" {
             // Same bare-index reference the register table admits; reading past
             // the end of a one-element reference used to abort the whole
