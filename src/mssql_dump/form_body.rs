@@ -13663,8 +13663,24 @@ pub(super) fn parse_form_usual_group_title_font_xml(
 pub(super) fn parse_form_usual_group_extended_options(
     fields: &[&str],
 ) -> Option<FormUsualGroupExtendedOptions> {
-    let options =
+    let raw_options =
         split_1c_braced_fields(fields.get(FormUsualGroupSchema::OPTIONS_SLOT)?.trim(), 0)?;
+    // The compact `28` bag is the wide `29` bag minus its final member, member
+    // for member -- the shape `form_property_bag_canonical_revision` already
+    // states for this pair. It used to be read by an arm of its own that
+    // answered three properties and `None` for the other twenty, so a group
+    // carrying it lost `HorizontalStretch`, `VerticalAlign`, `VerticalSpacing`,
+    // `ThroughAlign`, `United`, `ReadOnly`, `EnableContentChange`,
+    // `ChildItemsWidth`, `CurrentRowUse` and the rest outright. Padding the one
+    // member it does not carry and reading it as the revision it truncates
+    // gives every one of them back at its own slot; only `Behavior`, which the
+    // wide bag keeps in exactly the padded member, still needs the compact
+    // reading.
+    let compact = raw_options.len() == 28 && raw_options.first().map(|f| f.trim()) == Some("28");
+    let normalized = compact
+        .then(|| normalize_form_property_bag_revision(&raw_options))
+        .flatten();
+    let options = normalized.unwrap_or(raw_options);
     match options.first()?.trim() {
         "29" => {
             let schema = FormUsualGroupSchema::from_raw_layout(
@@ -13677,7 +13693,11 @@ pub(super) fn parse_form_usual_group_extended_options(
             let properties = schema.properties(fields, &options);
             Some(FormUsualGroupExtendedOptions {
                 group: parse_form_usual_group_property_bag_group(&options),
-                behavior: parse_form_usual_group_property_bag_behavior(&options),
+                behavior: if compact {
+                    parse_form_usual_group_compact_bag_behavior(&options)
+                } else {
+                    parse_form_usual_group_property_bag_behavior(&options)
+                },
                 representation: parse_form_usual_group_property_bag_representation(&options),
                 horizontal_stretch: parse_form_usual_group_horizontal_stretch(fields),
                 enabled: properties.enabled(),
@@ -17174,6 +17194,7 @@ fn form_item_record_canonical_revision(
 fn form_property_bag_canonical_revision(lead: &str, len: usize) -> Option<(&'static str, usize)> {
     match lead {
         "32" if len == 62 => Some(("36", 4)),
+        "28" if len == 28 => Some(("29", 1)),
         _ => None,
     }
 }
