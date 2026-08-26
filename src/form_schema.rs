@@ -204,6 +204,10 @@ pub(crate) fn form_extended_button_type_slot(field_count: usize, offset: usize) 
 pub(crate) enum FormAttributeAdditionalColumnsBindingKind {
     Attribute,
     Numeric,
+    /// A single negative marker: the group is bound to a *standard* member of
+    /// the attribute's own family, not to a column the attribute declares.
+    /// Declared column ids are non-negative, so the two never collide.
+    StandardMember,
     MetadataReference,
 }
 
@@ -242,6 +246,9 @@ impl FormAttributeAdditionalColumnsGroupSchema {
             match binding {
                 [number] if number.trim().parse::<u64>().is_ok() => {
                     FormAttributeAdditionalColumnsBindingKind::Numeric
+                }
+                [marker] if marker.trim().parse::<i64>().is_ok_and(|value| value < 0) => {
+                    FormAttributeAdditionalColumnsBindingKind::StandardMember
                 }
                 [prefix, uuid] if prefix.trim() == "0" && !uuid.trim().is_empty() => {
                     FormAttributeAdditionalColumnsBindingKind::MetadataReference

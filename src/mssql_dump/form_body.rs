@@ -4280,6 +4280,24 @@ pub(super) fn parse_form_attribute_additional_columns_group(
                 .map(|column| format!("{}.{}", attribute.name, column.name))?;
             (table, 3)
         }
+        // A negative marker names a standard tabular section of the
+        // attribute's own family, the same member and the same marker a bound
+        // slot's table segment names. Evidence: ERP УХ
+        // `ChartsOfAccounts/Хозрасчетный/Forms/ФормаСчета`, whose sole
+        // additional-columns group is `{0,{2,{1},{-12}},0}` against the
+        // `Объект` attribute of exact type `cfg:ChartOfAccountsObject.…`, and
+        // the platform writes
+        // `<AdditionalColumns table="Объект.ExtDimensionTypes"/>`; the group
+        // used to be refused whole, because a declared column id is
+        // non-negative and nothing else read the slot.
+        FormAttributeAdditionalColumnsBindingKind::StandardMember => {
+            let reference = form_attribute_exact_single_type_reference(attribute)?;
+            let (_, section_name, _) = form_standard_tabular_section_for_type_reference(
+                reference,
+                binding.first()?.trim(),
+            )?;
+            (format!("{}.{section_name}", attribute.name), 3)
+        }
         FormAttributeAdditionalColumnsBindingKind::MetadataReference => {
             let table = resolve_form_attribute_additional_columns_metadata_table_path(
                 &attribute_id,
@@ -19375,6 +19393,33 @@ fn resolve_form_owner_scoped_standard_tabular_section_path(
     column_key: Option<&str>,
 ) -> Option<String> {
     let reference = attribute.exact_single_type_reference.as_deref()?;
+    let (_, section_name, columns) =
+        form_standard_tabular_section_for_type_reference(reference, table_key)?;
+    match kind {
+        "2" => Some(format!("{}.{section_name}", attribute.name)),
+        "3" => {
+            let column_key = column_key?;
+            let column_name = columns
+                .iter()
+                .find_map(|(candidate, name)| (*candidate == column_key).then_some(*name))?;
+            Some(format!("{}.{section_name}.{column_name}", attribute.name))
+        }
+        _ => None,
+    }
+}
+
+/// The standard tabular section a marker names on a value of `reference`, with
+/// the standard attributes that section declares.
+///
+/// One reader for two places the same marker turns up: a bound slot's own
+/// table segment, and the target of an `AdditionalColumns` group. A family
+/// whose standard tabular sections are not evidenced answers nothing, and the
+/// caller leaves the member unread rather than spelling a name no platform
+/// bytes state.
+fn form_standard_tabular_section_for_type_reference(
+    reference: &str,
+    marker: &str,
+) -> Option<&'static ChartStandardTabularSectionDefinition> {
     let owner = form_generated_owner_type_from_type_reference(reference)?;
     if !matches!(
         (owner.family(), owner.role()),
@@ -19385,16 +19430,14 @@ fn resolve_form_owner_scoped_standard_tabular_section_path(
     ) {
         return None;
     }
-    let (_, section_name, columns) = chart_of_accounts_standard_tabular_section(table_key)?;
-    match kind {
-        "2" => Some(format!("{}.{section_name}", attribute.name)),
-        "3" => {
-            let column_key = column_key?;
-            let column_name = columns
-                .iter()
-                .find_map(|(candidate, name)| (*candidate == column_key).then_some(*name))?;
-            Some(format!("{}.{section_name}.{column_name}", attribute.name))
-        }
+    chart_of_accounts_standard_tabular_section(marker)
+}
+
+/// The single reference type a form attribute is declared to hold, when it
+/// holds exactly one.
+fn form_attribute_exact_single_type_reference(attribute: &FormAttribute) -> Option<&str> {
+    match attribute.value_types.as_slice() {
+        [ConstantValueType::Reference { reference }] => Some(reference.as_str()),
         _ => None,
     }
 }
