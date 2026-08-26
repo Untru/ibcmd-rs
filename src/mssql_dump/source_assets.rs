@@ -1598,12 +1598,13 @@ pub(super) fn write_source_asset(
             write_source_xml_file(&path, xml, context.source_version)?;
         }
         SourceAssetKind::StyleBody => {
-            let xml = extract_style_body_xml(bytes, context.object_refs).with_context(|| {
-                format!(
-                    "failed to extract style body from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+            let xml = extract_style_body_xml(bytes, context.object_refs, context.source_version)
+                .with_context(|| {
+                    format!(
+                        "failed to extract style body from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)

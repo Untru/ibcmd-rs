@@ -50356,9 +50356,13 @@ fn strict_filter_criterion_fixture() -> StrictFilterCriterionFixture {
     let content_ids = (0..2)
         .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
         .collect::<Vec<_>>();
-    let tail_ids = (0..2)
-        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
-        .collect::<Vec<_>>();
+    // The tail collections are not anonymous: a filter criterion's record
+    // opens them with the class uuids the platform gives its Form and Command
+    // children, so the fixture uses those rather than two fresh uuids.
+    let tail_ids = vec![
+        owner_graph::FILTER_CRITERION_FORM_COLLECTION_UUID.to_string(),
+        owner_graph::FILTER_CRITERION_COMMAND_COLLECTION_UUID.to_string(),
+    ];
     let type_references = [
         "cfg:CatalogRef.Products",
         "cfg:DocumentRef.Invoice",
@@ -50667,9 +50671,10 @@ fn extracts_strict_v20_filter_criterion_with_two_types_and_448_ordered_content_i
     let content_ids = (0..448)
         .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
         .collect::<Vec<_>>();
-    let tail_ids = (0..2)
-        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
-        .collect::<Vec<_>>();
+    let tail_ids = vec![
+        owner_graph::FILTER_CRITERION_FORM_COLLECTION_UUID.to_string(),
+        owner_graph::FILTER_CRITERION_COMMAND_COLLECTION_UUID.to_string(),
+    ];
     let raw = strict_filter_criterion_raw_for_test(
         &owner_uuid,
         "SyntheticCriterion",
@@ -51219,6 +51224,8 @@ fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
             &fixture.type_index,
             &BTreeSet::new(),
             &MetadataObjectReferenceIndexes::from_legacy(&fixture.object_refs).resolutions,
+            &fixture.object_refs,
+            &BTreeMap::new(),
             InfobaseConfigSourceVersion::V2_20,
         )
         .is_err(),
@@ -54500,7 +54507,12 @@ fn writes_style_body_xml_to_source_layout() {
         );
     let style_body = deflate_for_test(
             format!(
-                "{{2,8,{{{{-1}},0,{{4,2,{{20}},2}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{8,2,0,{{-20}},1,100}}}},{{{{-42}},0,{{4,0,{{14474460}},0}}}},{{{{-43}},0,{{4,0,{{15658734}},0}}}},{{{{-44}},0,{{4,3,{{-44}},3}}}},{{{{0,{color_uuid}}},0,{{4,0,{{13158655}},0}}}},{{{{0,{font_uuid}}},1,{{8,2,60,{{-20}},400,0,0,1,1,100}}}},{{0}}}}"
+                // Tags and member layout as the platform writes them: the
+                // body opens `{1,<count>,…}`, colour and border values open
+                // `{3,…}` and font values `{7,kind,mask,…}`. Taken from the
+                // extracted `Styles/Основной/Ext/Style.xml` bodies of
+                // Документооборот КОРП 3.0.21.3 and ERP УХ 3.2.12.6.
+                "{{1,8,{{{{-1}},0,{{3,2,{{20}}}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{7,2,0,{{-20}},1,100}}}},{{{{-42}},0,{{3,0,{{14474460}}}}}},{{{{-43}},0,{{3,0,{{15658734}}}}}},{{{{-44}},0,{{3,3,{{-44}}}}}},{{{{0,{color_uuid}}},0,{{3,0,{{13158655}}}}}},{{{{0,{font_uuid}}},1,{{7,2,60,{{-20}},400,0,0,1,1,100}}}}}}"
             )
             .as_bytes(),
         );
@@ -54552,7 +54564,7 @@ fn writes_style_body_xml_to_source_layout() {
     assert!(xml.contains("<Color>#FFC8C8</Color>"));
     assert!(xml.contains("<Item name=\"StyleItem.StrikeFont\">"));
     assert!(xml.contains(
-            "<Font ref=\"style:TextFont\" kind=\"StyleItem\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"true\"/>"
+            "<Font ref=\"style:TextFont\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"true\" kind=\"StyleItem\"/>"
         ));
 
     let body_row = dumped

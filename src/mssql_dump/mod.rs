@@ -31262,7 +31262,29 @@ fn parse_event_subscription_properties_from_text(
     })
 }
 
-fn extract_style_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Result<String> {
+/// A style body opens with its format tag and its declared item count.
+///
+/// Read off the extracted `Styles/Основной/Ext/Style.xml` bodies of both
+/// stand configurations that own a style -- Документооборот КОРП 3.0.21.3
+/// (`{1,105,…}`, 105 members, 105 `<Item>` in the native export) and ERP УХ
+/// 3.2.12.6 (`{1,231,…}`, 231 and 231). The reader previously demanded `2`
+/// here, and `4`/`8` for the value tuples below, none of which any platform
+/// byte on the stand writes; the style item family's own reader, which does
+/// export byte-exactly, has always read the very same tuples as `3` and `7`.
+const STYLE_BODY_TAG: &str = "1";
+const STYLE_BODY_COLOR_TAG: &str = "3";
+const STYLE_BODY_BORDER_TAG: &str = "3";
+const STYLE_BODY_FONT_TAG: &str = "7";
+/// The only font form a style body is evidenced to carry: a reference to a
+/// style item (`kind="StyleItem"`). `Absolute` and `WindowsFont` bodies would
+/// need their own member layout, and neither appears on the stand.
+const STYLE_BODY_FONT_STYLE_ITEM_KIND: &str = "2";
+
+fn extract_style_body_xml(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<String> {
     let inflated = inflate_raw_deflate(bytes)?;
     let text = String::from_utf8(inflated)?;
     let mut items = parse_style_body_items(text.trim_start_matches('\u{feff}'), object_refs)
@@ -31274,7 +31296,7 @@ fn extract_style_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) 
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
             .then_with(|| left.name.cmp(&right.name))
     });
-    Ok(format_style_body_xml(&items))
+    Ok(format_style_body_xml(&items, source_version))
 }
 
 fn parse_style_body_items(
@@ -31282,15 +31304,15 @@ fn parse_style_body_items(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<StyleBodyItem>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "2" {
+    if fields.first()?.trim() != STYLE_BODY_TAG {
         return None;
     }
     let declared_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != declared_count + 2 {
+        return None;
+    }
     let mut items = Vec::new();
     for field in fields.iter().skip(2) {
-        if field.trim() == "{0}" {
-            continue;
-        }
         let entry = split_1c_braced_fields(field, 0)?;
         let (name, standard_order) = style_body_item_name(entry.first()?, object_refs)?;
         let value = entry.get(2)?;
@@ -31404,7 +31426,7 @@ fn parse_style_body_color_value(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "4" {
+    if fields.first()?.trim() != STYLE_BODY_COLOR_TAG {
         return None;
     }
     let variant = fields.get(1)?.trim().parse::<i32>().ok()?;
@@ -31418,53 +31440,62 @@ fn parse_style_body_color_value(
     }
 }
 
+/// A style body's font value is the same physical tuple `StyleItems/*.xml`
+/// carries, so it is read the same way: the mask at slot 2 declares which of
+/// height/weight/italic/underline/strikeout actually follow the reference, and
+/// the scale sits one past whatever the mask consumed. Reading fixed slots
+/// instead only happened to work for a mask that declares all of them.
+///
+/// Attribute order follows the native export: reference, then the members the
+/// mask declared, then `kind`, then a non-default scale -- ERP УХ 3.2.12.6
+/// writes `<Font ref="style:TextFont" bold="false" italic="false"
+/// underline="false" strikeout="true" kind="StyleItem"/>` for the one body
+/// font on the stand whose mask declares members (`{7,2,60,{-20},400,0,0,1,
+/// 1,100}`), and both configurations write `<Font ref="style:…"
+/// kind="StyleItem"/>` for every mask-0 one.
 fn parse_style_body_font_xml(
     value: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "8" {
+    if fields.first()?.trim() != STYLE_BODY_FONT_TAG
+        || fields.get(1)?.trim() != STYLE_BODY_FONT_STYLE_ITEM_KIND
+    {
         return None;
     }
-    let kind = fields.get(1).map(|field| field.trim()).unwrap_or("2");
     let mut attrs = Vec::<(&str, String)>::new();
-    if kind == "2" {
-        let reference = fields
-            .get(3)
-            .and_then(|field| style_body_ref_name(field, object_refs))
-            .unwrap_or_else(|| "style:TextFont".to_string());
-        attrs.push(("ref", reference));
-        attrs.push(("kind", "StyleItem".to_string()));
-    } else {
-        attrs.push(("kind", "Absolute".to_string()));
-    }
+    attrs.push(("ref", style_body_ref_name(fields.get(3)?, object_refs)?));
 
-    let weight = fields
-        .get(4)
-        .and_then(|field| field.trim().parse::<i32>().ok())
-        .unwrap_or(400);
-    let bold = weight >= 700;
-    let italic = fields
-        .get(5)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    let underline = fields
-        .get(6)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    let strikeout = fields
-        .get(7)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    if bold || italic || underline || strikeout {
-        attrs.push(("bold", xml_bool(bold).to_string()));
-        attrs.push(("italic", xml_bool(italic).to_string()));
-        attrs.push(("underline", xml_bool(underline).to_string()));
-        attrs.push(("strikeout", xml_bool(strikeout).to_string()));
-    }
-    if let Some(scale) = fields.get(9).map(|field| field.trim())
-        && scale != "100"
+    let mask = fields.get(2)?.trim().parse::<u32>().ok()?;
+    let mut cursor = 4usize;
+    if let Some(height) = style_font_member(&fields, mask, STYLE_FONT_MEMBER_HEIGHT, &mut cursor)
+        && let Some(height) = font_height_xml(Some(height))
     {
+        attrs.push(("height", height));
+    }
+    if let Some(weight) = style_font_member(&fields, mask, STYLE_FONT_MEMBER_WEIGHT, &mut cursor) {
+        let weight = weight.parse::<i32>().unwrap_or(STYLE_FONT_DEFAULT_WEIGHT);
+        attrs.push((
+            "bold",
+            xml_bool(weight >= STYLE_FONT_BOLD_WEIGHT).to_string(),
+        ));
+    }
+    for (bit, name) in [
+        (STYLE_FONT_MEMBER_ITALIC, "italic"),
+        (STYLE_FONT_MEMBER_UNDERLINE, "underline"),
+        (STYLE_FONT_MEMBER_STRIKEOUT, "strikeout"),
+    ] {
+        if let Some(raw) = style_font_member(&fields, mask, bit, &mut cursor) {
+            let flag = parse_1c_bool_flag(raw).unwrap_or(false);
+            attrs.push((name, xml_bool(flag).to_string()));
+        }
+    }
+    attrs.push(("kind", "StyleItem".to_string()));
+    let scale = fields
+        .get(cursor.saturating_add(1))
+        .map(|field| field.trim())
+        .unwrap_or(STYLE_FONT_DEFAULT_SCALE);
+    if scale != STYLE_FONT_DEFAULT_SCALE {
         attrs.push(("scale", scale.to_string()));
     }
 
@@ -31476,13 +31507,10 @@ fn parse_style_body_border_xml(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "3" {
+    if fields.first()?.trim() != STYLE_BODY_BORDER_TAG {
         return None;
     }
-    let reference = fields
-        .get(2)
-        .and_then(|field| style_body_ref_name(field, object_refs))
-        .unwrap_or_else(|| "style:ControlBorder".to_string());
+    let reference = style_body_ref_name(fields.get(2)?, object_refs)?;
     Some(format_empty_style_body_value(
         "Border",
         &[("ref", reference)],
@@ -31498,11 +31526,29 @@ fn format_empty_style_body_value(element: &str, attrs: &[(&str, String)]) -> Str
     xml
 }
 
-fn format_style_body_xml(items: &[StyleBodyItem]) -> String {
+/// The envelope the platform writes around a style body: a byte-order mark, a
+/// nine-namespace `Style` root at the export dialect, and no trailing newline
+/// after `</Style>` -- exactly the frame `Styles/Основной/Ext/Style.xml`
+/// carries in both stand configurations that own a style. The extra
+/// `xmlns:pal` belongs to the 2.21 dialect only, the same way
+/// `format_web_service_source_xml` adds it there and not to 2.20.
+fn format_style_body_xml(
+    items: &[StyleBodyItem],
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
     );
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        const STYLE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
+        const PALETTE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
+        if let Some(style_index) = xml.find(STYLE_NAMESPACE_ATTRIBUTE) {
+            xml.insert_str(style_index, PALETTE_NAMESPACE_ATTRIBUTE);
+        }
+    }
     for item in items {
         xml.push_str(&format!(
             "\t<Item name=\"{}\">\r\n\t\t{}\r\n\t</Item>\r\n",
@@ -31510,7 +31556,7 @@ fn format_style_body_xml(items: &[StyleBodyItem]) -> String {
             item.value_xml
         ));
     }
-    xml.push_str("</Style>\r\n");
+    xml.push_str("</Style>");
     xml
 }
 
