@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -572,6 +573,16 @@ pub enum FormChoiceListValue {
     EmptyRef(String),
     LiteralDesignTimeRef(String),
     DesignTimeRef(String),
+    /// A design-time value of a platform-defined type: the value member names
+    /// the type by its platform identifier and the member by its ordinal, and
+    /// the platform writes the type's own QName as the `xsi:type` and the
+    /// member's own spelling as the element text.  Both spellings are supplied
+    /// by the caller, exactly as the metadata references above are -- naming a
+    /// type is resolution, not grammar.
+    DesignTimePlatformValue {
+        type_reference: String,
+        member: String,
+    },
 }
 
 /// Canonical XML leaf shape for a decoded `FormChoiceListValue`.
@@ -579,16 +590,19 @@ pub enum FormChoiceListValue {
 /// This is deliberately a data-only wire contract: the physical form adapter
 /// may escape and serialize it, but it must not decide which QName, nil form,
 /// or empty-element form belongs to a source value variant.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FormChoiceListValueWireShape<'a> {
-    xml_opening: &'static str,
+    // Borrowed for every variant whose QName is fixed by the variant itself,
+    // owned for the one whose QName is data: a design-time platform value
+    // names its type at run time, so the opening tag cannot be a literal.
+    xml_opening: Cow<'a, str>,
     xml_closing: &'static str,
     text: Option<&'a str>,
 }
 
 impl<'a> FormChoiceListValueWireShape<'a> {
-    pub const fn xml_opening(&self) -> &'static str {
-        self.xml_opening
+    pub fn xml_opening(&self) -> &str {
+        &self.xml_opening
     }
 
     pub const fn xml_closing(&self) -> &'static str {
@@ -605,7 +619,7 @@ impl<'a> FormChoiceListValueWireShape<'a> {
     where
         F: FnOnce(&str) -> String,
     {
-        output.push_str(self.xml_opening);
+        output.push_str(&self.xml_opening);
         if let Some(text) = self.text {
             output.push_str(&escape(text));
         }
@@ -620,35 +634,43 @@ impl FormChoiceListValue {
     pub fn wire_shape(&self) -> FormChoiceListValueWireShape<'_> {
         match self {
             Self::Boolean(value) => FormChoiceListValueWireShape {
-                xml_opening: "<Value xsi:type=\"xs:boolean\">",
+                xml_opening: Cow::Borrowed("<Value xsi:type=\"xs:boolean\">"),
                 xml_closing: "</Value>",
                 text: Some(if *value { "true" } else { "false" }),
             },
             Self::Decimal(value) => FormChoiceListValueWireShape {
-                xml_opening: "<Value xsi:type=\"xs:decimal\">",
+                xml_opening: Cow::Borrowed("<Value xsi:type=\"xs:decimal\">"),
                 xml_closing: "</Value>",
                 text: Some(value),
             },
             Self::Nil => FormChoiceListValueWireShape {
-                xml_opening: "<Value xsi:nil=\"true\"/>",
+                xml_opening: Cow::Borrowed("<Value xsi:nil=\"true\"/>"),
                 xml_closing: "",
                 text: None,
             },
             Self::String(value) => FormChoiceListValueWireShape {
-                xml_opening: if value.is_empty() {
+                xml_opening: Cow::Borrowed(if value.is_empty() {
                     "<Value xsi:type=\"xs:string\"/>"
                 } else {
                     "<Value xsi:type=\"xs:string\">"
-                },
+                }),
                 xml_closing: if value.is_empty() { "" } else { "</Value>" },
                 text: (!value.is_empty()).then_some(value),
             },
             Self::EmptyRef(value)
             | Self::LiteralDesignTimeRef(value)
             | Self::DesignTimeRef(value) => FormChoiceListValueWireShape {
-                xml_opening: "<Value xsi:type=\"xr:DesignTimeRef\">",
+                xml_opening: Cow::Borrowed("<Value xsi:type=\"xr:DesignTimeRef\">"),
                 xml_closing: "</Value>",
                 text: Some(value),
+            },
+            Self::DesignTimePlatformValue {
+                type_reference,
+                member,
+            } => FormChoiceListValueWireShape {
+                xml_opening: Cow::Owned(format!("<Value xsi:type=\"{type_reference}\">")),
+                xml_closing: "</Value>",
+                text: Some(member),
             },
         }
     }
@@ -661,15 +683,17 @@ const MAX_FORM_CHOICE_LIST_PRESENTATION_ITEMS: usize = 128;
 
 /// Decode one complete ChoiceList envelope. Domain reference resolution is
 /// deliberately supplied by the caller; all physical grammar remains here.
-pub fn parse_form_choice_list<FO, FR>(
+pub fn parse_form_choice_list<FO, FR, FP>(
     raw: &str,
     layout: FormChoiceListLayoutProfile,
     mut resolve_empty_ref_owner: FO,
     mut resolve_reference: FR,
+    mut resolve_design_time_platform_value: FP,
 ) -> Option<FormChoiceList>
 where
     FO: FnMut(&str) -> Option<String>,
     FR: FnMut(&str, &str) -> Option<String>,
+    FP: FnMut(&str, &str) -> Option<(String, String)>,
 {
     if raw.len() > MAX_FORM_CHOICE_LIST_RAW_BYTES {
         return None;
@@ -696,6 +720,7 @@ where
             layout,
             &mut resolve_empty_ref_owner,
             &mut resolve_reference,
+            &mut resolve_design_time_platform_value,
         )?);
     }
     for sidecar in &fields[item_fields_end..] {
@@ -709,15 +734,17 @@ where
 }
 
 /// Decode one ChoiceList item under an explicit physical layout profile.
-pub fn parse_form_choice_list_item<FO, FR>(
+pub fn parse_form_choice_list_item<FO, FR, FP>(
     raw: &str,
     layout: FormChoiceListLayoutProfile,
     mut resolve_empty_ref_owner: FO,
     mut resolve_reference: FR,
+    mut resolve_design_time_platform_value: FP,
 ) -> Option<FormChoiceListItem>
 where
     FO: FnMut(&str) -> Option<String>,
     FR: FnMut(&str, &str) -> Option<String>,
+    FP: FnMut(&str, &str) -> Option<(String, String)>,
 {
     if raw.len() > MAX_FORM_CHOICE_LIST_RAW_BYTES {
         return None;
@@ -727,18 +754,21 @@ where
         layout,
         &mut resolve_empty_ref_owner,
         &mut resolve_reference,
+        &mut resolve_design_time_platform_value,
     )
 }
 
-fn parse_form_choice_list_item_inner<FO, FR>(
+fn parse_form_choice_list_item_inner<FO, FR, FP>(
     raw: &str,
     layout: FormChoiceListLayoutProfile,
     resolve_empty_ref_owner: &mut FO,
     resolve_reference: &mut FR,
+    resolve_design_time_platform_value: &mut FP,
 ) -> Option<FormChoiceListItem>
 where
     FO: FnMut(&str) -> Option<String>,
     FR: FnMut(&str, &str) -> Option<String>,
+    FP: FnMut(&str, &str) -> Option<(String, String)>,
 {
     let fields = braced_fields_bounded(raw, 3)?;
     if fields.len() != 3
@@ -754,24 +784,52 @@ where
     if zero.trim() != "0" {
         return None;
     }
-    let value_fields = braced_fields_bounded(raw_value, 2)?;
+    // The bound is the longest value tuple the platform writes, not a claim
+    // about any one kind's arity: the tag in the leading member is what picks
+    // the shape, and every arm below pins its own member count with a slice
+    // pattern.  Two members for the literals and the undefined marker, three
+    // for a design-time platform value, which names its type between the tag
+    // and the member ordinal.
+    let value_fields = braced_fields_bounded(raw_value, 3)?;
     let kind = exact_1c_string(value_fields.first()?)?;
-    let nil = Uuid::nil();
     let value = match (kind.as_str(), value_fields.as_slice()) {
         ("N", [_, decimal])
             if mode.trim() == "1"
-                && ids_are(type_id, value_id, nil, nil)
+                && literal_ids_are(type_id, value_id, FORM_CHOICE_LIST_NUMBER_TYPE_ID)
                 && decimal_is_valid(decimal.trim()) =>
         {
             FormChoiceListValue::Decimal(decimal.trim().to_owned())
         }
-        ("S", [_, string]) if mode.trim() == "1" && ids_are(type_id, value_id, nil, nil) => {
+        ("S", [_, string])
+            if mode.trim() == "1"
+                && literal_ids_are(type_id, value_id, FORM_CHOICE_LIST_STRING_TYPE_ID) =>
+        {
             FormChoiceListValue::String(exact_1c_string(string)?)
+        }
+        // A design-time value of a platform-defined type.  The value member
+        // carries the type identifier and the member ordinal; the item's own
+        // type slot either repeats that same identifier or is unset, exactly
+        // as it does for the literals above, and the object slot is always
+        // empty because no object is referenced.  The caller owns both
+        // spellings: naming a type is resolution, and an ordinal this
+        // configuration has never been observed to write is a refusal, not a
+        // guess.
+        ("#", [_, platform_type_id, member_ordinal])
+            if mode.trim() == "1"
+                && Uuid::parse_str(platform_type_id.trim()).is_ok()
+                && literal_ids_are(type_id, value_id, platform_type_id) =>
+        {
+            let (type_reference, member) =
+                resolve_design_time_platform_value(platform_type_id.trim(), member_ordinal.trim())?;
+            FormChoiceListValue::DesignTimePlatformValue {
+                type_reference,
+                member,
+            }
         }
         ("B", [_, boolean])
             if layout == FormChoiceListLayoutProfile::InputFieldExtendedOptions
                 && mode.trim() == "1"
-                && ids_are(type_id, value_id, nil, nil) =>
+                && literal_ids_are(type_id, value_id, FORM_CHOICE_LIST_BOOLEAN_TYPE_ID) =>
         {
             match boolean.trim() {
                 "0" => FormChoiceListValue::Boolean(false),
@@ -882,9 +940,41 @@ fn parse_form_choice_list_empty_sidecar(raw: &str) -> Option<()> {
     .then_some(())
 }
 
-fn ids_are(type_id: &str, value_id: &str, expected_type: Uuid, expected_value: Uuid) -> bool {
-    Uuid::parse_str(type_id.trim()).ok() == Some(expected_type)
-        && Uuid::parse_str(value_id.trim()).ok() == Some(expected_value)
+/// Platform type identifiers a literal choice-list value repeats in the item's
+/// own type slot.
+///
+/// Under mode `1` the item's type slot carries the value's own type or nothing
+/// at all, and it is never written out: which element the platform emits is
+/// decided by the value tag alone, so the slot is a redundancy to be checked,
+/// not a reference to be resolved.  That is what makes these three identifiers
+/// grammar and not caller-supplied resolution, unlike the type of a design-time
+/// platform value, whose QName the platform does write.
+///
+/// Evidence, ERP УХ 3.2.12.6: every mode-`1` choice-list item in the whole
+/// configuration whose type slot is not nil carries exactly the identifier its
+/// own value tag names -- `9b6abf8b` on all 98 `"S"` items, `b0be78f2` on all
+/// 99 `"N"` items, `5d4125ad` on all 5 `"B"` items -- with no item pairing one
+/// of the three with a value tag of another kind.  The platform writes those
+/// items exactly as it writes the same literals with a nil type slot:
+/// `Catalogs/УсловияОплаты/Forms/ФормаЭлемента` spells its `{"N",30}`,
+/// `{"N",60}`, `{"N",90}`, `{"N",180}` under `b0be78f2` as four
+/// `<Value xsi:type="xs:decimal">` elements, value for value.
+const FORM_CHOICE_LIST_STRING_TYPE_ID: &str = "9b6abf8b-0173-48e5-b0a0-83b21fcf63c5";
+const FORM_CHOICE_LIST_NUMBER_TYPE_ID: &str = "b0be78f2-0ee6-4d31-a3bb-77dd32ba5bec";
+const FORM_CHOICE_LIST_BOOLEAN_TYPE_ID: &str = "5d4125ad-f6e7-4313-be32-f71d0ab60915";
+
+/// Whether the item type/value pair is the one a *literal* value writes: no
+/// object identifier at all, and a type slot that is either unset or a repeat
+/// of the value's own type.
+fn literal_ids_are(type_id: &str, value_id: &str, own_type_id: &str) -> bool {
+    let nil = Uuid::nil();
+    let Ok(type_uuid) = Uuid::parse_str(type_id.trim()) else {
+        return false;
+    };
+    if Uuid::parse_str(value_id.trim()).ok() != Some(nil) {
+        return false;
+    }
+    type_uuid == nil || Uuid::parse_str(own_type_id.trim()).ok() == Some(type_uuid)
 }
 
 fn decimal_is_valid(value: &str) -> bool {
@@ -913,6 +1003,7 @@ mod form_choice_list_tests {
     const NIL: &str = "00000000-0000-0000-0000-000000000000";
     const TYPE_ID: &str = "11111111-1111-4111-8111-111111111111";
     const VALUE_ID: &str = "22222222-2222-4222-8222-222222222222";
+    const PLATFORM_TYPE_ID: &str = "33333333-3333-4333-8333-333333333333";
     const SIDECAR: &str = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
 
     fn item(mode: &str, value: &str, type_id: &str, value_id: &str) -> String {
@@ -933,6 +1024,10 @@ mod form_choice_list_tests {
             |type_id, value_id| {
                 (type_id == TYPE_ID && value_id == VALUE_ID)
                     .then(|| "Enum.Kind.EnumValue.Value".to_owned())
+            },
+            |type_id, member_ordinal| {
+                (type_id == PLATFORM_TYPE_ID && member_ordinal == "7")
+                    .then(|| ("pfx:Kind".to_owned(), "Member".to_owned()))
             },
         )
     }
@@ -1013,12 +1108,148 @@ mod form_choice_list_tests {
             FormChoiceListLayoutProfile::InputFieldExtendedOptions,
             |_| None,
             |_, _| None,
+            |_, _| None,
         )
         .unwrap();
         assert_eq!(
             literal.items()[0].value(),
             &FormChoiceListValue::LiteralDesignTimeRef(format!("{TYPE_ID}.{VALUE_ID}"))
         );
+    }
+
+    #[test]
+    fn design_time_platform_value_is_resolved_by_the_caller_and_fails_closed() {
+        let decoded = parse(
+            &envelope(&item(
+                "1",
+                &format!(r##"{{"#",{PLATFORM_TYPE_ID},7}}"##),
+                NIL,
+                NIL,
+            )),
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        )
+        .unwrap();
+        assert_eq!(
+            decoded.items()[0].value(),
+            &FormChoiceListValue::DesignTimePlatformValue {
+                type_reference: "pfx:Kind".to_owned(),
+                member: "Member".to_owned(),
+            }
+        );
+        let shape = decoded.items()[0].value().wire_shape();
+        assert_eq!(shape.xml_opening(), "<Value xsi:type=\"pfx:Kind\">");
+        assert_eq!(shape.text(), Some("Member"));
+        assert_eq!(shape.xml_closing(), "</Value>");
+
+        // The item type slot repeats the value's own platform type, which is
+        // the second shape the corpus writes for the very same element.
+        let repeated = parse(
+            &envelope(&item(
+                "1",
+                &format!(r##"{{"#",{PLATFORM_TYPE_ID},7}}"##),
+                PLATFORM_TYPE_ID,
+                NIL,
+            )),
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        )
+        .unwrap();
+        assert_eq!(repeated.items()[0].value(), decoded.items()[0].value());
+
+        for raw in [
+            // An ordinal the caller cannot name is a refusal, never a guess.
+            envelope(&item(
+                "1",
+                &format!(r##"{{"#",{PLATFORM_TYPE_ID},8}}"##),
+                NIL,
+                NIL,
+            )),
+            // So is a type the caller cannot name.
+            envelope(&item("1", &format!(r##"{{"#",{TYPE_ID},7}}"##), NIL, NIL)),
+            // The type slot may repeat the value's own type or stay unset; a
+            // third, foreign identifier is neither.
+            envelope(&item(
+                "1",
+                &format!(r##"{{"#",{PLATFORM_TYPE_ID},7}}"##),
+                TYPE_ID,
+                NIL,
+            )),
+            // A design-time platform value references no object.
+            envelope(&item(
+                "1",
+                &format!(r##"{{"#",{PLATFORM_TYPE_ID},7}}"##),
+                NIL,
+                VALUE_ID,
+            )),
+            // Mode `0` is the reference mode and carries no literal.
+            envelope(&item(
+                "0",
+                &format!(r##"{{"#",{PLATFORM_TYPE_ID},7}}"##),
+                NIL,
+                NIL,
+            )),
+            // The type member has to be an identifier.
+            envelope(&item("1", r##"{"#","not-a-uuid",7}"##, NIL, NIL)),
+        ] {
+            assert!(
+                parse(&raw, FormChoiceListLayoutProfile::InputFieldExtendedOptions).is_none(),
+                "expected a refusal for {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_values_admit_their_own_platform_type_in_the_item_type_slot() {
+        for (value, own_type_id, expected) in [
+            (
+                r#"{"N",30}"#,
+                FORM_CHOICE_LIST_NUMBER_TYPE_ID,
+                FormChoiceListValue::Decimal("30".to_owned()),
+            ),
+            (
+                r#"{"S","text"}"#,
+                FORM_CHOICE_LIST_STRING_TYPE_ID,
+                FormChoiceListValue::String("text".to_owned()),
+            ),
+            (
+                r#"{"B",1}"#,
+                FORM_CHOICE_LIST_BOOLEAN_TYPE_ID,
+                FormChoiceListValue::Boolean(true),
+            ),
+        ] {
+            let echoed = parse(
+                &envelope(&item("1", value, own_type_id, NIL)),
+                FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+            )
+            .unwrap();
+            assert_eq!(echoed.items()[0].value(), &expected);
+
+            let unset = parse(
+                &envelope(&item("1", value, NIL, NIL)),
+                FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+            )
+            .unwrap();
+            assert_eq!(unset.items()[0].value(), &expected);
+
+            // The echo is the value's own type and nothing else: the type slot
+            // of one literal kind never carries another kind's identifier.
+            for foreign in [
+                FORM_CHOICE_LIST_STRING_TYPE_ID,
+                FORM_CHOICE_LIST_NUMBER_TYPE_ID,
+                FORM_CHOICE_LIST_BOOLEAN_TYPE_ID,
+            ]
+            .into_iter()
+            .filter(|candidate| *candidate != own_type_id)
+            {
+                assert!(
+                    parse(
+                        &envelope(&item("1", value, foreign, NIL)),
+                        FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+                    )
+                    .is_none(),
+                    "expected a refusal for {value} under {foreign}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1075,11 +1306,14 @@ mod form_choice_list_tests {
         ]
         .map(|value| {
             let shape = value.wire_shape();
-            (shape.xml_opening(), shape.xml_closing())
+            (shape.xml_opening().to_owned(), shape.xml_closing())
         });
         assert_eq!(
             reference_shapes,
-            [("<Value xsi:type=\"xr:DesignTimeRef\">", "</Value>"); 3]
+            std::array::from_fn::<_, 3, _>(|_| (
+                "<Value xsi:type=\"xr:DesignTimeRef\">".to_owned(),
+                "</Value>"
+            ))
         );
     }
 
@@ -1108,6 +1342,7 @@ mod form_choice_list_tests {
                 &empty_ref,
                 FormChoiceListLayoutProfile::RadioButtonOptions,
                 |_| None,
+                |_, _| None,
                 |_, _| None,
             )
             .is_none()

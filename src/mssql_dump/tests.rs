@@ -25274,6 +25274,151 @@ fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_paylo
 }
 
 #[test]
+fn design_time_platform_values_are_spelled_as_the_platform_writes_them() {
+    use crate::form_schema::{
+        form_attribute_column_builtin_type_reference, form_choice_list_design_time_platform_value,
+    };
+
+    // Every (type, ordinal) pair the eight gate configurations spell out,
+    // against the spelling the platform writes for it.
+    for (type_id, ordinal, reference, member) in [
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "0",
+            "dcsset:DataCompositionComparisonType",
+            "Equal",
+        ),
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "1",
+            "dcsset:DataCompositionComparisonType",
+            "NotEqual",
+        ),
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "7",
+            "dcsset:DataCompositionComparisonType",
+            "InList",
+        ),
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "8",
+            "dcsset:DataCompositionComparisonType",
+            "InListByHierarchy",
+        ),
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "9",
+            "dcsset:DataCompositionComparisonType",
+            "InHierarchy",
+        ),
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "11",
+            "dcsset:DataCompositionComparisonType",
+            "NotInList",
+        ),
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "14",
+            "dcsset:DataCompositionComparisonType",
+            "Filled",
+        ),
+        (
+            "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+            "15",
+            "dcsset:DataCompositionComparisonType",
+            "NotFilled",
+        ),
+        (
+            "872f7198-7083-4e3e-b57e-a2a9802c769e",
+            "0",
+            "ent:AccountType",
+            "Active",
+        ),
+        (
+            "872f7198-7083-4e3e-b57e-a2a9802c769e",
+            "1",
+            "ent:AccountType",
+            "Passive",
+        ),
+        (
+            "872f7198-7083-4e3e-b57e-a2a9802c769e",
+            "2",
+            "ent:AccountType",
+            "ActivePassive",
+        ),
+    ] {
+        assert_eq!(
+            form_choice_list_design_time_platform_value(type_id, ordinal),
+            Some((reference, member)),
+            "{type_id}/{ordinal}"
+        );
+    }
+
+    // An ordinal between two evidenced ones is still unevidenced: the table is
+    // what the corpus spells out, not a range.
+    for (type_id, ordinal) in [
+        ("dcbf2698-3c1f-4a22-997f-48070ae9bd64", "2"),
+        ("dcbf2698-3c1f-4a22-997f-48070ae9bd64", "10"),
+        ("dcbf2698-3c1f-4a22-997f-48070ae9bd64", "16"),
+        ("872f7198-7083-4e3e-b57e-a2a9802c769e", "3"),
+        ("11111111-1111-4111-8111-111111111111", "0"),
+    ] {
+        assert_eq!(
+            form_choice_list_design_time_platform_value(type_id, ordinal),
+            None,
+            "{type_id}/{ordinal}"
+        );
+    }
+
+    // One platform type is named in both roles this decoder resolves, and the
+    // platform spells it the same way in each.
+    assert_eq!(
+        form_attribute_column_builtin_type_reference("dcbf2698-3c1f-4a22-997f-48070ae9bd64"),
+        Some("dcsset:DataCompositionComparisonType"),
+    );
+    assert_eq!(
+        form_choice_list_design_time_platform_value("dcbf2698-3c1f-4a22-997f-48070ae9bd64", "0")
+            .map(|(reference, _)| reference),
+        form_attribute_column_builtin_type_reference("dcbf2698-3c1f-4a22-997f-48070ae9bd64"),
+    );
+}
+
+#[test]
+fn form_choice_list_writes_a_design_time_platform_value_under_its_own_qname() {
+    let provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+    };
+    let choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![FormChoiceListItem {
+            presentation_present: true,
+            presentation: Vec::new(),
+            value: FormChoiceListValue::DesignTimePlatformValue {
+                type_reference: "dcsset:DataCompositionComparisonType".to_owned(),
+                member: "Equal".to_owned(),
+            },
+        }],
+        provenance,
+    };
+    validate_canonical_form_choice_list(&choice_list).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&choice_list, 1).unwrap(),
+        "\t<ChoiceList>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"dcsset:DataCompositionComparisonType\">Equal</Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t</ChoiceList>\r\n"
+    );
+}
+
+#[test]
 fn form_list_settings_uses_the_canonical_dcs_scalar_serializer() {
     let xml = format_form_list_settings_xml(&FormListSettings {
         items_view_mode: Some("Compact".to_owned()),

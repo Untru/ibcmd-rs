@@ -104,6 +104,75 @@ pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Opt
         })
 }
 
+// A `ChoiceList` item whose value is a design-time value of a platform-defined
+// type names the type by identifier and the member by ordinal, and the platform
+// writes both out: the type's QName as the `xsi:type` of the `<Value>` element
+// and the member's own spelling as its text.  Neither spelling is derivable
+// from the bytes, so this is the whole of what the corpus proves, member for
+// member, and an ordinal that is not listed is a refusal.
+//
+// The prefixes are declared on the root element of every `Form.xml` the
+// platform writes -- `dcsset` and `ent` both sit in the fixed prologue -- so
+// the references are emitted bare, exactly as the platform writes them, just
+// like the attribute-column table above.  `dcbf2698` occurs in both roles and
+// is spelled the same way in each; the test below pins that agreement.
+//
+// Evidence, item for item and in order:
+//
+// * ERP УХ 3.2.12.6 `Catalogs/Запросы/Forms/НастройкаОтборов` spells the six
+//   items `0,1,7,11,9,8` of `dcbf2698` and the platform writes `Equal`,
+//   `NotEqual`, `InList`, `NotInList`, `InHierarchy`, `InListByHierarchy`;
+//   `Catalogs/ПоложениеОЗакупках/Forms/ФормаЭлемента` spells `0,1,7,11,14,15`
+//   and the platform writes `Equal`, `NotEqual`, `InList`, `NotInList`,
+//   `Filled`, `NotFilled`.  Those twelve items are every
+//   `dcsset:DataCompositionComparisonType` value in the configuration, and the
+//   eight ordinals are every ordinal it spells.
+// * `ChartsOfAccounts/Хозрасчетный/Forms/ФормаСчета` spells `0,1,2` of
+//   `872f7198` and the platform writes `Active`, `Passive`, `ActivePassive`;
+//   БСП демо 3.1.12.297 `ChartsOfAccounts/_ДемоОсновной/Forms/ФормаСчета`
+//   spells the same three ordinals and the platform writes the same three
+//   members.  No other configuration of the eight writes a design-time
+//   platform value at all.
+const FORM_DESIGN_TIME_PLATFORM_VALUE_TYPES: &[(&str, &str, &[(&str, &str)])] = &[
+    (
+        "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
+        "dcsset:DataCompositionComparisonType",
+        &[
+            ("0", "Equal"),
+            ("1", "NotEqual"),
+            ("7", "InList"),
+            ("8", "InListByHierarchy"),
+            ("9", "InHierarchy"),
+            ("11", "NotInList"),
+            ("14", "Filled"),
+            ("15", "NotFilled"),
+        ],
+    ),
+    (
+        "872f7198-7083-4e3e-b57e-a2a9802c769e",
+        "ent:AccountType",
+        &[("0", "Active"), ("1", "Passive"), ("2", "ActivePassive")],
+    ),
+];
+
+/// The QName and member spelling the platform writes for one design-time value
+/// of a platform-defined type, or `None` when the corpus has never shown what
+/// this type or this ordinal is spelled as.
+pub(crate) fn form_choice_list_design_time_platform_value(
+    type_id: &str,
+    member_ordinal: &str,
+) -> Option<(&'static str, &'static str)> {
+    FORM_DESIGN_TIME_PLATFORM_VALUE_TYPES
+        .iter()
+        .find(|(candidate, _, _)| type_id.eq_ignore_ascii_case(candidate))
+        .and_then(|(_, reference, members)| {
+            members
+                .iter()
+                .find_map(|(ordinal, member)| (*ordinal == member_ordinal).then_some(*member))
+                .map(|member| (*reference, member))
+        })
+}
+
 /// Slot holding `FormButtonType` in the long extended Button layout, before the
 /// top-level name offset is applied.
 const FORM_LONG_BUTTON_TYPE_SLOT: usize = 46;

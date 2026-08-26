@@ -46,9 +46,10 @@ use crate::form_schema::{
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_extended_button_type_slot, form_root_trailer_optional_blocks,
-    form_table_counted_property_bag_bounds, form_text_document_context_menu_child_is_valid,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    form_choice_list_design_time_platform_value, form_extended_button_type_slot,
+    form_root_trailer_optional_blocks, form_table_counted_property_bag_bounds,
+    form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 #[cfg(test)]
@@ -15713,6 +15714,10 @@ fn try_parse_form_radio_button_choice_list(
                 )
             })
         },
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
+        },
     )?;
     Some(decoded.items().to_vec())
 }
@@ -15743,6 +15748,10 @@ pub(super) fn try_parse_form_input_field_choice_list(
                     object_refs,
                 )
             })
+        },
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
         },
     )?;
     Some(decoded.items().to_vec())
@@ -15822,6 +15831,10 @@ pub(super) fn parse_form_input_field_choice_list_item(
                 .map(|owner| owner.owner_reference())
         },
         |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
+        },
     )
 }
 
@@ -15841,6 +15854,10 @@ pub(super) fn parse_form_radio_button_choice_list_item(
                 .map(|owner| owner.owner_reference())
         },
         |_, value_id| parse_design_time_reference(value_id, object_refs),
+        |type_id, member_ordinal| {
+            form_choice_list_design_time_platform_value(type_id, member_ordinal)
+                .map(|(reference, member)| (reference.to_owned(), member.to_owned()))
+        },
     )
 }
 
