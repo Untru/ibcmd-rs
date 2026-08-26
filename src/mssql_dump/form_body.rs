@@ -4719,7 +4719,7 @@ pub(super) fn parse_form_attribute_use_always(
     }
     let secondary_by_item_id =
         parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields);
-    let has_main_table = settings.is_some_and(|settings| settings.main_table.is_some());
+    let main_table = settings.and_then(|settings| settings.main_table.as_deref());
     let universe = form_dynamic_list_use_always_universe(settings, &settings_fields, object_refs);
     let mut parsed = Vec::new();
     let mut seen = BTreeSet::<String>::new();
@@ -4729,7 +4729,7 @@ pub(super) fn parse_form_attribute_use_always(
             &item_id,
             &field_name_by_item_id,
             &secondary_by_item_id,
-            has_main_table,
+            main_table,
             universe.as_ref(),
         ) else {
             continue;
@@ -4930,11 +4930,12 @@ pub(super) fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]
     parsed
 }
 
-/// Item id `10000000` is the list's default-picture pseudo field. It carries the
-/// `~` marker exactly when the list has no main table to resolve it against:
-/// across the 22 platform observations, all five lists with a nil `MainTable`
-/// wrote `~<attr>.DefaultPicture` and all seventeen with a real main table wrote
-/// `<attr>.DefaultPicture`.
+/// Item id `10000000` is the list's default-picture pseudo field. It carries
+/// the `~` marker exactly when the picture sits outside the table the list
+/// declares -- see
+/// [`form_dynamic_list_default_picture_is_out_of_table`], which reads the same
+/// test the row-picture slot reads, measured over all 6 211 `DefaultPicture`
+/// paths of the stand.
 ///
 /// Item id `-3` is the list's grouping pseudo field, written `Group`. The single
 /// platform observation (UT 11.5.27.75,
@@ -4965,12 +4966,15 @@ pub(super) fn form_dynamic_list_use_always_field_name(
     item_id: &str,
     field_name_by_item_id: &BTreeMap<String, String>,
     secondary_name_by_item_id: &BTreeMap<String, String>,
-    has_main_table: bool,
+    main_table: Option<&str>,
     universe: Option<&BTreeSet<String>>,
 ) -> Option<String> {
+    let has_main_table = main_table.is_some();
     match item_id {
-        "10000000" if has_main_table => Some(format!("{}.DefaultPicture", attribute_name)),
-        "10000000" => Some(format!("~{}.DefaultPicture", attribute_name)),
+        "10000000" if form_dynamic_list_default_picture_is_out_of_table(main_table) => {
+            Some(format!("~{}.DefaultPicture", attribute_name))
+        }
+        "10000000" => Some(format!("{}.DefaultPicture", attribute_name)),
         "-3" if has_main_table => Some(format!("{}.Group", attribute_name)),
         "-3" => None,
         "-1" if has_main_table => Some(format!("{}.Order", attribute_name)),
@@ -8010,6 +8014,23 @@ fn collect_form_attribute_data_path_columns(
                 .insert(FormAttributeColumnKey {
                     attribute_id: attribute.id.clone(),
                     column_id: item_id.clone(),
+                });
+        }
+        // `DefaultPicture` is a platform column, not a field-map entry, so the
+        // remembered-field pass above never reaches it; a list whose default
+        // picture sits outside its main table carries the same `~` marker on a
+        // data path onto it as the row-picture slot already writes.
+        if form_dynamic_list_default_picture_is_out_of_table(
+            attribute
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.main_table.as_deref()),
+        ) {
+            owner_scoped_bindings
+                .unresolvable_columns
+                .insert(FormAttributeColumnKey {
+                    attribute_id: attribute.id.clone(),
+                    column_id: FORM_DYNAMIC_LIST_DEFAULT_PICTURE_COLUMN.id.to_string(),
                 });
         }
     }
@@ -20089,22 +20110,30 @@ pub(super) fn parse_form_bound_data_path(
 /// Whether a dynamic list's `DefaultPicture` sits outside the table the list
 /// declares, which the platform marks by prefixing the whole path with `~`.
 ///
-/// Evidence: UT 11.5.27.75 spells out 1 587 `…DefaultPicture` row-picture
-/// paths. All 55 whose list declares no main table carry `~`, and so do all 6
-/// whose declared main table is an `Enum` -- an enumeration has no default
+/// Evidence: all 6 211 `…DefaultPicture` paths the stand spells out, over
+/// `uh`, `ut`, `do`, `ssl` and `sslbase` and over `<UseAlways><Field>`, item
+/// `<DataPath>` and `<RowPictureDataPath>` alike. The families separate the
+/// two outcomes with no overlap: all 250 paths whose list declares no main
+/// table carry `~`, and so do all 30 whose main table is an `Enum` and all 8
+/// whose main table is a `FilterCriterion` — neither family has a default
 /// picture of its own, so the field cannot come from that table. Every one of
-/// the remaining 1 526, over nine other main-table families, carries no `~`.
+/// the remaining 5 923, over thirteen other main-table families (virtual
+/// tables included), carries no `~`.
 pub(super) fn form_dynamic_list_default_picture_is_out_of_main_table(
     attribute: &FormAttributeMetadataOwner,
 ) -> bool {
-    if !attribute.has_dynamic_list_settings {
-        return false;
-    }
-    match attribute.main_table.as_deref() {
+    attribute.has_dynamic_list_settings
+        && form_dynamic_list_default_picture_is_out_of_table(attribute.main_table.as_deref())
+}
+
+/// The same test against the main table a dynamic list declares, for the
+/// readers that hold the table itself rather than a metadata-owner record.
+pub(super) fn form_dynamic_list_default_picture_is_out_of_table(main_table: Option<&str>) -> bool {
+    match main_table {
         None => true,
         Some(main_table) => main_table
             .split_once('.')
-            .is_some_and(|(family, _)| family == "Enum"),
+            .is_some_and(|(family, _)| matches!(family, "Enum" | "FilterCriterion")),
     }
 }
 
