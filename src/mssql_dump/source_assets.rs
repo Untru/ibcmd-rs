@@ -2026,6 +2026,7 @@ pub(super) fn write_source_asset(
                 format_business_process_flowchart_xml(&flowchart),
                 context.source_version,
             )?;
+            write_graphical_scheme_pictures(&path, &flowchart)?;
         }
         SourceAssetKind::TemplateGraphicalScheme => {
             // A standalone `GraphicalSchema` Template body comes in one of
@@ -2077,6 +2078,7 @@ pub(super) fn write_source_asset(
                     format_business_process_flowchart_xml(&flowchart),
                     context.source_version,
                 )?;
+                write_graphical_scheme_pictures(&path, &flowchart)?;
             } else {
                 write_source_xml_file(&path, inflated, context.source_version)?;
             }
@@ -2108,6 +2110,37 @@ pub(super) fn write_source_asset(
             diagnostics,
         })
     }
+}
+
+/// Publishes the pictures a graphical scheme carries inline. The platform
+/// puts each beside the scheme file, under the scheme's own stem:
+/// `<stem>/Items/<item name>/Picture.<ext>`. Evidence: ERP УХ
+/// `DataProcessors/ВыполнениеМаршрутныхЛистов/Templates/МетодикаББВ/Ext/
+/// Template/Items/Декорация11/Picture.png` and the 69 other inline pictures
+/// of that corpus.
+fn write_graphical_scheme_pictures(
+    scheme_path: &Path,
+    flowchart: &BusinessProcessFlowchart,
+) -> Result<()> {
+    let pictures = flowchart.picture_files();
+    if pictures.is_empty() {
+        return Ok(());
+    }
+    let stem = scheme_path.with_extension("");
+    for (item_name, file_name, data) in pictures {
+        if item_name.is_empty() || item_name.contains(['/', '\\']) {
+            bail!(
+                "graphical scheme item name {item_name:?} cannot name a picture directory beside {}",
+                scheme_path.display()
+            );
+        }
+        let directory = stem.join("Items").join(&item_name);
+        fs::create_dir_all(&directory)
+            .with_context(|| format!("failed to create {}", directory.display()))?;
+        let file = directory.join(&file_name);
+        fs::write(&file, &data).with_context(|| format!("failed to write {}", file.display()))?;
+    }
+    Ok(())
 }
 
 fn extract_moxel_source_asset_xml(

@@ -38719,35 +38719,50 @@ fn platform_business_process_flowchart_reencodes_byte_for_byte() {
     assert_eq!(xml.as_bytes(), native);
 }
 
+/// A graphical-scheme font record names its optional members with a bitmask,
+/// and the platform writes exactly the attributes that mask selects. Both
+/// tuples below and both expected renderings are read off ERP УХ 3.2.12.6's
+/// own export: mask 62 (`2+4+8+16+32`) publishes height and all four style
+/// flags, and mask 46 (`2+4+8+32`) publishes the same list minus `underline`
+/// -- the case that tells the mask layout apart from a fixed member order.
 #[test]
 fn writes_business_process_connection_line_font_from_serialized_style() {
-    let default_style =
-        "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
-    let line_style =
-        "{7,{3,0,{0}},{3,3,{-22}},{3,3,{-3}},{7,2,120,{-31},700,0,1,0,1,90},{1,0},1,1,1,1,0,0,0,0}";
-    let border = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
-    let line_head = "{4,2,{1,0},\"Line\",2}";
-    let line_geometry = format!("{{{line_style},6,2,50,60,70,80,{border},0,4,2,0,0,1}}");
-    let line_shape = format!("{{{line_geometry}}}");
-    let line_item = format!("{{{line_head},3,-1,0,-1,0,{line_shape}}}");
-    let text = format!(
-        "{{5,{{{{1,{{3,3,{{-10}}}},1,20,20,3,6,6,{{\"N\",10}},7,{{\"N\",10}},8,{{\"N\",10}},9,{{\"N\",10}},13,{{\"N\",0}},16,{{\"N\",0}}}}}},1,1,{line_item},2}}"
+    let case = |font: &str| {
+        let style = format!(
+            "{{7,{{3,0,{{0}}}},{{3,3,{{-22}}}},{{3,3,{{-3}}}},{font},{{1,0}},1,1,1,1,0,0,0,0}}"
+        );
+        let line = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
+        let head = "{4,2,{1,0},\"Line\",2}";
+        let geometry = format!("{{{style},6,2,50,60,70,80,{line},0,4,2,0,0,1}}");
+        let item = format!("{{{head},3,-1,0,-1,0,{{{geometry}}}}}");
+        let text = format!(
+            "{{5,{{{{1,{{3,3,{{-10}}}},1,20,20,3,6,6,{{\"N\",10}},7,{{\"N\",10}},8,{{\"N\",10}},9,{{\"N\",10}},13,{{\"N\",0}},16,{{\"N\",0}}}}}},1,1,{item},2}}"
+        );
+        let flowchart = parse_business_process_flowchart_text(&text, &BTreeMap::new()).unwrap();
+        let xml = format_business_process_flowchart_xml(&flowchart);
+        xml.split(r#"<ConnectionLine id="2">"#)
+            .nth(1)
+            .unwrap()
+            .split("</ConnectionLine>")
+            .next()
+            .unwrap()
+            .split("<Font")
+            .nth(1)
+            .unwrap()
+            .split("/>")
+            .next()
+            .unwrap()
+            .to_string()
+    };
+
+    assert_eq!(
+        case("{7,2,62,{-31},80,700,0,0,0,1,100}"),
+        r#" ref="style:NormalTextFont" height="8" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem""#
     );
-    let _ = default_style;
-
-    let flowchart = parse_business_process_flowchart_text(&text, &BTreeMap::new()).unwrap();
-    let xml = format_business_process_flowchart_xml(&flowchart);
-    let line_xml = xml
-        .split(r#"<ConnectionLine id="2">"#)
-        .nth(1)
-        .unwrap()
-        .split("</ConnectionLine>")
-        .next()
-        .unwrap();
-
-    assert!(line_xml.contains(
-            r#"<Font ref="style:NormalTextFont" height="12" bold="true" italic="false" underline="true" strikeout="false" kind="StyleItem" scale="90"/>"#
-        ));
+    assert_eq!(
+        case("{7,1,46,{0},100,400,0,0,1,100}"),
+        r#" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" ref="sys:DefaultGUIFont" height="10" bold="false" italic="false" strikeout="false" kind="WindowsFont""#
+    );
 }
 
 #[test]

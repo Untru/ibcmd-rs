@@ -5080,6 +5080,26 @@ struct BusinessProcessFlowchart {
     items: Vec<FlowchartItem>,
 }
 
+impl BusinessProcessFlowchart {
+    /// Every picture an item carries inline, as the sidecar file the platform
+    /// writes beside the scheme: `<asset stem>/Items/<item name>/<file name>`.
+    /// Evidence: ERP УХ `DataProcessors/ВыполнениеМаршрутныхЛистов/Templates/
+    /// МетодикаББВ/Ext/Template/Items/Декорация11/Picture.png` and the 69 other
+    /// inline pictures of that corpus, all reproduced byte-for-byte from the
+    /// `#base64:` payload of the item's picture record.
+    fn picture_files(&self) -> Vec<(String, String, Vec<u8>)> {
+        self.items
+            .iter()
+            .filter_map(|item| match &item.properties.picture {
+                FlowchartPicture::Embedded {
+                    file_name, data, ..
+                } => Some((item.name.clone(), file_name.clone(), data.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
 /// Root properties of the graphical scheme, read off the header record.
 struct FlowchartScheme {
     back_color: String,
@@ -5111,10 +5131,13 @@ struct FlowchartItem {
 }
 
 /// The style record every item carries: `{7, back, line, text, font,
-/// tooltip, halign, 1, 1, zorder, 0, transparent, 0, 0}`. The three colours
-/// are one and the same control-colour value the form writer reads, in the
-/// order back / line / text; the two constant flag groups are pinned because
-/// no item in the evidence base varies them.
+/// tooltip, halign, valign, picture location, zorder, hyperlink,
+/// transparent, 0, 0}`. The three colours are one and the same
+/// control-colour value the form writer reads, in the order back / line /
+/// text. Slots 7, 8 and 10 were pinned to `1`, `1` and `0` while the only
+/// evidence was `BusinessProcess.Flowchart`; the 1 594 `Decoration` items of
+/// ERP УХ's `GraphicalSchema` templates vary all three and name them:
+/// `VerticalAlign`, `PictureLocation`, `Hyperlink`.
 struct FlowchartItemStyle {
     back_color: String,
     line_color: String,
@@ -5122,8 +5145,41 @@ struct FlowchartItemStyle {
     font: FlowchartFont,
     tooltip: Vec<(String, String)>,
     horizontal_align: &'static str,
+    vertical_align: &'static str,
+    picture_location: &'static str,
     z_order: String,
+    hyperlink: bool,
     transparent: bool,
+}
+
+/// A `{4, 0, {0}, style, width, gap, uuid, 0}` record: the same shape serves
+/// a connection line's `<Line>` and a shape item's `<Border>`.
+struct FlowchartLineRecord {
+    style: &'static str,
+    width: String,
+    gap: bool,
+}
+
+/// The picture slot of an item. `Ref` is a platform standard picture named
+/// by UUID; `Embedded` carries the image bytes inline and is published as a
+/// sidecar file next to the scheme.
+enum FlowchartPicture {
+    Empty,
+    Ref {
+        reference: &'static str,
+        load_transparent: bool,
+    },
+    Embedded {
+        file_name: String,
+        data: Vec<u8>,
+        load_transparent: bool,
+    },
+}
+
+struct FlowchartCase {
+    name: String,
+    description: Vec<(String, String)>,
+    back_color: String,
 }
 
 struct FlowchartItemProperties {
@@ -5134,14 +5190,20 @@ struct FlowchartItemProperties {
     from: Option<FlowchartConnectionEnd>,
     to: Option<FlowchartConnectionEnd>,
     decorative_line: bool,
-    line_style: &'static str,
+    line: Option<FlowchartLineRecord>,
+    border: Option<FlowchartLineRecord>,
+    picture: FlowchartPicture,
+    picture_size: &'static str,
+    shape: Option<&'static str>,
     text_location: &'static str,
     begin_arrow: &'static str,
     end_arrow: &'static str,
     explanation: Option<String>,
     task_description: Option<String>,
     group: bool,
+    has_addressing_attributes: bool,
     addressing_attributes: Vec<FlowchartAddressingAttribute>,
+    cases: Vec<FlowchartCase>,
     subprocess: Option<String>,
     true_port_index: Option<String>,
     false_port_index: Option<String>,
@@ -5180,14 +5242,22 @@ struct FlowchartConnectionEnd {
     port_index: String,
 }
 
+/// A font record `{7, kind, mask, reference, <members>, 1, scale}`: `mask`
+/// is a bitmask naming which optional members follow, and the platform
+/// writes exactly the attributes the mask selects -- bit 2 `height`, bit 4
+/// the weight behind `bold`, bit 8 `italic`, bit 16 `underline`, bit 32
+/// `strikeout`. Read off all 3 305 style records of ERP УХ and
+/// Документооборот КОРП; `{7,1,46,{0},100,400,0,0,1,100}` (mask 46 = 2+4+8+32)
+/// is the discriminating case -- the platform writes `height`, `bold`,
+/// `italic` and `strikeout` and no `underline` at all.
 struct FlowchartFont {
     reference: String,
     kind: &'static str,
     height: Option<String>,
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    strikeout: bool,
+    bold: Option<bool>,
+    italic: Option<bool>,
+    underline: Option<bool>,
+    strikeout: Option<bool>,
     scale: Option<String>,
 }
 
@@ -5424,6 +5494,7 @@ fn parse_flowchart_scheme(
     let grid_horizontal_step = parse_flowchart_number(fields.get(3)?)?;
     let grid_vertical_step = parse_flowchart_number(fields.get(4)?)?;
     let draw_grid_mode = match fields.get(5)?.trim() {
+        "0" => "None",
         "3" => "Lines",
         _ => return None,
     };
@@ -5564,22 +5635,59 @@ fn parse_flowchart_item(
         "5" => {
             let (mut properties, tail) =
                 parse_flowchart_shape_graphics_with_tail(fields.get(2)?, object_refs)?;
-            if tail.len() != 3 || tail.first()?.trim() != "3" || tail.get(1)?.trim() != "2" {
+            if tail.len() != 3 || tail.first()?.trim() != "3" {
                 return None;
             }
-            properties.group = parse_flowchart_flag(tail.get(2)?)?;
+            // The two tail numbers are ports, not the group flag: ERP УХ's
+            // graphical schemes write `{3,16,1}` on 270 activities whose
+            // `<Group>` the platform exports as `false`. `Group` is the
+            // activity record's own fourth field, which agrees with the
+            // platform on all 353 activities of ERP УХ and Документооборот
+            // КОРП.
+            parse_flowchart_number(tail.get(1)?)?;
+            parse_flowchart_number(tail.get(2)?)?;
+            if fields.len() != 8 {
+                return None;
+            }
+            properties.group = parse_flowchart_flag(fields.get(4)?)?;
             properties.explanation = fields.get(3).and_then(|value| parse_1c_string(value));
             properties.task_description = fields.get(7).and_then(|value| parse_1c_string(value));
+            properties.has_addressing_attributes = true;
             properties.addressing_attributes = parse_flowchart_activity_addressing_attributes(
-                &fields,
+                fields.get(6)?,
                 object_refs,
                 metadata_object_refs,
                 type_index,
                 type_index_collisions,
-            )
-            .unwrap_or_default();
+            )?;
             events = parse_flowchart_activity_events(fields.get(5)?)?;
             ("Activity", properties)
+        }
+        "6" => {
+            let (mut properties, tail) =
+                parse_flowchart_shape_graphics_with_tail(fields.get(2)?, object_refs)?;
+            if tail.len() < 2 || tail.first()?.trim() != "2" {
+                return None;
+            }
+            let case_count = tail.get(1)?.trim().parse::<usize>().ok()?;
+            if tail.len() != case_count.checked_mul(2)?.checked_add(2)?
+                || fields.len() != case_count.checked_add(5)?
+                || fields.get(3)?.trim() != case_count.to_string()
+            {
+                return None;
+            }
+            let mut cases = Vec::with_capacity(case_count);
+            for index in 0..case_count {
+                cases.push(FlowchartCase {
+                    name: parse_1c_string(fields.get(4 + index)?)?,
+                    description: parse_flowchart_localized(tail.get(2 + index * 2)?)?,
+                    back_color: parse_flowchart_color(tail.get(3 + index * 2)?, object_refs)?,
+                });
+            }
+            properties.cases = cases;
+            events =
+                parse_flowchart_named_events(fields.get(4 + case_count)?, &["SwitchProcessing"])?;
+            ("Switch", properties)
         }
         "7" => (
             "Split",
@@ -5595,12 +5703,25 @@ fn parse_flowchart_item(
             ("Processing", properties)
         }
         "10" => {
-            let (mut properties, _tail) =
+            let (mut properties, tail) =
                 parse_flowchart_shape_graphics_with_tail(fields.get(2)?, object_refs)?;
-            properties.subprocess = fields
-                .get(4)
-                .and_then(|field| parse_non_zero_uuid(field.trim()))
-                .and_then(|uuid| object_refs.get(&uuid).cloned());
+            if tail.len() != 1 || tail.first()?.trim() != "1" || fields.len() != 6 {
+                return None;
+            }
+            // The zero UUID is the empty subprocess the platform still writes
+            // as `<Subprocess/>` (Документооборот КОРП,
+            // `BusinessProcesses/КомплексныйПроцесс`); a non-zero UUID that
+            // resolves to no object refuses the scheme rather than silently
+            // dropping the reference.
+            properties.subprocess = match parse_non_zero_uuid(fields.get(4)?.trim()) {
+                Some(uuid) => Some(object_refs.get(&uuid)?.clone()),
+                None => {
+                    if !is_uuid_text(fields.get(4)?.trim()) {
+                        return None;
+                    }
+                    Some(String::new())
+                }
+            };
             properties.task_description = fields.get(5).and_then(|value| parse_1c_string(value));
             events = parse_flowchart_named_events(
                 fields.get(3)?,
@@ -5633,13 +5754,13 @@ fn parse_flowchart_item(
 fn parse_flowchart_base(code: &str, body: &str) -> Option<FlowchartBase> {
     let fields = split_1c_braced_fields(body, 0)?;
     let head = split_1c_braced_fields(fields.first()?, 0)?;
-    let uuid = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9" | "10") {
+    let uuid = if matches!(code, "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10") {
         head.get(2).map(|value| value.trim().to_string())
     } else {
         None
     }
     .filter(|value| is_uuid_text(value));
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9" | "10") {
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10") {
         split_1c_braced_fields(head.first()?, 0)?
     } else {
         head
@@ -5667,14 +5788,20 @@ fn flowchart_item_properties(style: FlowchartItemStyle) -> FlowchartItemProperti
         from: None,
         to: None,
         decorative_line: false,
-        line_style: "Solid",
+        line: None,
+        border: None,
+        picture: FlowchartPicture::Empty,
+        picture_size: "AutoSize",
+        shape: None,
         text_location: "FirstSegment",
         begin_arrow: "None",
         end_arrow: "None",
         explanation: None,
         task_description: None,
         group: false,
+        has_addressing_attributes: false,
         addressing_attributes: Vec::new(),
+        cases: Vec::new(),
         subprocess: None,
         true_port_index: None,
         false_port_index: None,
@@ -5688,9 +5815,6 @@ fn parse_flowchart_item_style(
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() != 14
         || fields.first()?.trim() != "7"
-        || fields.get(7)?.trim() != "1"
-        || fields.get(8)?.trim() != "1"
-        || fields.get(10)?.trim() != "0"
         || fields.get(12)?.trim() != "0"
         || fields.get(13)?.trim() != "0"
     {
@@ -5705,10 +5829,156 @@ fn parse_flowchart_item_style(
         horizontal_align: match fields.get(6)?.trim() {
             "0" => "Left",
             "1" => "Center",
+            "2" => "Right",
+            _ => return None,
+        },
+        vertical_align: match fields.get(7)?.trim() {
+            "0" => "Top",
+            "1" => "Center",
+            _ => return None,
+        },
+        picture_location: match fields.get(8)?.trim() {
+            "1" => "Left",
+            "2" => "Top",
+            "5" => "Center",
             _ => return None,
         },
         z_order: parse_flowchart_number(fields.get(9)?)?,
+        hyperlink: parse_flowchart_flag(fields.get(10)?)?,
         transparent: parse_flowchart_flag(fields.get(11)?)?,
+    })
+}
+
+/// The `PictureSize` slot, shared by shape and decoration geometry.
+fn parse_flowchart_picture_size(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("RealSize"),
+        "2" => Some("Proportionally"),
+        "4" => Some("AutoSize"),
+        _ => None,
+    }
+}
+
+/// Standard platform pictures an item can point at by UUID. The mapping is
+/// platform-owned; each arm is read off the platform's own export of the
+/// scheme that carries it, with the observation count of ERP УХ 3.2.12.6
+/// following the arm.
+fn flowchart_standard_picture_reference(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "da0c4924-973c-4ef0-9dcf-f1fc3307e5e2" => Some("StdPicture.ChangeListItem"), // 19
+        "f3c1376a-d2ee-46c4-9e44-aa2f7dae31c4" => Some("StdPicture.Chart"),          // 4
+        _ => None,
+    }
+}
+
+/// The picture slot: `{4, kind, ...}`. Kind `0` is the empty picture the
+/// platform writes as `<Picture/>`; kind `1` names a standard platform
+/// picture by UUID; kind `3` carries the image inline as `#base64:` and is
+/// published beside the scheme as `Items/<item>/Picture.<ext>`. Any other
+/// kind refuses the whole scheme rather than dropping the picture.
+fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "4"
+        || fields.get(3)?.trim() != "\"\""
+        || fields.get(4)?.trim() != "-1"
+        || fields.get(5)?.trim() != "-1"
+    {
+        return None;
+    }
+    match fields.get(1)?.trim() {
+        "0" => {
+            if fields.len() != 9
+                || split_1c_braced_fields(fields.get(2)?, 0)? != vec!["0"]
+                || fields.get(6)?.trim() != "1"
+                || fields.get(7)?.trim() != "0"
+                || fields.get(8)?.trim() != "\"\""
+            {
+                return None;
+            }
+            Some(FlowchartPicture::Empty)
+        }
+        "1" => {
+            if fields.len() != 9 || fields.get(7)?.trim() != "0" || fields.get(8)?.trim() != "\"\""
+            {
+                return None;
+            }
+            let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
+            if payload.len() != 2 || payload.first()?.trim() != "0" {
+                return None;
+            }
+            Some(FlowchartPicture::Ref {
+                reference: flowchart_standard_picture_reference(payload.get(1)?.trim())?,
+                load_transparent: parse_flowchart_flag(fields.get(6)?)?,
+            })
+        }
+        "3" => {
+            if fields.len() != 10
+                || split_1c_braced_fields(fields.get(2)?, 0)? != vec!["0"]
+                || fields.get(8)?.trim() != "0"
+                || fields.get(9)?.trim() != "\"\""
+            {
+                return None;
+            }
+            let mut payload = fields.get(7)?.trim();
+            let mut inner = split_1c_braced_fields(payload, 0)?;
+            while inner.len() == 1 && inner.first()?.trim_start().starts_with('{') {
+                payload = inner.first()?.trim();
+                inner = split_1c_braced_fields(payload, 0)?;
+            }
+            if inner.len() != 1 {
+                return None;
+            }
+            let encoded = inner.first()?.trim().strip_prefix("#base64:")?;
+            let data = crate::module_blob::decode_base64_mime(encoded)?;
+            Some(FlowchartPicture::Embedded {
+                file_name: format!("Picture.{}", flowchart_picture_extension(&data)?),
+                data,
+                load_transparent: parse_flowchart_flag(fields.get(6)?)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The sidecar file name the platform gives an inline picture follows the
+/// image's own format, not the item: PNG, JPEG and BMP are the three formats
+/// the ERP УХ corpus carries.
+fn flowchart_picture_extension(data: &[u8]) -> Option<&'static str> {
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if data.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("jpg")
+    } else if data.starts_with(b"BM") {
+        Some("bmp")
+    } else {
+        None
+    }
+}
+
+/// A `{4, 0, {0}, style, width, gap, uuid, 0}` record. Both the connection
+/// line's own line and a shape item's border are this record; the border was
+/// pinned to `Solid`/`1`/`false` while `BusinessProcess.Flowchart` was the
+/// only evidence, and ERP УХ's graphical schemes carry `None` borders and
+/// width-3 lines.
+fn parse_flowchart_line_record(text: &str) -> Option<FlowchartLineRecord> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 8
+        || fields.first()?.trim() != "4"
+        || fields.get(1)?.trim() != "0"
+        || fields.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    Some(FlowchartLineRecord {
+        style: match fields.get(3)?.trim() {
+            "0" => "None",
+            "1" => "Solid",
+            "2" => "Dashed",
+            "3" => "Dotted",
+            _ => return None,
+        },
+        width: parse_flowchart_number(fields.get(4)?)?,
+        gap: parse_flowchart_flag(fields.get(5)?)?,
     })
 }
 
@@ -5738,9 +6008,12 @@ fn parse_flowchart_shape_graphics_with_tail<'a>(
     });
     let point_count = geometry.get(6)?.trim().parse::<usize>().ok()?;
     let rest = point_count.checked_mul(2)?.checked_add(7)?;
-    if geometry.len() != rest.checked_add(3)? || geometry.get(rest)?.trim() != "4" {
+    if geometry.len() != rest.checked_add(3)? {
         return None;
     }
+    properties.picture_size = parse_flowchart_picture_size(geometry.get(rest)?)?;
+    properties.picture = parse_flowchart_picture(geometry.get(rest + 1)?)?;
+    properties.border = Some(parse_flowchart_line_record(geometry.get(rest + 2)?)?);
     Some((properties, wrapper[1..].to_vec()))
 }
 
@@ -5752,9 +6025,12 @@ fn parse_flowchart_shape_graphics(
     (tail.len() == 1 && tail.first()?.trim() == "1").then_some(properties)
 }
 
-/// Decoration geometry: `{{style, 6, left, top, right, bottom, 4, picture,
-/// flag, shape, flip, angle}}`. Only the document shape with no flip and no
-/// rotation is evidenced; anything else refuses.
+/// Decoration geometry: `{{style, 6, left, top, right, bottom, picture size,
+/// picture, flag, shape, flip, angle}}`. `Shape` was pinned to the document
+/// figure while the only evidence was `BusinessProcess.Flowchart`; ERP УХ's
+/// graphical schemes carry three more figures and 1 453 shapeless
+/// decorations. Flip and rotation stay pinned -- nothing in either corpus
+/// varies them, so a scheme that does refuses rather than losing them.
 fn parse_flowchart_decoration_graphics(
     text: &str,
     object_refs: &BTreeMap<String, String>,
@@ -5766,9 +6042,7 @@ fn parse_flowchart_decoration_graphics(
     let geometry = split_1c_braced_fields(outer.first()?, 0)?;
     if geometry.len() != 12
         || geometry.get(1)?.trim() != "6"
-        || geometry.get(6)?.trim() != "4"
         || !matches!(geometry.get(8)?.trim(), "0" | "1")
-        || geometry.get(9)?.trim() != "10"
         || geometry.get(10)?.trim() != "0"
         || geometry.get(11)?.trim() != "0"
     {
@@ -5781,6 +6055,15 @@ fn parse_flowchart_decoration_graphics(
         top: parse_flowchart_number(geometry.get(3)?)?,
         right: parse_flowchart_number(geometry.get(4)?)?,
         bottom: parse_flowchart_number(geometry.get(5)?)?,
+    });
+    properties.picture_size = parse_flowchart_picture_size(geometry.get(6)?)?;
+    properties.picture = parse_flowchart_picture(geometry.get(7)?)?;
+    properties.shape = Some(match geometry.get(9)?.trim() {
+        "0" => "None",
+        "10" => "Document",
+        "11" => "Block",
+        "12" => "HorizontalBrackets",
+        _ => return None,
     });
     Some(properties)
 }
@@ -5813,9 +6096,10 @@ fn parse_flowchart_line_graphics(
         index += 2;
     }
     properties.pivot_points = points;
-    properties.line_style = parse_flowchart_line_style(geometry.get(index)?)?;
+    properties.line = Some(parse_flowchart_line_record(geometry.get(index)?)?);
     properties.text_location = match geometry.get(index + 1)?.trim() {
         "0" => "FirstSegment",
+        "1" => "Middle",
         _ => return None,
     };
     properties.from = Some(FlowchartConnectionEnd {
@@ -5867,10 +6151,10 @@ impl Default for FlowchartFont {
             reference: "sys:DefaultGUIFont".to_string(),
             kind: "WindowsFont",
             height: None,
-            bold: false,
-            italic: false,
-            underline: false,
-            strikeout: false,
+            bold: None,
+            italic: None,
+            underline: None,
+            strikeout: None,
             scale: None,
         }
     }
@@ -5886,18 +6170,18 @@ fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
     }
     let kind = fields.get(1).map(|field| field.trim()).unwrap_or("1");
     let (reference, kind_xml) = match kind {
-        "1" => ("sys:DefaultGUIFont".to_string(), "WindowsFont"),
+        "1" => {
+            if split_1c_braced_fields(fields.get(3)?, 0)? != vec!["0"] {
+                return None;
+            }
+            ("sys:DefaultGUIFont".to_string(), "WindowsFont")
+        }
         "2" => {
-            let reference = fields
-                .get(3)
-                .and_then(|field| {
-                    split_1c_braced_fields(field, 0)?
-                        .first()
-                        .and_then(|code| code.trim().parse::<i32>().ok())
-                })
+            let reference = split_1c_braced_fields(fields.get(3)?, 0)?
+                .first()
+                .and_then(|code| code.trim().parse::<i32>().ok())
                 .and_then(standard_style_item_for_code)
-                .map(|(_, name)| format!("style:{name}"))
-                .unwrap_or_else(|| "style:TextFont".to_string());
+                .map(|(_, name)| format!("style:{name}"))?;
             (reference, "StyleItem")
         }
         "3" => {
@@ -5916,60 +6200,50 @@ fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
         }
         _ => return None,
     };
-    let height = font_height_xml(fields.get(2).map(|field| field.trim()));
-    let (weight, italic, underline, strikeout, scale) = if fields.len() >= 10 {
-        (
-            fields
-                .get(4)
-                .and_then(|field| field.trim().parse::<i32>().ok())
-                .unwrap_or(400),
-            fields
-                .get(5)
-                .and_then(|field| parse_1c_bool_flag(field.trim()))
-                .unwrap_or(false),
-            fields
-                .get(6)
-                .and_then(|field| parse_1c_bool_flag(field.trim()))
-                .unwrap_or(false),
-            fields
-                .get(7)
-                .and_then(|field| parse_1c_bool_flag(field.trim()))
-                .unwrap_or(false),
-            fields.get(9).map(|field| field.trim()).unwrap_or("100"),
-        )
-    } else {
-        (
-            400,
-            false,
-            false,
-            false,
-            fields.get(5).map(|field| field.trim()).unwrap_or("100"),
-        )
+    let mask = fields.get(2)?.trim().parse::<u32>().ok()?;
+    // Only the five member bits below are evidenced; any other bit is a
+    // member layout nothing in the corpus describes, so the font refuses.
+    if mask & !0b11_1110 != 0 {
+        return None;
+    }
+    let mut index = 4usize;
+    let mut member = |bit: u32| -> Option<Option<&str>> {
+        if mask & bit == 0 {
+            return Some(None);
+        }
+        let value = fields.get(index)?.trim();
+        index += 1;
+        Some(Some(value))
     };
+    let height = member(2)?;
+    let weight = member(4)?;
+    let italic = member(8)?;
+    let underline = member(16)?;
+    let strikeout = member(32)?;
+    if fields.len() != index + 2 || fields.get(index)?.trim() != "1" {
+        return None;
+    }
+    let scale = fields.get(index + 1)?.trim();
     let scale = (scale != "100").then(|| scale.to_string());
+    let flag = |value: Option<&str>| -> Option<Option<bool>> {
+        match value {
+            None => Some(None),
+            Some(raw) => parse_1c_bool_flag(raw).map(Some),
+        }
+    };
     Some(FlowchartFont {
         reference,
         kind: kind_xml,
-        height,
-        bold: weight >= 700,
-        italic,
-        underline,
-        strikeout,
+        height: font_height_xml(height),
+        bold: match weight {
+            None => None,
+            Some(raw) => Some(raw.parse::<i32>().ok()? >= 700),
+        },
+        italic: flag(italic)?,
+        underline: flag(underline)?,
+        strikeout: flag(strikeout)?,
         scale,
     })
-}
-
-/// Line record `{4, 0, {0}, style, 1, 0, uuid, 0}`: style 1 solid, 2 dashed.
-fn parse_flowchart_line_style(text: &str) -> Option<&'static str> {
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 8 || fields.first()?.trim() != "4" {
-        return None;
-    }
-    match fields.get(3)?.trim() {
-        "1" => Some("Solid"),
-        "2" => Some("Dashed"),
-        _ => None,
-    }
 }
 
 /// Localized value `{1, count, {lang, content}...}` used by titles and
@@ -6023,27 +6297,29 @@ fn parse_flowchart_activity_events(text: &str) -> Option<Vec<FlowchartEvent>> {
         },
         FlowchartEvent {
             name: "BeforeExecute",
-            handler: None,
+            handler: handlers.get(&5).cloned(),
         },
         FlowchartEvent {
             name: "BeforeExecuteInteractively",
-            handler: None,
+            handler: handlers.get(&6).cloned(),
         },
     ])
 }
 
+/// The activity's addressing-attribute collection `{count, {ref, value}...}`.
+/// The count is declared, not fixed: ERP УХ writes four, Документооборот КОРП
+/// two, and the graphical-scheme templates of both write zero -- which the
+/// platform still exports as an empty `<AddressingAttributes/>` element.
 fn parse_flowchart_activity_addressing_attributes(
-    activity_fields: &[&str],
+    text: &str,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
 ) -> Option<Vec<FlowchartAddressingAttribute>> {
-    if activity_fields.len() != 8 {
-        return None;
-    }
-    let collection = split_1c_braced_fields(activity_fields.get(6)?, 0)?;
-    if collection.len() != 5 || collection.first()?.trim() != "4" {
+    let collection = split_1c_braced_fields(text, 0)?;
+    let declared = collection.first()?.trim().parse::<usize>().ok()?;
+    if collection.len() != declared.checked_add(1)? {
         return None;
     }
 
@@ -6078,7 +6354,7 @@ fn parse_flowchart_activity_addressing_attributes(
             )?,
         });
     }
-    if attributes.len() != 4 || references.len() != 4 {
+    if attributes.len() != declared || references.len() != declared {
         return None;
     }
     attributes.sort_by(|left, right| left.reference.cmp(&right.reference));
@@ -6234,8 +6510,7 @@ fn format_business_process_flowchart_xml(flowchart: &BusinessProcessFlowchart) -
 \t\t<RightMargin>{}</RightMargin>\r\n\
 \t\t<BlackAndWhite>{}</BlackAndWhite>\r\n\
 \t\t<FitPageMode>{}</FitPageMode>\r\n\
-\t</PrintParameters>\r\n\
-\t<Items>\r\n",
+\t</PrintParameters>\r\n",
         escape_xml_element_text(&print.top_margin),
         escape_xml_element_text(&print.left_margin),
         escape_xml_element_text(&print.bottom_margin),
@@ -6243,6 +6518,12 @@ fn format_business_process_flowchart_xml(flowchart: &BusinessProcessFlowchart) -
         xml_bool(print.black_and_white),
         print.fit_page_mode,
     ));
+    // A scheme with no items at all closes `<Items/>` in one element.
+    if flowchart.items.is_empty() {
+        xml.push_str("\t<Items/>\r\n</GraphicalSchema>");
+        return xml;
+    }
+    xml.push_str("\t<Items>\r\n");
     for item in &flowchart.items {
         push_flowchart_item_xml(&mut xml, item);
     }
@@ -6294,7 +6575,10 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
         "\t\t\t\t<ZOrder>{}</ZOrder>\r\n",
         escape_xml_element_text(&style.z_order)
     ));
-    xml.push_str("\t\t\t\t<Hyperlink>false</Hyperlink>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<Hyperlink>{}</Hyperlink>\r\n",
+        xml_bool(style.hyperlink)
+    ));
     xml.push_str(&format!(
         "\t\t\t\t<Transparent>{}</Transparent>\r\n",
         xml_bool(style.transparent)
@@ -6304,8 +6588,14 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
         "\t\t\t\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
         style.horizontal_align
     ));
-    xml.push_str("\t\t\t\t<VerticalAlign>Center</VerticalAlign>\r\n");
-    xml.push_str("\t\t\t\t<PictureLocation>Left</PictureLocation>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<VerticalAlign>{}</VerticalAlign>\r\n",
+        style.vertical_align
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t<PictureLocation>{}</PictureLocation>\r\n",
+        style.picture_location
+    ));
     if item.tag == "ConnectionLine" {
         push_flowchart_line_properties_xml(xml, &item.properties);
     } else {
@@ -6331,24 +6621,33 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
 }
 
 fn push_flowchart_localized_xml(xml: &mut String, tag: &str, values: &[(String, String)]) {
+    push_flowchart_localized_indented_xml(xml, tag, values, "\t\t\t\t");
+}
+
+fn push_flowchart_localized_indented_xml(
+    xml: &mut String,
+    tag: &str,
+    values: &[(String, String)],
+    indent: &str,
+) {
     if values.is_empty() {
-        xml.push_str(&format!("\t\t\t\t<{tag}/>\r\n"));
+        xml.push_str(&format!("{indent}<{tag}/>\r\n"));
         return;
     }
-    xml.push_str(&format!("\t\t\t\t<{tag}>\r\n"));
+    xml.push_str(&format!("{indent}<{tag}>\r\n"));
     for (lang, content) in values {
-        xml.push_str("\t\t\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
         xml.push_str(&format!(
-            "\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
             escape_xml_element_text(lang)
         ));
         xml.push_str(&format!(
-            "\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            "{indent}\t\t<v8:content>{}</v8:content>\r\n",
             escape_xml_element_text(content)
         ));
-        xml.push_str("\t\t\t\t\t</v8:item>\r\n");
+        xml.push_str(&format!("{indent}\t</v8:item>\r\n"));
     }
-    xml.push_str(&format!("\t\t\t\t</{tag}>\r\n"));
+    xml.push_str(&format!("{indent}</{tag}>\r\n"));
 }
 
 fn push_flowchart_font_xml(xml: &mut String, font: &FlowchartFont) {
@@ -6364,14 +6663,17 @@ fn push_flowchart_font_xml(xml: &mut String, font: &FlowchartFont) {
     if let Some(height) = &font.height {
         xml.push_str(&format!(" height=\"{}\"", escape_xml_text(height)));
     }
-    if font.bold || font.italic || font.underline || font.strikeout {
-        xml.push_str(&format!(
-            " bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\"",
-            xml_bool(font.bold),
-            xml_bool(font.italic),
-            xml_bool(font.underline),
-            xml_bool(font.strikeout)
-        ));
+    // Each style attribute appears exactly when the record's member mask
+    // selected it, independently of the others.
+    for (name, value) in [
+        ("bold", font.bold),
+        ("italic", font.italic),
+        ("underline", font.underline),
+        ("strikeout", font.strikeout),
+    ] {
+        if let Some(value) = value {
+            xml.push_str(&format!(" {name}=\"{}\"", xml_bool(value)));
+        }
     }
     xml.push_str(&format!(" kind=\"{}\"", font.kind));
     if let Some(scale) = &font.scale {
@@ -6390,51 +6692,75 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
             escape_xml_text(&location.right)
         ));
     }
-    if matches!(
-        item.tag,
-        "Start"
-            | "Activity"
-            | "Condition"
-            | "Completion"
-            | "Processing"
-            | "Split"
-            | "Join"
-            | "SubBusinessProcess"
-    ) {
-        xml.push_str("\t\t\t\t<Border width=\"1\" gap=\"false\">\r\n");
-        xml.push_str(
-            "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">Solid</v8ui:style>\r\n",
-        );
+    if let Some(border) = &item.properties.border {
+        xml.push_str(&format!(
+            "\t\t\t\t<Border width=\"{}\" gap=\"{}\">\r\n",
+            escape_xml_text(&border.width),
+            xml_bool(border.gap)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">{}</v8ui:style>\r\n",
+            border.style
+        ));
         xml.push_str("\t\t\t\t</Border>\r\n");
     }
-    xml.push_str("\t\t\t\t<Picture/>\r\n");
-    xml.push_str("\t\t\t\t<PictureSize>AutoSize</PictureSize>\r\n");
+    push_flowchart_picture_xml(xml, &item.properties.picture);
+    xml.push_str(&format!(
+        "\t\t\t\t<PictureSize>{}</PictureSize>\r\n",
+        item.properties.picture_size
+    ));
     if item.tag == "Activity" {
-        xml.push_str(&format!(
-            "\t\t\t\t<TaskDescription>{}</TaskDescription>\r\n",
-            escape_xml_element_text(item.properties.task_description.as_deref().unwrap_or(""))
-        ));
-        xml.push_str(&format!(
-            "\t\t\t\t<Explanation>{}</Explanation>\r\n",
-            escape_xml_element_text(item.properties.explanation.as_deref().unwrap_or(""))
-        ));
+        push_flowchart_text_element_xml(
+            xml,
+            "TaskDescription",
+            item.properties.task_description.as_deref().unwrap_or(""),
+        );
+        push_flowchart_text_element_xml(
+            xml,
+            "Explanation",
+            item.properties.explanation.as_deref().unwrap_or(""),
+        );
         xml.push_str(&format!(
             "\t\t\t\t<Group>{}</Group>\r\n",
             xml_bool(item.properties.group)
         ));
-        push_flowchart_addressing_attributes_xml(xml, &item.properties.addressing_attributes);
+        if item.properties.has_addressing_attributes {
+            push_flowchart_addressing_attributes_xml(xml, &item.properties.addressing_attributes);
+        }
     }
     if item.tag == "SubBusinessProcess" {
-        if let Some(subprocess) = &item.properties.subprocess {
-            xml.push_str(&format!(
+        match item.properties.subprocess.as_deref() {
+            Some("") | None => xml.push_str("\t\t\t\t<Subprocess/>\r\n"),
+            Some(subprocess) => xml.push_str(&format!(
                 "\t\t\t\t<Subprocess>{}</Subprocess>\r\n",
                 escape_xml_element_text(subprocess)
-            ));
+            )),
         }
-        xml.push_str(&format!(
-            "\t\t\t\t<TaskDescription>{}</TaskDescription>\r\n",
-            escape_xml_element_text(item.properties.task_description.as_deref().unwrap_or(""))
-        ));
+        push_flowchart_text_element_xml(
+            xml,
+            "TaskDescription",
+            item.properties.task_description.as_deref().unwrap_or(""),
+        );
+    }
+    if item.tag == "Switch" {
+        for case in &item.properties.cases {
+            xml.push_str("\t\t\t\t<Case>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<sch:name>{}</sch:name>\r\n",
+                escape_xml_element_text(&case.name)
+            ));
+            push_flowchart_localized_indented_xml(
+                xml,
+                "sch:description",
+                &case.description,
+                "\t\t\t\t\t",
+            );
+            xml.push_str(&format!(
+                "\t\t\t\t\t<sch:backColor>{}</sch:backColor>\r\n",
+                escape_xml_element_text(&case.back_color)
+            ));
+            xml.push_str("\t\t\t\t</Case>\r\n");
+        }
     }
     if item.tag == "Condition" {
         xml.push_str(&format!(
@@ -6446,11 +6772,60 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
             item.properties.false_port_index.as_deref().unwrap_or("1")
         ));
     }
-    if item.tag == "Decoration" {
-        xml.push_str("\t\t\t\t<Shape>Document</Shape>\r\n");
+    if let Some(shape) = item.properties.shape {
+        xml.push_str(&format!("\t\t\t\t<Shape>{shape}</Shape>\r\n"));
         xml.push_str("\t\t\t\t<FlipMode>0</FlipMode>\r\n");
         xml.push_str("\t\t\t\t<Angle xsi:type=\"xs:decimal\">0</Angle>\r\n");
     }
+}
+
+/// A property whose text is empty closes in one element.
+fn push_flowchart_text_element_xml(xml: &mut String, tag: &str, value: &str) {
+    if value.is_empty() {
+        xml.push_str(&format!("\t\t\t\t<{tag}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t<{tag}>{}</{tag}>\r\n",
+        escape_xml_element_text(value)
+    ));
+}
+
+fn push_flowchart_picture_xml(xml: &mut String, picture: &FlowchartPicture) {
+    let (body, load_transparent) = match picture {
+        FlowchartPicture::Empty => {
+            xml.push_str("\t\t\t\t<Picture/>\r\n");
+            return;
+        }
+        FlowchartPicture::Ref {
+            reference,
+            load_transparent,
+        } => (
+            format!(
+                "\t\t\t\t\t<Ref xmlns=\"http://v8.1c.ru/8.3/xcf/readable\">{}</Ref>\r\n",
+                escape_xml_element_text(reference)
+            ),
+            *load_transparent,
+        ),
+        FlowchartPicture::Embedded {
+            file_name,
+            load_transparent,
+            ..
+        } => (
+            format!(
+                "\t\t\t\t\t<Abs xmlns=\"http://v8.1c.ru/8.3/xcf/readable\">{}</Abs>\r\n",
+                escape_xml_element_text(file_name)
+            ),
+            *load_transparent,
+        ),
+    };
+    xml.push_str("\t\t\t\t<Picture>\r\n");
+    xml.push_str(&body);
+    xml.push_str(&format!(
+        "\t\t\t\t\t<LoadTransparent xmlns=\"http://v8.1c.ru/8.3/xcf/readable\">{}</LoadTransparent>\r\n",
+        xml_bool(load_transparent)
+    ));
+    xml.push_str("\t\t\t\t</Picture>\r\n");
 }
 
 fn push_flowchart_addressing_attributes_xml(
@@ -6458,6 +6833,7 @@ fn push_flowchart_addressing_attributes_xml(
     attributes: &[FlowchartAddressingAttribute],
 ) {
     if attributes.is_empty() {
+        xml.push_str("\t\t\t\t<AddressingAttributes/>\r\n");
         return;
     }
     xml.push_str("\t\t\t\t<AddressingAttributes>\r\n");
@@ -6517,12 +6893,18 @@ fn push_flowchart_line_properties_xml(xml: &mut String, properties: &FlowchartIt
     push_flowchart_connection_end_xml(xml, "From", properties.from.as_ref());
     push_flowchart_connection_end_xml(xml, "To", properties.to.as_ref());
     xml.push_str("\t\t\t\t</Connect>\r\n");
-    xml.push_str("\t\t\t\t<Line width=\"1\" gap=\"false\">\r\n");
-    xml.push_str(&format!(
-        "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">{}</v8ui:style>\r\n",
-        properties.line_style
-    ));
-    xml.push_str("\t\t\t\t</Line>\r\n");
+    if let Some(line) = &properties.line {
+        xml.push_str(&format!(
+            "\t\t\t\t<Line width=\"{}\" gap=\"{}\">\r\n",
+            escape_xml_text(&line.width),
+            xml_bool(line.gap)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">{}</v8ui:style>\r\n",
+            line.style
+        ));
+        xml.push_str("\t\t\t\t</Line>\r\n");
+    }
     xml.push_str(&format!(
         "\t\t\t\t<DecorativeLine>{}</DecorativeLine>\r\n",
         xml_bool(properties.decorative_line)
