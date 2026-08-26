@@ -46622,8 +46622,9 @@ fn extracts_configuration_used_mobile_application_functionalities_for_proven_lay
     );
 
     let (uuid, text) = flat_configuration_mobile_text(67, 60, &raw37);
-    let v17 =
+    let (v17, v17_messages) =
         parse_configuration_used_mobile_application_functionalities(&text, &uuid, "2.17").unwrap();
+    assert!(v17_messages.is_empty());
     assert_eq!(v17.len(), 37);
     assert_eq!(v17.first().map(|item| item.name), Some("Biometrics"));
     assert_eq!(

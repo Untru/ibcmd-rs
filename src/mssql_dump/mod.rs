@@ -8999,6 +8999,8 @@ struct ConfigurationProperties {
     default_report_variant_form: Option<ConfigurationRootReference>,
     default_report_settings_form: Option<ConfigurationRootReference>,
     used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
+    used_mobile_application_permission_messages:
+        Vec<ConfigurationMobileApplicationPermissionMessage>,
     compatibility_mode: Option<String>,
     /// Set only by the CF-container decode path
     /// (`extract_configuration_source_xml`'s own raw config-body text),
@@ -9029,6 +9031,14 @@ struct ConfigurationLocalizedProperties {
 struct ConfigurationMobileApplicationFunctionality {
     name: &'static str,
     use_functionality: bool,
+}
+
+/// One `<app:permissionMessage>` of the same block: the OS permission the
+/// message explains, and its localized text.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationMobileApplicationPermissionMessage {
+    permission: &'static str,
+    description: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -32678,6 +32688,7 @@ fn format_configuration_source_xml(
         push_used_mobile_application_functionalities_xml(
             &mut insert,
             &properties.used_mobile_application_functionalities,
+            &properties.used_mobile_application_permission_messages,
         );
         insert.push_str(policy.standalone_through_default_style_segment());
         push_optional_simple_property_xml(
@@ -32689,6 +32700,7 @@ fn format_configuration_source_xml(
         push_used_mobile_application_functionalities_xml(
             &mut insert,
             &properties.used_mobile_application_functionalities,
+            &properties.used_mobile_application_permission_messages,
         );
     }
     if let Some(localized) = &properties.localized_properties {
@@ -32866,6 +32878,7 @@ fn push_optional_localized_property_xml(xml: &mut String, name: &str, values: &[
 fn push_used_mobile_application_functionalities_xml(
     xml: &mut String,
     functionalities: &[ConfigurationMobileApplicationFunctionality],
+    permission_messages: &[ConfigurationMobileApplicationPermissionMessage],
 ) {
     if functionalities.is_empty() {
         return;
@@ -32882,6 +32895,35 @@ fn push_used_mobile_application_functionalities_xml(
             xml_bool(functionality.use_functionality)
         ));
         xml.push_str("\t\t\t\t</app:functionality>\r\n");
+    }
+    // The messages follow every `<app:functionality>`, in record order --
+    // Документооборот КОРП 3.0.21.3's native `Configuration.xml` writes its
+    // seven that way.
+    for message in permission_messages {
+        xml.push_str("\t\t\t\t<app:permissionMessage>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t<app:permission>{}</app:permission>\r\n",
+            escape_xml_element_text(message.permission)
+        ));
+        if message.description.is_empty() {
+            xml.push_str("\t\t\t\t\t<app:description/>\r\n");
+        } else {
+            xml.push_str("\t\t\t\t\t<app:description>\r\n");
+            for (lang, content) in &message.description {
+                xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                    escape_xml_element_text(lang)
+                ));
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                    escape_xml_element_text(content)
+                ));
+                xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
+            }
+            xml.push_str("\t\t\t\t\t</app:description>\r\n");
+        }
+        xml.push_str("\t\t\t\t</app:permissionMessage>\r\n");
     }
     xml.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
 }
