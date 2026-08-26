@@ -2861,6 +2861,8 @@ pub(crate) const FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER:
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormCheckBoxFieldSchema {
     top_level_offset: usize,
+    /// Option slot the block's own declared revision keeps `CheckBoxType` in.
+    check_box_type_option_slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -4341,13 +4343,41 @@ impl FormCheckBoxFieldSchema {
         options: &[&str],
     ) -> Option<Self> {
         let top_level_offset = Self::top_level_offset_for_raw_layout(wrapper, field_count)?;
-        if direct_discriminator != Some("3")
-            || options.len() != 13
-            || options.first().map(|field| field.trim()) != Some("11")
-        {
+        if direct_discriminator != Some("3") {
             return None;
         }
-        Some(Self { top_level_offset })
+        // The option block declares its own revision in its leading member, and
+        // that revision names which slot holds `CheckBoxType`.
+        //
+        // Revision `11` at 13 members is the block every corpus writes under
+        // form-body container revision `4`, and slot 12 is its code.  ERP УХ
+        // 3.2.12.6's container-revision-`3` form bodies write revision `10` at
+        // 12 members instead -- one member shorter, the leading member one
+        // lower, `len - lead` the same 2 -- and the missing member is the last
+        // one: over the whole block the two revisions agree member for member
+        // on slots 0..11, both in kind and in value distribution, and `11` adds
+        // slot 12 on the end.
+        //
+        // The code revision `10` reads is slot 4, the three-valued predecessor
+        // `11` still mirrors.  On all 887 revision-`11` blocks of the БСП base
+        // tree, slot 4 equals slot 12 wherever slot 12 is `0`/`1`/`2` and reads
+        // `0` on the eight where slot 12 is `3` -- `Switcher`, the ordinal
+        // revision `11` added.  On all 18 revision-`10` blocks the stand
+        // carries, the platform's own `<CheckBoxType>` is `Auto` on the sixteen
+        // whose slot 4 is `0`, `CheckBox` on the one that reads `1` and
+        // `Tumbler` on the one that reads `2`, with no counter-example.  Slot 4
+        // is not read under revision `11`, where slot 12 is authoritative and
+        // already proven byte-for-byte across the corpus.
+        let check_box_type_option_slot =
+            match (options.first().map(|field| field.trim()), options.len()) {
+                (Some("11"), 13) => 12,
+                (Some("10"), 12) => 4,
+                _ => return None,
+            };
+        Some(Self {
+            top_level_offset,
+            check_box_type_option_slot,
+        })
     }
 
     pub(crate) const fn options_slot(self) -> usize {
@@ -4404,7 +4434,9 @@ impl FormCheckBoxFieldSchema {
     pub(crate) fn check_box_type(self, options: &[&str]) -> Option<&'static str> {
         match (
             options.get(1).map(|field| field.trim()),
-            options.get(12).map(|field| field.trim()),
+            options
+                .get(self.check_box_type_option_slot)
+                .map(|field| field.trim()),
         ) {
             (Some("1"), Some("0")) => None,
             (Some("0"), Some("0")) => Some("Auto"),

@@ -74015,3 +74015,115 @@ fn revision_three_button_record_is_read_with_its_extended_layout() {
     assert_eq!(item.item_type, Some("CommandBarButton"));
     assert_eq!(item.default_button, Some(true));
 }
+
+/// `CheckBoxType` under the check box option block's short revision `10`.
+///
+/// Real ERP УХ 3.2.12.6 bytes:
+/// `Documents/ПоясненияКДекларацииПоНДС/Forms/ФормаРеквизитыСчетаФактуры`'s
+/// `СтандартныйСчетФактура`, a revision-3 field record (leading member `34`, 56
+/// members) whose option block at slot 39 declares `10` at 12 members. Native
+/// ibcmd writes `<CheckBoxType>Tumbler</CheckBoxType>` for it.
+///
+/// Revision `11` at 13 members keeps the code in slot 12; revision `10` has no
+/// slot 12 at all and keeps it in slot 4, the three-valued predecessor that
+/// revision `11` still mirrors everywhere but `Switcher`. Reading slot 12 on a
+/// `10` block therefore yields nothing and the element goes unwritten -- which
+/// is a default mistaken for an absence, not a genuine absence.
+#[test]
+fn revision_ten_check_box_option_block_names_its_check_box_type() {
+    const CHECK_BOX_34: &str = r#"{34,
+{30,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"СтандартныйСчетФактура",0,0,
+{1,0},
+{1,0},
+{1,
+{10}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{10,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},2,
+{1,2,
+{"ru","БЛ='Корректировочный счет-фактура'; БИ=Счет-фактура"},
+{"en","БЛ='Корректировочный счет-фактура'; БИ=Счет-фактура"}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},1,0,0,2},
+{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"СтандартныйСчетФактураПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,
+{22,
+{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СтандартныйСчетФактураКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{11,
+{32,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СтандартныйСчетФактураРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},3,3,0}"#;
+
+    let item = parse_form_child_item(
+        CHECK_BOX_34,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("a revision-3 check box field record must be readable");
+
+    assert_eq!(item.tag, "CheckBoxField");
+    assert_eq!(item.name, "СтандартныйСчетФактура");
+    assert_eq!(item.check_box_type, Some("Tumbler"));
+}
