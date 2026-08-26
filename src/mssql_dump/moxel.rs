@@ -4033,7 +4033,7 @@ const MAX_MOXEL_LINE_WIDTH: usize = 1024;
 
 /// Decodes the document's shared line table from its own root slot.
 ///
-/// Shape: `{count, (1, {4,0,{0},style,width,0,kind,0}, 0) * count}`.
+/// Shape: `{count, (1, {4,0,{0},style,width,slot,kind,0}, 0) * count}`.
 ///
 /// Evidence (native 1С:УТ 11.5.27.75, all 604 spreadsheet templates the dump
 /// emits): the declared count equals the published `<line>` count in every one
@@ -4067,7 +4067,6 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
             || descriptor.first()?.trim() != "4"
             || descriptor.get(1)?.trim() != "0"
             || descriptor.get(2)?.trim() != "{0}"
-            || descriptor.get(5)?.trim() != "0"
             || descriptor.get(7)?.trim() != "0"
         {
             return None;
@@ -4076,6 +4075,17 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
         if width > MAX_MOXEL_LINE_WIDTH {
             return None;
         }
+        // Member 5 is read as a number and not interpreted. It held `0` in
+        // every 1С:УТ 11.5.27.75 descriptor, which is where the literal `0`
+        // this used to demand came from; ERP УХ 3.2.12.6 disagrees. Seven
+        // `ChartsOfCharacteristicTypes/ВидыКонтроляДокументов` templates store
+        // `{4,0,{0},1,1,3,f527dc88-…,0}` as their first descriptor, and the
+        // platform publishes it as the same `Solid`/`1` cell line every other
+        // `1`/`1` descriptor publishes - the member changes nothing about the
+        // element. Demanding the literal refused the whole table over it and
+        // sent those documents down the reconstruction path, which lost the
+        // third line and renumbered every border reference.
+        descriptor.get(5)?.trim().parse::<i64>().ok()?;
         let kind = descriptor.get(6)?.trim();
         let line_type = match kind {
             MOXEL_CELL_LINE_KIND => "v8ui:SpreadsheetDocumentCellLineType",
