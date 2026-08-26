@@ -1804,7 +1804,7 @@ const EXPECTED_OWNER_GRAPH_LAYOUTS: &[ExpectedOwnerGraphLayout] = &[
         owner_discriminators: &["56", "57"],
         owner_header_slot: 9,
         owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
-        owner_reserved_fields: &[(39, "0")],
+        owner_reserved_fields: &[],
         generated_types: &[
             ExpectedOwnerGraphGeneratedType {
                 type_slot: 1,
@@ -27601,6 +27601,30 @@ fn constant_record_for_test(multi_line: &str, folders: &str, quick: &str, histor
 }
 
 const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},0,\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},0,\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,1,1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
+
+#[test]
+fn catalog_subordination_use_is_read_where_it_was_pinned_reserved() {
+    // Owner field 39 carries `<SubordinationUse>`, and the owner-graph layout
+    // used to declare it reserved with the value `"0"`, which refused every
+    // catalog that subordinates anything but items. All three values are
+    // attested against the platform's own XML for the same object: 2 470
+    // catalogs of the stand write `ToItems` and store `0`, `do`
+    // `Catalogs/ТемыОбсуждений` writes `ToFolders` and stores `1`, and `uh`
+    // `Catalogs/ХранимыеФайлыОрганизаций` writes `ToFoldersAndItems` and
+    // stores `2`.
+    assert_eq!(catalog_subordination_use_xml(0), Some("ToItems"));
+    assert_eq!(catalog_subordination_use_xml(1), Some("ToFolders"));
+    assert_eq!(catalog_subordination_use_xml(2), Some("ToFoldersAndItems"));
+    // A fourth value is not named by anything, so it still refuses.
+    assert_eq!(catalog_subordination_use_xml(3), None);
+    assert!(
+        owner_graph::OwnerGraphFamily::Catalog
+            .layout()
+            .owner_reserved_fields
+            .iter()
+            .all(|(index, _)| *index != 39)
+    );
+}
 
 #[test]
 fn constant_reads_the_four_properties_the_writer_used_to_pin() {

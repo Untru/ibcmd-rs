@@ -612,7 +612,13 @@ impl OwnerGraphFamily {
                 owner_header_slot: 9,
                 owner_header_encoding: OwnerHeaderEncoding::Wrapped,
                 owner_header_unique: true,
-                owner_reserved_fields: &[(39, "0")],
+                // Owner field 39 is not reserved: it carries
+                // `<SubordinationUse>`. Pinning it to `"0"` refused every
+                // catalog that subordinates anything but items -- two on the
+                // stand, `do` `ТемыОбсуждений` (`"1"`, `ToFolders`) and `uh`
+                // `ХранимыеФайлыОрганизаций` (`"2"`, `ToFoldersAndItems`),
+                // against 2 470 that write `ToItems` with `"0"`.
+                owner_reserved_fields: &[],
                 generated_types: CATALOG_GENERATED_TYPES,
                 root_collection_count_token: "5",
                 collection_markers: &[

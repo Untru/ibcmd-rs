@@ -23275,7 +23275,9 @@ fn parse_strict_catalog_properties_from_text(
         level_count: parse_exchange_plan_u32(fields.get(10)?)?,
         folders_on_top: information_register_bool(fields.get(13)?)?,
         owners: Some(owners),
-        subordination_use: Some("ToItems"),
+        subordination_use: Some(catalog_subordination_use_xml(parse_exchange_plan_u32(
+            fields.get(39)?,
+        )?)?),
         use_standard_commands: information_register_bool(fields.get(31)?)?,
         code_length: parse_exchange_plan_u32(fields.get(17)?)?,
         description_length: parse_exchange_plan_u32(fields.get(19)?)?,
@@ -28472,6 +28474,23 @@ fn catalog_code_allowed_length_xml(value: u32) -> Option<&'static str> {
     match value {
         0 => Some("Fixed"),
         1 => Some("Variable"),
+        _ => None,
+    }
+}
+
+/// `<SubordinationUse>` rides owner field 39.
+///
+/// All three values are attested against the platform's own XML for the same
+/// object: 2 470 catalogs of the stand write `ToItems` and store `0`, `do`
+/// `Catalogs/ТемыОбсуждений` writes `ToFolders` and stores `1`, and `uh`
+/// `Catalogs/ХранимыеФайлыОрганизаций` writes `ToFoldersAndItems` and
+/// stores `2`. The field used to be pinned to `0` as reserved, which refused
+/// the other two objects whole.
+fn catalog_subordination_use_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("ToItems"),
+        1 => Some("ToFolders"),
+        2 => Some("ToFoldersAndItems"),
         _ => None,
     }
 }
