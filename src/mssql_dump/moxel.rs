@@ -1410,13 +1410,16 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     // header/footer slot's own.
     let mut drawing_format_indices = drawings
         .iter()
-        .map(|drawing| drawing.format_index)
-        .collect::<BTreeSet<_>>();
+        .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
+        .collect::<MoxelFormatRefKinds>();
     // The positional split that lifts trailing drawing formats out of the
     // column half keeps naming the drawings alone: a note's format sits
     // wherever the table put it, and no observation says the split treats it
     // the way it treats a drawing's own trailing entry.
-    let trailing_drawing_indices = drawing_format_indices.clone();
+    let trailing_drawing_indices = drawing_format_indices
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
     let mut cell_format_indices = BTreeSet::new();
     for row in &rows {
         cell_format_indices.insert(row.format_index);
@@ -1445,7 +1448,27 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
     }) {
         if note_format_index > 0 && !cell_format_indices.contains(&note_format_index) {
-            drawing_format_indices.insert(note_format_index);
+            // `drawing_format_indices` is read by `parse_moxel_format_table`
+            // against `format_offset + 1`, the entry's own 1-based place in
+            // the stored table -- which is exactly what a drawing's record
+            // stores and what `parse_moxel_drawing_format_record` keeps
+            // unchanged. A cell's, a row's and a note's stored reference is
+            // carried one higher (`parse_moxel_note`'s `checked_add(1)`), an
+            // internal offset the publishing path takes back off again
+            // (`note.source_format_index - 1`). Comparing note against cell
+            // above stays in that raised space, where both sides sit; the
+            // set the table is read against does not.
+            //
+            // `Reports/РасчетСтоимостиЧистыхАктивов/Templates/
+            // РасчетСтоимостиЧистыхАктивов` shows the gap: its two notes
+            // store 24, its 45 stored formats put seven column entries in
+            // front, so the platform publishes that entry at 31 -- and 31 is
+            // the one that carries `<print>false</print>`. Marking 25
+            // instead left 31 read as a cell format
+            // (`<bottomBorder>1</bottomBorder>`).
+            drawing_format_indices
+                .entry(note_format_index - 1)
+                .or_insert(MoxelFormatRefKind::Note);
         }
     }
     let zero_column_format_table_is_width_only =
@@ -7314,7 +7337,7 @@ fn parse_moxel_formats_with_source_map(
     source_column_format_refs: &[usize],
     source_column_format_order: &[usize],
     style_refs: &[Option<String>],
-    drawing_format_indices: &BTreeSet<usize>,
+    drawing_format_indices: &MoxelFormatRefKinds,
     trailing_drawing_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (
@@ -7380,9 +7403,13 @@ pub(super) fn parse_moxel_formats(
     sparse_source_format_refs: bool,
     source_column_format_refs: &[usize],
     style_refs: &[Option<String>],
-    drawing_format_indices: &BTreeSet<usize>,
+    drawing_format_indices: &MoxelFormatRefKinds,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+    let trailing = drawing_format_indices
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
     let (column_formats, formats, _, _) = parse_moxel_formats_with_layout(
         fields,
         column_count,
@@ -7390,7 +7417,7 @@ pub(super) fn parse_moxel_formats(
         source_column_format_refs,
         style_refs,
         drawing_format_indices,
-        drawing_format_indices,
+        &trailing,
         number_format_refs,
     );
     (column_formats, formats)
@@ -7402,7 +7429,7 @@ fn parse_moxel_formats_with_layout(
     sparse_source_format_refs: bool,
     source_column_format_refs: &[usize],
     style_refs: &[Option<String>],
-    drawing_format_indices: &BTreeSet<usize>,
+    drawing_format_indices: &MoxelFormatRefKinds,
     trailing_drawing_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, Vec<usize>, bool) {
@@ -7496,7 +7523,7 @@ pub(super) fn parse_moxel_format_table(
     fields: &[&str],
     column_count: usize,
     style_refs: &[Option<String>],
-    drawing_format_indices: &BTreeSet<usize>,
+    drawing_format_indices: &MoxelFormatRefKinds,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> Option<Vec<MoxelFormat>> {
     // The palette's count and typed descriptors can satisfy the loose legacy
@@ -7541,9 +7568,20 @@ pub(super) fn parse_moxel_format_table(
                 formats.clear();
                 break;
             };
-            if drawing_format_indices.contains(&(format_offset + 1)) && format.width.is_none() {
-                let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
-                normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
+            if let Some(kind) = drawing_format_indices.get(&(format_offset + 1))
+                && format.width.is_none()
+            {
+                let pattern_color = match kind {
+                    MoxelFormatRefKind::Drawing => {
+                        parse_moxel_drawing_pattern_color(field, style_refs)
+                    }
+                    MoxelFormatRefKind::Note => None,
+                };
+                normalize_moxel_drawing_format_with_pattern_color(
+                    &mut format,
+                    *kind,
+                    pattern_color,
+                );
             }
             formats.push(format);
         }
@@ -7598,7 +7636,7 @@ pub(super) fn parse_moxel_nested_format_table(
     text: &str,
     column_count: usize,
     style_refs: &[Option<String>],
-    drawing_format_indices: &BTreeSet<usize>,
+    drawing_format_indices: &MoxelFormatRefKinds,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> Option<Vec<MoxelFormat>> {
     let nested = split_1c_braced_fields(text, 0)?;
@@ -7611,9 +7649,14 @@ pub(super) fn parse_moxel_nested_format_table(
         let Some(mut format) = parse_moxel_format(field, style_refs, number_format_refs) else {
             return None;
         };
-        if drawing_format_indices.contains(&(format_offset + 1)) && format.width.is_none() {
-            let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
-            normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
+        if let Some(kind) = drawing_format_indices.get(&(format_offset + 1))
+            && format.width.is_none()
+        {
+            let pattern_color = match kind {
+                MoxelFormatRefKind::Drawing => parse_moxel_drawing_pattern_color(field, style_refs),
+                MoxelFormatRefKind::Note => None,
+            };
+            normalize_moxel_drawing_format_with_pattern_color(&mut format, *kind, pattern_color);
         }
         formats.push(format);
     }
@@ -7629,11 +7672,31 @@ fn parse_moxel_drawing_pattern_color(text: &str, style_refs: &[Option<String>]) 
 
 #[cfg(test)]
 pub(super) fn normalize_moxel_drawing_format(format: &mut MoxelFormat) {
-    normalize_moxel_drawing_format_with_pattern_color(format, None);
+    normalize_moxel_drawing_format_with_pattern_color(format, MoxelFormatRefKind::Drawing, None);
 }
+
+/// What names a format-table entry that is not a cell, a row or a column: a
+/// `<drawing>` record of its own, or only a cell `<note>`.
+///
+/// Both spend members 1, 3 and 4 of the record on drawing members. They part
+/// company on colour: over the `Templates/*/Ext/Template.xml` trees of ERP УХ
+/// 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base 3.1.12.297 and Документооборот
+/// КОРП 3.0.21.3, 363 formats a `<note>` names publish
+/// `<backColor>style:ToolTipBackColor</backColor>` and none publishes
+/// `style:FormBackColor`, while 73 formats a `<drawing>` names publish
+/// `style:FormBackColor` and none publishes `style:ToolTipBackColor`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum MoxelFormatRefKind {
+    Drawing,
+    Note,
+}
+
+/// Format-table positions a drawing or a note names, by which of the two it is.
+pub(super) type MoxelFormatRefKinds = BTreeMap<usize, MoxelFormatRefKind>;
 
 fn normalize_moxel_drawing_format_with_pattern_color(
     format: &mut MoxelFormat,
+    kind: MoxelFormatRefKind,
     pattern_color: Option<String>,
 ) {
     // A drawing-referenced record spends three of the four border slots on
@@ -7645,6 +7708,15 @@ fn normalize_moxel_drawing_format_with_pattern_color(
     format.drawing_border = format.left_border.take();
     format.drawing_have_borders = format.right_border.take();
     format.print = format.bottom_border.take().and_then(moxel_print_flag);
+    // The colour rewrites below are a drawing's, not a note's: the 380
+    // published entries the stand names by a note alone carry no border,
+    // print or pattern member at all in 368 of them, `print` in ten,
+    // `drawingHaveLeftBorder` plus `print` in one and a `width` in the last
+    // (which never reaches here) -- and every one of them keeps
+    // `style:ToolTipBackColor` exactly as stored.
+    if kind == MoxelFormatRefKind::Note {
+        return;
+    }
     if pattern_color.is_some() {
         format.text_orientation = None;
         format.pattern_color = pattern_color;
@@ -7903,7 +7975,7 @@ pub(super) fn parse_moxel_number_format_refs(
     fields: &[&str],
     column_count: usize,
     style_refs: &[Option<String>],
-    _drawing_format_indices: &BTreeSet<usize>,
+    _drawing_format_indices: &MoxelFormatRefKinds,
 ) -> Vec<Vec<MoxelLocalizedValue>> {
     let mut required_count = 0usize;
     let mut start = 0usize;
@@ -8056,7 +8128,12 @@ pub(super) fn spreadsheet_number_format_hint_from_text(
             rows.iter()
                 .flat_map(|row| row.cells.iter())
                 .filter_map(|cell| cell.note.as_ref().map(|note| note.format_index))
-                .filter(|index| !cell_format_indices.contains(index)),
+                .filter(|index| *index > 0 && !cell_format_indices.contains(index))
+                // The set is read against the entry's own 1-based place in
+                // the stored table, which a note's reference carries one
+                // higher; see the same conversion in
+                // `parse_moxel_spreadsheet`.
+                .map(|index| index - 1),
         )
         .collect::<BTreeSet<_>>();
     let column_format_slots = moxel_column_format_slots(&column_sets, column_count);
@@ -13683,7 +13760,11 @@ mod moxel_exact_parity_tests {
         let raw = "{14370,0,3,0,255,0}";
         let mut format = parse_moxel_format(raw, &style_refs, &[]).unwrap();
         let pattern_color = parse_moxel_drawing_pattern_color(raw, &style_refs);
-        normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
+        normalize_moxel_drawing_format_with_pattern_color(
+            &mut format,
+            MoxelFormatRefKind::Drawing,
+            pattern_color,
+        );
         let spreadsheet = MoxelSpreadsheet {
             language_settings: None,
             template_mode: true,

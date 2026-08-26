@@ -1578,14 +1578,6 @@ enum DcsEmptyElementAction {
     /// evidenced default omission must not be rendered as an explicit
     /// empty marker.
     OmitIfEmpty,
-    /// Collapse `<name ...></name>` into a self-closed `<name .../>`.
-    ///
-    /// Evidenced alongside `OmitIfEmpty`: once the only child a
-    /// `dcsset:settings`/inline `settings` element carried was an
-    /// `outputParameters` placeholder that itself gets omitted, the
-    /// platform's own source XML self-closes the now-empty settings
-    /// element rather than leaving a separate open/close pair.
-    SelfCloseIfEmpty,
 }
 
 #[derive(Debug)]
@@ -1605,6 +1597,40 @@ struct DcsElementFrame {
     /// elements, which always keep whatever content (or lack of it) the
     /// storage document itself carried.
     empty_element_action: Option<DcsEmptyElementAction>,
+    /// Whether a child this element carried in storage was dropped on the way
+    /// out -- an `outputParameters` placeholder that `OmitIfEmpty` removed.
+    ///
+    /// What is left inside is then the storage pretty-printer's own
+    /// indentation, which indents nothing any more. The platform reads the
+    /// same storage into an object model where the element simply has no
+    /// children and writes it self-closed; over the `Templates/*/Ext/
+    /// Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП
+    /// demo/base 3.1.12.297 and Документооборот КОРП 3.0.21.3 not one
+    /// element is written as an open/close pair whose interior is only
+    /// indentation. The pairs those trees do carry -- 171 `v8:content`,
+    /// 3 `dcsset:name`, 1 `dcsset:title` -- hold character data that happens
+    /// to be spaces or tabs, which is a value, not indentation, and none of
+    /// them lost a child. So the rule is the dropped child, not the element
+    /// name: `dcsset:settings`, the inline `settings` of a template
+    /// envelope and a `dcsset:item` structure node all self-close by it.
+    dropped_child: bool,
+    /// This element is a `{data/core}item` of a localized string whose
+    /// `content` turned out to be empty, and the platform publishes nothing
+    /// at all for it.
+    ///
+    /// Across every file of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base
+    /// 3.1.12.297, Документооборот КОРП 3.0.21.3, MDM_Management,
+    /// Web_Service and WMS5 there is not one `<v8:content/>`, not one
+    /// `<v8:content></v8:content>` and not one `<v8:item>` that carries a
+    /// `lang` and no `content` -- while 795 localized strings are published
+    /// self-closed. Storage does carry the empty spelling, so the item is
+    /// dropped rather than published, and a localized string left with no
+    /// items self-closes by `dropped_child` above.
+    ///
+    /// The decision is per item, not per string: dropping the whole string
+    /// would also delete a sibling item that does carry text, and no
+    /// measurement says it should.
+    omit_localized_item: bool,
     /// Output offset right before this element's opening `<` was written.
     start_tag_begin_offset: usize,
     /// Output offset right after this element's opening tag's own closing
@@ -1710,8 +1736,20 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         // form was already self-closed instead of an
                         // open/close pair with nothing in between.
                         let omit = namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
-                            && local.as_ref() == b"outputParameters"
+                            && matches!(local.as_ref(), b"outputParameters" | b"dataParameters")
                             && !event_has_ordinary_attributes(&event)?;
+                        // A localized string item whose `content` is empty is
+                        // published by nothing at all -- see
+                        // `DcsElementFrame::omit_localized_item`.
+                        if namespace_ref(&namespace) == Some(DATA_CORE_NS)
+                            && local.as_ref() == b"content"
+                            && !event_has_ordinary_attributes(&event)?
+                            && let Some(parent) = self.element_stack.last_mut()
+                            && parent.namespace.as_deref() == Some(DATA_CORE_NS)
+                            && parent.local == b"item"
+                        {
+                            parent.omit_localized_item = true;
+                        }
                         if omit {
                             // The immediately preceding `Event::Text` already
                             // wrote the indentation that led up to this now-
@@ -1720,6 +1758,9 @@ impl<'a> DataCompositionXmlWriter<'a> {
                             let trimmed_len =
                                 self.output.trim_end_matches(['\r', '\n', '\t', ' ']).len();
                             self.output.truncate(trimmed_len);
+                            if let Some(parent) = self.element_stack.last_mut() {
+                                parent.dropped_child = true;
+                            }
                         } else {
                             self.write_start_tag(
                                 &reader,
@@ -1747,10 +1788,36 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     // a childless element), and the platform's own source
                     // XML does not preserve that indentation once there is
                     // nothing left for it to indent.
-                    let is_empty = frame.empty_element_action.is_some()
-                        && self.output[frame.start_tag_end_offset..]
-                            .bytes()
-                            .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
+                    let interior_is_blank = self.output[frame.start_tag_end_offset..]
+                        .bytes()
+                        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
+                    // A `content` spelled as an open/close pair with nothing
+                    // between the tags carries the same empty string its
+                    // self-closed spelling does, and drops its item the same
+                    // way -- see `DcsElementFrame::omit_localized_item`.
+                    if frame.namespace.as_deref() == Some(DATA_CORE_NS)
+                        && frame.local == b"content"
+                        && self.output[frame.start_tag_end_offset..].is_empty()
+                        && let Some(parent) = self.element_stack.last_mut()
+                        && parent.namespace.as_deref() == Some(DATA_CORE_NS)
+                        && parent.local == b"item"
+                    {
+                        parent.omit_localized_item = true;
+                    }
+                    if frame.omit_localized_item {
+                        // The item is published by nothing at all, and the
+                        // indentation that led up to its own opening tag goes
+                        // with it, exactly as an omitted placeholder's does.
+                        self.output.truncate(frame.start_tag_begin_offset);
+                        let trimmed_len =
+                            self.output.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                        self.output.truncate(trimmed_len);
+                        if let Some(parent) = self.element_stack.last_mut() {
+                            parent.dropped_child = true;
+                        }
+                        continue;
+                    }
+                    let is_empty = frame.empty_element_action.is_some() && interior_is_blank;
                     match frame.empty_element_action {
                         Some(DcsEmptyElementAction::OmitIfEmpty) if is_empty => {
                             // As in the `Event::Empty` arm above, the
@@ -1760,12 +1827,17 @@ impl<'a> DataCompositionXmlWriter<'a> {
                             let trimmed_len =
                                 self.output.trim_end_matches(['\r', '\n', '\t', ' ']).len();
                             self.output.truncate(trimmed_len);
+                            if let Some(parent) = self.element_stack.last_mut() {
+                                parent.dropped_child = true;
+                            }
                         }
-                        Some(DcsEmptyElementAction::SelfCloseIfEmpty) if is_empty => {
-                            // Drop any whitespace-only interior, then rewrite
+                        _ if frame.dropped_child && interior_is_blank => {
+                            // Every child this element carried was dropped and
+                            // what is left inside is the indentation that led
+                            // up to them -- see `DcsElementFrame::
+                            // dropped_child`. Drop that interior and rewrite
                             // the already-written opening tag's trailing `>`
-                            // into `/>` instead of appending a separate
-                            // closing tag.
+                            // into `/>` instead of appending a closing tag.
                             self.output.truncate(frame.start_tag_end_offset);
                             self.output.truncate(self.output.len() - 1);
                             self.output.push_str("/>");
@@ -1924,7 +1996,30 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         data_composition_object_ref_name(&value, self.object_refs, "CommonPicture.")
                             .map(|name| format!("v8ui:{name}"))
                     })
-                    .unwrap_or(value)
+                    // A picture the *platform* owns is stored by the same
+                    // `0:<uuid>` spelling and resolves through no
+                    // configuration object at all. Its identifier is a
+                    // platform constant -- the same table the command and
+                    // help picture readers already use -- and the platform
+                    // publishes it under the same `v8ui` prefix as a
+                    // configuration picture:
+                    // `Reports/КонтрольРассылкиОтчетов/Templates/
+                    // ОсновнаяСхемаКомпоновкиДанных` stores
+                    // `ref="0:7a9cd2fd-…"`/`ref="0:b2202798-…"` and the
+                    // platform exports `ref="v8ui:AppearanceCheckBox"`/
+                    // `ref="v8ui:AppearanceCross"`. Across the
+                    // `Templates/*/Ext/Template.xml` trees of ERP УХ
+                    // 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base 3.1.12.297
+                    // and Документооборот КОРП 3.0.21.3 every one of the 742
+                    // published `v8ui:Picture` refs is a `v8ui:` name and not
+                    // one is a raw uuid, so a uuid that names no picture at
+                    // all is refused rather than passed through.
+                    .or_else(|| {
+                        let uuid = value.trim().strip_prefix("0:")?;
+                        let name = common_command_standard_picture_name(uuid)?
+                            .strip_prefix("StdPicture.")?;
+                        Some(format!("v8ui:{name}"))
+                    })?
             } else if attr_name == "ref"
                 && matches!(
                     *mode,
@@ -2625,30 +2720,40 @@ fn data_composition_element_frame(
         // that needs this; every other caller leaves it at the neutral
         // default (never collapsed on close).
         empty_element_action: None,
+        dropped_child: false,
+        omit_localized_item: false,
         start_tag_begin_offset: 0,
         start_tag_end_offset: 0,
     })
 }
 
 /// Whether this element's `Start`/`End` pair, if it turns out to hold no
-/// content once its matching `End` is reached, should be omitted or
-/// self-closed instead of left as an empty open/close pair -- see
+/// content once its matching `End` is reached, should be omitted outright
+/// instead of left as an empty open/close pair -- see
 /// [`DcsEmptyElementAction`]. Keyed off the already-rendered name so it
 /// shares the exact same identity the platform's own `dcsset`/`dcscor`
 /// prefix resolution already settled on, rather than re-deriving it from
 /// the source spelling.
 fn dcs_empty_element_action(rendered_name: &str) -> Option<DcsEmptyElementAction> {
     match rendered_name {
-        "dcsset:outputParameters" => Some(DcsEmptyElementAction::OmitIfEmpty),
-        "dcsset:settings" => Some(DcsEmptyElementAction::SelfCloseIfEmpty),
+        // `dcsset:dataParameters` is the same placeholder as
+        // `dcsset:outputParameters` and reads the same way: storage keeps it
+        // even when unset, and across the `Templates/*/Ext/Template.xml`
+        // trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base
+        // 3.1.12.297 and Документооборот КОРП 3.0.21.3 all 2 783 published
+        // `<dcsset:dataParameters>` carry content and not one is empty in
+        // either spelling.
+        "dcsset:outputParameters" | "dcsset:dataParameters" => {
+            Some(DcsEmptyElementAction::OmitIfEmpty)
+        }
         _ => None,
     }
 }
 
 /// Whether this start event carries any attribute other than a namespace
-/// declaration. `OmitIfEmpty`/`SelfCloseIfEmpty` apply only to the
-/// evidenced attribute-free shape; an element carrying an attribute is left
-/// exactly as storage spelled it.
+/// declaration. `OmitIfEmpty` applies only to the evidenced attribute-free
+/// shape; an element carrying an attribute is left exactly as storage
+/// spelled it.
 fn event_has_ordinary_attributes(event: &quick_xml::events::BytesStart<'_>) -> Option<bool> {
     for attribute in event.attributes().with_checks(false) {
         let attribute = attribute.ok()?;
