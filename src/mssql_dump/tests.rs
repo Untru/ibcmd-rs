@@ -47668,7 +47668,7 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
                 value_id: "44444444-4444-4444-8444-444444444444".to_string(),
             },
         ],
-        value_type,
+        value_types: vec![value_type],
         tooltip: vec![("en".to_string(), "Use feature tip".to_string())],
         extended_presentation: Vec::new(),
         explanation: Vec::new(),

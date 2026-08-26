@@ -8790,7 +8790,7 @@ impl From<owner_graph::DecodedGeneratedType> for GeneratedTypeEntry {
 
 struct ConstantProperties {
     generated_types: Vec<GeneratedTypeEntry>,
-    value_type: ConstantValueType,
+    value_types: Vec<ConstantValueType>,
     tooltip: Vec<(String, String)>,
     extended_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
@@ -28620,18 +28620,28 @@ fn parse_constant_properties_from_text(
 ) -> Option<ConstantProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
-    // A constant may declare more than one type -- `do`
+    // A constant may declare more than one type: `do`
     // `Constants/ОтветственныйЗаУдалениеНеактивныхВерсий` and
-    // `СотрудникДляЗаданияРаспознавания` each name two catalogs, and the
-    // platform writes both inside one `<Type>` element -- but the canonical
-    // model this writer routes through carries a single type, so a set still
-    // fails closed there. Of the 3 378 constants on the stand those two are
-    // the only ones with more than one.
-    let mut value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
-    if value_types.len() != 1 {
+    // `СотрудникДляЗаданияРаспознавания` each name two catalogs and the
+    // platform writes both inside one `<Type>` element. Of the 3 378
+    // constants on the stand those two are the only ones with more than one,
+    // and both name references only. A set that mixes in a qualifier-bearing
+    // primitive would also have to place its `<v8:StringQualifiers>` and
+    // friends somewhere inside that one element; nothing on the stand shows
+    // where, so such a set still fails closed rather than guessing.
+    let value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
+    if value_types.is_empty()
+        || (value_types.len() > 1
+            && !value_types.iter().all(|value_type| {
+                matches!(
+                    value_type,
+                    ConstantValueType::Reference { .. }
+                        | ConstantValueType::ReferenceTypeSet { .. }
+                )
+            }))
+    {
         return None;
     }
-    let value_type = value_types.pop()?;
 
     let constant_object_start = text[..marker_start].rfind("{16,")?;
     let constant_fields = split_1c_braced_fields(text, constant_object_start)?;
@@ -28711,7 +28721,7 @@ fn parse_constant_properties_from_text(
 
     Some(ConstantProperties {
         generated_types,
-        value_type,
+        value_types,
         tooltip,
         extended_presentation,
         explanation,
@@ -37258,7 +37268,7 @@ fn format_constant_source_xml(
     let mut insert = format!(
         "{}\
 \t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-        format_constant_type_xml(&constant.value_type),
+        format_constant_types_xml(&constant.value_types),
         xml_bool(constant.use_standard_commands),
     );
     match &constant.default_form {
@@ -39439,16 +39449,40 @@ fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'st
     }
 }
 
+/// One `<Type>` element carrying every type the constant declares.
+///
+/// The platform writes a multi-type constant as several `<v8:Type>` lines
+/// inside the single element a one-type constant already uses -- `do`
+/// `Constants/ОтветственныйЗаУдалениеНеактивныхВерсий` names
+/// `cfg:CatalogRef.Сотрудники` and `cfg:CatalogRef.Пользователи` that way --
+/// so the members render exactly as they do on their own.
+fn format_constant_types_xml(value_types: &[ConstantValueType]) -> String {
+    if let [value_type] = value_types {
+        return format_constant_type_xml(value_type);
+    }
+    let mut xml = "\t\t\t<Type>\r\n".to_string();
+    for value_type in value_types {
+        xml.push_str(&format_constant_type_member_xml(value_type));
+    }
+    xml.push_str("\t\t\t</Type>\r\n");
+    xml
+}
+
 fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
+    format!(
+        "\t\t\t<Type>\r\n{}\t\t\t</Type>\r\n",
+        format_constant_type_member_xml(value_type)
+    )
+}
+
+fn format_constant_type_member_xml(value_type: &ConstantValueType) -> String {
     match value_type {
-        ConstantValueType::Boolean => {
-            "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n\t\t\t</Type>\r\n".to_string()
-        }
+        ConstantValueType::Boolean => "\t\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n".to_string(),
         ConstantValueType::String {
             length,
             allowed_length_flag,
         } => {
-            let mut xml = "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n".to_string();
+            let mut xml = "\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n".to_string();
             let allowed_length = if length.is_some() {
                 string_allowed_length_xml(*allowed_length_flag)
             } else {
@@ -39462,7 +39496,6 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
                 allowed_length
             ));
             xml.push_str("\t\t\t\t</v8:StringQualifiers>\r\n");
-            xml.push_str("\t\t\t</Type>\r\n");
             xml
         }
         ConstantValueType::Number {
@@ -39470,36 +39503,32 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
             fraction_digits,
             allowed_sign_flag,
         } => format!(
-            "\t\t\t<Type>\r\n\
-\t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
+            "\t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
 \t\t\t\t<v8:NumberQualifiers>\r\n\
 \t\t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
 \t\t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
 \t\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n\
-\t\t\t\t</v8:NumberQualifiers>\r\n\
-\t\t\t</Type>\r\n",
+\t\t\t\t</v8:NumberQualifiers>\r\n",
             number_allowed_sign_xml(*allowed_sign_flag)
         ),
         ConstantValueType::DateTime { date_fractions } => format!(
-            "\t\t\t<Type>\r\n\
-\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
+            "\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
 \t\t\t\t<v8:DateQualifiers>\r\n\
 \t\t\t\t\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
-\t\t\t\t</v8:DateQualifiers>\r\n\
-\t\t\t</Type>\r\n"
+\t\t\t\t</v8:DateQualifiers>\r\n"
         ),
         ConstantValueType::Reference { reference, .. } => {
             let tag = constant_reference_type_tag(reference);
             let namespace_attr = metadata_type_xml_namespace_attr(value_type);
             format!(
-                "\t\t\t<Type>\r\n\t\t\t\t<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n\t\t\t</Type>\r\n",
+                "\t\t\t\t<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n",
                 escape_xml_text(reference)
             )
         }
         ConstantValueType::ReferenceTypeSet { reference, .. } => {
             let namespace_attr = metadata_type_xml_namespace_attr(value_type);
             format!(
-                "\t\t\t<Type>\r\n\t\t\t\t<v8:TypeSet{namespace_attr}>{}</v8:TypeSet>\r\n\t\t\t</Type>\r\n",
+                "\t\t\t\t<v8:TypeSet{namespace_attr}>{}</v8:TypeSet>\r\n",
                 escape_xml_text(reference)
             )
         }
