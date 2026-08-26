@@ -6401,6 +6401,7 @@ pub(crate) enum FormTableXmlProperty {
     Font,
     Shortcut,
     CommandSet,
+    BehaviorOnHorizontalCompression,
     CurrentRowUse,
     ToolTip,
     ToolTipRepresentation,
@@ -6617,6 +6618,16 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // nothing this block writes ever follows it.
     FormTableXmlProperty::Shortcut,
     FormTableXmlProperty::CommandSet,
+    // `BehaviorOnHorizontalCompression` follows `CommandSet` and leads
+    // `RowFilter` on both evidenced occurrences: SSL/БСП 3.1.12.297's shared
+    // `sslbase`/`ssl` `ДействияПриПолученииДанныхОбмена/.../НастройкаДействий`
+    // and ERP УХ 3.2.12.6's `СообщенияФССОбИзмененииСостоянийЭЛН/.../ФормаСписка`,
+    // both writing the same one spelling, `MoveItemsByImportance`. `RowFilter`
+    // itself is emitted separately right after this ordered block (see the
+    // `item.tag == "Table" && item.row_filter_nil` check in
+    // `format_form_child_item_xml`), so this position alone reproduces the
+    // evidenced order.
+    FormTableXmlProperty::BehaviorOnHorizontalCompression,
     FormTableXmlProperty::ToolTip,
     FormTableXmlProperty::ToolTipRepresentation,
     FormTableXmlProperty::SearchStringLocation,
@@ -7003,6 +7014,17 @@ impl FormTableSchema {
     const SEARCH_CONTROL_LOCATION_REVERSE_OFFSET: usize = 23;
     const TOOLTIP_REPRESENTATION_REVERSE_OFFSET: usize = 28;
     const CURRENT_ROW_USE_REVERSE_OFFSET: usize = 5;
+    // Walking every `Table` item of the `sslbase`/`ssl` corpora (both SSL/БСП
+    // 3.1.12.297) whose fixed tail is long enough to hold it: reverse offset 4
+    // is `0` on all 642 that write no `<BehaviorOnHorizontalCompression>` and
+    // `2` on the single one that does --
+    // `ДействияПриПолученииДанныхОбмена/.../НастройкаДействий`'s
+    // `ДействияПриПолучении` table, native `MoveItemsByImportance`. No other
+    // code is observed at this coordinate. Independently, ERP УХ 3.2.12.6's
+    // `SообщенияФССОбИзмененииСостоянийЭЛН/.../ФормаСписка` carries the
+    // identical native spelling on its own table, corroborating the property
+    // (not the exact raw coordinate, not re-derived from that corpus here).
+    const BEHAVIOR_ON_HORIZONTAL_COMPRESSION_REVERSE_OFFSET: usize = 4;
     // This scalar is part of the fixed tail, not the counted property bag.
     // Native ibcmd emits AutoMaxWidth=false only for raw code 0 here.
     const AUTO_MAX_WIDTH_REVERSE_OFFSET: usize = 15;
@@ -7252,6 +7274,28 @@ impl FormTableSchema {
             "2" => Some(FormTableSearchControlLocation::CommandBar),
             _ => None,
         }
+    }
+
+    pub(crate) fn behavior_on_horizontal_compression_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::BEHAVIOR_ON_HORIZONTAL_COMPRESSION_REVERSE_OFFSET)?;
+        matches!(fields.get(slot)?.trim(), "0" | "2").then_some(slot)
+    }
+
+    /// `<BehaviorOnHorizontalCompression>`, evidenced only as
+    /// `MoveItemsByImportance` (raw `2`); raw `0` is the platform default and
+    /// writes nothing. See `BEHAVIOR_ON_HORIZONTAL_COMPRESSION_REVERSE_OFFSET`
+    /// for the evidence.
+    pub(crate) fn behavior_on_horizontal_compression(
+        self,
+        fields: &[&str],
+    ) -> Option<&'static str> {
+        (fields
+            .get(self.behavior_on_horizontal_compression_slot(fields)?)?
+            .trim()
+            == "2")
+            .then_some("MoveItemsByImportance")
     }
 
     pub(crate) fn current_row_use_slot(self, fields: &[&str]) -> Option<usize> {

@@ -103,6 +103,17 @@ const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
     ("Активность", "Active"),
     ("ВидДвижения", "RecordType"),
     ("ТипЗначения", "ValueType"),
+    // `ChartOfCalculationTypes`'s three standard tabular sections and their
+    // shared standard column (also `CalculationRegister`'s own dimension of
+    // the same name). Evidenced: `ssl`-demo's `ChartsOfCalculationTypes/
+    // _ДемоОсновныеНачисления/Forms/ФормаЭлемента` writes
+    // `Объект.BaseCalculationTypes`, `Объект.LeadingCalculationTypes`,
+    // `Объект.DisplacingCalculationTypes` and their nested
+    // `....CalculationType` columns.
+    ("БазовыеВидыРасчета", "BaseCalculationTypes"),
+    ("ВедущиеВидыРасчета", "LeadingCalculationTypes"),
+    ("ВытесняющиеВидыРасчета", "DisplacingCalculationTypes"),
+    ("ВидРасчета", "CalculationType"),
 ];
 const FORM_CHOICE_LIST_VALUE_INDENT: &str = "\t\t\t";
 const FORM_XML_LINE_ENDING: &str = "\r\n";
@@ -1252,6 +1263,7 @@ pub(super) struct FormChildItem {
     pub(super) change_row_set: Option<bool>,
     pub(super) change_row_order: Option<bool>,
     pub(super) command_set_excluded_commands: Vec<&'static str>,
+    pub(super) table_behavior_on_horizontal_compression: Option<&'static str>,
     pub(super) table_current_row_use: Option<FormTableCurrentRowUse>,
     pub(super) use_alternation_row_color: Option<bool>,
     pub(super) default_item: Option<bool>,
@@ -10246,6 +10258,8 @@ fn parse_form_child_item_with_metadata_owners(
             .unwrap_or_else(|| {
                 parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
             }),
+        table_behavior_on_horizontal_compression: table_schema
+            .and_then(|schema| schema.behavior_on_horizontal_compression(&fields)),
         table_current_row_use: table_schema.and_then(|schema| schema.current_row_use(&fields)),
         table_search_on_input: table_schema.and_then(|schema| schema.search_on_input(&fields)),
         table_initial_list_view: table_schema.and_then(|schema| schema.initial_list_view(&fields)),
@@ -18708,7 +18722,9 @@ fn resolve_form_owner_scoped_bound_data_path(
         return FormOwnerScopedDataPath::Ambiguous;
     };
     if fields.first().map(|field| field.trim()) == Some("2") {
-        return FormOwnerScopedDataPath::Resolved(table_path.clone());
+        return FormOwnerScopedDataPath::Resolved(normalize_form_owner_scoped_table_path(
+            table_path,
+        ));
     }
     if fields.first().map(|field| field.trim()) != Some("3") {
         return FormOwnerScopedDataPath::Unknown;
@@ -18726,11 +18742,40 @@ fn resolve_form_owner_scoped_bound_data_path(
     };
     match owner_scoped_bindings.column_names.get(&column_lookup) {
         Some(Some(column_name)) => {
+            // The prefix `normalize_form_table_column_name` strips is the raw
+            // (not yet standard-name-translated) tabular section name -- the
+            // one the raw column field name is actually concatenated with --
+            // so that translation happens first, on the untranslated
+            // `table_path`, and only the finished result is translated to the
+            // standard English spelling.
             let column_name = normalize_form_table_column_name(table_path, column_name);
-            FormOwnerScopedDataPath::Resolved(format!("{table_path}.{column_name}"))
+            FormOwnerScopedDataPath::Resolved(normalize_form_owner_scoped_table_path(&format!(
+                "{table_path}.{column_name}"
+            )))
         }
         Some(None) => FormOwnerScopedDataPath::Ambiguous,
         None => FormOwnerScopedDataPath::Unknown,
+    }
+}
+
+/// Translates a resolved owner-scoped path's own tabular-section segment
+/// (its second component, immediately after `Объект`/`Запись`) to the
+/// standard English spelling, leaving any further segments -- already
+/// translated by their own resolvers, e.g. `normalize_form_table_column_name`
+/// -- untouched. Evidenced: `ssl`-demo's `ChartsOfCalculationTypes/
+/// _ДемоОсновныеНачисления/Forms/ФормаЭлемента` writes
+/// `Объект.BaseCalculationTypes` and `Объект.BaseCalculationTypes.CalculationType`,
+/// never the raw `БазовыеВидыРасчета` tabular-section name the binding
+/// indexes carry internally.
+fn normalize_form_owner_scoped_table_path(table_path: &str) -> String {
+    let mut segments = table_path.splitn(3, '.');
+    let (Some(root), Some(table_name)) = (segments.next(), segments.next()) else {
+        return table_path.to_string();
+    };
+    let translated_table_name = normalize_form_data_path_child_name(root, table_name);
+    match segments.next() {
+        Some(rest) => format!("{root}.{translated_table_name}.{rest}"),
+        None => format!("{root}.{translated_table_name}"),
     }
 }
 
@@ -20445,7 +20490,33 @@ pub(super) fn normalize_form_table_column_name(table_name: &str, field_name: &st
         })
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| field_name.to_string());
+    if form_data_path_uses_standard_property_names(table_name)
+        && table_name.rsplit('.').next() == Some("ОбъектыМетаданных")
+        && let Some(standard_name) = form_metadata_object_value_tree_column_name(&field_name)
+    {
+        return standard_name.to_string();
+    }
     normalize_form_data_path_child_name(table_name, &field_name)
+}
+
+/// Standard column names of the platform's own metadata-object value tree
+/// (`v8:ValueTree`, attribute type uuid
+/// `e603c0f2-92fb-4d47-8f38-a44a381cf235`), used for a `ОбъектыМетаданных`
+/// -named attribute regardless of the raw column names the form designer
+/// shows (the declared columns there are the plain Cyrillic captions, not
+/// the standard-attribute style the general alias table covers). Evidenced
+/// by a `ssl`-demo `DataProcessors` form for picking metadata objects, whose
+/// own `Table` writes `Объект.ОбъектыМетаданных.Presentation` and
+/// `Объект.ОбъектыМетаданных.Picture` for its `Представление` and
+/// `Картинка` columns; the attribute's other declared columns (`ПолноеИмя`,
+/// `Использование`, `Подчиненный`, `ТолькоЧтение`, `Корневой`, `Класс`) are
+/// never referenced by any DataPath in that form and stay unproven here.
+fn form_metadata_object_value_tree_column_name(raw_name: &str) -> Option<&'static str> {
+    match raw_name {
+        "Представление" => Some("Presentation"),
+        "Картинка" => Some("Picture"),
+        _ => None,
+    }
 }
 
 pub(super) fn normalize_form_data_path_child_name(parent_path: &str, name: &str) -> String {
@@ -23273,6 +23344,10 @@ fn format_form_table_property_xml(
                 xml
             }
         }
+        FormTableXmlProperty::BehaviorOnHorizontalCompression => item
+            .table_behavior_on_horizontal_compression
+            .map(|value| format!("{tab}<BehaviorOnHorizontalCompression>{value}</BehaviorOnHorizontalCompression>\r\n"))
+            .unwrap_or_default(),
         FormTableXmlProperty::CurrentRowUse => item
             .table_current_row_use
             .map(|value| {

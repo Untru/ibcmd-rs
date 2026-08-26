@@ -2323,34 +2323,62 @@ pub(super) fn parse_configuration_properties_from_text(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<ConfigurationProperties> {
     let (fields, is_native_68_shape) = configuration_root_fields(text)?;
-    // Field 26 mirroring field 43 (`CompatibilityMode`, below) is proven only
-    // for the genuine `{68,...}` shape -- three corpora, "none match their
-    // own field 43 ... under `configuration_compatibility_mode_xml`'s
-    // formula", i.e. field 26 was the only working coordinate for either
-    // property there. SSL/БСП 3.1.12.297 (the `{67,...}` short revision
-    // `configuration_root_fields` normalizes to this same 61-field shape) is
-    // the first corpus where the two disagree: native writes
-    // `ConfigurationExtensionCompatibilityMode` `Version8_3_27` against
-    // `CompatibilityMode` `Version8_3_24`, while this record's fields 26 and
-    // 43 both hold the raw `CompatibilityMode` value (`80324`) -- field 26 is
-    // not this record's `ConfigurationExtensionCompatibilityMode` at all, and
-    // no other coordinate in the tuple carries `80327`. Restricting the read
-    // to a record that was genuinely `{68,...}` to begin with keeps the
-    // proven three-corpus mapping and fails closed here rather than emitting
-    // the wrong value.
-    let configuration_extension_compatibility_mode = is_native_68_shape
-        .then(|| {
-            fields
-                .get(26)
-                .and_then(|field| configuration_compatibility_mode_xml(field.trim()))
-        })
-        .flatten();
+    // Field 26 mirroring field 43 (`CompatibilityMode`, below) into
+    // `ConfigurationExtensionCompatibilityMode` is proven only for the
+    // genuine `{68,...}` shape -- three corpora, "none match their own field
+    // 43 ... under `configuration_compatibility_mode_xml`'s formula", i.e.
+    // field 26 was the only working coordinate for either property there.
+    // SSL/БСП 3.1.12.297's `{67,...}` short revision (which
+    // `configuration_root_fields` normalizes into this same 61-field shape,
+    // leaving fields 1..59 -- 26 and 43 among them -- at their original
+    // tuple positions) is a different record altogether: both `sslbase`'s
+    // and `ssl`-demo's copies carry `80324` at *both* fields 26 and 43, and
+    // native prints `CompatibilityMode` `Version8_3_24` (matching field 43
+    // directly, not mirrored) alongside `ConfigurationExtensionCompatibilityMode`
+    // `Version8_3_27` -- a value present nowhere in the tuple. `Version8_3_27`
+    // is exactly this reading platform's own build
+    // (`MAX_EVIDENCED_PACKED_PLATFORM_VERSION`, `ibcmd` 8.3.27.2214): the
+    // shorter `{67,...}` shape predates the extension-compatibility property,
+    // so a config still in that shape has no explicit value for it and the
+    // platform substitutes its own version when reading it back, while field
+    // 43 there -- unlike on the genuine `{68,...}` shape -- is this record's
+    // own faithful `CompatibilityMode` storage, not a stale alias of field 26.
+    //
+    // `configuration_root_fields` is a blind text search, not the
+    // uuid-anchored kind `configuration_root_property_fields` does: a
+    // coincidental `{67,` match elsewhere in the same text (e.g. an
+    // unrelated metadata header shaped `{67,{0,{3,...}}}`, 2 top-level
+    // members) also comes back with `is_native_68_shape == false` without
+    // ever having been the genuine, 60-field short Properties tuple.
+    // `normalize_short_configuration_root_property_fields` only pads to the
+    // full 61-field shape when the match really was `("67", 60)`; anything
+    // else it returns unchanged and short. Requiring the post-normalization
+    // length here tells the two apart instead of defaulting off of a match
+    // that was never this record to begin with.
+    let is_normalized_67_shape = !is_native_68_shape && fields.len() == 61;
+    let configuration_extension_compatibility_mode = if is_native_68_shape {
+        fields
+            .get(26)
+            .and_then(|field| configuration_compatibility_mode_xml(field.trim()))
+    } else if is_normalized_67_shape {
+        configuration_compatibility_mode_xml(&MAX_EVIDENCED_PACKED_PLATFORM_VERSION.to_string())
+    } else {
+        None
+    };
+    let compatibility_mode = if is_native_68_shape {
+        configuration_extension_compatibility_mode.clone()
+    } else if is_normalized_67_shape {
+        fields
+            .get(43)
+            .and_then(|field| configuration_compatibility_mode_xml(field.trim()))
+    } else {
+        None
+    };
     Some(ConfigurationProperties {
         name_prefix: fields
             .get(2)
             .and_then(|field| parse_1c_quoted_string(field.trim())),
-        configuration_extension_compatibility_mode: configuration_extension_compatibility_mode
-            .clone(),
+        configuration_extension_compatibility_mode,
         default_run_mode: fields
             .get(3)
             .and_then(|field| configuration_default_run_mode_xml(field.trim())),
@@ -2407,21 +2435,18 @@ pub(super) fn parse_configuration_properties_from_text(
         default_report_variant_form: None,
         default_report_settings_form: None,
         used_mobile_application_functionalities: Vec::new(),
-        // `configuration_root_fields` only ever finds the `{68,` (61-field)
-        // tuple shape, and on that shape `CompatibilityMode` (tuple field
-        // 43) mirrors `ConfigurationExtensionCompatibilityMode` (field 26)
-        // rather than being independently readable through field 43 itself.
-        // Confirmed identically on three corpora: ERP УХ's `Web_Service.cf`
-        // and `MDM_Management.cf` (both field 43 = `80307`, native
-        // `Version8_3_27` -- not the `Version8_3_7` field 43's own value
-        // would format to) and the independent vendor sitec's
-        // `МодульWebОбмена_ERP25.cf` (field 43 = `80501`, a different raw
-        // value, same native `Version8_3_27`) -- all three match field 26
-        // exactly and none match their own field 43 under
-        // `configuration_compatibility_mode_xml`'s formula. No `{68,`-shape
-        // corpus has ever shown field 43 and field 26 disagreeing in native
-        // output, so mirroring is the proven reading here, not field 43.
-        compatibility_mode: configuration_extension_compatibility_mode,
+        // See the evidence above `configuration_extension_compatibility_mode`:
+        // on the genuine `{68,` shape `CompatibilityMode` mirrors that same
+        // field 26 read (proven on three corpora -- ERP УХ's
+        // `Web_Service.cf` and `MDM_Management.cf`, both field 43 = `80307`
+        // against native `Version8_3_27`, and sitec's
+        // `МодульWebОбмена_ERP25.cf`, field 43 = `80501` against the same
+        // native `Version8_3_27` -- none matching their own field 43 under
+        // `configuration_compatibility_mode_xml`'s formula); on the shorter
+        // `{67,` shape (SSL/БСП 3.1.12.297) field 43 is independently read
+        // instead, since there it does hold this record's own faithful
+        // value (`80324` matching native `Version8_3_24` directly).
+        compatibility_mode,
         configuration_properties_evidenced_default_block: None,
     })
 }
