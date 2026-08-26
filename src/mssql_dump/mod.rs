@@ -29856,18 +29856,36 @@ fn parse_document_numerator_properties_from_text(
     if metadata_header_field_index(&fields, uuid) != Some(1) {
         return None;
     }
+    // The record carries five values behind the header, and two of them were
+    // read at each other's slots with each other's code tables. `<CheckUnique>`
+    // sits between them and pinned the pair: the one numerator of the stand
+    // that writes `false` (ERP УХ `СчетаФактурыВыданные`) is the one whose
+    // slot 5 reads `0`, so slot 5 is `<CheckUnique>` and the two neighbours are
+    // `<NumberPeriodicity>` (4) and `<NumberAllowedLength>` (6), not the other
+    // way round. They are the same two platform properties a document's own
+    // record carries, read here through the same code tables
+    // `parse_document_properties_from_text` already uses for them: `0`/`1` is
+    // `Fixed`/`Variable` for the allowed length and `Nonperiodical`/`Year` for
+    // the periodicity, and any other code is refused rather than folded into a
+    // default.
+    //
+    // Crossed, the pair was indistinguishable on seven of the stand's eight
+    // numerators, which all read `1,<check unique>,0` and want `Year`+`Fixed`;
+    // ERP УХ `ПерсонифицированныйУчет` reads `1,1,1` and is the only one the
+    // platform writes `Variable` for -- the crossed reading turned it into
+    // `Fixed`+`Month`.
     Some(DocumentNumeratorProperties {
         number_type: document_numerator_number_type_xml(parse_1c_u32_field(
             fields.get(2).copied(),
         )?),
         number_length: parse_1c_u32_field(fields.get(3).copied())?,
-        number_allowed_length: document_numerator_allowed_length_xml(parse_1c_u32_field(
-            fields.get(4).copied(),
-        )?),
-        check_unique: parse_1c_bool_field(fields.get(5).copied())?,
         number_periodicity: document_numerator_periodicity_xml(parse_1c_u32_field(
+            fields.get(4).copied(),
+        )?)?,
+        check_unique: parse_1c_bool_field(fields.get(5).copied())?,
+        number_allowed_length: document_numerator_allowed_length_xml(parse_1c_u32_field(
             fields.get(6).copied(),
-        )?),
+        )?)?,
     })
 }
 
@@ -29878,20 +29896,19 @@ fn document_numerator_number_type_xml(value: u32) -> &'static str {
     }
 }
 
-fn document_numerator_allowed_length_xml(value: u32) -> &'static str {
+fn document_numerator_allowed_length_xml(value: u32) -> Option<&'static str> {
     match value {
-        1 => "Fixed",
-        _ => "Variable",
+        0 => Some("Fixed"),
+        1 => Some("Variable"),
+        _ => None,
     }
 }
 
-fn document_numerator_periodicity_xml(value: u32) -> &'static str {
+fn document_numerator_periodicity_xml(value: u32) -> Option<&'static str> {
     match value {
-        1 => "Month",
-        2 => "Quarter",
-        3 => "Day",
-        4 => "None",
-        _ => "Year",
+        0 => Some("Nonperiodical"),
+        1 => Some("Year"),
+        _ => None,
     }
 }
 
