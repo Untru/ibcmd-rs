@@ -95,9 +95,14 @@ reader uses):
 
 | slot 2 | slot 3 | forms | native `<FormType>` |
 |---:|---:|---:|---|
-| 0 | 1 | 22 348 | `Managed` |
-| 1 | 1 | 289 | `Managed` |
+| 0 | 1 | 22 403 | `Managed` |
+| 1 | 1 | 234 | `Managed` |
 | 0 | 0 | 9 | `Ordinary` |
+
+Per key, `(slot 2, slot 3)` -> count: `ws` none; `wms` (0,1) 5; `mdm` (0,1) 8,
+(1,1) 4; `sslbase` (0,1) 896, (1,1) 13; `ssl` (0,1) 1 149, (1,1) 14; `do`
+(0,1) 2 297, (1,1) 53; `ut` (0,1) 5 172, (1,1) 29; `uh` (0,1) 12 876, (1,1)
+121, **(0,0) 9**.
 
 Per key: `ws` 0 forms, `wms` 5, `mdm` 12, `sslbase` 909, `ssl` 1 163, `do`
 2 350, `ut` 5 201, `uh` 13 006. No third value of slot 3 exists anywhere, and
