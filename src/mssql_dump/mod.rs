@@ -8179,6 +8179,15 @@ struct MetadataChildProperties {
     full_text_search: Option<&'static str>,
     data_history: Option<&'static str>,
     type_reduction_mode: Option<&'static str>,
+    /// `<BinaryDataStorageLocationUse>`, present only when the field's own
+    /// slot says so.
+    ///
+    /// One occurrence on the whole stand -- Документооборот КОРП 3.0.21.3's
+    /// `InformationRegisters/ОчередьОбновленияАдреснойКниги` resource
+    /// `ПараметрыОбновления` -- against 820 other ValueStorage-typed register
+    /// fields across five configurations that write neither the slot nor the
+    /// element, which is what rules the type out as the trigger.
+    binary_data_storage_location_use: Option<&'static str>,
     update_data_history_immediately_after_write: Option<bool>,
     execute_after_write_data_history_version_processing: Option<bool>,
 }
@@ -18026,11 +18035,22 @@ fn parse_information_register_child_payload_from_fields(
             properties.data_history = information_register_data_history(fields.get(4)?);
         }
         ("8", 7) | ("5", 7) => {
-            if fields.get(5)?.trim() != "0"
-                || !information_register_new_child_tail_is_valid(fields.get(6)?)
-            {
+            if !information_register_new_child_tail_is_valid(fields.get(6)?) {
                 return None;
             }
+            // Slot 5 is not a reserved zero: it is the field's own
+            // `<BinaryDataStorageLocationUse>` slot. Refusing every non-zero
+            // value there discarded the whole property block of the one field
+            // on the stand that writes one -- Документооборот КОРП
+            // 3.0.21.3's `InformationRegisters/ОчередьОбновленияАдреснойКниги`
+            // resource `ПараметрыОбновления` -- leaving a header-only
+            // `<Resource>`. Only the two values the stand shows are read; any
+            // other still fails closed.
+            properties.binary_data_storage_location_use = match fields.get(5)?.trim() {
+                "0" => None,
+                "1" => Some("DontUse"),
+                _ => return None,
+            };
             properties.indexing = information_register_indexing(fields.get(2)?);
             properties.full_text_search = information_register_full_text_search(fields.get(3)?);
             properties.data_history = information_register_data_history(fields.get(4)?);
@@ -18394,6 +18414,7 @@ fn parse_information_register_common_child_properties(
         full_text_search: None,
         data_history: None,
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -19102,6 +19123,7 @@ fn parse_catalog_child_properties(
         full_text_search: Some(full_text_search),
         data_history: Some(data_history),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -19465,6 +19487,7 @@ fn parse_document_child_properties(
         full_text_search: Some(full_text_search),
         data_history: Some(data_history),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -20199,6 +20222,7 @@ fn parse_accounting_register_child_properties_from_fields(
         full_text_search: None,
         data_history: None,
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -20319,6 +20343,7 @@ fn parse_metadata_child_properties_from_fields(
             .get(header_index + 25)
             .and_then(|field| metadata_data_history_xml(field.trim())),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: if matches!(owner_kind, "Catalog" | "Document")
         {
             fields
@@ -20452,6 +20477,7 @@ fn parse_data_processor_wrapped_child_properties(
         full_text_search: None,
         data_history: None,
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -22718,6 +22744,7 @@ fn parse_cct_attribute_properties(
             wrapper.get(data_history_index)?.trim(),
         )?),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -36414,6 +36441,11 @@ fn push_metadata_child_properties_xml_with_tail_order(
     if let Some(data_history) = properties.data_history {
         xml.push_str(&format!(
             "{indent}<DataHistory>{data_history}</DataHistory>\r\n"
+        ));
+    }
+    if let Some(use_mode) = properties.binary_data_storage_location_use {
+        xml.push_str(&format!(
+            "{indent}<BinaryDataStorageLocationUse>{use_mode}</BinaryDataStorageLocationUse>\r\n"
         ));
     }
     if let Some(type_reduction_mode) = properties.type_reduction_mode {
