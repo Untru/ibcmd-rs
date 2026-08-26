@@ -10415,9 +10415,7 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         location_in_command_bar: if tag == "Button" && form_button_layout_is_extended(&fields) {
-            fields
-                .get(49 + button_top_level_offset)
-                .and_then(|field| parse_form_button_location_in_command_bar(field))
+            parse_form_button_location_in_command_bar_at_revision(&fields, button_top_level_offset)
         } else {
             None
         },
@@ -14279,6 +14277,49 @@ pub(super) fn parse_form_button_location_in_command_bar(field: &str) -> Option<&
         "1" => Some("InAdditionalSubmenu"),
         "2" => Some("InCommandBar"),
         "3" => Some("InCommandBarAndInAdditionalSubmenu"),
+        _ => None,
+    }
+}
+
+/// `LocationInCommandBar` read at the coordinate the button record's own
+/// revision keeps it in.
+///
+/// The canonical revision `31` keeps the four-valued code in slot 49 --
+/// `0` no element, `1` `InAdditionalSubmenu`, `2` `InCommandBar`, `3`
+/// `InCommandBarAndInAdditionalSubmenu`.  The short revision `29` has no slot
+/// 49 at all: `form_item_record_canonical_revision` pads it and its two
+/// neighbours back as absent, and reading an absent member yields nothing --
+/// which is right, because the member is genuinely not there, and wrong as an
+/// answer, because the platform still writes the element.
+///
+/// Revision `29` keeps the property in slot 15, the three-valued predecessor
+/// revision `31` carries alongside its own slot 49.  Over all 27 703 `31`/52
+/// button records of the 5 201 UT 11.5.27.75 form layouts the two slots are in
+/// exact correspondence, with no other pair occurring: slot 15 `2` <-> slot 49
+/// `0` (23 033 records), `0` <-> `1` (2 991), `1` <-> `2` (457) and `1` <-> `3`
+/// (1 222).  Slot 15 therefore names the property outright except inside its
+/// own `1`, where the canonical revision refines "in the command bar" into
+/// "with" and "without" the additional submenu -- the one distinction revision
+/// `29` has no member to spell.
+///
+/// All 164 revision-`29` records of ERP УХ 3.2.12.6 agree with that reading
+/// against the platform's own XML: `InAdditionalSubmenu` on the six whose slot
+/// 15 is `0`, `InCommandBarAndInAdditionalSubmenu` on the seven whose slot 15
+/// is `1`, and no element at all on the other 151.
+fn parse_form_button_location_in_command_bar_at_revision(
+    fields: &[&str],
+    top_level_offset: usize,
+) -> Option<&'static str> {
+    let canonical = fields.get(49 + top_level_offset).map(|field| field.trim());
+    if canonical != Some(FORM_ITEM_ABSENT_MEMBER) {
+        return canonical.and_then(parse_form_button_location_in_command_bar);
+    }
+    match fields
+        .get(15 + top_level_offset)
+        .map(|field| field.trim())?
+    {
+        "0" => Some("InAdditionalSubmenu"),
+        "1" => Some("InCommandBarAndInAdditionalSubmenu"),
         _ => None,
     }
 }

@@ -74127,3 +74127,80 @@ fn revision_ten_check_box_option_block_names_its_check_box_type() {
     assert_eq!(item.name, "СтандартныйСчетФактура");
     assert_eq!(item.check_box_type, Some("Tumbler"));
 }
+
+/// `LocationInCommandBar` at the coordinate revision `29` keeps it in.
+///
+/// Real ERP УХ 3.2.12.6 bytes:
+/// `Catalogs/ЗаявлениеОНазначенииПенсии/Forms/ВоеннаяСлужба`'s
+/// `ВоеннаяСлужбаДобавить`, a 49-member revision-`29` button whose native
+/// element carries
+/// `<LocationInCommandBar>InCommandBarAndInAdditionalSubmenu</LocationInCommandBar>`.
+///
+/// The canonical revision keeps the four-valued code in slot 49, which this
+/// revision does not carry at all -- normalizing pads it as absent, and reading
+/// an absent member writes nothing. Slot 15 is where revision `29` keeps it,
+/// and the assertion fails on a reader that only knows the canonical
+/// coordinate.
+#[test]
+fn revision_three_button_names_its_location_in_command_bar() {
+    const BUTTON_29: &str = r#"{29,
+{24,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ВоеннаяСлужбаДобавить",
+{1,0},1,
+{5,b0016a68-ec64-4e6d-b905-c71fd62efc4c},
+{0},2,0,0,0,2,1,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,0,1,
+{11,
+{25,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ВоеннаяСлужбаДобавитьРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0}"#;
+
+    let item = parse_form_child_item(
+        BUTTON_29,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("a revision-3 button record must be readable");
+
+    assert_eq!(item.tag, "Button");
+    assert_eq!(item.name, "ВоеннаяСлужбаДобавить");
+    assert_eq!(
+        item.location_in_command_bar,
+        Some("InCommandBarAndInAdditionalSubmenu")
+    );
+}
