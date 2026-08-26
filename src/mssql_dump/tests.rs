@@ -70873,6 +70873,52 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
 }
 
 #[test]
+fn business_process_owned_templates_resolve_like_every_other_owner_family() {
+    // `BusinessProcess.Ознакомление` owns one template, and the platform
+    // writes it as a `<Template>` child after the forms. The collection is the
+    // ordinary owned-template collection, so it resolves through the shared
+    // reference index; the family folder is what keeps a foreign owner out.
+    const TEMPLATE_UUID: &str = "eff65b8a-0da0-4e63-b021-36eeb9818f66";
+    const NAME: &str = "ПФ_MXL_ЛистОзнакомления";
+    let refs = BTreeMap::from([(
+        TEMPLATE_UUID.to_owned(),
+        TemplateSourceReference {
+            relative_path: PathBuf::from(format!(
+                "BusinessProcesses/Ознакомление/Templates/{NAME}.xml"
+            )),
+            kind: "Template",
+            template_type: "SpreadsheetDocument",
+        },
+    )]);
+    assert_eq!(
+        parse_business_process_child_templates("Ознакомление", &[TEMPLATE_UUID.to_owned()], &refs),
+        Some(vec![NAME.to_owned()])
+    );
+    // Another business process may not claim it, and neither may another
+    // family whose folder happens to hold a template of the same name.
+    assert_eq!(
+        parse_business_process_child_templates("Согласование", &[TEMPLATE_UUID.to_owned()], &refs),
+        None
+    );
+    let foreign = BTreeMap::from([(
+        TEMPLATE_UUID.to_owned(),
+        TemplateSourceReference {
+            relative_path: PathBuf::from(format!("Documents/Ознакомление/Templates/{NAME}.xml")),
+            kind: "Template",
+            template_type: "SpreadsheetDocument",
+        },
+    )]);
+    assert_eq!(
+        parse_business_process_child_templates(
+            "Ознакомление",
+            &[TEMPLATE_UUID.to_owned()],
+            &foreign
+        ),
+        None
+    );
+}
+
+#[test]
 fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_process() {
     // `BusinessProcess.Исполнение.TabularSection.ДополнительныеРеквизиты
     // .Attribute.Значение` slot 14, verbatim. The record is the same shape the

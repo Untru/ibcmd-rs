@@ -8488,6 +8488,7 @@ struct BusinessProcessProperties {
     child_attributes: Vec<MetadataChildObject>,
     child_tabular_sections: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
+    child_templates: Vec<String>,
     child_commands: Vec<MetadataChildCommand>,
 }
 
@@ -10715,6 +10716,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             object_refs,
             metadata_object_refs,
             form_refs,
+            template_refs,
             owner_graph_diagnostic,
         )?;
         format_business_process_source_xml(&header, &business_process, source_version)?.into_bytes()
@@ -25346,6 +25348,7 @@ fn parse_business_process_properties_from_text(
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
     owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<BusinessProcessProperties> {
     let owner_graph = decode_owner_graph_for_family_parser(
@@ -25386,16 +25389,6 @@ fn parse_business_process_properties_from_text(
         owner_graph::OwnerCollectionRole::TabularSection,
         owner_graph_diagnostic,
     )?;
-    if !template_collection.items.is_empty() {
-        *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
-            owner_graph::OwnerGraphFamily::BusinessProcess,
-            owner_graph::OwnerCollectionRole::Template,
-            0,
-            owner_graph::OwnerGraphReference::OwnedTemplate,
-        ));
-        return None;
-    }
-
     let generated_types = owner_graph
         .generated_types
         .iter()
@@ -25428,6 +25421,22 @@ fn parse_business_process_properties_from_text(
         *owner_graph_diagnostic = Some(diagnostic);
         return None;
     }
+    let template_uuids = parse_owner_graph_child_uuid_collection(
+        &template_collection.items,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Template,
+        owner_graph::OwnerGraphReference::OwnedTemplate,
+        owner_graph_diagnostic,
+    )?;
+    validate_owner_graph_owned_templates(
+        &template_uuids,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        &header.name,
+        template_refs,
+        owner_graph_diagnostic,
+    )?;
+    let child_templates =
+        parse_business_process_child_templates(&header.name, &template_uuids, template_refs)?;
 
     let direct_attribute_uuids =
         parse_document_attribute_collection_indexed(&direct_attribute_collection.items, &[2, 3])
@@ -25710,8 +25719,35 @@ fn parse_business_process_properties_from_text(
         child_attributes,
         child_tabular_sections,
         child_forms,
+        child_templates,
         child_commands,
     })
+}
+
+fn parse_business_process_child_templates(
+    owner_name: &str,
+    template_uuids: &[String],
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let references = template_refs
+        .iter()
+        .map(|(uuid, template_ref)| owner_graph::OwnedTemplateReference {
+            uuid,
+            kind: template_ref.kind,
+            relative_path: &template_ref.relative_path,
+            canonical_reference: template_source_reference_name(template_ref),
+        })
+        .collect::<Vec<_>>();
+    let family = owner_graph::OwnerGraphFamily::BusinessProcess.as_str();
+    owner_graph::resolve_owned_template_names(
+        family,
+        metadata_source_folder_for_kind(family)?,
+        owner_name,
+        OWNER_GRAPH_TEMPLATE_FOLDER,
+        OWNER_GRAPH_TEMPLATE_KIND,
+        template_uuids,
+        &references,
+    )
 }
 
 fn validate_business_process_owner_graph_child_objects(
@@ -34425,6 +34461,7 @@ fn format_business_process_source_xml(
         if business_process.child_attributes.is_empty()
             && business_process.child_tabular_sections.is_empty()
             && business_process.child_forms.is_empty()
+            && business_process.child_templates.is_empty()
             && business_process.child_commands.is_empty()
         {
             xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
@@ -34440,6 +34477,12 @@ fn format_business_process_source_xml(
                 child_objects.push_str(&format!(
                     "\t\t\t<Form>{}</Form>\r\n",
                     escape_xml_element_text(form)
+                ));
+            }
+            for template in &business_process.child_templates {
+                child_objects.push_str(&format!(
+                    "\t\t\t<Template>{}</Template>\r\n",
+                    escape_xml_element_text(template)
                 ));
             }
             for command in &business_process.child_commands {
