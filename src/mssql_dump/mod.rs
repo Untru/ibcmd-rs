@@ -19187,6 +19187,23 @@ fn parse_information_register_data_path(
                 ("-3", 1) if owner_kind == "InformationRegister" => Some(format!(
                     "InformationRegister.{owner_name}.StandardAttribute.Recorder"
                 )),
+                // An accumulation register's own standard attributes are named
+                // by the very same negative markers, through the table this
+                // file already keeps for them
+                // (`accumulation_register_record_set_standard_attribute_name`,
+                // used where a form binding names one). Only the information
+                // register's two markers had an arm here, so a link that names
+                // one of the accumulation register's own standard attributes
+                // refused -- and the refusal is not local: the whole child's
+                // property block fails with it, and the dimension degrades to
+                // its header and `<Type>` alone. ERP УХ 3.2.12.6 loses four
+                // dimensions that way, two naming `StandardAttribute.Active`
+                // (`-5`) and two `StandardAttribute.Period` (`-2`).
+                (marker, 1) if owner_kind == "AccumulationRegister" => {
+                    accumulation_register_record_set_standard_attribute_name(marker).map(|name| {
+                        format!("AccumulationRegister.{owner_name}.StandardAttribute.{name}")
+                    })
+                }
                 _ => None,
             }
         })
@@ -29436,6 +29453,20 @@ fn parse_typed_metadata_properties_from_text(
         return None;
     }
 
+    // A bare family reference (`cfg:CatalogRef` with no object behind it) is a
+    // type *set*, and the platform spells it `<v8:TypeSet>`: across ERP УХ, UT
+    // and Документооборот there is not one `<v8:Type>cfg:…Ref</v8:Type>`
+    // anywhere, against 1 115 `<v8:TypeSet>cfg:CatalogRef</v8:TypeSet>` in ERP
+    // УХ alone. Every other family's reader classifies them through this same
+    // helper; only the typed-metadata reader (`CommonAttribute` and its
+    // siblings) never did, and ERP УХ
+    // `CommonAttributes/НСИ_ЭталонныйЭлемент` spelled its `cfg:CatalogRef` as
+    // a plain `<v8:Type>`. The sibling partition is deliberately not applied:
+    // over the 5 525 `<Type>` blocks these families write on the stand, not
+    // one puts a type set ahead of an ordinary type, so there is nothing here
+    // to reorder and no evidence for reordering.
+    let value_types = classify_metadata_reference_type_sets(value_types);
+
     Some(TypedMetadataProperties { value_types })
 }
 
@@ -31506,6 +31537,12 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "1001ae3e-9289-4303-9699-3c0c17e20e61" => Some("StdPicture.AddToFavorites"),
         "14b24498-e49c-4713-be64-75101d0abfb9" => Some("StdPicture.GoToEnd"),
         "167a160b-fa48-4337-87ab-7e0fe95c4b5a" => Some("StdPicture.DeleteListItem"),
+        // Read straight off the platform: ERP УХ 3.2.12.6
+        // `CommandGroups/ПерейтиУХ` carries the picture descriptor
+        // `{4,1,{0,dfcd2d21-…},"",-1,-1,1,0,""}` and the platform names it
+        // `StdPicture.FunctionMenuCommand`. Unnamed, the descriptor collapsed
+        // to `<Picture/>` and the group lost its picture block whole.
+        "dfcd2d21-24ea-4b27-ab9a-6bf754577536" => Some("StdPicture.FunctionMenuCommand"),
         // Read straight off the platform: ERP УХ 3.2.12.6
         // `Catalogs/ХранимыеФайлыОрганизаций/Ext/Help/ru.html` embeds this
         // identifier in an `<img src="../../mdpicture/id…">` and the platform's
