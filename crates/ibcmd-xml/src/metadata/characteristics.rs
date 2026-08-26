@@ -20,6 +20,7 @@ use crate::{AttributeKind, XmlElement, XmlNode};
 const XSI_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
 const XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const STRING_TYPE: &str = "xs:string";
+const BOOLEAN_TYPE: &str = "xs:boolean";
 const DESIGN_TIME_REF_TYPE: &str = "xr:DesignTimeRef";
 
 /// A Characteristics value cannot be represented as a valid XML 1.0 fragment.
@@ -312,17 +313,32 @@ fn decode_filter_value(
     uris: &ResolvedNamespaces,
 ) -> Result<CharacteristicFilterValue, MetadataDecodeError> {
     let mut xsi_type = None;
+    let mut xsi_nil = None;
     for attribute in element.attributes() {
-        match attribute.kind() {
+        let xsi_local = match attribute.kind() {
             AttributeKind::Ordinary(name)
-                if name.local() == "type"
-                    && name
-                        .prefix()
-                        .and_then(|prefix| namespace_uri_for_prefix(element, prefix, uris))
-                        == Some(XSI_NAMESPACE) =>
+                if name
+                    .prefix()
+                    .and_then(|prefix| namespace_uri_for_prefix(element, prefix, uris))
+                    == Some(XSI_NAMESPACE) =>
             {
+                name.local()
+            }
+            _ => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "TypesFilterValue attribute is unknown",
+                ));
+            }
+        };
+        match xsi_local {
+            "type" => {
                 if xsi_type.replace(attribute.value()).is_some() {
                     return Err(MetadataDecodeError::Duplicate("TypesFilterValue xsi:type"));
+                }
+            }
+            "nil" => {
+                if xsi_nil.replace(attribute.value()).is_some() {
+                    return Err(MetadataDecodeError::Duplicate("TypesFilterValue xsi:nil"));
                 }
             }
             _ => {
@@ -333,6 +349,16 @@ fn decode_filter_value(
         }
     }
     let value = element_text(element)?.unwrap_or_default();
+    // `xsi:nil` is the union member that carries no value, so it excludes
+    // `xsi:type` and any content rather than defaulting one of them.
+    if let Some(nil) = xsi_nil {
+        if nil != "true" || xsi_type.is_some() || !value.is_empty() {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "TypesFilterValue nil member is not exact",
+            ));
+        }
+        return Ok(CharacteristicFilterValue::Undefined);
+    }
     let xsi_type = xsi_type.ok_or(MetadataDecodeError::Missing("TypesFilterValue xsi:type"))?;
     let (prefix, local) = xsi_type
         .split_once(':')
@@ -345,6 +371,13 @@ fn decode_filter_value(
     match (namespace, local) {
         (XML_SCHEMA_NAMESPACE, "string") => CharacteristicFilterValue::string(&value)
             .map_err(|error| MetadataDecodeError::Core(error.to_string())),
+        (XML_SCHEMA_NAMESPACE, "boolean") => match value.as_str() {
+            "true" => Ok(CharacteristicFilterValue::Boolean(true)),
+            "false" => Ok(CharacteristicFilterValue::Boolean(false)),
+            _ => Err(MetadataDecodeError::InvalidEnvelope(
+                "TypesFilterValue boolean lexical form is unsupported",
+            )),
+        },
         (XR_NAMESPACE, "DesignTimeRef") if value.is_empty() => {
             Ok(CharacteristicFilterValue::DesignTimeRef(None))
         }
@@ -441,6 +474,17 @@ fn characteristic_value(item: &Characteristic) -> Result<CanonicalValue, Metadat
                 reference.as_ref().map_or("", |reference| reference.path()),
             )?);
         }
+        CharacteristicFilterValue::Boolean(value) => {
+            fields.push(text_field("TypesFilterValueKind", "boolean")?);
+            fields.push(text_field(
+                "TypesFilterValue",
+                if *value { "true" } else { "false" },
+            )?);
+        }
+        CharacteristicFilterValue::Undefined => {
+            fields.push(text_field("TypesFilterValueKind", "undefined")?);
+            fields.push(text_field("TypesFilterValue", "")?);
+        }
     }
     fields.extend([
         field_value("DataPathField", item.types().data_path_field())?,
@@ -499,7 +543,9 @@ fn validate_model(model: &Characteristics) -> Result<(), CharacteristicsXmlError
             CharacteristicFilterValue::DesignTimeRef(Some(reference)) => {
                 validate_reference(reference, "design-time reference")?;
             }
-            CharacteristicFilterValue::DesignTimeRef(None) => {}
+            CharacteristicFilterValue::DesignTimeRef(None)
+            | CharacteristicFilterValue::Boolean(_)
+            | CharacteristicFilterValue::Undefined => {}
         }
         validate_field(item.types().data_path_field())?;
         validate_field(item.types().multiple_values_use_field())?;
@@ -572,6 +618,13 @@ fn push_filter_value(xml: &mut String, indent: &str, value: &CharacteristicFilte
             "{indent}<xr:TypesFilterValue xsi:type=\"{DESIGN_TIME_REF_TYPE}\">{}</xr:TypesFilterValue>\r\n",
             escape_text(reference.path())
         )),
+        CharacteristicFilterValue::Boolean(value) => xml.push_str(&format!(
+            "{indent}<xr:TypesFilterValue xsi:type=\"{BOOLEAN_TYPE}\">{}</xr:TypesFilterValue>\r\n",
+            if *value { "true" } else { "false" }
+        )),
+        CharacteristicFilterValue::Undefined => {
+            xml.push_str(&format!("{indent}<xr:TypesFilterValue xsi:nil=\"true\"/>\r\n"));
+        }
     }
 }
 
@@ -711,6 +764,60 @@ mod tests {
             })
             .unwrap();
         decode_characteristics(element, &uris)
+    }
+
+    fn union_fixture(filter: &str) -> String {
+        format!(
+            "<Root xmlns=\"urn:test\" xmlns:r=\"{XR_NAMESPACE}\" xmlns:i=\"{XSI_NAMESPACE}\" xmlns:s=\"{XML_SCHEMA_NAMESPACE}\"><Characteristics><r:Characteristic><r:CharacteristicTypes from=\"Catalog.Types\"><r:KeyField>0</r:KeyField><r:TypesFilterField>-1</r:TypesFilterField>{filter}<r:DataPathField>0</r:DataPathField><r:MultipleValuesUseField>-1</r:MultipleValuesUseField></r:CharacteristicTypes><r:CharacteristicValues from=\"Catalog.Values\"><r:ObjectField>0</r:ObjectField><r:TypeField>-1</r:TypeField><r:ValueField>0</r:ValueField><r:MultipleValuesKeyField>-1</r:MultipleValuesKeyField><r:MultipleValuesOrderField>0</r:MultipleValuesOrderField></r:CharacteristicValues></r:Characteristic></Characteristics></Root>"
+        )
+    }
+
+    #[test]
+    fn nil_and_boolean_filter_members_round_trip_through_their_exact_spelling() {
+        // The platform spells the value-less member `xsi:nil="true"` on a
+        // self-closing element and the boolean member
+        // `xsi:type="xs:boolean">true`; both are distinct union members, not
+        // an omitted property.
+        for (filter, expected) in [
+            (
+                "<r:TypesFilterValue i:nil=\"true\"/>",
+                CharacteristicFilterValue::Undefined,
+            ),
+            (
+                "<r:TypesFilterValue i:type=\"s:boolean\">true</r:TypesFilterValue>",
+                CharacteristicFilterValue::Boolean(true),
+            ),
+            (
+                "<r:TypesFilterValue i:type=\"s:boolean\">false</r:TypesFilterValue>",
+                CharacteristicFilterValue::Boolean(false),
+            ),
+        ] {
+            let model = decode_fixture(&union_fixture(filter)).unwrap();
+            assert_eq!(model.items()[0].types().types_filter_value(), &expected);
+            let xml = render_characteristics_xml(&model, "").unwrap();
+            let rendered = match &expected {
+                CharacteristicFilterValue::Undefined => {
+                    "<xr:TypesFilterValue xsi:nil=\"true\"/>".to_owned()
+                }
+                CharacteristicFilterValue::Boolean(value) => format!(
+                    "<xr:TypesFilterValue xsi:type=\"xs:boolean\">{value}</xr:TypesFilterValue>"
+                ),
+                _ => unreachable!(),
+            };
+            assert!(xml.contains(&rendered), "{xml}");
+        }
+        for malformed in [
+            "<r:TypesFilterValue i:nil=\"false\"/>",
+            "<r:TypesFilterValue i:nil=\"true\">text</r:TypesFilterValue>",
+            "<r:TypesFilterValue i:nil=\"true\" i:type=\"s:string\"/>",
+            "<r:TypesFilterValue i:type=\"s:boolean\">1</r:TypesFilterValue>",
+            "<r:TypesFilterValue i:type=\"s:boolean\"/>",
+        ] {
+            assert!(
+                decode_fixture(&union_fixture(malformed)).is_err(),
+                "accepted malformed filter {malformed}"
+            );
+        }
     }
 
     #[test]

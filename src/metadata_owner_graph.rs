@@ -178,6 +178,8 @@ impl CharacteristicsFieldRole {
 pub(crate) enum CharacteristicsTagKind {
     Item,
     StringFill,
+    Boolean,
+    Undefined,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -292,6 +294,8 @@ impl CharacteristicsPhysicalSchema {
         match decoded {
             "#" => Some(CharacteristicsTagKind::Item),
             "S" => Some(CharacteristicsTagKind::StringFill),
+            "B" => Some(CharacteristicsTagKind::Boolean),
+            "U" => Some(CharacteristicsTagKind::Undefined),
             _ => None,
         }
     }
@@ -318,26 +322,23 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) const fn standard_attribute(
-        family: OwnerGraphFamily,
-        role: CharacteristicsFieldRole,
+    /// Which standard attribute a resolved marker may name, given the shape of
+    /// the source it is read against. A tabular section exposes only its
+    /// owner's `Ref`; an object source exposes its family's whole
+    /// standard-attribute table. Which marker spells `Ref` is not decided here
+    /// -- it comes from the source family's own table.
+    pub(crate) fn standard_attribute(
         shape: CharacteristicsSourceShape,
-        marker: i32,
+        name: &str,
     ) -> Option<CharacteristicsStandardAttributeKind> {
-        if matches!(family, OwnerGraphFamily::Document) {
-            if matches!(role, CharacteristicsFieldRole::ObjectField) && marker == -5 {
-                return Some(CharacteristicsStandardAttributeKind::Ref);
+        match shape {
+            CharacteristicsSourceShape::TabularSection => {
+                (name == "Ref").then_some(CharacteristicsStandardAttributeKind::Ref)
             }
-            return None;
+            CharacteristicsSourceShape::Object => {
+                Some(CharacteristicsStandardAttributeKind::FamilyTable)
+            }
         }
-        if matches!(shape, CharacteristicsSourceShape::TabularSection) {
-            return if marker == -8 {
-                Some(CharacteristicsStandardAttributeKind::Ref)
-            } else {
-                None
-            };
-        }
-        Some(CharacteristicsStandardAttributeKind::FamilyTable)
     }
 
     pub(crate) fn standard_attribute_path(source: &str, name: &str) -> String {
@@ -1986,12 +1987,24 @@ mod tests {
         );
         assert_eq!(
             CharacteristicsPhysicalSchema::standard_attribute(
-                OwnerGraphFamily::Document,
-                CharacteristicsFieldRole::ObjectField,
-                CharacteristicsSourceShape::Object,
-                -5,
+                CharacteristicsSourceShape::TabularSection,
+                "Ref",
             ),
             Some(CharacteristicsStandardAttributeKind::Ref)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::standard_attribute(
+                CharacteristicsSourceShape::TabularSection,
+                "Parent",
+            ),
+            None
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::standard_attribute(
+                CharacteristicsSourceShape::Object,
+                "Parent",
+            ),
+            Some(CharacteristicsStandardAttributeKind::FamilyTable)
         );
         assert!(!CharacteristicsPhysicalSchema::outer(Some(1), 2));
         assert_eq!(CharacteristicsPhysicalSchema::tag("unknown"), None);

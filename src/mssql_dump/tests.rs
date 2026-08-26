@@ -66446,29 +66446,117 @@ fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes
 }
 
 #[test]
-fn characteristics_document_schema_marker_is_closed_to_object_field() {
-    let values = CharacteristicReference::new("Document.Values", None).unwrap();
-    assert!(
-        decode_field(
-            OwnerGraphFamily::Document,
-            0,
-            &field("-5"),
+fn characteristics_standard_attribute_marker_follows_the_source_family() {
+    // Real bytes, ДО КОРП 3.0.21.3: one `BusinessProcess.Исполнение`
+    // characteristic reads its types out of a Catalog tabular section with
+    // marker `-8` and its values out of its own tabular section with marker
+    // `-5`, and the platform spells both `.StandardAttribute.Ref`. Which
+    // number spells `Ref` is therefore declared by the family of the object
+    // the reference points at, not by the family that owns the property and
+    // not by the field's role.
+    let cases = [
+        ("Catalog.Types.TabularSection.Rows", -8, "Ref"),
+        ("Document.Values.TabularSection.Rows", -5, "Ref"),
+        ("BusinessProcess.Values.TabularSection.Rows", -5, "Ref"),
+        ("Task.Values.TabularSection.Rows", -5, "Ref"),
+        (
+            "ChartOfCharacteristicTypes.Types.TabularSection.Rows",
+            -2,
+            "Ref",
+        ),
+        ("Catalog.Values", -4, "Parent"),
+        ("ChartOfCharacteristicTypes.Types", -2, "Ref"),
+    ];
+    for (source, marker, name) in cases {
+        let reference = CharacteristicReference::new(source, None).unwrap();
+        for role in [
             CharacteristicRole::ObjectField,
-            &values,
-            &BTreeMap::new(),
-        )
-        .is_ok()
-    );
+            CharacteristicRole::TypeField,
+            CharacteristicRole::KeyField,
+        ] {
+            let decoded = decode_field(
+                OwnerGraphFamily::Catalog,
+                0,
+                &field(&marker.to_string()),
+                role,
+                &reference,
+                &BTreeMap::new(),
+            )
+            .unwrap_or_else(|error| panic!("{source} marker {marker} refused: {error:?}"));
+            assert_eq!(
+                decoded.reference().map(CharacteristicReference::path),
+                Some(format!("{source}.StandardAttribute.{name}").as_str())
+            );
+        }
+    }
+    // A tabular-section source exposes only its owner's `Ref`; every other
+    // entry of the family table stays closed there.
+    let rows = CharacteristicReference::new("Catalog.Values.TabularSection.Rows", None).unwrap();
     let failure = decode_field(
-        OwnerGraphFamily::Document,
+        OwnerGraphFamily::Catalog,
         0,
-        &field("-5"),
-        CharacteristicRole::TypeField,
-        &values,
+        &field("-4"),
+        CharacteristicRole::ObjectField,
+        &rows,
         &BTreeMap::new(),
     )
     .unwrap_err();
     assert_eq!(failure.reason, CharacteristicsReason::UnsupportedMarker);
+    // A family with no standard-attribute table of its own fails closed
+    // instead of borrowing the owner's numbering.
+    let register = CharacteristicReference::new("InformationRegister.Values", None).unwrap();
+    let failure = decode_field(
+        OwnerGraphFamily::Catalog,
+        0,
+        &field("-8"),
+        CharacteristicRole::ObjectField,
+        &register,
+        &BTreeMap::new(),
+    )
+    .unwrap_err();
+    assert_eq!(failure.reason, CharacteristicsReason::UnsupportedMarker);
+}
+
+#[test]
+fn characteristics_filter_value_union_covers_undefined_and_boolean_members() {
+    // Real bytes: `{"U"}` is the union member the platform spells
+    // `<xr:TypesFilterValue xsi:nil="true"/>` (8 occurrences across ДО КОРП
+    // 3.0.21.3 and ERP УХ 3.2.12.6), and `{"B",1}` the one it spells
+    // `xsi:type="xs:boolean">true` (3 occurrences on ERP УХ). Neither carries
+    // a payload shaped like the string or design-time-ref members.
+    let undefined = decode(&collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"U"}"#,
+    )))
+    .unwrap();
+    assert_eq!(
+        undefined.items()[0].types().types_filter_value(),
+        &CharacteristicFilterValue::Undefined
+    );
+    let boolean = decode(&collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"B",1}"#,
+    )))
+    .unwrap();
+    assert_eq!(
+        boolean.items()[0].types().types_filter_value(),
+        &CharacteristicFilterValue::Boolean(true)
+    );
+    for malformed in [r#"{"U",1}"#, r#"{"B"}"#, r#"{"B",2}"#, r#"{"B",1,1}"#] {
+        let diagnostic = decode(&collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            malformed,
+        )))
+        .unwrap_err();
+        assert_eq!(
+            diagnostic.reason,
+            CharacteristicsReason::UnsupportedFilterUnion,
+            "accepted malformed filter {malformed:?}"
+        );
+    }
 }
 
 #[test]

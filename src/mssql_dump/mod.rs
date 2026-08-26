@@ -62,19 +62,19 @@ mod characteristics {
     use ibcmd_core::identity::ObjectUuid;
 
     use super::{
-        CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES, DOCUMENT_CHARACTERISTIC_TYPE_UUID,
-        information_register_uuid_is_zero, information_register_uuid_matches,
-        parse_information_register_design_time_ref, parse_information_register_design_time_ref_ids,
-        parse_information_register_non_zero_uuid, parse_information_register_quoted_string,
-        parse_information_register_usize, resolve_exchange_plan_index_reference,
-        split_information_register_braced_fields,
+        BUSINESS_PROCESS_STANDARD_ATTRIBUTES, CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES,
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID, DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES,
+        information_register_bool, information_register_uuid_is_zero,
+        information_register_uuid_matches, parse_information_register_design_time_ref,
+        parse_information_register_design_time_ref_ids, parse_information_register_non_zero_uuid,
+        parse_information_register_quoted_string, parse_information_register_usize,
+        resolve_exchange_plan_index_reference, split_information_register_braced_fields,
     };
     pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
     use crate::metadata_owner_graph::{
         CHARACTERISTICS_REASON_TOKENS, CHARACTERISTICS_REFERENCE_KIND_TOKENS,
         CHARACTERISTICS_STAGE_TOKENS, CharacteristicsPhysicalSchema, CharacteristicsSentinelKind,
-        CharacteristicsSourceShape, CharacteristicsStandardAttributeKind, CharacteristicsTagKind,
-        OwnerGraphFamily,
+        CharacteristicsStandardAttributeKind, CharacteristicsTagKind, OwnerGraphFamily,
     };
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -647,8 +647,8 @@ mod characteristics {
                         CharacteristicsReason::UnsupportedMarker,
                     )
                 })?;
-                let path = standard_attribute_reference(family, role, source.path(), marker)
-                    .ok_or_else(|| {
+                let path =
+                    standard_attribute_reference(source.path(), marker).ok_or_else(|| {
                         malformed_field(
                             family,
                             item_index,
@@ -734,36 +734,38 @@ mod characteristics {
         }
     }
 
-    fn standard_attribute_reference(
-        owner_family: OwnerGraphFamily,
-        role: CharacteristicRole,
-        source: &str,
-        marker: i32,
-    ) -> Option<String> {
-        let shape = CharacteristicsPhysicalSchema::source_shape(source)?;
-        let attributes = match owner_family {
-            OwnerGraphFamily::Catalog => CATALOG_STANDARD_ATTRIBUTES.as_slice(),
-            OwnerGraphFamily::ChartOfCharacteristicTypes => CCT_STANDARD_ATTRIBUTES.as_slice(),
-            _ => [].as_slice(),
-        };
-        let name = attributes
-            .iter()
-            .find_map(|(raw, name)| (raw.parse::<i32>().ok() == Some(marker)).then_some(*name));
-        // A tabular-section source names only the owner's own `Ref`, and which
-        // marker spells `Ref` is declared by the family's standard-attribute
-        // table (`-8` for catalogs, `-2` for characteristic-type plans) rather
-        // than being one number shared by both.
-        if shape == CharacteristicsSourceShape::TabularSection && !attributes.is_empty() {
-            return (name == Some("Ref"))
-                .then(|| CharacteristicsPhysicalSchema::standard_ref_path(source));
+    /// The standard-attribute marker vocabulary a reference speaks is declared
+    /// by the family of the object the reference points at, not by the family
+    /// of the object that owns the `Characteristics` property. The two are the
+    /// same object in the common case, which is why an owner-keyed table
+    /// survived this long, but a single `Characteristic` routinely mixes them:
+    /// `BusinessProcess.Исполнение` (ДО КОРП 3.0.21.3) reads its types out of
+    /// `Catalog.НаборыДополнительныхРеквизитовИСведений.TabularSection.
+    /// ДополнительныеРеквизиты` with marker `-8` and its values out of its own
+    /// tabular section with marker `-5`, and the platform spells both `Ref`.
+    fn source_standard_attributes(source: &str) -> Option<&'static [(&'static str, &'static str)]> {
+        match source.split('.').next()? {
+            "Catalog" => Some(CATALOG_STANDARD_ATTRIBUTES.as_slice()),
+            "ChartOfCharacteristicTypes" => Some(CCT_STANDARD_ATTRIBUTES.as_slice()),
+            "Document" => Some(DOCUMENT_STANDARD_ATTRIBUTES.as_slice()),
+            "BusinessProcess" => Some(BUSINESS_PROCESS_STANDARD_ATTRIBUTES.as_slice()),
+            "Task" => Some(TASK_STANDARD_ATTRIBUTES.as_slice()),
+            _ => None,
         }
-        match CharacteristicsPhysicalSchema::standard_attribute(owner_family, role, shape, marker)?
-        {
+    }
+
+    fn standard_attribute_reference(source: &str, marker: i32) -> Option<String> {
+        let shape = CharacteristicsPhysicalSchema::source_shape(source)?;
+        let name = source_standard_attributes(source)?
+            .iter()
+            .find_map(|(raw, name)| (raw.parse::<i32>().ok() == Some(marker)).then_some(*name))?;
+        match CharacteristicsPhysicalSchema::standard_attribute(shape, name)? {
             CharacteristicsStandardAttributeKind::Ref => {
                 Some(CharacteristicsPhysicalSchema::standard_ref_path(source))
             }
-            CharacteristicsStandardAttributeKind::FamilyTable => name
-                .map(|name| CharacteristicsPhysicalSchema::standard_attribute_path(source, name)),
+            CharacteristicsStandardAttributeKind::FamilyTable => Some(
+                CharacteristicsPhysicalSchema::standard_attribute_path(source, name),
+            ),
         }
     }
 
@@ -785,6 +787,18 @@ mod characteristics {
                     .ok_or_else(|| unsupported_filter(family, item_index, None))?;
                 CharacteristicFilterValue::string(&value)
                     .map_err(|_| unsupported_filter(family, item_index, None))
+            }
+            // The tag carries no payload of its own: the union member is the
+            // whole value. The platform still writes the element, spelled
+            // `xsi:nil="true"` -- an absent property would be a different
+            // shape entirely.
+            Some(CharacteristicsTagKind::Undefined) if fields.len() == 1 => {
+                Ok(CharacteristicFilterValue::Undefined)
+            }
+            Some(CharacteristicsTagKind::Boolean) if fields.len() == 2 => {
+                information_register_bool(fields[1])
+                    .map(CharacteristicFilterValue::Boolean)
+                    .ok_or_else(|| unsupported_filter(family, item_index, None))
             }
             Some(CharacteristicsTagKind::Item) if fields.len() == 3 => {
                 let (owner_uuid, value_uuid) =
