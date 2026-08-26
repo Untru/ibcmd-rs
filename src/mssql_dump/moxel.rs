@@ -66,6 +66,9 @@ pub(super) struct MoxelSpreadsheet {
     /// be built from, which leaves the pool on its previous path.
     pub(super) first_use_pool: Option<Vec<usize>>,
     pub(super) print_area: Option<MoxelArea>,
+    /// The repeating band `<repeatRows>` names, read from the first four of
+    /// the ten scalars behind the print-area record.
+    pub(super) repeat_rows: Option<MoxelArea>,
     /// `groupsBackColor`, `groupsColor`, `headersBackColor`, `headersColor`, in
     /// publication order, each `None` where the document leaves the role at its
     /// default.
@@ -1940,6 +1943,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         internal_sources,
         first_use_pool,
         print_area,
+        repeat_rows: parse_moxel_repeat_rows(&fields),
         group_header_colors: parse_moxel_group_header_colors(&fields, &style_refs),
         print_settings,
         lines,
@@ -3682,6 +3686,50 @@ fn moxel_print_area_anchor(fields: &[&str]) -> Option<usize> {
             && record[1..5].iter().all(|value| value.trim() == "-1")
             && parse_uuid_field(record.get(5)?.trim()).is_some())
         .then_some(index)
+    })
+}
+
+/// The repeating band, the first four of the ten scalars behind the print-area
+/// record. `<repeatRows>` is the only repeat element the stand publishes.
+///
+/// Evidence (Документооборот КОРП 3.0.21.3, the only configuration of the stand
+/// that publishes the element at all): all seven documents that publish
+/// `<repeatRows>` carry a non-zero pair in the first two slots and zero in the
+/// next two, and the published `<beginRow>`/`<endRow>` are exactly that pair -
+/// `ПФ_MXL_ИтоговаяЗапись` 6/9, `ПФ_MXL_ВнутренняяОпись` 7/9,
+/// `ПФ_MXL_НоменклатураДел` 9/11, `ПФ_MXL_РеестрЭД` 10/12,
+/// `ПФ_MXL_НоменклатураДелПодразделения` 11/13, `ПФ_MXL_Опись` 12/14,
+/// `ПФ_MXL_Акт` 19/21 - each with `<beginColumn>0</beginColumn>` and
+/// `<endColumn>0</endColumn>`. Every other document of the configuration stores
+/// `0,0,0,0` there and publishes nothing.
+///
+/// No document of the stand stores a non-zero third or fourth slot, so what the
+/// platform writes for one is not measured here: such a record is left unspelled
+/// rather than guessed into a `<repeatRows>` band of its own.
+const MOXEL_REPEAT_ROWS_SLOT_OFFSET: usize = 1;
+
+pub(super) fn parse_moxel_repeat_rows(fields: &[&str]) -> Option<MoxelArea> {
+    let anchor = moxel_print_area_anchor(fields)?;
+    let mut slots = [0i32; 4];
+    for (offset, slot) in slots.iter_mut().enumerate() {
+        *slot = fields
+            .get(anchor + MOXEL_REPEAT_ROWS_SLOT_OFFSET + offset)?
+            .trim()
+            .parse::<i32>()
+            .ok()?;
+    }
+    let [begin_row, end_row, begin_column, end_column] = slots;
+    if (begin_row == 0 && end_row == 0) || begin_column != 0 || end_column != 0 {
+        return None;
+    }
+    Some(MoxelArea {
+        name: String::new(),
+        area_type: "Rows",
+        begin_column,
+        begin_row,
+        end_column,
+        end_row,
+        columns_id: None,
     })
 }
 
@@ -9792,7 +9840,13 @@ fn render_moxel_spreadsheet_xml(
         push_moxel_print_settings_xml(&mut xml, print_settings);
     }
     if let Some(print_area) = &spreadsheet.print_area {
-        push_moxel_print_area_xml(&mut xml, print_area);
+        push_moxel_document_area_xml(&mut xml, "printArea", print_area);
+    }
+    // No document of the stand publishes both, so their relative order is not
+    // measured; `<repeatRows>` is placed where the seven documents that publish
+    // it put it - behind `<printSettings>`, ahead of the group/header colours.
+    if let Some(repeat_rows) = &spreadsheet.repeat_rows {
+        push_moxel_document_area_xml(&mut xml, "repeatRows", repeat_rows);
     }
     for (role, (tag, _)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
         if let Some(color) = &spreadsheet.group_header_colors[role] {
@@ -12669,8 +12723,8 @@ pub(super) fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
     xml.push_str("\t</namedItem>\r\n");
 }
 
-pub(super) fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
-    xml.push_str("\t<printArea>\r\n");
+pub(super) fn push_moxel_document_area_xml(xml: &mut String, tag: &str, area: &MoxelArea) {
+    xml.push_str(&format!("\t<{tag}>\r\n"));
     xml.push_str(&format!("\t\t<type>{}</type>\r\n", area.area_type));
     xml.push_str(&format!("\t\t<beginRow>{}</beginRow>\r\n", area.begin_row));
     xml.push_str(&format!("\t\t<endRow>{}</endRow>\r\n", area.end_row));
@@ -12688,7 +12742,7 @@ pub(super) fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
             escape_xml_text(columns_id)
         ));
     }
-    xml.push_str("\t</printArea>\r\n");
+    xml.push_str(&format!("\t</{tag}>\r\n"));
 }
 
 pub(super) fn push_moxel_row_xml(
@@ -13579,6 +13633,7 @@ mod moxel_exact_parity_tests {
             internal_sources: Vec::new(),
             first_use_pool: None,
             print_area: None,
+            repeat_rows: None,
             group_header_colors: [None, None, None, None],
             print_settings: None,
             lines: Vec::new(),
