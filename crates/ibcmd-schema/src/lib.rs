@@ -826,6 +826,36 @@ where
                 member,
             }
         }
+        // A design-time reference whose value member carries the referenced
+        // value's own cached literal instead of the undefined marker.  What
+        // makes an item a reference is its mode and its identifier pair, not
+        // which of the two carriers the value member holds, and the platform
+        // writes the reference either way.
+        //
+        // Evidence, ERP УХ 3.2.12.6
+        // `Catalogs/ВнешниеИнформационныеБазы/Forms/ФормаЭлемента`, item
+        // `Соединение77Версия`: three items under mode `0` and type
+        // `033c8a3f` -- `{"N",0}` with `a66cd7a7`, `{"N",1}` with `41bf69d0`,
+        // `{"N",2}` with `b6fb70a7` -- and the platform writes
+        // `Enum.ВидыРазмещенияИБ.EnumValue.ЛокальнаяВерсия`,
+        // `.ФайлСерверный` and `.КлиентСерверный`.  Those are the first,
+        // second and third `EnumValue` of that enumeration in declaration
+        // order, so the literal is the referenced member's own ordinal, a
+        // cached copy of what the pair already names, and it is never written
+        // out.  Across all eight gate configurations this is the only item
+        // that spells a reference this way.
+        //
+        // A pair the caller cannot name is a refusal here.  The `{"U"}` branch
+        // below falls back to the literal identifier pair, but that fallback
+        // is evidenced for the marker carrier and this carrier has never been
+        // observed unresolved.
+        ("N", [_, decimal])
+            if mode.trim() == "0"
+                && reference_ids_are_set(type_id, value_id)
+                && decimal_is_valid(decimal.trim()) =>
+        {
+            FormChoiceListValue::DesignTimeRef(resolve_reference(type_id.trim(), value_id.trim())?)
+        }
         ("B", [_, boolean])
             if layout == FormChoiceListLayoutProfile::InputFieldExtendedOptions
                 && mode.trim() == "1"
@@ -962,6 +992,18 @@ fn parse_form_choice_list_empty_sidecar(raw: &str) -> Option<()> {
 const FORM_CHOICE_LIST_STRING_TYPE_ID: &str = "9b6abf8b-0173-48e5-b0a0-83b21fcf63c5";
 const FORM_CHOICE_LIST_NUMBER_TYPE_ID: &str = "b0be78f2-0ee6-4d31-a3bb-77dd32ba5bec";
 const FORM_CHOICE_LIST_BOOLEAN_TYPE_ID: &str = "5d4125ad-f6e7-4313-be32-f71d0ab60915";
+
+/// Whether the item type/value pair names an object: both a type and an
+/// identifier within it, neither of them empty.
+fn reference_ids_are_set(type_id: &str, value_id: &str) -> bool {
+    matches!(
+        (
+            Uuid::parse_str(type_id.trim()),
+            Uuid::parse_str(value_id.trim()),
+        ),
+        (Ok(type_uuid), Ok(value_uuid)) if !type_uuid.is_nil() && !value_uuid.is_nil()
+    )
+}
 
 /// Whether the item type/value pair is the one a *literal* value writes: no
 /// object identifier at all, and a type slot that is either unset or a repeat
@@ -1195,6 +1237,50 @@ mod form_choice_list_tests {
                 "expected a refusal for {raw}"
             );
         }
+    }
+
+    #[test]
+    fn a_reference_is_read_from_its_identifier_pair_whichever_carrier_it_holds() {
+        for value in [r#"{"U"}"#, r#"{"N",2}"#] {
+            let decoded = parse(
+                &envelope(&item("0", value, TYPE_ID, VALUE_ID)),
+                FormChoiceListLayoutProfile::RadioButtonOptions,
+            )
+            .unwrap();
+            assert_eq!(
+                decoded.items()[0].value(),
+                &FormChoiceListValue::DesignTimeRef("Enum.Kind.EnumValue.Value".to_owned()),
+                "{value}"
+            );
+        }
+
+        for raw in [
+            // The cached literal carrier is read only where an identifier pair
+            // names an object: mode `1` is the literal mode, and a half-empty
+            // pair is the empty-reference shape, which this carrier has never
+            // been observed in.
+            envelope(&item("1", r#"{"N",2}"#, TYPE_ID, VALUE_ID)),
+            envelope(&item("0", r#"{"N",2}"#, TYPE_ID, NIL)),
+            envelope(&item("0", r#"{"N",2}"#, NIL, NIL)),
+        ] {
+            assert!(
+                parse(&raw, FormChoiceListLayoutProfile::RadioButtonOptions).is_none(),
+                "expected a refusal for {raw}"
+            );
+        }
+
+        // An unresolvable pair is a refusal for this carrier, not the literal
+        // identifier pair the marker carrier falls back to.
+        assert!(
+            parse_form_choice_list(
+                &envelope(&item("0", r#"{"N",2}"#, TYPE_ID, VALUE_ID)),
+                FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+                |_| None,
+                |_, _| None,
+                |_, _| None,
+            )
+            .is_none()
+        );
     }
 
     #[test]
