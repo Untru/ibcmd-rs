@@ -787,12 +787,21 @@ fn data_composition_style_item_name(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
+    data_composition_object_ref_name(text, object_refs, "StyleItem.")
+}
+
+/// The name a stored `0:<uuid>` reference denotes, under one object kind.
+fn data_composition_object_ref_name(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    kind: &str,
+) -> Option<String> {
     let uuid = serialized_data_composition_color_ref_uuid(text)?;
     let reference = object_refs.get(&uuid).or_else(|| {
         let source_uuid = text.trim().strip_prefix("0:")?;
         object_refs.get(source_uuid)
     })?;
-    let name = reference.strip_prefix("StyleItem.")?;
+    let name = reference.strip_prefix(kind)?;
     (!name.is_empty()).then(|| name.to_string())
 }
 
@@ -1900,7 +1909,26 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 .ok()?
                 .into_owned();
             let value = if attr_name == "ref" && is_data_ui_picture_value {
-                canonical_data_composition_picture_ref(reader, &value).unwrap_or(value)
+                canonical_data_composition_picture_ref(reader, &value)
+                    // A picture the configuration owns is stored by its
+                    // metadata uuid and published by its name under the
+                    // globally declared `v8ui` prefix, exactly as a stored
+                    // style-item reference is published under `style`. The
+                    // uuid form is not a spelling the platform ever writes:
+                    // `InformationRegisters/ЗначенияЭлементовКонструктора
+                    // ВидовПродукцииИС/Templates/МакетКонструктораВидов
+                    // ПродукцииИС` stores `ref="0:3febcafd-…"` and the
+                    // platform exports `ref="v8ui:УспешнаяПроверка
+                    // НаличияГосИС"`.
+                    .or_else(|| {
+                        data_composition_object_ref_name(
+                            &value,
+                            self.object_refs,
+                            "CommonPicture.",
+                        )
+                        .map(|name| format!("v8ui:{name}"))
+                    })
+                    .unwrap_or(value)
             } else if attr_name == "ref"
                 && matches!(
                     *mode,
