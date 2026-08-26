@@ -1614,6 +1614,23 @@ struct DcsElementFrame {
     /// name: `dcsset:settings`, the inline `settings` of a template
     /// envelope and a `dcsset:item` structure node all self-close by it.
     dropped_child: bool,
+    /// This element is a `{data/core}item` of a localized string whose
+    /// `content` turned out to be empty, and the platform publishes nothing
+    /// at all for it.
+    ///
+    /// Across every file of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base
+    /// 3.1.12.297, Документооборот КОРП 3.0.21.3, MDM_Management,
+    /// Web_Service and WMS5 there is not one `<v8:content/>`, not one
+    /// `<v8:content></v8:content>` and not one `<v8:item>` that carries a
+    /// `lang` and no `content` -- while 795 localized strings are published
+    /// self-closed. Storage does carry the empty spelling, so the item is
+    /// dropped rather than published, and a localized string left with no
+    /// items self-closes by `dropped_child` above.
+    ///
+    /// The decision is per item, not per string: dropping the whole string
+    /// would also delete a sibling item that does carry text, and no
+    /// measurement says it should.
+    omit_localized_item: bool,
     /// Output offset right before this element's opening `<` was written.
     start_tag_begin_offset: usize,
     /// Output offset right after this element's opening tag's own closing
@@ -1719,8 +1736,20 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         // form was already self-closed instead of an
                         // open/close pair with nothing in between.
                         let omit = namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
-                            && local.as_ref() == b"outputParameters"
+                            && matches!(local.as_ref(), b"outputParameters" | b"dataParameters")
                             && !event_has_ordinary_attributes(&event)?;
+                        // A localized string item whose `content` is empty is
+                        // published by nothing at all -- see
+                        // `DcsElementFrame::omit_localized_item`.
+                        if namespace_ref(&namespace) == Some(DATA_CORE_NS)
+                            && local.as_ref() == b"content"
+                            && !event_has_ordinary_attributes(&event)?
+                            && let Some(parent) = self.element_stack.last_mut()
+                            && parent.namespace.as_deref() == Some(DATA_CORE_NS)
+                            && parent.local == b"item"
+                        {
+                            parent.omit_localized_item = true;
+                        }
                         if omit {
                             // The immediately preceding `Event::Text` already
                             // wrote the indentation that led up to this now-
@@ -1762,6 +1791,32 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     let interior_is_blank = self.output[frame.start_tag_end_offset..]
                         .bytes()
                         .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
+                    // A `content` spelled as an open/close pair with nothing
+                    // between the tags carries the same empty string its
+                    // self-closed spelling does, and drops its item the same
+                    // way -- see `DcsElementFrame::omit_localized_item`.
+                    if frame.namespace.as_deref() == Some(DATA_CORE_NS)
+                        && frame.local == b"content"
+                        && self.output[frame.start_tag_end_offset..].is_empty()
+                        && let Some(parent) = self.element_stack.last_mut()
+                        && parent.namespace.as_deref() == Some(DATA_CORE_NS)
+                        && parent.local == b"item"
+                    {
+                        parent.omit_localized_item = true;
+                    }
+                    if frame.omit_localized_item {
+                        // The item is published by nothing at all, and the
+                        // indentation that led up to its own opening tag goes
+                        // with it, exactly as an omitted placeholder's does.
+                        self.output.truncate(frame.start_tag_begin_offset);
+                        let trimmed_len =
+                            self.output.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                        self.output.truncate(trimmed_len);
+                        if let Some(parent) = self.element_stack.last_mut() {
+                            parent.dropped_child = true;
+                        }
+                        continue;
+                    }
                     let is_empty = frame.empty_element_action.is_some() && interior_is_blank;
                     match frame.empty_element_action {
                         Some(DcsEmptyElementAction::OmitIfEmpty) if is_empty => {
@@ -2666,6 +2721,7 @@ fn data_composition_element_frame(
         // default (never collapsed on close).
         empty_element_action: None,
         dropped_child: false,
+        omit_localized_item: false,
         start_tag_begin_offset: 0,
         start_tag_end_offset: 0,
     })
@@ -2680,7 +2736,16 @@ fn data_composition_element_frame(
 /// the source spelling.
 fn dcs_empty_element_action(rendered_name: &str) -> Option<DcsEmptyElementAction> {
     match rendered_name {
-        "dcsset:outputParameters" => Some(DcsEmptyElementAction::OmitIfEmpty),
+        // `dcsset:dataParameters` is the same placeholder as
+        // `dcsset:outputParameters` and reads the same way: storage keeps it
+        // even when unset, and across the `Templates/*/Ext/Template.xml`
+        // trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base
+        // 3.1.12.297 and Документооборот КОРП 3.0.21.3 all 2 783 published
+        // `<dcsset:dataParameters>` carry content and not one is empty in
+        // either spelling.
+        "dcsset:outputParameters" | "dcsset:dataParameters" => {
+            Some(DcsEmptyElementAction::OmitIfEmpty)
+        }
         _ => None,
     }
 }
