@@ -7300,13 +7300,32 @@ fn nested_child_commands_for_owner_from_text(
         .collect()
 }
 
+/// An owner's own commands, found by the collection they sit in.
+///
+/// This used to look only inside a code-`9` payload, which is the long command
+/// shape; the short one wraps its payload in `{8, …}` and its header in
+/// `{2, …}` and was invisible to that test. Its sibling
+/// `nested_command_headers_for_owner_from_text` already carries the
+/// measurement -- `COMMAND_COLLECTION_LIST_MARKERS` spans hold commands and
+/// nothing else, and no command sits outside them -- and role rights have been
+/// reading commands that way; only this reader was left behind, so the same
+/// short commands the role-rights index sees never reached the owner's own
+/// `<ChildObjects>`.
+///
+/// ERP УХ 3.2.12.6 writes 19 of its 1 097 commands that way, and each one cost
+/// its owner a whole `<Command>` element (six `DataProcessors/…`,
+/// `Reports/АнализПоставок`, `InformationRegisters/ВерсииОбъектовДляЕИС` and
+/// others). For an owner-graph family it cost more than the element: the
+/// declared command count no longer matched what this reader found, and
+/// `parse_owner_graph_commands` refuses the whole object on that mismatch.
 fn nested_child_commands_from_text(
+    owner_kind: &str,
     text: &str,
     owner_uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<MetadataChildCommand> {
-    nested_command_headers_from_text(text, owner_uuid)
+    nested_command_headers_for_owner_from_text(owner_kind, text, owner_uuid)
         .into_iter()
         .map(|header| {
             let properties = parse_common_command_properties_from_text(
@@ -13375,7 +13394,8 @@ fn parse_owner_graph_commands(
     family: owner_graph::OwnerGraphFamily,
     diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<Vec<MetadataChildCommand>> {
-    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    let commands =
+        nested_child_commands_from_text(family.as_str(), text, owner_uuid, type_index, object_refs);
     if commands.len() != slots.len() {
         let item_index = commands.len().min(slots.len());
         let reason = if commands.len() < slots.len() {
@@ -24583,7 +24603,13 @@ fn parse_report_properties_from_text(
         child_metadata_objects,
         child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
         child_templates,
-        child_commands: nested_child_commands_from_text(text, uuid, type_index, object_refs),
+        child_commands: nested_child_commands_from_text(
+            "Report",
+            text,
+            uuid,
+            type_index,
+            object_refs,
+        ),
     })
 }
 
@@ -27559,7 +27585,8 @@ fn parse_task_commands(
         raw_headers.push(header);
     }
 
-    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    let commands =
+        nested_child_commands_from_text("Task", text, owner_uuid, type_index, object_refs);
     if commands.len() != raw_headers.len()
         || commands.iter().zip(&raw_headers).any(|(command, raw)| {
             command.properties.is_none()
@@ -28195,7 +28222,13 @@ fn parse_document_journal_commands(
         raw_headers.push(header);
     }
 
-    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    let commands = nested_child_commands_from_text(
+        "DocumentJournal",
+        text,
+        owner_uuid,
+        type_index,
+        object_refs,
+    );
     if commands.len() != raw_headers.len()
         || commands.iter().zip(&raw_headers).any(|(command, raw)| {
             command.properties.is_none()
@@ -28365,7 +28398,13 @@ fn parse_data_processor_properties_from_text(
             &header.name,
             template_refs,
         ),
-        child_commands: nested_child_commands_from_text(text, uuid, type_index, object_refs),
+        child_commands: nested_child_commands_from_text(
+            "DataProcessor",
+            text,
+            uuid,
+            type_index,
+            object_refs,
+        ),
     })
 }
 
@@ -38683,7 +38722,13 @@ fn parse_filter_criterion_child_commands(
         slots.push(slot);
     }
 
-    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    let commands = nested_child_commands_from_text(
+        "FilterCriterion",
+        text,
+        owner_uuid,
+        type_index,
+        object_refs,
+    );
     if commands.len() != slots.len() {
         return Err(FilterCriterionDecodeError::item(
             FilterCriterionDecodeStage::Tail,
