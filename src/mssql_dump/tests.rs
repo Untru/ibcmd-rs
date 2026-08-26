@@ -6877,6 +6877,7 @@ fn formats_form_metadata_for_v220_without_palette_namespace_or_compat_mode() {
         "Form",
         &header,
         &properties,
+        DeclaredFormType::Managed,
         InfobaseConfigSourceVersion::V2_20,
     );
 
@@ -11898,6 +11899,7 @@ fn formats_form_attribute_type_description_settings_from_element_type() {
 #[test]
 fn extracts_form_attribute_additional_columns_from_body_tail() {
     let body = ParsedFormBodyBlob {
+            revision: crate::module_blob::FormBodyRevision::V4,
             layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"}}".to_string(),
             module_text: String::new(),
             trailing: vec![r##"{4,1,{9,{3},0,"СписокЗаказов",{1,1,{"ru","Список заказов"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,1,{5,8,0,"СтрокиЗаказа",{1,1,{"ru","Строки заказа"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},1,{0,{2,{3},{8}},2,{5,1,0,"GTIN",{1,1,{"ru","GTIN"}},{"Pattern",{"S",50,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,2,0,"КоличествоКодов",{1,1,{"ru","Количество кодов"}},{"Pattern",{"N",6,0,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},0,{0}}"##.to_string()],
@@ -11921,6 +11923,7 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
         }
     }
     let body = ParsedFormBodyBlob {
+        revision: crate::module_blob::FormBodyRevision::V4,
         layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"},{31,{1,0},0,0,0,\"Trace\"}}".to_string(),
         module_text: String::new(),
         trailing: Vec::new(),
@@ -24761,6 +24764,7 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
         .replacen("{5006,0}", primary, 1)
         .replacen("{5007,0}", duplicate, 1);
     let body = ParsedFormBodyBlob {
+        revision: crate::module_blob::FormBodyRevision::V4,
         layout: format!("{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{field}}}"),
         module_text: String::new(),
         trailing: Vec::new(),

@@ -101,6 +101,8 @@ pub struct PatchedVersionsBlob {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParsedFormBodyBlob {
+    /// The container revision the record declared in its own first slot.
+    pub revision: FormBodyRevision,
     pub layout: String,
     pub module_text: String,
     pub trailing: Vec<String>,
@@ -19647,6 +19649,7 @@ pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
     let module_text = parse_1c_quoted_string(plain[container.module_range.clone()].trim())
         .context("Form body module text field is not a quoted string")?;
     Ok(ParsedFormBodyBlob {
+        revision: container.revision,
         layout,
         module_text,
         trailing: container
@@ -19658,8 +19661,46 @@ pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
     })
 }
 
+/// The container revision a Form body declares in its own first slot.
+///
+/// Both admitted revisions carry the identical ten-slot container -- marker,
+/// layout, module text, five blocks and two scalars. Measured over every form
+/// of all eight stand corpora (22,646 forms): revision `4` on 22,535 managed
+/// forms of all eight, revision `3` on 102 managed forms of ERP УХ 3.2.12.6
+/// only, and no other value anywhere. Layout revision `49` occurs under both
+/// container revisions, layout `50` only under `4`. See
+/// `docs/evidence/uh-form-body-container-revision-20260826.md`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum FormBodyRevision {
+    V3,
+    V4,
+}
+
+impl FormBodyRevision {
+    /// Reads the revision the record itself declares. Fail-closed: an
+    /// undeclared or unnamed revision is refused, never assumed.
+    fn parse(declared: Option<&str>) -> Result<Self> {
+        match declared {
+            Some("3") => Ok(Self::V3),
+            Some("4") => Ok(Self::V4),
+            Some(other) => Err(anyhow!(
+                "Form body declares unsupported container revision {other}"
+            )),
+            None => Err(anyhow!("Form body declares no container revision")),
+        }
+    }
+
+    pub const fn declared_marker(self) -> &'static str {
+        match self {
+            Self::V3 => "3",
+            Self::V4 => "4",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FormBodyContainer {
+    revision: FormBodyRevision,
     layout_range: Range<usize>,
     module_range: Range<usize>,
     trailing_ranges: Vec<Range<usize>>,
@@ -19672,9 +19713,8 @@ impl FormBodyContainer {
             .find('{')
             .ok_or_else(|| anyhow!("Form body has no braced payload"))?;
         let fields = scan_braced_fields(plain, body_start)?;
-        if fields.first().map(|range| plain[range.clone()].trim()) != Some("4") {
-            return Err(anyhow!("Form body does not start with type marker 4"));
-        }
+        let revision =
+            FormBodyRevision::parse(fields.first().map(|range| plain[range.clone()].trim()))?;
         let layout_range = fields
             .get(1)
             .ok_or_else(|| anyhow!("Form body has no layout field"))?
@@ -19690,6 +19730,7 @@ impl FormBodyContainer {
             ));
         }
         Ok(Self {
+            revision,
             layout_range,
             module_range,
             trailing_ranges: fields.iter().skip(3).cloned().collect(),
@@ -37176,7 +37217,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let base = super::deflate_raw(b"{5,{\"not a form\"},\"module\"}")?;
         let error = super::parse_form_body_blob(&base).unwrap_err();
 
-        assert!(error.to_string().contains("type marker 4"));
+        // The refusal names the revision the record itself declared: the
+        // reader dispatches on that slot instead of matching one marker.
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported container revision 5"),
+            "{error}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_revision_three_form_body_container() -> anyhow::Result<()> {
+        let base = super::deflate_raw(b"{3,{49,0},\"module\",{0,0},{0,0},{0,0},{0,0},{0,0},0,0}")?;
+        let parsed = super::parse_form_body_blob(&base)?;
+
+        assert_eq!(parsed.revision, super::FormBodyRevision::V3);
+        assert_eq!(parsed.layout, "{49,0}");
+        assert_eq!(parsed.module_text, "module");
+        assert_eq!(parsed.trailing_fields, 7);
 
         Ok(())
     }

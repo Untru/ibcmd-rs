@@ -714,6 +714,9 @@ pub(crate) enum SourceAssetKind {
     StandaloneContent,
     StyleBody,
     TemplateGraphicalScheme,
+    // A form body whose owning record declared no form type this reader can
+    // name. Refused rather than guessed.
+    UndeclaredFormType,
     WsDefinition,
 }
 
@@ -879,7 +882,11 @@ pub(super) fn source_asset_paths_with_indexes(
         }
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
-    paths.extend(form_body_asset_paths(&form_refs, &file_names));
+    paths.extend(form_body_asset_paths(
+        &form_refs,
+        &file_names,
+        &declared_form_types(metadata_texts),
+    ));
     paths.extend(template_body_asset_paths(&template_refs, &file_names));
 
     paths
@@ -1028,9 +1035,30 @@ pub(super) fn template_body_source_asset(
     }
 }
 
+/// Every form uuid these metadata rows declare, mapped to the form type the
+/// record itself declares. A uuid absent from this map declared nothing this
+/// reader can name; the body routing below turns that into a typed refusal.
+pub(super) fn declared_form_types(
+    metadata_texts: &[MetadataTextRow],
+) -> BTreeMap<String, DeclaredFormType> {
+    let mut types = BTreeMap::new();
+    for row in metadata_texts {
+        if !is_form_metadata_text(&row.text, &row.file_name)
+            && !is_direct_code14_form_metadata_text(&row.text, &row.file_name)
+        {
+            continue;
+        }
+        if let Some(form_type) = parse_declared_form_type(&row.text, &row.file_name) {
+            types.insert(row.file_name.clone(), form_type);
+        }
+    }
+    types
+}
+
 pub(super) fn form_body_asset_paths(
     form_refs: &BTreeMap<String, FormSourceReference>,
     file_names: &BTreeSet<&str>,
+    form_types: &BTreeMap<String, DeclaredFormType>,
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
     for (form_uuid, form_ref) in form_refs {
@@ -1040,15 +1068,28 @@ pub(super) fn form_body_asset_paths(
         }
         let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
-        paths.insert(
-            body_id,
-            SourceAsset {
+        // The declared form type, not the shape of the body, picks the file
+        // the platform writes: a managed form gets the rendered `Form.xml`,
+        // an ordinary one gets its stored body verbatim as `Form.bin`.
+        // Confirmed byte-for-byte on all nine ordinary ERP УХ 3.2.12.6 forms
+        // (`docs/evidence/uh-ordinary-form-body-20260826.md`).
+        let asset = match form_types.get(form_uuid) {
+            Some(DeclaredFormType::Ordinary) => SourceAsset {
+                primary_path: form_dir.join("Ext").join("Form.bin"),
+                kind: SourceAssetKind::InflatedBinary,
+            },
+            Some(DeclaredFormType::Managed) => SourceAsset {
                 primary_path: form_dir.join("Ext").join("Form.xml"),
                 kind: SourceAssetKind::Form {
                     owner_reference: form_owner_reference_name(form_ref),
                 },
             },
-        );
+            None => SourceAsset {
+                primary_path: form_dir.join("Ext").join("Form.xml"),
+                kind: SourceAssetKind::UndeclaredFormType,
+            },
+        };
+        paths.insert(body_id, asset);
     }
 
     paths
@@ -1832,6 +1873,12 @@ pub(super) fn write_source_asset(
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
             write_source_xml_file(&path, xml, context.source_version)?;
+        }
+        SourceAssetKind::UndeclaredFormType => {
+            bail!(
+                "form source asset {} declares no form-type discriminator",
+                asset.primary_path.display()
+            );
         }
         SourceAssetKind::InflatedBinary => {
             let inflated = inflate_raw_deflate(bytes).with_context(|| {

@@ -267,6 +267,43 @@ impl Default for FormMetadataProperties {
     }
 }
 
+/// The form's own declared form-type discriminator.
+///
+/// Slot 3 of a form's `{13,<header>,<includeHelp>,<formType>,<usePurposes>}`
+/// metadata block carries it: `1` for a managed form, `0` for an ordinary
+/// one. Measured over every form of all eight stand corpora (22,646 forms:
+/// `ws` 0, `wms` 5, `mdm` 12, `sslbase` 909, `ssl` 1,163, `do` 2,350,
+/// `ut` 5,201, `uh` 13,006) the slot is always present and never holds any
+/// other value, and its `0` occurs on exactly the nine forms whose native
+/// declaration says `<FormType>Ordinary</FormType>` -- all nine in ERP УХ
+/// 3.2.12.6. See `docs/evidence/uh-ordinary-form-body-20260826.md`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum DeclaredFormType {
+    Managed,
+    Ordinary,
+}
+
+impl DeclaredFormType {
+    pub(super) const fn xml_name(self) -> &'static str {
+        match self {
+            Self::Managed => "Managed",
+            Self::Ordinary => "Ordinary",
+        }
+    }
+}
+
+/// Reads slot 3 of the form's own metadata block. `None` means the record
+/// declared no form type this reader can name, which the callers turn into a
+/// typed refusal rather than into an assumed `Managed`.
+pub(super) fn parse_declared_form_type(text: &str, uuid: &str) -> Option<DeclaredFormType> {
+    let (form_fields, _) = form_metadata_fields_and_extended_presentation_from_text(text, uuid)?;
+    match form_fields.get(3).map(|field| field.trim()) {
+        Some("0") => Some(DeclaredFormType::Ordinary),
+        Some("1") => Some(DeclaredFormType::Managed),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_form_metadata_properties_from_text(
     text: &str,
     kind: &str,
@@ -377,6 +414,7 @@ pub(super) fn format_form_source_xml(
     kind: &str,
     header: &MetadataHeader,
     properties: &FormMetadataProperties,
+    form_type: DeclaredFormType,
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let palette_namespace = if source_version == InfobaseConfigSourceVersion::V2_21 {
@@ -422,9 +460,10 @@ pub(super) fn format_form_source_xml(
         ));
     }
     xml.push_str(&format!(
-        "\t\t\t<FormType>Managed</FormType>\r\n\
+        "\t\t\t<FormType>{}</FormType>\r\n\
 \t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
 \t\t\t<UsePurposes>\r\n",
+        form_type.xml_name(),
         xml_bool(properties.include_help_in_contents)
     ));
     for purpose in &properties.use_purposes {
