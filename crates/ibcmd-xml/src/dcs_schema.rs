@@ -30,7 +30,21 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
 
 const MAX_DEPTH: usize = 64;
-const MAX_EVENTS: usize = 32_768;
+
+/// The runaway-loop guard for one XML scan, derived from the document itself.
+///
+/// Every event and every token a scan yields consumes at least one byte of the
+/// document, so a scan that has produced more of them than the document has
+/// bytes is not making progress. That is the whole property the guard is there
+/// for, and it is the document's own size that states it: a flat constant
+/// instead states a maximum document size, which is a claim about the platform
+/// nothing measured. UH 3.2.12.6 has data-composition templates whose stored
+/// primary schema runs past 32 768 events -- real platform documents the
+/// platform itself exports -- and a flat cap refused them for being large.
+/// The `+ 1` admits the terminating end-of-input event, which consumes none.
+fn scan_bound(bytes: usize) -> usize {
+    bytes + 1
+}
 
 use crate::{
     analyze_dcs_inline_settings_fragment, validate_dcs_inline_settings_fragment_structure,
@@ -2315,9 +2329,10 @@ fn parse_document(bytes: &[u8]) -> Result<ParsedElement, DcsInnerSchemaError> {
     let mut stack: Vec<ParsedElement> = Vec::new();
     let mut root = None;
     let mut events = 0usize;
+    let max_events = scan_bound(bytes.len());
     loop {
         events += 1;
-        if events > MAX_EVENTS {
+        if events > max_events {
             return Err(DcsInnerSchemaError::Malformed(
                 "XML event limit exceeded".into(),
             ));
@@ -2827,7 +2842,7 @@ fn scan_raw_tokens(body: &str) -> Result<Vec<RawToken<'_>>, DcsInnerSchemaError>
             }
         }
     }
-    if tokens.len() > MAX_EVENTS {
+    if tokens.len() > scan_bound(body.len()) {
         return Err(DcsInnerSchemaError::Malformed(
             "XML event limit exceeded".into(),
         ));
@@ -3868,19 +3883,22 @@ fn storage_document_body<'a>(bytes: &'a [u8], what: &str) -> Result<&'a str, Dcs
 /// The source prefix an element or attribute namespace already has in the
 /// target document, for a namespace the source root does not declare.
 ///
-/// This only ever answers where the whole-document direction fails closed, and
-/// only in the terminal directions: the terminal's `dcsat` prefix is declared
-/// by the `AreaTemplate` element the fragment carries with it, so everything
-/// under it is spelled through that declaration rather than through one of
-/// its own. The primary direction never asks, so its output cannot change.
-fn inherited_source_prefix(
-    mode: RewriteMode,
-    source_scopes: &SourcePrefixScopes,
-    uri: &str,
-) -> Option<String> {
-    if mode == RewriteMode::PrimaryDocument {
-        return None;
-    }
+/// This only ever answers where the whole-document direction fails closed: the
+/// `dcsat` prefix is declared by the `AreaTemplate` element that introduces
+/// it, so everything under it is spelled through that declaration rather than
+/// through one of its own.
+///
+/// It is the same rule in every direction, because it is the same document
+/// shape. Which `SchemaFile` an area template is stored in is not fixed --
+/// UH 3.2.12.6 keeps `Reports/РасшифровкаСтатистики/Templates/ОписаниеНастроек`
+/// in the terminal one and
+/// `Reports/РасшифровкаФормулыБюджетногоОтчета/Templates/ОсновнаяСхемаКомпоновкиДанных`
+/// in the primary one -- and both storages write the very same
+/// `<template xmlns:dcsat="..." xsi:type="dcsat:AreaTemplate">` that the
+/// platform's own source writes, with the very same `dcsat:` descendants.
+/// Answering only in the terminal direction refused the second group for
+/// where it was stored rather than for what it said.
+fn inherited_source_prefix(source_scopes: &SourcePrefixScopes, uri: &str) -> Option<String> {
     resolve_source_prefix(source_scopes, uri).filter(|prefix| !prefix.is_empty())
 }
 
@@ -4212,11 +4230,9 @@ fn rewrite_tokens(
                             );
                         }
                     }
-                    let Some(appearance_prefix) = inherited_source_prefix(
-                        mode,
-                        &source_scopes,
-                        DCS_AREA_TEMPLATE_NAMESPACE_URI,
-                    ) else {
+                    let Some(appearance_prefix) =
+                        inherited_source_prefix(&source_scopes, DCS_AREA_TEMPLATE_NAMESPACE_URI)
+                    else {
                         return unsupported(
                             "no area-template prefix is in scope where an appearance is inlined",
                         );
@@ -4339,7 +4355,7 @@ fn rewrite_tokens(
 
                 let element_prefix = match source_namespace_prefix(policy, &uri) {
                     Some(prefix) => prefix.to_owned(),
-                    None => match inherited_source_prefix(mode, &source_scopes, &uri) {
+                    None => match inherited_source_prefix(&source_scopes, &uri) {
                         Some(prefix) => prefix,
                         None => {
                             return unsupported(format!(
@@ -4376,7 +4392,7 @@ fn rewrite_tokens(
                     // `<dcsat:appearance>`.
                     let inherited_default = declared_prefix
                         .is_empty()
-                        .then(|| inherited_source_prefix(mode, &source_scopes, value))
+                        .then(|| inherited_source_prefix(&source_scopes, value))
                         .flatten();
                     match source_namespace_prefix(policy, value) {
                         Some(source) => {
