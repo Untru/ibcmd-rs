@@ -19501,6 +19501,25 @@ fn walk_form_bound_chain_members(
                     target.push_str(name);
                 }
             }
+            [column_id]
+                if previous_type
+                    .is_some_and(|reference| form_type_reference_is_value_list(reference)) =>
+            {
+                // A built-in value list numbers its own four members the same
+                // way wherever it is reached, and they are declared by the
+                // type, so the declared-column index of the attribute the
+                // chain is rooted at cannot spell them. Evidence: `ssl`-demo
+                // `DataProcessors/_ДемоВыборОбъектовМетаданных/Forms/Форма`,
+                // Table `ОбъектыМетаданных` whose row picture carries `{3}`
+                // past `{0,1669f593-…}` - the `ОбъектыМетаданных` attribute of
+                // type `v8:ValueListType` - and the platform writes
+                // `Объект.ОбъектыМетаданных.Picture`.
+                let name = form_value_list_member_name(column_id.trim())?;
+                for target in [&mut path, &mut key] {
+                    target.push('.');
+                    target.push_str(name);
+                }
+            }
             [column_id] => {
                 let column_id = parse_form_chain_numeric_id(column_id)?;
                 let lookup = FormAttributeColumnKey {
@@ -20038,6 +20057,25 @@ fn form_standard_period_member_name(column_id: &str) -> Option<&'static str> {
         "2" => Some("EndDate"),
         _ => None,
     }
+}
+
+fn form_type_reference_is_value_list(reference: &str) -> bool {
+    matches!(reference, "v8:ValueListType" | "ValueListType")
+}
+
+/// The four members the built-in value list declares, by the id a bound chain
+/// numbers them with. Exactly the ids and names the attribute-rooted route
+/// already reads through the platform-column index, so a value list reached
+/// through a chain and one held by a form attribute spell their members alike.
+fn form_value_list_member_name(column_id: &str) -> Option<&'static str> {
+    [
+        FORM_VALUE_LIST_VALUE_COLUMN,
+        FORM_VALUE_LIST_PRESENTATION_COLUMN,
+        FORM_VALUE_LIST_CHECK_COLUMN,
+        FORM_VALUE_LIST_PICTURE_COLUMN,
+    ]
+    .iter()
+    .find_map(|column| (column.id == column_id).then_some(column.name))
 }
 
 /// The built-in standard period's own columns. `1` and `2` are already reached
