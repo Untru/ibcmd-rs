@@ -38719,6 +38719,97 @@ fn platform_business_process_flowchart_reencodes_byte_for_byte() {
     assert_eq!(xml.as_bytes(), native);
 }
 
+/// A standalone `GraphicalSchema` template body decodes through the same
+/// grammar and is reproduced byte-for-byte. Документооборот КОРП 3.0.21.3,
+/// `Catalogs/СхемыПроцессов/Templates/ШаблонЭлементаДекорация`: one
+/// `Decoration` whose stored figure is `11`, which the platform exports as
+/// `<Shape>Block</Shape>` -- the value that refused the whole scheme while
+/// the decoder admitted only figure `10`.
+#[test]
+fn platform_graphical_scheme_template_reencodes_byte_for_byte() {
+    let text = include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "graphical-scheme-do/raw/ШаблонЭлементаДекорация.scheme.txt"
+    ));
+    assert_eq!(
+        format!("{:x}", Sha256::digest(text.as_bytes())),
+        "293327995a04b0c6718092a14fe4c4b51d90930d55fe05419c5db8aa08e8b47e"
+    );
+    assert!(looks_like_graphical_scheme_blob_text(
+        text.trim_start_matches('\u{feff}').trim_start()
+    ));
+    let flowchart = parse_business_process_flowchart_text(
+        text.trim_start_matches('\u{feff}').trim_start(),
+        &BTreeMap::new(),
+    )
+    .expect("the platform graphical scheme parses whole");
+    let native: &[u8] = include_bytes!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "graphical-scheme-do/native/Catalogs/СхемыПроцессов/Templates/",
+        "ШаблонЭлементаДекорация/Ext/Template.xml"
+    ));
+    assert_eq!(
+        format!("{:x}", Sha256::digest(native)),
+        "44b0477f3ae332704f72415230dab4eb6751e01ecd5283d0864d64a201618013",
+        "bundled native evidence must stay byte-identical to the platform export"
+    );
+    assert_eq!(
+        format_business_process_flowchart_xml(&flowchart).as_bytes(),
+        native
+    );
+}
+
+/// The route map that carries the `Switch` item (code 6), which the decoder
+/// did not know at all, and activities whose addressing-attribute collection
+/// declares two members rather than the four ERP УХ writes.
+/// Документооборот КОРП 3.0.21.3, `BusinessProcesses/Рассмотрение`.
+#[test]
+fn platform_graphical_scheme_switch_item_reencodes_byte_for_byte() {
+    let text = include_str!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "graphical-scheme-do/raw/Рассмотрение.flowchart.txt"
+    ));
+    assert_eq!(
+        format!("{:x}", Sha256::digest(text.as_bytes())),
+        "93a484597aa9931da53ee8dcf500d2b0255e708fb95f4fa790aa5a6ab8c4e4e6"
+    );
+    let object_refs = BTreeMap::from(
+        [
+            (
+                "88f44c9b-216d-4d7e-bc88-1e6b253ed01e",
+                "Task.ЗадачаИсполнителя.AddressingAttribute.Исполнитель",
+            ),
+            (
+                "d4ddd77f-0a21-4e76-9e66-1bb76edd257d",
+                "Task.ЗадачаИсполнителя.AddressingAttribute.РольИсполнителя",
+            ),
+        ]
+        .map(|(key, value)| (key.to_string(), value.to_string())),
+    );
+    let flowchart = parse_business_process_flowchart_text(
+        text.trim_start_matches('\u{feff}').trim_start(),
+        &object_refs,
+    )
+    .expect("the platform route map parses whole");
+    assert!(
+        flowchart.items.iter().any(|item| item.tag == "Switch"),
+        "the route map must publish the Switch item the decoder gained"
+    );
+    let native: &[u8] = include_bytes!(concat!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "graphical-scheme-do/native/BusinessProcesses/Рассмотрение/Ext/Flowchart.xml"
+    ));
+    assert_eq!(
+        format!("{:x}", Sha256::digest(native)),
+        "12e61b06ae0b52fa264e9e73f08aa1134442d2fea9772d0a5063fed74f762d83",
+        "bundled native evidence must stay byte-identical to the platform export"
+    );
+    assert_eq!(
+        format_business_process_flowchart_xml(&flowchart).as_bytes(),
+        native
+    );
+}
+
 /// A graphical-scheme font record names its optional members with a bitmask,
 /// and the platform writes exactly the attributes that mask selects. Both
 /// tuples below and both expected renderings are read off ERP УХ 3.2.12.6's
