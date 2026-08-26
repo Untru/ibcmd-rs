@@ -1089,6 +1089,13 @@ pub(super) struct FormCommand {
     pub(super) tooltip: Vec<(String, String)>,
     pub(super) picture_ref: Option<String>,
     pub(super) picture_load_transparent: bool,
+    /// The transparent pixel the picture record declares, `None` when it
+    /// declares the `-1, -1` pair that means it has none.  Members 4 and 5 of
+    /// the picture value, read by `FormPictureValueSchema` for every picture
+    /// kind; the command's own writer used to drop them, so the 214 native
+    /// commands that reference a picture *and* declare a pixel lost the
+    /// element the platform closes their `<Picture>` with.
+    pub(super) picture_transparent_pixel: Option<(i64, i64)>,
     pub(super) shortcut: Option<String>,
     pub(super) use_rights: Option<FormRightsSetting>,
     pub(super) action: String,
@@ -7240,6 +7247,7 @@ fn parse_form_command_with_items(
             .unwrap_or_default(),
         picture_ref,
         picture_load_transparent: picture.load_transparent(),
+        picture_transparent_pixel: picture.transparent_pixel(),
         shortcut: fields
             .get(6)
             .and_then(|field| parse_common_command_shortcut_value(field)),
@@ -22356,6 +22364,24 @@ fn format_form_body_xml_with_dcs_profiles(
                 &command.tooltip,
                 3,
             ));
+            // The command's permission opens the run behind `ToolTip`, ahead
+            // of `Shortcut` and `Picture` alike.  The UT 11.5.27.75 census
+            // that first placed it saw only four `<Use>` blocks and none of
+            // them next to a `Shortcut` or a `Picture`, so it took the last
+            // position that evidence allowed -- behind both.  Over the four
+            // native trees together (ERP УХ 3.2.12.6, Документооборот КОРП
+            // 3.0.21.3, УТ 11.5.27.75 and БСП demo: 21 711 forms, 486
+            // commands that carry `<Use>`) the platform writes `Use` before
+            // `Shortcut` (4 commands), `Picture` (116), `Action` (485),
+            // `FunctionalOptions` (136), `Representation` (104),
+            // `ModifiesSavedData` (148), `CurrentRowUse` (405) and
+            // `AssociatedTableElementId` (3), and after `Title` (484) and
+            // `ToolTip` (364).  Not one of the 45 ordered child pairs of a
+            // `<Command>` is observed in both directions anywhere in the four
+            // trees.
+            if let Some(rights) = &command.use_rights {
+                xml.push_str(&format_form_rights_setting_xml("Use", rights, "\t\t\t"));
+            }
             if let Some(shortcut) = command.shortcut.as_deref() {
                 xml.push_str(&format!(
                     "\t\t\t<Shortcut>{}</Shortcut>\r\n",
@@ -22372,16 +22398,15 @@ fn format_form_body_xml_with_dcs_profiles(
                     "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
                     xml_bool(command.picture_load_transparent)
                 ));
+                // The transparent pixel closes the picture, exactly as the
+                // stand-alone `ExtPicture` writer and the control's own
+                // `ValuesPicture` writer already spell it.
+                if let Some((x, y)) = command.picture_transparent_pixel {
+                    xml.push_str(&format!(
+                        "\t\t\t\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+                    ));
+                }
                 xml.push_str("\t\t\t</Picture>\r\n");
-            }
-            // The command's permission sits ahead of its `Action`: UT
-            // 11.5.27.75, all four native `<Use>` blocks follow the command's
-            // `ToolTip` and are followed by `<Action>`.  None of the four
-            // carries a `Shortcut` or a `Picture`, so the block is not ordered
-            // against those by observation and takes the last position the
-            // evidence allows.
-            if let Some(rights) = &command.use_rights {
-                xml.push_str(&format_form_rights_setting_xml("Use", rights, "\t\t\t"));
             }
             if !command.action.is_empty() {
                 xml.push_str(&format!(
