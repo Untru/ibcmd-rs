@@ -4315,13 +4315,31 @@ fn rewrite_tokens(
                             source_scopes: source_scopes.clone(),
                         },
                     )?;
-                    out.push('<');
-                    out.push_str(&appearance_prefix);
-                    out.push_str(":appearance>");
-                    out.push_str(&body);
-                    out.push_str("</");
-                    out.push_str(&appearance_prefix);
-                    out.push_str(":appearance>");
+                    if body.trim().is_empty() {
+                        // The side-table entry the ordinal selects carries
+                        // nothing, and the platform's own source XML never
+                        // writes an empty appearance -- over the
+                        // `Templates/*/Ext/Template.xml` trees of ERP УХ
+                        // 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base and
+                        // Документооборот КОРП 3.0.21.3 there are 16 185
+                        // `<dcsat:appearance>` and 11 311 `<appearance>` and
+                        // not one of either is self-closed or an empty
+                        // open/close pair. So nothing is written in the
+                        // `appIndex`'s place, and the indentation that led up
+                        // to it is trimmed with it, exactly as the bare
+                        // self-closed `appearance` above is dropped.
+                        let trimmed_len =
+                            out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+                        out.truncate(trimmed_len);
+                    } else {
+                        out.push('<');
+                        out.push_str(&appearance_prefix);
+                        out.push_str(":appearance>");
+                        out.push_str(&body);
+                        out.push_str("</");
+                        out.push_str(&appearance_prefix);
+                        out.push_str(":appearance>");
+                    }
                     if start.self_closing {
                         scopes.pop();
                         source_scopes.pop();

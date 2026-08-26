@@ -414,7 +414,7 @@ pub(super) struct MoxelCell {
 pub(super) struct MoxelNote {
     pub(super) format_index: usize,
     pub(super) source_format_index: usize,
-    pub(super) text: MoxelLocalizedValue,
+    pub(super) text: Vec<MoxelLocalizedValue>,
     pub(super) begin_row: i32,
     pub(super) begin_row_offset: i32,
     pub(super) end_row: i32,
@@ -3183,7 +3183,7 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     // text list and of the note are read as before, so a member this reader
     // cannot spell out is dropped rather than costing the cell.
     let localized = text_at.and_then(|at| parse_moxel_localized_cell_value(fields.get(at)?));
-    let empty_text = matches!(localized.as_deref(), Some([]));
+    let has_text_member = localized.is_some();
     // An empty language on the leading item marks a parameter reference
     // rather than a text list (see `MoxelDrawingMembers::text`, the same
     // container); a parameter is always the sole item, everything else is
@@ -3193,9 +3193,24 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
             Vec::new(),
             items.into_iter().next().map(|item| item.content),
         ),
-        Some(items) => (items, None),
+        // An item whose content is empty is not published. Evidence: over the
+        // whole `Templates/*/Ext/Template.xml` corpus of ERP УХ 3.2.12.6,
+        // 1С:УТ 11.5.27.75 and Документооборот КОРП 3.0.21.3 -- 10 163 199
+        // `<tl>` and 1 610 230 `<tl/>` -- there is not one
+        // `<v8:content></v8:content>` or `<v8:content/>`, so a list whose only
+        // declared item is `{"ru",""}` is published as the self-closed `<tl/>`.
+        // (No stored list mixes empty and non-empty content: 36 267 lists over
+        // 88 decoded bodies are either wholly empty or wholly not.)
+        Some(items) => (
+            items
+                .into_iter()
+                .filter(|item| !item.content.is_empty())
+                .collect::<Vec<_>>(),
+            None,
+        ),
         None => (Vec::new(), None),
     };
+    let empty_text = has_text_member && text.is_empty() && parameter.is_none();
     // Where the record carries a formatted tail, that tail is the text the
     // platform publishes; the plain copy beside it is the same content with its
     // markup stripped. Evidence (native 1С:УТ 11.5.27.75): 16 cells in the
@@ -3234,7 +3249,13 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
     }
 
     let note_text_field = fields.get(note_text_index)?.trim();
-    let text = parse_moxel_single_localized_value(note_text_field)?;
+    // The note's text is the same declared-count localized container the cell
+    // text uses: `{1,<count>,{<lang>,<content>},…}`. Reading one pair and
+    // dropping the rest cost every bilingual note in the corpus -- measured on
+    // ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base and Документооборот
+    // КОРП 3.0.21.3, 1 899 notes carry 1 576 two-language texts against 323
+    // one-language ones, and the platform publishes every declared item.
+    let text = parse_moxel_localized_note_text(note_text_field)?;
     let note_fields = split_1c_braced_fields(fields.get(note_text_index + 2)?.trim(), 0)?;
     if note_fields.len() != 12
         || note_fields.get(1)?.trim() != "6"
@@ -3243,12 +3264,19 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
         return None;
     }
 
+    // The note's own leading record is `{16, <format>, <text>}` -- the mask
+    // names one member, the localized text, and the record may stop right
+    // behind it or spend one more field on a trailing `0`, exactly as the cell
+    // record may stop in front of its own trailing flag. Requiring the trailing
+    // field refused every note in 21 ERP УХ 3.2.12.6 templates; all 37 of their
+    // note records stop at three members, while the records this reader already
+    // accepted carry the fourth.
     let format_fields = split_1c_braced_fields(note_fields.first()?.trim(), 0)?;
-    if format_fields.len() != 4
+    if !matches!(format_fields.len(), 3 | 4)
         || format_fields.first()?.trim() != "16"
         || format_fields.get(2)?.trim() != note_text_field
-        || format_fields.get(3)?.trim() != "0"
-        || parse_moxel_single_localized_value(format_fields.get(2)?.trim())? != text
+        || format_fields.get(3).is_some_and(|field| field.trim() != "0")
+        || parse_moxel_localized_note_text(format_fields.get(2)?.trim())? != text
     {
         return None;
     }
@@ -3284,19 +3312,34 @@ fn parse_moxel_cell_note(fields: &[&str], note_text_index: usize) -> Option<Moxe
     })
 }
 
-fn parse_moxel_single_localized_value(text: &str) -> Option<MoxelLocalizedValue> {
+/// The note's localized text container `{1, <count>, {<lang>,<content>}, …}`.
+///
+/// The count is the record's own declaration of how many pairs follow, and the
+/// record must carry exactly that many and at least one: a note the platform
+/// publishes always publishes a `<text>` with items in it.
+fn parse_moxel_localized_note_text(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 3 || fields.first()?.trim() != "1" || fields.get(1)?.trim() != "1" {
+    if fields.first()?.trim() != "1" {
         return None;
     }
-    let pair = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    if pair.len() != 2 {
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count == 0 || fields.len() != count.checked_add(2)? {
         return None;
     }
-    Some(MoxelLocalizedValue {
-        lang: parse_1c_string(pair.first()?)?,
-        content: parse_1c_string(pair.get(1)?)?,
-    })
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| {
+            let pair = split_1c_braced_fields(field, 0)?;
+            if pair.len() != 2 {
+                return None;
+            }
+            Some(MoxelLocalizedValue {
+                lang: parse_1c_string(pair.first()?)?,
+                content: parse_1c_string(pair.get(1)?)?,
+            })
+        })
+        .collect()
 }
 
 /// The formatted tail `{1, <text list>, 1}` of a cell record.
@@ -4563,6 +4606,23 @@ pub(super) fn parse_moxel_picture(
     if fields.len() <= MOXEL_PICTURE_TRANSPARENCY_FIELD {
         return None;
     }
+    // The record's own shape decides whether it is a picture at all: member 2
+    // is the picture's reference record and is always a braced list, member 3
+    // is its stored name and is always a quoted string, and members 4 and 5 are
+    // its stored size pair and are always integers. Without that walk any
+    // `{4, …}` record long enough was taken for a picture, and 28 ERP УХ
+    // 3.2.12.6 templates published an empty `<picture><index>0</index>
+    // <picture/></picture>` for records like `{4,0,<uuid>,4,0,17,1,18,…}` that
+    // the platform publishes nothing for. Measured over 58 templates -- the 28
+    // that publish no picture and 30 that publish 134 between them -- the walk
+    // reproduces the platform's `<picture>` count exactly, with no exception.
+    if split_1c_braced_fields(fields.get(2)?, 0).is_none()
+        || parse_1c_string(fields.get(3)?).is_none()
+        || fields.get(4)?.trim().parse::<i64>().is_err()
+        || fields.get(5)?.trim().parse::<i64>().is_err()
+    {
+        return None;
+    }
     let ref_name = fields
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0))
@@ -4748,10 +4808,19 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
         match kind_code {
             "5" => {
                 let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
+                // Code 3 is `Tile`. Evidence (native ERP УХ 3.2.12.6): over the
+                // 25 templates that publish a tiled picture, pairing each
+                // `<drawing>` with the stored record that carries its `<id>`
+                // gives 42 records with code 3 and every one of them is
+                // published `Tile`, beside 64 code-1 `Stretch` and 9 code-0
+                // `RealSize` in the same files, with no counterexample.
+                // Refusing the code cost the whole drawing and renumbered the
+                // `<zOrder>` of every drawing behind it.
                 let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
                     0 => "RealSize",
                     1 => "Stretch",
                     2 => "Proportionally",
+                    3 => "Tile",
                     4 => "AutoSize",
                     7 => "ByFontSize",
                     _ => return None,
@@ -7947,10 +8016,18 @@ pub(super) fn parse_moxel_format(
             .and_then(moxel_picture_vertical_alignment),
         picture_size_mode: parse_moxel_format_usize(&values, 38).and_then(moxel_picture_size_mode),
         text_position: parse_moxel_format_usize(&values, 39).and_then(moxel_text_position),
-        left_margin: parse_moxel_format_usize(&values, 42).and_then(moxel_explicit_zero),
-        top_margin: parse_moxel_format_usize(&values, 43).and_then(moxel_explicit_zero),
-        right_margin: parse_moxel_format_usize(&values, 44).and_then(moxel_explicit_zero),
-        bottom_margin: parse_moxel_format_usize(&values, 45).and_then(moxel_explicit_zero),
+        // The mask already decides whether a margin is stored at all, so the
+        // stored value is published as it stands. Restricting publication to a
+        // stored zero dropped every non-zero one: over the `Template.xml` trees
+        // of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base and
+        // Документооборот КОРП 3.0.21.3 the platform publishes 62 `leftMargin`
+        // 8, 13 `leftMargin`/`rightMargin` 40, 6 `leftMargin` 24, 4
+        // `leftMargin` 16, 4 `rightMargin` 8, 3 `bottomMargin` 8 and one
+        // `bottomMargin` 28 inside `<format>` across 32 documents.
+        left_margin: parse_moxel_format_usize(&values, 42),
+        top_margin: parse_moxel_format_usize(&values, 43),
+        right_margin: parse_moxel_format_usize(&values, 44),
+        bottom_margin: parse_moxel_format_usize(&values, 45),
     };
     // `<pattern>` was synthesized for a record that stores no member 12 when
     // three unrelated members happened to line up. It is a fitted rule: the
@@ -12480,16 +12557,18 @@ fn push_moxel_note_xml(
         "\t\t\t\t\t\t<formatIndex>{format_index}</formatIndex>\r\n"
     ));
     xml.push_str("\t\t\t\t\t\t<text>\r\n");
-    xml.push_str("\t\t\t\t\t\t\t<v8:item>\r\n");
-    xml.push_str(&format!(
-        "\t\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-        escape_xml_element_text(&note.text.lang)
-    ));
-    xml.push_str(&format!(
-        "\t\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-        escape_xml_element_text(&note.text.content)
-    ));
-    xml.push_str("\t\t\t\t\t\t\t</v8:item>\r\n");
+    for item in &note.text {
+        xml.push_str("\t\t\t\t\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(&item.lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&item.content)
+        ));
+        xml.push_str("\t\t\t\t\t\t\t</v8:item>\r\n");
+    }
     xml.push_str("\t\t\t\t\t\t</text>\r\n");
     xml.push_str(&format!(
         "\t\t\t\t\t\t<beginRow>{}</beginRow>\r\n",
