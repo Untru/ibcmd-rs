@@ -194,11 +194,20 @@ pub(super) fn parse_command_interface_sectioned_fields(
     let count = parse_command_interface_section_count(fields, &mut index)?;
     let mut commands_placement = Vec::with_capacity(count);
     for _ in 0..count {
+        // The `{0}` sentinel -- a placement member that names no command -- is
+        // the same atom the visibility and order sections already accept, and
+        // the platform writes it the same way, as `<Command name="0">`. It was
+        // admitted in two sections out of three, so a record carrying one here
+        // failed whole: ERP УХ 3.2.12.6
+        // `Subsystems/ПодсистемыУХ/Subsystems/ЦенныеБумагиБУ` and
+        // `Subsystems/ПодсистемыУХ/Subsystems/ИнтеграцияУправлениеРисками/Subsystems/РисковыеСобытия`
+        // each open their placement section with one, and the platform writes
+        // both files in full.
         let name = parse_command_interface_command_name_field(
             fields.get(index)?,
             command_refs,
             metadata_refs,
-            false,
+            true,
         )?;
         index += 1;
         let command_group = command_interface_group_name(fields.get(index)?.trim(), metadata_refs);
@@ -450,7 +459,15 @@ pub(super) fn command_interface_subsystem_name(
         .get(uuid)
         .filter(|reference| reference.kind == "Subsystem")
         .map(|reference| format!("Subsystem.{}", reference.name))
-        .unwrap_or_else(|| format!("Subsystem.{uuid}"))
+        // Nothing named this member: the platform writes the bare uuid, not a
+        // `Subsystem.` prefix in front of it -- the prefix is part of the
+        // path it builds from the names it has, and it has none here. ERP УХ
+        // 3.2.12.6 spells four such members across three files
+        // (`Subsystems/ОбщиеСправочникиИНастройкиУХ`,
+        // `Subsystems/ОтчетыБазовая/Subsystems/ПродажиБазовая` and
+        // `Subsystems/ПодсистемыУХ/Subsystems/ОбъектыМСФО`), every one of them
+        // bare.
+        .unwrap_or_else(|| uuid.to_string())
 }
 
 pub(super) fn parse_home_page_work_area_blob(
@@ -757,7 +774,16 @@ pub(super) fn command_interface_standard_command_for_code(
         ("0" | "100", "Constant") => Some("Open"),
         ("0" | "100", "CalculationRegister") => Some("OpenList"),
         ("0" | "100", _) => command_interface_standard_command(kind),
-        ("1", "BusinessProcess" | "Catalog" | "Document" | "InformationRegister") => Some("Create"),
+        // `ChartOfAccounts` names its "create" command from the same slot its
+        // siblings do; it was simply never listed. ERP УХ 3.2.12.6 spells
+        // exactly two, both `ChartOfAccounts.Хозрасчетный.StandardCommand.Create`
+        // (`Subsystems/РегламентированныйУчет/Subsystems/БухгалтерскийИНалоговыйУчет`
+        // and `Subsystems/РегламентированныйУчетПодсистемы/Subsystems/БухгалтерскийУчет`),
+        // and both were written as the raw `1:<uuid>` sentinel instead.
+        (
+            "1",
+            "BusinessProcess" | "Catalog" | "ChartOfAccounts" | "Document" | "InformationRegister",
+        ) => Some("Create"),
         ("1", "ChartOfCharacteristicTypes") => Some("CreateFolder"),
         ("2", "Catalog") => Some("CreateFolder"),
         ("2", "ChartOfCharacteristicTypes") => Some("Create"),

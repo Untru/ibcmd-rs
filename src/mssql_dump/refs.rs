@@ -30,14 +30,26 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
     index
 }
 
-/// The target's own `<UseStandardCommands>`, read through the same owner-graph
-/// decoder its full properties parser uses -- offset 31 of the normalized
-/// owner fields for `Catalog`, the one kind this is evidenced for (see
-/// `parse_strict_catalog_properties_from_text`, which reads the identical
-/// slot for the object's own `Catalogs/<name>.xml`). `None` for every other
-/// kind, or when the graph does not decode: the caller then keeps the
-/// pre-existing `true` assumption rather than a guessed offset, per the
-/// project's fail-closed rule on unevidenced field positions.
+/// The target's own `<UseStandardCommands>`, read through the same decoder and
+/// at the same slot the kind's own properties parser uses -- offset 31 of the
+/// normalized owner fields for `Catalog`, offset 23 for `Document`, logical
+/// field 7 for `InformationRegister`, and slot 7 of the object fields for
+/// `Report`. `None` for every other kind, or when the decode fails: the caller
+/// then keeps the pre-existing `true` assumption rather than a guessed offset,
+/// per the project's fail-closed rule on unevidenced field positions.
+///
+/// `Document` and `Report` were added on a corpus-wide census rather than a
+/// single file. Every `code:uuid` sentinel the platform writes in a
+/// `Ext/CommandInterface.xml` of ERP УХ 3.2.12.6 belongs to one of four kinds
+/// -- `Catalog` (6 targets), `InformationRegister` (12), `Document` (5),
+/// `Report` (2) -- and the first two were the only ones this function could
+/// answer for, so the last two synthesized a `.StandardCommand.X` name over
+/// the platform's sentinel in seven `Subsystems/.../Ext/CommandInterface.xml`
+/// files. The converse direction is clean across the whole stand: over ERP УХ,
+/// UT, Документооборот and БСП demo, of the 904 documents and reports that
+/// declare `<UseStandardCommands>false</UseStandardCommands>` not one is named
+/// with a `.StandardCommand.` anywhere in the platform's own trees, so reading
+/// the declaration can only remove synthesized names the platform never wrote.
 fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeader) -> Option<bool> {
     if kind == "InformationRegister" {
         // Same slot `parse_information_register_owner_properties` already
@@ -53,17 +65,32 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
         let fields = parse_information_register_owner_fields(text, header)?;
         return information_register_bool(fields.logical.get(7)?);
     }
-    if kind != "Catalog" {
-        return None;
+    if kind == "Report" {
+        // Same slot `parse_report_properties_from_text` reads for the report's
+        // own `Reports/<name>.xml`, behind the same layout-marker guard it
+        // uses: a marker this reader does not know is a refusal, not a slot 7
+        // read blind.
+        let fields = metadata_object_fields(text)?;
+        if !matches!(fields.first().map(|value| value.trim()), Some("19" | "20")) {
+            return None;
+        }
+        return parse_1c_bool_field(fields.get(7).copied());
     }
+    let family = match kind {
+        "Catalog" => owner_graph::OwnerGraphFamily::Catalog,
+        // Same slot `parse_document_properties_from_text` reads for the
+        // document's own `Documents/<name>.xml`, through the same owner-graph
+        // decoder.
+        "Document" => owner_graph::OwnerGraphFamily::Document,
+        _ => return None,
+    };
+    let slot = match kind {
+        "Catalog" => 31,
+        _ => 23,
+    };
     let mut diagnostic = None;
-    let graph = decode_owner_graph_for_family_parser(
-        owner_graph::OwnerGraphFamily::Catalog,
-        text,
-        header,
-        &mut diagnostic,
-    )?;
-    information_register_bool(graph.owner_fields.get(31)?)
+    let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
+    information_register_bool(graph.owner_fields.get(slot)?)
 }
 
 /// What a metadata table declares about the existence of its own standard
