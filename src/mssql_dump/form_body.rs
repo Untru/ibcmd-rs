@@ -31,11 +31,11 @@ use crate::form_schema::{
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
     FormPictureValueSchema, FormPopupColorSchema, FormPopupSchema,
     FormPopupShapeRepresentationSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema,
-    FormRootConversationsRepresentationSchema, FormRootCustomSettingsFolderSchema,
-    FormRootCustomizableSchema, FormRootEnabledSchema, FormRootGroupSchema, FormRootGroupingSchema,
+    FormRootConversationsRepresentationSchema, FormRootCustomizableSchema, FormRootEnabledSchema,
+    FormRootGroupSchema, FormRootGroupingSchema, FormRootItemReferenceSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootPropertyBagSchema,
-    FormRootVariantAppearanceSchema, FormRootVerticalAlign, FormRootVerticalAlignSchema,
-    FormRootVerticalScrollSchema, FormSearchStringAdditionProperties,
+    FormRootSettingsStorageSchema, FormRootVariantAppearanceSchema, FormRootVerticalAlign,
+    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema, FormSearchStringAdditionProperties,
     FormSearchStringAdditionSchema, FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
@@ -389,6 +389,15 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     );
     properties.custom_settings_folder =
         extract_form_custom_settings_folder(&form_fields, &child_item_indexes.item_name_by_id);
+    properties.group_list =
+        extract_form_group_list(&form_fields, &child_item_indexes.item_name_by_id);
+    properties.settings_storage = extract_form_settings_storage(
+        &form_fields,
+        context.form_reference_index.unwrap_or(context.object_refs),
+    );
+    properties.use_for_folders_and_items = properties
+        .use_for_folders_and_items
+        .or_else(|| form_default_use_for_folders_and_items(&form_fields, &attributes));
     let child_item_indexes_cpu_ms = elapsed_ms(started);
 
     let started = Instant::now();
@@ -759,6 +768,7 @@ pub(super) struct FormBodyProperties {
     pub(super) auto_title: Option<bool>,
     pub(super) auto_url: Option<bool>,
     pub(super) save_data_in_settings: Option<&'static str>,
+    pub(super) settings_storage: Option<String>,
     pub(super) auto_save_data_in_settings: Option<&'static str>,
     pub(super) group: Option<&'static str>,
     pub(super) scaling_mode: Option<&'static str>,
@@ -789,6 +799,7 @@ pub(super) struct FormBodyProperties {
     pub(super) variant_appearance: Option<String>,
     pub(super) auto_show_state: Option<&'static str>,
     pub(super) custom_settings_folder: Option<String>,
+    pub(super) group_list: Option<String>,
     pub(super) report_result_view_mode: Option<&'static str>,
     pub(super) view_mode_application_on_set_report_result: Option<&'static str>,
 }
@@ -2021,6 +2032,7 @@ pub(super) fn extract_form_body_properties(
         auto_title: extract_form_auto_title(fields),
         auto_url: extract_form_auto_url(fields),
         save_data_in_settings: extract_form_save_data_in_settings(fields),
+        settings_storage: None,
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
         scaling_mode: extract_form_scaling_mode(fields),
@@ -2056,6 +2068,7 @@ pub(super) fn extract_form_body_properties(
         variant_appearance: None,
         auto_show_state: extract_form_auto_show_state(fields),
         custom_settings_folder: None,
+        group_list: None,
         report_result_view_mode: extract_form_report_result_view_mode(fields),
         view_mode_application_on_set_report_result:
             extract_form_view_mode_application_on_set_report_result(fields),
@@ -2411,8 +2424,64 @@ pub(super) fn extract_form_report_attribute_ref(
 }
 
 pub(super) fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
-    let value = form_root_property_bag_value(fields, "0")?;
+    let value = form_root_property_bag_value(fields, FORM_USE_FOR_FOLDERS_AND_ITEMS_BAG_KEY)?;
     parse_form_choice_folders_and_items_value(value)
+}
+
+pub(super) const FORM_USE_FOR_FOLDERS_AND_ITEMS_BAG_KEY: &str = "0";
+
+/// Which metadata families own a `UseForFoldersAndItems` at all.
+const FORM_FOLDERS_AND_ITEMS_OBJECT_PREFIXES: [&str; 2] =
+    ["CatalogObject.", "ChartOfCharacteristicTypesObject."];
+
+/// Whether the form's main attribute is typed as an object of a family that
+/// owns `UseForFoldersAndItems`.
+///
+/// Census over the eight stand corpora, all 22 637 native `Form.xml`
+/// documents: a form carries `<UseForFoldersAndItems>` on exactly the 1 771
+/// whose main attribute declares a `CatalogObject.…` or a
+/// `ChartOfCharacteristicTypesObject.…` among its types, and on none of the
+/// other 20 866 -- a total function with no counter-example in either
+/// direction. The main attribute is not always singly typed: 217 of the 1 771
+/// declare the object type beside two to sixty-one others, so the test is
+/// membership rather than an exact single type.
+fn form_main_attribute_owns_folders_and_items(attributes: &[FormAttribute]) -> bool {
+    attributes
+        .iter()
+        .filter(|attribute| attribute.main_attribute)
+        .any(|attribute| {
+            attribute.value_types.iter().any(|value_type| {
+                let ConstantValueType::Reference { reference } = value_type else {
+                    return false;
+                };
+                let reference = reference.strip_prefix("cfg:").unwrap_or(reference);
+                FORM_FOLDERS_AND_ITEMS_OBJECT_PREFIXES
+                    .iter()
+                    .any(|prefix| reference.starts_with(prefix))
+            })
+        })
+}
+
+/// The `UseForFoldersAndItems` an owning form writes when its property bag
+/// carries no entry for the property.
+///
+/// A default is not an absence. Across the eight corpora the bag names the
+/// value on 1 764 of the 1 771 owning forms (`0` on 1 595 of them and `1` on
+/// 169) and carries no key `0` at all on the remaining seven, every one of
+/// which the platform still writes -- as `Items`, the same value code `0`
+/// names. The seven are ERP УХ `49` roots whose bag is declared empty, so the
+/// entry is not merely unread: the bag says there is nothing to read.
+///
+/// The bag must be readable for the default to apply: an unreadable bag is
+/// "unknown", not "empty", and keeps the property unwritten.
+fn form_default_use_for_folders_and_items(
+    fields: &[&str],
+    attributes: &[FormAttribute],
+) -> Option<&'static str> {
+    if form_root_property_bag_entry(fields, FORM_USE_FOR_FOLDERS_AND_ITEMS_BAG_KEY)?.is_some() {
+        return None;
+    }
+    form_main_attribute_owns_folders_and_items(attributes).then_some("Items")
 }
 
 fn parse_form_choice_folders_and_items_value(value: &str) -> Option<&'static str> {
@@ -2555,17 +2624,68 @@ pub(super) fn extract_form_conversations_representation(fields: &[&str]) -> Opti
     .conversations_representation(trailer)
 }
 
+/// A form-root property that names one of the form's own items by id.
+///
+/// The name comes from the form's own item table; an id the table does not
+/// carry keeps the platform's dangling `<id>:<form-item class uuid>` spelling
+/// rather than dropping the property, exactly as a picture or a command the
+/// reader cannot name does. See `FormRootItemReferenceSchema` for the corpus.
+fn extract_form_root_item_reference(
+    fields: &[&str],
+    property_bag_key: &'static str,
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let schema = FormRootItemReferenceSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        property_bag_key,
+    )?;
+    let value = form_root_property_bag_value(fields, schema.property_bag_key())?;
+    let value_fields = split_1c_braced_fields(value.trim(), 0)?;
+    let item_id = schema.item_id(&value_fields)?;
+    Some(
+        item_name_by_id
+            .get(&item_id)
+            .cloned()
+            .unwrap_or_else(|| format!("{item_id}:{FORM_ITEM_TYPE_UUID}")),
+    )
+}
+
+/// The metadata object or form root field 8 names as the form's settings
+/// storage. A uuid the reference index does not carry stays unread rather than
+/// being spelled out: every one of the 20 evidenced roots resolves, so a miss
+/// is unproven rather than a dangling reference the platform would spell.
+pub(super) fn extract_form_settings_storage(
+    fields: &[&str],
+    reference_index: &BTreeMap<String, String>,
+) -> Option<String> {
+    let schema = FormRootSettingsStorageSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        fields.len(),
+    )?;
+    let uuid = parse_non_zero_uuid(fields.get(schema.slot())?.trim())?;
+    reference_index.get(&uuid).cloned()
+}
+
 pub(super) fn extract_form_custom_settings_folder(
     fields: &[&str],
     item_name_by_id: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let schema =
-        FormRootCustomSettingsFolderSchema::from_raw_layout(fields.first().map(|f| f.trim()))?;
-    let value =
-        form_root_property_bag_value(fields, FormRootCustomSettingsFolderSchema::PROPERTY_BAG_KEY)?;
-    let value_fields = split_1c_braced_fields(value.trim(), 0)?;
-    let item_id = schema.item_id(&value_fields)?;
-    item_name_by_id.get(&item_id).cloned()
+    extract_form_root_item_reference(
+        fields,
+        FormRootItemReferenceSchema::CUSTOM_SETTINGS_FOLDER_KEY,
+        item_name_by_id,
+    )
+}
+
+pub(super) fn extract_form_group_list(
+    fields: &[&str],
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    extract_form_root_item_reference(
+        fields,
+        FormRootItemReferenceSchema::GROUP_LIST_KEY,
+        item_name_by_id,
+    )
 }
 
 pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
@@ -2689,6 +2809,18 @@ pub(super) fn form_root_property_bag_value<'a>(
     fields: &'a [&str],
     property_key: &str,
 ) -> Option<&'a str> {
+    form_root_property_bag_entry(fields, property_key).flatten()
+}
+
+/// The bag walk, keeping "the bag is unreadable" apart from "the bag is
+/// readable and has no such key". The two are the same answer to a reader of
+/// one value and different answers to a reader that has a default to apply:
+/// a default belongs to an entry the bag declares absent, never to a bag
+/// nobody could read.
+pub(super) fn form_root_property_bag_entry<'a>(
+    fields: &'a [&str],
+    property_key: &str,
+) -> Option<Option<&'a str>> {
     let schema = FormRootPropertyBagSchema::from_raw_layout(
         fields.get(FormRootPropertyBagSchema::COUNT_SLOT).copied(),
         fields.len(),
@@ -2707,7 +2839,7 @@ pub(super) fn form_root_property_bag_value<'a>(
             found = Some(*fields.get(key_slot + 1)?);
         }
     }
-    found
+    Some(found)
 }
 
 pub(super) fn form_standard_excluded_command_name(
@@ -22435,6 +22567,20 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(value)
         ));
     }
+    // `SettingsStorage` follows the two settings flags and leads everything
+    // else. The twenty native forms that carry it across the eight stand
+    // corpora put `SaveDataInSettings` (14), `AutoSaveDataInSettings` (12),
+    // `Title` (4) and `WindowOpeningMode` (2) before it and `AutoTitle` (11),
+    // `VerticalScroll` (9), `CommandBarLocation` (7), `CommandSet` (4),
+    // `Customizable` (3), `UseForFoldersAndItems` (3), the report run (4 each),
+    // `Group`, `ScalingMode`, `AutoFillCheck` and the document trio (1 each)
+    // and every collection after it, with no pair counted both ways.
+    if let Some(value) = &properties.settings_storage {
+        xml.push_str(&format!(
+            "\t<SettingsStorage>{}</SettingsStorage>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     if properties.save_window_settings == Some(false) {
         xml.push_str("\t<SaveWindowSettings>false</SaveWindowSettings>\r\n");
     }
@@ -22659,6 +22805,21 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(value) = properties.view_mode_application_on_set_report_result {
         xml.push_str(&format!(
             "\t<ViewModeApplicationOnSetReportResult>{}</ViewModeApplicationOnSetReportResult>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // `GroupList` closes the scalar run, immediately ahead of the collections.
+    // The twelve native forms that carry it across the eight stand corpora put
+    // `AutoCommandBar` (12), `ChildItems` (12), `Attributes` (12), `Events`
+    // (9), `Commands` (7), `Parameters` (5) and `CommandInterface` (1) after
+    // it and `AutoTitle` (6), `VerticalScroll` (6), `CommandBarLocation` (5),
+    // `Title` (4), `CommandSet` (4), `Width` (3) and `WindowOpeningMode` (3)
+    // before it, and no pair is counted in both directions. It never shares a
+    // form with any report property, so it takes the last scalar slot rather
+    // than claiming a place inside a run it has never been observed in.
+    if let Some(value) = &properties.group_list {
+        xml.push_str(&format!(
+            "\t<GroupList>{}</GroupList>\r\n",
             escape_xml_text(value)
         ));
     }
