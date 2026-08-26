@@ -31019,7 +31019,7 @@ fn parse_event_subscription_properties_from_text(
         .map(|(event, _)| event)
         .unwrap_or(raw_event.as_str())
         .to_string();
-    let source_types = parse_event_subscription_type_pattern(fields.get(2)?, type_index, &event)?;
+    let source_types = parse_event_subscription_type_pattern(fields.get(2)?, type_index)?;
     let module_uuid = parse_uuid_field(fields.get(4)?.trim())?;
     let module_ref = object_refs.get(&module_uuid)?;
     let method = fields
@@ -31643,46 +31643,8 @@ fn parse_metadata_type_pattern_with_builtin(
 fn parse_event_subscription_type_pattern(
     value: &str,
     type_index: &BTreeMap<String, String>,
-    event: &str,
 ) -> Option<Vec<ConstantValueType>> {
-    let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != r#""Pattern""# {
-        return None;
-    }
-    let type_ids = fields
-        .iter()
-        .skip(1)
-        .map(|field| metadata_type_pattern_field_type_id(field))
-        .collect::<Option<Vec<_>>>()?;
-    fields
-        .iter()
-        .skip(1)
-        .map(|field| {
-            parse_event_subscription_type_pattern_element(field, type_index, event, &type_ids)
-        })
-        .collect()
-}
-
-fn parse_event_subscription_type_pattern_element(
-    value: &str,
-    type_index: &BTreeMap<String, String>,
-    event: &str,
-    pattern_type_ids: &[String],
-) -> Option<ConstantValueType> {
-    let element = split_1c_braced_fields(value, 0)?;
-    if element.first()?.trim() == r##""#""## && element.len() >= 2 {
-        let type_id = parse_uuid_field(element.get(1)?.trim())?;
-        let reference = type_index
-            .get(&type_id)
-            .cloned()
-            .or_else(|| {
-                event_subscription_builtin_type_reference(event, pattern_type_ids, &type_id)
-                    .map(ToOwned::to_owned)
-            })
-            .or_else(|| builtin_type_reference(&type_id).map(ToOwned::to_owned))?;
-        return Some(ConstantValueType::Reference { reference });
-    }
-    parse_metadata_type_pattern_element(value, type_index)
+    parse_metadata_type_pattern(value, type_index)
 }
 
 fn parse_metadata_type_pattern_element(
@@ -31759,41 +31721,6 @@ fn metadata_type_pattern_field_type_id(value: &str) -> Option<String> {
     }
 }
 
-fn event_subscription_builtin_type_reference(
-    event: &str,
-    pattern_type_ids: &[String],
-    type_id: &str,
-) -> Option<&'static str> {
-    if event == "FillCheckProcessing" {
-        return match type_id {
-            "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:BusinessProcessObject"),
-            _ => None,
-        };
-    }
-    if pattern_type_ids.len() == 4
-        && pattern_type_ids
-            == [
-                "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed",
-                "30b100d6-b29f-47ac-aec7-cb8ca8a54767",
-                "82a1b659-b220-4d94-a9bd-14d757b95a48",
-                "cf4abea6-37b2-11d4-940f-008048da11f9",
-            ]
-    {
-        return match type_id {
-            "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:ChartOfAccountsObject"),
-            _ => None,
-        };
-    }
-    if pattern_type_ids.len() == 1
-        && pattern_type_ids.first().map(String::as_str)
-            == Some("fcd3404e-1523-48ce-9bc0-ecdb822684a1")
-        && matches!(event, "BeforeWrite" | "OnSetNewNumber")
-    {
-        return Some("cfg:BusinessProcessObject");
-    }
-    None
-}
-
 pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
     match type_id {
         "acf6192e-81ca-46ef-93a6-5a6968b78663" => Some("v8:ValueTable"),
@@ -31814,13 +31741,35 @@ pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63" => Some("cfg:AnyIBRef"),
         "0195e80c-b157-11d4-9435-004095e12fc7" => Some("cfg:ConstantValueManager"),
         "061d872a-5787-460e-95ac-ed74ea3a3e84" => Some("cfg:DocumentObject"),
-        "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:BusinessProcessObject"),
+        // Three object-family identifiers were rotated among themselves.
+        // Event subscriptions decide them: an `<Event>` whose `Source` names a
+        // single family pins that family's identifier outright. Census of the
+        // subscriptions of `do`, `ssl`, `sslbase`, `mdm`, `ws` and `wms`,
+        // pattern against the XML the platform writes for the same object:
+        // `fcd3404e` is alone in the pattern of twelve subscriptions and every
+        // one of them is written `cfg:BusinessProcessObject`; `do`
+        // `ОбменДаннымиДО20ДО21ПередЗаписью` carries exactly
+        // `{3e63355c, cf4abea6, fcd3404e}` against
+        // `{BusinessProcessObject, CatalogObject, TaskObject}`, which leaves
+        // `3e63355c` = `cfg:TaskObject`; and `do`
+        // `ОбработкаПредопределенныхЭлементовПередЗаписью` carries
+        // `{238e7e88, 30b100d6, 82a1b659, cf4abea6}` against
+        // `{CatalogObject, ChartOfAccountsObject, ChartOfCalculationTypesObject,
+        // ChartOfCharacteristicTypesObject}`, which leaves `238e7e88` =
+        // `cfg:ChartOfAccountsObject`.
+        //
+        // The rotation was invisible for a long time because the platform
+        // writes a subscription's type sets in one canonical order, so a
+        // permutation of the same three names still produced the same bytes.
+        // It shows only where the pattern carries some of the three and not
+        // all: nine subscriptions of `do` and four of `uh`.
+        "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:ChartOfAccountsObject"),
         "30b100d6-b29f-47ac-aec7-cb8ca8a54767" => Some("cfg:ChartOfCalculationTypesObject"),
-        "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:ChartOfAccountsObject"),
+        "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:TaskObject"),
         "82a1b659-b220-4d94-a9bd-14d757b95a48" => Some("cfg:ChartOfCharacteristicTypesObject"),
         "857c4a91-e5f4-4fac-86ec-787626f1c108" => Some("cfg:ExchangePlanObject"),
         "cf4abea6-37b2-11d4-940f-008048da11f9" => Some("cfg:CatalogObject"),
-        "fcd3404e-1523-48ce-9bc0-ecdb822684a1" => Some("cfg:TaskObject"),
+        "fcd3404e-1523-48ce-9bc0-ecdb822684a1" => Some("cfg:BusinessProcessObject"),
         "13134201-f60b-11d5-a3c7-0050bae0a776" => Some("cfg:InformationRegisterRecordSet"),
         "2deed9b8-0056-4ffe-a473-c20a6c32a0bc" => Some("cfg:AccountingRegisterRecordSet"),
         "b64d9a40-1642-11d6-a3c7-0050bae0a776" => Some("cfg:AccumulationRegisterRecordSet"),
@@ -36887,19 +36836,19 @@ fn format_event_subscription_source_xml(
 fn sorted_event_subscription_source_types(
     source_types: &[ConstantValueType],
 ) -> Vec<&ConstantValueType> {
+    // The canonical family order is the platform's, and it does not depend on
+    // whether the source also names individual objects: `do`
+    // `БизнесСобытияПередЗаписьюОбъекта` writes seven `<v8:Type>` catalogs and
+    // then `BusinessProcessObject`, `TaskObject` -- family order, not pattern
+    // order. The order used to be applied only to all-type-set sources, which
+    // hid the rotation of the three object-family identifiers rather than
+    // exposing it.
     let mut indexed = source_types.iter().enumerate().collect::<Vec<_>>();
-    let all_type_sets = indexed.iter().all(|(_, source_type)| {
-        event_subscription_source_type_tag(&metadata_type_xml_name(source_type)) == "TypeSet"
-    });
     indexed.sort_by_key(|(index, source_type)| {
         let reference = metadata_type_xml_name(source_type);
         let tag = event_subscription_source_type_tag(&reference);
         let tag_rank = if tag == "Type" { 0usize } else { 1usize };
-        let type_set_rank = if all_type_sets {
-            event_subscription_type_set_order(&reference).unwrap_or(usize::MAX)
-        } else {
-            usize::MAX
-        };
+        let type_set_rank = event_subscription_type_set_order(&reference).unwrap_or(usize::MAX);
         (tag_rank, type_set_rank, *index)
     });
     indexed

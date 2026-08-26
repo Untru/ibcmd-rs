@@ -28134,6 +28134,84 @@ fn keeps_event_subscription_specific_types_before_type_sets() {
 }
 
 #[test]
+fn object_family_identifiers_are_the_ones_the_subscriptions_pin() {
+    // Three identifiers were rotated among themselves. An event subscription
+    // whose `Source` names a single family pins that family outright: twelve
+    // subscriptions across the stand carry `fcd3404e` alone and every one is
+    // written `cfg:BusinessProcessObject`.
+    assert_eq!(
+        builtin_type_reference("fcd3404e-1523-48ce-9bc0-ecdb822684a1"),
+        Some("cfg:BusinessProcessObject")
+    );
+    // `do` `ОбменДаннымиДО20ДО21ПередЗаписью` carries exactly these three
+    // identifiers against exactly these three names.
+    assert_eq!(
+        [
+            "3e63355c-1378-4953-be9b-1deb5fb6bec5",
+            "cf4abea6-37b2-11d4-940f-008048da11f9",
+            "fcd3404e-1523-48ce-9bc0-ecdb822684a1",
+        ]
+        .map(|id| builtin_type_reference(id).expect("identifier is named")),
+        [
+            "cfg:TaskObject",
+            "cfg:CatalogObject",
+            "cfg:BusinessProcessObject",
+        ]
+    );
+    // `do` `ОбработкаПредопределенныхЭлементовПередЗаписью` carries these four.
+    assert_eq!(
+        [
+            "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed",
+            "30b100d6-b29f-47ac-aec7-cb8ca8a54767",
+            "82a1b659-b220-4d94-a9bd-14d757b95a48",
+            "cf4abea6-37b2-11d4-940f-008048da11f9",
+        ]
+        .map(|id| builtin_type_reference(id).expect("identifier is named")),
+        [
+            "cfg:ChartOfAccountsObject",
+            "cfg:ChartOfCalculationTypesObject",
+            "cfg:ChartOfCharacteristicTypesObject",
+            "cfg:CatalogObject",
+        ]
+    );
+}
+
+#[test]
+fn event_subscription_family_order_holds_when_the_source_also_names_objects() {
+    // `do` `БизнесСобытияПередЗаписьюОбъекта` writes seven catalog objects and
+    // then `BusinessProcessObject`, `TaskObject` -- the canonical family order,
+    // not the order the physical pattern stores them in. The order used to be
+    // applied only when every source entry was a type set.
+    let source_types = vec![
+        ConstantValueType::Reference {
+            reference: "cfg:CatalogObject.Проекты".to_string(),
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:TaskObject".to_string(),
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:CatalogObject.Файлы".to_string(),
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:BusinessProcessObject".to_string(),
+        },
+    ];
+    let actual = sorted_event_subscription_source_types(&source_types)
+        .into_iter()
+        .map(metadata_type_xml_name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        vec![
+            "cfg:CatalogObject.Проекты",
+            "cfg:CatalogObject.Файлы",
+            "cfg:BusinessProcessObject",
+            "cfg:TaskObject",
+        ]
+    );
+}
+
+#[test]
 fn formats_scheduled_job_detailed_daily_schedules() {
     let schedule = deflate_for_test(
             b"{20260101000000,20260131000000,00010101000500,00010101000000,00010101000000,0,0,0,7,1,2,3,4,5,6,7,0,0,1,1,1,1,1,{00010101000000,00010101000000,00010101000500,00010101000000,00010101000000,0,0,0,0,0,0,0,1,0,0}}",
