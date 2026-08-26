@@ -15673,7 +15673,8 @@ fn resolve_form_button_register_command_names(
         if let Some(command_name) = item.command_name.as_deref()
             && let Some((kind, uuid)) = command_name.split_once(':')
             && matches!(kind, "3" | "4" | "5" | "6" | "7")
-            && parse_non_zero_uuid(uuid).is_some()
+            && let Some(parsed) = parse_non_zero_uuid(uuid)
+            && form_command_interface_target_use_standard_commands(&parsed, context)
             && let Some(named) =
                 resolve_information_register_open_by_value_command(kind, uuid, context)
         {
@@ -21013,8 +21014,8 @@ pub(super) fn parse_form_button_command_name(
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let kind = fields.first()?.trim();
-    if fields.len() == 1 && kind == "0" {
-        return Some("0".to_string());
+    if let Some(name) = form_command_record_single_field_name(&fields) {
+        return Some(name);
     }
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
@@ -21077,6 +21078,27 @@ pub(super) fn parse_form_button_command_name(
         return Some(command_name);
     }
     Some(form_command_record_sentinel(kind, &uuid))
+}
+
+/// What a command record that carries nothing but its own kind spells.
+///
+/// The record is `{N}` with no target at all, and the platform writes the bare
+/// `N`. Census of every `<Command>` a native `<CommandInterface>` item carries
+/// across the eight stand corpora: 865 read `0`, three read `4` and two read
+/// `3`, and the export's own record census finds exactly 635 `{0}` records,
+/// three `{4}` and two `{3}` at those positions -- equal multisets, and the
+/// five non-zero ones were the only records of the shape the reader dropped.
+/// Nothing but a bare number is ever written for such a record.
+///
+/// Both readers of the record grammar go through this one function. No button
+/// carries a record of this shape other than `{0}` anywhere in the corpus, so
+/// sharing it changes nothing there; it removes the second place for the two to
+/// disagree, which is what every twinned reader in this file has eventually
+/// done.
+fn form_command_record_single_field_name(fields: &[&str]) -> Option<String> {
+    let [only] = fields else { return None };
+    let only = only.trim();
+    only.parse::<u64>().ok().map(|_| only.to_string())
 }
 
 /// What the platform writes for a `{kind, uuid}` command record no name fits.
@@ -22263,6 +22285,9 @@ pub(super) fn parse_form_command_interface_command(
     {
         return Some(format!("Form.Command.{}", command.name));
     }
+    if let Some(name) = form_command_record_single_field_name(&fields) {
+        return Some(name);
+    }
     match kind {
         "0" => {
             let Some(target) = target else {
@@ -22278,11 +22303,28 @@ pub(super) fn parse_form_command_interface_command(
                     .map(|reference| {
                         // A filter criterion carries no command of its own, so this
                         // slot names its "open by value" standard command; every
-                        // other target in this slot is already a command reference.
+                        // other target in this slot is named by the same function
+                        // the button reader uses.
+                        //
+                        // The slot is not "already a command reference": most of
+                        // its targets are, and those the function returns
+                        // unchanged, but a target that is a metadata object
+                        // itself needs that object's own standard command
+                        // spelled. Census of every `<Command>` a native
+                        // `<CommandInterface>` item carries across the eight
+                        // stand corpora -- 15 705 of them -- finds not one bare
+                        // metadata reference: every one is a command reference,
+                        // a `.StandardCommand.` name, a bare number or the raw
+                        // `kind:uuid` sentinel. Writing the reference bare was
+                        // therefore always wrong, and it is what the four items
+                        // ERP УХ writes as `Document.ПредложениеПоставщика.
+                        // StandardCommand.OpenList`,
+                        // `DocumentJournal.ДвижениеИнвестиций.…OpenList` and two
+                        // catalogue `…OpenList` names were coming out as.
                         if is_top_level_reference_of_kind(reference, "FilterCriterion") {
                             format!("{reference}.StandardCommand.OpenByValue")
                         } else {
-                            reference.clone()
+                            form_object_reference_command_name(reference)
                         }
                     })
                     .or_else(|| form_standard_command_name(&uuid))
@@ -22321,16 +22363,27 @@ pub(super) fn parse_form_command_interface_command(
         }
         "3" => {
             let target = target?;
+            let uuid = parse_non_zero_uuid(target)?;
+            // The gate runs first, ahead of the register rule and not behind
+            // it. A target with no standard commands has no "open by value"
+            // either, and the rule was naming one anyway on every slot it
+            // reached before the gate. ERP УХ 3.2.12.6: all fifteen registers
+            // this reader named through the rule and the platform left as the
+            // raw sentinel declare `UseStandardCommands=false` --
+            // `ОбработанныеОбъектыБД` (13 items), `ИзмененныеОбъектыДляВыгрузки`
+            // (6), `НастройкиОповещений` (5), `СверкаВГОЗакрыта`,
+            // `ОбъектыХранимыхФайлов`, `ПроцедурыРасчетов`,
+            // `ИменаФайловИКаталогов` and eight more, one item each. Not one
+            // register the platform does name through the rule declares it.
+            if !form_command_interface_target_use_standard_commands(&uuid, context) {
+                return Some(format!("{kind}:{uuid}"));
+            }
             if let Some(name) =
                 resolve_information_register_open_by_value_command(kind, target, context)
             {
                 return Some(name);
             }
-            let uuid = parse_non_zero_uuid(target)?;
             let reference = context.object_refs.get(&uuid)?;
-            if !form_command_interface_target_use_standard_commands(&uuid, context) {
-                return Some(format!("{kind}:{uuid}"));
-            }
             // A catalog names its "create based on" command from slot 3, where a
             // document or business process names the same command from slot 2.
             form_object_family_standard_command_name(
@@ -22358,11 +22411,19 @@ pub(super) fn parse_form_command_interface_command(
             .or_else(|| resolve_information_register_open_by_value_command(kind, target, context))
         }
         // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
-        // theirs with the object commands handled above. Unlike those, this
-        // grammar never touches `object_refs`, so `UseStandardCommands` has no
-        // uuid to gate here.
+        // theirs with the object commands handled above. The gate belongs here
+        // too: the rule resolves its target through `object_refs` like every
+        // other, and ERP УХ leaves `5:1c2ef491-…`, `6:1c2ef491-…`,
+        // `5:917a207a-…`, `6:917a207a-…`, `5:67b0794f-…`, `5:9f6e69eb-…` and
+        // `5:1f15119b-…` raw -- every one of them a register that declares
+        // `UseStandardCommands=false`.
         "5" | "6" | "7" => {
-            resolve_information_register_open_by_value_command(kind, target?, context)
+            let target = target?;
+            let uuid = parse_non_zero_uuid(target)?;
+            if !form_command_interface_target_use_standard_commands(&uuid, context) {
+                return Some(format!("{kind}:{uuid}"));
+            }
+            resolve_information_register_open_by_value_command(kind, target, context)
         }
         _ => None,
     }
