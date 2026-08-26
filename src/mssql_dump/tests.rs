@@ -73935,3 +73935,83 @@ fn short_input_field_options_revision_reads_its_properties() {
         assert!(xml.contains(expected), "missing {expected} in {xml}");
     }
 }
+
+/// `Button` under its short revision `29`, the one the revision-3 form body
+/// container carries.
+///
+/// Real ERP УХ 3.2.12.6 bytes:
+/// `Catalogs/ДокументыРеализацииПолномочийНалоговыхОрганов/Forms/ФормаОтправкиРезультатаПриема`'s
+/// `СформироватьРезультатПриема`, 49 members under leading member `29`, which
+/// native ibcmd writes as `<Button name="СформироватьРезультатПриема" id="33">`
+/// with `<Type>CommandBarButton</Type>` and
+/// `<DefaultButton>true</DefaultButton>`.
+///
+/// All 164 button records of the 102 revision-3 form bodies declare `29` at
+/// exactly 49 members, and that shape is `31`/52's own shape member for member
+/// with three fewer trailing scalars. The assertions go past recognition on
+/// purpose: `item_type` and `default_button` come off slots the extended-button
+/// layout addresses only after the record is normalized to its canonical
+/// revision, so a reader that merely admitted the leading member would still
+/// fail them.
+#[test]
+fn revision_three_button_record_is_read_with_its_extended_layout() {
+    const BUTTON_29: &str = r#"{29,
+{33,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СформироватьРезультатПриема",
+{1,0},1,
+{0,5d41082e-9619-42ec-b96f-98b082b3a2f0},
+{0},3,1,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},1,
+{"Pattern"},"",2,1,1,
+{11,
+{34,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СформироватьРезультатПриемаРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0}"#;
+
+    let item = parse_form_child_item(
+        BUTTON_29,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .expect("a revision-3 button record must be readable");
+
+    assert_eq!(item.tag, "Button");
+    assert_eq!(item.name, "СформироватьРезультатПриема");
+    assert_eq!(item.id, "33");
+    assert_eq!(item.item_type, Some("CommandBarButton"));
+    assert_eq!(item.default_button, Some(true));
+}

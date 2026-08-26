@@ -16485,6 +16485,34 @@ fn form_item_record_canonical_revision(
         // leading member. It never reaches a form record, and 49 is neither
         // 51 nor 52.
         "30" if matches!(field_count, 51 | 52) => Some(("31", 1)),
+        // `Button`'s third revision, the one the revision-3 form container
+        // carries.  The 102 ERP УХ 3.2.12.6 form bodies that declare container
+        // revision `3` (`FormBodyRevision`, `module_blob.rs`) hold 164 button
+        // records and *every one* of them declares `29` at 49 members: no
+        // canonical `31`, no short `30`, and no second length.  Anchored on the
+        // class uuid the platform writes before each record, the slot shape of
+        // `29`/49 is `31`/52's own shape member for member over all 49 members,
+        // and `31`/52 carries exactly three more trailing scalars -- the
+        // trailing scalar run falls 18 -> 15.  Both keep the name at slot 5 and
+        // their own `ExtendedTooltip` at slot 32 (itself the decorations' short
+        // revision `11` at 33 members under this container, the canonical `12`
+        // at 34 under container `4`), so this is the same tail truncation the
+        // arms above read, one revision further back.
+        //
+        // Unlike `30`/51 and `31`/52 this revision's `field_count - wrapper` is
+        // 20, not 21: revision `30` added two trailing members where the leading
+        // member advanced by one.  The leading member names the revision; only
+        // the measured arity says which shape it is, so the guard pins the one
+        // length the corpus writes.  A `29` record of any other length stays
+        // refused rather than padded on the strength of a formula.
+        //
+        // Collision pre-flight: over every braced block of the dumped layouts
+        // no `{29,...}` at 49 members is anything but a class-anchored button.
+        // The other `{29,...}` blocks are the `UsualGroup` extended-options bag
+        // at 29 members (`form_property_bag_canonical_revision` documents it)
+        // and one- and two-member value tuples, none of which this guard can
+        // reach.
+        "29" if field_count == 49 => Some(("31", 3)),
         _ => None,
     }
 }
