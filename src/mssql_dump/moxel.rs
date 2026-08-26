@@ -7999,10 +7999,18 @@ pub(super) fn parse_moxel_format(
             .and_then(moxel_picture_vertical_alignment),
         picture_size_mode: parse_moxel_format_usize(&values, 38).and_then(moxel_picture_size_mode),
         text_position: parse_moxel_format_usize(&values, 39).and_then(moxel_text_position),
-        left_margin: parse_moxel_format_usize(&values, 42).and_then(moxel_explicit_zero),
-        top_margin: parse_moxel_format_usize(&values, 43).and_then(moxel_explicit_zero),
-        right_margin: parse_moxel_format_usize(&values, 44).and_then(moxel_explicit_zero),
-        bottom_margin: parse_moxel_format_usize(&values, 45).and_then(moxel_explicit_zero),
+        // The mask already decides whether a margin is stored at all, so the
+        // stored value is published as it stands. Restricting publication to a
+        // stored zero dropped every non-zero one: over the `Template.xml` trees
+        // of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base and
+        // Документооборот КОРП 3.0.21.3 the platform publishes 62 `leftMargin`
+        // 8, 13 `leftMargin`/`rightMargin` 40, 6 `leftMargin` 24, 4
+        // `leftMargin` 16, 4 `rightMargin` 8, 3 `bottomMargin` 8 and one
+        // `bottomMargin` 28 inside `<format>` across 32 documents.
+        left_margin: parse_moxel_format_usize(&values, 42),
+        top_margin: parse_moxel_format_usize(&values, 43),
+        right_margin: parse_moxel_format_usize(&values, 44),
+        bottom_margin: parse_moxel_format_usize(&values, 45),
     };
     // `<pattern>` was synthesized for a record that stores no member 12 when
     // three unrelated members happened to line up. It is a fitted rule: the
