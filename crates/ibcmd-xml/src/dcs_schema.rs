@@ -3081,6 +3081,22 @@ struct RewriteState {
     /// the same pattern `dcsset:outputParameters` has in the settings
     /// document (see `DcsEmptyElementAction` in `src/mssql_dump/dcs.rs`).
     omit_if_empty: bool,
+    /// Whether a child this element carried in storage was dropped on the way
+    /// out -- an empty `appearance`/`inputParameters` placeholder, or an
+    /// `appIndex` whose side-table entry carries nothing.
+    ///
+    /// What is left behind in that case is the storage pretty-printer's own
+    /// indentation, which indents nothing any more. The platform reads the
+    /// same storage into an object model where the element simply has no
+    /// children, and writes it self-closed: over the `Templates/*/Ext/
+    /// Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП
+    /// demo/base 3.1.12.297 and Документооборот КОРП 3.0.21.3 not one
+    /// element is written as an open/close pair whose interior is only
+    /// indentation. The pairs those trees do carry -- 171 `v8:content`,
+    /// 3 `dcsset:name`, 1 `dcsset:title` -- all hold character data that
+    /// happens to be spaces or tabs, which is a value and not indentation,
+    /// and no child of theirs was dropped.
+    dropped_child: bool,
 }
 
 impl RewriteState {
@@ -3098,6 +3114,7 @@ impl RewriteState {
             start_tag_begin_offset: 0,
             start_tag_end_offset: 0,
             omit_if_empty: false,
+            dropped_child: false,
         }
     }
 
@@ -4088,7 +4105,13 @@ fn rewrite_tokens(
                                 let trimmed_len =
                                     out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
                                 out.truncate(trimmed_len);
-                            } else if out[state.start_tag_end_offset..].is_empty() {
+                                if let Some(parent) = frames.last_mut() {
+                                    parent.dropped_child = true;
+                                }
+                            } else if out[state.start_tag_end_offset..].is_empty()
+                                || (state.dropped_child
+                                    && out[state.start_tag_end_offset..].trim().is_empty())
+                            {
                                 // Nothing at all was written between the two
                                 // tags -- either storage spelled the element
                                 // as an empty open/close pair, or an omitted
@@ -4105,6 +4128,13 @@ fn rewrite_tokens(
                                 // `dcsat:tableCell`s whose only child is an
                                 // empty `dcsat:appearance` are written
                                 // `<dcsat:tableCell/>`.
+                                //
+                                // The same holds when what is left inside is
+                                // the indentation of a child that was dropped
+                                // (`RewriteState::dropped_child`): the
+                                // indentation indents nothing any more, and
+                                // the platform writes the childless element
+                                // self-closed just the same.
                                 out.truncate(state.start_tag_end_offset - 1);
                                 out.push_str("/>");
                             } else {
@@ -4330,6 +4360,9 @@ fn rewrite_tokens(
                         // self-closed `appearance` above is dropped.
                         let trimmed_len = out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
                         out.truncate(trimmed_len);
+                        if let Some(parent) = frames.last_mut() {
+                            parent.dropped_child = true;
+                        }
                     } else {
                         out.push('<');
                         out.push_str(&appearance_prefix);
@@ -4614,6 +4647,9 @@ fn rewrite_tokens(
                     source_scopes.pop();
                     let trimmed_len = out.trim_end_matches(['\r', '\n', '\t', ' ']).len();
                     out.truncate(trimmed_len);
+                    if let Some(parent) = frames.last_mut() {
+                        parent.dropped_child = true;
+                    }
                     continue;
                 }
                 let element_start = out.len();
