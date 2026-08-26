@@ -20328,7 +20328,33 @@ pub(super) fn normalize_form_table_column_name(table_name: &str, field_name: &st
         })
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| field_name.to_string());
+    if form_data_path_uses_standard_property_names(table_name)
+        && table_name.rsplit('.').next() == Some("ОбъектыМетаданных")
+        && let Some(standard_name) = form_metadata_object_value_tree_column_name(&field_name)
+    {
+        return standard_name.to_string();
+    }
     normalize_form_data_path_child_name(table_name, &field_name)
+}
+
+/// Standard column names of the platform's own metadata-object value tree
+/// (`v8:ValueTree`, attribute type uuid
+/// `e603c0f2-92fb-4d47-8f38-a44a381cf235`), used for a `ОбъектыМетаданных`
+/// -named attribute regardless of the raw column names the form designer
+/// shows (the declared columns there are the plain Cyrillic captions, not
+/// the standard-attribute style the general alias table covers). Evidenced
+/// by a `ssl`-demo `DataProcessors` form for picking metadata objects, whose
+/// own `Table` writes `Объект.ОбъектыМетаданных.Presentation` and
+/// `Объект.ОбъектыМетаданных.Picture` for its `Представление` and
+/// `Картинка` columns; the attribute's other declared columns (`ПолноеИмя`,
+/// `Использование`, `Подчиненный`, `ТолькоЧтение`, `Корневой`, `Класс`) are
+/// never referenced by any DataPath in that form and stay unproven here.
+fn form_metadata_object_value_tree_column_name(raw_name: &str) -> Option<&'static str> {
+    match raw_name {
+        "Представление" => Some("Presentation"),
+        "Картинка" => Some("Picture"),
+        _ => None,
+    }
 }
 
 pub(super) fn normalize_form_data_path_child_name(parent_path: &str, name: &str) -> String {
