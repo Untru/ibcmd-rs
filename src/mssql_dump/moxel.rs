@@ -2041,13 +2041,17 @@ fn normalize_moxel_lines_to_published_citation_order(spreadsheet: &mut MoxelSpre
             }
         }
     }
-    if order.iter().copied().eq(0..spreadsheet.lines.len()) {
+    // This pass decides order, never membership: which entries survive is
+    // `compact_moxel_line_table`'s call, made against its own coverage
+    // evidence. A walk that does not name every entry of the table it was
+    // handed - or names one the table cannot answer - is therefore not this
+    // pass's case and leaves the table exactly as it found it.
+    if order.len() != spreadsheet.lines.len()
+        || order.iter().any(|index| *index >= spreadsheet.lines.len())
+    {
         return;
     }
-    // Fail-closed: a citation the table cannot answer is not this pass's case,
-    // and the table it would build would drop a line for a reference that
-    // resolves nowhere.
-    if order.iter().any(|index| *index >= spreadsheet.lines.len()) {
+    if order.iter().copied().eq(0..spreadsheet.lines.len()) {
         return;
     }
     let remap = order
