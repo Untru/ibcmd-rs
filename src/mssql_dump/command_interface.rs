@@ -9,6 +9,7 @@ pub(super) struct CommandInterface {
     pub(super) groups_order: Vec<String>,
     pub(super) commands_visibility: Vec<CommandInterfaceVisibilityEntry>,
     pub(super) subsystems_order: Vec<String>,
+    pub(super) subsystems_visibility: Vec<CommandInterfaceVisibilityEntry>,
 }
 
 impl CommandInterface {
@@ -30,6 +31,7 @@ impl CommandInterface {
             && self.groups_order.is_empty()
             && self.commands_visibility.is_empty()
             && self.subsystems_order.is_empty()
+            && self.subsystems_visibility.is_empty()
     }
 }
 
@@ -65,12 +67,30 @@ pub(super) struct HomePageWorkAreaItem {
     pub(super) form: String,
     pub(super) height: String,
     pub(super) common: bool,
+    /// The per-role overrides the item's visibility atom declares, in blob
+    /// order -- the same adjustable shape a command's visibility carries.
+    pub(super) values: Vec<CommandInterfaceVisibilityValue>,
 }
 
 pub(super) struct ClientApplicationInterface {
     pub(super) top: Vec<ClientApplicationInterfaceNode>,
     pub(super) left: Vec<ClientApplicationInterfaceNode>,
-    pub(super) panel_defs: Vec<String>,
+    pub(super) bottom: Vec<ClientApplicationInterfaceNode>,
+    pub(super) panel_defs: Vec<ClientApplicationPanelDef>,
+}
+
+pub(super) struct ClientApplicationPanelDef {
+    pub(super) id: String,
+    /// The panel's command representation, when the record states one.
+    ///
+    /// One occurrence on the whole stand: Документооборот КОРП 3.0.21.3's
+    /// `Ext/ClientApplicationInterface.xml` writes `{<uuid>,2,4}` and names
+    /// it `<spr>PictureOnLeftAndText</spr>`. Every other panel def of every
+    /// corpus writes `{<uuid>,0}` (or, once in БСП демо 3.1.12.297,
+    /// `{<uuid>,1,""}`) and the platform renders it self-closed, which is
+    /// what an unrecognized tail keeps doing here rather than inventing a
+    /// name for it.
+    pub(super) spr: Option<&'static str>,
 }
 
 pub(super) struct ClientApplicationInterfaceGroup {
@@ -167,6 +187,7 @@ pub(super) fn parse_command_interface_sectioned_fields(
             groups_order: Vec::new(),
             commands_visibility,
             subsystems_order: Vec::new(),
+            subsystems_visibility: Vec::new(),
         });
     }
 
@@ -212,12 +233,18 @@ pub(super) fn parse_command_interface_sectioned_fields(
     let count = parse_command_interface_section_count(fields, &mut index)?;
     let mut subsystems_order = Vec::with_capacity(count);
     for _ in 0..count {
-        let uuid = parse_non_zero_uuid(fields.get(index)?.trim())?;
-        subsystems_order.push(command_interface_subsystem_name(
-            &uuid,
-            metadata_refs,
-            subsystem_refs,
-        ));
+        // A slot in the declared order can be the zero uuid: it names no
+        // subsystem, and the platform still writes it, as a self-closed
+        // `<Subsystem/>` holding the position. Документооборот КОРП
+        // 3.0.21.3's `Subsystems/НастройкаИАдминистрирование` writes one
+        // among its fourteen. Refusing it cost the whole file.
+        let raw = fields.get(index)?.trim();
+        let uuid = parse_uuid_field(raw)?;
+        subsystems_order.push(if information_register_uuid_is_zero(&uuid) {
+            String::new()
+        } else {
+            command_interface_subsystem_name(&uuid, metadata_refs, subsystem_refs)
+        });
         index += 1;
     }
 
@@ -231,7 +258,35 @@ pub(super) fn parse_command_interface_sectioned_fields(
         index += 1;
     }
 
-    if fields.get(index)?.trim() != "0" || index + 1 != fields.len() {
+    // The sixth section is subsystem visibility, not a mandatory trailing
+    // zero: it carries `<uuid>,<visibility atom>` pairs in the same
+    // adjustable shape command visibility uses. Reading it as a terminator
+    // worked only because every record observed so far left it absent -- the
+    // marker is then `0` and the record ends there, which is also why the
+    // all-empty shape is six zeros rather than five and a tail. Документооборот
+    // КОРП 3.0.21.3's Configuration record populates it, and the whole
+    // `Ext/CommandInterface.xml` was refused over the leftover check.
+    let count = parse_command_interface_section_count(fields, &mut index)?;
+    let mut subsystems_visibility = Vec::with_capacity(count);
+    for _ in 0..count {
+        let uuid = parse_non_zero_uuid(fields.get(index)?.trim())?;
+        let name = command_interface_subsystem_name(&uuid, metadata_refs, subsystem_refs);
+        index += 1;
+        let field = fields.get(index)?;
+        let (common, values) =
+            match parse_command_interface_adjustable_visibility(field, metadata_refs) {
+                Some(parsed) => parsed,
+                None => (parse_command_interface_common_flag(field)?, Vec::new()),
+            };
+        index += 1;
+        subsystems_visibility.push(CommandInterfaceVisibilityEntry {
+            name,
+            common,
+            values,
+        });
+    }
+
+    if index != fields.len() {
         return None;
     }
 
@@ -241,6 +296,7 @@ pub(super) fn parse_command_interface_sectioned_fields(
         groups_order,
         commands_visibility,
         subsystems_order,
+        subsystems_visibility,
     })
 }
 
@@ -400,15 +456,21 @@ pub(super) fn command_interface_subsystem_name(
 pub(super) fn parse_home_page_work_area_blob(
     bytes: &[u8],
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<HomePageWorkArea> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
-    parse_home_page_work_area_text(text.trim_start_matches('\u{feff}'), form_refs)
+    parse_home_page_work_area_text(
+        text.trim_start_matches('\u{feff}'),
+        form_refs,
+        metadata_refs,
+    )
 }
 
 pub(super) fn parse_home_page_work_area_text(
     text: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<HomePageWorkArea> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "1" {
@@ -416,8 +478,10 @@ pub(super) fn parse_home_page_work_area_text(
     }
     let template = home_page_work_area_template_name(fields.get(1)?.trim())?;
     let mut index = 2usize;
-    let left_column = parse_home_page_work_area_column(&fields, &mut index, form_refs)?;
-    let right_column = parse_home_page_work_area_column(&fields, &mut index, form_refs)?;
+    let left_column =
+        parse_home_page_work_area_column(&fields, &mut index, form_refs, metadata_refs)?;
+    let right_column =
+        parse_home_page_work_area_column(&fields, &mut index, form_refs, metadata_refs)?;
 
     Some(HomePageWorkArea {
         template,
@@ -437,12 +501,13 @@ pub(super) fn parse_home_page_work_area_column(
     fields: &[&str],
     index: &mut usize,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<Vec<HomePageWorkAreaItem>> {
     let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
     *index += 1;
     let mut items = Vec::with_capacity(count);
     for _ in 0..count {
-        let item = parse_home_page_work_area_item(fields.get(*index)?, form_refs)?;
+        let item = parse_home_page_work_area_item(fields.get(*index)?, form_refs, metadata_refs)?;
         *index += 1;
         items.push(item);
     }
@@ -452,6 +517,7 @@ pub(super) fn parse_home_page_work_area_column(
 pub(super) fn parse_home_page_work_area_item(
     field: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<HomePageWorkAreaItem> {
     let fields = split_1c_braced_fields(field, 0)?;
     let form_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
@@ -461,12 +527,23 @@ pub(super) fn parse_home_page_work_area_item(
         .and_then(form_source_reference_name)
         .unwrap_or(form_uuid);
     let height = fields.get(2)?.trim().to_string();
-    let common = parse_command_interface_common_flag(fields.get(3)?)?;
+    // The item's visibility slot is the same adjustable atom a command's is
+    // (`{0,{0,{"B",c},N,<role uuid>,{"B",v},…}}`), and the platform prints
+    // its per-role overrides the same way. Reading only the common flag lost
+    // every one of them -- Документооборот КОРП 3.0.21.3's
+    // `Ext/HomePageWorkArea.xml` declares 62 across its two columns.
+    let visibility = fields.get(3)?;
+    let (common, values) =
+        match parse_command_interface_adjustable_visibility(visibility, metadata_refs) {
+            Some(parsed) => parsed,
+            None => (parse_command_interface_common_flag(visibility)?, Vec::new()),
+        };
 
     Some(HomePageWorkAreaItem {
         form,
         height,
         common,
+        values,
     })
 }
 
@@ -488,6 +565,7 @@ pub(super) fn parse_client_application_interface_text(
 
     let mut top = Vec::new();
     let mut left = Vec::new();
+    let mut bottom = Vec::new();
     let mut index = 1usize;
     while index < fields.len() {
         let Some(area_fields) = fields
@@ -503,6 +581,14 @@ pub(super) fn parse_client_application_interface_text(
         let group = parse_client_application_interface_area(area_fields.get(2)?)?;
         match area_code {
             "1" => top = group,
+            // Area 2 is the bottom band. Its only populated occurrence on the
+            // stand is Документооборот КОРП 3.0.21.3's, whose native
+            // `Ext/ClientApplicationInterface.xml` writes `<bottom>` right
+            // after `<left>`; ERP УХ and УТ leave it empty and write
+            // `<top>` before `<left>`, so the file order is top, left,
+            // bottom. Area 4 stays unread: it is empty in every corpus, so
+            // nothing observed says what it renders as.
+            "2" => bottom = group,
             "3" => left = group,
             _ => {}
         }
@@ -516,16 +602,32 @@ pub(super) fn parse_client_application_interface_text(
             break;
         }
         let panel_def_fields = split_1c_braced_fields(fields.get(index + 1)?, 0)?;
-        let panel_uuid = parse_non_zero_uuid(panel_def_fields.first()?.trim())?;
-        panel_defs.push(panel_uuid);
+        let id = parse_non_zero_uuid(panel_def_fields.first()?.trim())?;
+        panel_defs.push(ClientApplicationPanelDef {
+            id,
+            spr: client_application_panel_def_spr(&panel_def_fields),
+        });
         index += 2;
     }
 
     Some(ClientApplicationInterface {
         top,
         left,
+        bottom,
         panel_defs,
     })
+}
+
+/// The `<spr>` a panel definition states, if it states one this reader can
+/// name. See [`ClientApplicationPanelDef::spr`] for what the stand proves.
+fn client_application_panel_def_spr(panel_def_fields: &[&str]) -> Option<&'static str> {
+    match panel_def_fields.get(1)?.trim() {
+        "2" => match panel_def_fields.get(2)?.trim() {
+            "4" => Some("PictureOnLeftAndText"),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 pub(super) fn parse_client_application_interface_area(
@@ -720,9 +822,40 @@ pub(super) fn format_command_interface_xml(command_interface: &CommandInterface)
         }
         xml.push_str("\t</CommandsOrder>\r\n");
     }
+    // Position taken from the one native file on the stand that carries the
+    // section, Документооборот КОРП 3.0.21.3's `Ext/CommandInterface.xml`:
+    // `<SubsystemsVisibility>` precedes `<SubsystemsOrder>`.
+    if !command_interface.subsystems_visibility.is_empty() {
+        xml.push_str("\t<SubsystemsVisibility>\r\n");
+        for entry in &command_interface.subsystems_visibility {
+            xml.push_str(&format!(
+                "\t\t<Subsystem name=\"{}\">\r\n\
+\t\t\t<Visibility>\r\n\
+\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
+                escape_xml_text(&entry.name),
+                xml_bool(entry.common)
+            ));
+            for value in &entry.values {
+                xml.push_str(&format!(
+                    "\t\t\t\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+                    escape_xml_text(&value.name),
+                    xml_bool(value.value)
+                ));
+            }
+            xml.push_str(
+                "\t\t\t</Visibility>\r\n\
+\t\t</Subsystem>\r\n",
+            );
+        }
+        xml.push_str("\t</SubsystemsVisibility>\r\n");
+    }
     if !command_interface.subsystems_order.is_empty() {
         xml.push_str("\t<SubsystemsOrder>\r\n");
         for subsystem in &command_interface.subsystems_order {
+            if subsystem.is_empty() {
+                xml.push_str("\t\t<Subsystem/>\r\n");
+                continue;
+            }
             xml.push_str(&format!(
                 "\t\t<Subsystem>{}</Subsystem>\r\n",
                 escape_xml_text(subsystem)
@@ -775,13 +908,22 @@ pub(super) fn push_home_page_work_area_column_xml(
 \t\t\t<Form>{}</Form>\r\n\
 \t\t\t<Height>{}</Height>\r\n\
 \t\t\t<Visibility>\r\n\
-\t\t\t\t<xr:Common>{}</xr:Common>\r\n\
-\t\t\t</Visibility>\r\n\
-\t\t</Item>\r\n",
+\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
             escape_xml_element_text(&item.form),
             escape_xml_element_text(&item.height),
             xml_bool(item.common)
         ));
+        for value in &item.values {
+            xml.push_str(&format!(
+                "\t\t\t\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+                escape_xml_text(&value.name),
+                xml_bool(value.value)
+            ));
+        }
+        xml.push_str(
+            "\t\t\t</Visibility>\r\n\
+\t\t</Item>\r\n",
+        );
     }
     xml.push_str(&format!("\t</{tag}>\r\n"));
 }
@@ -799,11 +941,20 @@ pub(super) fn format_client_application_interface_xml(
     if !interface.left.is_empty() {
         push_client_application_interface_area_xml(&mut xml, "left", &interface.left);
     }
+    if !interface.bottom.is_empty() {
+        push_client_application_interface_area_xml(&mut xml, "bottom", &interface.bottom);
+    }
     for panel_def in &interface.panel_defs {
-        xml.push_str(&format!(
-            "\t<panelDef id=\"{}\"/>\r\n",
-            escape_xml_text(panel_def)
-        ));
+        match panel_def.spr {
+            Some(spr) => xml.push_str(&format!(
+                "\t<panelDef id=\"{}\">\r\n\t\t<spr>{spr}</spr>\r\n\t</panelDef>\r\n",
+                escape_xml_text(&panel_def.id)
+            )),
+            None => xml.push_str(&format!(
+                "\t<panelDef id=\"{}\"/>\r\n",
+                escape_xml_text(&panel_def.id)
+            )),
+        }
     }
     xml.push_str("</ClientApplicationInterface>");
     xml

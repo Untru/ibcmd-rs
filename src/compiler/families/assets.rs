@@ -440,6 +440,22 @@ const ROUTES: &[SourceAssetRoute] = &[
     ),
     route!("CommonPicture", Picture, ".0", "Ext/Picture.xml", Picture),
     route!("CommonCommand", Help, ".5", "Ext/Help.xml", Help),
+    // The remaining help slots, read off `ConfigDumpInfo.xml`, which names
+    // every versioned storage record: Документооборот КОРП 3.0.21.3 writes
+    // `Catalog.ДокументыПредприятия.Help` for `<uuid>.1`,
+    // `DataProcessor.ПодписаниеДанныхВМобильномДО.Help` for `<uuid>.1`,
+    // `InformationRegister.ТекущиеСостоянияДокументов.Help` for `<uuid>.0`,
+    // `CommonForm.СозданиеДокументаПоШаблону.Help` for `<uuid>.1`,
+    // `DocumentJournal.ЭлектроннаяПочта.Form.ФормаСписка.Help` for
+    // `<uuid>.1` and `Subsystem.СтандартныеПодсистемыДокументооборота.Help`
+    // for `<uuid>.0`. None of the six suffixes was claimed by another route
+    // of the same family.
+    route!("Catalog", Help, ".1", "Ext/Help.xml", Help),
+    route!("DataProcessor", Help, ".1", "Ext/Help.xml", Help),
+    route!("InformationRegister", Help, ".0", "Ext/Help.xml", Help),
+    route!("CommonForm", Help, ".1", "Ext/Help.xml", Help),
+    route!("Form", Help, ".1", "Ext/Help.xml", Help),
+    route!("Subsystem", Help, ".0", "Ext/Help.xml", Help),
     route!("Role", Rights, ".0", "Ext/Rights.xml", Rights),
     route!(
         "AccumulationRegister",

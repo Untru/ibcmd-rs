@@ -488,6 +488,14 @@ impl FilterCriterionDiagnosticTokens {
     pub(crate) const fn content_role() -> &'static str {
         "content"
     }
+
+    pub(crate) const fn form_role() -> &'static str {
+        "form"
+    }
+
+    pub(crate) const fn command_role() -> &'static str {
+        "command"
+    }
 }
 
 pub(crate) const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
@@ -513,6 +521,21 @@ pub(crate) const BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID: &str =
 pub(crate) const BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID: &str =
     "a3fe6537-d787-40f7-8a06-419d2f0c1cfd";
 pub(crate) const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
+/// A filter criterion's two owned-child collections, in the order its record
+/// writes them.
+///
+/// The command one is the same uuid `COMMAND_COLLECTION_LIST_MARKERS` already
+/// attributes to `FilterCriterion` from a whole-corpus census; the form one is
+/// read off the same records. Both were re-read on the extracted bytes of
+/// `do` 3.0.21.3's seven filter criteria, ERP УХ 3.2.12.6's
+/// `ЗадачиПоЭкземпляруБюджета`, `ДокументыВНАПоОснованию`,
+/// `ПротоколРассылкиПоАналитическойПодписке` and `ВзаимодействияКонтакта`,
+/// and БСП 3.1.12.297's `СвязанныеДокументы` -- the same pair opens the
+/// tail in every one of them, whether the collections are populated or empty.
+pub(crate) const FILTER_CRITERION_FORM_COLLECTION_UUID: &str =
+    "00867c40-06b1-11d6-a3c7-0050bae0a776";
+pub(crate) const FILTER_CRITERION_COMMAND_COLLECTION_UUID: &str =
+    "23fa3b84-220a-40e9-8331-e588bed87f7d";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OwnerGraphFamily {

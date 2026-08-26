@@ -2534,13 +2534,15 @@ pub(super) fn extract_configuration_source_xml(
         properties.localized_properties =
             parse_configuration_localized_properties_from_root(text, uuid);
     }
-    properties.used_mobile_application_functionalities =
+    let (functionalities, permission_messages) =
         parse_configuration_used_mobile_application_functionalities(
             text,
             uuid,
             source_version.as_str(),
         )
         .unwrap_or_default();
+    properties.used_mobile_application_functionalities = functionalities;
+    properties.used_mobile_application_permission_messages = permission_messages;
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
         let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
         for (slot, target) in [
@@ -2709,6 +2711,7 @@ pub(super) fn parse_configuration_properties_from_text(
         default_report_variant_form: None,
         default_report_settings_form: None,
         used_mobile_application_functionalities: Vec::new(),
+        used_mobile_application_permission_messages: Vec::new(),
         // See the evidence above `configuration_extension_compatibility_mode`:
         // on the genuine `{68,` shape `CompatibilityMode` mirrors that same
         // field 26 read (proven on three corpora -- ERP УХ's
@@ -2965,21 +2968,58 @@ const CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES: [(u32, &str); 38] = [
     (41, "TextToSpeech"),
 ];
 
+/// The OS permissions a `<app:permissionMessage>` can explain.
+///
+/// A separate vocabulary from the functionality table above -- the same name
+/// carries a different id in each (`Camera` is functionality 18 and
+/// permission 12) -- so nothing here is inferred from that one. These seven
+/// are read straight off Документооборот КОРП 3.0.21.3, the only
+/// configuration on the stand whose block carries messages at all: its
+/// record's seven ids line up one-to-one, in order, with the seven
+/// `<app:permission>` names its native `Configuration.xml` prints. Any other
+/// id fails closed.
+const CONFIGURATION_MOBILE_APPLICATION_PERMISSIONS: [(u32, &str); 7] = [
+    (0, "Biometrics"),
+    (12, "Camera"),
+    (13, "Microphone"),
+    (14, "MusicLibrary"),
+    (15, "PictureAndVideoLibraries"),
+    (16, "AudioPlaybackAndVibration"),
+    (20, "PostNotifications"),
+];
+
+fn configuration_mobile_application_permission_name(id: u32) -> Option<&'static str> {
+    CONFIGURATION_MOBILE_APPLICATION_PERMISSIONS
+        .iter()
+        .find_map(|(candidate, name)| (*candidate == id).then_some(*name))
+}
+
 pub(super) fn parse_configuration_used_mobile_application_functionalities(
     text: &str,
     uuid: &str,
     source_version: &str,
-) -> Option<Vec<ConfigurationMobileApplicationFunctionality>> {
+) -> Option<(
+    Vec<ConfigurationMobileApplicationFunctionality>,
+    Vec<ConfigurationMobileApplicationPermissionMessage>,
+)> {
     let fields = configuration_root_property_fields(text, uuid)?;
     let raw_fields = split_1c_braced_fields(fields.get(53)?.trim(), 0)?;
     if raw_fields.first()?.trim() != "2" {
         return None;
     }
     let count = raw_fields.get(1)?.trim().parse::<usize>().ok()?;
-    if raw_fields.len() != count.checked_add(3)? {
-        return None;
-    }
-    let trailing = parse_1c_bool_flag(raw_fields.last()?.trim())?;
+    // The pair table is followed by one scalar, and that scalar can in turn
+    // be followed by a counted list of permission messages -- Документооборот
+    // КОРП 3.0.21.3 writes seven, every other configuration on the stand
+    // writes the scalar `0` and stops. Demanding the table end right after
+    // the scalar dropped the whole block for the one that does not.
+    let tail = raw_fields.get(count.checked_add(2)?..)?;
+    let trailing_field = *tail.first()?;
+    let permission_messages = if tail.len() == 1 {
+        Vec::new()
+    } else {
+        parse_configuration_mobile_application_permission_messages(tail)?
+    };
     let mut functionalities = Vec::with_capacity(38);
     for ((expected_id, name), field) in CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
         .iter()
@@ -3014,17 +3054,53 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
         // The 2.17 dialect prints no `TextToSpeech` at all, so the shorter
         // record's trailing scalar is read for its shape and dropped. No
         // corpus shows how a full-length record maps onto that dialect.
-        ("2.17", n) if n + 1 == full => {}
+        ("2.17", n) if n + 1 == full => {
+            parse_1c_bool_flag(trailing_field.trim())?;
+        }
         ("2.20", n) if n + 1 == full => {
             functionalities.push(ConfigurationMobileApplicationFunctionality {
                 name: CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES[full - 1].1,
-                use_functionality: trailing,
+                use_functionality: parse_1c_bool_flag(trailing_field.trim())?,
             })
         }
         ("2.20" | "2.21", n) if n == full => {}
         _ => return None,
     }
-    Some(functionalities)
+    // The shorter record spends its trailing scalar on the last
+    // functionality's flag, so it has nowhere left to declare messages. Only
+    // the full-length shape is observed carrying them.
+    if !permission_messages.is_empty() && count != full {
+        return None;
+    }
+    Some((functionalities, permission_messages))
+}
+
+/// `<count>, {<permission id>, <localized description>} …`, the tail of a
+/// full-length mobile-functionalities table.
+fn parse_configuration_mobile_application_permission_messages(
+    tail: &[&str],
+) -> Option<Vec<ConfigurationMobileApplicationPermissionMessage>> {
+    let count = tail.first()?.trim().parse::<usize>().ok()?;
+    if tail.len() != count.checked_add(1)? {
+        return None;
+    }
+    let mut messages = Vec::with_capacity(count);
+    let mut seen = BTreeSet::new();
+    for field in tail.iter().skip(1) {
+        let entry = split_1c_braced_fields(field.trim(), 0)?;
+        if entry.len() != 2 {
+            return None;
+        }
+        let id = entry.first()?.trim().parse::<u32>().ok()?;
+        if !seen.insert(id) {
+            return None;
+        }
+        messages.push(ConfigurationMobileApplicationPermissionMessage {
+            permission: configuration_mobile_application_permission_name(id)?,
+            description: parse_1c_synonyms(entry.get(1)?.trim()),
+        });
+    }
+    Some(messages)
 }
 
 fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {

@@ -8228,6 +8228,15 @@ struct MetadataChildProperties {
     full_text_search: Option<&'static str>,
     data_history: Option<&'static str>,
     type_reduction_mode: Option<&'static str>,
+    /// `<BinaryDataStorageLocationUse>`, present only when the field's own
+    /// slot says so.
+    ///
+    /// One occurrence on the whole stand -- Документооборот КОРП 3.0.21.3's
+    /// `InformationRegisters/ОчередьОбновленияАдреснойКниги` resource
+    /// `ПараметрыОбновления` -- against 820 other ValueStorage-typed register
+    /// fields across five configurations that write neither the slot nor the
+    /// element, which is what rules the type out as the trigger.
+    binary_data_storage_location_use: Option<&'static str>,
     update_data_history_immediately_after_write: Option<bool>,
     execute_after_write_data_history_version_processing: Option<bool>,
 }
@@ -8661,6 +8670,10 @@ struct FilterCriterionFullProperties {
     value_types: Vec<ConstantValueType>,
     use_standard_commands: bool,
     content: Vec<String>,
+    default_form: Option<String>,
+    auxiliary_form: Option<String>,
+    child_forms: Vec<String>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -8742,6 +8755,8 @@ impl FilterCriterionDecodeReason {
 enum FilterCriterionCollectionRole {
     Pattern,
     Content,
+    Form,
+    Command,
 }
 
 impl FilterCriterionCollectionRole {
@@ -8749,6 +8764,8 @@ impl FilterCriterionCollectionRole {
         match self {
             Self::Pattern => owner_graph::FilterCriterionDiagnosticTokens::pattern_role(),
             Self::Content => owner_graph::FilterCriterionDiagnosticTokens::content_role(),
+            Self::Form => owner_graph::FilterCriterionDiagnosticTokens::form_role(),
+            Self::Command => owner_graph::FilterCriterionDiagnosticTokens::command_role(),
         }
     }
 }
@@ -8831,7 +8848,7 @@ impl From<owner_graph::DecodedGeneratedType> for GeneratedTypeEntry {
 
 struct ConstantProperties {
     generated_types: Vec<GeneratedTypeEntry>,
-    value_type: ConstantValueType,
+    value_types: Vec<ConstantValueType>,
     tooltip: Vec<(String, String)>,
     extended_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
@@ -9031,6 +9048,8 @@ struct ConfigurationProperties {
     default_report_variant_form: Option<ConfigurationRootReference>,
     default_report_settings_form: Option<ConfigurationRootReference>,
     used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
+    used_mobile_application_permission_messages:
+        Vec<ConfigurationMobileApplicationPermissionMessage>,
     compatibility_mode: Option<String>,
     /// Set only by the CF-container decode path
     /// (`extract_configuration_source_xml`'s own raw config-body text),
@@ -9061,6 +9080,14 @@ struct ConfigurationLocalizedProperties {
 struct ConfigurationMobileApplicationFunctionality {
     name: &'static str,
     use_functionality: bool,
+}
+
+/// One `<app:permissionMessage>` of the same block: the OS permission the
+/// message explains, and its localized text.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationMobileApplicationPermissionMessage {
+    permission: &'static str,
+    description: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -10664,7 +10691,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml")
     };
-    let nested_commands = if metadata_kind_can_own_commands(kind)
+    let mut nested_commands = if metadata_kind_can_own_commands(kind)
         && !matches!(
             kind,
             "Report"
@@ -10895,6 +10922,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             type_index,
             type_index_collisions,
             object_ref_resolutions,
+            object_refs,
+            form_refs,
             source_version,
         ) {
             Ok(Some(properties)) => properties,
@@ -10904,6 +10933,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                 return None;
             }
         };
+        if matches!(filter_criterion, FilterCriterionProperties::StrictFull(_)) {
+            // The strict decoder writes `<ChildObjects>` itself, from the
+            // criterion's own declared form and command collections. Leaving
+            // the generic text-scanning command pass armed on top of that
+            // wrote every owned command twice.
+            nested_commands = Vec::new();
+        }
         format_filter_criterion_source_xml(&header, &filter_criterion, source_version).into_bytes()
     } else if kind == "ChartOfAccounts" {
         match parse_chart_of_accounts_properties_from_text(
@@ -18262,11 +18298,22 @@ fn parse_information_register_child_payload_from_fields(
             properties.data_history = information_register_data_history(fields.get(4)?);
         }
         ("8", 7) | ("5", 7) => {
-            if fields.get(5)?.trim() != "0"
-                || !information_register_new_child_tail_is_valid(fields.get(6)?)
-            {
+            if !information_register_new_child_tail_is_valid(fields.get(6)?) {
                 return None;
             }
+            // Slot 5 is not a reserved zero: it is the field's own
+            // `<BinaryDataStorageLocationUse>` slot. Refusing every non-zero
+            // value there discarded the whole property block of the one field
+            // on the stand that writes one -- Документооборот КОРП
+            // 3.0.21.3's `InformationRegisters/ОчередьОбновленияАдреснойКниги`
+            // resource `ПараметрыОбновления` -- leaving a header-only
+            // `<Resource>`. Only the two values the stand shows are read; any
+            // other still fails closed.
+            properties.binary_data_storage_location_use = match fields.get(5)?.trim() {
+                "0" => None,
+                "1" => Some("DontUse"),
+                _ => return None,
+            };
             properties.indexing = information_register_indexing(fields.get(2)?);
             properties.full_text_search = information_register_full_text_search(fields.get(3)?);
             properties.data_history = information_register_data_history(fields.get(4)?);
@@ -18630,6 +18677,7 @@ fn parse_information_register_common_child_properties(
         full_text_search: None,
         data_history: None,
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -19338,6 +19386,7 @@ fn parse_catalog_child_properties(
         full_text_search: Some(full_text_search),
         data_history: Some(data_history),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -19701,6 +19750,7 @@ fn parse_document_child_properties(
         full_text_search: Some(full_text_search),
         data_history: Some(data_history),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -20435,6 +20485,7 @@ fn parse_accounting_register_child_properties_from_fields(
         full_text_search: None,
         data_history: None,
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -20555,6 +20606,7 @@ fn parse_metadata_child_properties_from_fields(
             .get(header_index + 25)
             .and_then(|field| metadata_data_history_xml(field.trim())),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: if matches!(owner_kind, "Catalog" | "Document")
         {
             fields
@@ -20688,6 +20740,7 @@ fn parse_data_processor_wrapped_child_properties(
         full_text_search: None,
         data_history: None,
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -22967,6 +23020,7 @@ fn parse_cct_attribute_properties(
             wrapper.get(data_history_index)?.trim(),
         )?),
         type_reduction_mode: None,
+        binary_data_storage_location_use: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -28546,6 +28600,10 @@ fn metadata_source_folder_for_kind(kind: &str) -> Option<&'static str> {
         "ChartOfAccounts" => Some("ChartsOfAccounts"),
         "ChartOfCalculationTypes" => Some("ChartsOfCalculationTypes"),
         "ChartOfCharacteristicTypes" => Some("ChartsOfCharacteristicTypes"),
+        // The inverse mapping (`metadata_kind_for_source_folder`) has always
+        // carried this pair; only the forward one was missing, because until
+        // now no filter criterion needed its own owned-form folder resolved.
+        "FilterCriterion" => Some("FilterCriteria"),
         _ => None,
     }
 }
@@ -28921,18 +28979,28 @@ fn parse_constant_properties_from_text(
 ) -> Option<ConstantProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
-    // A constant may declare more than one type -- `do`
+    // A constant may declare more than one type: `do`
     // `Constants/ОтветственныйЗаУдалениеНеактивныхВерсий` and
-    // `СотрудникДляЗаданияРаспознавания` each name two catalogs, and the
-    // platform writes both inside one `<Type>` element -- but the canonical
-    // model this writer routes through carries a single type, so a set still
-    // fails closed there. Of the 3 378 constants on the stand those two are
-    // the only ones with more than one.
-    let mut value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
-    if value_types.len() != 1 {
+    // `СотрудникДляЗаданияРаспознавания` each name two catalogs and the
+    // platform writes both inside one `<Type>` element. Of the 3 378
+    // constants on the stand those two are the only ones with more than one,
+    // and both name references only. A set that mixes in a qualifier-bearing
+    // primitive would also have to place its `<v8:StringQualifiers>` and
+    // friends somewhere inside that one element; nothing on the stand shows
+    // where, so such a set still fails closed rather than guessing.
+    let value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
+    if value_types.is_empty()
+        || (value_types.len() > 1
+            && !value_types.iter().all(|value_type| {
+                matches!(
+                    value_type,
+                    ConstantValueType::Reference { .. }
+                        | ConstantValueType::ReferenceTypeSet { .. }
+                )
+            }))
+    {
         return None;
     }
-    let value_type = value_types.pop()?;
 
     let constant_object_start = text[..marker_start].rfind("{16,")?;
     let constant_fields = split_1c_braced_fields(text, constant_object_start)?;
@@ -29012,7 +29080,7 @@ fn parse_constant_properties_from_text(
 
     Some(ConstantProperties {
         generated_types,
-        value_type,
+        value_types,
         tooltip,
         extended_presentation,
         explanation,
@@ -31574,7 +31642,29 @@ fn parse_event_subscription_properties_from_text(
     })
 }
 
-fn extract_style_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Result<String> {
+/// A style body opens with its format tag and its declared item count.
+///
+/// Read off the extracted `Styles/Основной/Ext/Style.xml` bodies of both
+/// stand configurations that own a style -- Документооборот КОРП 3.0.21.3
+/// (`{1,105,…}`, 105 members, 105 `<Item>` in the native export) and ERP УХ
+/// 3.2.12.6 (`{1,231,…}`, 231 and 231). The reader previously demanded `2`
+/// here, and `4`/`8` for the value tuples below, none of which any platform
+/// byte on the stand writes; the style item family's own reader, which does
+/// export byte-exactly, has always read the very same tuples as `3` and `7`.
+const STYLE_BODY_TAG: &str = "1";
+const STYLE_BODY_COLOR_TAG: &str = "3";
+const STYLE_BODY_BORDER_TAG: &str = "3";
+const STYLE_BODY_FONT_TAG: &str = "7";
+/// The only font form a style body is evidenced to carry: a reference to a
+/// style item (`kind="StyleItem"`). `Absolute` and `WindowsFont` bodies would
+/// need their own member layout, and neither appears on the stand.
+const STYLE_BODY_FONT_STYLE_ITEM_KIND: &str = "2";
+
+fn extract_style_body_xml(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<String> {
     let inflated = inflate_raw_deflate(bytes)?;
     let text = String::from_utf8(inflated)?;
     let mut items = parse_style_body_items(text.trim_start_matches('\u{feff}'), object_refs)
@@ -31586,7 +31676,7 @@ fn extract_style_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) 
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
             .then_with(|| left.name.cmp(&right.name))
     });
-    Ok(format_style_body_xml(&items))
+    Ok(format_style_body_xml(&items, source_version))
 }
 
 fn parse_style_body_items(
@@ -31594,15 +31684,15 @@ fn parse_style_body_items(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<StyleBodyItem>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "2" {
+    if fields.first()?.trim() != STYLE_BODY_TAG {
         return None;
     }
     let declared_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != declared_count + 2 {
+        return None;
+    }
     let mut items = Vec::new();
     for field in fields.iter().skip(2) {
-        if field.trim() == "{0}" {
-            continue;
-        }
         let entry = split_1c_braced_fields(field, 0)?;
         let (name, standard_order) = style_body_item_name(entry.first()?, object_refs)?;
         let value = entry.get(2)?;
@@ -31716,7 +31806,7 @@ fn parse_style_body_color_value(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "4" {
+    if fields.first()?.trim() != STYLE_BODY_COLOR_TAG {
         return None;
     }
     let variant = fields.get(1)?.trim().parse::<i32>().ok()?;
@@ -31730,53 +31820,62 @@ fn parse_style_body_color_value(
     }
 }
 
+/// A style body's font value is the same physical tuple `StyleItems/*.xml`
+/// carries, so it is read the same way: the mask at slot 2 declares which of
+/// height/weight/italic/underline/strikeout actually follow the reference, and
+/// the scale sits one past whatever the mask consumed. Reading fixed slots
+/// instead only happened to work for a mask that declares all of them.
+///
+/// Attribute order follows the native export: reference, then the members the
+/// mask declared, then `kind`, then a non-default scale -- ERP УХ 3.2.12.6
+/// writes `<Font ref="style:TextFont" bold="false" italic="false"
+/// underline="false" strikeout="true" kind="StyleItem"/>` for the one body
+/// font on the stand whose mask declares members (`{7,2,60,{-20},400,0,0,1,
+/// 1,100}`), and both configurations write `<Font ref="style:…"
+/// kind="StyleItem"/>` for every mask-0 one.
 fn parse_style_body_font_xml(
     value: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "8" {
+    if fields.first()?.trim() != STYLE_BODY_FONT_TAG
+        || fields.get(1)?.trim() != STYLE_BODY_FONT_STYLE_ITEM_KIND
+    {
         return None;
     }
-    let kind = fields.get(1).map(|field| field.trim()).unwrap_or("2");
     let mut attrs = Vec::<(&str, String)>::new();
-    if kind == "2" {
-        let reference = fields
-            .get(3)
-            .and_then(|field| style_body_ref_name(field, object_refs))
-            .unwrap_or_else(|| "style:TextFont".to_string());
-        attrs.push(("ref", reference));
-        attrs.push(("kind", "StyleItem".to_string()));
-    } else {
-        attrs.push(("kind", "Absolute".to_string()));
-    }
+    attrs.push(("ref", style_body_ref_name(fields.get(3)?, object_refs)?));
 
-    let weight = fields
-        .get(4)
-        .and_then(|field| field.trim().parse::<i32>().ok())
-        .unwrap_or(400);
-    let bold = weight >= 700;
-    let italic = fields
-        .get(5)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    let underline = fields
-        .get(6)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    let strikeout = fields
-        .get(7)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    if bold || italic || underline || strikeout {
-        attrs.push(("bold", xml_bool(bold).to_string()));
-        attrs.push(("italic", xml_bool(italic).to_string()));
-        attrs.push(("underline", xml_bool(underline).to_string()));
-        attrs.push(("strikeout", xml_bool(strikeout).to_string()));
-    }
-    if let Some(scale) = fields.get(9).map(|field| field.trim())
-        && scale != "100"
+    let mask = fields.get(2)?.trim().parse::<u32>().ok()?;
+    let mut cursor = 4usize;
+    if let Some(height) = style_font_member(&fields, mask, STYLE_FONT_MEMBER_HEIGHT, &mut cursor)
+        && let Some(height) = font_height_xml(Some(height))
     {
+        attrs.push(("height", height));
+    }
+    if let Some(weight) = style_font_member(&fields, mask, STYLE_FONT_MEMBER_WEIGHT, &mut cursor) {
+        let weight = weight.parse::<i32>().unwrap_or(STYLE_FONT_DEFAULT_WEIGHT);
+        attrs.push((
+            "bold",
+            xml_bool(weight >= STYLE_FONT_BOLD_WEIGHT).to_string(),
+        ));
+    }
+    for (bit, name) in [
+        (STYLE_FONT_MEMBER_ITALIC, "italic"),
+        (STYLE_FONT_MEMBER_UNDERLINE, "underline"),
+        (STYLE_FONT_MEMBER_STRIKEOUT, "strikeout"),
+    ] {
+        if let Some(raw) = style_font_member(&fields, mask, bit, &mut cursor) {
+            let flag = parse_1c_bool_flag(raw).unwrap_or(false);
+            attrs.push((name, xml_bool(flag).to_string()));
+        }
+    }
+    attrs.push(("kind", "StyleItem".to_string()));
+    let scale = fields
+        .get(cursor.saturating_add(1))
+        .map(|field| field.trim())
+        .unwrap_or(STYLE_FONT_DEFAULT_SCALE);
+    if scale != STYLE_FONT_DEFAULT_SCALE {
         attrs.push(("scale", scale.to_string()));
     }
 
@@ -31788,13 +31887,10 @@ fn parse_style_body_border_xml(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "3" {
+    if fields.first()?.trim() != STYLE_BODY_BORDER_TAG {
         return None;
     }
-    let reference = fields
-        .get(2)
-        .and_then(|field| style_body_ref_name(field, object_refs))
-        .unwrap_or_else(|| "style:ControlBorder".to_string());
+    let reference = style_body_ref_name(fields.get(2)?, object_refs)?;
     Some(format_empty_style_body_value(
         "Border",
         &[("ref", reference)],
@@ -31810,11 +31906,29 @@ fn format_empty_style_body_value(element: &str, attrs: &[(&str, String)]) -> Str
     xml
 }
 
-fn format_style_body_xml(items: &[StyleBodyItem]) -> String {
+/// The envelope the platform writes around a style body: a byte-order mark, a
+/// nine-namespace `Style` root at the export dialect, and no trailing newline
+/// after `</Style>` -- exactly the frame `Styles/Основной/Ext/Style.xml`
+/// carries in both stand configurations that own a style. The extra
+/// `xmlns:pal` belongs to the 2.21 dialect only, the same way
+/// `format_web_service_source_xml` adds it there and not to 2.20.
+fn format_style_body_xml(
+    items: &[StyleBodyItem],
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
     );
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        const STYLE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
+        const PALETTE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
+        if let Some(style_index) = xml.find(STYLE_NAMESPACE_ATTRIBUTE) {
+            xml.insert_str(style_index, PALETTE_NAMESPACE_ATTRIBUTE);
+        }
+    }
     for item in items {
         xml.push_str(&format!(
             "\t<Item name=\"{}\">\r\n\t\t{}\r\n\t</Item>\r\n",
@@ -31822,7 +31936,7 @@ fn format_style_body_xml(items: &[StyleBodyItem]) -> String {
             item.value_xml
         ));
     }
-    xml.push_str("</Style>\r\n");
+    xml.push_str("</Style>");
     xml
 }
 
@@ -32907,6 +33021,7 @@ fn format_configuration_source_xml(
         push_used_mobile_application_functionalities_xml(
             &mut insert,
             &properties.used_mobile_application_functionalities,
+            &properties.used_mobile_application_permission_messages,
         );
         insert.push_str(policy.standalone_through_default_style_segment());
         push_optional_simple_property_xml(
@@ -32918,6 +33033,7 @@ fn format_configuration_source_xml(
         push_used_mobile_application_functionalities_xml(
             &mut insert,
             &properties.used_mobile_application_functionalities,
+            &properties.used_mobile_application_permission_messages,
         );
     }
     if let Some(localized) = &properties.localized_properties {
@@ -33095,6 +33211,7 @@ fn push_optional_localized_property_xml(xml: &mut String, name: &str, values: &[
 fn push_used_mobile_application_functionalities_xml(
     xml: &mut String,
     functionalities: &[ConfigurationMobileApplicationFunctionality],
+    permission_messages: &[ConfigurationMobileApplicationPermissionMessage],
 ) {
     if functionalities.is_empty() {
         return;
@@ -33111,6 +33228,35 @@ fn push_used_mobile_application_functionalities_xml(
             xml_bool(functionality.use_functionality)
         ));
         xml.push_str("\t\t\t\t</app:functionality>\r\n");
+    }
+    // The messages follow every `<app:functionality>`, in record order --
+    // Документооборот КОРП 3.0.21.3's native `Configuration.xml` writes its
+    // seven that way.
+    for message in permission_messages {
+        xml.push_str("\t\t\t\t<app:permissionMessage>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t<app:permission>{}</app:permission>\r\n",
+            escape_xml_element_text(message.permission)
+        ));
+        if message.description.is_empty() {
+            xml.push_str("\t\t\t\t\t<app:description/>\r\n");
+        } else {
+            xml.push_str("\t\t\t\t\t<app:description>\r\n");
+            for (lang, content) in &message.description {
+                xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                    escape_xml_element_text(lang)
+                ));
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                    escape_xml_element_text(content)
+                ));
+                xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
+            }
+            xml.push_str("\t\t\t\t\t</app:description>\r\n");
+        }
+        xml.push_str("\t\t\t\t</app:permissionMessage>\r\n");
     }
     xml.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
 }
@@ -35575,6 +35721,14 @@ fn format_settings_storage_source_xml(
         properties.push_str("\t\t\t<AuxiliaryLoadForm/>\r\n");
         xml.insert_str(index, &properties);
     }
+    // A settings storage always declares the element, self-closed when it
+    // owns no form: Документооборот КОРП 3.0.21.3's
+    // `SettingsStorages/НастройкиОбработкиОценкаПроизводительности` owns none
+    // and native still writes `<ChildObjects/>`. The owned-form pass fills
+    // this in when there are forms (see `insert_metadata_child_objects_xml`).
+    if let Some(index) = xml.find("\t</SettingsStorage>\r\n") {
+        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+    }
     xml
 }
 
@@ -36320,6 +36474,17 @@ fn insert_metadata_child_objects_xml(xml: &mut String, owner_kind: &str, child_o
         xml.insert_str(index, child_objects);
         return;
     }
+    // A writer that already declared an empty `<ChildObjects/>` gets it
+    // filled in, not doubled: without this the fallthrough below appended a
+    // second, populated element after the self-closed one.
+    const EMPTY_CHILD_OBJECTS: &str = "\t\t<ChildObjects/>\r\n";
+    if let Some(index) = xml.rfind(EMPTY_CHILD_OBJECTS) {
+        xml.replace_range(
+            index..index + EMPTY_CHILD_OBJECTS.len(),
+            &format!("\t\t<ChildObjects>\r\n{child_objects}\t\t</ChildObjects>\r\n"),
+        );
+        return;
+    }
     let marker = format!("\t</{owner_kind}>");
     let Some(index) = xml.find(&marker) else {
         return;
@@ -36737,6 +36902,11 @@ fn push_metadata_child_properties_xml_with_tail_order(
     if let Some(data_history) = properties.data_history {
         xml.push_str(&format!(
             "{indent}<DataHistory>{data_history}</DataHistory>\r\n"
+        ));
+    }
+    if let Some(use_mode) = properties.binary_data_storage_location_use {
+        xml.push_str(&format!(
+            "{indent}<BinaryDataStorageLocationUse>{use_mode}</BinaryDataStorageLocationUse>\r\n"
         ));
     }
     if let Some(type_reduction_mode) = properties.type_reduction_mode {
@@ -37610,7 +37780,7 @@ fn format_constant_source_xml(
     let mut insert = format!(
         "{}\
 \t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-        format_constant_type_xml(&constant.value_type),
+        format_constant_types_xml(&constant.value_types),
         xml_bool(constant.use_standard_commands),
     );
     match &constant.default_form {
@@ -37926,12 +38096,15 @@ fn format_xdto_package_source_xml(
     xml
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_filter_criterion_properties_from_text(
     text: &str,
     expected_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
     source_version: InfobaseConfigSourceVersion,
 ) -> std::result::Result<Option<FilterCriterionProperties>, FilterCriterionDecodeError> {
     let root_fields = split_information_register_braced_fields(text).ok_or_else(|| {
@@ -38070,26 +38243,6 @@ fn parse_filter_criterion_properties_from_text(
             )
         })?;
 
-    for index in [8usize, 9] {
-        let uuid = parse_filter_criterion_uuid(
-            owner_fields.get(index).ok_or_else(|| {
-                FilterCriterionDecodeError::new(
-                    FilterCriterionDecodeStage::Owner,
-                    FilterCriterionDecodeReason::Shape,
-                )
-            })?,
-            FilterCriterionDecodeStage::Owner,
-            None,
-            None,
-            false,
-        )?;
-        if !information_register_uuid_is_zero(&uuid) {
-            return Err(FilterCriterionDecodeError::new(
-                FilterCriterionDecodeStage::Owner,
-                FilterCriterionDecodeReason::Shape,
-            ));
-        }
-    }
     for index in [10usize, 11, 12] {
         let fields = owner_fields
             .get(index)
@@ -38112,26 +38265,65 @@ fn parse_filter_criterion_properties_from_text(
         }
     }
 
-    let first_collection =
-        parse_filter_criterion_empty_collection(root_fields.get(3).ok_or_else(|| {
+    let form_items = parse_filter_criterion_child_collection(
+        root_fields.get(3).ok_or_else(|| {
             FilterCriterionDecodeError::new(
                 FilterCriterionDecodeStage::Tail,
                 FilterCriterionDecodeReason::Shape,
             )
-        })?)?;
-    let second_collection =
-        parse_filter_criterion_empty_collection(root_fields.get(4).ok_or_else(|| {
+        })?,
+        owner_graph::FILTER_CRITERION_FORM_COLLECTION_UUID,
+        FilterCriterionCollectionRole::Form,
+    )?;
+    let command_items = parse_filter_criterion_child_collection(
+        root_fields.get(4).ok_or_else(|| {
             FilterCriterionDecodeError::new(
                 FilterCriterionDecodeStage::Tail,
                 FilterCriterionDecodeReason::Shape,
             )
-        })?)?;
-    if first_collection.eq_ignore_ascii_case(&second_collection) {
-        return Err(FilterCriterionDecodeError::new(
-            FilterCriterionDecodeStage::Tail,
-            FilterCriterionDecodeReason::DuplicateUuid,
-        ));
-    }
+        })?,
+        owner_graph::FILTER_CRITERION_COMMAND_COLLECTION_UUID,
+        FilterCriterionCollectionRole::Command,
+    )?;
+
+    let form_uuids = parse_filter_criterion_owned_form_uuids(&form_items)?;
+    let child_forms =
+        parse_filter_criterion_child_form_names(&form_uuids, &expected_header.name, form_refs)?;
+    // Slots 8 and 9 are `DefaultForm` and `AuxiliaryForm`, not reserved zeros:
+    // every filter criterion that owns a form writes that form's uuid in slot
+    // 8 (`do` 3.0.21.3 has seven, ERP УХ 3.2.12.6 three more), and the ones
+    // that own none write the zero uuid there, which is what the earlier
+    // zeros-only reading mistook for the whole rule.
+    let default_form = parse_filter_criterion_owner_form_ref(
+        owner_fields.get(8).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        &form_uuids,
+        &expected_header.name,
+        form_refs,
+    )?;
+    let auxiliary_form = parse_filter_criterion_owner_form_ref(
+        owner_fields.get(9).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        &form_uuids,
+        &expected_header.name,
+        form_refs,
+    )?;
+
+    let child_commands = parse_filter_criterion_child_commands(
+        &command_items,
+        text,
+        &expected_header.uuid,
+        type_index,
+        object_refs,
+    )?;
 
     Ok(Some(FilterCriterionProperties::StrictFull(
         FilterCriterionFullProperties {
@@ -38152,8 +38344,265 @@ fn parse_filter_criterion_properties_from_text(
             value_types,
             use_standard_commands,
             content,
+            default_form,
+            auxiliary_form,
+            child_forms,
+            child_commands,
         },
     )))
+}
+
+/// One owned-child collection of a filter criterion's record tail.
+///
+/// The class uuid is checked, then the *declared* member count decides how
+/// many members follow -- a collection whose declaration and body disagree is
+/// refused rather than trimmed to whichever is shorter.
+fn parse_filter_criterion_child_collection<'a>(
+    value: &'a str,
+    expected_class_uuid: &str,
+    role: FilterCriterionCollectionRole,
+) -> std::result::Result<Vec<&'a str>, FilterCriterionDecodeError> {
+    let fields = split_information_register_braced_fields(value).ok_or_else(|| {
+        FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Shape,
+        )
+    })?;
+    let class_uuid = parse_filter_criterion_uuid(
+        fields.first().ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        FilterCriterionDecodeStage::Tail,
+        Some(role),
+        None,
+        true,
+    )?;
+    if !class_uuid.eq_ignore_ascii_case(expected_class_uuid) {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::InvalidReference,
+        ));
+    }
+    let declared = fields
+        .get(1)
+        .and_then(|value| parse_information_register_usize(value))
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?;
+    if fields.len() != declared + 2 {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Count,
+        ));
+    }
+    Ok(fields[2..].to_vec())
+}
+
+fn parse_filter_criterion_owned_form_uuids(
+    items: &[&str],
+) -> std::result::Result<Vec<String>, FilterCriterionDecodeError> {
+    let mut seen = BTreeSet::new();
+    let mut uuids = Vec::with_capacity(items.len());
+    for (item_index, value) in items.iter().enumerate() {
+        let uuid = parse_filter_criterion_uuid(
+            value,
+            FilterCriterionDecodeStage::Tail,
+            Some(FilterCriterionCollectionRole::Form),
+            Some(item_index),
+            true,
+        )?
+        .to_ascii_lowercase();
+        if !seen.insert(uuid.clone()) {
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::DuplicateUuid,
+                FilterCriterionCollectionRole::Form,
+                item_index,
+                Some(uuid),
+            ));
+        }
+        uuids.push(uuid);
+    }
+    Ok(uuids)
+}
+
+fn parse_filter_criterion_child_form_names(
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> std::result::Result<Vec<String>, FilterCriterionDecodeError> {
+    let prefix = format!("FilterCriterion.{owner_name}.Form.");
+    let mut names = Vec::with_capacity(form_uuids.len());
+    for (item_index, uuid) in form_uuids.iter().enumerate() {
+        let reference =
+            filter_criterion_owned_form_reference(uuid, owner_name, form_refs, item_index)?;
+        let name = reference.strip_prefix(&prefix).ok_or_else(|| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                FilterCriterionDecodeReason::InvalidReference,
+                FilterCriterionCollectionRole::Form,
+                item_index,
+                Some(uuid.clone()),
+            )
+        })?;
+        names.push(name.to_string());
+    }
+    Ok(names)
+}
+
+fn filter_criterion_owned_form_reference(
+    uuid: &str,
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    item_index: usize,
+) -> std::result::Result<String, FilterCriterionDecodeError> {
+    let fail = |reason: FilterCriterionDecodeReason| {
+        FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Resolver,
+            reason,
+            FilterCriterionCollectionRole::Form,
+            item_index,
+            Some(uuid.to_string()),
+        )
+    };
+    let mut matches = form_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+    let (_, form) = matches
+        .next()
+        .ok_or_else(|| fail(FilterCriterionDecodeReason::MissingReference))?;
+    if matches.next().is_some() {
+        return Err(fail(FilterCriterionDecodeReason::AmbiguousReference));
+    }
+    if form.kind != "Form"
+        || !is_owned_metadata_child_path(
+            &form.relative_path,
+            metadata_source_folder_for_kind("FilterCriterion")
+                .ok_or_else(|| fail(FilterCriterionDecodeReason::InvalidReference))?,
+            owner_name,
+            "Forms",
+        )
+    {
+        return Err(fail(FilterCriterionDecodeReason::InvalidReference));
+    }
+    let reference =
+        form_source_reference_name(form).ok_or_else(|| fail(FilterCriterionDecodeReason::Shape))?;
+    let prefix = format!("FilterCriterion.{owner_name}.Form.");
+    match reference.strip_prefix(&prefix) {
+        Some(name) if !name.is_empty() && !name.contains('.') => Ok(reference),
+        _ => Err(fail(FilterCriterionDecodeReason::InvalidReference)),
+    }
+}
+
+/// `DefaultForm` / `AuxiliaryForm`: the zero uuid means the property is left
+/// unset; any other value must name one of the criterion's own declared forms.
+fn parse_filter_criterion_owner_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> std::result::Result<Option<String>, FilterCriterionDecodeError> {
+    let uuid =
+        parse_filter_criterion_uuid(value, FilterCriterionDecodeStage::Owner, None, None, false)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Ok(None);
+    }
+    let uuid = uuid.to_ascii_lowercase();
+    let item_index = form_uuids
+        .iter()
+        .position(|candidate| candidate == &uuid)
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                FilterCriterionDecodeReason::MissingReference,
+                FilterCriterionCollectionRole::Form,
+                0,
+                Some(uuid.clone()),
+            )
+        })?;
+    filter_criterion_owned_form_reference(&uuid, owner_name, form_refs, item_index).map(Some)
+}
+
+fn parse_filter_criterion_child_commands(
+    items: &[&str],
+    text: &str,
+    owner_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> std::result::Result<Vec<MetadataChildCommand>, FilterCriterionDecodeError> {
+    let mut slots = Vec::with_capacity(items.len());
+    let mut identities = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let mut value_uuid = None::<String>;
+    for (item_index, value) in items.iter().enumerate() {
+        let fail = |reason: FilterCriterionDecodeReason| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Tail,
+                reason,
+                FilterCriterionCollectionRole::Command,
+                item_index,
+                None,
+            )
+        };
+        let slot = parse_owner_graph_command_identity_slot(value)
+            .ok_or_else(|| fail(FilterCriterionDecodeReason::Shape))?;
+        if !identities.insert(slot.identity_uuid.to_ascii_lowercase())
+            || !names.insert(slot.header.name.to_lowercase())
+        {
+            return Err(fail(FilterCriterionDecodeReason::DuplicateUuid));
+        }
+        if value_uuid
+            .as_ref()
+            .is_some_and(|shared| !shared.eq_ignore_ascii_case(&slot.value_uuid))
+        {
+            return Err(fail(FilterCriterionDecodeReason::InvalidReference));
+        }
+        value_uuid.get_or_insert_with(|| slot.value_uuid.clone());
+        slots.push(slot);
+    }
+
+    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    if commands.len() != slots.len() {
+        return Err(FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Count,
+            FilterCriterionCollectionRole::Command,
+            commands.len().min(slots.len()),
+            None,
+        ));
+    }
+    for (item_index, (command, slot)) in commands.iter().zip(&slots).enumerate() {
+        let reason = if command.properties.is_none() {
+            Some(FilterCriterionDecodeReason::Shape)
+        } else if !command
+            .header
+            .uuid
+            .eq_ignore_ascii_case(&slot.identity_uuid)
+            || command.header.name != slot.header.name
+            || command.header.synonyms != slot.header.synonyms
+            || command.header.comment != slot.header.comment
+        {
+            Some(FilterCriterionDecodeReason::HeaderMismatch)
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Tail,
+                reason,
+                FilterCriterionCollectionRole::Command,
+                item_index,
+                Some(slot.identity_uuid.clone()),
+            ));
+        }
+    }
+    Ok(commands)
 }
 
 fn filter_criterion_legacy_direct_header_is_valid(
@@ -38628,38 +39077,6 @@ fn filter_criterion_content_reference_is_valid(reference: &str) -> bool {
         )
 }
 
-fn parse_filter_criterion_empty_collection(
-    value: &str,
-) -> std::result::Result<String, FilterCriterionDecodeError> {
-    let fields = split_information_register_braced_fields(value).ok_or_else(|| {
-        FilterCriterionDecodeError::new(
-            FilterCriterionDecodeStage::Tail,
-            FilterCriterionDecodeReason::Shape,
-        )
-    })?;
-    let count = fields
-        .get(1)
-        .and_then(|value| parse_information_register_usize(value));
-    if fields.len() != 2 || count != Some(0) {
-        return Err(FilterCriterionDecodeError::new(
-            FilterCriterionDecodeStage::Tail,
-            FilterCriterionDecodeReason::Shape,
-        ));
-    }
-    parse_filter_criterion_uuid(
-        fields.first().ok_or_else(|| {
-            FilterCriterionDecodeError::new(
-                FilterCriterionDecodeStage::Tail,
-                FilterCriterionDecodeReason::Shape,
-            )
-        })?,
-        FilterCriterionDecodeStage::Tail,
-        None,
-        None,
-        true,
-    )
-}
-
 fn filter_criterion_extraction_diagnostic(
     error: FilterCriterionDecodeError,
 ) -> MetadataSourceExtractionDiagnostic {
@@ -38715,18 +39132,50 @@ fn format_filter_criterion_source_xml(
         }
         insert.push_str("\t\t\t</Content>\r\n");
     }
+    push_filter_criterion_form_property_xml(&mut insert, "DefaultForm", &properties.default_form);
+    push_filter_criterion_form_property_xml(
+        &mut insert,
+        "AuxiliaryForm",
+        &properties.auxiliary_form,
+    );
     insert.push_str(
-        "\t\t\t<DefaultForm/>\r\n\
-\t\t\t<AuxiliaryForm/>\r\n\
-\t\t\t<ListPresentation/>\r\n\
+        "\t\t\t<ListPresentation/>\r\n\
 \t\t\t<ExtendedListPresentation/>\r\n\
 \t\t\t<Explanation/>\r\n",
     );
     insert_metadata_properties_xml(&mut xml, &insert);
+    let mut child_objects = String::new();
+    for form in &properties.child_forms {
+        child_objects.push_str(&format!(
+            "\t\t\t<Form>{}</Form>\r\n",
+            escape_xml_element_text(form)
+        ));
+    }
+    for command in &properties.child_commands {
+        push_metadata_child_command_xml(&mut child_objects, command);
+    }
     if let Some(index) = xml.find("\t</FilterCriterion>\r\n") {
-        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        if child_objects.is_empty() {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        } else {
+            xml.insert_str(
+                index,
+                &format!("\t\t<ChildObjects>\r\n{child_objects}\t\t</ChildObjects>\r\n"),
+            );
+        }
     }
     xml
+}
+
+fn push_filter_criterion_form_property_xml(xml: &mut String, name: &str, value: &Option<String>) {
+    match value {
+        Some(value) => xml.push_str(&format!(
+            "\t\t\t<{name}>{}</{name}>\r\n",
+            escape_xml_element_text(value),
+            name = name
+        )),
+        None => xml.push_str(&format!("\t\t\t<{name}/>\r\n")),
+    }
 }
 
 fn insert_metadata_properties_xml(xml: &mut String, insert: &str) {
@@ -39512,16 +39961,40 @@ fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'st
     }
 }
 
+/// One `<Type>` element carrying every type the constant declares.
+///
+/// The platform writes a multi-type constant as several `<v8:Type>` lines
+/// inside the single element a one-type constant already uses -- `do`
+/// `Constants/ОтветственныйЗаУдалениеНеактивныхВерсий` names
+/// `cfg:CatalogRef.Сотрудники` and `cfg:CatalogRef.Пользователи` that way --
+/// so the members render exactly as they do on their own.
+fn format_constant_types_xml(value_types: &[ConstantValueType]) -> String {
+    if let [value_type] = value_types {
+        return format_constant_type_xml(value_type);
+    }
+    let mut xml = "\t\t\t<Type>\r\n".to_string();
+    for value_type in value_types {
+        xml.push_str(&format_constant_type_member_xml(value_type));
+    }
+    xml.push_str("\t\t\t</Type>\r\n");
+    xml
+}
+
 fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
+    format!(
+        "\t\t\t<Type>\r\n{}\t\t\t</Type>\r\n",
+        format_constant_type_member_xml(value_type)
+    )
+}
+
+fn format_constant_type_member_xml(value_type: &ConstantValueType) -> String {
     match value_type {
-        ConstantValueType::Boolean => {
-            "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n\t\t\t</Type>\r\n".to_string()
-        }
+        ConstantValueType::Boolean => "\t\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n".to_string(),
         ConstantValueType::String {
             length,
             allowed_length_flag,
         } => {
-            let mut xml = "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n".to_string();
+            let mut xml = "\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n".to_string();
             let allowed_length = if length.is_some() {
                 string_allowed_length_xml(*allowed_length_flag)
             } else {
@@ -39535,7 +40008,6 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
                 allowed_length
             ));
             xml.push_str("\t\t\t\t</v8:StringQualifiers>\r\n");
-            xml.push_str("\t\t\t</Type>\r\n");
             xml
         }
         ConstantValueType::Number {
@@ -39543,36 +40015,32 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
             fraction_digits,
             allowed_sign_flag,
         } => format!(
-            "\t\t\t<Type>\r\n\
-\t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
+            "\t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
 \t\t\t\t<v8:NumberQualifiers>\r\n\
 \t\t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
 \t\t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
 \t\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n\
-\t\t\t\t</v8:NumberQualifiers>\r\n\
-\t\t\t</Type>\r\n",
+\t\t\t\t</v8:NumberQualifiers>\r\n",
             number_allowed_sign_xml(*allowed_sign_flag)
         ),
         ConstantValueType::DateTime { date_fractions } => format!(
-            "\t\t\t<Type>\r\n\
-\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
+            "\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
 \t\t\t\t<v8:DateQualifiers>\r\n\
 \t\t\t\t\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
-\t\t\t\t</v8:DateQualifiers>\r\n\
-\t\t\t</Type>\r\n"
+\t\t\t\t</v8:DateQualifiers>\r\n"
         ),
         ConstantValueType::Reference { reference, .. } => {
             let tag = constant_reference_type_tag(reference);
             let namespace_attr = metadata_type_xml_namespace_attr(value_type);
             format!(
-                "\t\t\t<Type>\r\n\t\t\t\t<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n\t\t\t</Type>\r\n",
+                "\t\t\t\t<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n",
                 escape_xml_text(reference)
             )
         }
         ConstantValueType::ReferenceTypeSet { reference, .. } => {
             let namespace_attr = metadata_type_xml_namespace_attr(value_type);
             format!(
-                "\t\t\t<Type>\r\n\t\t\t\t<v8:TypeSet{namespace_attr}>{}</v8:TypeSet>\r\n\t\t\t</Type>\r\n",
+                "\t\t\t\t<v8:TypeSet{namespace_attr}>{}</v8:TypeSet>\r\n",
                 escape_xml_text(reference)
             )
         }

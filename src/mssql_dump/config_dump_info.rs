@@ -514,14 +514,50 @@ fn config_dump_top_name(
     let role_path = emitted_source_asset_paths
         .get(id)
         .or_else(|| source_assets.get(id).map(|asset| &asset.primary_path))
-        .or_else(|| module_text_paths.get(id))
-        .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has no typed row-role route"))?;
-    let role = role_path
-        .file_stem()
+        .or_else(|| module_text_paths.get(id));
+    if let Some(role_path) = role_path {
+        let role = role_path
+            .file_stem()
+            .and_then(|role| role.to_str())
+            .filter(|role| !role.is_empty())
+            .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has an invalid row-role route"))?;
+        return Ok(format!("{base}.{role}"));
+    }
+    // A record that decodes to nothing still has a name here. The three
+    // lookups above all go through an asset that was actually discovered or
+    // emitted, and an empty help body or an empty command interface produces
+    // neither -- the platform writes no `Ext/*.xml` for them, but
+    // `ConfigDumpInfo.xml` names them all the same (11 such entries on
+    // Документооборот КОРП 3.0.21.3, and the very same situation the
+    // Configuration root's own `.9`/`.a` pair already resolves from the route
+    // table in `add_configuration_root_command_interface_references`). So the
+    // role comes from the same typed (family, suffix) table, keyed by the
+    // owner's own family.
+    let (_, suffix) = id
+        .rsplit_once('.')
+        .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has no row suffix"))?;
+    let family = metadata_reference_family(base)
+        .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} owner {base} names no family"))?;
+    let role = crate::compiler::families::assets::SourceAssetRegistry
+        .route_by_suffix(family, suffix)
+        .and_then(|route| Path::new(route.relative_path()).file_stem())
         .and_then(|role| role.to_str())
-        .filter(|role| !role.is_empty())
-        .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has an invalid row-role route"))?;
+        .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has no typed row-role route"))?;
     Ok(format!("{base}.{role}"))
+}
+
+/// The metadata family a canonical reference names.
+///
+/// A reference is `Kind.Name` repeated (`Catalog.X`,
+/// `Subsystem.A.Subsystem.B`, `DocumentJournal.J.Form.F`), and 1C forbids a
+/// dot inside a metadata name, so the family is always the second-to-last
+/// segment.
+fn metadata_reference_family(reference: &str) -> Option<&str> {
+    let segments = reference.split('.').collect::<Vec<_>>();
+    if segments.len() < 2 || segments.len() % 2 != 0 {
+        return None;
+    }
+    segments.get(segments.len() - 2).copied()
 }
 
 fn build_config_dump_children(

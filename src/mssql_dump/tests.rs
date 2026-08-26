@@ -5915,7 +5915,7 @@ fn extracts_home_page_work_area_with_form_references() {
         },
     )]);
 
-    let work_area = parse_home_page_work_area_blob(&body, &form_refs).unwrap();
+    let work_area = parse_home_page_work_area_blob(&body, &form_refs, &BTreeMap::new()).unwrap();
     let xml = format_home_page_work_area_xml(&work_area, InfobaseConfigSourceVersion::V2_20);
 
     assert!(xml.contains("<WorkingAreaTemplate>TwoColumnsVariableWidth</WorkingAreaTemplate>"));
@@ -37684,16 +37684,34 @@ fn role_rights_blob_configuration_root_inverts_when_set_for_new_objects_true() {
 #[test]
 fn role_rights_blob_configuration_root_refuses_unnamed_right_diverging_from_default() {
     let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
-    // Identical to the always-tolerated shape except the first unnamed right
-    // (`3762abec…`) is true while `setForNewObjects` is false. Every
+    // Identical to the always-tolerated shape except the still-unnamed right
+    // (`4df6d046…`) is true while `setForNewObjects` is false. Every
     // occurrence of that UUID in the ERP УХ corpus matched the role's own
     // default (2026-08-24, 1,679/1,679), so a value that doesn't is an
     // unproven shape: the whole blob is refused rather than guessing a name.
-    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,3762abec-3836-446a-83ce-3e05001bca8b,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,4df6d046-3bf8-4dda-991c-53ba664296a5,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
     let rights_blob = deflate_for_test(rights_text.as_bytes());
     let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
 
     assert!(parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).is_none());
+}
+
+#[test]
+fn role_rights_blob_configuration_root_names_collaboration_system_registration() {
+    let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    // The same shape for `3762abec…`, which used to share that refusal: the
+    // uuid is named now, because Документооборот КОРП 3.0.21.3's
+    // `Roles/АдминистраторСистемы` writes it diverging from the flag and the
+    // platform's own `Ext/Rights.xml` prints the name for it.
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,3762abec-3836-446a-83ce-3e05001bca8b,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
+
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    let xml = format_role_rights_xml(&rights);
+
+    assert!(xml.contains("<name>CollaborationSystemInfoBaseRegistration</name>"));
+    assert!(!xml.contains("3762abec"));
 }
 
 #[test]
@@ -46723,8 +46741,9 @@ fn extracts_configuration_used_mobile_application_functionalities_for_proven_lay
     );
 
     let (uuid, text) = flat_configuration_mobile_text(67, 60, &raw37);
-    let v17 =
+    let (v17, v17_messages) =
         parse_configuration_used_mobile_application_functionalities(&text, &uuid, "2.17").unwrap();
+    assert!(v17_messages.is_empty());
     assert_eq!(v17.len(), 37);
     assert_eq!(v17.first().map(|item| item.name), Some("Biometrics"));
     assert_eq!(
@@ -47787,7 +47806,7 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
                 value_id: "44444444-4444-4444-8444-444444444444".to_string(),
             },
         ],
-        value_type,
+        value_types: vec![value_type],
         tooltip: vec![("en".to_string(), "Use feature tip".to_string())],
         extended_presentation: Vec::new(),
         explanation: Vec::new(),
@@ -50475,9 +50494,13 @@ fn strict_filter_criterion_fixture() -> StrictFilterCriterionFixture {
     let content_ids = (0..2)
         .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
         .collect::<Vec<_>>();
-    let tail_ids = (0..2)
-        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
-        .collect::<Vec<_>>();
+    // The tail collections are not anonymous: a filter criterion's record
+    // opens them with the class uuids the platform gives its Form and Command
+    // children, so the fixture uses those rather than two fresh uuids.
+    let tail_ids = vec![
+        owner_graph::FILTER_CRITERION_FORM_COLLECTION_UUID.to_string(),
+        owner_graph::FILTER_CRITERION_COMMAND_COLLECTION_UUID.to_string(),
+    ];
     let type_references = [
         "cfg:CatalogRef.Products",
         "cfg:DocumentRef.Invoice",
@@ -50786,9 +50809,10 @@ fn extracts_strict_v20_filter_criterion_with_two_types_and_448_ordered_content_i
     let content_ids = (0..448)
         .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
         .collect::<Vec<_>>();
-    let tail_ids = (0..2)
-        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
-        .collect::<Vec<_>>();
+    let tail_ids = vec![
+        owner_graph::FILTER_CRITERION_FORM_COLLECTION_UUID.to_string(),
+        owner_graph::FILTER_CRITERION_COMMAND_COLLECTION_UUID.to_string(),
+    ];
     let raw = strict_filter_criterion_raw_for_test(
         &owner_uuid,
         "SyntheticCriterion",
@@ -51338,6 +51362,8 @@ fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
             &fixture.type_index,
             &BTreeSet::new(),
             &MetadataObjectReferenceIndexes::from_legacy(&fixture.object_refs).resolutions,
+            &fixture.object_refs,
+            &BTreeMap::new(),
             InfobaseConfigSourceVersion::V2_20,
         )
         .is_err(),
@@ -54623,7 +54649,12 @@ fn writes_style_body_xml_to_source_layout() {
         );
     let style_body = deflate_for_test(
             format!(
-                "{{2,8,{{{{-1}},0,{{4,2,{{20}},2}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{8,2,0,{{-20}},1,100}}}},{{{{-42}},0,{{4,0,{{14474460}},0}}}},{{{{-43}},0,{{4,0,{{15658734}},0}}}},{{{{-44}},0,{{4,3,{{-44}},3}}}},{{{{0,{color_uuid}}},0,{{4,0,{{13158655}},0}}}},{{{{0,{font_uuid}}},1,{{8,2,60,{{-20}},400,0,0,1,1,100}}}},{{0}}}}"
+                // Tags and member layout as the platform writes them: the
+                // body opens `{1,<count>,…}`, colour and border values open
+                // `{3,…}` and font values `{7,kind,mask,…}`. Taken from the
+                // extracted `Styles/Основной/Ext/Style.xml` bodies of
+                // Документооборот КОРП 3.0.21.3 and ERP УХ 3.2.12.6.
+                "{{1,8,{{{{-1}},0,{{3,2,{{20}}}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{7,2,0,{{-20}},1,100}}}},{{{{-42}},0,{{3,0,{{14474460}}}}}},{{{{-43}},0,{{3,0,{{15658734}}}}}},{{{{-44}},0,{{3,3,{{-44}}}}}},{{{{0,{color_uuid}}},0,{{3,0,{{13158655}}}}}},{{{{0,{font_uuid}}},1,{{7,2,60,{{-20}},400,0,0,1,1,100}}}}}}"
             )
             .as_bytes(),
         );
@@ -54675,7 +54706,7 @@ fn writes_style_body_xml_to_source_layout() {
     assert!(xml.contains("<Color>#FFC8C8</Color>"));
     assert!(xml.contains("<Item name=\"StyleItem.StrikeFont\">"));
     assert!(xml.contains(
-            "<Font ref=\"style:TextFont\" kind=\"StyleItem\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"true\"/>"
+            "<Font ref=\"style:TextFont\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"true\" kind=\"StyleItem\"/>"
         ));
 
     let body_row = dumped
