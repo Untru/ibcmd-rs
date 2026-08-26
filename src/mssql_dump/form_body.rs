@@ -11008,6 +11008,27 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.border_color.clone())
+        } else if tag == "PictureDecoration" {
+            // Slot 6 of the decoration's own thirteen-member option tuple,
+            // read by the one colour reader every other owner uses.  The
+            // decoration had no branch here at all, so the element was never
+            // written for it.
+            //
+            // Census over both configurations whose form layouts were dumped,
+            // pairing each `12`/`PictureDecoration` record with the native item
+            // of the same name: Документооборот КОРП 3.0.21.3, 1 599
+            // decorations -- `{3,4,{0}}` (the colour reader's "no colour") on
+            // exactly the 1 593 that write no `<BorderColor>` and
+            // `{3,3,{0,<style uuid>}}` on exactly the 6 that do.  ERP УХ
+            // 3.2.12.6, 7 659 decorations -- the same "no colour" shape on
+            // exactly the 7 657 that write nothing and `{3,2,{73}}` on exactly
+            // the 2 that say `web:LightSalmon`.  Two different colour spaces
+            // land in the same slot and both are what the shared reader
+            // already spells; no shape maps to two answers.
+            picture_decoration_options
+                .as_deref()
+                .and_then(|options| options.get(FormPictureDecorationSchema::BORDER_COLOR_SLOT))
+                .and_then(|field| parse_form_control_color(field, object_refs))
         } else if let Some(value) = popup_color_schema
             .and(fields.get(FormPopupColorSchema::OPTIONS_SLOT))
             .and_then(|field| split_1c_braced_fields(field.trim(), 0))
@@ -25464,6 +25485,23 @@ pub(super) fn format_form_child_item_xml(
             }
             if item.decoration_enable_drag == Some(true) {
                 xml.push_str(&format!("{tab}\t<EnableDrag>true</EnableDrag>\r\n"));
+            }
+            // `BorderColor` sits directly ahead of `Border`.  Over the 23
+            // `<PictureDecoration>` elements of the five reference trees that
+            // carry one, it trails `Picture` (16), `PictureSize` (17),
+            // `VerticalStretch` (19), `Height` (17), `Width` (16),
+            // `HorizontalStretch` (7), `Visible` (3), `AutoMaxHeight` (3),
+            // `MaxHeight` (3), `Title` (2) and `Hyperlink` (2), and leads
+            // `Border` (2), `FileDragMode` (17), `ContextMenu` (23),
+            // `ExtendedTooltip` (23) and `Events` (2), with no pair counted
+            // both ways.  No decoration in the corpus carries it together with
+            // the drag pair, so it is written where the pairs that *are*
+            // observed put it: behind the picture run, ahead of `Border`.
+            if let Some(border_color) = &item.border_color {
+                xml.push_str(&format!(
+                    "{tab}\t<BorderColor>{}</BorderColor>\r\n",
+                    escape_xml_text(border_color)
+                ));
             }
             xml.push_str(&format_form_control_border_xml(item, indent + 1));
             if let Some(file_drag_mode) = item.file_drag_mode {

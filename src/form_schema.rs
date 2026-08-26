@@ -2290,6 +2290,8 @@ pub(crate) struct FormPictureDecorationProperties {
 
 impl FormPictureDecorationSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
+    /// `BorderColor` of the decoration, inside its own option tuple.
+    pub(crate) const BORDER_COLOR_SLOT: usize = 6;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
