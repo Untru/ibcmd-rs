@@ -73,8 +73,8 @@ mod characteristics {
     pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
     use crate::metadata_owner_graph::{
         CHARACTERISTICS_REASON_TOKENS, CHARACTERISTICS_REFERENCE_KIND_TOKENS,
-        CHARACTERISTICS_STAGE_TOKENS, CharacteristicsPhysicalSchema, CharacteristicsSentinelKind,
-        CharacteristicsStandardAttributeKind, CharacteristicsTagKind, OwnerGraphFamily,
+        CHARACTERISTICS_STAGE_TOKENS, CharacteristicsOwnerFamily, CharacteristicsPhysicalSchema,
+        CharacteristicsSentinelKind, CharacteristicsStandardAttributeKind, CharacteristicsTagKind,
     };
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -97,7 +97,6 @@ mod characteristics {
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub(super) enum CharacteristicsReason {
-        UnsupportedFamily,
         InvalidEnvelope,
         InvalidCount,
         InvalidTypeTag,
@@ -131,7 +130,7 @@ mod characteristics {
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub(super) struct CharacteristicsDiagnostic {
-        pub(super) family: OwnerGraphFamily,
+        pub(super) family: CharacteristicsOwnerFamily,
         pub(super) stage: CharacteristicsStage,
         pub(super) field_index: usize,
         pub(super) item_index: Option<usize>,
@@ -142,7 +141,7 @@ mod characteristics {
 
     impl CharacteristicsDiagnostic {
         fn new(
-            family: OwnerGraphFamily,
+            family: CharacteristicsOwnerFamily,
             stage: CharacteristicsStage,
             item_index: Option<usize>,
             role: CharacteristicRole,
@@ -152,7 +151,7 @@ mod characteristics {
             Self {
                 family,
                 stage,
-                field_index: characteristics_slot(family).unwrap_or(0),
+                field_index: characteristics_slot(family),
                 item_index,
                 role,
                 reference_kind,
@@ -161,51 +160,30 @@ mod characteristics {
         }
     }
 
-    pub(super) fn characteristics_slot(
-        family: OwnerGraphFamily,
-    ) -> Result<usize, CharacteristicsDiagnostic> {
+    /// Which owner-record field carries the `Characteristics` collection.
+    /// Every family that declares the property has one; `BusinessProcess` (41)
+    /// and `Task` (44) were confirmed on real bytes by locating the slot whose
+    /// payload items are typed with the platform's own Characteristic type
+    /// uuid, then checking the declared item count against the number of
+    /// `<xr:Characteristic>` elements the platform writes for the same object.
+    pub(super) const fn characteristics_slot(family: CharacteristicsOwnerFamily) -> usize {
         match family {
-            OwnerGraphFamily::Catalog => Ok(52),
-            OwnerGraphFamily::Document => Ok(45),
-            OwnerGraphFamily::ChartOfCharacteristicTypes => Ok(50),
-            OwnerGraphFamily::BusinessProcess => Err(CharacteristicsDiagnostic {
-                family,
-                stage: CharacteristicsStage::Outer,
-                field_index: 0,
-                item_index: None,
-                role: CharacteristicRole::Collection,
-                reference_kind: None,
-                reason: CharacteristicsReason::UnsupportedFamily,
-            }),
+            CharacteristicsOwnerFamily::Catalog => 52,
+            CharacteristicsOwnerFamily::Document => 45,
+            CharacteristicsOwnerFamily::ChartOfCharacteristicTypes => 50,
+            CharacteristicsOwnerFamily::BusinessProcess => 41,
+            CharacteristicsOwnerFamily::Task => 44,
         }
     }
 
-    pub(super) fn decode_characteristics(
-        family: OwnerGraphFamily,
-        value: &str,
-        type_index: &BTreeMap<String, String>,
-        metadata_object_refs: &BTreeMap<String, String>,
-        object_refs: &BTreeMap<String, String>,
-    ) -> Result<Characteristics, CharacteristicsDiagnostic> {
-        decode_characteristics_with_owner_code(
-            family,
-            None,
-            value,
-            type_index,
-            metadata_object_refs,
-            object_refs,
-        )
-    }
-
     pub(super) fn decode_characteristics_with_owner_code(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         owner_code: Option<&str>,
         value: &str,
         type_index: &BTreeMap<String, String>,
         metadata_object_refs: &BTreeMap<String, String>,
         object_refs: &BTreeMap<String, String>,
     ) -> Result<Characteristics, CharacteristicsDiagnostic> {
-        let _ = characteristics_slot(family)?;
         let outer = split_information_register_braced_fields(value).ok_or_else(|| {
             diagnostic(
                 family,
@@ -260,7 +238,7 @@ mod characteristics {
                 .then(|| fields[0].trim().parse::<i32>().ok())
                 .flatten()
         };
-        if matches!(family, OwnerGraphFamily::Catalog)
+        if matches!(family, CharacteristicsOwnerFamily::Catalog)
             && CharacteristicsPhysicalSchema::catalog_57_legacy_empty(
                 owner_code.unwrap_or_default(),
                 outer
@@ -318,7 +296,7 @@ mod characteristics {
     }
 
     fn decode_item(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         type_index: &BTreeMap<String, String>,
@@ -509,7 +487,7 @@ mod characteristics {
     }
 
     fn decode_source(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         role: CharacteristicRole,
@@ -578,7 +556,7 @@ mod characteristics {
     }
 
     pub(super) fn decode_field(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         role: CharacteristicRole,
@@ -770,7 +748,7 @@ mod characteristics {
     }
 
     pub(super) fn decode_filter_value(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         value: &str,
         type_index: &BTreeMap<String, String>,
@@ -853,7 +831,7 @@ mod characteristics {
     }
 
     fn diagnostic(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         stage: CharacteristicsStage,
         item_index: Option<usize>,
         role: CharacteristicRole,
@@ -864,7 +842,7 @@ mod characteristics {
     }
 
     fn item_diagnostic(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         stage: CharacteristicsStage,
         role: CharacteristicRole,
@@ -882,7 +860,7 @@ mod characteristics {
     }
 
     fn unresolved(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         stage: CharacteristicsStage,
         role: CharacteristicRole,
@@ -899,7 +877,7 @@ mod characteristics {
     }
 
     fn malformed_field(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         role: CharacteristicRole,
         reference_kind: Option<CharacteristicsReferenceKind>,
@@ -916,7 +894,7 @@ mod characteristics {
     }
 
     fn unsupported_filter(
-        family: OwnerGraphFamily,
+        family: CharacteristicsOwnerFamily,
         item_index: usize,
         reference_kind: Option<CharacteristicsReferenceKind>,
     ) -> CharacteristicsDiagnostic {
@@ -8470,6 +8448,7 @@ struct DocumentNumberingProperties {
 
 struct BusinessProcessProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    characteristics: Characteristics,
     use_standard_commands: bool,
     edit_type: &'static str,
     input_by_string: Vec<String>,
@@ -8514,6 +8493,7 @@ struct BusinessProcessProperties {
 
 struct TaskProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    characteristics: Characteristics,
     internal_uuid_slots: TaskInternalUuidSlots,
     use_standard_commands: bool,
     number_type: &'static str,
@@ -10737,7 +10717,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             owner_graph_diagnostic,
         )?;
-        format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
+        format_business_process_source_xml(&header, &business_process, source_version)?.into_bytes()
     } else if kind == "Task" {
         let task = parse_task_properties_from_text(
             text,
@@ -10748,7 +10728,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             owner_graph_diagnostic,
         )?;
-        format_task_source_xml(&header, &task, source_version).into_bytes()
+        format_task_source_xml(&header, &task, source_version)?.into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid, form_refs)?;
         format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
@@ -13357,8 +13337,7 @@ fn characteristics_extraction_diagnostic(
     failure: characteristics::CharacteristicsDiagnostic,
 ) -> MetadataSourceExtractionDiagnostic {
     let class = match failure.reason {
-        characteristics::CharacteristicsReason::UnsupportedFamily
-        | characteristics::CharacteristicsReason::UnsupportedMarker
+        characteristics::CharacteristicsReason::UnsupportedMarker
         | characteristics::CharacteristicsReason::UnsupportedFilterUnion => {
             MetadataSourceFailureClass::Unsupported
         }
@@ -13392,20 +13371,14 @@ fn characteristics_extraction_diagnostic(
 }
 
 fn decode_owner_characteristics(
-    family: owner_graph::OwnerGraphFamily,
+    family: owner_graph::CharacteristicsOwnerFamily,
     fields: &[&str],
     type_index: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<Characteristics> {
-    let slot = match characteristics::characteristics_slot(family) {
-        Ok(slot) => slot,
-        Err(failure) => {
-            *diagnostic = Some(characteristics_extraction_diagnostic(failure));
-            return None;
-        }
-    };
+    let slot = characteristics::characteristics_slot(family);
     match characteristics::decode_characteristics_with_owner_code(
         family,
         fields.first().map(|value| value.trim()),
@@ -21960,7 +21933,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     )?;
 
     let characteristics = decode_owner_characteristics(
-        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
         fields,
         type_index,
         metadata_object_refs,
@@ -23241,7 +23214,7 @@ fn parse_strict_catalog_properties_from_text(
         &METADATA_BASED_ON_PREFIXES,
     )?;
     let characteristics = decode_owner_characteristics(
-        owner_graph::OwnerGraphFamily::Catalog,
+        owner_graph::CharacteristicsOwnerFamily::Catalog,
         fields,
         type_index,
         metadata_object_refs,
@@ -24524,7 +24497,7 @@ fn parse_document_properties_from_text(
         owner_graph_diagnostic,
     )?;
     let characteristics = decode_owner_characteristics(
-        owner_graph::OwnerGraphFamily::Document,
+        owner_graph::CharacteristicsOwnerFamily::Document,
         fields,
         type_index,
         metadata_object_refs,
@@ -25576,9 +25549,14 @@ fn parse_business_process_properties_from_text(
         choice_data_get_mode_on_input_by_string,
     ) = parse_owner_input_modes(fields.get(44)?)?;
 
-    if !task_characteristics_is_empty(fields.get(41)?) {
-        return None;
-    }
+    let characteristics = decode_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::BusinessProcess,
+        fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        owner_graph_diagnostic,
+    )?;
 
     let mut identities = owner_graph.identities.clone();
     record_owner_graph_child_ids(
@@ -25627,6 +25605,7 @@ fn parse_business_process_properties_from_text(
 
     Some(BusinessProcessProperties {
         generated_types,
+        characteristics,
         use_standard_commands: information_register_bool(fields.get(2)?)?,
         edit_type: match fields.get(16)?.trim() {
             "1" => "InDialog",
@@ -26287,11 +26266,19 @@ fn parse_task_properties_from_text(
     // reusing a stale assumption.
     if fields.get(45)?.trim() != "1"
         || fields.get(20)?.trim() != "1"
-        || !task_characteristics_is_empty(fields.get(44)?)
         || !owner_graph::task_reserved_tail_is_zero(&fields)
     {
         return None;
     }
+
+    let characteristics = decode_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::Task,
+        &fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        owner_graph_diagnostic,
+    )?;
 
     let mut child_uuids = BTreeSet::new();
     if form_uuids
@@ -26312,6 +26299,7 @@ fn parse_task_properties_from_text(
 
     Some(TaskProperties {
         generated_types,
+        characteristics,
         internal_uuid_slots: TaskInternalUuidSlots {
             field_13: internal_uuid_slots.field_13,
             field_14: internal_uuid_slots.field_14,
@@ -26419,10 +26407,6 @@ fn parse_owner_input_modes(value: &str) -> Option<(&'static str, &'static str, &
         && fields.get(1)?.trim() == "2"
         && fields.get(2)?.trim() == "0")
         .then_some(("Begin", "DontUse", "Directly"))
-}
-
-fn task_characteristics_is_empty(value: &str) -> bool {
-    exchange_plan_characteristics_is_empty(value)
 }
 
 struct TaskRootCollection<'a> {
@@ -34286,7 +34270,7 @@ fn format_business_process_source_xml(
     header: &MetadataHeader,
     business_process: &BusinessProcessProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     let mut xml = format_full_metadata_source_xml("BusinessProcess", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&business_process.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
@@ -34356,9 +34340,11 @@ fn format_business_process_source_xml(
             &mut properties,
             &business_process.standard_attributes,
         );
+        properties.push_str(
+            &render_metadata_characteristics_xml(&business_process.characteristics).ok()?,
+        );
         properties.push_str(&format!(
-            "\t\t\t<Characteristics/>\r\n\
-\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
+            "\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
             xml_bool(business_process.autonumbering),
         ));
         push_task_based_on_xml(&mut properties, &business_process.based_on);
@@ -34451,14 +34437,14 @@ fn format_business_process_source_xml(
             xml.insert_str(index, &child_objects);
         }
     }
-    xml
+    Some(xml)
 }
 
 fn format_task_source_xml(
     header: &MetadataHeader,
     task: &TaskProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     task.internal_uuid_slots.acknowledge_internal_only();
     let mut xml = format_full_metadata_source_xml("Task", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&task.generated_types);
@@ -34497,7 +34483,7 @@ fn format_task_source_xml(
         );
         push_task_based_on_xml(&mut properties, &task.based_on);
         push_metadata_standard_attributes_xml(&mut properties, &task.standard_attributes);
-        properties.push_str("\t\t\t<Characteristics/>\r\n");
+        properties.push_str(&render_metadata_characteristics_xml(&task.characteristics).ok()?);
         properties.push_str(&format!(
             "\t\t\t<DefaultPresentation>{}</DefaultPresentation>\r\n\
 \t\t\t<EditType>{}</EditType>\r\n",
@@ -34623,7 +34609,7 @@ fn format_task_source_xml(
             xml.insert_str(index, &child_objects);
         }
     }
-    xml
+    Some(xml)
 }
 
 fn push_task_based_on_xml(xml: &mut String, references: &[String]) {

@@ -2,8 +2,8 @@ use super::characteristics::*;
 use super::*;
 use crate::metadata_owner_graph::{
     CATALOG_ATTRIBUTE_GROUP_UUID, CATALOG_COMMAND_COLLECTION_UUID, CATALOG_FORM_COLLECTION_UUID,
-    CATALOG_TABULAR_SECTION_COLLECTION_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
-    DOCUMENT_COMMAND_COLLECTION_UUID, DOCUMENT_FORM_COLLECTION_UUID,
+    CATALOG_TABULAR_SECTION_COLLECTION_UUID, CharacteristicsOwnerFamily,
+    DOCUMENT_ATTRIBUTE_GROUP_UUID, DOCUMENT_COMMAND_COLLECTION_UUID, DOCUMENT_FORM_COLLECTION_UUID,
     DOCUMENT_TABULAR_SECTION_COLLECTION_UUID, METADATA_TEMPLATE_COLLECTION_UUID, OwnerGraphFamily,
 };
 use flate2::Compression;
@@ -2027,9 +2027,7 @@ fn owner_graph_fixture_for_test(
     for (field_index, value) in expected.owner_reserved_fields {
         fields[*field_index] = (*value).to_owned();
     }
-    if let Ok(slot) = characteristics::characteristics_slot(expected.family) {
-        fields[slot] = "{0,{0}}".to_owned();
-    }
+    fields[characteristics::characteristics_slot(expected.family.into())] = "{0,{0}}".to_owned();
     let collections = expected
         .collection_markers
         .iter()
@@ -25696,7 +25694,7 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
     let mut characteristics_diagnostic = None;
     assert!(
         decode_owner_characteristics(
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
             &fields,
             &type_index,
             &object_refs,
@@ -55343,7 +55341,20 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
             .len(),
         8
     );
-    assert!(task_characteristics_is_empty(fields[44]));
+    let mut characteristics_diagnostic = None;
+    assert!(
+        decode_owner_characteristics(
+            owner_graph::CharacteristicsOwnerFamily::Task,
+            &fields,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &mut characteristics_diagnostic,
+        )
+        .expect("Task characteristics")
+        .is_empty()
+    );
+    assert!(characteristics_diagnostic.is_none());
     assert!(owner_graph::task_reserved_tail_is_zero(&fields));
     assert_eq!(
         parse_owner_input_modes(fields[47]),
@@ -66317,8 +66328,9 @@ fn references() -> BTreeMap<String, String> {
 }
 
 fn decode(value: &str) -> Result<Characteristics, CharacteristicsDiagnostic> {
-    decode_characteristics(
-        OwnerGraphFamily::Catalog,
+    decode_characteristics_with_owner_code(
+        CharacteristicsOwnerFamily::Catalog,
+        None,
         value,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -66392,19 +66404,28 @@ fn characteristics_mutation_matrix_reports_typed_stage_role_and_reason() {
 }
 
 #[test]
-fn characteristics_slot_matrix_is_closed_to_three_owner_families() {
-    assert_eq!(characteristics_slot(OwnerGraphFamily::Catalog), Ok(52));
-    assert_eq!(characteristics_slot(OwnerGraphFamily::Document), Ok(45));
+fn characteristics_slot_matrix_covers_every_owner_family_that_declares_the_property() {
+    // Every slot index was read off real bytes: the payload of the slot is the
+    // one whose items carry the platform's Characteristic type uuid, and its
+    // declared count matches the number of `<xr:Characteristic>` elements the
+    // platform writes for the same object.
     assert_eq!(
-        characteristics_slot(OwnerGraphFamily::ChartOfCharacteristicTypes),
-        Ok(50)
+        characteristics_slot(CharacteristicsOwnerFamily::Catalog),
+        52
     );
     assert_eq!(
-        characteristics_slot(OwnerGraphFamily::BusinessProcess)
-            .unwrap_err()
-            .reason,
-        CharacteristicsReason::UnsupportedFamily
+        characteristics_slot(CharacteristicsOwnerFamily::Document),
+        45
     );
+    assert_eq!(
+        characteristics_slot(CharacteristicsOwnerFamily::ChartOfCharacteristicTypes),
+        50
+    );
+    assert_eq!(
+        characteristics_slot(CharacteristicsOwnerFamily::BusinessProcess),
+        41
+    );
+    assert_eq!(characteristics_slot(CharacteristicsOwnerFamily::Task), 44);
 }
 
 #[test]
@@ -66475,7 +66496,7 @@ fn characteristics_standard_attribute_marker_follows_the_source_family() {
             CharacteristicRole::KeyField,
         ] {
             let decoded = decode_field(
-                OwnerGraphFamily::Catalog,
+                CharacteristicsOwnerFamily::Catalog,
                 0,
                 &field(&marker.to_string()),
                 role,
@@ -66493,7 +66514,7 @@ fn characteristics_standard_attribute_marker_follows_the_source_family() {
     // entry of the family table stays closed there.
     let rows = CharacteristicReference::new("Catalog.Values.TabularSection.Rows", None).unwrap();
     let failure = decode_field(
-        OwnerGraphFamily::Catalog,
+        CharacteristicsOwnerFamily::Catalog,
         0,
         &field("-4"),
         CharacteristicRole::ObjectField,
@@ -66506,7 +66527,7 @@ fn characteristics_standard_attribute_marker_follows_the_source_family() {
     // instead of borrowing the owner's numbering.
     let register = CharacteristicReference::new("InformationRegister.Values", None).unwrap();
     let failure = decode_field(
-        OwnerGraphFamily::Catalog,
+        CharacteristicsOwnerFamily::Catalog,
         0,
         &field("-8"),
         CharacteristicRole::ObjectField,
@@ -66564,7 +66585,7 @@ fn characteristics_uuid_field_outside_source_fails_ancestry() {
     let source = CharacteristicReference::new("Catalog.Values", None).unwrap();
     let raw = format!("{{1,{{0,{FIELD_UUID}}},0}}");
     let failure = decode_field(
-        OwnerGraphFamily::Catalog,
+        CharacteristicsOwnerFamily::Catalog,
         0,
         &raw,
         CharacteristicRole::ValueField,
@@ -66591,8 +66612,14 @@ fn characteristics_nonempty_design_time_ref_retains_value_uuid_provenance() {
             "Catalog.Filter.Item".to_owned(),
         ),
     ]);
-    let value =
-        decode_filter_value(OwnerGraphFamily::Catalog, 0, &raw, &BTreeMap::new(), &refs).unwrap();
+    let value = decode_filter_value(
+        CharacteristicsOwnerFamily::Catalog,
+        0,
+        &raw,
+        &BTreeMap::new(),
+        &refs,
+    )
+    .unwrap();
     let CharacteristicFilterValue::DesignTimeRef(Some(reference)) = value else {
         panic!("expected nonempty design-time reference");
     };
@@ -66615,13 +66642,13 @@ fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed(
         OwnerGraphFamily::Document,
         OwnerGraphFamily::ChartOfCharacteristicTypes,
     ] {
-        let slot = characteristics_slot(family).unwrap();
+        let slot = characteristics_slot(family.into());
         let mut owned_fields = vec!["0".to_owned(); family.layout().owner_field_count];
         owned_fields[slot] = raw.clone();
         let fields = owned_fields.iter().map(String::as_str).collect::<Vec<_>>();
         let mut diagnostic = None;
         let model = decode_owner_characteristics(
-            family,
+            family.into(),
             &fields,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -66652,7 +66679,7 @@ fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed(
     }
 
     let family = OwnerGraphFamily::ChartOfCharacteristicTypes;
-    let slot = characteristics_slot(family).unwrap();
+    let slot = characteristics_slot(family.into());
     let invalid = collection(&item(
         "4",
         "00000000-0000-0000-0000-000000000000",
@@ -66664,7 +66691,7 @@ fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed(
     let mut diagnostic = None;
     assert!(
         decode_owner_characteristics(
-            family,
+            family.into(),
             &fields,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -70728,7 +70755,7 @@ fn characteristics_tabular_section_object_field_takes_the_family_ref_marker() {
         "ChartOfCharacteristicTypes.СтатьиАктивовПассивов.TabularSection.ДополнительныеРеквизиты";
     let source = CharacteristicReference::new(SECTION, None).unwrap();
     let decoded = decode_field(
-        OwnerGraphFamily::ChartOfCharacteristicTypes,
+        CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
         0,
         &field("-2"),
         CharacteristicRole::ObjectField,
@@ -70746,7 +70773,7 @@ fn characteristics_tabular_section_object_field_takes_the_family_ref_marker() {
     for marker in ["-8", "-9", "-6"] {
         assert_eq!(
             decode_field(
-                OwnerGraphFamily::ChartOfCharacteristicTypes,
+                CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
                 0,
                 &field(marker),
                 CharacteristicRole::ObjectField,
@@ -70766,7 +70793,7 @@ fn characteristics_tabular_section_object_field_takes_the_family_ref_marker() {
             .unwrap();
     assert_eq!(
         decode_field(
-            OwnerGraphFamily::ChartOfCharacteristicTypes,
+            CharacteristicsOwnerFamily::ChartOfCharacteristicTypes,
             0,
             &field("-9"),
             CharacteristicRole::ObjectField,

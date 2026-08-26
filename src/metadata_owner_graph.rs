@@ -132,8 +132,7 @@ pub(crate) const CHARACTERISTICS_ROLE_TOKENS: [&str; 13] = [
     "multiple_values_key_field",
     "multiple_values_order_field",
 ];
-pub(crate) const CHARACTERISTICS_REASON_TOKENS: [&str; 10] = [
-    "unsupported_family",
+pub(crate) const CHARACTERISTICS_REASON_TOKENS: [&str; 9] = [
     "invalid_envelope",
     "invalid_count",
     "invalid_type_tag",
@@ -521,6 +520,43 @@ pub(crate) enum OwnerGraphFamily {
     Document,
     BusinessProcess,
     ChartOfCharacteristicTypes,
+}
+
+/// The owner families whose record declares a `Characteristics` slot.
+///
+/// It is a separate vocabulary from [`OwnerGraphFamily`] on purpose: `Task`
+/// carries the property but is not decoded through the owner graph at all, and
+/// giving it an owner-graph layout it does not have would be inventing one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CharacteristicsOwnerFamily {
+    Catalog,
+    Document,
+    ChartOfCharacteristicTypes,
+    BusinessProcess,
+    Task,
+}
+
+impl CharacteristicsOwnerFamily {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Catalog => "Catalog",
+            Self::Document => "Document",
+            Self::ChartOfCharacteristicTypes => "ChartOfCharacteristicTypes",
+            Self::BusinessProcess => "BusinessProcess",
+            Self::Task => "Task",
+        }
+    }
+}
+
+impl From<OwnerGraphFamily> for CharacteristicsOwnerFamily {
+    fn from(family: OwnerGraphFamily) -> Self {
+        match family {
+            OwnerGraphFamily::Catalog => Self::Catalog,
+            OwnerGraphFamily::Document => Self::Document,
+            OwnerGraphFamily::BusinessProcess => Self::BusinessProcess,
+            OwnerGraphFamily::ChartOfCharacteristicTypes => Self::ChartOfCharacteristicTypes,
+        }
+    }
 }
 
 /// A semantically named child collection in an owner record.
