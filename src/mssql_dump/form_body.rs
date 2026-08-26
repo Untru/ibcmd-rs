@@ -17033,13 +17033,10 @@ use crate::form_schema::FORM_ABSENT_MEMBER as FORM_ITEM_ABSENT_MEMBER;
 /// key off: an unprefixed `54` record is even-length where the `55` one is
 /// odd, and the `+ 1` puts it back.
 ///
-/// Only the two revisions evidenced by that measurement are admitted here.
-/// `Button` `30` (111 records) and the decorations' `11` (102) have the same
-/// shape but have not had their own byte-level pass -- see
-/// `docs/evidence/uh-form-item-tree-revision-map-20260825.md`.  Wrapper `35`
-/// keeps the separate handling it already has; it is not normalized, because
-/// unlike `34` it occurs outside ERP УХ (ERP УХ MDM_Management) where the
-/// existing arms are already proven against native bytes.
+/// Only the revisions evidenced by that measurement are admitted here.
+/// `Button` `30` (111 records) has the same shape but has not had its own
+/// byte-level pass -- see
+/// `docs/evidence/uh-form-item-tree-revision-map-20260825.md`.
 fn form_item_record_canonical_revision(
     wrapper: &str,
     field_count: usize,
@@ -17064,6 +17061,22 @@ fn form_item_record_canonical_revision(
         // field record normalizes, the packer's own button does not and stays
         // with the `Button` arm below.
         "34" if matches!(field_count, 56 | 57) => Some(("37", 3)),
+        // The field class's middle revision, one member longer than `34` and
+        // two shorter than `37`, under the same `field_count - wrapper` of
+        // 22/23. It used to be recognized one property at a time instead:
+        // whichever reader had been shown a `35` record admitted it, and every
+        // reader that had not refused it outright, so a `35` field lost
+        // `TitleLocation`, `Visible`, `Mask`, `ReadOnly` and the alignment
+        // members while its neighbours on the same record were read. Reading
+        // the declared length as the revision it is puts every one of them back
+        // at the canonical slot without a per-property arm.
+        //
+        // The prefixed shape needs no separate handling: `35` at 58 members
+        // normalizes to `37` at 60, which is exactly the shape whose own
+        // `top_level_offset` the field schema already reads off the name slot,
+        // so the record keeps its conditional `UserVisible` prefix instead of
+        // being stripped of it by the wrapper-`35` special case.
+        "35" if matches!(field_count, 57 | 58) => Some(("37", 2)),
         // The decoration class ships two sub-shapes with different base
         // arities, and the short revision `11` covers both.
         //
