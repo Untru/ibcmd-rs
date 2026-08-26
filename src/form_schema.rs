@@ -4052,7 +4052,9 @@ impl FormFieldSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormButtonColorSchema;
+pub(crate) struct FormButtonColorSchema {
+    top_level_offset: usize,
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormButtonCommonSchema {
@@ -4076,12 +4078,23 @@ impl FormButtonCommonSchema {
         (fields.get(7 + self.top_level_offset)?.trim() == "0").then_some(false)
     }
 
+    /// The bound slot a command button spells its command's parameter source
+    /// in.
+    ///
+    /// The 53-member layout is the 52-member one with the conditional-appearance
+    /// prefix inserted ahead of the name, which is what `top_level_offset`
+    /// carries for `enabled`, `check`, `font`, `parameter`, the geometry pair
+    /// and both stretch flags on this very schema. The slot used to be spelled
+    /// for the unprefixed layout alone and answered nothing for the prefixed
+    /// one, so a prefixed command button was written with no `<DataPath>` at
+    /// all. ERP УХ 3.2.12.6
+    /// `Catalogs/ГруппыВНАМСФО/Forms/ФормаЭлемента` button
+    /// `ФормаОтчетДвиженияВНАДвиженияВНАМСФО` spells its name at member 6 and
+    /// the chain `{2,{1},{-8}}` at member 10, one behind each of the
+    /// unprefixed positions, and the platform writes
+    /// `<DataPath>Объект.Ref</DataPath>` for it.
     pub(crate) const fn data_path_slot(self) -> Option<usize> {
-        if self.top_level_offset == 0 {
-            Some(9)
-        } else {
-            None
-        }
+        Some(9 + self.top_level_offset)
     }
 
     /// The metadata object a command button passes to its command.
@@ -4152,24 +4165,35 @@ impl FormButtonCommonSchema {
 }
 
 impl FormButtonColorSchema {
+    /// The three colour members of a `Button`, in both of its record shapes.
+    ///
+    /// The 53-member record is the 52-member one with the
+    /// conditional-appearance prefix ahead of the name; the schema used to
+    /// admit only the unprefixed shape, so a prefixed button lost `<BackColor>`,
+    /// `<TextColor>` and `<BorderColor>` outright rather than reading them one
+    /// slot later.
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
+        top_level_offset: usize,
     ) -> Option<Self> {
-        (wrapper == "31" && field_count == 52 && item_tag == "Button").then_some(Self)
+        match (wrapper, field_count, item_tag, top_level_offset) {
+            ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => Some(Self { top_level_offset }),
+            _ => None,
+        }
     }
 
     pub(crate) const fn back_color_slot(self) -> usize {
-        19
+        19 + self.top_level_offset
     }
 
     pub(crate) const fn text_color_slot(self) -> usize {
-        20
+        20 + self.top_level_offset
     }
 
     pub(crate) const fn border_color_slot(self) -> usize {
-        21
+        21 + self.top_level_offset
     }
 }
 
@@ -4186,7 +4210,12 @@ impl FormButtonShapeRepresentationSchema {
         top_level_offset: usize,
     ) -> Option<Self> {
         match (wrapper, field_count, item_tag, top_level_offset) {
-            ("31", 52, "Button", 0) => Some(Self { slot: 45 }),
+            // Same prefixed/unprefixed pair as every other member of a
+            // `Button`: the 53-member record carries the conditional-appearance
+            // prefix ahead of the name and shifts the whole tail one slot.
+            ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => Some(Self {
+                slot: 45 + top_level_offset,
+            }),
             _ => None,
         }
     }
@@ -6336,6 +6365,8 @@ pub(crate) fn form_tooltip_representation_schema(
     }
     let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
         ("31", 52, FormTooltipRepresentationItemKind::Button, _) => 30,
+        // The prefixed `Button` record is the same record one slot later.
+        ("31", 53, FormTooltipRepresentationItemKind::Button, _) => 31,
         _ => return None,
     };
     Some(FormTooltipRepresentationSchema { slot })

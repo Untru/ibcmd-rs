@@ -1767,6 +1767,25 @@ where
 pub fn parse_form_choice_parameter_links_with_reference_resolver<F>(
     primary: &str,
     duplicate: &str,
+    resolve: F,
+) -> Result<Vec<FormChoiceParameterLink>, FormChoiceParameterLinksParseError>
+where
+    F: FnMut(&FormChoiceParameterLinkReference) -> Option<String>,
+{
+    parse_form_choice_parameter_links_with_optional_mirror(primary, Some(duplicate), resolve)
+}
+
+/// The same decode where the `5007` mirror is a member the record's own
+/// revision may not carry at all.
+///
+/// The mirror is a duplicate of the `5006` collection, not a second half of it:
+/// both are parsed independently and compared for equality, and every field the
+/// caller receives comes from the primary. A revision that ends before the
+/// mirror therefore states the collection in full; passing `None` drops the
+/// cross-check that revision cannot supply, and nothing else.
+pub fn parse_form_choice_parameter_links_with_optional_mirror<F>(
+    primary: &str,
+    duplicate: Option<&str>,
     mut resolve: F,
 ) -> Result<Vec<FormChoiceParameterLink>, FormChoiceParameterLinksParseError>
 where
@@ -1774,10 +1793,12 @@ where
 {
     let primary = parse_raw_form_choice_parameter_links(primary, "5006", false)
         .ok_or(FormChoiceParameterLinksParseError::PrimaryMalformed)?;
-    let duplicate = parse_raw_form_choice_parameter_links(duplicate, "5007", true)
-        .ok_or(FormChoiceParameterLinksParseError::DuplicateMalformed)?;
-    if primary != duplicate {
-        return Err(FormChoiceParameterLinksParseError::MirrorMismatch);
+    if let Some(duplicate) = duplicate {
+        let duplicate = parse_raw_form_choice_parameter_links(duplicate, "5007", true)
+            .ok_or(FormChoiceParameterLinksParseError::DuplicateMalformed)?;
+        if primary != duplicate {
+            return Err(FormChoiceParameterLinksParseError::MirrorMismatch);
+        }
     }
     primary
         .into_iter()

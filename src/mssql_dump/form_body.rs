@@ -69,7 +69,7 @@ use ibcmd_schema::{
     bundled_dcs_conditional_appearance_policy, bundled_dcs_form_server_state_policy,
     bundled_writer_rules, form_choice_parameter_cluster_order,
     form_text_document_context_menu_owner_fields, parse_form_choice_list,
-    parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
+    parse_form_choice_parameter_links_with_optional_mirror as parse_schema_form_choice_parameter_links_with_optional_mirror,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
     parse_generated_metadata_owner, parse_metadata_data_path,
@@ -2047,7 +2047,7 @@ fn emit_form_choice_parameter_available_types(
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct FormTypeLink {
     pub(super) data_path: String,
-    pub(super) link_item: &'static str,
+    pub(super) link_item: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -9936,7 +9936,8 @@ fn parse_form_child_item_with_metadata_owners(
     let spreadsheet_document_properties = field_schema_and_options
         .as_ref()
         .and_then(|(schema, options)| schema.spreadsheet_document_properties(&fields, options));
-    let button_color_schema = FormButtonColorSchema::from_raw_layout(wrapper, fields.len(), tag);
+    let button_color_schema =
+        FormButtonColorSchema::from_raw_layout(wrapper, fields.len(), tag, button_top_level_offset);
     let button_shape_representation_schema = FormButtonShapeRepresentationSchema::from_raw_layout(
         wrapper,
         fields.len(),
@@ -10365,10 +10366,16 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             input_hint
         };
+    // The extended option bag does not move when the record carries the
+    // conditional-appearance prefix -- the shift is on the record, and the bag
+    // is found by scanning the record's tail for its own declared revision, not
+    // by an absolute slot. The audit therefore admits the prefixed record at
+    // its own length, `59 + offset`, instead of the unprefixed length alone;
+    // spelling only the unprefixed one left every prefixed `InputField` with no
+    // `<TypeLink>` at all, which is the sole property this binding feeds.
     let audited_input_field_options = (tag == "InputField"
         && wrapper == "37"
-        && fields.len() == 59
-        && input_field_top_level_offset == 0)
+        && fields.len() == 59 + input_field_top_level_offset)
         .then_some(input_field_extended_options.as_deref())
         .flatten();
     let tooltip = parse_form_child_item_tooltip(
@@ -13637,7 +13644,18 @@ fn form_document_field_geometry_options<'a>(
     let layout = FORM_DOCUMENT_FIELD_GEOMETRY
         .iter()
         .find_map(|(candidate, layout)| (*candidate == tag).then_some(layout))?;
-    let options = split_1c_braced_fields(fields.get(39)?.trim(), 0)?;
+    // The option bag sits at the field class's own options base, which the
+    // conditional-appearance prefix pushes along with the rest of the record.
+    // Spelling the unprefixed slot alone made a prefixed document field miss
+    // the bag entirely and lose its geometry -- `<Height>` on the two
+    // `TextDocumentField` items of ERP УХ 3.2.12.6
+    // `Catalogs/РасширенияПанелиНалоговогоМониторинга/Forms/ФормаЭлемента`.
+    // The bag's own discriminator and length are still checked, so the offset
+    // only decides where to look.
+    let offset = form_input_field_layout_is_extended(fields)
+        .then(|| form_input_field_top_level_offset(fields))
+        .unwrap_or(0);
+    let options = split_1c_braced_fields(fields.get(39 + offset)?.trim(), 0)?;
     (options.first()?.trim() == layout.discriminator && options.len() == layout.len)
         .then_some((layout, options))
 }
@@ -13740,8 +13758,24 @@ pub(super) fn parse_form_usual_group_title_font_xml(
 pub(super) fn parse_form_usual_group_extended_options(
     fields: &[&str],
 ) -> Option<FormUsualGroupExtendedOptions> {
-    let options =
+    let raw_options =
         split_1c_braced_fields(fields.get(FormUsualGroupSchema::OPTIONS_SLOT)?.trim(), 0)?;
+    // The compact `28` bag is the wide `29` bag minus its final member, member
+    // for member -- the shape `form_property_bag_canonical_revision` already
+    // states for this pair. It used to be read by an arm of its own that
+    // answered three properties and `None` for the other twenty, so a group
+    // carrying it lost `HorizontalStretch`, `VerticalAlign`, `VerticalSpacing`,
+    // `ThroughAlign`, `United`, `ReadOnly`, `EnableContentChange`,
+    // `ChildItemsWidth`, `CurrentRowUse` and the rest outright. Padding the one
+    // member it does not carry and reading it as the revision it truncates
+    // gives every one of them back at its own slot; only `Behavior`, which the
+    // wide bag keeps in exactly the padded member, still needs the compact
+    // reading.
+    let compact = raw_options.len() == 28 && raw_options.first().map(|f| f.trim()) == Some("28");
+    let normalized = compact
+        .then(|| normalize_form_property_bag_revision(&raw_options))
+        .flatten();
+    let options = normalized.unwrap_or(raw_options);
     match options.first()?.trim() {
         "29" => {
             let schema = FormUsualGroupSchema::from_raw_layout(
@@ -13754,7 +13788,11 @@ pub(super) fn parse_form_usual_group_extended_options(
             let properties = schema.properties(fields, &options);
             Some(FormUsualGroupExtendedOptions {
                 group: parse_form_usual_group_property_bag_group(&options),
-                behavior: parse_form_usual_group_property_bag_behavior(&options),
+                behavior: if compact {
+                    parse_form_usual_group_compact_bag_behavior(&options)
+                } else {
+                    parse_form_usual_group_property_bag_behavior(&options)
+                },
                 representation: parse_form_usual_group_property_bag_representation(&options),
                 horizontal_stretch: parse_form_usual_group_horizontal_stretch(fields),
                 enabled: properties.enabled(),
@@ -14276,7 +14314,7 @@ fn form_choice_parameter_link_standard_terminal_member(
 
 pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     primary: &str,
-    duplicate: &str,
+    duplicate: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
@@ -14285,10 +14323,8 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     data_path_by_binding_key: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Result<Vec<ibcmd_schema::FormChoiceParameterLink>, FormChoiceParameterLinksParseError> {
-    parse_schema_form_choice_parameter_links_with_reference_resolver(
-        primary,
-        duplicate,
-        |reference| match reference {
+    parse_schema_form_choice_parameter_links_with_optional_mirror(primary, duplicate, |reference| {
+        match reference {
             FormChoiceParameterLinkReference::FormAttribute {
                 attribute_id,
                 terminal,
@@ -14391,8 +14427,8 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                     }
                 }
             }
-        },
-    )
+        }
+    })
 }
 
 #[cfg(test)]
@@ -14459,27 +14495,40 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     let duplicate =
         schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate);
     // A member the record's own revision does not carry is *absent*, not
-    // malformed: the short `32`/62 revision of the `InputField` option tuple
-    // ends four members before the `5007` mirror this reader cross-checks
-    // against, so the collection cannot be read here at all.  Reporting it
-    // malformed instead made the writer refuse the whole form.
-    if options.get(primary_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
-        || options.get(duplicate_slot) == Some(&FORM_ITEM_ABSENT_MEMBER)
-    {
+    // malformed. The collection itself lives at slot 26, which every observed
+    // revision carries; it is the `5007` mirror at slot 64 that the short
+    // `32`/62 revision ends before. The mirror is a duplicate of the same
+    // collection -- both sides are parsed independently and compared, and every
+    // field the caller gets comes from the primary -- so a revision without one
+    // still states the links in full, and the reader drops the cross-check it
+    // cannot run rather than the collection it can read. Only an absent
+    // *primary* leaves nothing to read.
+    if options.get(primary_slot) == Some(&FORM_ITEM_ABSENT_MEMBER) {
         return FormChoiceParameterLinks::Absent;
     }
-    let (Some(primary), Some(duplicate)) = (primary, duplicate) else {
+    let mirror_absent = options.get(duplicate_slot) == Some(&FORM_ITEM_ABSENT_MEMBER);
+    let Some(primary) = primary else {
         return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
-            primary_raw: primary.map(str::to_owned),
+            primary_raw: None,
             duplicate_raw: duplicate.map(str::to_owned),
             primary_slot,
             duplicate_slot,
-            error: if primary.is_none() {
-                FormChoiceParameterLinksParseError::PrimaryMalformed
-            } else {
-                FormChoiceParameterLinksParseError::DuplicateMalformed
-            },
+            error: FormChoiceParameterLinksParseError::PrimaryMalformed,
         });
+    };
+    let duplicate = if mirror_absent {
+        None
+    } else {
+        let Some(duplicate) = duplicate else {
+            return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+                primary_raw: Some(primary.to_owned()),
+                duplicate_raw: None,
+                primary_slot,
+                duplicate_slot,
+                error: FormChoiceParameterLinksParseError::DuplicateMalformed,
+            });
+        };
+        Some(duplicate)
     };
     match parse_form_input_field_choice_parameter_links_with_metadata(
         primary,
@@ -14494,9 +14543,20 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     ) {
         Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
         Ok(links) => FormChoiceParameterLinks::Typed(links),
+        // On a revision that carries the mirror an unreadable collection is a
+        // hard writer refusal, and stays one. On a revision that does not, the
+        // reader has only just started looking at a member it used to answer
+        // `Absent` for outright, and an opaque answer here would turn every
+        // record it cannot yet read into a form the export stops writing: 279
+        // ERP УХ forms, 199 of them previously byte-exact, when this arm was
+        // first shipped without the distinction. Widening a refusal from the
+        // node to the whole form is the failure this project has already
+        // reverted packages over, so the unmirrored arm keeps the answer it had
+        // before and reads only what it can.
+        Err(_) if duplicate.is_none() => FormChoiceParameterLinks::Absent,
         Err(error) => FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
             primary_raw: Some(primary.to_owned()),
-            duplicate_raw: Some(duplicate.to_owned()),
+            duplicate_raw: duplicate.map(str::to_owned),
             primary_slot,
             duplicate_slot,
             error,
@@ -14719,11 +14779,21 @@ pub(super) fn parse_form_input_field_type_link(
     // The one-member owner `{1}` and the two-member terminals are all readable;
     // only the arms that demanded a two-member owner and a one-member terminal
     // were not.
-    let link_item = match fields.last()?.trim() {
-        "0" => "0",
-        "1" => "1",
-        _ => return None,
-    };
+    // The frame's trailing member is the ext-dimension index the linked type is
+    // taken from, written out as it stands: `Субконто2` links item `2` and
+    // `Субконто3` item `3` on ERP УХ 3.2.12.6
+    // `Catalogs/ПараметрыУчетаФИРСБУ/Forms/СчетаУчетаДокумента`. Admitting only
+    // `0` and `1` was a flat bound with no origin -- over the eight stand
+    // corpora the platform writes 207 `0`, 5 `1`, one `2` and one `3`, and the
+    // two it writes above the bound were the two the reader dropped the whole
+    // `<TypeLink>` for. It is read as the canonical decimal it is, so a member
+    // that is not one still declines.
+    let link_item = fields.last()?.trim();
+    let link_item = link_item
+        .parse::<u32>()
+        .ok()
+        .filter(|value| value.to_string() == link_item)?
+        .to_string();
     if fields.len() < 3 {
         return None;
     }
@@ -17143,13 +17213,10 @@ use crate::form_schema::FORM_ABSENT_MEMBER as FORM_ITEM_ABSENT_MEMBER;
 /// key off: an unprefixed `54` record is even-length where the `55` one is
 /// odd, and the `+ 1` puts it back.
 ///
-/// Only the two revisions evidenced by that measurement are admitted here.
-/// `Button` `30` (111 records) and the decorations' `11` (102) have the same
-/// shape but have not had their own byte-level pass -- see
-/// `docs/evidence/uh-form-item-tree-revision-map-20260825.md`.  Wrapper `35`
-/// keeps the separate handling it already has; it is not normalized, because
-/// unlike `34` it occurs outside ERP УХ (ERP УХ MDM_Management) where the
-/// existing arms are already proven against native bytes.
+/// Only the revisions evidenced by that measurement are admitted here.
+/// `Button` `30` (111 records) has the same shape but has not had its own
+/// byte-level pass -- see
+/// `docs/evidence/uh-form-item-tree-revision-map-20260825.md`.
 fn form_item_record_canonical_revision(
     wrapper: &str,
     field_count: usize,
@@ -17174,6 +17241,22 @@ fn form_item_record_canonical_revision(
         // field record normalizes, the packer's own button does not and stays
         // with the `Button` arm below.
         "34" if matches!(field_count, 56 | 57) => Some(("37", 3)),
+        // The field class's middle revision, one member longer than `34` and
+        // two shorter than `37`, under the same `field_count - wrapper` of
+        // 22/23. It used to be recognized one property at a time instead:
+        // whichever reader had been shown a `35` record admitted it, and every
+        // reader that had not refused it outright, so a `35` field lost
+        // `TitleLocation`, `Visible`, `Mask`, `ReadOnly` and the alignment
+        // members while its neighbours on the same record were read. Reading
+        // the declared length as the revision it is puts every one of them back
+        // at the canonical slot without a per-property arm.
+        //
+        // The prefixed shape needs no separate handling: `35` at 58 members
+        // normalizes to `37` at 60, which is exactly the shape whose own
+        // `top_level_offset` the field schema already reads off the name slot,
+        // so the record keeps its conditional `UserVisible` prefix instead of
+        // being stripped of it by the wrapper-`35` special case.
+        "35" if matches!(field_count, 57 | 58) => Some(("37", 2)),
         // The decoration class ships two sub-shapes with different base
         // arities, and the short revision `11` covers both.
         //
@@ -17271,6 +17354,7 @@ fn form_item_record_canonical_revision(
 fn form_property_bag_canonical_revision(lead: &str, len: usize) -> Option<(&'static str, usize)> {
     match lead {
         "32" if len == 62 => Some(("36", 4)),
+        "28" if len == 28 => Some(("29", 1)),
         _ => None,
     }
 }
@@ -19269,19 +19353,28 @@ fn resolve_form_document_register_records_data_path(
                 )?
                 .to_string(),
                 [marker, uuid] => {
-                    marker.trim().parse::<i64>().ok()?;
-                    let uuid = parse_non_zero_uuid(uuid.trim())?;
-                    let reference = object_refs.get(&uuid)?;
-                    let (owner_reference, relative_path) =
-                        form_metadata_data_path_route(reference)?;
-                    // The member has to belong to the very register the chain
-                    // has reached; a field of some other register named by the
-                    // same marker would spell a path that register has no
-                    // column for.
-                    if owner_reference != *register_reference {
-                        return None;
+                    if let Some(name) = form_register_record_set_ext_dimension_name(
+                        register_family,
+                        marker.trim(),
+                        uuid.trim(),
+                    ) {
+                        name
+                    } else {
+                        let suffix =
+                            form_register_record_set_member_suffix(register_family, marker.trim())?;
+                        let uuid = parse_non_zero_uuid(uuid.trim())?;
+                        let reference = object_refs.get(&uuid)?;
+                        let (owner_reference, relative_path) =
+                            form_metadata_data_path_route(reference)?;
+                        // The member has to belong to the very register the
+                        // chain has reached; a field of some other register
+                        // named by the same marker would spell a path that
+                        // register has no column for.
+                        if owner_reference != *register_reference {
+                            return None;
+                        }
+                        format!("{relative_path}{suffix}")
                     }
-                    relative_path
                 }
                 _ => return None,
             };
@@ -19312,7 +19405,103 @@ fn form_register_record_set_standard_attribute_name(
 ) -> Option<&'static str> {
     match family {
         "AccumulationRegister" => accumulation_register_record_set_standard_attribute_name(marker),
+        "AccountingRegister" => ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES
+            .iter()
+            .find_map(|(candidate, name)| (*candidate == marker).then_some(*name)),
         _ => None,
+    }
+}
+
+/// The standard attributes an accounting register's *record set* spells for the
+/// markers a form binding names them by.
+///
+/// This is not the register's `<StandardAttributes>` metadata list and cannot
+/// be read off it: that list carries one `Account` descriptor, while the record
+/// set of a correspondence register carries the two columns `AccountDr` and
+/// `AccountCr`, which is what a form's `<DataPath>` spells.
+///
+/// Every row is a pairing of one `{-n}` terminal against the `<DataPath>` the
+/// platform writes for the item that carries it, over the only three forms in
+/// any gate corpus that bind an accounting register's record set (ERP УХ
+/// 3.2.12.6 `Documents/ОперацияБух`, `Documents/ОперацияМСФО` and
+/// `Documents/ОперацияМеждународный`, five register record sets across two
+/// charts of accounts and both settings of `Correspondence`):
+/// `-2` Period (3 register sets), `-4` LineNumber (3), `-5` Active (2, on
+/// `Международный` and `МеждународныйБезКорреспонденции`), `-6` AccountDr (3)
+/// and `-7` AccountCr (3). No marker is spelled two ways anywhere.
+///
+/// `Recorder`, `RecordType`, the non-correspondence `Account` and
+/// `PeriodAdjustment` are members the family has but no corpus binding names,
+/// so they have no evidenced marker here and the slot stays unresolved rather
+/// than borrowing the accumulation register's numbering.
+const ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
+    ("-7", "AccountCr"),
+    ("-6", "AccountDr"),
+    ("-5", "Active"),
+    ("-4", "LineNumber"),
+    ("-2", "Period"),
+];
+
+/// The `ExtDimension…` family a record-set terminal `{index, <family uuid>}`
+/// names, and the one-based number the platform appends to it.
+///
+/// Unlike every other member of a record set these are generated per
+/// ext-dimension slot of the register's chart of accounts, so the terminal
+/// carries an index against a fixed family uuid instead of the member's own.
+/// The two uuids are platform-wide, not per chart of accounts: the same pair
+/// serves `AccountingRegisters/Хозрасчетный` and
+/// `.../КорректировкиНалоговойБазы` (chart `Хозрасчетный`) and
+/// `AccountingRegisters/МСФО` (chart `МСФО`), 18 terminals in all, and the
+/// platform writes `ExtDimensionDr1..3` for the `1ab44b24…` family and
+/// `ExtDimensionCr1..3` for the `f77758c9…` one, index `0` spelling `1`.
+///
+/// A register whose chart of accounts is addressed without correspondence
+/// names its ext dimensions through neither family in any corpus form, so no
+/// third family is invented here.
+fn form_register_record_set_ext_dimension_name(
+    family: &str,
+    index: &str,
+    uuid: &str,
+) -> Option<String> {
+    if family != "AccountingRegister" {
+        return None;
+    }
+    let stem = match uuid {
+        ACCOUNTING_REGISTER_EXT_DIMENSION_DR_FAMILY => "ExtDimensionDr",
+        ACCOUNTING_REGISTER_EXT_DIMENSION_CR_FAMILY => "ExtDimensionCr",
+        _ => return None,
+    };
+    let index = index.parse::<usize>().ok()?;
+    Some(format!("{stem}{}", index.checked_add(1)?))
+}
+
+const ACCOUNTING_REGISTER_EXT_DIMENSION_DR_FAMILY: &str = "1ab44b24-3315-40a9-b495-f1f1227ac205";
+const ACCOUNTING_REGISTER_EXT_DIMENSION_CR_FAMILY: &str = "f77758c9-9fcd-490f-9bbd-1e446541f536";
+
+/// The suffix a record-set member's own name takes when the register splits it
+/// between the two sides of a correspondence entry.
+///
+/// A record-set terminal that names its member by uuid also carries a marker,
+/// and on an accounting register that marker is the side: the same dimension or
+/// resource uuid appears twice, once under `2` and once under `3`, and the
+/// platform writes the member's name with `Dr` and `Cr` appended respectively,
+/// while a member the register does not split carries `0` and is written
+/// plain. Measured over the three ERP УХ 3.2.12.6 forms that bind a record set:
+/// 26 terminals under `2`/`3` forming 13 `Dr`/`Cr` pairs and 14 under `0`, with
+/// no uuid spelled both ways under one marker and no other marker observed.
+///
+/// The other register families keep the reading they were measured under: their
+/// terminals carry a marker this code has never seen disagree with the member's
+/// own name, so it stays a number that must parse and nothing more.
+fn form_register_record_set_member_suffix(family: &str, marker: &str) -> Option<&'static str> {
+    match family {
+        "AccountingRegister" => match marker {
+            "0" => Some(""),
+            "2" => Some("Dr"),
+            "3" => Some("Cr"),
+            _ => None,
+        },
+        _ => marker.parse::<i64>().ok().map(|_| ""),
     }
 }
 
@@ -28435,7 +28624,7 @@ fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String 
 {tab}\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
 {tab}</TypeLink>\r\n",
         escape_xml_text(&type_link.data_path),
-        escape_xml_text(type_link.link_item)
+        escape_xml_text(&type_link.link_item)
     )
 }
 

@@ -16289,7 +16289,7 @@ fn indexes_direct_table_columns_from_their_structural_table_parent() {
     );
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         r#"{5006,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0}"#,
-        r#"{5007,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0,"",""}"#,
+        Some(r#"{5007,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0,"",""}"#),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &indexes.table_name_by_id,
@@ -24248,7 +24248,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
 
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         &primary,
-        &duplicate,
+        Some(&duplicate),
         &attribute_names,
         &attribute_owners,
         &BTreeMap::new(),
@@ -24275,7 +24275,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
     assert_eq!(
         parse_form_input_field_choice_parameter_links_with_metadata(
             &primary,
-            &duplicate,
+            Some(&duplicate),
             &attribute_names,
             &attribute_owners,
             &BTreeMap::new(),
@@ -24289,7 +24289,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
     assert_eq!(
         parse_form_input_field_choice_parameter_links_with_metadata(
             &primary,
-            &duplicate,
+            Some(&duplicate),
             &attribute_names,
             &attribute_owners,
             &BTreeMap::new(),
@@ -24397,7 +24397,7 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
     ] {
         let links = parse_form_input_field_choice_parameter_links_with_metadata(
             primary,
-            duplicate,
+            Some(duplicate),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &table_names,
@@ -24423,7 +24423,7 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
     assert_eq!(
         parse_form_input_field_choice_parameter_links_with_metadata(
             primary,
-            duplicate,
+            Some(duplicate),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &table_names,
@@ -24509,7 +24509,7 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
 
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         &primary,
-        &duplicate,
+        Some(&duplicate),
         &attribute_names,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24534,7 +24534,7 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
     assert_eq!(
         parse_form_input_field_choice_parameter_links_with_metadata(
             &primary,
-            &duplicate,
+            Some(&duplicate),
             &attribute_names,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -24615,7 +24615,7 @@ fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
     ]);
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         &primary,
-        &duplicate,
+        Some(&duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24637,7 +24637,7 @@ fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
     )]);
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         &primary,
-        &duplicate,
+        Some(&duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24653,7 +24653,7 @@ fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
     assert_eq!(
         parse_form_input_field_choice_parameter_links_with_metadata(
             &primary,
-            &duplicate,
+            Some(&duplicate),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -24687,7 +24687,7 @@ fn input_field_choice_parameter_links_read_agreeing_binding_uuid_routes() {
     ]);
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         &primary,
-        &duplicate,
+        Some(&duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24742,7 +24742,7 @@ fn input_field_choice_parameter_links_resolve_live_hybrid_table_routes_and_date(
     ]);
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         primary,
-        duplicate,
+        Some(duplicate),
         &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
         &BTreeMap::new(),
         &table_names,
@@ -69580,7 +69580,7 @@ fn choice_parameter_link_standard_terminals_follow_the_attribute_family() {
         };
         let links = parse_form_input_field_choice_parameter_links_with_metadata(
             &primary,
-            &duplicate,
+            Some(&duplicate),
             &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
             &form_attribute_metadata_owners_by_id(&attributes),
             &BTreeMap::new(),
@@ -72499,7 +72499,7 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
     )]);
     let links = parse_form_input_field_choice_parameter_links_with_metadata(
         primary,
-        duplicate,
+        Some(duplicate),
         &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
         &form_attribute_metadata_owners_by_id(&attributes),
         &BTreeMap::new(),
@@ -72526,7 +72526,7 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
     assert!(
         parse_form_input_field_choice_parameter_links_with_metadata(
             r#"{5006,1,"Ссылка",2,{1},{-4},0}"#,
-            r#"{5007,1,"Ссылка",2,{1},{-4},0,"",""}"#,
+            Some(r#"{5007,1,"Ссылка",2,{1},{-4},0,"",""}"#),
             &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
             &form_attribute_metadata_owners_by_id(&attributes),
             &BTreeMap::new(),
@@ -72544,7 +72544,9 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
         assert!(
             parse_form_input_field_choice_parameter_links_with_metadata(
                 &format!(r#"{{5006,1,"Ссылка",2,{{1}},{{{marker}}},0}}"#),
-                &format!(r#"{{5007,1,"Ссылка",2,{{1}},{{{marker}}},0,"",""}}"#),
+                Some(&format!(
+                    r#"{{5007,1,"Ссылка",2,{{1}},{{{marker}}},0,"",""}}"#
+                )),
                 &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
                 &form_attribute_metadata_owners_by_id(&attributes),
                 &BTreeMap::new(),
