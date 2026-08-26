@@ -4606,6 +4606,23 @@ pub(super) fn parse_moxel_picture(
     if fields.len() <= MOXEL_PICTURE_TRANSPARENCY_FIELD {
         return None;
     }
+    // The record's own shape decides whether it is a picture at all: member 2
+    // is the picture's reference record and is always a braced list, member 3
+    // is its stored name and is always a quoted string, and members 4 and 5 are
+    // its stored size pair and are always integers. Without that walk any
+    // `{4, …}` record long enough was taken for a picture, and 28 ERP УХ
+    // 3.2.12.6 templates published an empty `<picture><index>0</index>
+    // <picture/></picture>` for records like `{4,0,<uuid>,4,0,17,1,18,…}` that
+    // the platform publishes nothing for. Measured over 58 templates -- the 28
+    // that publish no picture and 30 that publish 134 between them -- the walk
+    // reproduces the platform's `<picture>` count exactly, with no exception.
+    if split_1c_braced_fields(fields.get(2)?, 0).is_none()
+        || parse_1c_string(fields.get(3)?).is_none()
+        || fields.get(4)?.trim().parse::<i64>().is_err()
+        || fields.get(5)?.trim().parse::<i64>().is_err()
+    {
+        return None;
+    }
     let ref_name = fields
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0))
