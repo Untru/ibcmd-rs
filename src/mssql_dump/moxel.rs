@@ -48,6 +48,7 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) source_formats: Vec<MoxelFormat>,
     pub(super) rows: Vec<MoxelRow>,
     pub(super) vertical_groups: Vec<MoxelVerticalGroup>,
+    pub(super) horizontal_groups: Vec<MoxelVerticalGroup>,
     pub(super) merges: Vec<MoxelMerge>,
     pub(super) horizontal_unmerges: Vec<MoxelMerge>,
     pub(super) vertical_unmerges: Vec<MoxelMerge>,
@@ -493,6 +494,20 @@ pub(super) struct MoxelVerticalGroup {
     /// own localized-value member (field 3) declares zero items -- see
     /// `parse_moxel_vertical_group`.
     pub(super) text: Vec<MoxelLocalizedValue>,
+    /// The record's sixth member, published as `<g>Begin</g>` when set.
+    ///
+    /// Evidence (native ERP УХ 3.2.12.6): `<g>` occurs six times in the whole
+    /// stand -- all six inside
+    /// `Reports/ИсполнениеКонтрактовГОЗ/Templates/ИсполнениеКонтрактов`,
+    /// whose seven row groups store `1` in six records and `0` in the
+    /// seventh, and whose one column group stores `0`. The platform publishes
+    /// `<g>Begin</g>` for exactly the six that store `1`, and nothing for the
+    /// other two. Every other group in the five corpora -- 223 332 `<vg>` on
+    /// ERP УХ, 1 703 on 1С:УТ, 1 424 on Документооборот КОРП and 3 on БСП
+    /// демо -- publishes no `<g>` at all, so a member the reader ignored
+    /// entirely was right everywhere except in that one document. Only `0`
+    /// and `1` are observed; another value is a typed refusal.
+    pub(super) group_begin: bool,
 }
 
 #[derive(Clone)]
@@ -1332,7 +1347,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     if rows.is_empty() {
         return None;
     }
-    let vertical_groups = parse_moxel_vertical_groups(&fields);
+    let (vertical_groups, horizontal_groups) = parse_moxel_row_column_groups(&fields);
     let (merges, horizontal_unmerges, vertical_unmerges) = parse_moxel_merge_regions(&fields);
     let named_items = parse_moxel_named_items(&fields);
     let areas = named_items
@@ -1399,6 +1414,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         && style_refs.iter().all(Option::is_none)
         && declared_sheet_height.unwrap_or(0) == 0
         && vertical_groups.is_empty()
+        && horizontal_groups.is_empty()
         && merges.is_empty()
         && horizontal_unmerges.is_empty()
         && vertical_unmerges.is_empty()
@@ -1896,6 +1912,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         source_formats,
         rows,
         vertical_groups,
+        horizontal_groups,
         merges,
         horizontal_unmerges,
         vertical_unmerges,
@@ -2108,51 +2125,97 @@ fn moxel_source_column_format_refs_in_set_order(
     ordered
 }
 
-pub(super) fn parse_moxel_vertical_groups(fields: &[&str]) -> Vec<MoxelVerticalGroup> {
+/// One count-prefixed group run: `{count, (record, -1) * count}`.
+///
+/// Returns the decoded records and the index just past the run. The count is
+/// the record's own declared one; the only bound on it is the one the field
+/// list itself proves, since every record costs two fields.
+fn parse_moxel_group_run(
+    fields: &[&str],
+    count_index: usize,
+) -> Option<(Vec<MoxelVerticalGroup>, usize)> {
+    let count = fields.get(count_index)?.trim().parse::<usize>().ok()?;
+    let run_end = count_index
+        .checked_add(count.checked_mul(2)?)?
+        .checked_add(1)?;
+    if run_end > fields.len() {
+        return None;
+    }
+    let mut groups = Vec::with_capacity(count);
+    let mut cursor = count_index + 1;
+    for _ in 0..count {
+        groups.push(parse_moxel_vertical_group(fields.get(cursor)?)?);
+        if fields.get(cursor + 1)?.trim() != "-1" {
+            return None;
+        }
+        cursor += 2;
+    }
+    Some((groups, cursor))
+}
+
+/// The document's row and column grouping block.
+///
+/// Shape: `{rowCount, (row group, -1) * rowCount, columnCount,
+/// (column group, -1) * columnCount, 0, 0}`, published as the `<vg>` run
+/// followed by the `<hg>` run.
+///
+/// The column run is what the previous reading missed: it demanded the three
+/// literals `0, 0, 0` right behind the row run, which is exactly what the
+/// block looks like when the column count is zero -- true of every document
+/// on the stand but two.
+/// `Reports/ИсполнениеКонтрактовГОЗ/Templates/ИсполнениеКонтрактов`
+/// (ERP УХ 3.2.12.6) stores seven row groups followed by `1` and one column
+/// group, and `Catalogs/НастройкиДоступностиПоСостоянию/Templates/
+/// НастройкиПолейКомандДокументПредприятия` (Документооборот КОРП 3.0.21.3)
+/// stores no row group at all followed by `2` and two column groups. Both
+/// published their whole grouping block as nothing, because the literal
+/// behind the row run was a column count rather than `0`.
+///
+/// The other half of the loss was a flat `count > 2048` cap on the row run:
+/// ERP УХ's three
+/// `Reports/РегламентированныйОтчетСтатистикаФорма85К/Templates/СхемаВыгрузкиXML*`
+/// declare **2 289** row groups each and lost all of them. Nothing in the
+/// format caps a document's group count; the run's own arithmetic
+/// (`count * 2 + 1` fields) is the only bound the record proves, and it is
+/// the one this reader now uses.
+pub(super) fn parse_moxel_row_column_groups(
+    fields: &[&str],
+) -> (Vec<MoxelVerticalGroup>, Vec<MoxelVerticalGroup>) {
+    // A document whose row count is non-zero carries its own decoy: the `0`
+    // that sits right in front of that count reads as an empty row run
+    // followed by the real run taken as the column one, and it comes first.
+    // The row run is therefore looked for on its own terms before the
+    // rowless shape is considered at all -- which is exactly the order the
+    // previous reading enforced by refusing a zero count outright.
+    scan_moxel_row_column_groups(fields, true)
+        .or_else(|| scan_moxel_row_column_groups(fields, false))
+        .unwrap_or_default()
+}
+
+fn scan_moxel_row_column_groups(
+    fields: &[&str],
+    require_vertical: bool,
+) -> Option<(Vec<MoxelVerticalGroup>, Vec<MoxelVerticalGroup>)> {
     for index in 0..fields.len() {
-        let Some(count) = fields
-            .get(index)
-            .and_then(|field| field.trim().parse::<usize>().ok())
-        else {
+        let Some((vertical, cursor)) = parse_moxel_group_run(fields, index) else {
             continue;
         };
-        if count == 0 || count > 2048 {
+        if require_vertical && vertical.is_empty() {
             continue;
         }
-        let Some(last_group_field) = index.checked_add(count * 2) else {
+        let Some((horizontal, cursor)) = parse_moxel_group_run(fields, cursor) else {
             continue;
         };
-        if last_group_field + 3 >= fields.len() {
+        if vertical.is_empty() && horizontal.is_empty() {
             continue;
         }
-        let mut groups = Vec::with_capacity(count);
-        let mut cursor = index + 1;
-        let mut valid = true;
-        for _ in 0..count {
-            let Some(group) = fields
-                .get(cursor)
-                .and_then(|field| parse_moxel_vertical_group(field))
-            else {
-                valid = false;
-                break;
-            };
-            if fields.get(cursor + 1).map(|field| field.trim()) != Some("-1") {
-                valid = false;
-                break;
-            }
-            groups.push(group);
-            cursor += 2;
-        }
-        if valid
-            && !groups.is_empty()
-            && fields.get(cursor).map(|field| field.trim()) == Some("0")
+        if fields.get(cursor).map(|field| field.trim()) == Some("0")
             && fields.get(cursor + 1).map(|field| field.trim()) == Some("0")
-            && fields.get(cursor + 2).map(|field| field.trim()) == Some("0")
         {
-            return groups;
+            return Some((vertical, horizontal));
         }
     }
-    Vec::new()
+    None
 }
 
 pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGroup> {
@@ -2173,12 +2236,18 @@ pub(super) fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGrou
     // any document where even one group carried a label -- the whole
     // `<vg>`/`<vgLevels>` construction, not just the labelled groups.
     let text_items = parse_moxel_localized_values(fields.get(3)?)?;
+    let group_begin = match fields.get(5)?.trim() {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
     Some(MoxelVerticalGroup {
         begin_row: fields.first()?.trim().parse::<usize>().ok()?,
         end_row: fields.get(1)?.trim().parse::<usize>().ok()?,
         level: fields.get(2)?.trim().parse::<usize>().ok()?,
         open: fields.get(4)?.trim().parse::<usize>().ok()? == 0,
         text: text_items,
+        group_begin,
     })
 }
 
@@ -5151,7 +5220,7 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
             series.marker = "Auto";
         }
     }
-    validate_moxel_chart_v74_front(tail, elements_is_init)?;
+    validate_moxel_chart_v74_front(tail)?;
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
     // Evidence: the same target record publishes
@@ -5936,7 +6005,7 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
 /// `parse_moxel_chart`) -- the two `GanttChart` templates each diverge from
 /// the pre-existing corpus's shared default at a different subset of them,
 /// which a single hard-coded literal cannot spell for both at once.
-fn validate_moxel_chart_v74_front(tail: &[&str], elements_is_init: bool) -> Option<()> {
+fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
     let expected = [
         (3, "0"),
         (4, "\", \""),
@@ -8729,10 +8798,6 @@ pub(super) fn moxel_format_pattern(value: usize) -> Option<&'static str> {
     }
 }
 
-pub(super) fn moxel_explicit_zero(value: usize) -> Option<usize> {
-    (value == 0).then_some(0)
-}
-
 pub(super) fn moxel_false_only(value: usize) -> Option<bool> {
     (value == 0).then_some(false)
 }
@@ -9442,7 +9507,18 @@ fn render_moxel_spreadsheet_xml(
     }
     xml.push_str(&format!("\t<vgRows>{}</vgRows>\r\n", spreadsheet.height));
     for group in &spreadsheet.vertical_groups {
-        push_moxel_vertical_group_xml(&mut xml, group);
+        push_moxel_group_xml(&mut xml, "vg", group);
+    }
+    // The column groups follow the row groups, with no count element of
+    // their own: neither `Reports/ИсполнениеКонтрактовГОЗ/Templates/
+    // ИсполнениеКонтрактов` (ERP УХ, one column group behind seven row
+    // groups) nor `Catalogs/НастройкиДоступностиПоСостоянию/Templates/
+    // НастройкиПолейКомандДокументПредприятия` (Документооборот КОРП, two
+    // column groups and no row group) publishes an `hgLevels`/`hgColumns`
+    // counterpart to `<vgLevels>`/`<vgRows>`, and all three column groups
+    // store level 0.
+    for group in &spreadsheet.horizontal_groups {
+        push_moxel_group_xml(&mut xml, "hg", group);
     }
     for merge in &spreadsheet.merges {
         push_moxel_merge_xml(&mut xml, merge);
@@ -12185,8 +12261,17 @@ pub(super) fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
     xml.push_str("\t</merge>\r\n");
 }
 
-pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerticalGroup) {
-    xml.push_str("\t<vg>\r\n");
+/// One `<vg>`/`<hg>` element.
+///
+/// The member order is the record's own -- begin, end, label, open, group
+/// marker. `<b>`, `<e>` and `<t>` are pinned by the corpus (745 labelled
+/// groups), `<o>` by the ten 1С:УТ records that publish `<o>false</o>`, and
+/// `<g>` by the six ERP УХ records that publish `<g>Begin</g>`. No document
+/// on the stand publishes `<g>` beside `<t>` or `<o>`, so their relative
+/// order is unobserved and this writer follows the storage record rather
+/// than inventing one.
+pub(super) fn push_moxel_group_xml(xml: &mut String, tag: &str, group: &MoxelVerticalGroup) {
+    xml.push_str(&format!("\t<{tag}>\r\n"));
     xml.push_str(&format!("\t\t<b>{}</b>\r\n", group.begin_row));
     if group.end_row != group.begin_row {
         xml.push_str(&format!("\t\t<e>{}</e>\r\n", group.end_row));
@@ -12210,7 +12295,10 @@ pub(super) fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerti
     if !group.open {
         xml.push_str("\t\t<o>false</o>\r\n");
     }
-    xml.push_str("\t</vg>\r\n");
+    if group.group_begin {
+        xml.push_str("\t\t<g>Begin</g>\r\n");
+    }
+    xml.push_str(&format!("\t</{tag}>\r\n"));
 }
 
 pub(super) fn push_moxel_vertical_unmerge_xml(xml: &mut String, merge: &MoxelMerge) {
@@ -13201,6 +13289,7 @@ mod moxel_exact_parity_tests {
             source_formats: Vec::new(),
             rows: Vec::new(),
             vertical_groups: Vec::new(),
+            horizontal_groups: Vec::new(),
             merges: Vec::new(),
             horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
