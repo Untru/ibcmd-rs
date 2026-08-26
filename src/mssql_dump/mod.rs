@@ -8265,6 +8265,13 @@ struct RegisterStandardAttribute {
     synonym: Vec<(String, String)>,
     data_history: &'static str,
     full_text_search: &'static str,
+    /// `<xr:ChoiceHistoryOnInput>`. The writer used to print `Auto`, and the
+    /// reader refused anything else. Three objects of the stand write
+    /// `DontUse` -- the `Date` standard attribute of `do`
+    /// `Documents/ДанныеДокументаМЭДО`, `КвитанцияМЭДО` and `УведомлениеМЭДО`
+    /// -- against 8 934 that write `Auto`, and the refusal lost all three
+    /// objects whole.
+    choice_history_on_input: &'static str,
     fill_value: MetadataChildFillValue,
     link_by_type: Option<RegisterStandardAttributeLinkByType>,
     mask: String,
@@ -14112,10 +14119,6 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             quick_choice,
             INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
         )? != "2"
-        || parse_information_register_standard_attribute_direct_enum(
-            choice_history,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-        )? != "0"
         || parse_information_register_standard_attribute_bool(password_mode)?
         || parse_information_register_standard_attribute_bool(mark_negatives)?
         || !information_register_standard_attribute_nil_is_valid(min_value)
@@ -14157,6 +14160,12 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
         "1" => "Use",
         _ => return None,
     };
+    let choice_history_on_input = metadata_choice_history_on_input_xml(
+        parse_information_register_standard_attribute_direct_enum(
+            choice_history,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+        )?,
+    )?;
     Some((
         RegisterStandardAttribute {
             name,
@@ -14170,6 +14179,7 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             synonym: parse_information_register_standard_attribute_localized(synonym)?,
             data_history,
             full_text_search,
+            choice_history_on_input,
             fill_value,
             link_by_type: None,
             mask,
@@ -14965,6 +14975,7 @@ fn register_standard_attribute(
             .unwrap_or_default(),
         data_history: "Use",
         full_text_search: "Use",
+        choice_history_on_input: "Auto",
         fill_value: MetadataChildFillValue::Nil,
         link_by_type,
         mask: String::new(),
@@ -34840,11 +34851,12 @@ fn push_metadata_standard_attributes_xml(
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
         xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Format", &attribute.format);
-        xml.push_str(
+        xml.push_str(&format!(
             "\t\t\t\t\t<xr:ChoiceForm/>\r\n\
 \t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n",
-        );
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
+            attribute.choice_history_on_input,
+        ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "EditFormat", &attribute.edit_format);
         xml.push_str(&format!(
             "\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
@@ -35501,7 +35513,8 @@ fn push_register_standard_attributes_xml_with_indent(
         xml.push_str(&format!(
             "{property_indent}<xr:ChoiceForm/>\r\n\
 {property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-{property_indent}<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n"
+{property_indent}<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
+            attribute.choice_history_on_input,
         ));
         push_xr_localized_property_xml(xml, &property_indent, "EditFormat", &attribute.edit_format);
         xml.push_str(&format!(

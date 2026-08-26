@@ -27603,6 +27603,45 @@ fn constant_record_for_test(multi_line: &str, folders: &str, quick: &str, histor
 const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},0,\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},0,\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,1,1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
 
 #[test]
+fn standard_attribute_choice_history_on_input_is_read_not_pinned_to_auto() {
+    // The reader refused any standard attribute whose `ChoiceHistoryOnInput`
+    // was not `Auto`, and the writer printed `Auto` unconditionally. Three
+    // objects of the stand write `DontUse` -- the `Date` standard attribute of
+    // `do` `Documents/ДанныеДокументаМЭДО`, `КвитанцияМЭДО` and
+    // `УведомлениеМЭДО` -- against 61 900 attributes that write `Auto`.
+    assert_eq!(metadata_choice_history_on_input_xml("0"), Some("Auto"));
+    assert_eq!(metadata_choice_history_on_input_xml("1"), Some("DontUse"));
+    assert_eq!(metadata_choice_history_on_input_xml("2"), None);
+
+    let render = |choice_history_on_input| {
+        let mut attribute =
+            register_standard_attribute("Date", "ShowError", &BTreeMap::new(), None);
+        attribute.choice_history_on_input = choice_history_on_input;
+        let mut xml = String::new();
+        push_metadata_standard_attributes_xml(
+            &mut xml,
+            &[MetadataStandardAttribute {
+                attribute,
+                comment: String::new(),
+                type_reduction_mode: "TransformValues",
+                choice_parameter_links: Vec::new(),
+            }],
+        );
+        xml
+    };
+    assert!(
+        render("Auto").contains("<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>"),
+        "{}",
+        render("Auto")
+    );
+    assert!(
+        render("DontUse").contains("<xr:ChoiceHistoryOnInput>DontUse</xr:ChoiceHistoryOnInput>"),
+        "{}",
+        render("DontUse")
+    );
+}
+
+#[test]
 fn catalog_subordination_use_is_read_where_it_was_pinned_reserved() {
     // Owner field 39 carries `<SubordinationUse>`, and the owner-graph layout
     // used to declare it reserved with the value `"0"`, which refused every
