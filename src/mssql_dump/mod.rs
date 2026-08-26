@@ -31356,6 +31356,13 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "1001ae3e-9289-4303-9699-3c0c17e20e61" => Some("StdPicture.AddToFavorites"),
         "14b24498-e49c-4713-be64-75101d0abfb9" => Some("StdPicture.GoToEnd"),
         "167a160b-fa48-4337-87ab-7e0fe95c4b5a" => Some("StdPicture.DeleteListItem"),
+        // Read straight off the platform: ERP УХ 3.2.12.6
+        // `Catalogs/ХранимыеФайлыОрганизаций/Ext/Help/ru.html` embeds this
+        // identifier in an `<img src="../../mdpicture/id…">` and the platform's
+        // own page names it `StdPicture.DeleteListItemDirectly` in that very
+        // spot. A standard-picture identifier is a platform constant, not a
+        // per-configuration calibration.
+        "6cbf8f9a-3d2f-427b-bfce-5e2bc7a8589d" => Some("StdPicture.DeleteListItemDirectly"),
         "1f046bc2-d6c5-46a3-a459-b2c0508f86fb" => Some("StdPicture.QueryWizard"),
         "2c732bfa-f734-48bc-a18b-7554db8a3888" => Some("StdPicture.DataCompositionSelection"),
         "38bbcebe-e456-461b-8457-07c9a72344a3" => Some("StdPicture.FindInTree"),

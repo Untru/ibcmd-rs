@@ -4155,6 +4155,41 @@ pub(super) fn format_predefined_type_xml(
             }
         }
     }
+    // A predefined item's type carries the same qualifier blocks every other
+    // `<Type>` in the tree does, written in the same order the shared metadata
+    // emitter uses (`format_form_metadata_types_xml_with_indent`): number,
+    // string, date. Only the string block had a writer here, so a predefined
+    // item typed `xs:decimal` or `xs:dateTime` lost its qualifiers whole --
+    // ERP УХ 3.2.12.6 `ChartsOfCharacteristicTypes/ПараметрыЗакупки` and
+    // `.../РеквизитыЭлементовФинансовыхОтчетов` (number) and
+    // `.../ТипыРеквизитовКомментариев` (date). No `<Type>` anywhere on the
+    // stand carries two of the three blocks at once, so the order between them
+    // is inherited from the shared emitter rather than observed here.
+    if let Some((digits, fraction_digits, allowed_sign_flag)) =
+        value_types.iter().find_map(|value_type| {
+            if let ConstantValueType::Number {
+                digits,
+                fraction_digits,
+                allowed_sign_flag,
+            } = value_type
+            {
+                Some((*digits, *fraction_digits, *allowed_sign_flag))
+            } else {
+                None
+            }
+        })
+    {
+        xml.push_str(&format!("{tab}\t<v8:NumberQualifiers>\r\n"));
+        xml.push_str(&format!("{tab}\t\t<v8:Digits>{digits}</v8:Digits>\r\n"));
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n"
+        ));
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
+            number_allowed_sign_xml(allowed_sign_flag)
+        ));
+        xml.push_str(&format!("{tab}\t</v8:NumberQualifiers>\r\n"));
+    }
     if let Some((length, allowed_length_flag)) = value_types.iter().find_map(|value_type| {
         if let ConstantValueType::String {
             length: Some(length),
@@ -4173,6 +4208,19 @@ pub(super) fn format_predefined_type_xml(
             predefined_string_allowed_length_xml(allowed_length_flag)
         ));
         xml.push_str(&format!("{tab}\t</v8:StringQualifiers>\r\n"));
+    }
+    if let Some(date_fractions) = value_types.iter().find_map(|value_type| {
+        if let ConstantValueType::DateTime { date_fractions } = value_type {
+            Some(*date_fractions)
+        } else {
+            None
+        }
+    }) {
+        xml.push_str(&format!("{tab}\t<v8:DateQualifiers>\r\n"));
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n"
+        ));
+        xml.push_str(&format!("{tab}\t</v8:DateQualifiers>\r\n"));
     }
     xml.push_str(&format!("{tab}</Type>\r\n"));
     xml
