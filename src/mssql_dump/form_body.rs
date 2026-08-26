@@ -103,6 +103,17 @@ const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
     ("Активность", "Active"),
     ("ВидДвижения", "RecordType"),
     ("ТипЗначения", "ValueType"),
+    // `ChartOfCalculationTypes`'s three standard tabular sections and their
+    // shared standard column (also `CalculationRegister`'s own dimension of
+    // the same name). Evidenced: `ssl`-demo's `ChartsOfCalculationTypes/
+    // _ДемоОсновныеНачисления/Forms/ФормаЭлемента` writes
+    // `Объект.BaseCalculationTypes`, `Объект.LeadingCalculationTypes`,
+    // `Объект.DisplacingCalculationTypes` and their nested
+    // `....CalculationType` columns.
+    ("БазовыеВидыРасчета", "BaseCalculationTypes"),
+    ("ВедущиеВидыРасчета", "LeadingCalculationTypes"),
+    ("ВытесняющиеВидыРасчета", "DisplacingCalculationTypes"),
+    ("ВидРасчета", "CalculationType"),
 ];
 const FORM_CHOICE_LIST_VALUE_INDENT: &str = "\t\t\t";
 const FORM_XML_LINE_ENDING: &str = "\r\n";
@@ -18557,7 +18568,9 @@ fn resolve_form_owner_scoped_bound_data_path(
         return FormOwnerScopedDataPath::Ambiguous;
     };
     if fields.first().map(|field| field.trim()) == Some("2") {
-        return FormOwnerScopedDataPath::Resolved(table_path.clone());
+        return FormOwnerScopedDataPath::Resolved(normalize_form_owner_scoped_table_path(
+            table_path,
+        ));
     }
     if fields.first().map(|field| field.trim()) != Some("3") {
         return FormOwnerScopedDataPath::Unknown;
@@ -18575,11 +18588,40 @@ fn resolve_form_owner_scoped_bound_data_path(
     };
     match owner_scoped_bindings.column_names.get(&column_lookup) {
         Some(Some(column_name)) => {
+            // The prefix `normalize_form_table_column_name` strips is the raw
+            // (not yet standard-name-translated) tabular section name -- the
+            // one the raw column field name is actually concatenated with --
+            // so that translation happens first, on the untranslated
+            // `table_path`, and only the finished result is translated to the
+            // standard English spelling.
             let column_name = normalize_form_table_column_name(table_path, column_name);
-            FormOwnerScopedDataPath::Resolved(format!("{table_path}.{column_name}"))
+            FormOwnerScopedDataPath::Resolved(normalize_form_owner_scoped_table_path(&format!(
+                "{table_path}.{column_name}"
+            )))
         }
         Some(None) => FormOwnerScopedDataPath::Ambiguous,
         None => FormOwnerScopedDataPath::Unknown,
+    }
+}
+
+/// Translates a resolved owner-scoped path's own tabular-section segment
+/// (its second component, immediately after `Объект`/`Запись`) to the
+/// standard English spelling, leaving any further segments -- already
+/// translated by their own resolvers, e.g. `normalize_form_table_column_name`
+/// -- untouched. Evidenced: `ssl`-demo's `ChartsOfCalculationTypes/
+/// _ДемоОсновныеНачисления/Forms/ФормаЭлемента` writes
+/// `Объект.BaseCalculationTypes` and `Объект.BaseCalculationTypes.CalculationType`,
+/// never the raw `БазовыеВидыРасчета` tabular-section name the binding
+/// indexes carry internally.
+fn normalize_form_owner_scoped_table_path(table_path: &str) -> String {
+    let mut segments = table_path.splitn(3, '.');
+    let (Some(root), Some(table_name)) = (segments.next(), segments.next()) else {
+        return table_path.to_string();
+    };
+    let translated_table_name = normalize_form_data_path_child_name(root, table_name);
+    match segments.next() {
+        Some(rest) => format!("{root}.{translated_table_name}.{rest}"),
+        None => format!("{root}.{translated_table_name}"),
     }
 }
 
