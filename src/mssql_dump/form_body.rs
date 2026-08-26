@@ -13187,9 +13187,7 @@ pub(super) fn parse_form_usual_group_extended_options(
             Some(FormUsualGroupExtendedOptions {
                 group: parse_form_usual_group_property_bag_group(&options),
                 behavior: parse_form_usual_group_property_bag_behavior(&options),
-                representation: options
-                    .get(3)
-                    .and_then(|field| parse_form_child_item_representation(field)),
+                representation: parse_form_usual_group_property_bag_representation(&options),
                 horizontal_stretch: parse_form_usual_group_horizontal_stretch(fields),
                 enabled: properties.enabled(),
                 read_only: properties.read_only(),
@@ -13261,10 +13259,13 @@ pub(super) fn parse_form_usual_group_extended_options(
         //   requires the three slots to agree and declines outright rather
         //   than guess at the value a disagreement or an unobserved code
         //   would mean.
+        // - `Representation`: slot 3, read through the bag-wide
+        //   `parse_form_usual_group_property_bag_representation`, whose
+        //   evidence covers this revision.
         "28" => Some(FormUsualGroupExtendedOptions {
             group: parse_form_usual_group_property_bag_group(&options),
             behavior: parse_form_usual_group_compact_bag_behavior(&options),
-            representation: None,
+            representation: parse_form_usual_group_property_bag_representation(&options),
             horizontal_stretch: None,
             enabled: None,
             read_only: None,
@@ -13294,9 +13295,7 @@ pub(super) fn parse_form_usual_group_extended_options(
                 options.get(27).map(|value| value.trim()),
                 options.get(36).map(|value| value.trim()),
             );
-            let representation = options
-                .get(3)
-                .and_then(|field| parse_form_child_item_representation(field));
+            let representation = parse_form_usual_group_property_bag_representation(&options);
             let behavior = parse_form_extended_group_behavior(
                 fields.get(16).map(|value| value.trim()),
                 fields.get(17).map(|value| value.trim()),
@@ -13334,6 +13333,29 @@ pub(super) fn parse_form_usual_group_extended_options(
         }
         _ => None,
     }
+}
+
+/// `Representation` of a grouping control, read off its property bag.
+///
+/// Slot 3 under the code table `parse_form_child_item_representation` states,
+/// shared by every bag revision rather than restated once per arm.
+///
+/// Evidence for the compact `28` revision, which used to leave the slot
+/// unread: every `28` bag in ERP УХ 3.2.12.6 -- 916 bags in 392 forms, 912 of
+/// which name exactly one item in the native tree, all 912 of them
+/// `UsualGroup` -- carries at slot 3 a value that is a function of the element
+/// the platform writes on that item, with no bag disagreeing: `0` ->
+/// `<Representation>None</Representation>` (581 bags), `2` -> no element at
+/// all (300, `WeakSeparation` being the `UsualGroup` default that
+/// `form_child_item_representation_is_default` suppresses), `3` ->
+/// `NormalSeparation` (23) and `1` -> `StrongSeparation` (12).  Leaving the
+/// slot unread lost `<Representation>` on 137 ERP УХ forms.
+pub(super) fn parse_form_usual_group_property_bag_representation(
+    options: &[&str],
+) -> Option<&'static str> {
+    options
+        .get(3)
+        .and_then(|field| parse_form_child_item_representation(field))
 }
 
 pub(super) fn parse_form_usual_group_property_bag_group(options: &[&str]) -> Option<&'static str> {
