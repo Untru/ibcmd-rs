@@ -8720,8 +8720,41 @@ fn parse_moxel_windows_color(value: &str) -> Option<String> {
     }
 }
 
+/// The web-colour palette slot's own enumeration.
+///
+/// Measured per document by pairing the palette's kind-2 slots with the
+/// `d3p1:` names the platform publishes for the same document: a format
+/// record cites a palette slot by index in members 5, 10, 11 and 13, so
+/// counting citations per slot and names per name gives two multisets that
+/// have to agree. Where the slots whose code this table already knew account
+/// for their names exactly, the remaining slot and the remaining name pair
+/// uniquely.
+///
+/// Eight codes were added that way on ERP УХ 3.2.12.6, each from at least
+/// one document where the pairing is unambiguous, with no conflict between
+/// documents:
+///
+/// | code | name | documents | citations |
+/// | ---: | --- | ---: | --- |
+/// | 2 | `AntiqueWhite` | 1 | 5 |
+/// | 5 | `Azure` | 2 | 1, 5 |
+/// | 49 | `GhostWhite` | 2 | 5, 5 |
+/// | 54 | `GreenYellow` | 2 | 3, 2 |
+/// | 59 | `Ivory` | 2 | 7, 7 |
+/// | 61 | `Lavender` | 1 | 9 |
+/// | 88 | `MediumGreen` | 2 | 11, 5 |
+/// | 93 | `MediumSpringGreen` | 1 | 1 |
+///
+/// (`РасшифровкаАктаСверкиСФНС_5_03_АктНеЕНП` cites codes 2 and 5 the same
+/// number of times and cannot separate them on its own; the two documents
+/// above that carry one each do, and this one then agrees with them.)
+///
+/// A code the corpus does not spell stays a typed refusal: an unresolvable
+/// slot makes the whole palette unusable rather than being guessed at.
 pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
     let name = match value.parse::<u32>().ok()? {
+        2 => "AntiqueWhite",
+        5 => "Azure",
         6 => "Beige",
         8 => "Black",
         10 => "Blue",
@@ -8737,9 +8770,13 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         45 => "FloralWhite",
         46 => "ForestGreen",
         48 => "Gainsboro",
+        49 => "GhostWhite",
         52 => "Gray",
         53 => "Green",
+        54 => "GreenYellow",
         55 => "HoneyDew",
+        59 => "Ivory",
+        61 => "Lavender",
         64 => "LemonChiffon",
         67 => "LightCyan",
         68 => "LightGoldenRod",
@@ -8750,6 +8787,8 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         84 => "Maroon",
         86 => "MediumBlue",
         87 => "MediumGray",
+        88 => "MediumGreen",
+        93 => "MediumSpringGreen",
         97 => "MintCream",
         98 => "MistyRose",
         108 => "PaleGoldenrod",
