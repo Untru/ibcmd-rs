@@ -31379,7 +31379,10 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         55 => Some("web:HoneyDew"),
         61 => Some("web:Lavender"),
         62 => Some("web:LavenderBlush"),
-        64 => Some("web:LightCoral"),
+        // `uh` `StyleItems/ИзмененнаяНастройка` writes `web:LemonChiffon`
+        // for index 64; the table read it as `LightCoral`, a name it already
+        // gives 66.
+        64 => Some("web:LemonChiffon"),
         65 => Some("web:LightBlue"),
         66 => Some("web:LightCoral"),
         67 => Some("web:LightCyan"),
@@ -31427,7 +31430,10 @@ fn style_system_color_name(code: i32) -> Option<&'static str> {
         -3 => Some("style:FormTextColor"),
         -11 => Some("style:FieldTextColor"),
         -15 => Some("style:ButtonTextColor"),
-        -7 => Some("style:FieldBackColor"),
+        // `uh` `StyleItems/ЦветФонаТолькоПросмотр` writes
+        // `style:ButtonBackColor` for index `-7`; the form palette reads it the
+        // same way on 68 occurrences.
+        -7 => Some("style:ButtonBackColor"),
         -13 => Some("style:FieldTextColor"),
         // `-21` is `ButtonTextColor`, read off the platform's own `<Value>`
         // for `do` `StyleItems/ЦветКалендаряПодпись` and
