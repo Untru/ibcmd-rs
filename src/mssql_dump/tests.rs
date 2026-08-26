@@ -32447,7 +32447,7 @@ fn formats_moxel_column_sets_accept_explicit_empty_default_set() {
         false,
         &[],
         &[],
-        &BTreeSet::new(),
+        &MoxelFormatRefKinds::new(),
         &[],
     );
 
@@ -33248,7 +33248,7 @@ fn formats_moxel_width_table_tolerates_empty_format_slots() {
         false,
         &[],
         &[],
-        &BTreeSet::new(),
+        &MoxelFormatRefKinds::new(),
         &[],
     );
 
@@ -33270,8 +33270,15 @@ fn formats_moxel_width_table_equal_to_column_count_uses_column_formats() {
         "{128,113}",
         "{128,552}",
     ];
-    let (column_formats, formats) =
-        parse_moxel_formats(&fields, 5, false, &[], &[], &BTreeSet::new(), &[]);
+    let (column_formats, formats) = parse_moxel_formats(
+        &fields,
+        5,
+        false,
+        &[],
+        &[],
+        &MoxelFormatRefKinds::new(),
+        &[],
+    );
 
     assert_eq!(column_formats.len(), 5);
     assert!(column_formats[0].is_empty());
@@ -34217,8 +34224,9 @@ fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_format
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
     assert_eq!(style_refs.len(), 1);
     assert_eq!(style_refs[0].as_deref(), Some("style:FormBackColor"));
-    let formats = parse_moxel_format_table(&fields, 0, &style_refs, &BTreeSet::new(), &[])
-        .expect("nested format table");
+    let formats =
+        parse_moxel_format_table(&fields, 0, &style_refs, &MoxelFormatRefKinds::new(), &[])
+            .expect("nested format table");
     assert_eq!(formats.len(), 2);
     assert!(
         formats
@@ -35900,8 +35908,8 @@ fn debug_moxel_card_output_order() {
     let drawings = parse_moxel_drawings(&fields);
     let drawing_format_indices = drawings
         .iter()
-        .map(|drawing| drawing.format_index)
-        .collect::<BTreeSet<_>>();
+        .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
+        .collect::<MoxelFormatRefKinds>();
     let number_format_refs = parse_moxel_number_format_refs(
         &fields,
         moxel_column_format_slots(&column_sets, 0),
@@ -36012,8 +36020,8 @@ fn debug_moxel_bank_transfer_style_slots() {
     let drawings = parse_moxel_drawings(&fields);
     let drawing_format_indices = drawings
         .iter()
-        .map(|drawing| drawing.format_index)
-        .collect::<BTreeSet<_>>();
+        .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
+        .collect::<MoxelFormatRefKinds>();
     let number_format_refs = parse_moxel_number_format_refs(
         &fields,
         moxel_column_format_slots(&column_sets, 0),
@@ -36124,8 +36132,8 @@ fn debug_moxel_bank_purchase_style_slots() {
     let drawings = parse_moxel_drawings(&fields);
     let drawing_format_indices = drawings
         .iter()
-        .map(|drawing| drawing.format_index)
-        .collect::<BTreeSet<_>>();
+        .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
+        .collect::<MoxelFormatRefKinds>();
     let number_format_refs = parse_moxel_number_format_refs(
         &fields,
         moxel_column_format_slots(&column_sets, 0),
@@ -36224,8 +36232,8 @@ fn debug_moxel_invoice_1096_raw_format_slots() {
     let drawings = parse_moxel_drawings(&fields);
     let drawing_format_indices = drawings
         .iter()
-        .map(|drawing| drawing.format_index)
-        .collect::<BTreeSet<_>>();
+        .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
+        .collect::<MoxelFormatRefKinds>();
     let default_format = parse_moxel_default_format(&fields, &BTreeMap::new());
     let default_format_width =
         parse_moxel_default_format_width(&fields, moxel_column_format_slots(&column_sets, 0));
