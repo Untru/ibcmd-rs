@@ -148,6 +148,11 @@ impl MetadataCommonAttributeContent {
 pub(super) struct MetadataFieldDeclarationIndex {
     tables: BTreeMap<String, MetadataTableStandardAttributes>,
     common_attributes: BTreeMap<String, MetadataCommonAttributeContent>,
+    /// Every `Kind.Name` the configuration declares, folded to lower case: the
+    /// query language names metadata case-insensitively, so a query naming
+    /// `Перечисление.СтатусызаданийТорговымПредставителям` names the declared
+    /// `Enum.СтатусыЗаданийТорговымПредставителям`.
+    declared_tables: BTreeSet<String>,
 }
 
 impl MetadataFieldDeclarationIndex {
@@ -157,6 +162,16 @@ impl MetadataFieldDeclarationIndex {
 
     pub(super) fn common_attribute(&self, name: &str) -> Option<&MetadataCommonAttributeContent> {
         self.common_attributes.get(name)
+    }
+
+    /// Whether the configuration declares a metadata table by this
+    /// `Kind.Name`. `None` when this index carries no table names at all, which
+    /// is a refusal to answer rather than a denial.
+    pub(super) fn declares_table(&self, reference: &str) -> Option<bool> {
+        if self.declared_tables.is_empty() {
+            return None;
+        }
+        Some(self.declared_tables.contains(&reference.to_lowercase()))
     }
 
     #[cfg(test)]
@@ -213,6 +228,11 @@ pub(super) fn build_metadata_field_declaration_index_from_texts(
     object_refs: &BTreeMap<String, String>,
 ) -> MetadataFieldDeclarationIndex {
     let mut index = MetadataFieldDeclarationIndex::default();
+    index.declared_tables = object_refs
+        .values()
+        .filter(|reference| reference.split('.').count() == 2)
+        .map(|reference| reference.to_lowercase())
+        .collect();
     for row in rows {
         let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
             continue;

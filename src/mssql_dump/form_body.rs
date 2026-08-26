@@ -5234,21 +5234,25 @@ pub(super) fn form_dynamic_list_use_always_universe(
     let mut universe;
     if settings.manual_query {
         let query_text = settings.query_text.as_deref()?;
-        let selection = parse_form_dynamic_list_query_selection(query_text)?;
-        if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
-            universe = selection.extension.clone().unwrap_or_default();
+        if form_dynamic_list_query_names_undeclared_metadata(query_text, declarations) {
+            universe = BTreeSet::new();
         } else {
-            if selection.has_star {
-                return None;
-            }
-            universe = selection.aliases.clone();
-            if let Some(main_table) = settings.main_table.as_deref() {
-                universe.extend(form_dynamic_list_main_table_auto_fields(
-                    main_table,
-                    &selection,
-                    object_refs,
-                    declarations,
-                )?);
+            let selection = parse_form_dynamic_list_query_selection(query_text)?;
+            if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
+                universe = selection.extension.clone().unwrap_or_default();
+            } else {
+                if selection.has_star {
+                    return None;
+                }
+                universe = selection.aliases.clone();
+                if let Some(main_table) = settings.main_table.as_deref() {
+                    universe.extend(form_dynamic_list_main_table_auto_fields(
+                        main_table,
+                        &selection,
+                        object_refs,
+                        declarations,
+                    )?);
+                }
             }
         }
     } else {
@@ -5307,6 +5311,59 @@ pub(super) fn form_dynamic_list_use_always_universe(
         ));
     }
     Some(universe)
+}
+
+/// Whether the query names metadata the configuration does not declare.
+///
+/// A `ЗНАЧЕНИЕ(...)` literal naming a table no metadata record declares is a
+/// query that cannot compile, and a dynamic list whose query does not compile
+/// has no available fields at all: the platform marks every field the map
+/// remembers.
+///
+/// Evidence: ERP УХ MDM_Management 3.2.12.6,
+/// `Documents/ЗаявкаНаИзменениеНСИ/Forms/ФормаСписка` and `.../ФормаВыбора`,
+/// whose query selects
+/// `ЗНАЧЕНИЕ(Перечисление.СостоянияСогласования.Черновик)` while the
+/// configuration declares `Enum.СостоянияСогласованияНСИ` and no
+/// `СостоянияСогласования` at all; all eight remembered fields of each list
+/// carry the `~` marker on their item `<DataPath>`. Over the whole stand these
+/// two are the only dynamic lists whose query names undeclared metadata: the
+/// other 2 226 ERP УХ, 1 025 UT, 497 Документооборот, 173 БСП demo and 148 БСП
+/// base manual-query lists name only declared metadata, and ten lists that look
+/// like counter-examples name it in a different case, which the query language
+/// resolves and this reader does too.
+///
+/// Only the `ЗНАЧЕНИЕ(...)` literal is read here. A `FROM` source naming
+/// undeclared metadata is the same failure in principle and has no observation
+/// on the stand, so it is left alone rather than guessed at.
+fn form_dynamic_list_query_names_undeclared_metadata(
+    query_text: &str,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> bool {
+    let Some(declarations) = declarations else {
+        return false;
+    };
+    let tokens = tokenize_1c_query(query_text);
+    for window in tokens.windows(5) {
+        if !is_1c_query_keyword(&window[0], Q_VALUE_LITERAL) || window[1] != "(" || window[3] != "."
+        {
+            continue;
+        }
+        let kind_upper = window[2].to_uppercase();
+        let Some(kind) = Q_RU_SOURCE_KINDS
+            .iter()
+            .find_map(|(ru, en)| (*ru == kind_upper).then_some(*en))
+        else {
+            continue;
+        };
+        if !is_1c_query_ident(&window[4]) {
+            continue;
+        }
+        if declarations.declares_table(&format!("{kind}.{}", window[4])) == Some(false) {
+            return true;
+        }
+    }
+    false
 }
 
 /// The family's standard attributes filtered down to the ones the main table
@@ -5951,6 +6008,9 @@ fn form_query_extension_item_name(item: &[String]) -> Option<String> {
         });
     is_plain_path.then(|| body[0].clone())
 }
+
+/// The query language's own literal for a value of a metadata type.
+const Q_VALUE_LITERAL: &[&str] = &["ЗНАЧЕНИЕ", "VALUE"];
 
 const Q_RU_SOURCE_KINDS: &[(&str, &str)] = &[
     ("СПРАВОЧНИК", "Catalog"),
