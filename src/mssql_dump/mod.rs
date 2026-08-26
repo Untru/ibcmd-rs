@@ -1069,6 +1069,23 @@ const CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS: &[(&str, &str)] = &[
     ("-4", "DeletionMark"),
     ("-2", "Ref"),
 ];
+/// The standard tabular sections a `ChartOfAccounts` carries, each with the
+/// standard attributes it declares, keyed by the marker the native record
+/// names them by.  The metadata compiler reads this table to write
+/// `<xr:StandardTabularSection name="ExtDimensionTypes">` and its four
+/// `<xr:StandardAttribute>` children, and a form's bound slot names the very
+/// same members by the very same markers.
+const CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS:
+    &[ChartStandardTabularSectionDefinition] = &[(
+    "-12",
+    "ExtDimensionTypes",
+    &[
+        ("-15", "TurnoversOnly"),
+        ("-14", "Predefined"),
+        ("-13", "ExtDimensionType"),
+        ("-12", "LineNumber"),
+    ],
+)];
 const CHART_OF_CALCULATION_TYPES_RESERVED_COLLECTION_UUIDS: [&str; 3] = [
     "054aa8cf-faa6-4634-aef4-1087ca0d88fc",
     "0dc22ad2-476a-4794-afae-cfa7ed251752",
@@ -21113,16 +21130,7 @@ fn parse_chart_of_accounts_properties(
         )?,
         standard_tabular_sections: parse_chart_standard_tabular_sections(
             fields.get(39)?,
-            &[(
-                "-12",
-                "ExtDimensionTypes",
-                &[
-                    ("-15", "TurnoversOnly"),
-                    ("-14", "Predefined"),
-                    ("-13", "ExtDimensionType"),
-                    ("-12", "LineNumber"),
-                ],
-            )],
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(51)?)?,
         edit_type: parse_chart_edit_type(fields.get(31)?)?,
@@ -21770,6 +21778,28 @@ fn chart_of_accounts_standard_attribute_name(marker: &str) -> Option<&'static st
     CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS
         .iter()
         .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+}
+
+/// The `ChartOfAccounts` standard tabular section a bound slot names by
+/// `marker`, with the standard attributes that section declares.
+pub(super) fn chart_of_accounts_standard_tabular_section(
+    marker: &str,
+) -> Option<&'static ChartStandardTabularSectionDefinition> {
+    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS
+        .iter()
+        .find(|(candidate, _, _)| *candidate == marker)
+}
+
+/// The sole standard tabular section a `ChartOfAccounts` declares — the one an
+/// `ExtDimensionAccountingFlag` is a column of.  Reading it from the same table
+/// the metadata compiler reads keeps the two spellings one fact; were the
+/// family ever to declare a second section, the flag's owning section would no
+/// longer follow from the family alone and this refuses rather than guesses.
+pub(super) fn chart_of_accounts_sole_standard_tabular_section_name() -> Option<&'static str> {
+    match CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
+        [(_, name, _)] => Some(name),
+        _ => None,
+    }
 }
 
 type ChartStandardTabularSectionDefinition = (

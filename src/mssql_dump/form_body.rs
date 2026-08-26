@@ -19148,6 +19148,23 @@ fn resolve_form_owner_scoped_bound_data_path(
     else {
         return FormOwnerScopedDataPath::Unknown;
     };
+    // A standard tabular section and its standard attributes are named by the
+    // platform, not by the designer, so they are read off the marker before
+    // the binding indexes -- which carry the designer's own spelling -- get a
+    // chance to answer.
+    if let Some(attribute) = attribute_metadata_owners_by_id.get(&attribute_id) {
+        if let Some(data_path) = resolve_form_owner_scoped_standard_tabular_section_path(
+            fields.first().map(|field| field.trim()).unwrap_or_default(),
+            attribute,
+            &table_key,
+            fields
+                .get(3)
+                .and_then(|field| parse_form_binding_key(field.trim()))
+                .as_deref(),
+        ) {
+            return FormOwnerScopedDataPath::Resolved(data_path);
+        }
+    }
     let table_lookup = FormBoundTableKey {
         attribute_id: attribute_id.clone(),
         table_key: table_key.clone(),
@@ -19213,6 +19230,51 @@ fn normalize_form_owner_scoped_table_path(table_path: &str) -> String {
     match segments.next() {
         Some(rest) => format!("{root}.{translated_table_name}.{rest}"),
         None => format!("{root}.{translated_table_name}"),
+    }
+}
+
+/// Names a *standard* tabular section of the attribute's own family, and one
+/// of that section's standard attributes, off the markers the binding states.
+///
+/// The designer's spelling of these members is not the platform's: the БСП демо
+/// chart of accounts declares the section as `ВидыСубконто` with columns
+/// `ВидСубконто` and `ТолькоОбороты`, while its own `ФормаСчета` writes
+/// `Объект.ExtDimensionTypes`, `….ExtDimensionType` and `….TurnoversOnly`.
+/// Translating the designer's names by a name table cannot express that -- ERP
+/// УХ spells three *user* tabular attributes `ВидСубконто` under `Объект`
+/// (`Объект.ЗначенияСубконто.ВидСубконто` and two siblings), which the platform
+/// writes unchanged -- so the standard members are recognised by the marker
+/// that names them and by nothing else. The marker table is the one the
+/// metadata compiler already reads to write `<xr:StandardTabularSection>` and
+/// its `<xr:StandardAttribute>` children.
+fn resolve_form_owner_scoped_standard_tabular_section_path(
+    kind: &str,
+    attribute: &FormAttributeMetadataOwner,
+    table_key: &str,
+    column_key: Option<&str>,
+) -> Option<String> {
+    let reference = attribute.exact_single_type_reference.as_deref()?;
+    let owner = form_generated_owner_type_from_type_reference(reference)?;
+    if !matches!(
+        (owner.family(), owner.role()),
+        (
+            GeneratedMetadataOwnerFamily::ChartOfAccounts,
+            GeneratedMetadataOwnerRole::Object,
+        )
+    ) {
+        return None;
+    }
+    let (_, section_name, columns) = chart_of_accounts_standard_tabular_section(table_key)?;
+    match kind {
+        "2" => Some(format!("{}.{section_name}", attribute.name)),
+        "3" => {
+            let column_key = column_key?;
+            let column_name = columns
+                .iter()
+                .find_map(|(candidate, name)| (*candidate == column_key).then_some(*name))?;
+            Some(format!("{}.{section_name}.{column_name}", attribute.name))
+        }
+        _ => None,
     }
 }
 
@@ -20513,6 +20575,34 @@ pub(super) fn form_metadata_data_path_route(reference: &str) -> Option<(String, 
         MetadataDataPathRole::TabularSection => path.table_name()?.to_string(),
         MetadataDataPathRole::TabularAttribute => {
             format!("{}.{}", path.table_name()?, path.member_name())
+        }
+        // An accounting flag is a member of the chart of accounts itself and
+        // is spelled by its own name, exactly like an attribute. Evidence:
+        // `ssl`-demo `ChartsOfAccounts/_ДемоОсновной/Forms/ФормаСчета`, whose
+        // CheckBoxFields carry `{2,{1},{0,043b8e1f-…}}` and `{0,ac9494df-…}`
+        // against attribute `Объект`, and the platform writes
+        // `Объект.Валютный` and `Объект.Количественный`.
+        MetadataDataPathRole::AccountingFlag
+            if path.family() == GeneratedMetadataOwnerFamily::ChartOfAccounts =>
+        {
+            path.member_name().to_string()
+        }
+        // An ext-dimension accounting flag is a column of the family's
+        // standard tabular section, so its path carries that section. Same
+        // form: `{3,{1},{-12},{0,44e5937f-…}}` and its two siblings, where the
+        // platform writes `Объект.ExtDimensionTypes.Валютный`,
+        // `….Количественный` and `….Суммовой`.
+        MetadataDataPathRole::ExtDimensionAccountingFlag
+            if path.family() == GeneratedMetadataOwnerFamily::ChartOfAccounts =>
+        {
+            format!(
+                "{}.{}",
+                chart_of_accounts_sole_standard_tabular_section_name()?,
+                path.member_name()
+            )
+        }
+        MetadataDataPathRole::AccountingFlag | MetadataDataPathRole::ExtDimensionAccountingFlag => {
+            return None;
         }
     };
     Some((path.owner_reference(), relative_path))

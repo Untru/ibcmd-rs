@@ -3857,6 +3857,12 @@ pub enum MetadataDataPathRole {
     Resource,
     TabularSection,
     TabularAttribute,
+    /// A `ChartOfAccounts` accounting flag: a member of the object itself,
+    /// declared in its own collection rather than among the attributes.
+    AccountingFlag,
+    /// A `ChartOfAccounts` ext-dimension accounting flag: a member of that
+    /// family's standard tabular section, not of the object.
+    ExtDimensionAccountingFlag,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3871,6 +3877,9 @@ pub struct MetadataDataPath<'a> {
 impl<'a> MetadataDataPath<'a> {
     pub fn owner_reference(self) -> String {
         format!("{}.{}", self.family.token(), self.owner_name)
+    }
+    pub const fn family(self) -> GeneratedMetadataOwnerFamily {
+        self.family
     }
     pub const fn role(self) -> MetadataDataPathRole {
         self.role
@@ -3902,6 +3911,14 @@ pub fn parse_metadata_data_path(value: &str) -> Option<MetadataDataPath<'_>> {
             };
             (role, None, *name)
         }
+        ["AccountingFlag", name] if valid_name(name) => {
+            (MetadataDataPathRole::AccountingFlag, None, *name)
+        }
+        ["ExtDimensionAccountingFlag", name] if valid_name(name) => (
+            MetadataDataPathRole::ExtDimensionAccountingFlag,
+            None,
+            *name,
+        ),
         ["TabularSection", table] if valid_name(table) => {
             (MetadataDataPathRole::TabularSection, Some(*table), *table)
         }
