@@ -10144,7 +10144,12 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             )
         };
         let properties = parse_form_metadata_properties_from_text(text, kind, uuid);
-        let xml = format_form_source_xml(kind, &header, &properties, source_version).into_bytes();
+        // Fail-closed: a form whose record declares no form type this reader
+        // can name gets no declaration file at all, never an assumed
+        // `<FormType>Managed</FormType>`.
+        let form_type = parse_declared_form_type(text, uuid)?;
+        let xml = format_form_source_xml(kind, &header, &properties, form_type, source_version)
+            .into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if is_template_metadata_text(text, uuid) {
