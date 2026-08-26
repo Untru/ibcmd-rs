@@ -37565,16 +37565,34 @@ fn role_rights_blob_configuration_root_inverts_when_set_for_new_objects_true() {
 #[test]
 fn role_rights_blob_configuration_root_refuses_unnamed_right_diverging_from_default() {
     let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
-    // Identical to the always-tolerated shape except the first unnamed right
-    // (`3762abec…`) is true while `setForNewObjects` is false. Every
+    // Identical to the always-tolerated shape except the still-unnamed right
+    // (`4df6d046…`) is true while `setForNewObjects` is false. Every
     // occurrence of that UUID in the ERP УХ corpus matched the role's own
     // default (2026-08-24, 1,679/1,679), so a value that doesn't is an
     // unproven shape: the whole blob is refused rather than guessing a name.
-    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,3762abec-3836-446a-83ce-3e05001bca8b,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,4df6d046-3bf8-4dda-991c-53ba664296a5,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
     let rights_blob = deflate_for_test(rights_text.as_bytes());
     let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
 
     assert!(parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).is_none());
+}
+
+#[test]
+fn role_rights_blob_configuration_root_names_collaboration_system_registration() {
+    let cfg_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    // The same shape for `3762abec…`, which used to share that refusal: the
+    // uuid is named now, because Документооборот КОРП 3.0.21.3's
+    // `Roles/АдминистраторСистемы` writes it diverging from the flag and the
+    // platform's own `Ext/Rights.xml` prints the name for it.
+    let rights_text = "{10,{1,{{1,dddddddd-dddd-4ddd-dddd-dddddddddddd,0,0},{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,3c00c6ee-844e-4620-85e4-671e72f114d9,1,3762abec-3836-446a-83ce-3e05001bca8b,1,d8682bbb-7800-4aa0-8590-d3cb11fe2a29,1,31c3d4f6-7d02-4654-a14e-06aacafcb4fa,1}}},{0},0,1,0,4294967295}";
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let object_refs = BTreeMap::from([(cfg_uuid.to_string(), "Configuration.DemoApp".to_string())]);
+
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    let xml = format_role_rights_xml(&rights);
+
+    assert!(xml.contains("<name>CollaborationSystemInfoBaseRegistration</name>"));
+    assert!(!xml.contains("3762abec"));
 }
 
 #[test]

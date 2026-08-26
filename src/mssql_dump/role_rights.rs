@@ -643,19 +643,24 @@ pub(super) fn role_standard_attribute_descriptor(
 /// name in `ROLE_RIGHT_NAMES`.
 ///
 /// Measured over the ERP УХ role corpus (2026-08-24, 1,679 roles whose Rights
-/// blob has a Configuration-object entry): both UUIDs occur in every one of
+/// blob has a Configuration-object entry): the UUID occurs in every one of
 /// them, and in every occurrence the value equals that role's own
 /// `setForNewObjects` flag — which is exactly the condition under which
 /// `role_rights_for_xml` never prints a Configuration-root right at all (see
-/// its doc comment). They are therefore structurally invisible in every
-/// observed byte of output, on any value they take. Parsing tolerates them
+/// its doc comment). It is therefore structurally invisible in every
+/// observed byte of output, on any value it takes. Parsing tolerates it
 /// only while the equality holds, because no observed byte proves what name
-/// the platform would print if it ever didn't: a role where either value
+/// the platform would print if it ever didn't: a role where the value
 /// diverges from the flag is refused rather than guessed.
-const CONFIGURATION_ROOT_TOLERATED_UNNAMED_RIGHT_UUIDS: [&str; 2] = [
-    "3762abec-3836-446a-83ce-3e05001bca8b",
-    "4df6d046-3bf8-4dda-991c-53ba664296a5",
-];
+///
+/// The list used to hold a second uuid, `3762abec-…`. Документооборот КОРП
+/// 3.0.21.3 writes that one *diverging* from the flag on
+/// `Roles/АдминистраторСистемы`, so the platform prints it and its native
+/// `Ext/Rights.xml` states the name; it now sits in `ROLE_RIGHT_NAMES` where
+/// the bytes put it, and the whole role -- which this refusal used to
+/// discard -- is exported again.
+const CONFIGURATION_ROOT_TOLERATED_UNNAMED_RIGHT_UUIDS: [&str; 1] =
+    ["4df6d046-3bf8-4dda-991c-53ba664296a5"];
 
 /// True for the six Configuration-root rights that pick the client's launch
 /// mode (thin/thick client window mode, analytics client). Unlike every
@@ -1089,6 +1094,18 @@ const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
         "AnalyticsSystemClient",
     ),
     ("07ef4641-f7da-417a-bd75-35c40a17c2f7", "Automation"),
+    // Named from the platform's own bytes, not inferred: Документооборот
+    // КОРП 3.0.21.3's `Roles/АдминистраторСистемы` writes this uuid `1` while
+    // the role's `setForNewObjects` is false, so the platform prints it -- and
+    // its native `Ext/Rights.xml` names it here, in the one position the
+    // blob's order leaves for it, between `TechnicalSpecialistMode` and
+    // `MainWindowModeNormal`. Every other of that object's 26 pairs maps
+    // one-to-one onto a named right in the same order, so the alignment
+    // admits no other reading.
+    (
+        "3762abec-3836-446a-83ce-3e05001bca8b",
+        "CollaborationSystemInfoBaseRegistration",
+    ),
     (
         "399d7390-8d83-4a57-b4d7-c902c15b701f",
         "ConfigurationExtensionsAdministration",
