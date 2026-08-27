@@ -5463,12 +5463,20 @@ pub(super) fn form_dynamic_list_use_always_universe(
 /// `Активно`, `Документ` and `ИндексСтроки` plain because that register
 /// declares them.
 ///
-/// The whole stand carries 192 dynamic lists whose final selection has a star.
-/// The platform marks a field on 71 of them, every one of the readable shape
-/// above; the other 121 — 56 ERP УХ, 48 UT, 8 Документооборот, 2 БСП demo, 2
-/// БСП base tabular-section stars, one bare `*` and four whose star qualifier
-/// names no source — are written plain, which is what a refused universe
-/// already writes.
+/// The whole stand carries 192 manual-query dynamic lists whose final selection
+/// has a star, and this reader's own parse splits them into four shapes:
+///
+/// | shape | records | platform marks |
+/// |---|---:|---:|
+/// | `<alias>.*` over a base table (readable) | 71 (`uh`) | 71 |
+/// | `<alias>.<section>.*` | 111 (`uh` 56, `ut` 48, `do` 7) | 0 |
+/// | star qualifier names no FROM source of that select | 9 (`uh` 2, `ut` 2, `do` 1, `ssl` 2, `sslbase` 2) | 0 |
+/// | bare `*` | 1 (`uh`) | 0 |
+///
+/// Every record of the readable shape carries a marker and every record of the
+/// other three is written plain, which is what a refused universe already
+/// writes — so reading the readable shape and refusing the rest moves 71
+/// records and no other.
 fn form_dynamic_list_star_source_fields(
     qualifier: Option<&str>,
     selection: &FormDynamicListQuerySelection,
@@ -6103,6 +6111,42 @@ fn is_1c_query_temp_batch(tokens: &[String]) -> bool {
     false
 }
 
+/// Whether a batch declares a selection of its own — a `ВЫБРАТЬ` at the batch's
+/// own nesting level, as opposed to one inside a parenthesized subquery.
+///
+/// A batch that declares none produces no result set, so it is not the query's
+/// final selection. `УНИЧТОЖИТЬ <таблица>` is the shape that occurs: a query
+/// that builds temporary tables ends by dropping them, and the last batch of
+/// such a query is a `УНИЧТОЖИТЬ`, not the `ВЫБРАТЬ` that feeds the list.
+/// Reading it as the selection made the whole universe a refusal, and a
+/// refused universe writes every remembered field plain.
+///
+/// Evidence: the two dynamic lists of the stand whose query ends this way.
+/// ERP УХ 3.2.12.6 `DataProcessors/ДокументооборотСКонтролирующимиОрганами/
+/// Forms/ОтветыНаТребованияФСС` ends `УНИЧТОЖИТЬ ВТСтатус; УНИЧТОЖИТЬ
+/// ВТОтветы`, and its real final selection names `Ссылка` but no
+/// `СостояниеСдачиОтчетности` — the platform writes
+/// `<Field>~Ответы.СостояниеСдачиОтчетности</Field>` beside a plain
+/// `<Field>Ответы.Ссылка</Field>`. `Documents/ЗаявлениеОВвозеТоваровПолученное/
+/// Forms/ФормаРабочееМесто` ends `УНИЧТОЖИТЬ КОформлению`, and its final
+/// selection names all six remembered fields, every one of which the platform
+/// writes plain.
+///
+/// This is a rule about which batch is read, not a list of statements: a batch
+/// is the selection when it declares one.
+fn query_batch_declares_selection(tokens: &[String]) -> bool {
+    let mut depth = 0i64;
+    for token in tokens {
+        match token.as_str() {
+            "(" | "{" => depth += 1,
+            ")" | "}" => depth -= 1,
+            _ if depth == 0 && is_1c_query_keyword(token, Q_SELECT) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn split_1c_query_items(tokens: &[String]) -> Vec<Vec<String>> {
     let mut items = Vec::new();
     let mut current = Vec::new();
@@ -6292,9 +6336,10 @@ fn form_query_source_reference(source: &[String]) -> Option<String> {
     }
 }
 
-/// Parses the final `SELECT` batch of a dynamic-list query: the last batch not
-/// stored into a temporary table. `None` when no such batch exists or it has
-/// no selection list.
+/// Parses the final `SELECT` batch of a dynamic-list query: the last batch that
+/// declares a selection of its own (see [`query_batch_declares_selection`]) and
+/// does not store it into a temporary table. `None` when no such batch exists
+/// or it has no selection list.
 pub(super) fn parse_form_dynamic_list_query_selection(
     query_text: &str,
 ) -> Option<FormDynamicListQuerySelection> {
@@ -6302,7 +6347,7 @@ pub(super) fn parse_form_dynamic_list_query_selection(
     let batches = split_1c_query_batches(&tokens);
     let batch = batches
         .iter()
-        .rfind(|batch| !batch.is_empty() && !is_1c_query_temp_batch(batch))?;
+        .rfind(|batch| query_batch_declares_selection(batch) && !is_1c_query_temp_batch(batch))?;
     let mut index = 0;
     while index < batch.len() && !is_1c_query_keyword(&batch[index], Q_SELECT) {
         index += 1;
@@ -6357,7 +6402,24 @@ pub(super) fn parse_form_dynamic_list_query_selection(
             ")" | "}" => depth -= 1,
             _ => {}
         }
-        if depth == 0 && (is_1c_query_keyword(token, Q_FROM) || is_1c_query_keyword(token, Q_INTO))
+        // The selection list ends at the first clause the batch declares after
+        // it -- its data source or any of the clauses that follow one. Ending
+        // it at `ИЗ`/`ПОМЕСТИТЬ` alone reads the clause body as further
+        // selection items whenever a batch declares no source at all, and then
+        // the item the clause keyword sits behind loses its alias: ERP УХ
+        // 3.2.12.6 `Documents/ЗаказПереработчику/Forms/РабочееМесто` and
+        // `Documents/ЗаказПереработчику2_5/Forms/РабочееМесто` end
+        // `ЛОЖЬ КАК ДинамическаяСтруктура ГДЕ ЛОЖЬ`, and the platform writes
+        // `<Field>СписокКОформлению.ДинамическаяСтруктура</Field>` plain while
+        // the reader, not seeing the alias, marked it. Those two are the only
+        // dynamic lists on the whole stand whose final selection batch reaches
+        // a clause keyword before a source (1 739 ERP УХ, 821 UT, 323
+        // Документооборот, 136 БСП demo and 111 БСП base batches declare their
+        // source first, and the batches that declare neither are unaffected).
+        if depth == 0
+            && (is_1c_query_keyword(token, Q_FROM)
+                || is_1c_query_keyword(token, Q_INTO)
+                || is_1c_query_keyword(token, Q_CLAUSE_END))
         {
             break;
         }
