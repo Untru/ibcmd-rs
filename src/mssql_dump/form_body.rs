@@ -10485,7 +10485,6 @@ pub(super) fn parse_form_child_item_with_dynamic_list_attrs(
         &BTreeMap::new(),
         &BTreeSet::new(),
         object_refs,
-        None,
     )
 }
 
