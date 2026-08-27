@@ -160,19 +160,22 @@ pub fn render_cct_characteristics_xml(
     predefined_data_update: &str,
     edit_type: &str,
     quick_choice: &str,
+    choice_mode: &str,
 ) -> Result<String, CharacteristicsXmlError> {
     validate_xml_1_0(predefined_data_update, "PredefinedDataUpdate")?;
     validate_xml_1_0(edit_type, "EditType")?;
     validate_xml_1_0(quick_choice, "QuickChoice")?;
+    validate_xml_1_0(choice_mode, "ChoiceMode")?;
     let mut xml = render_metadata_characteristics_xml(model)?;
     let predefined_data_update = escape_text(predefined_data_update);
     let edit_type = escape_text(edit_type);
     let quick_choice = escape_text(quick_choice);
+    let choice_mode = escape_text(choice_mode);
     xml.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{predefined_data_update}</PredefinedDataUpdate>\r\n\
 \t\t\t<EditType>{edit_type}</EditType>\r\n\
 \t\t\t<QuickChoice>{quick_choice}</QuickChoice>\r\n\
-\t\t\t<ChoiceMode>BothWays</ChoiceMode>\r\n"
+\t\t\t<ChoiceMode>{choice_mode}</ChoiceMode>\r\n"
     ));
     Ok(xml)
 }
@@ -841,9 +844,10 @@ mod tests {
         }
 
         for values in [
-            ("bad\u{1}", "Dialog", "true"),
-            ("Auto", "bad\u{1}", "true"),
-            ("Auto", "Dialog", "bad\u{1}"),
+            ("bad\u{1}", "Dialog", "true", "BothWays"),
+            ("Auto", "bad\u{1}", "true", "BothWays"),
+            ("Auto", "Dialog", "bad\u{1}", "BothWays"),
+            ("Auto", "Dialog", "true", "bad\u{1}"),
         ] {
             assert!(matches!(
                 render_cct_characteristics_xml(
@@ -851,6 +855,7 @@ mod tests {
                     values.0,
                     values.1,
                     values.2,
+                    values.3,
                 ),
                 Err(CharacteristicsXmlError::InvalidXmlCharacter { .. })
             ));
@@ -860,11 +865,12 @@ mod tests {
     #[test]
     fn renderer_escapes_attributes_filter_text_and_all_cct_tail_values() {
         let model = model_with("Catalog.T&\"<", "a&<b>");
-        let xml = render_cct_characteristics_xml(&model, "A&<", "D>\"", "Q<&").unwrap();
+        let xml = render_cct_characteristics_xml(&model, "A&<", "D>\"", "Q<&", "C&>").unwrap();
         assert!(xml.contains("from=\"Catalog.T&amp;&quot;&lt;\""));
         assert!(xml.contains(">a&amp;&lt;b&gt;</xr:TypesFilterValue>"));
         assert!(xml.contains("<PredefinedDataUpdate>A&amp;&lt;</PredefinedDataUpdate>"));
         assert!(xml.contains("<EditType>D&gt;\"</EditType>"));
         assert!(xml.contains("<QuickChoice>Q&lt;&amp;</QuickChoice>"));
+        assert!(xml.contains("<ChoiceMode>C&amp;&gt;</ChoiceMode>"));
     }
 }
