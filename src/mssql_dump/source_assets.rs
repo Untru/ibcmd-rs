@@ -4580,9 +4580,23 @@ pub(super) fn parse_schedule_number_list(
     Some(values)
 }
 
+/// A compact-schedule slot holds a signed integer, not a digit string.
+///
+/// Census over the `Schedule.xml` files of the eight stand configurations:
+/// `DayInMonth` is written 1441 times as `0`, 14 times as `1`, 6 times as `5`
+/// and once as `-1` (`uh`'s `ScheduledJobs/ОтправкаРасхожденийВГО`). Refusing
+/// the leading minus refused that whole schedule instead of the one slot.
 pub(super) fn parse_schedule_number(value: &str) -> Option<String> {
     let value = value.trim();
-    if value.chars().all(|ch| ch.is_ascii_digit()) {
+    let digits = value.strip_prefix('-');
+    if digits.is_some_and(str::is_empty) {
+        return None;
+    }
+    if digits
+        .unwrap_or(value)
+        .chars()
+        .all(|ch| ch.is_ascii_digit())
+    {
         Some(value.to_string())
     } else {
         None
