@@ -1039,9 +1039,53 @@ pub(super) const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str =
 pub(super) const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME: &str = "dcsset:SettingsComposer";
 const DATA_COMPOSITION_SETTINGS_NAMESPACE_ATTRIBUTE: &str =
     r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#;
-// Platform type IDs used by serialized Form type patterns.
-const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
+/// Platform types the writer spells with a prefix **bound at the document
+/// root**, so their QName is one fact and not a per-document one.
+///
+/// The split of platform type names into per-owner tables was never a platform
+/// fact. A `<v8:Type>` names a platform type by *namespace and local name*; the
+/// prefix is chosen by the document being written. When the namespace is
+/// already bound at the root element, the writer uses the root prefix and
+/// declares nothing; when it is not, it declares the namespace inline on the
+/// `<v8:Type>` element itself, either with the canonical prefix it holds for
+/// that namespace (`mxl`, `fd`, `dcsset`, `pdfdoc`, `pl`) or with a generated
+/// `d<N>p1` where **N is the 1-based element depth** of that very element.
+///
+/// The depth rule is measured, not assumed: across all eight stand corpora
+/// there are 17 495 inline `xmlns:d<N>p1` declarations and in every one of them
+/// N equals the depth of the element carrying it -- 0 counterexamples. It is
+/// what makes `d5p1:Chart` and `d7p1:Chart` the same name: type id
+/// `3543ef08-…` sits at depth 5 in a form body
+/// (`<Form><Attributes><Attribute><Type><v8:Type>`, 30 occurrences) and at
+/// depth 7 in a metadata root
+/// (`<MetaDataObject><DataProcessor><ChildObjects><Attribute><Properties>
+/// <Type><v8:Type>`, 5 occurrences).
+///
+/// The names below carry `cfg:`, `v8:` and `v8ui:`, and every document that can
+/// carry a `<v8:Type>` for them binds those three at its own root -- both the
+/// `MDClasses` root and the `logform` root do. Census of the eight corpora:
+/// `v8:TypeDescription` 695, `v8ui:Picture` 558, `cfg:ConstantsSet` 227,
+/// `cfg:ReportObject` 24, `v8ui:VerticalAlign` 11, `cfg:ReportBuilder` 5 --
+/// 1 520 occurrences, and **not one of them carries an inline `xmlns`**. So one
+/// table answers every reader for them, and the per-shape tables below keep
+/// only the names whose spelling really does depend on the document.
+const ROOT_BOUND_PLATFORM_TYPE_REFERENCES: &[(&str, &str)] = &[
     (CONSTANTS_SET_TYPE_UUID, "cfg:ConstantsSet"),
+    (TYPE_DESCRIPTION_TYPE_UUID, "v8:TypeDescription"),
+    ("e6f51714-91cb-4dce-94fe-90ae3e3e1ad1", "v8ui:Picture"),
+    ("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb", "cfg:ReportObject"),
+    ("52616226-8ccf-4d1d-a3da-827eeb4f9cf9", "v8ui:VerticalAlign"),
+    // Named by `DataProcessors/УниверсальныйОбменДаннымиXML` in ух, ут, до and
+    // БСП демо and by `Reports/ПланПоказателей` in ух -- five records of one
+    // type id, one spelling, in two different owner families.
+    (REPORT_BUILDER_TYPE_UUID, "cfg:ReportBuilder"),
+];
+// Platform type IDs used by serialized Form type patterns. Only the names whose
+// prefix the form document itself fixes stay here: the `d5p1:` names by the
+// depth rule above, and the four inline-declared canonical prefixes the form
+// writer knows how to spell (`form_metadata_type_xml_namespace_attr`). Names
+// bound at the root live in `ROOT_BOUND_PLATFORM_TYPE_REFERENCES`.
+const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     (
         DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID,
         DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME,
@@ -1050,11 +1094,7 @@ const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
         "151f8778-e2d0-496a-9f02-d9ffd93b57ec",
         "fd:FormattedDocument",
     ),
-    (TYPE_DESCRIPTION_TYPE_UUID, "v8:TypeDescription"),
     ("ebf766b1-f32c-11d3-9851-008048da1252", "d5p1:TextDocument"),
-    ("e6f51714-91cb-4dce-94fe-90ae3e3e1ad1", "v8ui:Picture"),
-    ("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb", "cfg:ReportObject"),
-    ("52616226-8ccf-4d1d-a3da-827eeb4f9cf9", "v8ui:VerticalAlign"),
     (CHART_TYPE_UUID, "d5p1:Chart"),
     (
         "4af83795-fc2a-48cd-9bea-ce665789a62c",
@@ -1080,14 +1120,11 @@ const GEOGRAPHICAL_SCHEMA_TYPE_REFERENCE: &str = "d5p1:GeographicalSchema";
 /// attribute's `<v8:Type>` and in the `xsi:type` of its `<Settings>` block.
 const PLANNER_TYPE_UUID: &str = "43dc7f37-5b1d-42a7-8f28-f545080d0255";
 const PLANNER_TYPE_REFERENCE: &str = "pl:Planner";
-// Platform types serialized in DataProcessor Attribute patterns. SettingsComposer
-// stays on its stricter owner-wide admission path below.
-const DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
-    (CONSTANTS_SET_TYPE_UUID, "cfg:ConstantsSet"),
-    (TYPE_DESCRIPTION_TYPE_UUID, "v8:TypeDescription"),
-    (CHART_TYPE_UUID, "d7p1:Chart"),
-    (REPORT_BUILDER_TYPE_UUID, "cfg:ReportBuilder"),
-];
+// Platform types serialized in DataProcessor Attribute patterns. Only the one
+// name whose prefix the metadata-root document fixes stays here: `Chart` at
+// depth 7. SettingsComposer stays on its stricter owner-wide admission path
+// below.
+const DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[(CHART_TYPE_UUID, "d7p1:Chart")];
 const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
@@ -34082,9 +34119,20 @@ pub(super) fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         // `cfg:BusinessProcessRoutePointRef`, a name only the other copy knew,
         // so the object failed closed on an identifier the project already
         // resolves elsewhere. One table now answers both readers.
-        _ => DCS_BUILTIN_REFERENCE_TYPE_SETS
+        _ => ROOT_BOUND_PLATFORM_TYPE_REFERENCES
             .iter()
-            .find_map(|(candidate, reference)| (*candidate == type_id).then_some(*reference)),
+            .find_map(|(candidate, reference)| {
+                candidate
+                    .eq_ignore_ascii_case(type_id)
+                    .then_some(*reference)
+            })
+            .or_else(|| {
+                DCS_BUILTIN_REFERENCE_TYPE_SETS
+                    .iter()
+                    .find_map(|(candidate, reference)| {
+                        (*candidate == type_id).then_some(*reference)
+                    })
+            }),
     }
 }
 

@@ -72758,6 +72758,62 @@ fn every_reference_family_protocol_identifier_answers_both_readers() {
 }
 
 #[test]
+fn a_root_bound_platform_type_name_is_one_fact_for_every_reader() {
+    // A `<v8:Type>` names a platform type by namespace and local name; the
+    // prefix belongs to the document. Where the namespace is bound at the
+    // document root the writer uses the root prefix and declares nothing, and
+    // both the `MDClasses` root and the `logform` root bind `cfg`, `v8` and
+    // `v8ui`. Census of the eight stand corpora: 1 520 `<v8:Type>` elements
+    // spell one of the six names below and not one of them carries an inline
+    // `xmlns`. So all three readers must answer the same for all six.
+    for (identifier, reference) in ROOT_BOUND_PLATFORM_TYPE_REFERENCES {
+        assert_eq!(builtin_type_reference(identifier), Some(*reference));
+        assert_eq!(form_builtin_type_reference(identifier), Some(*reference));
+        assert_eq!(
+            data_processor_builtin_type_reference(identifier),
+            Some(*reference)
+        );
+    }
+    // And the per-document-shape tables keep no root-bound name of their own:
+    // a private second copy of such a row is exactly what let
+    // `cfg:ReportBuilder` be known to the data-processor reader and unknown to
+    // every other one.
+    for (_, reference) in FORM_BUILTIN_TYPE_REFERENCES
+        .iter()
+        .chain(DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES.iter())
+    {
+        assert!(
+            !reference.starts_with("cfg:")
+                && !reference.starts_with("v8:")
+                && !reference.starts_with("v8ui:"),
+            "{reference} is spelled with a root-bound prefix and belongs to the shared table"
+        );
+    }
+}
+
+#[test]
+fn report_builder_attribute_names_its_type_in_a_metadata_root() {
+    // `uh` `Reports/ПланПоказателей` declares one attribute and types it
+    // `{"Pattern",{"#",0dda99d9-ae9f-43d2-b7ac-44f3fb0d4059}}`. The platform
+    // prints `<v8:Type>cfg:ReportBuilder</v8:Type>` with no inline namespace --
+    // the same spelling its four `DataProcessors/УниверсальныйОбменДаннымиXML`
+    // records get, which the export already matched byte for byte.
+    let value_types = stable_partition_metadata_types(classify_metadata_reference_type_sets(
+        parse_metadata_type_pattern(
+            r##"{"Pattern",{"#",0dda99d9-ae9f-43d2-b7ac-44f3fb0d4059}}"##,
+            &BTreeMap::new(),
+        )
+        .expect("report builder pattern must parse"),
+    ));
+    let xml = format_metadata_types_xml(&value_types);
+    assert!(
+        xml.contains("<v8:Type>cfg:ReportBuilder</v8:Type>"),
+        "{xml}"
+    );
+    assert!(!xml.contains("xmlns:"), "{xml}");
+}
+
+#[test]
 fn task_tabular_sections_are_read_by_the_shared_owned_section_reader() {
     // `do` `Task.ЗадачаИсполнителя` owns two tabular sections; the record is
     // the ordinary owned-section record, envelope `{1,<payload>,
