@@ -981,6 +981,10 @@ pub(super) struct FormAttributeSaveFieldBinding {
     /// with. Empty for the one-component entry, which names the member and
     /// stops there.
     pub(super) members: Vec<String>,
+    /// The entry written out physically -- what the platform writes for a
+    /// reference the configuration cannot name. See
+    /// [`form_attribute_save_entry_physical_spelling`].
+    pub(super) physical: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4454,10 +4458,49 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
                     key,
                     metadata_uuid,
                     members,
+                    physical: form_attribute_save_entry_physical_spelling(&entry),
                 },
             ))
         })
         .collect()
+}
+
+/// A saved-field entry written out physically.
+///
+/// The platform does not drop a reference it cannot name -- it writes it out as
+/// the bytes spell it, the members of a tuple joined by a colon and the tuples
+/// joined by a slash. The entry is `{N,c1,…,cN}`, so the declared component
+/// count opens the spelling and every component follows it.
+///
+/// Evidence: the 35 `1/0:<uuid>` saved fields the stand's native trees carry --
+/// 4 in Документооборот КОРП 3.0.21.3
+/// `DataProcessors/ПечатьЭтикетокИЦенниковБПО/Forms/Форма` and 31 over ten ERP
+/// УХ 3.2.12.6 forms -- every one of them against an entry that reads
+/// `{1,{0,<uuid>}}`. `DataProcessors/ИмпортОбъектовИзExcel/Forms/Форма` puts
+/// both outcomes in one block: its `Объект` attribute declares seven entries of
+/// that identical shape, six of whose uuids are attributes of
+/// `DataProcessor.ИмпортОбъектовИзExcel` and are written `Объект.<name>`, while
+/// `3db98de4-94bb-4d5d-96fc-5fe2132ec47d` is named nowhere in the configuration
+/// and is written `1/0:3db98de4-94bb-4d5d-96fc-5fe2132ec47d`. The shape is the
+/// same either way, so nothing but the resolution decides the spelling.
+///
+/// The same law already answers an unnameable choice-parameter link and a
+/// style-item colour that names an element the configuration has deleted.
+fn form_attribute_save_entry_physical_spelling(entry: &[&str]) -> String {
+    entry
+        .iter()
+        .map(
+            |component| match split_1c_braced_fields(component.trim(), 0) {
+                Some(members) => members
+                    .iter()
+                    .map(|member| member.trim())
+                    .collect::<Vec<_>>()
+                    .join(":"),
+                None => component.trim().to_string(),
+            },
+        )
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 pub(super) fn parse_form_attribute_save_field_bindings(
@@ -4523,6 +4566,23 @@ pub(super) fn apply_form_attribute_save_field_bindings(
                     base.zip(form_settings_composer_member_walk(&binding.members))
                         .map(|(base, tail)| format!("{base}{tail}"))
                 };
+                // A saved field whose metadata reference this configuration
+                // cannot name is not a malformed entry: the platform writes it
+                // out physically and keeps the block around it. Answering
+                // nothing dropped the entry, and an attribute whose every entry
+                // was such a reference lost its whole `<Save>` block --
+                // `DataProcessors/ПечатьЭтикетокИЦенниковБПО/Forms/Форма` of
+                // Документооборот КОРП 3.0.21.3 is exactly that. Only a
+                // metadata terminal falls back: that is the terminal the
+                // corpus writes physically, and no other terminal was ever
+                // observed unresolved. See
+                // [`form_attribute_save_entry_physical_spelling`].
+                let data_path = data_path.or_else(|| {
+                    binding
+                        .metadata_uuid
+                        .is_some()
+                        .then(|| binding.physical.clone())
+                });
                 if let Some(data_path) = data_path
                     && seen.insert(data_path.clone())
                 {

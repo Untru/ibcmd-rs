@@ -11287,11 +11287,13 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
                 key: "0|11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
                 metadata_uuid: Some("11a93e3a-3c5b-4242-913c-02474a383344".to_string()),
                 members: Vec::new(),
+                physical: "1/0:11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
             },
             FormAttributeSaveFieldBinding {
                 key: "0|ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string(),
                 metadata_uuid: Some("ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string()),
                 members: Vec::new(),
+                physical: "1/0:ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string(),
             }
         ])
     );
@@ -11352,6 +11354,67 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
     assert!(xml.contains("<Save>"));
     assert!(xml.contains("<Field>Объект.РезультатВыгрузкиXDTO</Field>"));
     assert!(xml.contains("<Field>Объект.ВерсияФормата</Field>"));
+}
+
+/// A saved field whose metadata reference the configuration cannot name is
+/// written physically, and the block is written around it.
+///
+/// Evidence: Документооборот КОРП 3.0.21.3
+/// `DataProcessors/ПечатьЭтикетокИЦенниковБПО/Forms/Форма`, whose `Объект`
+/// attribute carries four entries of the shape `{1,{0,<uuid>}}`, none of whose
+/// uuids the configuration names; the platform writes all four as
+/// `1/0:<uuid>`.
+#[test]
+fn unnameable_form_attribute_saved_field_is_written_physically() {
+    let save_field_bindings = extract_form_body_attribute_save_field_bindings(
+        &[concat!(
+            "{4,1,",
+            r##"{9,{1},0,"Объект",{1,0},{"Pattern",{"#",385af45e-dd13-46d7-b604-725d76450564}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,2,{1,{0,34c2c3c8-95f8-4cbd-90c6-5516c6b25c70}},{1,{0,7eb47a9b-11cb-41ac-b0cf-065d7d9b819e}}},1,0,0,0,{0,0},{0,0}}"##,
+            "}"
+        )
+        .to_string()],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+    let mut attributes = vec![FormAttribute {
+        chart_settings: None,
+        view_rights: None,
+        edit_rights: None,
+        id: "1".to_string(),
+        name: "Объект".to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+        unresolvable_field_item_ids: BTreeSet::new(),
+    }];
+    apply_form_attribute_save_field_bindings(
+        &mut attributes,
+        &save_field_bindings,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+
+    assert_eq!(
+        attributes[0].save_fields,
+        vec![
+            "1/0:34c2c3c8-95f8-4cbd-90c6-5516c6b25c70".to_string(),
+            "1/0:7eb47a9b-11cb-41ac-b0cf-065d7d9b819e".to_string(),
+        ]
+    );
+    let xml = format_form_attributes_xml(&attributes);
+    assert!(xml.contains("<Field>1/0:34c2c3c8-95f8-4cbd-90c6-5516c6b25c70</Field>"));
 }
 
 #[test]
