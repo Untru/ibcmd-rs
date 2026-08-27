@@ -3584,7 +3584,18 @@ impl FormFieldSchema {
             "CalendarField" => ("8", 24, "6", None, None, None),
             "GraphicalSchemaField" => ("14", 14, "3", None, None, None),
             "HTMLDocumentField" => ("15", 13, "3", None, None, Some(3)),
-            "FormattedDocumentField" => ("17", 16, "1", None, None, Some(8)),
+            // The formatted document keeps the whole colour triple in three
+            // adjacent option slots, and only the border one had been claimed.
+            // Over the 35 native `FormattedDocumentField` items of
+            // Документооборот КОРП 3.0.21.3 option slot 6 carries the unset
+            // shape `{3,4,{0}}` on 34 and `{3,3,{-11}}` -- `style:FieldTextColor`
+            // -- on exactly the one whose document writes `<TextColor>`, and
+            // option slot 7 is unset on 33 and `{3,3,{-1}}` --
+            // `style:FormBackColor` -- on exactly the two that write
+            // `<BackColor>`.  БСП base, БСП demo and УТ 11.5.27.75 write
+            // neither element on any of their 89 items and read the unset shape
+            // in both slots throughout.
+            "FormattedDocumentField" => ("17", 16, "1", Some(6), Some(7), Some(8)),
             // The PDF viewer field carries one member more than the other
             // field kinds at the same head offset: all five of UT
             // 11.5.27.75's `PDFDocumentField` items spell a 60-member

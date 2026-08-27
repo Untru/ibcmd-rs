@@ -10377,12 +10377,16 @@ fn parse_form_child_item_with_metadata_owners(
     let input_hint = (tag == "InputField")
         .then(|| parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
         .unwrap_or_default();
-    let input_hint =
-        if input_field_top_level_offset > 0 && !input_hint.is_empty() && input_hint == title {
-            Vec::new()
-        } else {
-            input_hint
-        };
+    // An `InputField` whose record carries the conditional-appearance prefix
+    // used to lose an `<InputHint>` that repeated its own `<Title>`, on the
+    // unstated assumption that the shifted bag had answered the title twice.
+    // The assumption is measurable and false: the guard fires nowhere in БСП
+    // demo (0 of 4 079 prefixed input fields), nowhere in УТ 11.5.27.75, and
+    // exactly three times in Документооборот КОРП 3.0.21.3 -- the three
+    // `ОтборСостояние`/`ОтборКатегория`/`ОтборСостояниеМЭДО` fields of
+    // `Catalogs/ДокументыПредприятия/Forms/ФормаСпискаСПапками`, each of which
+    // the platform writes an `<InputHint>` for, spelled exactly like its
+    // title. The bag slot answers the hint; nothing needs suppressing.
     // The extended option bag does not move when the record carries the
     // conditional-appearance prefix -- the shift is on the record, and the bag
     // is found by scanning the record's tail for its own declared revision, not
@@ -14268,9 +14272,17 @@ pub(super) fn parse_form_container_enabled(tag: &str, fields: &[&str]) -> Option
         // 6 016 `ColumnGroup` items and the 1 of 2 684 `Pages` items that carry
         // `<Enabled>false</Enabled>` and `1` on every other one, with no other
         // code on either kind.
+        // A `ButtonGroup` keeps it in the same container slot, and was the
+        // last grouping kind the table left out.  Over the 10 656
+        // `ButtonGroup` items of Документооборот КОРП 3.0.21.3 (1 656), БСП
+        // demo (922), БСП base (796) and УТ 11.5.27.75 (7 333) slot 10 reads
+        // `0` on exactly the 4 that carry `<Enabled>false</Enabled>` -- all
+        // four in Документооборот, in two list forms -- and `1` on the other
+        // 10 652, with no other code and no record length that shifts it.
         "Page"
         | "Pages"
         | "ColumnGroup"
+        | "ButtonGroup"
         | "SearchStringAddition"
         | "SearchControlAddition"
         | "ViewStatusAddition" => 10,
@@ -18215,10 +18227,16 @@ fn parse_form_picture_decoration_picture(
 /// | 6 | `AutoSizeIgnoreScale` | 2 | 2 |
 /// | 7 | `ByFontSize` | 5 | 25 |
 ///
-/// Code 3 never occurs on either owner, so it stays unmapped rather than being
-/// guessed into the sequence: the enumeration is a flat ordinal, not a
-/// composition mask, since 5 and 6 are not 4|1 and 4|2 under any reading that
-/// keeps 1 and 2 meaning `Stretch` and `Proportionally`.
+/// Code 3 does not occur in UT 11.5.27.75 at all; Документооборот КОРП
+/// 3.0.21.3 spells it, and it is `Tile`.  Over that configuration's 1 602
+/// native `PictureDecoration` items the code is a total function of the
+/// spelling in the same way -- 1 495 read `0` and write no element, and the
+/// other seven codes cover the 107 that write one, `3` on exactly the 8 that
+/// write `<PictureSize>Tile</PictureSize>` (20 `Stretch`, 45
+/// `Proportionally`, 30 `AutoSize`, 1 `RealSizeIgnoreScale`, 2
+/// `AutoSizeIgnoreScale`, 1 `ByFontSize`).  The enumeration stays a flat
+/// ordinal rather than a composition mask: 5 and 6 are not 4|1 and 4|2 under
+/// any reading that keeps 1 and 2 meaning `Stretch` and `Proportionally`.
 ///
 /// The spreadsheet-document table in `moxel` shares the five codes it knows but
 /// is a separate authority measured against a separate corpus, so the two are
@@ -18228,6 +18246,7 @@ pub(super) fn form_picture_size_mode(value: usize) -> Option<&'static str> {
         0 => Some("RealSize"),
         1 => Some("Stretch"),
         2 => Some("Proportionally"),
+        3 => Some("Tile"),
         4 => Some("AutoSize"),
         5 => Some("RealSizeIgnoreScale"),
         6 => Some("AutoSizeIgnoreScale"),
@@ -26569,6 +26588,14 @@ pub(super) fn format_form_child_item_xml(
     }
     if usual_group_title_first {
         if item.tag == "ButtonGroup" {
+            // `Enabled` opens the group's run: over the eight native stand
+            // trees it trails only `Visible` (1) and leads `Title` (9),
+            // `ToolTip` (6), `ExtendedTooltip` (9) and `ChildItems` (9), with
+            // no pair counted both ways.  It never shares a group with
+            // `EnableContentChange`, so their relative order is unobserved.
+            if item.enabled == Some(false) {
+                xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
+            }
             xml.push_str(&format_form_shared_container_content_change_xml(
                 item,
                 indent + 1,
@@ -26896,6 +26923,20 @@ pub(super) fn format_form_child_item_xml(
     // `SkipOnInput` (1) and `AutoMaxHeight` (1) lead it, and it leads `Font`
     // (1), `ContextMenu` (7) and `ExtendedTooltip` (7), with no pair counted
     // both ways.
+    // `BackColor` stands immediately ahead of it, the same way it does on
+    // every other control kind that carries both: the 2 native
+    // `FormattedDocumentField` items of Документооборот КОРП 3.0.21.3 that
+    // carry one write `Height`, `AutoMaxHeight`, `BackColor`, `BorderColor`,
+    // `Font` in that order, and no field anywhere writes the two the other way
+    // round.
+    if item.tag == "FormattedDocumentField"
+        && let Some(back_color) = &item.back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BackColor>{}</BackColor>\r\n",
+            escape_xml_text(back_color)
+        ));
+    }
     if item.tag == "FormattedDocumentField"
         && let Some(border_color) = &item.border_color
     {
