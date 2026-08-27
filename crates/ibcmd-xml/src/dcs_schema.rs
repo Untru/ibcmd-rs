@@ -3495,6 +3495,10 @@ const DATA_UI_STYLE_NAMESPACE_URI: &str = "http://v8.1c.ru/8.1/data/ui/style";
 const XSI_TYPE_EXPANDED_NAME: &str = "{http://www.w3.org/2001/XMLSchema-instance}type";
 const DATA_UI_COLOR_EXPANDED_NAME: &str = "{http://v8.1c.ru/8.1/data/ui}Color";
 const DATA_CORE_TYPE_EXPANDED_NAME: &str = "{http://v8.1c.ru/8.1/data/core}Type";
+const DESIGN_TIME_VALUE_EXPANDED_NAME: &str =
+    "{http://v8.1c.ru/8.1/data-composition-system/core}DesignTimeValue";
+const CURRENT_CONFIG_ANY_REF_EXPANDED_NAME: &str =
+    "{http://v8.1c.ru/8.1/data/enterprise/current-config}AnyRef";
 
 /// Expands a prefixed attribute name against the scopes in effect. An
 /// unprefixed attribute is in no namespace, which is never what a caller
@@ -4027,13 +4031,47 @@ fn rewrite_tokens(
                         }
                         RewriteFrame::TypeId | RewriteFrame::AppIndex => {}
                         _ if state.text == RewriteTextKind::TypeQName => {
-                            let resolved = rewrite_qname_value(
+                            let mut resolved = rewrite_qname_value(
                                 policy,
                                 &scopes,
                                 &state.renamed,
                                 "xsi:type",
                                 value,
                             )?;
+                            // The configuration's "any reference" type set is
+                            // stored under one name and published under
+                            // another. `DataProcessors/
+                            // ЗаменаИОбъединениеЭлементов/Templates/
+                            // ОсновнаяСхемаКомпоновкиДанных` and
+                            // `Reports/ИспользованиеСчетовИСубконто
+                            // МеждународныйУчет/Templates/ПоказателиОтчетов`
+                            // of ERP УХ 3.2.12.6 both store
+                            // `<TypeSet …>dNp1:AnyRef</TypeSet>` and the
+                            // platform exports `dNp1:AnyIBRef`. Over every
+                            // `.xml` of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75,
+                            // БСП demo/base 3.1.12.297, Документооборот КОРП
+                            // 3.0.21.3, MDM_Management, Web_Service and WMS5
+                            // the platform writes `AnyIBRef` 1 379 times --
+                            // 1 321 in forms and 58 in templates -- and
+                            // `AnyRef` not once, in either `<Type>` or
+                            // `<TypeSet>`, so the storage spelling is not one
+                            // the source direction ever carries. The uuid
+                            // form of the same type set already resolves to
+                            // `AnyIBRef` through the type index; only the
+                            // lexical one fell through untouched.
+                            if expanded_qname(&scopes, value).as_deref()
+                                == Some(CURRENT_CONFIG_ANY_REF_EXPANDED_NAME)
+                            {
+                                let renamed = {
+                                    let (prefix, _) = split_prefix(&resolved);
+                                    if prefix.is_empty() {
+                                        "AnyIBRef".to_owned()
+                                    } else {
+                                        format!("{prefix}:AnyIBRef")
+                                    }
+                                };
+                                resolved = renamed;
+                            }
                             out.push_str(&resolved);
                             // The source-direction QName is what the builtin
                             // sort-bounds table is keyed by, so it is kept for
@@ -4546,10 +4584,12 @@ fn rewrite_tokens(
                     }
                 }
                 let mut rendered = String::new();
+                let mut rendered_attribute_count = 0usize;
                 for (key, value) in &start.attributes {
                     if *key == "xmlns" || key.starts_with("xmlns:") {
                         continue;
                     }
+                    rendered_attribute_count += 1;
                     let (attribute_prefix, attribute_local) = split_prefix(key);
                     let emitted_key = if attribute_prefix.is_empty() {
                         attribute_local.to_owned()
@@ -4632,6 +4672,30 @@ fn rewrite_tokens(
                         .attributes
                         .iter()
                         .all(|(key, _)| *key == "xmlns" || key.starts_with("xmlns:"));
+                // A `DesignTimeValue` with nothing inside it is a spelling the
+                // platform never writes. Over the `Templates/*/Ext/
+                // Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75,
+                // БСП demo/base 3.1.12.297, Документооборот КОРП 3.0.21.3,
+                // MDM_Management, Web_Service and WMS5 the platform publishes
+                // 3 213 `xsi:type="dcscor:DesignTimeValue"` values and not one
+                // of them is self-closed -- every one carries content -- while
+                // the empty value is written `<value xsi:nil="true"/>` 6 937
+                // times. Storage keeps the discriminator either way:
+                // `Reports/АнализИсполненияПрограммыЗакупок/Templates/
+                // ОсновнаяСхемаКомпоновкиДанных` stores `<value
+                // xmlns:dcscor="…" xsi:type="dcscor:DesignTimeValue"/>` and
+                // the platform exports `<value xsi:nil="true"/>`.
+                if start.self_closing
+                    && rendered_attribute_count == 1
+                    && start.attributes.iter().any(|(key, value)| {
+                        expanded_attribute_name(&scopes, key).as_deref()
+                            == Some(XSI_TYPE_EXPANDED_NAME)
+                            && expanded_qname(&scopes, value).as_deref()
+                                == Some(DESIGN_TIME_VALUE_EXPANDED_NAME)
+                    })
+                {
+                    rendered = " xsi:nil=\"true\"".to_owned();
+                }
                 if start.self_closing && omit_if_empty {
                     // Storage already spells this element self-closed, so
                     // there is no content run to wait on: the platform's own
