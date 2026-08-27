@@ -1033,6 +1033,14 @@ const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
 const METADATA_OBJECT_REF_TYPE_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 const CONSTANTS_SET_TYPE_UUID: &str = "dcfc3784-a14f-4786-ac7b-c82db5ba275f";
 const CHART_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
+/// The Gantt chart. Named by every Gantt-chart-typed form attribute the eight
+/// stand corpora carry -- 19 of them, one in Documentooborot KORP 3.0.21.3 and
+/// 18 in ERP UH 3.2.12.6: each stores this type id and the platform writes this
+/// QName both in the attribute's `<v8:Type>` and in the `xsi:type` of its
+/// `<Settings>` block. The id had no entry at all, so neither element was
+/// written on any of them.
+pub(super) const GANTT_CHART_TYPE_UUID: &str = "3a6e63bf-16aa-42eb-b48c-2fff9670ad2f";
+pub(super) const GANTT_CHART_TYPE_REFERENCE: &str = "d5p1:GanttChart";
 const REPORT_BUILDER_TYPE_UUID: &str = "0dda99d9-ae9f-43d2-b7ac-44f3fb0d4059";
 pub(super) const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str =
     "cab0d12b-3c88-4993-8edc-8c3827cadc7d";
@@ -1056,6 +1064,7 @@ const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     ("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb", "cfg:ReportObject"),
     ("52616226-8ccf-4d1d-a3da-827eeb4f9cf9", "v8ui:VerticalAlign"),
     (CHART_TYPE_UUID, "d5p1:Chart"),
+    (GANTT_CHART_TYPE_UUID, GANTT_CHART_TYPE_REFERENCE),
     (
         "4af83795-fc2a-48cd-9bea-ce665789a62c",
         "d5p1:FlowchartContextType",
@@ -41776,7 +41785,7 @@ fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'st
         }
         ConstantValueType::Reference { reference }
         | ConstantValueType::ReferenceTypeSet { reference }
-            if reference == "d5p1:Chart" =>
+            if reference == "d5p1:Chart" || reference == GANTT_CHART_TYPE_REFERENCE =>
         {
             r#" xmlns:d5p1="http://v8.1c.ru/8.2/data/chart""#
         }

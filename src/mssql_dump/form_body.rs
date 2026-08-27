@@ -8954,6 +8954,39 @@ pub(super) fn extend_form_attribute_special_columns(
             .or_default()
             .insert(column.id.to_string(), column.name.to_string());
     }
+    // A Gantt chart exposes two standard columns of its own, and a table nested
+    // in a `GanttChartField` binds to them the same way any other two-segment
+    // chain binds to a declared column.
+    //
+    // Evidence: over the whole population the eight stand corpora have -- the
+    // 20 `GanttChartField` items -- exactly two forms bind a chain whose owner
+    // segment names a `GanttChart`-typed form attribute and whose terminal is a
+    // bare index: Documentooborot KORP 3.0.21.3
+    // `Catalogs/ProektnyeZadachi/Forms/FormaPlanaProekta` and ERP UH 3.2.12.6
+    // `Reports/MonitoringZakaza/Forms/FormaOtcheta`. Both bind index `0` and
+    // index `1`, and the platform writes `<DataPath>....Point</DataPath>` for
+    // `0` and `<DataPath>....Text</DataPath>` for `1` on both. No other index
+    // occurs on a Gantt-typed attribute anywhere in the corpus, so no third
+    // column is claimed.
+    if form_attribute_is_gantt_chart(attribute) {
+        table_column_names_by_id
+            .entry(attribute.id.clone())
+            .or_default()
+            .extend([
+                ("0".to_string(), "Point".to_string()),
+                ("1".to_string(), "Text".to_string()),
+            ]);
+    }
+}
+
+pub(super) fn form_attribute_is_gantt_chart(attribute: &FormAttribute) -> bool {
+    attribute.value_types.iter().any(|value_type| {
+        matches!(
+            value_type,
+            ConstantValueType::Reference { reference }
+                if reference == FORM_GANTT_CHART_TYPE_REFERENCE
+        )
+    })
 }
 
 fn form_attribute_is_value_list(attribute: &FormAttribute) -> bool {
@@ -10797,9 +10830,12 @@ fn parse_form_child_item_with_metadata_owners(
     let check_box_field_layout = (tag == "CheckBoxField")
         .then(|| parse_form_check_box_field_layout(wrapper, &fields))
         .flatten();
-    let special_field_layout = matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField")
-        .then(|| parse_form_special_field_layout(wrapper, &fields))
-        .flatten();
+    let special_field_layout = matches!(
+        tag,
+        "ProgressBarField" | "TrackBarField" | "ChartField" | "GanttChartField"
+    )
+    .then(|| parse_form_special_field_layout(wrapper, &fields))
+    .flatten();
     let input_field_top_level_offset = matches!(
         tag,
         "InputField"
@@ -10830,6 +10866,14 @@ fn parse_form_child_item_with_metadata_owners(
             // writes `<TitleLocation>None</TitleLocation>`.
             | "FormattedDocumentField"
             | "PDFDocumentField"
+            // The Gantt chart carries the same conditional prefix on 3 of the
+            // 20 items the eight stand corpora have -- ERP УХ
+            // `DataProcessors/ДиаграммаГантаОперации/Forms/Форма`,
+            // `Catalogs/УдалитьПанелиОтчетов/Forms/ФормаЭлемента_Управляемая`
+            // and `Reports/ИсполнениеСтадийМеропритияДиаграммаГанта/Forms/
+            // ФормаОтчета` -- each with its discriminator `12` at slot 6 and
+            // its name at slot 7.
+            | "GanttChartField"
     )
     .then(|| {
         form_input_field_layout_is_extended(&fields)
@@ -11190,6 +11234,11 @@ fn parse_form_child_item_with_metadata_owners(
             // platform writes both, name for name and id for id.
             if tag == "PDFDocumentField" {
                 &["ContextMenu", "ViewStatusAddition"]
+            } else if tag == "GanttChartField" {
+                // The Gantt chart owns its own nested `Table`, in the trailing
+                // record member its slot 58 declares. See
+                // `FormSpecialFieldSchema::from_raw_layout` for the census.
+                &["ContextMenu", "Table"]
             } else {
                 &["ContextMenu"]
             },
@@ -11758,6 +11807,11 @@ fn parse_form_child_item_with_metadata_owners(
                     | "ProgressBarField"
                     | "TrackBarField"
                     | "ChartField"
+                    // The Gantt chart reads the same slot. Over the whole
+                    // population the eight stand corpora have -- 20 items --
+                    // it is `1` on exactly the 7 that carry
+                    // `<DefaultItem>true</DefaultItem>` and `0` on the other 13.
+                    | "GanttChartField"
             )
         {
             fields
@@ -13098,6 +13152,11 @@ fn parse_form_child_item_with_metadata_owners(
             field_schema_and_options
                 .as_ref()
                 .and_then(|(schema, options)| schema.vertical_stretch(options))
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.vertical_stretch(options))
+        {
+            Some(value)
         } else if tag == "UsualGroup" {
             parse_form_usual_group_vertical_stretch(&fields)
         } else if tag == "Page" {
@@ -13916,6 +13975,7 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            | "GanttChartField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -19499,15 +19559,19 @@ fn parse_form_special_field_layout<'a>(
     wrapper: &str,
     fields: &'a [&'a str],
 ) -> Option<(FormSpecialFieldSchema, Vec<&'a str>)> {
+    let top_level_offset = form_input_field_top_level_offset(fields);
     let options = fields
-        .get(FormSpecialFieldSchema::OPTIONS_SLOT)
+        .get(FormSpecialFieldSchema::OPTIONS_SLOT + top_level_offset)
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
     let schema = FormSpecialFieldSchema::from_raw_layout(
         wrapper,
         fields.len(),
-        fields.get(5).map(|field| field.trim()),
-        options.len(),
-        options.first().map(|field| field.trim()),
+        fields.get(5 + top_level_offset).map(|field| field.trim()),
+        top_level_offset,
+        &options,
+        fields
+            .get(FormSpecialFieldSchema::NESTED_ITEM_COUNT_SLOT + top_level_offset)
+            .map(|field| field.trim()),
     )?;
     Some((schema, options))
 }
@@ -20981,6 +21045,7 @@ pub(super) fn parse_form_child_item_data_path(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            | "GanttChartField"
     );
     let input_field_offset = field_layout_tag
         .then(|| {
@@ -21102,7 +21167,12 @@ pub(super) fn parse_form_child_item_data_path(
         // document fields do: all five items of Документооборот КОРП 3.0.21.3
         // hold a one-segment chain there naming the form attribute the
         // platform writes in `<DataPath>`.
-        | "PlannerField" => resolve_slots(&input_slots, &parse_bound),
+        | "PlannerField"
+        // The Gantt chart spells its binding in the same slot 11. All 20 items
+        // of the eight stand corpora hold a one-segment chain there naming the
+        // form attribute the platform writes in `<DataPath>`, and none of them
+        // falls back to a parent path.
+        | "GanttChartField" => resolve_slots(&input_slots, &parse_bound),
         "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
         "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
         "Button" => button_data_path_slot
@@ -27828,6 +27898,11 @@ pub(super) fn format_form_child_item_xml(
             // Документооборот КОРП 3.0.21.3 carry a title and write it
             // directly behind `<DataPath>`.
             | "PlannerField"
+            // A `GanttChartField` writes its `<Title>` directly behind
+            // `<DataPath>` too: Документооборот КОРП 3.0.21.3
+            // `Catalogs/ПроектныеЗадачи/Forms/ФормаПланаПроекта` is the corpus's
+            // only Gantt chart with a title, and the platform writes it there.
+            | "GanttChartField"
             | "ColumnGroup"
     );
     let title_location_follows_title =
@@ -30402,6 +30477,15 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
     }
+    // A `GanttChartField` owns its nested `Table` as a direct element between
+    // `ExtendedTooltip` and `Events`, not inside a `<ChildItems>` group: all 17
+    // Gantt charts of the eight stand corpora that carry one write it bare
+    // there, and none of the 20 writes a `<ChildItems>` element at all.
+    if item.tag == "GanttChartField" {
+        for child in &direct_regular_children {
+            xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+        }
+    }
     if item.tag != "Table" && !item.events.is_empty() {
         xml.push_str(&format!("{tab}\t<Events>\r\n"));
         for event in &item.events {
@@ -30500,6 +30584,8 @@ pub(super) fn format_form_child_item_xml(
                 for child in &direct_regular_children {
                     xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
                 }
+            } else if item.tag == "GanttChartField" {
+                // Already written above, ahead of `<Events>`.
             } else {
                 xml.push_str(&format_form_child_items_xml(
                     &direct_regular_children,
@@ -33494,6 +33580,8 @@ pub(super) fn parse_and_render_form_chart_settings_for_test(text: &str) -> Optio
 }
 
 const FORM_CHART_TYPE_REFERENCE: &str = "d5p1:Chart";
+/// The type reference a Gantt-chart-typed form attribute declares.
+use super::GANTT_CHART_TYPE_REFERENCE as FORM_GANTT_CHART_TYPE_REFERENCE;
 const FORM_CHART_VALUE_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
 const FORM_CHART_BORDER_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
 const FORM_CHART_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
