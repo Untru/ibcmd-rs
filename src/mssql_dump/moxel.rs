@@ -6116,23 +6116,39 @@ fn parse_moxel_chart_color(text: &str) -> Option<String> {
 }
 
 /// `ttlBorder`/`lgBorder`/`chBorder`'s own record: `{3,0,{0},<style>,<width>,
-/// 0,48312c09-257f-4b29-b280-284dd89efc1e}`, where `<style>` is `0` for
-/// `WithoutBorder` or `1` for `Single` and `<width>` is the plain integer the
-/// XML publishes as the `width` attribute. The trailing uuid is the same
-/// `parse_moxel_chart_color`'s 7-field branch already names
-/// `style:BorderColor`, but that is the *adjacent*
-/// `ttlBorderColor`/`lgBorderColor`/`chBorderColor` slot's own value, not
-/// this one's -- the two are independent tokens sitting next to each other.
+/// 0,<style item>}`, where `<style>` is `0` for `WithoutBorder` or `1` for
+/// `Single` and `<width>` is the plain integer the XML publishes as the
+/// `width` attribute.
+///
+/// The seventh member is a style-item identifier -- the same slot
+/// `parse_moxel_chart_color`'s 7-field branch reads as the record's style
+/// colour -- and the `<...Border>` element publishes nothing from it: the
+/// colour it would name is written by the *adjacent*
+/// `ttlBorderColor`/`lgBorderColor`/`chBorderColor` slot, an independent
+/// token sitting next to this one. This reader used to demand one particular
+/// identifier there and refused the whole chart otherwise, which is what
+/// cost Документооборот КОРП 3.0.21.3 both of its `GanttChart` templates:
+/// `Reports/ДлительностьОтложенногоОбновления/Templates/ДиаграммаГанта` and
+/// `Reports/АнализЖурналаРегистрации/Templates/
+/// ПродолжительностьРаботыРегламентныхЗаданий` store their `chBorder` as
+/// `{3,0,{0},1,1,0,00000000-0000-0000-0000-000000000000}` and both publish
+/// `<d3p1:chBorder width="1"><v8ui:style xsi:type="v8ui:ControlBorderType">
+/// Single</v8ui:style></d3p1:chBorder>` -- the same two-member publication
+/// `{3,0,{0},1,1,0,48312c09-…}` produces in the `labelsBorder` slot of those
+/// same two documents and six more times in
+/// `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ`. Pairing every
+/// stored 7-member `{3,0,{0},…}` record of the Документооборот templates
+/// that publish a chart border against their published `width`/`style`
+/// leaves the seventh member naming nothing either way, so what is required
+/// here is its shape, not its value.
 fn parse_moxel_chart_border(text: &str) -> Option<MoxelChartBorder> {
-    const BORDER_LINE_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
-
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() != 7
         || fields.first()?.trim() != "3"
         || fields.get(1)?.trim() != "0"
         || compact_moxel_chart_token(fields.get(2)?) != "{0}"
         || fields.get(5)?.trim() != "0"
-        || !fields.get(6)?.trim().eq_ignore_ascii_case(BORDER_LINE_UUID)
+        || parse_uuid_field(fields.get(6)?).is_none()
     {
         return None;
     }
