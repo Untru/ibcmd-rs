@@ -385,7 +385,8 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     // The root command set names a standard command only when the form has it,
     // exactly as a button does -- both are the same list of uuids read against
     // the same one table, and what the platform cannot name it leaves out.
-    let main_list_table = form_main_attribute_list_table(&attributes);
+    let main_list_settings = form_main_attribute_list_settings(&attributes);
+    let main_list_table = main_list_settings.and_then(|settings| settings.main_table.as_deref());
     properties.command_set_excluded_commands.retain(|command| {
         form_extension_owns_standard_command(command, &main_attribute_extension)
             && form_list_owner_declares_standard_command(
@@ -393,6 +394,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
                 main_list_table,
                 context.metadata_field_declarations,
             )
+            && form_list_without_main_table_declares_standard_command(command, main_list_settings)
     });
 
     let started = Instant::now();
@@ -23662,16 +23664,17 @@ fn form_extension_owns_standard_command(
     }
 }
 
-/// The main table of the form's own dynamic list, when the main attribute is
-/// one and declares a main table.
-fn form_main_attribute_list_table(attributes: &[FormAttribute]) -> Option<&str> {
+/// The dynamic-list settings of the form's own main attribute, when it has
+/// them. A form whose main attribute is not a list answers `None`, which is a
+/// different state from a list that declares no main table.
+fn form_main_attribute_list_settings(
+    attributes: &[FormAttribute],
+) -> Option<&FormDynamicListSettings> {
     attributes
         .iter()
         .find(|attribute| attribute.main_attribute)?
         .settings
-        .as_ref()?
-        .main_table
-        .as_deref()
+        .as_ref()
 }
 
 /// Whether the table the form's list is built over has the standard command
@@ -23701,7 +23704,9 @@ fn form_main_attribute_list_table(attributes: &[FormAttribute]) -> Option<&str> 
 /// catalogs write it and none of the 56 item-hierarchy ones does, which is the
 /// same split `IsFolder` already answers.
 ///
-/// A main table this index carries no declarations for withholds nothing.
+/// A main table this index carries no declarations for withholds nothing --
+/// except for the families that have no hierarchy to declare at all, which the
+/// second half of this reader answers.
 fn form_list_owner_declares_standard_command(
     command: &str,
     main_table: Option<&str>,
@@ -23715,6 +23720,9 @@ fn form_list_owner_declares_standard_command(
     let Some(main_table) = main_table else {
         return true;
     };
+    if !form_main_table_family_can_be_hierarchical(main_table) {
+        return false;
+    }
     let Some(declarations) = declarations else {
         return true;
     };
@@ -23722,6 +23730,82 @@ fn form_list_owner_declares_standard_command(
         return true;
     };
     table.declares(standard_attribute)
+}
+
+/// Whether the family a main table belongs to has a hierarchy at all.
+///
+/// Three families do: a catalog and a chart of characteristic types declare
+/// `<Hierarchical>`, and a chart of accounts is hierarchical by construction
+/// and declares nothing. No other family has a `Parent`, so no list over one
+/// carries a hierarchy command.
+///
+/// Evidence, the same 6 727 native root `<CommandSet>` blocks: 1 214 of them
+/// name a main table of one of the other families -- 750 a document, 407 an
+/// information register, 37 a document journal, 13 a business process, 11 an
+/// accumulation register, 5 an enumeration, 3 an exchange plan and 1 an
+/// accounting register -- and not one of the 1 214 writes `HierarchicalList`,
+/// `LevelDown`, `LevelUp`, `List`, `MoveItem`, `Tree` or `CreateFolder`, while
+/// the 293 hierarchical catalogs write each of them 51..100 times. ERP УХ
+/// 3.2.12.6 `Documents/Лот/Forms/ФормаСписка` is the corpus's own statement of
+/// it: its list is over `Document.Лот`, and its command set is exactly the one
+/// this export writes minus `CreateFolder`.
+fn form_main_table_family_can_be_hierarchical(main_table: &str) -> bool {
+    matches!(
+        main_table.split('.').next(),
+        Some("Catalog" | "ChartOfAccounts" | "ChartOfCharacteristicTypes")
+    )
+}
+
+/// Whether the form's own list has the standard command this name spells.
+///
+/// A dynamic list that declares no `<MainTable>` is built from its own query
+/// and has no table behind it, so it carries none of the commands that act on
+/// a table's rows -- what the platform cannot name it leaves out of the set.
+///
+/// Evidence: of the 6 727 native root `<CommandSet>` blocks of the eight stand
+/// corpora, 1 867 sit on a form whose main attribute is a `cfg:DynamicList`,
+/// and 30 of those declare no `<MainTable>`. Not one of the 30 names any of
+/// the sixteen commands below, each of which the other 1 837 name between 66
+/// and 1 358 times: `Change` 789, `Copy` 1 348, `Create` 1 358, `CreateFolder`
+/// 100, `Delete` 1 085, `FindByCurrentValue` 367, `HierarchicalList` 66,
+/// `LevelDown` 70, `LevelUp` 70, `List` 72, `MoveItem` 84, `Post` 472,
+/// `SetDateInterval` 409, `SetDeletionMark` 787, `Tree` 66, `UndoPosting` 470.
+/// What the 30 do name is the list's own view and search commands --
+/// `CancelSearch` 13, `Refresh` 12, `Choose` 11, `Find` 11, `ListSettings` 10,
+/// `OutputList` 8 and the four settings commands -- so the set is not simply
+/// empty there.
+///
+/// Only that state refuses. A form whose main attribute is not a dynamic list
+/// has no list to ask about and is left exactly as it was.
+fn form_list_without_main_table_declares_standard_command(
+    command: &str,
+    main_list_settings: Option<&FormDynamicListSettings>,
+) -> bool {
+    let Some(settings) = main_list_settings else {
+        return true;
+    };
+    if settings.main_table.is_some() {
+        return true;
+    }
+    !matches!(
+        command,
+        "Change"
+            | "Copy"
+            | "Create"
+            | "CreateFolder"
+            | "Delete"
+            | "FindByCurrentValue"
+            | "HierarchicalList"
+            | "LevelDown"
+            | "LevelUp"
+            | "List"
+            | "MoveItem"
+            | "Post"
+            | "SetDateInterval"
+            | "SetDeletionMark"
+            | "Tree"
+            | "UndoPosting"
+    )
 }
 
 pub(super) fn form_object_reference_command_name(reference: &str) -> String {
