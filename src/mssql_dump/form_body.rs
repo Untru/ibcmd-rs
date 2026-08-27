@@ -12655,6 +12655,7 @@ fn parse_form_child_item_with_metadata_owners(
             wrapper,
             &fields,
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             table_column_names_by_id,
             type_link_data_path_by_table_column,
@@ -21298,11 +21299,13 @@ fn form_attribute_matches_metadata_owner(
 /// element on the 8 that have one and nothing on the other 67 -- as well as on
 /// every item without one. Refusing the whole slot when the prefix is present
 /// is what hid those eight.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_title_data_path(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
@@ -21347,14 +21350,26 @@ pub(super) fn parse_form_title_data_path(
     // for that same id: on two catalog list forms of UT 11.5.27.75 the column
     // the group's title binds to is named `Description` by the list's own field
     // map, and the global index answered the caption of a label field instead.
-    resolve_form_item_scoped_current_data_path(
+    if let Some(path) = resolve_form_item_scoped_current_data_path(
         binding,
         table_name_by_id,
         table_column_names_by_id,
         type_link_data_path_by_table_column,
         object_refs,
         owner_scoped_bindings,
-    )
+    ) {
+        return Some(path);
+    }
+    // A bound title may also name a standard attribute of the type its root
+    // attribute is declared with -- the strict field model every other bound
+    // slot already reads, and the only route that can name a terminal whose
+    // marker follows the root directly, with no declared column in between to
+    // state a type.  Three native `UsualGroup` titles of Документооборот КОРП
+    // 3.0.21.3 bind `{2,{N},{-3}}` against an attribute of exact type
+    // `CatalogRef.<X>`, and the platform writes `<attribute>.Description` for
+    // each; the chain walker above answers nothing for them, because it has no
+    // type to resolve `-3` against.
+    resolve_form_strict_field_model_data_path(binding, attribute_metadata_owners_by_id, object_refs)
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
