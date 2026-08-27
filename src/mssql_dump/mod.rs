@@ -15,9 +15,9 @@ use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::StorageImage;
 use ibcmd_schema::{
     GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner,
-    parse_task_choice_history_on_input_slot, parse_task_data_lock_control_mode_slot,
-    parse_task_full_text_search_slot, parse_task_include_help_in_contents_slot,
-    parse_task_number_allowed_length_slot, parse_task_number_auto_prefix_slot,
+    parse_task_data_lock_control_mode_slot, parse_task_full_text_search_slot,
+    parse_task_include_help_in_contents_slot, parse_task_number_allowed_length_slot,
+    parse_task_number_auto_prefix_slot,
 };
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{
@@ -28202,8 +28202,15 @@ fn parse_task_properties_from_text(
         auxiliary_object_form,
         auxiliary_list_form,
         auxiliary_choice_form,
-        choice_history_on_input: parse_task_choice_history_on_input_slot(fields.get(43)?)?
-            .xml_value(),
+        // `ChoiceHistoryOnInput` rides slot 48, not slot 43. Slot 43 already
+        // decides `NumberAllowedLength` right above, and the two only look
+        // interchangeable while every observed Task agrees on both: the five
+        // `ЗадачаИсполнителя` captures hold `0` in both slots and write
+        // `Fixed`/`Auto`. `uh`'s `БюджетнаяЗадача` separates them -- slot 43
+        // is `1` and it writes `Variable`, slot 48 is `1` and it writes
+        // `DontUse` -- so reading the element off 43 spelt `Auto` and reading
+        // slot 48 as a reserved zero refused the object outright.
+        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(48)?.trim())?,
         include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(24)?)?,
         data_lock_fields,
         data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(33)?)?

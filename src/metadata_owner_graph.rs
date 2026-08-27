@@ -96,11 +96,18 @@ pub(crate) fn resolve_owned_template_names(
     Some(names)
 }
 
-/// Verifies the four currently reserved Task owner slots as a schema-owned
+/// Verifies the three currently reserved Task owner slots as a schema-owned
 /// invariant instead of a physical-adapter name/value special case.
+///
+/// Slot 48 used to be counted among them. It is not reserved: it carries
+/// `ChoiceHistoryOnInput`. Census over the six Task objects of the stand --
+/// `ЗадачаИсполнителя` in five configurations plus `uh`'s `БюджетнаяЗадача` --
+/// the five `Auto` tasks hold `0` there and the one `DontUse` task holds `1`,
+/// while slot 43, the slot that was decoding it, tracks `NumberAllowedLength`
+/// instead (`0`/`Fixed` for the five, `1`/`Variable` for `БюджетнаяЗадача`).
 pub(crate) fn task_reserved_tail_is_zero(fields: &[&str]) -> bool {
     fields
-        .get(48..52)
+        .get(49..52)
         .is_some_and(|reserved| reserved.iter().all(|field| field.trim() == "0"))
 }
 
