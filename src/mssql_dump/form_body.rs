@@ -387,6 +387,14 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     // the same one table, and what the platform cannot name it leaves out.
     let main_list_settings = form_main_attribute_list_settings(&attributes);
     let main_list_table = main_list_settings.and_then(|settings| settings.main_table.as_deref());
+    // The same main attribute, addressed by id rather than by its settings, for
+    // the one root reader that asks about the *table* showing the list instead
+    // of about the list itself -- the row-set rule below, which needs a fact
+    // only the item tree carries and therefore runs after it is parsed.
+    let main_list_attribute_id = attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute && attribute.settings.is_some())
+        .map(|attribute| attribute.id.clone());
     properties.command_set_excluded_commands.retain(|command| {
         form_extension_owns_standard_command(command, &main_attribute_extension)
             && form_list_owner_declares_standard_command(
@@ -553,6 +561,21 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &child_item_indexes,
         context.trace_sink,
     );
+    // The root command set is the second reader of the very fact the table's
+    // own set already reads: a dynamic list whose row set the form declares
+    // unchangeable has no commands that change it, so the platform names none
+    // of them -- at the root exactly as inside the table.
+    if let Some(main_list_attribute_id) = main_list_attribute_id.as_deref()
+        && form_main_list_row_set_is_unchangeable(
+            &child_items,
+            main_list_attribute_id,
+            &child_item_indexes.bound_attribute_id_by_table_id,
+        )
+    {
+        properties
+            .command_set_excluded_commands
+            .retain(|command| !FORM_TABLE_ROW_SET_EXCLUDED_COMMANDS.contains(command));
+    }
     resolve_form_choice_form_references(
         &mut child_items,
         context.form_reference_index.unwrap_or(context.object_refs),
@@ -24005,6 +24028,51 @@ fn form_list_without_main_table_declares_standard_command(
             | "Tree"
             | "UndoPosting"
     )
+}
+
+/// Whether the table showing the form's own main list declares its row set
+/// unchangeable.
+///
+/// `<ChangeRowSet>false</ChangeRowSet>` belongs to the list, not to the table's
+/// grammar -- `parse_form_table_command_set_excluded_commands_for_table`
+/// already reads it that way for the table's own `<CommandSet>`, against the
+/// same binding index. The root set is the second reader of the same fact, so
+/// it asks the same question of the same table rather than keeping a flag of
+/// its own.
+///
+/// Evidence, the native trees of the eight stand corpora: of the 1 867 root
+/// `<CommandSet>` blocks that sit on a form whose main attribute is a
+/// `cfg:DynamicList`, 79 are shown by a table declaring `<ChangeRowSet>false`,
+/// and **not one** of the 79 names any of `Copy`, `Create`, `CreateFolder`,
+/// `Delete`, `MoveItem` or `SetDeletionMark`, while 1 620 of the remaining
+/// 1 788 name at least one. The split holds on every corpus that has the
+/// population at all -- ERP УХ 41/0 against 884/828, УТ 23/0 against 539/508,
+/// ДО 13/0 against 235/161, БСП демо 1/0 against 68/64, БСП базовая 1/0
+/// against 62/59 -- with no counter-example anywhere.
+///
+/// ERP УХ 3.2.12.6 states it three times over:
+/// `Catalogs/ВидыДоговоровКонтрагентовУХ/Forms/ФормаВыбора` and
+/// `.../ФормаСписка` are hierarchical-catalog lists whose whole root set the
+/// platform leaves out, and
+/// `InformationRegisters/УниверсальныеКомментарии/Forms/ФормаСпискаКомментариев`
+/// keeps its `Change` and loses exactly `Copy` and `Create`.
+fn form_main_list_row_set_is_unchangeable(
+    items: &[FormChildItem],
+    main_attribute_id: &str,
+    bound_attribute_id_by_table_id: &BTreeMap<String, String>,
+) -> bool {
+    items.iter().any(|item| {
+        (item.tag == "Table"
+            && item.change_row_set == Some(false)
+            && bound_attribute_id_by_table_id
+                .get(&item.id)
+                .is_some_and(|attribute_id| attribute_id == main_attribute_id))
+            || form_main_list_row_set_is_unchangeable(
+                &item.child_items,
+                main_attribute_id,
+                bound_attribute_id_by_table_id,
+            )
+    })
 }
 
 pub(super) fn form_object_reference_command_name(reference: &str) -> String {
