@@ -22359,6 +22359,13 @@ fn parse_chart_of_calculation_types_properties(
     }
 
     let input_modes = parse_catalog_input_modes(fields.get(58)?)?;
+    // Fields 27 and 55 are `1` on every chart of calculation types of the stand
+    // and used to be read as `<CodeAllowedLength>` and `<DataLockControlMode>`,
+    // whose separating carriers are fields 53 and 41. Both are kept as
+    // validated constants so an unobserved value fails closed.
+    if fields.get(27)?.trim() != "1" || fields.get(55)?.trim() != "1" {
+        return None;
+    }
     Some(ChartOfCalculationTypesProperties {
         generated_types,
         use_standard_commands: information_register_bool(fields.get(24)?)?,
@@ -22369,7 +22376,11 @@ fn parse_chart_of_calculation_types_properties(
             "1" => "String",
             _ => return None,
         },
-        code_allowed_length: match fields.get(27)?.trim() {
+        // `<CodeAllowedLength>` rides field 53, not field 27: one ERP УХ chart
+        // writes `0` there and exports `Fixed`, while the other and the БСП
+        // demo chart write `1` and export `Variable`; field 27 is `1` on all
+        // three and is kept as a checked constant below.
+        code_allowed_length: match fields.get(53)?.trim() {
             "0" => "Fixed",
             "1" => "Variable",
             _ => return None,
@@ -22380,8 +22391,15 @@ fn parse_chart_of_calculation_types_properties(
             _ => return None,
         },
         edit_type: parse_chart_edit_type(fields.get(38)?)?,
-        quick_choice: information_register_bool(fields.get(37)?)?,
-        choice_mode: parse_chart_choice_mode(fields.get(41)?)?,
+        // No chart of calculation types of the stand separates `<QuickChoice>`:
+        // all three export `false`. Field 37, against which this used to be
+        // read, carries `<IncludeHelpInContents>` and is `1` on the two charts
+        // that include help.
+        quick_choice: false,
+        // No chart of calculation types of the stand separates `<ChoiceMode>`:
+        // all three export `BothWays`. Field 41, against which this used to be
+        // pinned, carries `<DataLockControlMode>` below.
+        choice_mode: "BothWays",
         input_by_string: parse_chart_input_by_string(
             fields.get(40)?,
             "ChartOfCalculationTypes",
@@ -22501,8 +22519,16 @@ fn parse_chart_of_calculation_types_properties(
             ],
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(57)?)?,
-        include_help_in_contents: !information_register_bool(fields.get(53)?)?,
-        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(55)?)?,
+        // `<IncludeHelpInContents>` rides field 37 straight, not the negation
+        // of field 53: the БСП demo chart writes `0` and exports `false`, both
+        // ERP УХ charts write `1` and export `true`. Field 53 is
+        // `<CodeAllowedLength>` and disagreed with that reading on one of them.
+        include_help_in_contents: information_register_bool(fields.get(37)?)?,
+        // `<DataLockControlMode>` rides field 41 with the shared 0/1 encoding:
+        // the БСП demo chart writes `1`/`Managed`, both ERP УХ charts write
+        // `0`/`Automatic`. Field 55, against which this used to be read, is `1`
+        // on all three and is kept as a checked constant below.
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(41)?)?,
         full_text_search: register_child_full_text_search_xml(fields.get(42)?.trim())?,
         object_presentation: parse_information_register_owner_localized_value(fields.get(48)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
@@ -22651,13 +22677,6 @@ fn parse_chart_predefined_data_update(value: &str) -> Option<&'static str> {
 fn parse_chart_edit_type(value: &str) -> Option<&'static str> {
     match value.trim() {
         "2" => Some("InDialog"),
-        _ => None,
-    }
-}
-
-fn parse_chart_choice_mode(value: &str) -> Option<&'static str> {
-    match value.trim() {
-        "1" => Some("BothWays"),
         _ => None,
     }
 }
