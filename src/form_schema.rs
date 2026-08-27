@@ -6574,7 +6574,11 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormInputFieldTailXmlProperty {
+    MultipleValuesFont,
+    MultipleValuesBackColor,
+    MultipleValuesHyperlink,
     MultipleValueDataPath,
+    MultipleValuePictureDataPath,
     MultipleValuePresentDataPath,
     AllowInputEmptyMultipleValues,
     ListChoiceMode,
@@ -6590,7 +6594,20 @@ pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlPropert
     // `ChoiceFoldersAndItems`, `ContextMenu` and `ExtendedTooltip`.
     FormInputFieldTailXmlProperty::AllowInputEmptyMultipleValues,
     FormInputFieldTailXmlProperty::ListChoiceMode,
+    // The multiple-value editor's own look leads its `ExtendedEdit` switch.
+    // Документооборот КОРП 3.0.21.3 is the only stand corpus that writes any
+    // of these, and it writes them in exactly one order: `MultipleValuesFont`
+    // (5 items) leads `MultipleValuesBackColor` (1),
+    // `ExtendedEditMultipleValues` (2), `MultipleValueDataPath` (5),
+    // `MultipleValuePictureDataPath` (1), `MultipleValuePresentDataPath` (4)
+    // and `TextEdit` (5); `MultipleValuesHyperlink` (2) trails
+    // `ExtendedEditMultipleValues` (2) and leads `MultipleValueDataPath` (2);
+    // and the picture path sits between the value path (1) and the
+    // presentation path (1).  No pair is counted both ways.
+    FormInputFieldTailXmlProperty::MultipleValuesFont,
+    FormInputFieldTailXmlProperty::MultipleValuesBackColor,
     FormInputFieldTailXmlProperty::ExtendedEditMultipleValues,
+    FormInputFieldTailXmlProperty::MultipleValuesHyperlink,
     // `ShowCheckBoxesInDropList` trails `ListChoiceMode` (4),
     // `ExtendedEditMultipleValues` (2), `ExtendedEdit` (2), `ClearButton` (6),
     // `ChoiceButton` (3), `OpenButton` (2), `CreateButton` (1),
@@ -6610,6 +6627,7 @@ pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlPropert
     // and `Events`, and the value path precedes the presentation path, on all 3
     // native items that carry them.
     FormInputFieldTailXmlProperty::MultipleValueDataPath,
+    FormInputFieldTailXmlProperty::MultipleValuePictureDataPath,
     FormInputFieldTailXmlProperty::MultipleValuePresentDataPath,
     FormInputFieldTailXmlProperty::AutoMarkIncomplete,
 ];
@@ -8157,6 +8175,9 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     SpellCheckingOnTextInput,
     SpecialTextInputMode,
     MultipleValuesOptions,
+    AutoCapitalizationOnTextInput,
+    OnScreenKeyboardReturnKeyText,
+    AutofillHint,
 }
 
 impl FormInputFieldExtendedOptionSlot {
@@ -8271,6 +8292,22 @@ impl FormInputFieldExtendedOptionSlot {
             // six are, item for item, exactly the 7 items the platform writes
             // the three spellings on, with no other code in the slot.
             Self::SpecialTextInputMode => 60,
+            // Three more single-code slots in the same run, each measured the
+            // same way and each written by only one of the eight stand
+            // corpora.  Of the 12 546 `InputField` option tuples the
+            // Документооборот КОРП 3.0.21.3 form bodies spell out, slot 59
+            // holds `0` on 12 544 and `3` on exactly the 2 items the platform
+            // writes `<AutoCapitalizationOnTextInput>Sentences</...>` on; slot
+            // 61 holds `0` on 12 545 and `7` on exactly the one that says
+            // `<OnScreenKeyboardReturnKeyText>Done</...>`; slot 63 holds `0`
+            // on 12 544 and `1` on exactly the one that says
+            // `<AutofillHint>FullName</...>`.  БСП demo (5 138 tuples) and УТ
+            // 11.5.27.75 (50 065) hold `0` in all three slots throughout and
+            // write none of the three elements.  No other code occurs
+            // anywhere, so a code these tables do not name writes nothing.
+            Self::AutoCapitalizationOnTextInput => 59,
+            Self::OnScreenKeyboardReturnKeyText => 61,
+            Self::AutofillHint => 63,
             // The multiple-values sub-tuple.  It is the bare `{0}` on 50 058
             // of the 50 065 tuples, none of whose items carries either of the
             // two properties below, and a seven-member record on the other 7.

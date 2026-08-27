@@ -1452,6 +1452,9 @@ pub(super) struct FormChildItem {
     pub(super) decoration_enable_start_drag: Option<bool>,
     pub(super) decoration_enable_drag: Option<bool>,
     pub(super) special_text_input_mode: Option<&'static str>,
+    pub(super) auto_capitalization_on_text_input: Option<&'static str>,
+    pub(super) on_screen_keyboard_return_key_text: Option<&'static str>,
+    pub(super) autofill_hint: Option<&'static str>,
     pub(super) auto_show_clear_button_mode: Option<&'static str>,
     pub(super) auto_correction_on_text_input: Option<&'static str>,
     pub(super) spell_checking_on_text_input: Option<&'static str>,
@@ -1530,7 +1533,11 @@ pub(super) struct FormChildItem {
     pub(super) footer_data_path: Option<String>,
     pub(super) footer_text: Vec<(String, String)>,
     pub(super) multiple_value_data_path: Option<String>,
+    pub(super) multiple_value_picture_data_path: Option<String>,
     pub(super) multiple_value_present_data_path: Option<String>,
+    pub(super) multiple_values_hyperlink: Option<bool>,
+    pub(super) multiple_values_font_xml: Option<String>,
+    pub(super) multiple_values_back_color: Option<String>,
     pub(super) title_data_path: Option<String>,
     pub(super) command_name: Option<String>,
     pub(super) command_source: Option<String>,
@@ -10051,6 +10058,7 @@ fn parse_form_child_item_with_metadata_owners(
     let data_path_resolution = data_paths.primary;
     let footer_data_path = data_paths.footer;
     let multiple_value_data_path = data_paths.multiple_value;
+    let multiple_value_picture_data_path = data_paths.multiple_value_picture;
     let multiple_value_present_data_path = data_paths.multiple_value_present;
     let data_path_provenance = data_path_resolution
         .as_ref()
@@ -12129,6 +12137,42 @@ fn parse_form_child_item_with_metadata_owners(
             let slot = FormPictureDecorationSchema.enable_drag_option_slot(options)?;
             (options.get(slot)?.trim() == "1").then_some(true)
         }),
+        auto_capitalization_on_text_input: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                match schema
+                    .input_field_option(options, InputFieldSlot::AutoCapitalizationOnTextInput)?
+                    .trim()
+                {
+                    "3" => Some("Sentences"),
+                    _ => None,
+                }
+            }),
+        on_screen_keyboard_return_key_text: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                match schema
+                    .input_field_option(options, InputFieldSlot::OnScreenKeyboardReturnKeyText)?
+                    .trim()
+                {
+                    "7" => Some("Done"),
+                    _ => None,
+                }
+            }),
+        autofill_hint: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                match schema
+                    .input_field_option(options, InputFieldSlot::AutofillHint)?
+                    .trim()
+                {
+                    "1" => Some("FullName"),
+                    _ => None,
+                }
+            }),
         special_text_input_mode: field_schema_and_options
             .as_ref()
             .filter(|_| tag == "InputField")
@@ -12653,7 +12697,45 @@ fn parse_form_child_item_with_metadata_owners(
         footer_data_path,
         footer_text,
         multiple_value_data_path,
+        multiple_value_picture_data_path,
         multiple_value_present_data_path,
+        // Three more members of the same twenty-member bag, each a total
+        // function of the platform's answer over the 16 `InputField` items of
+        // Документооборот КОРП 3.0.21.3 that carry the bag -- the only
+        // configuration of the eight stand corpora that writes any of the
+        // three elements at all. Member 1 reads `1` on exactly the 2 that
+        // carry `<MultipleValuesHyperlink>true</MultipleValuesHyperlink>` and
+        // `2` on the other 14; member 5 is a font tuple, `{7,3,0,1,100}` on
+        // the 11 that write no `<MultipleValuesFont>` and a spelled font on
+        // exactly the 5 that do; member 7 is a colour, unset on 15 and
+        // `{3,3,{0,a8bb5d69-…}}` on exactly the one that writes
+        // `<MultipleValuesBackColor>`. Member 6 is a colour too and is unset
+        // on all 16, so nothing is claimed for it.
+        multiple_values_hyperlink: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                (members.get(1)?.trim() == "1").then_some(true)
+            }),
+        multiple_values_font_xml: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                parse_form_font_tuple_xml_tag(
+                    members.get(5)?.trim(),
+                    object_refs,
+                    "MultipleValuesFont",
+                )
+            }),
+        multiple_values_back_color: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                parse_form_control_color(members.get(7)?, object_refs)
+            }),
         title_data_path: parse_form_title_data_path(
             tag,
             wrapper,
@@ -19066,7 +19148,12 @@ pub(super) fn parse_form_child_item_data_path(
     // 9 is the value path and member 15 the presentation path: the item over
     // `ТипСуммы` declares `Наименование` before `Код` yet still spells `Код` at
     // member 9, so the two are told apart by position and not by the order the
-    // attribute declares its columns. Member 12 is bound on none of the 34 838.
+    // attribute declares its columns. Member 12 was bound on none of the 34 838,
+    // and is the picture path: Документооборот КОРП 3.0.21.3 binds it on
+    // exactly one of its own `InputField` items -- `ОтборФлаг` of
+    // `DocumentJournals/ЭлектроннаяПочта/Forms/МК_ФормаСписка`, the only item in
+    // the configuration the platform writes `<MultipleValuePictureDataPath>`
+    // for -- and leaves it `{0}` on the other fifteen that carry the bag.
     let multiple_value_paths = (tag == "InputField")
         .then(|| form_input_field_extended_options(fields))
         .flatten()
@@ -19085,9 +19172,9 @@ pub(super) fn parse_form_child_item_data_path(
                     owner_scoped_bindings,
                 )
             };
-            Some((resolve(9), resolve(15)))
+            Some((resolve(9), resolve(12), resolve(15)))
         })
-        .unwrap_or((None, None));
+        .unwrap_or((None, None, None));
     let data_path = match tag {
         // The empty binding `{0}` is the platform's own statement that the
         // table shows no data, exactly as it is on a field, and the platform
@@ -19158,7 +19245,8 @@ pub(super) fn parse_form_child_item_data_path(
         primary: data_path.into_option(),
         footer: footer_data_path,
         multiple_value: multiple_value_paths.0,
-        multiple_value_present: multiple_value_paths.1,
+        multiple_value_picture: multiple_value_paths.1,
+        multiple_value_present: multiple_value_paths.2,
     };
     paths
 }
@@ -19205,6 +19293,7 @@ pub(super) struct FormChildItemDataPaths {
     pub(super) primary: Option<ResolvedFormChildItemDataPath>,
     pub(super) footer: Option<String>,
     pub(super) multiple_value: Option<String>,
+    pub(super) multiple_value_picture: Option<String>,
     pub(super) multiple_value_present: Option<String>,
 }
 
@@ -24271,10 +24360,38 @@ fn format_form_input_field_tail_xml(
                     "{tab}<ExtendedEditMultipleValues>true</ExtendedEditMultipleValues>\r\n"
                 ));
             }
+            FormInputFieldTailXmlProperty::MultipleValuesFont => {
+                if let Some(font_xml) = &item.multiple_values_font_xml {
+                    xml.push_str(&format!("{tab}{font_xml}\r\n"));
+                }
+            }
+            FormInputFieldTailXmlProperty::MultipleValuesBackColor => {
+                if let Some(color) = &item.multiple_values_back_color {
+                    xml.push_str(&format!(
+                        "{tab}<MultipleValuesBackColor>{}</MultipleValuesBackColor>\r\n",
+                        escape_xml_text(color)
+                    ));
+                }
+            }
+            FormInputFieldTailXmlProperty::MultipleValuesHyperlink
+                if item.multiple_values_hyperlink == Some(true) =>
+            {
+                xml.push_str(&format!(
+                    "{tab}<MultipleValuesHyperlink>true</MultipleValuesHyperlink>\r\n"
+                ));
+            }
             FormInputFieldTailXmlProperty::MultipleValueDataPath => {
                 if let Some(path) = &item.multiple_value_data_path {
                     xml.push_str(&format!(
                         "{tab}<MultipleValueDataPath>{}</MultipleValueDataPath>\r\n",
+                        escape_xml_text(path)
+                    ));
+                }
+            }
+            FormInputFieldTailXmlProperty::MultipleValuePictureDataPath => {
+                if let Some(path) = &item.multiple_value_picture_data_path {
+                    xml.push_str(&format!(
+                        "{tab}<MultipleValuePictureDataPath>{}</MultipleValuePictureDataPath>\r\n",
                         escape_xml_text(path)
                     ));
                 }
@@ -26990,6 +27107,40 @@ pub(super) fn format_form_child_item_xml(
     if let Some(value) = item.auto_correction_on_text_input {
         xml.push_str(&format!(
             "{tab}\t<AutoCorrectionOnTextInput>{}</AutoCorrectionOnTextInput>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // The three mobile-input properties close the same run, all three behind
+    // the `Font` block and ahead of `InputHint`.  Документооборот КОРП
+    // 3.0.21.3 is the only stand corpus that writes any of them:
+    // `AutoCapitalizationOnTextInput` (2 items) trails `Font` (2), `MultiLine`
+    // (2), `HorizontalStretch` (2), `MaxHeight` (2), `AutoMaxHeight` (2),
+    // `AutoMaxWidth` (2), `Width` (2), `EditMode` (2), `TitleLocation` (2),
+    // `TitleFont` (2) and `DataPath` (2) and leads `InputHint` (2),
+    // `ContextMenu` (2), `ExtendedTooltip` (2) and `Events` (2);
+    // `OnScreenKeyboardReturnKeyText` (1) trails `Font`,
+    // `IncompleteChoiceMode`, `ClearButton`, `HorizontalStretch`,
+    // `TitleLocation`, `TitleFont`, `Title` and `DataPath` and leads
+    // `ContextMenu`, `ExtendedTooltip` and `Events`; `AutofillHint` (1) trails
+    // `TextEdit`, `ListChoiceMode`, `OpenButton`, `DropListButton`, `ToolTip`,
+    // `Title` and `DataPath` and leads `ContextMenu`, `ExtendedTooltip` and
+    // `Events`.  No two of the three ever share an item, so their order
+    // relative to each other is unobserved and they stay adjacent.
+    if let Some(value) = item.auto_capitalization_on_text_input {
+        xml.push_str(&format!(
+            "{tab}\t<AutoCapitalizationOnTextInput>{}</AutoCapitalizationOnTextInput>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = item.on_screen_keyboard_return_key_text {
+        xml.push_str(&format!(
+            "{tab}\t<OnScreenKeyboardReturnKeyText>{}</OnScreenKeyboardReturnKeyText>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = item.autofill_hint {
+        xml.push_str(&format!(
+            "{tab}\t<AutofillHint>{}</AutofillHint>\r\n",
             escape_xml_text(value)
         ));
     }
