@@ -7061,7 +7061,17 @@ impl FormTableSlot {
 
     fn accepts(self, field: &str) -> bool {
         match self {
-            Self::RowInputMode => matches!(field.trim(), "0" | "2"),
+            // Code `3` is `BeforeCurrentRow`.  It occurs nowhere in УТ
+            // 11.5.27.75 or either БСП, so the gate that admits a table's whole
+            // layout only knew `0` and `2` -- and one table of Документооборот
+            // КОРП 3.0.21.3 was refused outright, losing every property the
+            // gate guards.  Over that configuration's 2 010 native tables the
+            // slot reads `0` on 1 988 that write no `<RowInputMode>`, `2` on
+            // exactly the 20 that write `AfterCurrentRow` and `3` on exactly
+            // the one that writes `BeforeCurrentRow`.  ERP УХ spells one more
+            // code for its single `EndOfWindow`, which stays unnamed and
+            // therefore still refused rather than guessed.
+            Self::RowInputMode => matches!(field.trim(), "0" | "2" | "3"),
             Self::HorizontalScrollBar => matches!(field.trim(), "0" | "1" | "2"),
             Self::InitialListView | Self::InitialTreeView => {
                 matches!(field.trim(), "0" | "1" | "2")
@@ -7805,8 +7815,11 @@ impl FormTableSchema {
     }
 
     pub(crate) fn row_input_mode(self, fields: &[&str]) -> Option<&'static str> {
-        (fields.get(FormTableSlot::RowInputMode.index())?.trim() == "2")
-            .then_some("AfterCurrentRow")
+        match fields.get(FormTableSlot::RowInputMode.index())?.trim() {
+            "2" => Some("AfterCurrentRow"),
+            "3" => Some("BeforeCurrentRow"),
+            _ => None,
+        }
     }
 
     pub(crate) fn selection_mode(self, fields: &[&str]) -> Option<&'static str> {
