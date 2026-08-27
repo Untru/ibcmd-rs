@@ -1011,14 +1011,31 @@ impl FormPageSchema {
         }
     }
 
-    /// The grouping of a `Page` whose option bag is the short `17`/18 revision.
+    /// Whether an option bag is the short `17`/18 revision of a `Page`'s.
     ///
-    /// The short bag is *not* admitted as the whole schema: only the grouping
-    /// triple is measured against the platform in it, and its remaining members
-    /// -- the spacing pair, the alignment pair, the children width, the scroll
-    /// flag, the colour and the picture -- have no such measurement, so every
-    /// reader but this one keeps refusing it rather than reading a canonical
-    /// slot number in a bag that is two members shorter.
+    /// The short bag is *not* admitted as the whole schema: only the two
+    /// members measured against the platform below are read out of it, and its
+    /// remaining ones -- the spacing pair, the alignment pair, the children
+    /// width, the scroll flag, the colour and the picture -- have no such
+    /// measurement, so every reader but those two keeps refusing it rather than
+    /// reading a canonical slot number in a bag two members shorter.
+    fn is_short_revision(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> bool {
+        wrapper == "22"
+            && field_count >= 30
+            && (field_count - 30) % 2 == 0
+            && item_tag == "Page"
+            && direct_discriminator == Some("4")
+            && options.len() == 18
+            && options.first().map(|field| field.trim()) == Some("17")
+    }
+
+    /// The grouping of a `Page` whose option bag is the short `17`/18 revision.
     pub(crate) fn short_revision_group(
         wrapper: &str,
         field_count: usize,
@@ -1026,17 +1043,48 @@ impl FormPageSchema {
         direct_discriminator: Option<&str>,
         options: &[&str],
     ) -> Option<&'static str> {
-        if wrapper != "22"
-            || field_count < 30
-            || (field_count - 30) % 2 != 0
-            || item_tag != "Page"
-            || direct_discriminator != Some("4")
-            || options.len() != 18
-            || options.first().map(|field| field.trim()) != Some("17")
-        {
+        Self::is_short_revision(
+            wrapper,
+            field_count,
+            item_tag,
+            direct_discriminator,
+            options,
+        )
+        .then(|| Self::group_from_options(options))
+        .flatten()
+    }
+
+    /// `<ShowTitle>false</ShowTitle>` of a `Page` whose option bag is the short
+    /// `17`/18 revision, read off the same slot the canonical bag holds it in.
+    ///
+    /// `FormChildItemShowTitleSchema` reads member 6 of the canonical bag and
+    /// admits nothing else; the short bag holds the same flag in the same
+    /// member. Evidence, the compiled bodies of eleven ERP УХ 3.2.12.6 forms
+    /// joined against the pages the platform writes for them -- 28 pages, both
+    /// revisions, no counter-example: member 6 reads `0` on exactly the two
+    /// that carry `<ShowTitle>false</ShowTitle>`
+    /// (`Catalogs/ОписиИсходящихДокументовВНалоговыеОрганы/Forms/
+    /// ФормаЗагруженныхXMLФайлов` page `ГруппаПодтверждение` and
+    /// `CommonForms/РабочийСтолОператораОтправки` page
+    /// `ГруппаПраваяОтчетность`, both short) and `1` on the other 26, of which
+    /// thirteen are canonical and thirteen short.
+    pub(crate) fn short_revision_show_title(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<bool> {
+        if !Self::is_short_revision(
+            wrapper,
+            field_count,
+            item_tag,
+            direct_discriminator,
+            options,
+        ) {
             return None;
         }
-        Self::group_from_options(options)
+        (options.get(6).map(|field| field.trim()) == Some("0")).then_some(false)
     }
 
     pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormPageProperties {

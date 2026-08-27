@@ -11754,11 +11754,26 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         scroll_on_compress: page_properties.and_then(|properties| properties.scroll_on_compress()),
-        show_title: show_title_schema.and_then(|schema| {
-            show_title_options
-                .as_deref()
-                .and_then(|options| schema.show_title(options))
-        }),
+        show_title: show_title_schema
+            .and_then(|schema| {
+                show_title_options
+                    .as_deref()
+                    .and_then(|options| schema.show_title(options))
+            })
+            // The short revision of the page option bag carries the flag in the
+            // same slot; nothing else of it is measured, so nothing else is
+            // read.
+            .or_else(|| {
+                show_title_options.as_deref().and_then(|options| {
+                    FormPageSchema::short_revision_show_title(
+                        wrapper,
+                        fields.len(),
+                        tag,
+                        direct_discriminator,
+                        options,
+                    )
+                })
+            }),
         header_horizontal_align: if tag == "ColumnGroup" {
             column_group_options
                 .as_ref()
