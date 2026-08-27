@@ -22338,6 +22338,9 @@ fn form_standard_attribute_table_for_type_reference(
         (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Object) => {
             Some(chart_of_accounts_standard_attribute_definitions())
         }
+        (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Ref) => {
+            Some(CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES)
+        }
         (GeneratedMetadataOwnerFamily::BusinessProcess, GeneratedMetadataOwnerRole::Object) => {
             Some(&BUSINESS_PROCESS_STANDARD_ATTRIBUTES)
         }
@@ -22424,6 +22427,31 @@ const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-5", "Owner"),
     ("-7", "DeletionMark"),
 ];
+/// Reached by dereferencing a value whose declared type is exactly one chart of
+/// accounts reference — a form attribute, one of its columns, or a metadata
+/// field the chain walks onto.
+///
+/// The marker is the family's own: `-8` is `Description` in
+/// `CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS`, the table the metadata
+/// compiler writes `<xr:StandardAttribute name="Description">` from, and the
+/// reference role names it by the same number. Only that one row is claimed,
+/// because only that one is observed: over the eight native stand trees every
+/// data path whose last step leaves a `cfg:ChartOfAccountsRef.*` value spells
+/// `Description` — fourteen of them, on nine ERP УХ forms, among them
+/// `Catalogs/СоответствияОборотовМеждународногоУчета/Forms/ФормаЭлемента`
+/// (`Объект.СчетРеглУчетаДт.Description` and three more, each a
+/// `{3,{1},{0,<metadata field>},{-8}}` chain),
+/// `InformationRegisters/ПравилаУточненияСчетовВМеждународномУчете/Forms/НастройкаУточненияСчетов`
+/// (`ШаблоныПроводок.СчетУчета.Description`, `{3,{1},{5},{-8}}`, a form
+/// attribute's own column) and `CommonForms/НастройкаСчетовУчетаОперации`
+/// (`СчетУчета.Description`, the attribute itself). A census of every native
+/// `<xr:Value>`, `<xr:DataPath>`, `<xr:LinkItem>` and `<DataPath>` naming a
+/// member of an attribute or column declared exactly one chart-of-accounts
+/// reference finds that single spelling and no other, so the `-8 => Ref`
+/// reading of last resort in
+/// `form_choice_parameter_link_standard_terminal_member` — which this table now
+/// takes precedence over for this family — has no case in the corpus.
+const CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-8", "Description")];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),
