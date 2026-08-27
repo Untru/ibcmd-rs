@@ -21839,6 +21839,21 @@ fn walk_form_bound_chain_members(
                     target.push_str(index);
                     target.push(']');
                 }
+                // An index does not reach a new member: it picks one element of
+                // the collection the previous segment reached, and what that
+                // element declares is what the collection declares. Letting the
+                // type fall on the floor here left the member behind the index
+                // with nothing to be read against, and the whole slot went
+                // unspelled. Evidence: ERP УХ 3.2.12.6
+                // `Reports/АнализСубконто/Forms/ФормаОтчета`,
+                // `Reports/КарточкаСубконто/Forms/ФормаОтчета` and
+                // `Reports/ОборотыМеждуСубконто/Forms/ФормаОтчета` carry
+                // `{4,{1},{0,3ba406b5-…},{0,e67e2953-…},{0}}` -- the report's
+                // own `СписокВидовСубконто`, a value list, an index, and the
+                // value list's member `0` -- and the platform writes
+                // `Отчет.СписокВидовСубконто[0].Value`.
+                reached_type = previous_type;
+                reached_metadata_reference = previous_metadata_reference;
             }
             [column_id, uuid]
                 if uuid
