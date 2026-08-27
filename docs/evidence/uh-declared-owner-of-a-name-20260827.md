@@ -218,3 +218,35 @@ Forms/ФормаСписка`; пять документов с пустым `<B
 `Documents/УрегулированиеРасхожденияВГО/Forms/ФормаДокумента` (2),
 `InformationRegisters/ШаблоныАналитикПлатежей/Forms/ФормаЗаписи` (6),
 `Documents/НачислениеОперацийМСФО/Forms/ФормаДокумента` (6, физические) и др.
+
+### `Form.StandardCommand.X` на кнопке — 4 файла, перепись готова
+
+Перепись всех восьми корпусов по `<CommandName>Form.StandardCommand.X` в разрезе
+семейства типа главного реквизита формы (та же ось, что закрыла раздел 1):
+
+| команда | семейства, на которых платформа её называет |
+|---|---|
+| `Write` | Document 228, Catalog 141, InformationRegisterRecordManager 45, Task 33, BusinessProcess 28, ConstantsSet 5, InformationRegisterRecordSet 2, ChartOfCharacteristicTypes 2, AccountingRegisterRecordSet 1, ExchangePlan 1 |
+| `WriteAndClose` | Catalog 109, InformationRegisterRecordManager 37, Document 32, ConstantsSet 6, InformationRegisterRecordSet 3, ChartOfCharacteristicTypes 2, ExchangePlan 2 |
+| `Reread` | Document 90, Task 39, Catalog 29, InformationRegisterRecordManager 11, InformationRegisterRecordSet 5 |
+| `PostAndClose` | Document 154 |
+| `Post` | Document 157, DynamicList 2 |
+| `UndoPosting` | Document 106, DynamicList 2 |
+| `Generate` | Report 17 |
+| `CancelEdit` | Report 9, SettingsComposer 5 |
+| `EndEdit` | Report 3 |
+| `SetDateInterval` | DynamicList 5 |
+
+Ни одна из них ни разу не названа на форме **без главного реквизита** и ни разу
+— на форме с главным реквизитом `cfg:DataProcessorObject`. Обратная сторона в
+ух: `Catalogs/МониторыКлючевыхПоказателей/Forms/ФормаПроизвольногоОтчетаПоМКП` и
+`Catalogs/ПроизвольныеОтчеты/Forms/ФормаПроизвольногоОтчетаПоИсточнику` (обе без
+главного реквизита) держат `0:32df4349-…` вместо
+`Form.StandardCommand.WriteAndClose`; `DataProcessors/СтруктураВладения/Forms/
+Форма` держит `0:b5e6da6b-…` вместо `…Generate`, а
+`DataProcessors/НалоговыйМониторинг/Forms/РегламентированнаяОтчетность` —
+`0:eb880cb2-…` вместо `…SetDateInterval`.
+
+Правило той же формы, что и в разделе 1, и с тем же измеренным отказом, но в
+этот пакет не вошло: его проверка требует отдельного полного прогона ух, а
+пакет уже закрыт. Это следующий шаг, и он закрывает как минимум четыре файла.
