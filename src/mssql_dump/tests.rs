@@ -55140,7 +55140,20 @@ fn writes_ws_reference_body_asset_to_source_layout() {
             )
             .as_bytes(),
         );
-    let ws_body = deflate_for_test(b"<definitions/>");
+    let ws_container = crate::v8_container::build_v8_container(&[
+        crate::v8_container::V8Element {
+            name: "0.wsdl".to_string(),
+            header: crate::v8_container::make_v8_element_header("0.wsdl"),
+            data: b"<definitions/>".to_vec(),
+        },
+        crate::v8_container::V8Element {
+            name: "1.xsd".to_string(),
+            header: crate::v8_container::make_v8_element_header("1.xsd"),
+            data: b"<xs:schema/>".to_vec(),
+        },
+    ])
+    .unwrap();
+    let ws_body = deflate_for_test(&ws_container);
     let rows = vec![
         ConfigRow {
             file_name: ws_uuid.to_string(),
@@ -55161,8 +55174,14 @@ fn writes_ws_reference_body_asset_to_source_layout() {
     assert_eq!(dumped.metadata_xml_rows, 1);
     assert_eq!(dumped.source_asset_rows, 1);
     assert_eq!(
-        fs::read_to_string(root.join("WSReferences/UpdateFiles/Ext/WSDefinition.xml")).unwrap(),
-        "<definitions/>"
+        fs::read(root.join("WSReferences/UpdateFiles/Ext/WSDefinition.xml")).unwrap(),
+        b"\xEF\xBB\xBF<definitions/>".to_vec()
+    );
+    // Imported schemas travel in the same container and are written verbatim
+    // under their own member names.
+    assert_eq!(
+        fs::read(root.join("WSReferences/UpdateFiles/Ext/1.xsd")).unwrap(),
+        b"<xs:schema/>".to_vec()
     );
 
     let _ = fs::remove_dir_all(root);

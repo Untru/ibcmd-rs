@@ -737,21 +737,6 @@ pub(crate) fn data_composition_type_id_xml(
     ))
 }
 
-pub(super) fn extract_ws_definition_xml(inflated: &[u8]) -> Option<Vec<u8>> {
-    let xml_start = find_bytes(inflated, b"<?xml")?;
-    let xml = &inflated[xml_start..];
-    let mut content = Vec::with_capacity(3 + xml.len());
-    content.extend_from_slice(b"\xEF\xBB\xBF");
-    content.extend_from_slice(xml);
-    Some(content)
-}
-
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 fn data_composition_xsi_type_is(
     reader: &NsReader<&[u8]>,
     event: &quick_xml::events::BytesStart<'_>,
