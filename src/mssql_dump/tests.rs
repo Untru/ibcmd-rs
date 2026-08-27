@@ -20788,6 +20788,7 @@ fn formats_table_search_additions_as_direct_sections() {
         picture_transparent_pixel: None,
         html_document_output: None,
         graphical_scheme_edit: None,
+        excluded_commands: Vec::new(),
         button_check: None,
         tag: "Table",
         id: "25".to_string(),
@@ -21051,6 +21052,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 picture_transparent_pixel: None,
                 html_document_output: None,
                 graphical_scheme_edit: None,
+                excluded_commands: Vec::new(),
                 button_check: None,
                 tag: "SearchStringAddition",
                 id: "26".to_string(),
@@ -21315,6 +21317,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 picture_transparent_pixel: None,
                 html_document_output: None,
                 graphical_scheme_edit: None,
+                excluded_commands: Vec::new(),
                 button_check: None,
                 tag: "InputField",
                 id: "40".to_string(),
@@ -73981,6 +73984,166 @@ fn planner_field_writes_its_own_geometry_drag_flag_and_events() {
         !xml.contains("<Event name=\"BeforeCreate\">"),
         "this item stores no BeforeCreate: {xml}"
     );
+}
+
+#[test]
+fn graphical_schema_field_writes_its_excluded_command_set_sorted_by_name() {
+    // Real bytes: DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма/
+    // Ext/Form.xml of Документооборот КОРП 3.0.21.3 (storage element
+    // `2d885109-4c96-41c0-a996-785bfd793c2d.0`) -- the only item of the eight
+    // stand corpora whose native XML carries a `<CommandSet>` of its own. Its
+    // top-level slot 48 declares 31 command identifiers; every other
+    // wrapper-`37` field record of every kind reads `{0}` there.
+    //
+    // The identifiers are named by seed, not by this record: see
+    // `parse_form_excluded_commands`. The record stores them sorted by
+    // identifier and the platform writes the names sorted by name, which is
+    // what this test pins alongside the block's position.
+    let item = parse_form_child_item(
+        r#"{37,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,14,"КартаМаршрута",0,0,
+{1,1,
+{"ru","Карта маршрута"}
+},
+{1,0},
+{1,
+{3}
+},
+{0},1,1,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{3,80,18,0,0,
+{3,4,
+{0}
+},
+{1,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,"КартаМаршрутаВыбор",1,0,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,0,1},1,0,0,1,0,1,1},
+{0,1,0},1,
+{22,
+{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартаМаршрутаКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},1,a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Задачи",
+{1,1,
+{"ru","Задачи в точке маршрута"}
+},1,
+{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},0,
+{"Pattern"},"",0,0,1,
+{12,
+{47,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗадачиExtendedTooltip",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{31,01db2225-b62d-4112-a4b6-d39d627bf79f,1c7ec5be-53a6-43cc-8bc8-9a73ca72a44e,1d13f9a3-402a-46cb-9c68-1709356840f2,23176829-e3f7-46dc-af32-6af1f6d67643,356928f8-1b7d-4579-9813-d19699de6b76,3667f2a8-3912-4b56-a3b5-d69a1b7eec5d,3ddfe26e-81bc-453f-bd88-5185aca5b2f0,494c5e0a-f4f0-4184-9d10-2b57e780e428,56f9684a-d741-44c0-bf84-652b987507dd,5eee88e8-c2c7-45b1-8303-049edb58170d,5f8efacc-cd77-4bc9-8ae8-74af39dc5535,767690d6-cf3b-4f04-a28c-f91fb83a6a0a,7b53bef7-3811-4375-810a-672bf817ace4,87ddfbaa-b8e9-4f2b-884a-88c203115854,89a42f51-7f8b-4efe-a257-94a623242a0a,8b35d4bf-46b1-4a46-9e89-e69ccd6cacdc,a5a41937-c459-438d-b2f5-81b561dc67c5,abaddb09-44e1-4d85-b473-cd3db79f5fa3,b4a65823-eb91-4b2c-9be6-a349566d9a63,bfd14d15-932b-4f08-8090-395e4816e174,c4ac110c-99d4-4c75-882e-f2a5b9c199ad,c54de1e2-eadf-4ad7-ba5e-f165ed302c29,c58155b0-29dc-4905-a0c0-1ed2d6f88c4c,d80a7ec0-3dc2-4777-9752-8fec196eb655,d80be1de-253f-4a06-8c1a-b3920137e0ac,df450081-a8c6-46bb-9370-0ee8e4687e2d,e22c2307-5585-4491-a106-3fca57a987ac,e915596d-e318-452b-9ba9-95cf99432b2c,ea0bafc6-647c-46eb-bb8b-6417593546cc,f27f75fc-027d-4c8e-9f7d-337f985f0ee9,fdc8da8c-430b-4ea3-b0a3-f8a5d91a0a59},0,0,1,
+{12,
+{48,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартаМаршрутаExtendedTooltip",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "GraphicalSchemaField");
+    assert_eq!(item.excluded_commands.len(), 31);
+    assert_eq!(item.excluded_commands.first().copied(), Some("AlignBottom"));
+    assert_eq!(item.excluded_commands.last().copied(), Some("Ungroup"));
+    assert!(
+        !item.excluded_commands.contains(&"Print"),
+        "Print is the one command this record does not exclude"
+    );
+    let mut sorted = item.excluded_commands.clone();
+    sorted.sort_unstable();
+    assert_eq!(item.excluded_commands, sorted);
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    let title_location = xml.find("<TitleLocation>None</TitleLocation>").unwrap();
+    let command_set = xml.find("<CommandSet>").unwrap();
+    let width = xml.find("<Width>80</Width>").unwrap();
+    assert!(
+        title_location < command_set && command_set < width,
+        "CommandSet sits between TitleLocation and Width: {xml}"
+    );
+    assert_eq!(xml.matches("<ExcludedCommand>").count(), 31);
 }
 
 /// Evidence: fixture `form-planner-settings`. Three of its thirteen pairs are

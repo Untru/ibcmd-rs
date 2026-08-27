@@ -1521,6 +1521,9 @@ pub(super) struct FormChildItem {
     /// A graphical scheme field's own `<Edit>` flag, read off its option
     /// tuple rather than derived from `<ReadOnly>`.
     pub(super) graphical_scheme_edit: Option<bool>,
+    /// The `<ExcludedCommand>` names of a graphical scheme field's own
+    /// `<CommandSet>`, already sorted the way the platform writes them.
+    pub(super) excluded_commands: Vec<&'static str>,
     pub(super) pages_read_only: Option<bool>,
     pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
     pub(super) list_addition_tooltip_representation: Option<&'static str>,
@@ -12064,6 +12067,7 @@ fn parse_form_child_item_with_metadata_owners(
             .as_ref()
             .and_then(|(schema, options)| schema.html_document_output(options)),
         graphical_scheme_edit: parse_form_document_field_flag(tag, fields, |layout| layout.edit),
+        excluded_commands: parse_form_excluded_commands(tag, fields),
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
         auto_add_incomplete: table_schema.and_then(|schema| schema.auto_add_incomplete(&fields)),
         format: if tag == "UsualGroup" {
@@ -14496,6 +14500,134 @@ fn parse_form_document_field_font_xml(
     let (layout, options) = form_document_field_geometry_options(tag, fields)?;
     parse_form_font_tuple_xml(options.get(layout.font?)?, object_refs)
 }
+
+/// The `<ExcludedCommand>` list of a graphical scheme field's `<CommandSet>`.
+///
+/// Top-level slot 48 of the wrapper-`37` field record holds `{<count>,<command
+/// id>*count}` -- a declared count, walked as declared. It reads `{0}` on all
+/// 620 wrapper-`37` field records of every kind across the form bodies traced
+/// for this pass and a 31-entry list on exactly one: Документооборот КОРП
+/// 3.0.21.3's `DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма`, the
+/// only item of the eight stand corpora whose native XML carries a
+/// `<CommandSet>` of its own.
+///
+/// The identifiers are named by seed, not by that single record. Seed
+/// `gsxcmd-all` writes all 31 names the record publishes and stores exactly
+/// its 31 identifiers; five further seeds (`gsxcmd-b0`..`gsxcmd-b4`) write
+/// binary-coded halves of the same list, so each identifier appears in a
+/// unique subset of the five and every one of the 31 resolves to exactly one
+/// name with no collision. A 32nd name, `Print`, is the one command the
+/// native record does *not* exclude; seed `gsxq-Print` names it. Twenty-four
+/// further spellings were tried and refused by the XDTO enumeration itself.
+///
+/// The written order is not the stored one: the record stores the identifiers
+/// sorted by identifier, and the platform writes the names sorted by name --
+/// `gsxcmd-b0`'s sixteen commands come back alphabetical against a stored
+/// order that is not.
+///
+/// An identifier this table does not name leaves the whole block unwritten
+/// rather than publishing a partial list.
+fn parse_form_excluded_commands(tag: &str, fields: &[&str]) -> Vec<&'static str> {
+    if tag != "GraphicalSchemaField" {
+        return Vec::new();
+    }
+    let offset = form_input_field_layout_is_extended(fields)
+        .then(|| form_input_field_top_level_offset(fields))
+        .unwrap_or(0);
+    let Some(list) = fields
+        .get(FORM_EXCLUDED_COMMAND_SLOT + offset)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return Vec::new();
+    };
+    let Some(count) = list
+        .first()
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    if count == 0 || list.len() != count + 1 {
+        return Vec::new();
+    }
+    let mut names = Vec::with_capacity(count);
+    for id in &list[1..] {
+        let id = id.trim();
+        let Some(name) = FORM_GRAPHICAL_SCHEME_COMMANDS
+            .iter()
+            .find_map(|(candidate, name)| candidate.eq_ignore_ascii_case(id).then_some(*name))
+        else {
+            return Vec::new();
+        };
+        names.push(name);
+    }
+    names.sort_unstable();
+    names
+}
+
+/// Top-level slot of the excluded-command list in the wrapper-`37` field
+/// record.
+const FORM_EXCLUDED_COMMAND_SLOT: usize = 48;
+
+/// The graphical scheme's own command identifiers, each named by the seeds
+/// `parse_form_excluded_commands` records.
+const FORM_GRAPHICAL_SCHEME_COMMANDS: &[(&str, &'static str)] = &[
+    ("ea0bafc6-647c-46eb-bb8b-6417593546cc", "AlignBottom"),
+    ("1c7ec5be-53a6-43cc-8bc8-9a73ca72a44e", "AlignCenter"),
+    ("c4ac110c-99d4-4c75-882e-f2a5b9c199ad", "AlignLeft"),
+    ("e22c2307-5585-4491-a106-3fca57a987ac", "AlignMiddle"),
+    ("767690d6-cf3b-4f04-a28c-f91fb83a6a0a", "AlignRight"),
+    ("3ddfe26e-81bc-453f-bd88-5185aca5b2f0", "AlignTop"),
+    ("a5a41937-c459-438d-b2f5-81b561dc67c5", "BringToBack"),
+    ("bfd14d15-932b-4f08-8090-395e4816e174", "BringToFront"),
+    (
+        "23176829-e3f7-46dc-af32-6af1f6d67643",
+        "DistributeHorizontally",
+    ),
+    (
+        "56f9684a-d741-44c0-bf84-652b987507dd",
+        "DistributeVertically",
+    ),
+    ("356928f8-1b7d-4579-9813-d19699de6b76", "EqualHeight"),
+    ("89a42f51-7f8b-4efe-a257-94a623242a0a", "EqualSize"),
+    ("3667f2a8-3912-4b56-a3b5-d69a1b7eec5d", "EqualWidth"),
+    ("87ddfbaa-b8e9-4f2b-884a-88c203115854", "Group"),
+    ("df450081-a8c6-46bb-9370-0ee8e4687e2d", "InsertItemActivity"),
+    (
+        "c54de1e2-eadf-4ad7-ba5e-f165ed302c29",
+        "InsertItemCompletion",
+    ),
+    (
+        "d80a7ec0-3dc2-4777-9752-8fec196eb655",
+        "InsertItemCondition",
+    ),
+    (
+        "494c5e0a-f4f0-4184-9d10-2b57e780e428",
+        "InsertItemDecoration",
+    ),
+    (
+        "5eee88e8-c2c7-45b1-8303-049edb58170d",
+        "InsertItemDecorativeLine",
+    ),
+    ("d80be1de-253f-4a06-8c1a-b3920137e0ac", "InsertItemJoin"),
+    (
+        "c58155b0-29dc-4905-a0c0-1ed2d6f88c4c",
+        "InsertItemProcessing",
+    ),
+    ("e915596d-e318-452b-9ba9-95cf99432b2c", "InsertItemSplit"),
+    ("abaddb09-44e1-4d85-b473-cd3db79f5fa3", "InsertItemStart"),
+    (
+        "fdc8da8c-430b-4ea3-b0a3-f8a5d91a0a59",
+        "InsertItemSubBusinessProcess",
+    ),
+    ("8b35d4bf-46b1-4a46-9e89-e69ccd6cacdc", "InsertItemSwitch"),
+    ("01db2225-b62d-4112-a4b6-d39d627bf79f", "PageSetup"),
+    ("1d13f9a3-402a-46cb-9c68-1709356840f2", "Preview"),
+    ("e2d6f793-b786-4640-a91b-8d77f73860f1", "Print"),
+    ("7b53bef7-3811-4375-810a-672bf817ace4", "PrintImmediately"),
+    ("b4a65823-eb91-4b2c-9be6-a349566d9a63", "SendBackward"),
+    ("5f8efacc-cd77-4bc9-8ae8-74af39dc5535", "SendForward"),
+    ("f27f75fc-027d-4c8e-9f7d-337f985f0ee9", "Ungroup"),
+];
 
 /// The mirror of `parse_form_document_field_flag` for a flag whose unwritten
 /// default is `0`: only the `1` state reaches the XML.
@@ -26880,6 +27012,22 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
             escape_xml_text(title_location)
         ));
+    }
+    // A graphical scheme field's `<CommandSet>` sits between its
+    // `<TitleLocation>` and its geometry: the corpus's only such block --
+    // Документооборот КОРП 3.0.21.3's
+    // `DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма` -- writes it
+    // directly behind `<TitleLocation>None</TitleLocation>` and directly
+    // ahead of `<Width>80</Width>`, and every seed that adds one to the
+    // minimal `gsx-base` tree puts it in the same place.
+    if !item.excluded_commands.is_empty() {
+        xml.push_str(&format!("{tab}\t<CommandSet>\r\n"));
+        for command in &item.excluded_commands {
+            xml.push_str(&format!(
+                "{tab}\t\t<ExcludedCommand>{command}</ExcludedCommand>\r\n"
+            ));
+        }
+        xml.push_str(&format!("{tab}\t</CommandSet>\r\n"));
     }
     if matches!(
         item.tag,
