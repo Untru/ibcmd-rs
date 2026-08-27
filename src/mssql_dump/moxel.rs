@@ -1024,6 +1024,17 @@ pub(super) struct MoxelPrintSettings {
     pub(super) page_height: Option<String>,
     pub(super) duplex_type: Option<&'static str>,
     pub(super) page_placement_alternation: Option<&'static str>,
+    /// Key 21, published as `<firstPageNumber>` behind
+    /// `<pagePlacementAlternation>`, exactly where its key sits in the record.
+    ///
+    /// Evidence: `Documents/РегистрацияДефекта/Templates/
+    /// ПФ_MXL_ДефектнаяВедомость` of ERP УХ 3.2.12.6 stores fourteen keys --
+    /// `1,2,5,6,7,8,9,10,11,12,14,19,20,21` -- and the platform publishes
+    /// exactly fourteen members, the last of them
+    /// `<firstPageNumber>0</firstPageNumber>`. The key was outside this
+    /// reader's domain, and a key outside the domain refuses the whole record
+    /// by design, so the document lost its entire `<printSettings>`.
+    pub(super) first_page_number: Option<usize>,
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -7211,14 +7222,19 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if count == 0 || count > 20 || fields.len() != count * 2 + 2 {
+    // The declared count is bounded by the record's own length and, below, by
+    // the key domain itself: every key has to be in it and no key may repeat,
+    // so a record can never name more members than the domain has. The flat 20
+    // this used to carry stopped being that bound the moment key 21 joined the
+    // domain.
+    if count == 0 || fields.len() != count.checked_mul(2)?.checked_add(2)? {
         return None;
     }
     let mut settings = MoxelPrintSettings::default();
     let mut seen_keys = BTreeSet::new();
     for pair in fields[2..].chunks_exact(2) {
         let key = pair.first()?.trim().parse::<usize>().ok()?;
-        if !matches!(key, 0..=17 | 19 | 20) || !seen_keys.insert(key) {
+        if !matches!(key, 0..=17 | 19 | 20 | 21) || !seen_keys.insert(key) {
             return None;
         }
         let value = parse_moxel_print_settings_value(pair.get(1)?)?;
@@ -7252,6 +7268,7 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
                 settings.page_placement_alternation =
                     Some(moxel_page_placement_alternation(value.as_usize()?)?);
             }
+            21 => settings.first_page_number = Some(value.as_usize()?),
             _ => return None,
         }
     }
@@ -9391,6 +9408,12 @@ pub(super) fn moxel_page_orientation(value: usize) -> Option<&'static str> {
 pub(super) fn moxel_duplex_type(value: usize) -> Option<&'static str> {
     match value {
         1 => Some("None"),
+        // Evidence: `Reports/КонтрольПлатежаНаСоответствие275ФЗ/Templates/
+        // СоставКонтролей` of ERP УХ 3.2.12.6 stores `2` at key 19 and the
+        // platform publishes `<duplexType>FlipPagesLeft</duplexType>`. The
+        // code was outside this table, and an unspellable member refuses the
+        // whole record, so the document lost its entire `<printSettings>`.
+        2 => Some("FlipPagesLeft"),
         4 => Some("UsePrinterSettings"),
         _ => None,
     }
@@ -11415,6 +11438,7 @@ pub(super) fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPr
         "pagePlacementAlternation",
         settings.page_placement_alternation,
     );
+    push_moxel_format_usize(xml, "firstPageNumber", settings.first_page_number);
     xml.push_str("\t</printSettings>\r\n");
 }
 
@@ -11440,6 +11464,7 @@ impl MoxelPrintSettings {
             && self.page_height.is_none()
             && self.duplex_type.is_none()
             && self.page_placement_alternation.is_none()
+            && self.first_page_number.is_none()
     }
 }
 
