@@ -2341,7 +2341,28 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 self.output.push_str(&text[value_start + value.len()..]);
                 return Some(());
             }
-            if *mode == DataCompositionDocumentMode::FormListSettingsChild && value.contains(':') {
+            // A colour value carrying a `:` is normally a QName, and a QName
+            // this fragment cannot render would land in the document with a
+            // prefix nothing declares -- hence the refusal. The stored
+            // `0:<uuid>` style-item reference is not a QName at all: `0` is an
+            // index, not a prefix, and when the style item that uuid names is
+            // gone the platform writes the reference physically instead of
+            // dropping it, exactly as it writes every other reference it
+            // cannot name.
+            //
+            // Evidence: ERP УХ 3.2.12.6
+            // `DataProcessors/СопоставлениеПланФактОперацийМСФО/Forms/Форма`,
+            // whose `ListSettings` conditional appearance stores
+            // `<value ... xsi:type="d5p1:Color">0:615512b6-4378-4fce-86f1-a56725f945da</value>`
+            // and whose native XML carries
+            // `<dcscor:value xsi:type="v8ui:Color">0:615512b6-4378-4fce-86f1-a56725f945da</dcscor:value>`.
+            // That uuid occurs nowhere else in the whole configuration -- it
+            // names no style item this configuration carries -- and it is the
+            // only `0:<uuid>` colour on the whole stand.
+            if *mode == DataCompositionDocumentMode::FormListSettingsChild
+                && value.contains(':')
+                && serialized_data_composition_color_ref_uuid(value).is_none()
+            {
                 return None;
             }
         }

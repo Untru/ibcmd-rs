@@ -23757,6 +23757,86 @@ fn parses_input_field_choice_list_non_nil_uuid_pair_with_semantic_precedence() {
     );
 }
 
+/// A choice-parameter reference whose type the configuration names but whose
+/// value it does not is written as the identifier pair, exactly as the choice
+/// list writes an unnamed pair; a type the export cannot name uniquely keeps
+/// the whole value refused.
+///
+/// Evidence: ERP УХ 3.2.12.6
+/// `Reports/ПлатежныйКалендарьУХ/Forms/ФормаПереводаКонверсии`, whose two
+/// `Отбор.ПриходРасход` fixed arrays hold `d3af0748-…` / `a1914f0e-…` and
+/// `836f82c0-023e-0000-8076-63823e020000` under the same type
+/// `4b2c53c8-d593-4b27-8e3a-3b44ff5452a7`; the platform writes
+/// `Enum.ВидыДвиженийПриходРасход.EnumValue.Расход` / `.Приход` for the first
+/// and the dotted identifier pair for the second. Those two members are the
+/// only choice-parameter references spelled this way on the whole stand.
+#[test]
+fn writes_an_unnamed_choice_parameter_reference_as_its_identifier_pair() {
+    let platform_discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let fixed_array_type = "4500381b-db30-4a10-9db4-990038032acf";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let enum_type = "11111111-1111-4111-8111-111111111111";
+    let named_value = "22222222-2222-4222-8222-222222222221";
+    let unnamed_value = "22222222-2222-4222-8222-222222222222";
+    let member = |value: &str| {
+        format!(r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{enum_type},{value},{{1,0}}}}}}"##)
+    };
+    let fixed_array = format!(
+        r##"{{"#",{platform_discriminator},{{0,1,{{"#",{fixed_array_type},{{2,{},{}}}}},{nil},{nil},{{1,0}}}}}}"##,
+        member(named_value),
+        member(unnamed_value)
+    );
+    let collection = format!(r#"{{0,1,"Filter.Kind",{fixed_array}}}"#);
+    let type_index = BTreeMap::from([(
+        enum_type.to_string(),
+        "cfg:EnumRef.SyntheticKind".to_string(),
+    )]);
+    let object_refs = BTreeMap::from([(
+        named_value.to_string(),
+        "Enum.SyntheticKind.EnumValue.First".to_string(),
+    )]);
+
+    let parameters = parse_form_input_field_choice_parameters(
+        &collection,
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert!(matches!(
+        parameters.items()[0].value(),
+        ibcmd_schema::FormChoiceParameterValue::FixedArray(values)
+            if values.iter().map(|value| value.value_ref()).collect::<Vec<_>>()
+                == [
+                    "Enum.SyntheticKind.EnumValue.First",
+                    &format!("{enum_type}.{unnamed_value}")[..],
+                ]
+    ));
+
+    // A type identifier the export cannot name uniquely is a different
+    // failure: the configuration carries the type and the platform names it,
+    // so the pair would be a guess and the whole value stays refused.
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &collection,
+            &type_index,
+            &BTreeSet::from([enum_type.to_string()]),
+            &object_refs,
+        )
+        .is_none()
+    );
+    // So is a type this configuration does not carry at all.
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &collection,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+}
+
 #[test]
 fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
     let platform_discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
@@ -29835,20 +29915,98 @@ fn parses_and_formats_metadata_child_fill_value_variants() {
     ));
     assert!(matches!(boolean_nil, MetadataChildFillValue::Nil));
     assert_eq!(
-        format_metadata_child_fill_value_xml(&MetadataChildFillValue::DateTime(
-            "0001-01-01T00:00:00".to_string()
-        )),
+        format_metadata_child_fill_value_xml(
+            &MetadataChildFillValue::DateTime("0001-01-01T00:00:00".to_string()),
+            &[],
+        ),
         r#"<FillValue xsi:type="xs:dateTime">0001-01-01T00:00:00</FillValue>"#
     );
     assert_eq!(
-        format_metadata_child_fill_value_xml(&MetadataChildFillValue::Decimal("0".to_string())),
+        format_metadata_child_fill_value_xml(
+            &MetadataChildFillValue::Decimal("0".to_string()),
+            &[],
+        ),
         r#"<FillValue xsi:type="xs:decimal">0</FillValue>"#
     );
     assert_eq!(
-        format_metadata_child_fill_value_xml(&MetadataChildFillValue::DesignTimeRef(
-            "Catalog.Валюты.EmptyRef".to_string()
-        )),
+        format_metadata_child_fill_value_xml(
+            &MetadataChildFillValue::DesignTimeRef("Catalog.Валюты.EmptyRef".to_string()),
+            &[],
+        ),
         r#"<FillValue xsi:type="xr:DesignTimeRef">Catalog.Валюты.EmptyRef</FillValue>"#
+    );
+}
+
+/// The empty-string fill value is spelled by the attribute's declared type.
+///
+/// Evidence, ERP УХ 3.2.12.6, on the platform's own bytes:
+/// `InformationRegisters/КлассыКонтрагентов` carries `{"S",""}` on
+/// `ПроцентАванса` and `СрокОтсрочки`, both typed `{"Pattern",{"N",3,0,1}}`,
+/// and the platform writes `<FillValue xsi:nil="true"/>`;
+/// `DataProcessors/ФормированиеЗаказовПоставщикуПоПлану` carries the very same
+/// `{"S",""}` on `Артикул`, typed `{"Pattern",{"#",055d69df-...}}` --
+/// `DefinedType.Артикул`, a string -- and the platform writes
+/// `<FillValue xsi:type="xs:string"/>`.
+/// `DataProcessors/ОтменаИсполненияПлатежныхПозиций` carries it on `Сумма`,
+/// typed the same way but naming `DefinedType.ДенежнаяСуммаЛюбогоЗнака`, a
+/// number, and the platform writes the nil element. Nothing in the attribute's
+/// own bytes tells the last two apart, so a type set leaves the list undecided
+/// and the stored spelling stands.
+#[test]
+fn empty_string_fill_value_follows_the_declared_type() {
+    let empty = MetadataChildFillValue::String(String::new());
+    let string_type = [ConstantValueType::String {
+        length: Some(50),
+        allowed_length_flag: 1,
+    }];
+    let number_type = [ConstantValueType::Number {
+        digits: 3,
+        fraction_digits: 0,
+        allowed_sign_flag: 1,
+    }];
+    let reference_type = [ConstantValueType::Reference {
+        reference: "cfg:CatalogRef.Валюты".to_string(),
+    }];
+    let type_set = [ConstantValueType::ReferenceTypeSet {
+        reference: "cfg:DefinedType.Артикул".to_string(),
+    }];
+    let mixed = [
+        ConstantValueType::Number {
+            digits: 3,
+            fraction_digits: 0,
+            allowed_sign_flag: 1,
+        },
+        ConstantValueType::String {
+            length: Some(10),
+            allowed_length_flag: 1,
+        },
+    ];
+    for types in [
+        &number_type[..],
+        &reference_type[..],
+        &[ConstantValueType::Boolean][..],
+        &[ConstantValueType::DateTime {
+            date_fractions: "Date",
+        }][..],
+    ] {
+        assert_eq!(
+            format_metadata_child_fill_value_xml(&empty, types),
+            r#"<FillValue xsi:nil="true"/>"#
+        );
+    }
+    for types in [&string_type[..], &type_set[..], &mixed[..], &[][..]] {
+        assert_eq!(
+            format_metadata_child_fill_value_xml(&empty, types),
+            r#"<FillValue xsi:type="xs:string"/>"#
+        );
+    }
+    // A non-empty string is the value itself whatever the declared type says.
+    assert_eq!(
+        format_metadata_child_fill_value_xml(
+            &MetadataChildFillValue::String("x".to_string()),
+            &number_type,
+        ),
+        r#"<FillValue xsi:type="xs:string">x</FillValue>"#
     );
 }
 
@@ -44204,7 +44362,7 @@ fn parses_exact_information_register_legacy_and_new_child_wrappers() {
             assert_eq!(properties.main_filter, Some(true));
             assert_eq!(properties.deny_incomplete_values, Some(false));
             let mut xml = String::new();
-            push_metadata_child_properties_xml(&mut xml, "\t", &properties);
+            push_metadata_child_properties_xml(&mut xml, "\t", &properties, &[]);
             let ordered = [
                 "<ChoiceHistoryOnInput>",
                 "<Master>",
@@ -58361,8 +58519,14 @@ fn extracts_data_processor_child_attribute_property_tail_from_wrapped_layout() {
         attribute_xml.contains("<v8:content>Date tooltip</v8:content>"),
         "{xml}"
     );
+    // The attribute is typed `{"Pattern",{"D","D"}}` -- a date -- and carries
+    // the stored `{"S",""}`. A declared type that admits no string is what
+    // makes the platform write the nil element instead of the empty string:
+    // ERP УХ 3.2.12.6 `InformationRegisters/ДвиженияБюджетированияПоПозициям`,
+    // dimension `ДатаПогашения`, is exactly this pair of facts and the
+    // platform writes `<FillValue xsi:nil="true"/>`.
     assert!(
-        attribute_xml.contains(r#"<FillValue xsi:type="xs:string"/>"#),
+        attribute_xml.contains(r#"<FillValue xsi:nil="true"/>"#),
         "{xml}"
     );
     assert!(
@@ -75728,4 +75892,75 @@ fn revision_three_button_names_its_location_in_command_bar() {
         item.location_in_command_bar,
         Some("InCommandBarAndInAdditionalSubmenu")
     );
+}
+
+/// A `ListSettings` child whose colour names a style item the configuration no
+/// longer carries keeps the stored `0:<uuid>` reference; a colour that does
+/// name one still resolves, and a genuine QName the fragment cannot render
+/// still refuses the whole document.
+///
+/// Evidence: ERP УХ 3.2.12.6
+/// `DataProcessors/СопоставлениеПланФактОперацийМСФО/Forms/Форма` stores
+/// `<value ... xsi:type="d5p1:Color">0:615512b6-4378-4fce-86f1-a56725f945da</value>`
+/// in its conditional appearance and the platform writes
+/// `<dcscor:value xsi:type="v8ui:Color">0:615512b6-4378-4fce-86f1-a56725f945da</dcscor:value>`.
+/// That uuid occurs nowhere else in the whole configuration, and it is the only
+/// `0:<uuid>` colour on the whole stand.
+#[test]
+fn transliterated_list_settings_colour_keeps_an_unnamed_style_item_reference() {
+    let document = |value: &str| {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ConditionalAppearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" \
+xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" \
+xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<item>\r\n\
+\t\t<appearance>\r\n\
+\t\t\t<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" \
+xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" \
+xsi:type=\"dcsset:SettingsParameterValue\">\r\n\
+\t\t\t\t<parameter>ЦветФона</parameter>\r\n\
+\t\t\t\t<value xmlns:d5p1=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"d5p1:Color\">{value}</value>\r\n\
+\t\t\t</item>\r\n\
+\t\t</appearance>\r\n\
+\t</item>\r\n\
+</ConditionalAppearance>"
+        )
+    };
+    let transliterate = |value: &str, object_refs: &BTreeMap<String, String>| {
+        crate::mssql_dump::dcs::transliterate_form_list_settings_child_document(
+            document(value).as_bytes(),
+            crate::mssql_dump::dcs::FormListSettingsChildKind::ConditionalAppearance,
+            object_refs,
+            "",
+        )
+    };
+    let uuid = "615512b6-4378-4fce-86f1-a56725f945da";
+    let Some(crate::mssql_dump::dcs::FormListSettingsChildTransliteration::Fragment(unnamed)) =
+        transliterate(&format!("0:{uuid}"), &BTreeMap::new())
+    else {
+        panic!("an unnamed style item must keep its physical reference");
+    };
+    assert!(
+        unnamed.contains(&format!(
+            "<dcscor:value xsi:type=\"v8ui:Color\">0:{uuid}</dcscor:value>"
+        )),
+        "{unnamed}"
+    );
+
+    let object_refs = BTreeMap::from([(uuid.to_string(), "StyleItem.ЦветПоля".to_string())]);
+    let Some(crate::mssql_dump::dcs::FormListSettingsChildTransliteration::Fragment(named)) =
+        transliterate(&format!("0:{uuid}"), &object_refs)
+    else {
+        panic!("a named style item must resolve");
+    };
+    assert!(
+        named.contains("<dcscor:value xsi:type=\"v8ui:Color\">style:ЦветПоля</dcscor:value>"),
+        "{named}"
+    );
+
+    // A colour value that really is a QName and names a namespace the fragment
+    // cannot render still refuses the document rather than emitting a prefix
+    // nothing declares.
+    assert_eq!(transliterate("xs:string", &BTreeMap::new()), None);
 }

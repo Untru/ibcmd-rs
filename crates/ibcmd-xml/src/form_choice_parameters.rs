@@ -228,12 +228,17 @@ fn preflight(
         validate_value("name", parameter.name())?;
         validate_presentation(parameter.presentation())?;
         match parameter.value() {
-            FormChoiceParameterValue::Undefined | FormChoiceParameterValue::Boolean(_) => {}
+            FormChoiceParameterValue::Undefined
+            | FormChoiceParameterValue::Boolean(_)
+            | FormChoiceParameterValue::Nil => {}
             FormChoiceParameterValue::String(text) => {
                 validate_value("string", text)?;
             }
-            FormChoiceParameterValue::DateTime(text) => {
-                validate_value("date-time", text)?;
+            FormChoiceParameterValue::Decimal(value) => {
+                validate_value("decimal", value)?;
+            }
+            FormChoiceParameterValue::DateTime(value) => {
+                validate_value("date-time", value)?;
             }
             FormChoiceParameterValue::DesignTimeRef(reference) => {
                 validate_value("design-time reference", reference)?;
@@ -376,21 +381,37 @@ fn emit_value(
     push_indent(sink, indent, 3)?;
     sink.push("<")?;
     sink.push(&policy.scalar_value)?;
+    // The nil value is the one shape whose element carries no `xsi:type` at
+    // all, so its attribute is decided before the common prefix is written.
+    if matches!(value, FormChoiceParameterValue::Nil) {
+        return sink.push(" xsi:nil=\"true\"/>\r\n");
+    }
     sink.push(" xsi:type=\"")?;
     match value {
+        FormChoiceParameterValue::Nil => {
+            Err(FormChoiceParametersEmitError::InvalidValue("nil value"))
+        }
         FormChoiceParameterValue::Undefined => Err(FormChoiceParametersEmitError::InvalidValue(
             "undefined value",
         )),
-        FormChoiceParameterValue::String(text) => {
-            push_escaped(sink, XML_SCHEMA_STRING_TYPE, EscapeMode::Attribute)?;
+        FormChoiceParameterValue::Decimal(number) => {
+            push_escaped(sink, XML_SCHEMA_DECIMAL_TYPE, EscapeMode::Attribute)?;
             sink.push("\">")?;
-            push_escaped(sink, text, EscapeMode::Text)?;
+            push_escaped(sink, number, EscapeMode::Text)?;
             sink.push("</")?;
             sink.push(&policy.scalar_value)?;
             sink.push(">\r\n")
         }
-        FormChoiceParameterValue::DateTime(text) => {
+        FormChoiceParameterValue::DateTime(moment) => {
             push_escaped(sink, XML_SCHEMA_DATE_TIME_TYPE, EscapeMode::Attribute)?;
+            sink.push("\">")?;
+            push_escaped(sink, moment, EscapeMode::Text)?;
+            sink.push("</")?;
+            sink.push(&policy.scalar_value)?;
+            sink.push(">\r\n")
+        }
+        FormChoiceParameterValue::String(text) => {
+            push_escaped(sink, XML_SCHEMA_STRING_TYPE, EscapeMode::Attribute)?;
             sink.push("\">")?;
             push_escaped(sink, text, EscapeMode::Text)?;
             sink.push("</")?;
@@ -732,6 +753,46 @@ mod tests {
 \t\t</xr:Link>\r\n\
 \t</ChoiceParameterLinks>\r\n"
         );
+    }
+
+    /// The three scalar members added beside the boolean and the string. The
+    /// nil one keeps the typed wrapper and its presentation -- unlike the bare
+    /// `Undefined` marker, which replaces the wrapper itself.
+    ///
+    /// Evidence: seed `vgr-cp1` (8.3.27.2214) round-trips
+    /// `<Value xsi:type="xs:decimal">2`, `<Value xsi:type="xs:dateTime">
+    /// 2020-01-01T00:00:00` and `<Value xsi:nil="true"/>` through the platform
+    /// byte for byte.
+    #[test]
+    fn decimal_date_and_nil_scalars_use_exact_lexicals() {
+        let scalar = |member: &str| {
+            parameter(
+                "Filter",
+                &format!(
+                    "{{\"#\",{DISCRIMINATOR},{{0,1,{member},{NIL},{NIL},{}}}}}",
+                    presentation(&[("ru", "п")])
+                ),
+            )
+        };
+        let emitted = |member: &str| emit_form_choice_parameters(&scalar(member), 1).unwrap();
+        assert!(
+            emitted(r#"{"N",-12.75}"#)
+                .contains("<Value xsi:type=\"xs:decimal\">-12.75</Value>\r\n")
+        );
+        assert!(
+            emitted(r#"{"D",20200101000000}"#)
+                .contains("<Value xsi:type=\"xs:dateTime\">2020-01-01T00:00:00</Value>\r\n")
+        );
+        let nil = emitted(r#"{"U"}"#);
+        assert!(nil.contains("<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"));
+        assert!(nil.contains("<v8:content>п</v8:content>\r\n"));
+        assert!(nil.contains("<Value xsi:nil=\"true\"/>\r\n"));
+        // The bare marker still replaces the whole wrapper.
+        let undefined =
+            parse_form_choice_parameters("{0,1,\"Filter\",{\"U\"}}", |_, _| None).unwrap();
+        let undefined = emit_form_choice_parameters(&undefined, 1).unwrap();
+        assert!(undefined.contains("<app:value xsi:nil=\"true\"/>\r\n"));
+        assert!(!undefined.contains("FormChoiceListDesTimeValue"));
     }
 
     #[test]
