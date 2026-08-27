@@ -778,6 +778,20 @@ pub(super) struct MoxelDrawingMembers {
     /// order. Same container the cell record uses (see `MoxelCell::text`);
     /// a bilingual drawing publishes one `v8:item` per configured language.
     pub(super) text: Vec<MoxelLocalizedValue>,
+    /// Whether the record carries the text member at all, which is a
+    /// different question from whether that member has any language in it:
+    /// a declared-but-empty container publishes `<text/>`.
+    ///
+    /// Evidence: pairing every stored drawing record of the ERP УХ 3.2.12.6
+    /// templates whose storage this wave extracted against the published
+    /// `<drawing>` block carrying its `<id>` -- 900 drawings paired -- splits
+    /// three ways with no overlap. 801 records whose mask leaves bit 4 clear
+    /// publish no `<text>` at all; 53 whose container is the declared-empty
+    /// `{1,0}` publish `<text/>`; 7 whose container carries languages publish
+    /// them. (The 19 records whose container is a parameter -- a sole item
+    /// with an empty language -- publish `<parameter>` and no `<text>`, which
+    /// is the case this reader already separates.)
+    pub(super) text_present: bool,
     pub(super) parameter: Option<String>,
     pub(super) value: Option<String>,
     pub(super) detail_parameter: Option<String>,
@@ -5101,13 +5115,32 @@ fn parse_moxel_drawing_format_record(text: &str) -> Option<(usize, MoxelDrawingM
             Some(first) if first.lang.is_empty() => {
                 members.parameter = Some(first.content.clone());
             }
-            Some(_) => members.text = localized,
-            None => {}
+            Some(_) => {
+                members.text = localized;
+                members.text_present = true;
+            }
+            // A declared container with no language in it is still the text
+            // member -- see `MoxelDrawingMembers::text_present`.
+            None => members.text_present = true,
         }
-        if fields.get(cursor + 1)?.trim() != "0" {
-            return None;
+        cursor += 1;
+        // One more slot may follow the container, and the record's own length
+        // is what says whether it does. Of the 79 paired drawings whose mask
+        // sets bit 4, 76 carry a trailing `"0"` here and three do not --
+        // `Reports/РегламентированныйОтчетЕдиныйНалогНаВмененныйДоход/
+        // Templates/ФормаОтчета2012Кв1_Раздел2` and both
+        // `Reports/РегламентированныйОтчетПрибыль/Templates/
+        // ФормаОтчета20{15Кв1,16Кв4}_Лист02_6б` store
+        // `{16,<index>,{1,2,{"ru",…},{"en",…}}}` -- and the platform publishes
+        // the very same fifteen elements, in the same order, for both
+        // spellings. Demanding the slot cost those three documents their
+        // whole `Text` drawing.
+        if fields.len() == cursor.checked_add(1)? {
+            if fields.get(cursor)?.trim() != "0" {
+                return None;
+            }
+            cursor += 1;
         }
-        cursor += 2;
     }
     (cursor == fields.len()).then_some((format_index, members))
 }
@@ -11758,7 +11791,11 @@ pub(super) fn push_moxel_drawing_xml(
     // Member publication order is `text`/`parameter`, `value`,
     // `detailParameter`, which is the reverse of their slot order in the record;
     // the 9 records that carry all three pin it.
-    if !drawing.members.text.is_empty() {
+    if drawing.members.text_present && drawing.members.text.is_empty() {
+        // The member is declared and carries no language -- see
+        // `MoxelDrawingMembers::text_present`.
+        xml.push_str("\t\t<text/>\r\n");
+    } else if !drawing.members.text.is_empty() {
         xml.push_str("\t\t<text>\r\n");
         for item in &drawing.members.text {
             xml.push_str("\t\t\t<v8:item>\r\n");

@@ -34770,6 +34770,7 @@ fn self_closes_empty_string_drawing_value() {
         z_order: 4,
         members: MoxelDrawingMembers {
             text: Vec::new(),
+            text_present: false,
             parameter: Some("ФИОРуководителя".to_string()),
             value: Some(String::new()),
             detail_parameter: None,
