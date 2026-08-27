@@ -34959,7 +34959,10 @@ fn formats_moxel_multiple_column_sets_do_not_synthesize_default_format_index() {
 fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     // `<zOrder>` is the drawing's position in the sequence, so the ordinal is
     // assigned by the sequence reader rather than by the record decoder.
-    let drawings = parse_moxel_drawings(&["{{0,31},5,1,20,24,6,1,20,88,70,1,1,1,0}"]);
+    let drawings = parse_moxel_drawings(
+        &["{{0,31},5,1,20,24,6,1,20,88,70,1,1,1,0}"],
+        &BTreeMap::new(),
+    );
     assert_eq!(drawings.len(), 1);
     let drawing = drawings.into_iter().next().unwrap();
 
@@ -35001,10 +35004,13 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     assert!(xml.contains("<zOrder>1</zOrder>"));
     assert!(xml.contains("<pictureIndex>1</pictureIndex>"));
 
-    let real_size = parse_moxel_drawings(&["{{0,137},5,7,1,6,3,11,3,66,54,2,1,0,0}"])
-        .into_iter()
-        .next()
-        .unwrap();
+    let real_size = parse_moxel_drawings(
+        &["{{0,137},5,7,1,6,3,11,3,66,54,2,1,0,0}"],
+        &BTreeMap::new(),
+    )
+    .into_iter()
+    .next()
+    .unwrap();
     assert_eq!(real_size.id, 2);
     assert!(matches!(
         real_size.kind,
@@ -35016,10 +35022,13 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     assert_eq!(real_size.z_order, 1);
     assert!(!real_size.auto_size);
 
-    let proportional = parse_moxel_drawings(&["{{0,77},5,1,9,21,9,6,14,12,66,10,1,2,0}"])
-        .into_iter()
-        .next()
-        .unwrap();
+    let proportional = parse_moxel_drawings(
+        &["{{0,77},5,1,9,21,9,6,14,12,66,10,1,2,0}"],
+        &BTreeMap::new(),
+    )
+    .into_iter()
+    .next()
+    .unwrap();
     assert_eq!(proportional.id, 10);
     assert!(matches!(
         proportional.kind,
@@ -35031,10 +35040,13 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     assert_eq!(proportional.z_order, 1);
     assert!(!proportional.auto_size);
 
-    let auto_size = parse_moxel_drawings(&["{{0,44},5,5,26,27,30,37,26,15,720,1,1,4,0}"])
-        .into_iter()
-        .next()
-        .unwrap();
+    let auto_size = parse_moxel_drawings(
+        &["{{0,44},5,5,26,27,30,37,26,15,720,1,1,4,0}"],
+        &BTreeMap::new(),
+    )
+    .into_iter()
+    .next()
+    .unwrap();
     assert_eq!(auto_size.id, 1);
     assert!(matches!(
         auto_size.kind,
@@ -35110,16 +35122,18 @@ fn self_closes_empty_string_drawing_value() {
 fn rejects_malformed_or_unbounded_moxel_chart_drawings() {
     let chart_type = "a8b97779-1a4b-4059-b09c-807f86d2a461";
     assert!(
-        parse_moxel_drawing(&format!(
-            "{{{{0,60}},10,1,4,9,15,1,12,759,33,1,{chart_type},{{{{11}},{{74}}}},0}}"
-        ))
+        parse_moxel_drawing(
+            &format!("{{{{0,60}},10,1,4,9,15,1,12,759,33,1,{chart_type},{{{{11}},{{74}}}},0}}"),
+            &BTreeMap::new()
+        )
         .is_none()
     );
     let oversized = "0".repeat(1024 * 1024 + 1);
     assert!(
-        parse_moxel_drawing(&format!(
-            "{{{{0,60}},10,1,4,9,15,1,12,759,33,1,{chart_type},{oversized},0}}"
-        ))
+        parse_moxel_drawing(
+            &format!("{{{{0,60}},10,1,4,9,15,1,12,759,33,1,{chart_type},{oversized},0}}"),
+            &BTreeMap::new()
+        )
         .is_none()
     );
 }
@@ -36229,7 +36243,7 @@ fn debug_moxel_card_output_order() {
     let fields = split_1c_braced_fields(&raw, 0).unwrap();
     let (column_sets, _, _) = parse_moxel_column_sets(&fields);
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
-    let drawings = parse_moxel_drawings(&fields);
+    let drawings = parse_moxel_drawings(&fields, &BTreeMap::new());
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
@@ -36341,7 +36355,7 @@ fn debug_moxel_bank_transfer_style_slots() {
     let fields = split_1c_braced_fields(&raw, 0).unwrap();
     let (column_sets, _, _) = parse_moxel_column_sets(&fields);
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
-    let drawings = parse_moxel_drawings(&fields);
+    let drawings = parse_moxel_drawings(&fields, &BTreeMap::new());
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
@@ -36453,7 +36467,7 @@ fn debug_moxel_bank_purchase_style_slots() {
     let fields = split_1c_braced_fields(&raw, 0).unwrap();
     let (column_sets, _, _) = parse_moxel_column_sets(&fields);
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
-    let drawings = parse_moxel_drawings(&fields);
+    let drawings = parse_moxel_drawings(&fields, &BTreeMap::new());
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
@@ -36553,7 +36567,7 @@ fn debug_moxel_invoice_1096_raw_format_slots() {
     let rows = parse_moxel_rows(&fields);
     let (column_sets, _, _) = parse_moxel_column_sets(&fields);
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
-    let drawings = parse_moxel_drawings(&fields);
+    let drawings = parse_moxel_drawings(&fields, &BTreeMap::new());
     let drawing_format_indices = drawings
         .iter()
         .map(|drawing| (drawing.format_index, MoxelFormatRefKind::Drawing))
@@ -75441,7 +75455,7 @@ fn renders_gantt_chart_with_elements_init_to_platform_proven_xml() {
 /// byte-identical against these two files
 /// (`docs/evidence/ut-diagram-remainder-20260825.md`).
 fn assert_platform_proven_moxel_gantt_drawing(raw_drawing_field: &str, native_drawing_xml: &str) {
-    let drawings = parse_moxel_drawings(&[raw_drawing_field]);
+    let drawings = parse_moxel_drawings(&[raw_drawing_field], &BTreeMap::new());
     assert_eq!(
         drawings.len(),
         1,
