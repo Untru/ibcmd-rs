@@ -3314,8 +3314,11 @@ const FORM_SPREADSHEET_ADDITIONAL_DETAIL_PROCESSING_EVENT_UUID: &str =
     "0b8dc702-d001-4637-a215-9f35613e096c";
 const FORM_SPREADSHEET_BEFORE_WRITE_EVENT_UUID: &str = "b7646583-04d3-4905-8f04-8985914bd1b7";
 const FORM_SPREADSHEET_DETAIL_PROCESSING_EVENT_UUID: &str = "2988b2a5-c887-4928-94ae-5d0c9c31e999";
-const FORM_SPREADSHEET_DRAG_EVENT_UUID: &str = "8ad48496-8d0b-4f6c-ae48-99d95227884b";
-const FORM_SPREADSHEET_DRAG_CHECK_EVENT_UUID: &str = "0d644ff6-443b-4390-86fa-7f9105e42711";
+// The drag pair is not spreadsheet-specific: the same two identifiers name
+// `Drag` and `DragCheck` on a `CalendarField` too, so they are spelled once
+// and shared by both owner tables.
+const FORM_ITEM_DRAG_EVENT_UUID: &str = "8ad48496-8d0b-4f6c-ae48-99d95227884b";
+const FORM_ITEM_DRAG_CHECK_EVENT_UUID: &str = "0d644ff6-443b-4390-86fa-7f9105e42711";
 const FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID: &str = "2042ec93-3108-4190-b767-ec6c10dd9ff4";
 const FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID: &str =
     "411a4578-276c-4f4a-b56a-b3b01181c997";
@@ -3325,6 +3328,7 @@ const FORM_SPREADSHEET_BEFORE_PRINT_EVENT_UUID: &str = "61455593-0982-4415-bc2e-
 const FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID: &str = "83c14f85-ab1f-4c77-bd3b-81970b72543b";
 const FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID: &str = "1490ede6-6f33-4c6d-b971-53b2541331ea";
 const FORM_CALENDAR_SELECTION_EVENT_UUID: &str = "2feb1ee9-b750-4352-bb4c-67ba1c608dc6";
+const FORM_CALENDAR_ON_ACTIVATE_DATE_EVENT_UUID: &str = "3793cac5-9f9a-4b7c-adda-386e5cccf794";
 const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
 const FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID: &str = "526c501f-ed3f-4db4-8731-fd0324707501";
 
@@ -3409,8 +3413,8 @@ impl FormChildItemEventCollectionSchema {
                     FORM_SPREADSHEET_DETAIL_PROCESSING_EVENT_UUID,
                     "DetailProcessing",
                 ),
-                (FORM_SPREADSHEET_DRAG_EVENT_UUID, "Drag"),
-                (FORM_SPREADSHEET_DRAG_CHECK_EVENT_UUID, "DragCheck"),
+                (FORM_ITEM_DRAG_EVENT_UUID, "Drag"),
+                (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
                 (FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
                 (
                     FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID,
@@ -3430,6 +3434,18 @@ impl FormChildItemEventCollectionSchema {
             FormChildItemEventCollectionOwner::CalendarField => &[
                 (FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID, "OnPeriodOutput"),
                 (FORM_CALENDAR_SELECTION_EVENT_UUID, "Selection"),
+                // The same all-or-nothing rule as the spreadsheet table above:
+                // one unnamed identifier discarded every event beside it, and
+                // three native calendars of Документооборот КОРП 3.0.21.3 lost
+                // their whole `<Events>` list to it.  The decoder emits each
+                // handler verbatim beside the raw identifier, and the platform
+                // names them without ambiguity: `3793cac5` is the
+                // `OnActivateDate` of all 3 `<Event name="OnActivateDate">`
+                // elements in the eight stand corpora, and the drag pair
+                // repeats the identifiers the spreadsheet field already uses.
+                (FORM_CALENDAR_ON_ACTIVATE_DATE_EVENT_UUID, "OnActivateDate"),
+                (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
+                (FORM_ITEM_DRAG_EVENT_UUID, "Drag"),
             ],
             FormChildItemEventCollectionOwner::GraphicalSchemaField => &[
                 (FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID, "Selection"),
