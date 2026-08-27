@@ -1428,6 +1428,8 @@ pub(super) struct FormChildItem {
     pub(super) height: Option<String>,
     pub(super) show_current_date: Option<bool>,
     pub(super) show_months_panel: Option<bool>,
+    pub(super) calendar_selection_mode: Option<&'static str>,
+    pub(super) calendar_enable_drag: Option<bool>,
     pub(super) width_in_months: Option<String>,
     pub(super) height_in_months: Option<String>,
     pub(super) auto_max_width: Option<bool>,
@@ -1450,6 +1452,9 @@ pub(super) struct FormChildItem {
     pub(super) decoration_enable_start_drag: Option<bool>,
     pub(super) decoration_enable_drag: Option<bool>,
     pub(super) special_text_input_mode: Option<&'static str>,
+    pub(super) auto_capitalization_on_text_input: Option<&'static str>,
+    pub(super) on_screen_keyboard_return_key_text: Option<&'static str>,
+    pub(super) autofill_hint: Option<&'static str>,
     pub(super) auto_show_clear_button_mode: Option<&'static str>,
     pub(super) auto_correction_on_text_input: Option<&'static str>,
     pub(super) spell_checking_on_text_input: Option<&'static str>,
@@ -1487,6 +1492,7 @@ pub(super) struct FormChildItem {
     pub(super) html_document_output: Option<&'static str>,
     pub(super) pages_read_only: Option<bool>,
     pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
+    pub(super) list_addition_tooltip_representation: Option<&'static str>,
     pub(super) incomplete_choice_mode: Option<&'static str>,
     pub(super) choice_button_representation: Option<&'static str>,
     pub(super) choice_button_picture_ref: Option<String>,
@@ -1528,7 +1534,11 @@ pub(super) struct FormChildItem {
     pub(super) footer_data_path: Option<String>,
     pub(super) footer_text: Vec<(String, String)>,
     pub(super) multiple_value_data_path: Option<String>,
+    pub(super) multiple_value_picture_data_path: Option<String>,
     pub(super) multiple_value_present_data_path: Option<String>,
+    pub(super) multiple_values_hyperlink: Option<bool>,
+    pub(super) multiple_values_font_xml: Option<String>,
+    pub(super) multiple_values_back_color: Option<String>,
     pub(super) title_data_path: Option<String>,
     pub(super) command_name: Option<String>,
     pub(super) command_source: Option<String>,
@@ -3322,6 +3332,19 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "49ede602-af78-4a50-b821-ec81f6778f2d" => Some("MultipleValuesDelete"),
         "2971b9a9-1724-4f34-aaa4-f3db584c3ca0" => Some("OnCurrentParentChange"),
         "b98da5a8-349c-4159-a6a8-17a34ceb10ec" => Some("OnChangeDisplaySettings"),
+        // Three more platform event identifiers, read off the native
+        // "Документооборот КОРП" 3.0.21.3 tree, the only one of the eight
+        // stand corpora that writes any of the three names.  The decoder
+        // already emits the handler verbatim beside the raw identifier, so
+        // each occurrence pairs one identifier with one platform-written
+        // name, and every occurrence agrees: `2c5f182c` with
+        // `OnPasteFromClipboard` (2 of 2), `e6e68c5f` with
+        // `MultipleValueOpening` (6 of 6) and `7de586c4` with `BeforePrint`
+        // (3 of 3, beside the spreadsheet field's own `BeforePrint`
+        // identifier, which the item-scoped table already names).
+        "2c5f182c-1a2b-4fe1-a340-71979d5c39a8" => Some("OnPasteFromClipboard"),
+        "e6e68c5f-dc83-43c1-b6ca-438be00b77c1" => Some("MultipleValueOpening"),
+        "7de586c4-b5b7-40f7-917f-8049b127e015" => Some("BeforePrint"),
         _ => None,
     }
 }
@@ -10296,6 +10319,7 @@ fn parse_form_child_item_with_metadata_owners(
     let data_path_resolution = data_paths.primary;
     let footer_data_path = data_paths.footer;
     let multiple_value_data_path = data_paths.multiple_value;
+    let multiple_value_picture_data_path = data_paths.multiple_value_picture;
     let multiple_value_present_data_path = data_paths.multiple_value_present;
     let data_path_provenance = data_path_resolution
         .as_ref()
@@ -10622,12 +10646,16 @@ fn parse_form_child_item_with_metadata_owners(
     let input_hint = (tag == "InputField")
         .then(|| parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
         .unwrap_or_default();
-    let input_hint =
-        if input_field_top_level_offset > 0 && !input_hint.is_empty() && input_hint == title {
-            Vec::new()
-        } else {
-            input_hint
-        };
+    // An `InputField` whose record carries the conditional-appearance prefix
+    // used to lose an `<InputHint>` that repeated its own `<Title>`, on the
+    // unstated assumption that the shifted bag had answered the title twice.
+    // The assumption is measurable and false: the guard fires nowhere in БСП
+    // demo (0 of 4 079 prefixed input fields), nowhere in УТ 11.5.27.75, and
+    // exactly three times in Документооборот КОРП 3.0.21.3 -- the three
+    // `ОтборСостояние`/`ОтборКатегория`/`ОтборСостояниеМЭДО` fields of
+    // `Catalogs/ДокументыПредприятия/Forms/ФормаСпискаСПапками`, each of which
+    // the platform writes an `<InputHint>` for, spelled exactly like its
+    // title. The bag slot answers the hint; nothing needs suppressing.
     // The extended option bag does not move when the record carries the
     // conditional-appearance prefix -- the shift is on the record, and the bag
     // is found by scanning the record's tail for its own declared revision, not
@@ -12058,6 +12086,35 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        // Option 5 of the same tuple is the calendar's `<SelectionMode>`, and
+        // option 13 its `<EnableDrag>`.  Over the 35 native `CalendarField`
+        // items of the eight stand corpora option 5 reads `1` on exactly the 2
+        // that carry `<SelectionMode>Multiple</SelectionMode>`, `2` on the one
+        // that carries `<SelectionMode>Interval</SelectionMode>` and `0` on
+        // the other 32, which carry no element; option 13 reads `1` on exactly
+        // the one that carries `<EnableDrag>true</EnableDrag>` and `0` on the
+        // other 34.  No third selection code occurs anywhere, so a code this
+        // table does not name writes nothing rather than guessing a spelling.
+        calendar_selection_mode: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(5))
+                .and_then(|field| match field.trim() {
+                    "1" => Some("Multiple"),
+                    "2" => Some("Interval"),
+                    _ => None,
+                })
+        } else {
+            None
+        },
+        calendar_enable_drag: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(13))
+                .and_then(|field| (field.trim() == "1").then_some(true))
+        } else {
+            None
+        },
         width_in_months: if tag == "CalendarField" {
             document_field_options
                 .as_deref()
@@ -12341,6 +12398,42 @@ fn parse_form_child_item_with_metadata_owners(
             let slot = FormPictureDecorationSchema.enable_drag_option_slot(options)?;
             (options.get(slot)?.trim() == "1").then_some(true)
         }),
+        auto_capitalization_on_text_input: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                match schema
+                    .input_field_option(options, InputFieldSlot::AutoCapitalizationOnTextInput)?
+                    .trim()
+                {
+                    "3" => Some("Sentences"),
+                    _ => None,
+                }
+            }),
+        on_screen_keyboard_return_key_text: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                match schema
+                    .input_field_option(options, InputFieldSlot::OnScreenKeyboardReturnKeyText)?
+                    .trim()
+                {
+                    "7" => Some("Done"),
+                    _ => None,
+                }
+            }),
+        autofill_hint: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                match schema
+                    .input_field_option(options, InputFieldSlot::AutofillHint)?
+                    .trim()
+                {
+                    "1" => Some("FullName"),
+                    _ => None,
+                }
+            }),
         special_text_input_mode: field_schema_and_options
             .as_ref()
             .filter(|_| tag == "InputField")
@@ -12525,6 +12618,12 @@ fn parse_form_child_item_with_metadata_owners(
         search_string_addition_properties: search_string_addition
             .as_ref()
             .map(|(schema, options)| schema.properties(&fields, options)),
+        list_addition_tooltip_representation: (wrapper == "5"
+            && fields.len() == 24
+            && matches!(tag, "ViewStatusAddition" | "SearchControlAddition"))
+        .then(|| fields.get(11))
+        .flatten()
+        .and_then(|field| decode_form_tooltip_representation(field.trim())),
         incomplete_choice_mode: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| {
@@ -12865,12 +12964,51 @@ fn parse_form_child_item_with_metadata_owners(
         footer_data_path,
         footer_text,
         multiple_value_data_path,
+        multiple_value_picture_data_path,
         multiple_value_present_data_path,
+        // Three more members of the same twenty-member bag, each a total
+        // function of the platform's answer over the 16 `InputField` items of
+        // Документооборот КОРП 3.0.21.3 that carry the bag -- the only
+        // configuration of the eight stand corpora that writes any of the
+        // three elements at all. Member 1 reads `1` on exactly the 2 that
+        // carry `<MultipleValuesHyperlink>true</MultipleValuesHyperlink>` and
+        // `2` on the other 14; member 5 is a font tuple, `{7,3,0,1,100}` on
+        // the 11 that write no `<MultipleValuesFont>` and a spelled font on
+        // exactly the 5 that do; member 7 is a colour, unset on 15 and
+        // `{3,3,{0,a8bb5d69-…}}` on exactly the one that writes
+        // `<MultipleValuesBackColor>`. Member 6 is a colour too and is unset
+        // on all 16, so nothing is claimed for it.
+        multiple_values_hyperlink: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                (members.get(1)?.trim() == "1").then_some(true)
+            }),
+        multiple_values_font_xml: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                parse_form_font_tuple_xml_tag(
+                    members.get(5)?.trim(),
+                    object_refs,
+                    "MultipleValuesFont",
+                )
+            }),
+        multiple_values_back_color: field_schema_and_options
+            .as_ref()
+            .filter(|_| tag == "InputField")
+            .and_then(|(schema, options)| {
+                let members = parse_form_input_field_multiple_values_options(*schema, options)?;
+                parse_form_control_color(members.get(7)?, object_refs)
+            }),
         title_data_path: parse_form_title_data_path(
             tag,
             wrapper,
             &fields,
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             table_column_names_by_id,
             type_link_data_path_by_table_column,
@@ -13822,12 +13960,57 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             width: Some((1, "50")),
             height: Some((2, "10")),
             max_width: None,
-            max_height: None,
+            // The height cap sits immediately behind the auto flag that bounds
+            // it, exactly as it does on every sibling kind.  Over the 186
+            // native `FormattedDocumentField` items of the eight stand corpora
+            // slot 15 reads `10` on exactly the 3 that carry
+            // `<MaxHeight>10</MaxHeight>` -- all three in Документооборот КОРП
+            // 3.0.21.3 -- and `0` on the other 183, which carry no element.
+            // No field in any tree carries `<MaxWidth>`, so slot 12 stays
+            // unclaimed.
+            max_height: Some(15),
             auto_max_width: Some(11),
             auto_max_height: Some(14),
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             font: Some(9),
+        },
+    ),
+    (
+        // The calendar field's own 24-member tuple, which no geometry row
+        // claimed, so its two extent caps and its stretch pair never reached
+        // the XML.  The caps sit where every sibling kind keeps them -- the
+        // auto flag immediately ahead of the cap it bounds -- and the stretch
+        // pair sits in slots 3 and 4, where the picture and spreadsheet fields
+        // keep theirs.
+        //
+        // Evidence: the 35 native `CalendarField` items of the eight stand
+        // corpora, where this row is a total function of the platform's
+        // answer.  `Документооборот КОРП` 3.0.21.3 alone exercises every
+        // coordinate: slot 3 reads `0` on exactly its 3 items that carry
+        // `<HorizontalStretch>false</HorizontalStretch>`, slot 4 on exactly
+        // the 5 that carry `<VerticalStretch>false</VerticalStretch>`, slot 19
+        // on exactly the 2 that carry `<AutoMaxWidth>false</AutoMaxWidth>`,
+        // slot 22 on exactly the 3 that carry
+        // `<AutoMaxHeight>false</AutoMaxHeight>`, and slot 23 reads `17` on
+        // exactly the 2 that carry `<MaxHeight>17</MaxHeight>` and `0` on the
+        // other 9.  `БСП` base and demo (4 items each) read the unwritten
+        // state in all five slots, matching their empty native spelling.  No
+        // calendar in any tree carries `<MaxWidth>`, so slot 20 is left
+        // unclaimed rather than guessed from the sibling shape.
+        "CalendarField",
+        FormDocumentFieldGeometry {
+            discriminator: "6",
+            len: 24,
+            width: None,
+            height: None,
+            max_width: None,
+            max_height: Some(23),
+            auto_max_width: Some(19),
+            auto_max_height: Some(22),
+            horizontal_stretch: Some(3),
+            vertical_stretch: Some(4),
+            font: None,
         },
     ),
     (
@@ -14438,9 +14621,17 @@ pub(super) fn parse_form_container_enabled(tag: &str, fields: &[&str]) -> Option
         // 6 016 `ColumnGroup` items and the 1 of 2 684 `Pages` items that carry
         // `<Enabled>false</Enabled>` and `1` on every other one, with no other
         // code on either kind.
+        // A `ButtonGroup` keeps it in the same container slot, and was the
+        // last grouping kind the table left out.  Over the 10 656
+        // `ButtonGroup` items of Документооборот КОРП 3.0.21.3 (1 656), БСП
+        // demo (922), БСП base (796) and УТ 11.5.27.75 (7 333) slot 10 reads
+        // `0` on exactly the 4 that carry `<Enabled>false</Enabled>` -- all
+        // four in Документооборот, in two list forms -- and `1` on the other
+        // 10 652, with no other code and no record length that shifts it.
         "Page"
         | "Pages"
         | "ColumnGroup"
+        | "ButtonGroup"
         | "SearchStringAddition"
         | "SearchControlAddition"
         | "ViewStatusAddition" => 10,
@@ -18128,8 +18319,24 @@ pub(super) fn parse_form_child_item_tooltip(
         fields.get(5).map(|field| field.trim()),
     )
     .map(|schema| schema.tooltip_slot());
+    // The three list additions keep their tooltip in slot 8 of their own
+    // 24-member wrapper-`5` record, directly behind the title block in slot 7.
+    // The slot had no reader, so the one addition of Документооборот КОРП
+    // 3.0.21.3 that carries a `<ToolTip>` lost it. Over that configuration's
+    // 2 185 `SearchStringAddition` records slot 8 is the empty container
+    // `{1,0}` on 2 184 and a populated one on exactly the one the platform
+    // writes the element for; no `ViewStatusAddition` or
+    // `SearchControlAddition` in any of the eight native trees carries one.
     let indexes: &[usize] = match wrapper {
         "22" => &[8],
+        "5" if fields.len() == 24
+            && matches!(
+                tag,
+                "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition"
+            ) =>
+        {
+            &[8]
+        }
         "35" | "37" | "48" => &[10 + top_level_offset],
         _ => &[],
     };
@@ -18532,10 +18739,16 @@ fn parse_form_picture_decoration_picture(
 /// | 6 | `AutoSizeIgnoreScale` | 2 | 2 |
 /// | 7 | `ByFontSize` | 5 | 25 |
 ///
-/// Code 3 never occurs on either owner, so it stays unmapped rather than being
-/// guessed into the sequence: the enumeration is a flat ordinal, not a
-/// composition mask, since 5 and 6 are not 4|1 and 4|2 under any reading that
-/// keeps 1 and 2 meaning `Stretch` and `Proportionally`.
+/// Code 3 does not occur in UT 11.5.27.75 at all; Документооборот КОРП
+/// 3.0.21.3 spells it, and it is `Tile`.  Over that configuration's 1 602
+/// native `PictureDecoration` items the code is a total function of the
+/// spelling in the same way -- 1 495 read `0` and write no element, and the
+/// other seven codes cover the 107 that write one, `3` on exactly the 8 that
+/// write `<PictureSize>Tile</PictureSize>` (20 `Stretch`, 45
+/// `Proportionally`, 30 `AutoSize`, 1 `RealSizeIgnoreScale`, 2
+/// `AutoSizeIgnoreScale`, 1 `ByFontSize`).  The enumeration stays a flat
+/// ordinal rather than a composition mask: 5 and 6 are not 4|1 and 4|2 under
+/// any reading that keeps 1 and 2 meaning `Stretch` and `Proportionally`.
 ///
 /// The spreadsheet-document table in `moxel` shares the five codes it knows but
 /// is a separate authority measured against a separate corpus, so the two are
@@ -18545,6 +18758,7 @@ pub(super) fn form_picture_size_mode(value: usize) -> Option<&'static str> {
         0 => Some("RealSize"),
         1 => Some("Stretch"),
         2 => Some("Proportionally"),
+        3 => Some("Tile"),
         4 => Some("AutoSize"),
         5 => Some("RealSizeIgnoreScale"),
         6 => Some("AutoSizeIgnoreScale"),
@@ -19381,7 +19595,12 @@ pub(super) fn parse_form_child_item_data_path(
     // 9 is the value path and member 15 the presentation path: the item over
     // `ТипСуммы` declares `Наименование` before `Код` yet still spells `Код` at
     // member 9, so the two are told apart by position and not by the order the
-    // attribute declares its columns. Member 12 is bound on none of the 34 838.
+    // attribute declares its columns. Member 12 was bound on none of the 34 838,
+    // and is the picture path: Документооборот КОРП 3.0.21.3 binds it on
+    // exactly one of its own `InputField` items -- `ОтборФлаг` of
+    // `DocumentJournals/ЭлектроннаяПочта/Forms/МК_ФормаСписка`, the only item in
+    // the configuration the platform writes `<MultipleValuePictureDataPath>`
+    // for -- and leaves it `{0}` on the other fifteen that carry the bag.
     let multiple_value_paths = (tag == "InputField")
         .then(|| form_input_field_extended_options(fields))
         .flatten()
@@ -19400,9 +19619,9 @@ pub(super) fn parse_form_child_item_data_path(
                     owner_scoped_bindings,
                 )
             };
-            Some((resolve(9), resolve(15)))
+            Some((resolve(9), resolve(12), resolve(15)))
         })
-        .unwrap_or((None, None));
+        .unwrap_or((None, None, None));
     let data_path = match tag {
         // The empty binding `{0}` is the platform's own statement that the
         // table shows no data, exactly as it is on a field, and the platform
@@ -19473,7 +19692,8 @@ pub(super) fn parse_form_child_item_data_path(
         primary: data_path.into_option(),
         footer: footer_data_path,
         multiple_value: multiple_value_paths.0,
-        multiple_value_present: multiple_value_paths.1,
+        multiple_value_picture: multiple_value_paths.1,
+        multiple_value_present: multiple_value_paths.2,
     };
     paths
 }
@@ -19520,6 +19740,7 @@ pub(super) struct FormChildItemDataPaths {
     pub(super) primary: Option<ResolvedFormChildItemDataPath>,
     pub(super) footer: Option<String>,
     pub(super) multiple_value: Option<String>,
+    pub(super) multiple_value_picture: Option<String>,
     pub(super) multiple_value_present: Option<String>,
 }
 
@@ -21633,11 +21854,13 @@ fn form_attribute_matches_metadata_owner(
 /// element on the 8 that have one and nothing on the other 67 -- as well as on
 /// every item without one. Refusing the whole slot when the prefix is present
 /// is what hid those eight.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_title_data_path(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
@@ -21682,14 +21905,26 @@ pub(super) fn parse_form_title_data_path(
     // for that same id: on two catalog list forms of UT 11.5.27.75 the column
     // the group's title binds to is named `Description` by the list's own field
     // map, and the global index answered the caption of a label field instead.
-    resolve_form_item_scoped_current_data_path(
+    if let Some(path) = resolve_form_item_scoped_current_data_path(
         binding,
         table_name_by_id,
         table_column_names_by_id,
         type_link_data_path_by_table_column,
         object_refs,
         owner_scoped_bindings,
-    )
+    ) {
+        return Some(path);
+    }
+    // A bound title may also name a standard attribute of the type its root
+    // attribute is declared with -- the strict field model every other bound
+    // slot already reads, and the only route that can name a terminal whose
+    // marker follows the root directly, with no declared column in between to
+    // state a type.  Three native `UsualGroup` titles of Документооборот КОРП
+    // 3.0.21.3 bind `{2,{N},{-3}}` against an attribute of exact type
+    // `CatalogRef.<X>`, and the platform writes `<attribute>.Description` for
+    // each; the chain walker above answers nothing for them, because it has no
+    // type to resolve `-3` against.
+    resolve_form_strict_field_model_data_path(binding, attribute_metadata_owners_by_id, object_refs)
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
@@ -24183,30 +24418,9 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(conversations_representation)
         ));
     }
-    // `CollapseItemsByImportanceVariant` trails everything it is ever seen with
-    // except the collections: `AutoTitle` (26), `CommandBarLocation` (25),
-    // `Title` (23), `Customizable` (21), the spacing pair (20 each),
-    // `AutoSaveDataInSettings` (17), `WindowOpeningMode` (4), `VerticalScroll`
-    // (2), `Width` (2), `AutoURL` (2), `ConversationsRepresentation` (1),
-    // `HorizontalAlign` (1), `AutoFillCheck` (1) and `SaveWindowSettings` (1);
-    // it leads `UseForFoldersAndItems` (1) and every collection section, and no
-    // pair is observed in both directions in that (UT 11.5.27.75) corpus.
-    //
-    // SSL demo 3.1.12.297 is the only native form across five corpora that
-    // also carries `MobileDeviceCommandBarContent`
-    // (`Documents/_ДемоЗаказПокупателя`'s list form), and there it trails it
-    // rather than leading it -- the first observation of this particular
-    // pair, so it moves out from under the general "leads every collection"
-    // claim rather than contradicting an actually-measured direction.
     xml.push_str(&format_form_mobile_device_command_bar_content_xml(
         &properties.mobile_device_command_bar_content,
     ));
-    if let Some(value) = properties.collapse_items_by_importance_variant {
-        xml.push_str(&format!(
-            "\t<CollapseItemsByImportanceVariant>{}</CollapseItemsByImportanceVariant>\r\n",
-            escape_xml_text(value)
-        ));
-    }
     if !properties.command_set_excluded_commands.is_empty() {
         xml.push_str("\t<CommandSet>\r\n");
         for command in &properties.command_set_excluded_commands {
@@ -24217,17 +24431,44 @@ fn format_form_body_xml_with_dcs_profiles(
         }
         xml.push_str("\t</CommandSet>\r\n");
     }
-    // The document trio (`AutoTime`/`UsePostingMode`/`RepostOnWrite`) is always
-    // contiguous in the native tree and always follows `CommandSet` (238),
-    // `MobileDeviceCommandBarContent` (1), `CommandBarLocation` (14),
-    // `VerticalScroll` (20) and `Customizable` (2), with no counter-example.
-    append_form_document_properties_xml(&mut xml, properties);
     if properties.show_title == Some(false) {
         xml.push_str("\t<ShowTitle>false</ShowTitle>\r\n");
     }
     if properties.show_close_button == Some(false) {
         xml.push_str("\t<ShowCloseButton>false</ShowCloseButton>\r\n");
     }
+    // `CollapseItemsByImportanceVariant` trails everything it is ever seen with
+    // except the document trio and the collections: `AutoTitle` (66),
+    // `CommandBarLocation` (57), `Title` (54), `VerticalSpacing` (45),
+    // `Customizable` (44), `HorizontalSpacing` (43), `AutoSaveDataInSettings`
+    // (42), `WindowOpeningMode` (12), `VerticalScroll` (7), `Width` (7),
+    // `AutoURL` (7), `ConversationsRepresentation` (6), `AutoFillCheck` (4),
+    // `SaveWindowSettings` (4), `HorizontalAlign` (4), `CommandSet` (3),
+    // `MobileDeviceCommandBarContent` (3), `ShowTitle` (3), `ShowCloseButton`
+    // (2), `Group` (2), `VerticalAlign` (1) and `SaveDataInSettings` (1); it
+    // leads `AutoTime`, `UsePostingMode` and `RepostOnWrite` (2 each),
+    // `UseForFoldersAndItems` (2) and every collection section.  Census over
+    // all eight native stand trees, no pair counted both ways.  The UT
+    // 11.5.27.75 census that first placed it saw it beside neither
+    // `CommandSet` nor the two window switches, so it took the position ahead
+    // of the command set; it is written after all three.
+    //
+    // The two window switches in turn move ahead of the document trio, which
+    // they are never observed beside -- no native form in the eight trees
+    // carries both `ShowTitle`/`ShowCloseButton` and the trio, so that
+    // relative order is unmeasured either way, and only this arrangement
+    // leaves room for the collapse variant between them and the trio.
+    if let Some(value) = properties.collapse_items_by_importance_variant {
+        xml.push_str(&format!(
+            "\t<CollapseItemsByImportanceVariant>{}</CollapseItemsByImportanceVariant>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // The document trio (`AutoTime`/`UsePostingMode`/`RepostOnWrite`) is always
+    // contiguous in the native tree and always follows `CommandSet` (238),
+    // `MobileDeviceCommandBarContent` (1), `CommandBarLocation` (14),
+    // `VerticalScroll` (20) and `Customizable` (2), with no counter-example.
+    append_form_document_properties_xml(&mut xml, properties);
     // `ShowTitle` precedes `UseForFoldersAndItems` in the native tree (1
     // co-occurrence, no counter-example).
     if let Some(value) = properties.use_for_folders_and_items {
@@ -24598,10 +24839,38 @@ fn format_form_input_field_tail_xml(
                     "{tab}<ExtendedEditMultipleValues>true</ExtendedEditMultipleValues>\r\n"
                 ));
             }
+            FormInputFieldTailXmlProperty::MultipleValuesFont => {
+                if let Some(font_xml) = &item.multiple_values_font_xml {
+                    xml.push_str(&format!("{tab}{font_xml}\r\n"));
+                }
+            }
+            FormInputFieldTailXmlProperty::MultipleValuesBackColor => {
+                if let Some(color) = &item.multiple_values_back_color {
+                    xml.push_str(&format!(
+                        "{tab}<MultipleValuesBackColor>{}</MultipleValuesBackColor>\r\n",
+                        escape_xml_text(color)
+                    ));
+                }
+            }
+            FormInputFieldTailXmlProperty::MultipleValuesHyperlink
+                if item.multiple_values_hyperlink == Some(true) =>
+            {
+                xml.push_str(&format!(
+                    "{tab}<MultipleValuesHyperlink>true</MultipleValuesHyperlink>\r\n"
+                ));
+            }
             FormInputFieldTailXmlProperty::MultipleValueDataPath => {
                 if let Some(path) = &item.multiple_value_data_path {
                     xml.push_str(&format!(
                         "{tab}<MultipleValueDataPath>{}</MultipleValueDataPath>\r\n",
+                        escape_xml_text(path)
+                    ));
+                }
+            }
+            FormInputFieldTailXmlProperty::MultipleValuePictureDataPath => {
+                if let Some(path) = &item.multiple_value_picture_data_path {
+                    xml.push_str(&format!(
+                        "{tab}<MultipleValuePictureDataPath>{}</MultipleValuePictureDataPath>\r\n",
                         escape_xml_text(path)
                     ));
                 }
@@ -25537,8 +25806,21 @@ pub(super) fn format_form_child_item_xml(
     // `AdditionSource` (6), `Title` (2), `Width` (2), `AutoMaxWidth` (3),
     // `MaxWidth` (1), `HorizontalStretch` (5), `ContextMenu` (6) and
     // `ExtendedTooltip` (6).
-    if let Some(properties) = item.search_string_addition_properties.as_ref()
-        && let Some(value) = properties.tooltip_representation
+    // Its two siblings open with the same element read out of the same
+    // top-level slot of the same 24-member wrapper-`5` record.  They were
+    // never read, because the reader that answers the search string's own
+    // properties is gated on that item's eleven-member option bag, and theirs
+    // holds sixteen members -- a gate on the option bag, not on where this
+    // element lives.  Over the 2 011 `ViewStatusAddition` items of
+    // Документооборот КОРП 3.0.21.3 slot 11 reads `1` on exactly the one whose
+    // document says `<ToolTipRepresentation>None</...>` and `0` on the other
+    // 2 010; over all 4 548 of УТ 11.5.27.75 it reads `0` and none of them
+    // carries the element.
+    if let Some(value) = item
+        .search_string_addition_properties
+        .as_ref()
+        .and_then(|properties| properties.tooltip_representation)
+        .or(item.list_addition_tooltip_representation)
     {
         xml.push_str(&format!(
             "{tab}\t<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
@@ -25558,7 +25840,14 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
     if item.tag.ends_with("Addition") {
-        if item.addition_source_item.is_some() || item.item_type.is_some() {
+        // The block is written for the source it names, and the platform never
+        // writes one that names none: over all eight native stand trees every
+        // single `<AdditionSource>` -- 33 647 in ERP УХ, 13 947 in УТ, 6 258 in
+        // Документооборот, 2 545 and 2 080 in the two БСП, 33 in MDM and 9 in
+        // WMS -- carries an `<Item>`, and not one carries a bare `<Type>`.
+        // Writing the type alone put a block the platform leaves out on an
+        // addition whose slot 19 names no owner.
+        if item.addition_source_item.is_some() {
             xml.push_str(&format!("{tab}\t<AdditionSource>\r\n"));
             if let Some(source_item) = &item.addition_source_item {
                 xml.push_str(&format!(
@@ -25887,6 +26176,11 @@ pub(super) fn format_form_child_item_xml(
     // (2/2) and ahead of `Height` (2), `Width` (1), `EditMode` (1) and
     // `AutoMaxHeight` (1), never the reverse; both used to write it behind
     // their geometry.
+    // `HTMLDocumentField` carries it in the same slot, and used to write it
+    // behind its geometry too: over all eight native stand trees it trails
+    // `DataPath` (2), `Title` (2) and `TitleLocation` (2) and leads
+    // `ToolTipRepresentation` (1), `Width` (2), `Height` (1), `ContextMenu`
+    // (2), `Events` (2) and `ExtendedTooltip` (2), with no counter-example.
     if matches!(
         item.tag,
         "InputField"
@@ -25901,6 +26195,7 @@ pub(super) fn format_form_child_item_xml(
             | "ColumnGroup"
             | "TextDocumentField"
             | "FormattedDocumentField"
+            | "HTMLDocumentField"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -26199,8 +26494,9 @@ pub(super) fn format_form_child_item_xml(
     // geometry untouched.
     let graphical_schema_field_geometry_suppressed_by_parent_page =
         item.tag == "GraphicalSchemaField" && item.parent_child_items_width == Some("LeftWidest");
-    // `Page` and `Popup` write their width behind the title block, with the rest
-    // of their geometry (see the page order table and the popup run below).
+    // `Page`, `Popup` and `ButtonGroup` write their width behind the title
+    // block, with the rest of their geometry (see the page order table, the
+    // popup run below and the button-group header above).
     if !matches!(
         item.tag,
         "Table"
@@ -26210,6 +26506,7 @@ pub(super) fn format_form_child_item_xml(
             | "CommandBar"
             | "Page"
             | "Popup"
+            | "ButtonGroup"
     ) && !pages_geometry_after_title
         && !graphical_schema_field_geometry_suppressed_by_parent_page
         && let Some(width) = &item.width
@@ -26273,39 +26570,6 @@ pub(super) fn format_form_child_item_xml(
     // `graphical_schema_field_geometry_suppressed_by_parent_page`.
     if item.tag == "GraphicalSchemaField" && item.read_only == Some(true) {
         xml.push_str(&format!("{tab}\t<Edit>false</Edit>\r\n"));
-    }
-    // A calendar field writes its border behind the title block and ahead of
-    // the calendar run: on the one native calendar that carries one,
-    // `DataPath` and `TitleLocation` lead it and `ShowMonthsPanel`,
-    // `ContextMenu`, `ExtendedTooltip` and `Events` trail it.
-    if item.tag == "CalendarField" {
-        xml.push_str(&format_form_control_border_xml(item, indent + 1));
-    }
-    if item.tag == "CalendarField" {
-        if let Some(show_current_date) = item.show_current_date {
-            xml.push_str(&format!(
-                "{tab}\t<ShowCurrentDate>{}</ShowCurrentDate>\r\n",
-                xml_bool(show_current_date)
-            ));
-        }
-        if let Some(show_months_panel) = item.show_months_panel {
-            xml.push_str(&format!(
-                "{tab}\t<ShowMonthsPanel>{}</ShowMonthsPanel>\r\n",
-                xml_bool(show_months_panel)
-            ));
-        }
-        if let Some(width_in_months) = &item.width_in_months {
-            xml.push_str(&format!(
-                "{tab}\t<WidthInMonths>{}</WidthInMonths>\r\n",
-                escape_xml_text(width_in_months)
-            ));
-        }
-        if let Some(height_in_months) = &item.height_in_months {
-            xml.push_str(&format!(
-                "{tab}\t<HeightInMonths>{}</HeightInMonths>\r\n",
-                escape_xml_text(height_in_months)
-            ));
-        }
     }
     if item.tag == "LabelDecoration"
         && let Some(skip_on_input) = item.skip_on_input
@@ -26411,9 +26675,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(parameter)
         ));
     }
-    if item.tag == "Button" {
-        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
-    }
     if item.tag == "Button"
         && let Some(data_path) = &item.data_path
     {
@@ -26421,6 +26682,14 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
         ));
+    }
+    // A button's colour triple trails its `DataPath`: over all eight native
+    // stand trees the 2 buttons that carry both write `DataPath` first, and
+    // the same 2 put it ahead of `Font` as well.  The triple still trails
+    // `Type` (2 006), `CommandName` (2 006), `Visible` (215) and `Parameter`,
+    // and still leads `Font` (800) and `Picture` (77).
+    if item.tag == "Button" {
+        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
     }
     // A button's `Font` belongs in front of its `Picture`, not behind it: native
     // writes `Font` before `Picture` on all 13 buttons that carry both and never
@@ -26560,6 +26829,58 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
             if vertical_stretch { "true" } else { "false" }
         ));
+    }
+    // A calendar field closes its run with the selection pair, its border and
+    // the months block, in that order.  Census over the 35 native
+    // `CalendarField` items of the eight stand corpora, no pair counted both
+    // ways: `SelectionMode` trails `AutoMaxHeight` (3), `MaxHeight` (2), the
+    // stretch pair (2 each), `AutoMaxWidth` (1), `Height` (3), `Title` (3),
+    // `TitleLocation` (3), `DataPath` (3) and `GroupHorizontalAlign` (1), and
+    // leads `EnableDrag` (1), `Border` (3), `WidthInMonths` (1),
+    // `HeightInMonths` (1), `ContextMenu` (3), `ExtendedTooltip` (3) and
+    // `Events` (3); `EnableDrag` leads `Border` (1) and the three closers;
+    // `Border` leads `ShowMonthsPanel` (2), `WidthInMonths` (1) and
+    // `HeightInMonths` (1).  The border and months block used to be written
+    // directly behind the width, ahead of everything the shared geometry run
+    // emits after it -- harmless only while the calendar's own caps and
+    // stretch flags were unread.
+    if item.tag == "CalendarField" {
+        if let Some(selection_mode) = item.calendar_selection_mode {
+            xml.push_str(&format!(
+                "{tab}\t<SelectionMode>{selection_mode}</SelectionMode>\r\n"
+            ));
+        }
+        if let Some(enable_drag) = item.calendar_enable_drag {
+            xml.push_str(&format!(
+                "{tab}\t<EnableDrag>{}</EnableDrag>\r\n",
+                xml_bool(enable_drag)
+            ));
+        }
+        xml.push_str(&format_form_control_border_xml(item, indent + 1));
+        if let Some(show_current_date) = item.show_current_date {
+            xml.push_str(&format!(
+                "{tab}\t<ShowCurrentDate>{}</ShowCurrentDate>\r\n",
+                xml_bool(show_current_date)
+            ));
+        }
+        if let Some(show_months_panel) = item.show_months_panel {
+            xml.push_str(&format!(
+                "{tab}\t<ShowMonthsPanel>{}</ShowMonthsPanel>\r\n",
+                xml_bool(show_months_panel)
+            ));
+        }
+        if let Some(width_in_months) = &item.width_in_months {
+            xml.push_str(&format!(
+                "{tab}\t<WidthInMonths>{}</WidthInMonths>\r\n",
+                escape_xml_text(width_in_months)
+            ));
+        }
+        if let Some(height_in_months) = &item.height_in_months {
+            xml.push_str(&format!(
+                "{tab}\t<HeightInMonths>{}</HeightInMonths>\r\n",
+                escape_xml_text(height_in_months)
+            ));
+        }
     }
     xml.push_str(&format_form_spreadsheet_document_properties_xml(
         item,
@@ -26883,6 +27204,14 @@ pub(super) fn format_form_child_item_xml(
     }
     if usual_group_title_first {
         if item.tag == "ButtonGroup" {
+            // `Enabled` opens the group's run: over the eight native stand
+            // trees it trails only `Visible` (1) and leads `Title` (9),
+            // `ToolTip` (6), `ExtendedTooltip` (9) and `ChildItems` (9), with
+            // no pair counted both ways.  It never shares a group with
+            // `EnableContentChange`, so their relative order is unobserved.
+            if item.enabled == Some(false) {
+                xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
+            }
             xml.push_str(&format_form_shared_container_content_change_xml(
                 item,
                 indent + 1,
@@ -26902,6 +27231,18 @@ pub(super) fn format_form_child_item_xml(
                 FormTooltipRepresentationXmlOrder::ButtonGroupHeader,
                 indent + 1,
             ));
+            // A `ButtonGroup` carries its width behind the title block, like
+            // the rest of its geometry: over all eight native stand trees the
+            // 2 groups that carry both write `Title` first, and `Width` leads
+            // `HorizontalStretch` (2), `ExtendedTooltip` (2) and `ChildItems`
+            // (2), with no pair counted both ways.  It used to be written by
+            // the shared geometry run, ahead of the title.
+            if let Some(width) = &item.width {
+                xml.push_str(&format!(
+                    "{tab}\t<Width>{}</Width>\r\n",
+                    escape_xml_text(width)
+                ));
+            }
         }
         if item.tag == "UsualGroup" {
             if let Some(horizontal_stretch) = item.horizontal_stretch {
@@ -27198,6 +27539,20 @@ pub(super) fn format_form_child_item_xml(
     // `SkipOnInput` (1) and `AutoMaxHeight` (1) lead it, and it leads `Font`
     // (1), `ContextMenu` (7) and `ExtendedTooltip` (7), with no pair counted
     // both ways.
+    // `BackColor` stands immediately ahead of it, the same way it does on
+    // every other control kind that carries both: the 2 native
+    // `FormattedDocumentField` items of Документооборот КОРП 3.0.21.3 that
+    // carry one write `Height`, `AutoMaxHeight`, `BackColor`, `BorderColor`,
+    // `Font` in that order, and no field anywhere writes the two the other way
+    // round.
+    if item.tag == "FormattedDocumentField"
+        && let Some(back_color) = &item.back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BackColor>{}</BackColor>\r\n",
+            escape_xml_text(back_color)
+        ));
+    }
     if item.tag == "FormattedDocumentField"
         && let Some(border_color) = &item.border_color
     {
@@ -27251,6 +27606,40 @@ pub(super) fn format_form_child_item_xml(
     if let Some(value) = item.auto_correction_on_text_input {
         xml.push_str(&format!(
             "{tab}\t<AutoCorrectionOnTextInput>{}</AutoCorrectionOnTextInput>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // The three mobile-input properties close the same run, all three behind
+    // the `Font` block and ahead of `InputHint`.  Документооборот КОРП
+    // 3.0.21.3 is the only stand corpus that writes any of them:
+    // `AutoCapitalizationOnTextInput` (2 items) trails `Font` (2), `MultiLine`
+    // (2), `HorizontalStretch` (2), `MaxHeight` (2), `AutoMaxHeight` (2),
+    // `AutoMaxWidth` (2), `Width` (2), `EditMode` (2), `TitleLocation` (2),
+    // `TitleFont` (2) and `DataPath` (2) and leads `InputHint` (2),
+    // `ContextMenu` (2), `ExtendedTooltip` (2) and `Events` (2);
+    // `OnScreenKeyboardReturnKeyText` (1) trails `Font`,
+    // `IncompleteChoiceMode`, `ClearButton`, `HorizontalStretch`,
+    // `TitleLocation`, `TitleFont`, `Title` and `DataPath` and leads
+    // `ContextMenu`, `ExtendedTooltip` and `Events`; `AutofillHint` (1) trails
+    // `TextEdit`, `ListChoiceMode`, `OpenButton`, `DropListButton`, `ToolTip`,
+    // `Title` and `DataPath` and leads `ContextMenu`, `ExtendedTooltip` and
+    // `Events`.  No two of the three ever share an item, so their order
+    // relative to each other is unobserved and they stay adjacent.
+    if let Some(value) = item.auto_capitalization_on_text_input {
+        xml.push_str(&format!(
+            "{tab}\t<AutoCapitalizationOnTextInput>{}</AutoCapitalizationOnTextInput>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = item.on_screen_keyboard_return_key_text {
+        xml.push_str(&format!(
+            "{tab}\t<OnScreenKeyboardReturnKeyText>{}</OnScreenKeyboardReturnKeyText>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = item.autofill_hint {
+        xml.push_str(&format!(
+            "{tab}\t<AutofillHint>{}</AutofillHint>\r\n",
             escape_xml_text(value)
         ));
     }
@@ -27436,6 +27825,22 @@ pub(super) fn format_form_child_item_xml(
     // (29) trails `ShapeRepresentation` (5), `Shape` (1), `Representation`
     // (25), `Picture` (15) and `Title` (18) and leads `LocationInCommandBar`
     // (3) and `ExtendedTooltip` (29).  No pair is observed in both directions.
+    //
+    // `RepresentationInContextMenu` leads the whole shape run: over all eight
+    // native stand trees it precedes `ShapeRepresentation` on the 3 buttons
+    // that carry both and never follows it, and it never shares a button with
+    // `Shape` or `PictureLocation`.  It still trails `Type` (1 372),
+    // `CommandName` (1 372), `Representation` (184), `Title` (226),
+    // `ToolTipRepresentation` (14) and `Picture` (49), and leads
+    // `LocationInCommandBar` (463) and `ExtendedTooltip` (1 372).
+    if item.tag == "Button"
+        && let Some(representation) = item.representation_in_context_menu
+    {
+        xml.push_str(&format!(
+            "{tab}\t<RepresentationInContextMenu>{}</RepresentationInContextMenu>\r\n",
+            escape_xml_text(representation)
+        ));
+    }
     if item.tag == "Button"
         && let Some(shape) = item.shape
     {
@@ -27458,14 +27863,6 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<PictureLocation>{}</PictureLocation>\r\n",
             escape_xml_text(picture_location)
-        ));
-    }
-    if item.tag == "Button"
-        && let Some(representation) = item.representation_in_context_menu
-    {
-        xml.push_str(&format!(
-            "{tab}\t<RepresentationInContextMenu>{}</RepresentationInContextMenu>\r\n",
-            escape_xml_text(representation)
         ));
     }
     if item.tag == "CommandBar"
@@ -27618,6 +28015,7 @@ pub(super) fn format_form_child_item_xml(
             | "ColumnGroup"
             | "TextDocumentField"
             | "FormattedDocumentField"
+            | "HTMLDocumentField"
             | "Table"
             | "LabelDecoration"
             | "PictureDecoration"
@@ -27827,22 +28225,30 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
-    // A `Page` writes its `Shortcut` after `Title` and before `TitleDataPath` (1)
-    // and `ExtendedTooltip` (5), with no counter-example.
-    if item.tag == "Page"
-        && let Some(shortcut) = &item.item_shortcut
-    {
-        xml.push_str(&format!(
-            "{tab}\t<Shortcut>{}</Shortcut>\r\n",
-            escape_xml_text(shortcut)
-        ));
-    }
     if matches!(item.tag, "Page" | "UsualGroup")
         && let Some(title_data_path) = &item.title_data_path
     {
         xml.push_str(&format!(
             "{tab}\t<TitleDataPath>{}</TitleDataPath>\r\n",
             escape_xml_text(title_data_path)
+        ));
+    }
+    // A `Page`'s `BackColor` closes the run behind `TitleDataPath`, not with
+    // the rest of the page's ordered property block.  The UT 11.5.27.75
+    // census that put it there saw no page carrying both; over all eight
+    // native stand trees the pair is observed once, `TitleDataPath` first.
+    // Everything the ordered block writes still leads it -- `Title` (351),
+    // `Height` (77), `ShowTitle` (161), `Group` (201), `HorizontalStretch`
+    // (144), `VerticalStretch` (161), `HorizontalAlign` (125), `VerticalAlign`
+    // (68), the two spacings (62/82), `ToolTip` (37) and `Visible` (8) -- and
+    // it still leads `ScrollOnCompress` (70), `ExtendedTooltip` (411) and
+    // `ChildItems` (404), with no pair counted both ways.
+    if item.tag == "Page"
+        && let Some(back_color) = &item.back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BackColor>{}</BackColor>\r\n",
+            escape_xml_text(back_color)
         ));
     }
     // A `Page` closes its scalar run with `ScrollOnCompress`.  UT 11.5.27.75
@@ -28038,6 +28444,14 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
                     ));
                 }
             }
+            FormPageXmlProperty::Shortcut => {
+                if let Some(shortcut) = &item.item_shortcut {
+                    xml.push_str(&format!(
+                        "{tab}<Shortcut>{}</Shortcut>\r\n",
+                        escape_xml_text(shortcut)
+                    ));
+                }
+            }
             FormPageXmlProperty::Format => {
                 xml.push_str(&format_form_localized_section(
                     "Format",
@@ -28148,14 +28562,6 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
             FormPageXmlProperty::ShowTitle => {
                 if item.show_title == Some(false) {
                     xml.push_str(&format!("{tab}<ShowTitle>false</ShowTitle>\r\n"));
-                }
-            }
-            FormPageXmlProperty::BackColor => {
-                if let Some(back_color) = &item.back_color {
-                    xml.push_str(&format!(
-                        "{tab}<BackColor>{}</BackColor>\r\n",
-                        escape_xml_text(back_color)
-                    ));
                 }
             }
         }
@@ -30681,11 +31087,25 @@ fn format_form_chart_settings_xml(
     color!("ttlTxtColor", 28);
     color!("legTxtColor", 29);
     color!("chTxtColor", 30);
+    // The chart's three own fonts are ordinary form font tuples, and the two
+    // UT 11.5.27.75 records this writer was derived from both carry the
+    // auto-font shape `{7,3,0,1,100}` in all three slots -- which is why they
+    // were spelled as a constant.  A tuple of any other shape refused the
+    // whole `<Settings>` block: the 12 chart records of Документооборот КОРП
+    // 3.0.21.3 carry `{7,2,0,{-20},1,100}` there, and the platform writes
+    // `ref="style:TextFont" kind="StyleItem"` for it -- exactly what the
+    // shared font-tuple writer renders from that tuple, under the element name
+    // this block spells.  The auto-font shape keeps its own spelling because
+    // the shared writer refuses a mask-less auto font outright.
     for (name, slot) in [("ttlFont", 31usize), ("legFont", 32), ("chFont", 33)] {
-        if form_chart_compact(t.get(slot)?) != "{7,3,0,1,100}" {
-            return None;
+        let raw = t.get(slot)?;
+        if form_chart_compact(raw) == "{7,3,0,1,100}" {
+            xml.push_str(&format!("{child_tab}<d4p1:{name} kind=\"AutoFont\"/>\r\n"));
+        } else {
+            let rendered =
+                parse_form_font_tuple_xml_tag(raw.trim(), object_refs, &format!("d4p1:{name}"))?;
+            xml.push_str(&format!("{child_tab}{rendered}\r\n"));
         }
-        xml.push_str(&format!("{child_tab}<d4p1:{name} kind=\"AutoFont\"/>\r\n"));
     }
     scalar!("isShowScale", form_chart_bool(t.get(34)?)?);
     scalar!("isShowScaleVL", form_chart_bool(t.get(35)?)?);

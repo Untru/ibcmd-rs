@@ -348,6 +348,7 @@ pub(crate) enum FormPageXmlProperty {
     TitleFont,
     ToolTip,
     ToolTipRepresentation,
+    Shortcut,
     Width,
     Height,
     HorizontalStretch,
@@ -364,7 +365,6 @@ pub(crate) enum FormPageXmlProperty {
     VerticalAlign,
     ChildItemsWidth,
     ShowTitle,
-    BackColor,
 }
 
 pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
@@ -375,6 +375,15 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::TitleFont,
     FormPageXmlProperty::ToolTip,
     FormPageXmlProperty::ToolTipRepresentation,
+    // A page's `Shortcut` sits inside the ordered block, not behind it: over
+    // all eight native stand trees it trails `Title` (24) and `ToolTip` (1)
+    // and leads `Picture` (2), `Group` (1), `TitleDataPath` (6),
+    // `ExtendedTooltip` (24) and `ChildItems` (24), with no pair counted both
+    // ways.  The UT 11.5.27.75 census that first placed it saw neither the
+    // picture nor the group beside it, so it was written after the whole
+    // block.  It is never observed beside the geometry run, so opening the
+    // run is the earliest position the evidence allows.
+    FormPageXmlProperty::Shortcut,
     // A page's geometry sits behind its title block, not in front of it.  UT
     // 11.5.27.75 native tree, 7 016 `Page` instances: `Width` (57) trails
     // `Title` (57), `ToolTip` (6), `EnableContentChange` (4) and
@@ -436,7 +445,6 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::VerticalAlign,
     FormPageXmlProperty::ChildItemsWidth,
     FormPageXmlProperty::ShowTitle,
-    FormPageXmlProperty::BackColor,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3306,8 +3314,11 @@ const FORM_SPREADSHEET_ADDITIONAL_DETAIL_PROCESSING_EVENT_UUID: &str =
     "0b8dc702-d001-4637-a215-9f35613e096c";
 const FORM_SPREADSHEET_BEFORE_WRITE_EVENT_UUID: &str = "b7646583-04d3-4905-8f04-8985914bd1b7";
 const FORM_SPREADSHEET_DETAIL_PROCESSING_EVENT_UUID: &str = "2988b2a5-c887-4928-94ae-5d0c9c31e999";
-const FORM_SPREADSHEET_DRAG_EVENT_UUID: &str = "8ad48496-8d0b-4f6c-ae48-99d95227884b";
-const FORM_SPREADSHEET_DRAG_CHECK_EVENT_UUID: &str = "0d644ff6-443b-4390-86fa-7f9105e42711";
+// The drag pair is not spreadsheet-specific: the same two identifiers name
+// `Drag` and `DragCheck` on a `CalendarField` too, so they are spelled once
+// and shared by both owner tables.
+const FORM_ITEM_DRAG_EVENT_UUID: &str = "8ad48496-8d0b-4f6c-ae48-99d95227884b";
+const FORM_ITEM_DRAG_CHECK_EVENT_UUID: &str = "0d644ff6-443b-4390-86fa-7f9105e42711";
 const FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID: &str = "2042ec93-3108-4190-b767-ec6c10dd9ff4";
 const FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID: &str =
     "411a4578-276c-4f4a-b56a-b3b01181c997";
@@ -3317,6 +3328,7 @@ const FORM_SPREADSHEET_BEFORE_PRINT_EVENT_UUID: &str = "61455593-0982-4415-bc2e-
 const FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID: &str = "83c14f85-ab1f-4c77-bd3b-81970b72543b";
 const FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID: &str = "1490ede6-6f33-4c6d-b971-53b2541331ea";
 const FORM_CALENDAR_SELECTION_EVENT_UUID: &str = "2feb1ee9-b750-4352-bb4c-67ba1c608dc6";
+const FORM_CALENDAR_ON_ACTIVATE_DATE_EVENT_UUID: &str = "3793cac5-9f9a-4b7c-adda-386e5cccf794";
 const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
 const FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID: &str = "526c501f-ed3f-4db4-8731-fd0324707501";
 
@@ -3401,8 +3413,8 @@ impl FormChildItemEventCollectionSchema {
                     FORM_SPREADSHEET_DETAIL_PROCESSING_EVENT_UUID,
                     "DetailProcessing",
                 ),
-                (FORM_SPREADSHEET_DRAG_EVENT_UUID, "Drag"),
-                (FORM_SPREADSHEET_DRAG_CHECK_EVENT_UUID, "DragCheck"),
+                (FORM_ITEM_DRAG_EVENT_UUID, "Drag"),
+                (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
                 (FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
                 (
                     FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID,
@@ -3422,6 +3434,18 @@ impl FormChildItemEventCollectionSchema {
             FormChildItemEventCollectionOwner::CalendarField => &[
                 (FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID, "OnPeriodOutput"),
                 (FORM_CALENDAR_SELECTION_EVENT_UUID, "Selection"),
+                // The same all-or-nothing rule as the spreadsheet table above:
+                // one unnamed identifier discarded every event beside it, and
+                // three native calendars of Документооборот КОРП 3.0.21.3 lost
+                // their whole `<Events>` list to it.  The decoder emits each
+                // handler verbatim beside the raw identifier, and the platform
+                // names them without ambiguity: `3793cac5` is the
+                // `OnActivateDate` of all 3 `<Event name="OnActivateDate">`
+                // elements in the eight stand corpora, and the drag pair
+                // repeats the identifiers the spreadsheet field already uses.
+                (FORM_CALENDAR_ON_ACTIVATE_DATE_EVENT_UUID, "OnActivateDate"),
+                (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
+                (FORM_ITEM_DRAG_EVENT_UUID, "Drag"),
             ],
             FormChildItemEventCollectionOwner::GraphicalSchemaField => &[
                 (FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID, "Selection"),
@@ -3560,7 +3584,18 @@ impl FormFieldSchema {
             "CalendarField" => ("8", 24, "6", None, None, None),
             "GraphicalSchemaField" => ("14", 14, "3", None, None, None),
             "HTMLDocumentField" => ("15", 13, "3", None, None, Some(3)),
-            "FormattedDocumentField" => ("17", 16, "1", None, None, Some(8)),
+            // The formatted document keeps the whole colour triple in three
+            // adjacent option slots, and only the border one had been claimed.
+            // Over the 35 native `FormattedDocumentField` items of
+            // Документооборот КОРП 3.0.21.3 option slot 6 carries the unset
+            // shape `{3,4,{0}}` on 34 and `{3,3,{-11}}` -- `style:FieldTextColor`
+            // -- on exactly the one whose document writes `<TextColor>`, and
+            // option slot 7 is unset on 33 and `{3,3,{-1}}` --
+            // `style:FormBackColor` -- on exactly the two that write
+            // `<BackColor>`.  БСП base, БСП demo and УТ 11.5.27.75 write
+            // neither element on any of their 89 items and read the unset shape
+            // in both slots throughout.
+            "FormattedDocumentField" => ("17", 16, "1", Some(6), Some(7), Some(8)),
             // The PDF viewer field carries one member more than the other
             // field kinds at the same head offset: all five of UT
             // 11.5.27.75's `PDFDocumentField` items spell a 60-member
@@ -3661,8 +3696,18 @@ impl FormFieldSchema {
                 "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
             )
             .then_some(20 + top_level_offset),
-            auto_cell_height_slot: matches!(item_tag, "InputField" | "LabelField" | "PictureField")
-                .then_some(28 + top_level_offset),
+            // `CheckBoxField` reads the flag out of the very same
+            // offset-corrected slot and was simply not listed.  Over the 2 760
+            // `CheckBoxField` records of Документооборот КОРП 3.0.21.3 slot
+            // `28 + offset` reads `1` on exactly the one item the platform
+            // writes `<AutoCellHeight>true</AutoCellHeight>` on and `0` on
+            // every other one; over all 6 295 of УТ 11.5.27.75 it reads `0`
+            // throughout and no check box there carries the element.
+            auto_cell_height_slot: matches!(
+                item_tag,
+                "InputField" | "LabelField" | "PictureField" | "CheckBoxField"
+            )
+            .then_some(28 + top_level_offset),
             // Slot `22 + top_level_offset` carries `CellHyperlink` for every
             // field kind that can sit in a table cell, not only the two the
             // decoder used to admit: on the 1 181 nested `PictureField` items
@@ -6539,7 +6584,11 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormInputFieldTailXmlProperty {
+    MultipleValuesFont,
+    MultipleValuesBackColor,
+    MultipleValuesHyperlink,
     MultipleValueDataPath,
+    MultipleValuePictureDataPath,
     MultipleValuePresentDataPath,
     AllowInputEmptyMultipleValues,
     ListChoiceMode,
@@ -6555,20 +6604,40 @@ pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlPropert
     // `ChoiceFoldersAndItems`, `ContextMenu` and `ExtendedTooltip`.
     FormInputFieldTailXmlProperty::AllowInputEmptyMultipleValues,
     FormInputFieldTailXmlProperty::ListChoiceMode,
-    // `ShowCheckBoxesInDropList` trails `ListChoiceMode`, `ExtendedEdit`,
-    // `ClearButton` (2), `ChoiceButton`, `MaxWidth` (2), `AutoMaxWidth`,
-    // `Width`, `HorizontalStretch`, `TitleLocation` (2), `ToolTipRepresentation`
-    // and `DataPath` (2), and leads `ChooseType`, `TextEdit`, `ChoiceList`,
-    // `ContextMenu` (2), `ExtendedTooltip` (2) and `Events` (2), on the two
-    // native items that carry it.  It never shares an item with
-    // `AllowInputEmptyMultipleValues`, so their relative order is unobserved.
-    FormInputFieldTailXmlProperty::ShowCheckBoxesInDropList,
+    // The multiple-value editor's own look leads its `ExtendedEdit` switch.
+    // Документооборот КОРП 3.0.21.3 is the only stand corpus that writes any
+    // of these, and it writes them in exactly one order: `MultipleValuesFont`
+    // (5 items) leads `MultipleValuesBackColor` (1),
+    // `ExtendedEditMultipleValues` (2), `MultipleValueDataPath` (5),
+    // `MultipleValuePictureDataPath` (1), `MultipleValuePresentDataPath` (4)
+    // and `TextEdit` (5); `MultipleValuesHyperlink` (2) trails
+    // `ExtendedEditMultipleValues` (2) and leads `MultipleValueDataPath` (2);
+    // and the picture path sits between the value path (1) and the
+    // presentation path (1).  No pair is counted both ways.
+    FormInputFieldTailXmlProperty::MultipleValuesFont,
+    FormInputFieldTailXmlProperty::MultipleValuesBackColor,
     FormInputFieldTailXmlProperty::ExtendedEditMultipleValues,
+    FormInputFieldTailXmlProperty::MultipleValuesHyperlink,
+    // `ShowCheckBoxesInDropList` trails `ListChoiceMode` (4),
+    // `ExtendedEditMultipleValues` (2), `ExtendedEdit` (2), `ClearButton` (6),
+    // `ChoiceButton` (3), `OpenButton` (2), `CreateButton` (1),
+    // `DropListButton` (1), `MaxWidth` (5), `AutoMaxWidth` (3), `Width` (3),
+    // `HorizontalStretch` (3), `Title` (3), `TitleLocation` (7),
+    // `ToolTipRepresentation` (2) and `DataPath` (8), and leads `ChooseType`
+    // (4), `TextEdit` (3), `InputHint` (3), `ChoiceList` (2), `ContextMenu`
+    // (8), `ExtendedTooltip` (8) and `Events` (8), over all eight native stand
+    // trees with no pair counted both ways.  The UT 11.5.27.75 census that
+    // first placed it saw neither of the two items that carry
+    // `ExtendedEditMultipleValues` beside it, so it took the slot ahead of it.
+    // It never shares an item with `AllowInputEmptyMultipleValues` or the two
+    // multiple-value paths, so those orders stay unobserved.
+    FormInputFieldTailXmlProperty::ShowCheckBoxesInDropList,
     // The two multiple-value bound paths trail `ExtendedEditMultipleValues`,
     // `ChoiceButton` and `DataPath` and precede `ContextMenu`, `ExtendedTooltip`
     // and `Events`, and the value path precedes the presentation path, on all 3
     // native items that carry them.
     FormInputFieldTailXmlProperty::MultipleValueDataPath,
+    FormInputFieldTailXmlProperty::MultipleValuePictureDataPath,
     FormInputFieldTailXmlProperty::MultipleValuePresentDataPath,
     FormInputFieldTailXmlProperty::AutoMarkIncomplete,
 ];
@@ -6697,8 +6766,14 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // `EnableStartDrag` (3), `RowFilter` (3), `DataPath` (3), `Title` (2) and
     // the three search/status locations (1 each), on all 3 native tables that
     // carry it, with no pair counted both ways.
-    FormTableXmlProperty::Enabled,
+    //
+    // `Autofill` leads it: over all eight native stand trees the platform
+    // writes `Autofill` before `Enabled` on the 3 tables that carry both, and
+    // never the other way round. `Autofill` also leads `ReadOnly` (22) and
+    // `SkipOnInput` (200) there, so it takes the slot ahead of `Enabled`
+    // rather than between `Enabled` and `ReadOnly`.
     FormTableXmlProperty::Autofill,
+    FormTableXmlProperty::Enabled,
     FormTableXmlProperty::ReadOnly,
     FormTableXmlProperty::SkipOnInput,
     FormTableXmlProperty::DefaultItem,
@@ -6747,16 +6822,21 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::SelectionMode,
     FormTableXmlProperty::RowSelectionMode,
     FormTableXmlProperty::Header,
-    // `FooterHeight` follows the header switch and opens the line/scrollbar
-    // run: on all 5 native tables that carry it, it trails `Representation`
-    // (5), `ChangeRowSet` (3), `ChangeRowOrder` (3), `Width` (2),
-    // `CommandBarLocation` (2), `TitleLocation` (1), `SkipOnInput` (1),
-    // `MaxWidth` (1), `HeightInTableRows` (1), `Height` (1), `Header` (1) and
-    // `AutoMaxWidth` (1), and leads `HorizontalScrollBar` (1),
-    // `HorizontalLines` (1), `VerticalLines` (1), `AutoInsertNewRow` (3), the
-    // stretch pair (1 each), `EnableStartDrag` (3), `EnableDrag` (3),
-    // `FileDragMode` (3), `DataPath` (5), `RowPictureDataPath` (1),
-    // `RowsPicture` (1), `Title` (4), `CommandSet` (3) and `RowFilter` (5).
+    // The two header/footer switches and their two heights run
+    // `Header HeaderHeight Footer FooterHeight`, ahead of the scrollbar and
+    // line run, not inside it.  Census over all eight native stand trees, with
+    // no pair counted both ways anywhere: `HeaderHeight` precedes `Footer` (9),
+    // `HorizontalScrollBar` (1), `HorizontalLines` (2), `VerticalLines` (3),
+    // `UseAlternationRowColor` (62), `Title` (87) and `CommandSet` (78);
+    // `Footer` precedes `FooterHeight` (4), `HorizontalScrollBar` (1),
+    // `HorizontalLines` (4), `VerticalLines` (4), `UseAlternationRowColor`
+    // (25), `Title` (170), `TitleFont` (8), `TitleTextColor` (7) and
+    // `CommandSet` (62); `FooterHeight` precedes `HorizontalScrollBar` (6),
+    // `HorizontalLines` (9), `VerticalLines` (9), `Title` (20) and `CommandSet`
+    // (20).  Reading the heights as members of the line run is what put
+    // `HeaderHeight` and `Footer` behind `VerticalLines`.
+    FormTableXmlProperty::HeaderHeight,
+    FormTableXmlProperty::Footer,
     FormTableXmlProperty::FooterHeight,
     FormTableXmlProperty::HorizontalScrollBar,
     // `VerticalScrollBar` trails `HorizontalScrollBar` (4), `Header` (13),
@@ -6766,24 +6846,6 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::VerticalScrollBar,
     FormTableXmlProperty::HorizontalLines,
     FormTableXmlProperty::VerticalLines,
-    // `HeaderHeight` trails `Representation`, `CommandBarLocation`, `ReadOnly`,
-    // `SkipOnInput`, `DefaultItem`, `ChangeRowSet`, `ChangeRowOrder`, `Width`,
-    // `Height`, `HeightInTableRows`, `SelectionMode`, `RowSelectionMode` and
-    // `Header`, and precedes `UseAlternationRowColor`, `AutoInsertNewRow`,
-    // `EnableStartDrag`, `FileDragMode`, `DataPath`, `Title` and `CommandSet`
-    // on all 32 native occurrences, with no counter-example.
-    FormTableXmlProperty::HeaderHeight,
-    // `Footer` trails `Representation` (31), `SkipOnInput` (13),
-    // `ChangeRowOrder` (8), `ChangeRowSet` (8), `ReadOnly` (4),
-    // `TitleLocation` (4), `CommandBarLocation` (3), `AutoMaxHeight` (2),
-    // `HeightInTableRows` (2), `AutoMaxWidth` (1), `DefaultItem` (1),
-    // `HeaderHeight` (1) and `Height` (1), and precedes `DataPath` (39),
-    // `Events` (31), `FileDragMode` (29), `Title` (27), `EnableDrag` (23),
-    // `EnableStartDrag` (23), `AutoInsertNewRow` (22), `CommandSet` (9),
-    // `AutoAddIncomplete` (7), the three search/status locations (4 each),
-    // `VerticalStretch` (3) and `UseAlternationRowColor` (2), across all 39
-    // native occurrences with no pair counted both ways.
-    FormTableXmlProperty::Footer,
     FormTableXmlProperty::UseAlternationRowColor,
     FormTableXmlProperty::AutoInsertNewRow,
     FormTableXmlProperty::AutoAddIncomplete,
@@ -6832,18 +6894,23 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::BackColor,
     FormTableXmlProperty::TextColor,
     FormTableXmlProperty::BorderColor,
+    // A table's own `Font` leads its title block, not trails it.  The UT
+    // 11.5.27.75 census that first placed it saw only 2 occurrences and
+    // neither shared a table with `Title` or `TitleFont`, so it took the
+    // position beside `TitleFont`.  Over all eight native stand trees the
+    // pair is observed: `Font` precedes `Title` (8) and `TitleFont` (3), and
+    // never follows either.  It still trails `UseAlternationRowColor` (2),
+    // `HorizontalScrollBar` (5), `VerticalScrollBar` (4), `HorizontalLines`
+    // (10) and `VerticalLines` (12), all of which this block already writes
+    // ahead of the colour triple.
+    FormTableXmlProperty::Font,
     FormTableXmlProperty::Title,
     // A table's `TitleFont` follows its title block and precedes the command
-    // set, like every other titled owner: it trails `Title` (22) and
-    // `TitleTextColor` (11) and leads `CommandSet` (18), `RowFilter` (20),
+    // set, like every other titled owner: it trails `Title` (73) and
+    // `TitleTextColor` (58) and leads `CommandSet` (48), `RowFilter` (20),
     // `SearchStringLocation`, `ViewStatusLocation` and `SearchControlLocation`
-    // (12 each) and `ToolTip` (1) on all 27 native occurrences.  `Font` (2)
-    // trails `DataPath` and `FileDragMode` and leads `CommandSet`, `RowFilter`
-    // and the three locations; it never shares a table with `Title`,
-    // `TitleFont` or the colour triple, so it stays beside `TitleFont`, the
-    // nearest position that satisfies every observed pair.
+    // (12 each) and `ToolTip` (1) on all native occurrences.
     FormTableXmlProperty::TitleFont,
-    FormTableXmlProperty::Font,
     // A table's `Shortcut` sits between its title block and its command set.
     // UT 11.5.27.75 native tree, the 3 tables that carry one: it trails
     // `Title` (2), `RowPictureDataPath` (1), `DataPath` (3),
@@ -6875,7 +6942,6 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // block writes ever follows it.
     FormTableXmlProperty::GroupHorizontalAlign,
     FormTableXmlProperty::GroupVerticalAlign,
-    FormTableXmlProperty::CurrentRowUse,
     // `RefreshRequest` closes the table's own scalar block, immediately ahead of
     // the `AutoRefresh` group.  UT 11.5.27.75 native tree, 4 543 `Table`
     // instances and 30 carrying the property: it trails `CommandBarLocation`
@@ -6887,8 +6953,17 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // `RestoreCurrentRow`, `TopLevelParent`, `ShowRoot`, `AllowRootChoice`,
     // `UpdateOnDataChange` and `AllowGettingCurrentRowURL` (6 each), plus
     // `RowFilter` (23), `Events` (30) and `ChildItems` (30).  No pair is observed
-    // in both directions, and `CurrentRowUse` never co-occurs with it.
+    // in both directions.
+    //
+    // That census saw no table carrying both `RefreshRequest` and
+    // `CurrentRowUse`, so their relative order was a guess.  Over all eight
+    // native stand trees the pair is observed 6 times, every one of them
+    // `RefreshRequest` first, so `CurrentRowUse` moves behind it -- still
+    // ahead of `AutoRefresh` (108) and behind the three search/status
+    // locations (97 / 102 / 83), `ToolTip` (4), `ToolTipRepresentation` (6)
+    // and `GroupVerticalAlign` (1), with no pair counted both ways.
     FormTableXmlProperty::RefreshRequest,
+    FormTableXmlProperty::CurrentRowUse,
     FormTableXmlProperty::AutoRefresh,
     FormTableXmlProperty::AutoRefreshPeriod,
     FormTableXmlProperty::Period,
@@ -6986,7 +7061,17 @@ impl FormTableSlot {
 
     fn accepts(self, field: &str) -> bool {
         match self {
-            Self::RowInputMode => matches!(field.trim(), "0" | "2"),
+            // Code `3` is `BeforeCurrentRow`.  It occurs nowhere in УТ
+            // 11.5.27.75 or either БСП, so the gate that admits a table's whole
+            // layout only knew `0` and `2` -- and one table of Документооборот
+            // КОРП 3.0.21.3 was refused outright, losing every property the
+            // gate guards.  Over that configuration's 2 010 native tables the
+            // slot reads `0` on 1 988 that write no `<RowInputMode>`, `2` on
+            // exactly the 20 that write `AfterCurrentRow` and `3` on exactly
+            // the one that writes `BeforeCurrentRow`.  ERP УХ spells one more
+            // code for its single `EndOfWindow`, which stays unnamed and
+            // therefore still refused rather than guessed.
+            Self::RowInputMode => matches!(field.trim(), "0" | "2" | "3"),
             Self::HorizontalScrollBar => matches!(field.trim(), "0" | "1" | "2"),
             Self::InitialListView | Self::InitialTreeView => {
                 matches!(field.trim(), "0" | "1" | "2")
@@ -7133,6 +7218,7 @@ pub(crate) enum FormTableSearchStringLocation {
     CommandBar,
     Top,
     Bottom,
+    FormCaption,
     PullFromTop,
 }
 
@@ -7143,6 +7229,7 @@ impl FormTableSearchStringLocation {
             Self::CommandBar => "CommandBar",
             Self::Top => "Top",
             Self::Bottom => "Bottom",
+            Self::FormCaption => "FormCaption",
             Self::PullFromTop => "PullFromTop",
         }
     }
@@ -7479,6 +7566,13 @@ impl FormTableSchema {
             "2" => Some(FormTableSearchStringLocation::CommandBar),
             "3" => Some(FormTableSearchStringLocation::Top),
             "4" => Some(FormTableSearchStringLocation::Bottom),
+            // Code `5` occurs in no other stand corpus at all -- not in БСП
+            // demo, not in УТ, and in Документооборот КОРП 3.0.21.3 on
+            // exactly two tables, which are exactly the two the platform
+            // writes `<SearchStringLocation>FormCaption</...>` on anywhere in
+            // the eight native trees.  It is the only unmapped non-zero code
+            // any of the three configurations spells in this slot.
+            "5" => Some(FormTableSearchStringLocation::FormCaption),
             "6" => Some(FormTableSearchStringLocation::PullFromTop),
             _ => None,
         }
@@ -7721,8 +7815,11 @@ impl FormTableSchema {
     }
 
     pub(crate) fn row_input_mode(self, fields: &[&str]) -> Option<&'static str> {
-        (fields.get(FormTableSlot::RowInputMode.index())?.trim() == "2")
-            .then_some("AfterCurrentRow")
+        match fields.get(FormTableSlot::RowInputMode.index())?.trim() {
+            "2" => Some("AfterCurrentRow"),
+            "3" => Some("BeforeCurrentRow"),
+            _ => None,
+        }
     }
 
     pub(crate) fn selection_mode(self, fields: &[&str]) -> Option<&'static str> {
@@ -8110,6 +8207,9 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     SpellCheckingOnTextInput,
     SpecialTextInputMode,
     MultipleValuesOptions,
+    AutoCapitalizationOnTextInput,
+    OnScreenKeyboardReturnKeyText,
+    AutofillHint,
 }
 
 impl FormInputFieldExtendedOptionSlot {
@@ -8224,6 +8324,22 @@ impl FormInputFieldExtendedOptionSlot {
             // six are, item for item, exactly the 7 items the platform writes
             // the three spellings on, with no other code in the slot.
             Self::SpecialTextInputMode => 60,
+            // Three more single-code slots in the same run, each measured the
+            // same way and each written by only one of the eight stand
+            // corpora.  Of the 12 546 `InputField` option tuples the
+            // Документооборот КОРП 3.0.21.3 form bodies spell out, slot 59
+            // holds `0` on 12 544 and `3` on exactly the 2 items the platform
+            // writes `<AutoCapitalizationOnTextInput>Sentences</...>` on; slot
+            // 61 holds `0` on 12 545 and `7` on exactly the one that says
+            // `<OnScreenKeyboardReturnKeyText>Done</...>`; slot 63 holds `0`
+            // on 12 544 and `1` on exactly the one that says
+            // `<AutofillHint>FullName</...>`.  БСП demo (5 138 tuples) and УТ
+            // 11.5.27.75 (50 065) hold `0` in all three slots throughout and
+            // write none of the three elements.  No other code occurs
+            // anywhere, so a code these tables do not name writes nothing.
+            Self::AutoCapitalizationOnTextInput => 59,
+            Self::OnScreenKeyboardReturnKeyText => 61,
+            Self::AutofillHint => 63,
             // The multiple-values sub-tuple.  It is the bare `{0}` on 50 058
             // of the 50 065 tuples, none of whose items carries either of the
             // two properties below, and a seven-member record on the other 7.
