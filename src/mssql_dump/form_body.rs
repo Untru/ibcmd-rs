@@ -14406,9 +14406,20 @@ fn form_choice_parameter_link_standard_terminal_member(
 /// reference are written the same way, so the fallback is the answer to every
 /// outcome that is not a resolution.
 ///
-/// A standard-marker terminal and a table-current-data reference keep the old
-/// refusal: neither has ever been observed unresolved, and neither physical
-/// spelling is evidenced.
+/// The spelling is mechanical rather than a table of shapes: the reference is a
+/// chain of braced tuples, each tuple's members are joined by `:` and the tuples
+/// by `/`. Every physical `<xr:DataPath>` of the eight stand corpora reads that
+/// way -- 169 values over six distinct shapes, with no counter-example: `41`
+/// bare owner ids, `43` `<owner>/0:<uuid>`, `43` `<owner>:<type uuid>`, `37`
+/// `<owner>:<type uuid>/<n>:<uuid>`, three `1/-5` (a standard marker terminal,
+/// ERP УХ `Catalogs/ВидыДвиженийМСФО/Forms/ФормаЭлемента` and
+/// `Catalogs/УдалитьКонтрольныеСоотношения/Forms/ФормаЭлемента`) and two `0/0`.
+/// A table's current data is owned by a form item, so its owner tuple is
+/// `{table id, 02023637-7868-4a5f-8576-835a76e0c9ba}` and spells
+/// `<table>:02023637-…`: `Documents/КорректировкаПланов/Forms/ФормаДокумента`
+/// writes `20:02023637-…/0:2829c630-…` and `68:02023637-…/0:229f3065-…`, and
+/// `Documents/ВерсияСоглашенияКоммерческийДоговор/Forms/ФормаДокумента` writes
+/// `1932:02023637-…/0:47f6b07d-…`.
 pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     primary: &str,
     duplicate: Option<&str>,
@@ -14438,14 +14449,17 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         .unwrap_or_else(|| attribute_id.to_string()),
                 ),
                 FormChoiceParameterLinkTerminal::Standard(standard) => {
-                    let member = form_choice_parameter_link_standard_terminal_member(
+                    form_choice_parameter_link_standard_terminal_member(
                         attribute_id,
                         *standard,
                         attribute_metadata_owners_by_id,
-                    )?;
-                    attribute_names_by_id
-                        .get(attribute_id)
-                        .map(|attribute| format!("{attribute}.{member}"))
+                    )
+                    .and_then(|member| {
+                        attribute_names_by_id
+                            .get(attribute_id)
+                            .map(|attribute| format!("{attribute}.{member}"))
+                    })
+                    .or_else(|| Some(format!("{attribute_id}/{}", standard.marker_text())))
                 }
                 FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
                     match resolve_form_owner_scoped_metadata_uuid_data_path_status(
@@ -14467,6 +14481,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
             },
             FormChoiceParameterLinkReference::TableCurrentData { table_id, terminal } => {
                 let table_id = table_id.to_string();
+                let physical_owner = format!("{table_id}:{FORM_ITEM_TYPE_UUID}");
                 match terminal {
                     FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(column_id) => {
                         let column_id = column_id.to_string();
@@ -14482,6 +14497,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                                     data_path_by_binding_key,
                                 )
                             })
+                            .or_else(|| Some(format!("{physical_owner}/{column_id}")))
                     }
                     FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
                         type_link_data_path_by_table_column
@@ -14495,6 +14511,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                                     object_refs,
                                 )
                             })
+                            .or_else(|| Some(format!("{physical_owner}/0:{uuid}")))
                     }
                     FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
                         binding_id,
@@ -14530,7 +14547,9 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         // whose layout route the platform writes were rejected
                         // in favour of an `AdditionalColumns` name the platform
                         // never writes there.
-                        numeric_route.or(uuid_route)
+                        numeric_route
+                            .or(uuid_route)
+                            .or_else(|| Some(format!("{physical_owner}/{binding_id}:{uuid}")))
                     }
                 }
             }
