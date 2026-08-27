@@ -15,9 +15,9 @@ use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::StorageImage;
 use ibcmd_schema::{
     GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner,
-    parse_task_choice_history_on_input_slot, parse_task_data_lock_control_mode_slot,
-    parse_task_full_text_search_slot, parse_task_include_help_in_contents_slot,
-    parse_task_number_allowed_length_slot, parse_task_number_auto_prefix_slot,
+    parse_task_data_lock_control_mode_slot, parse_task_full_text_search_slot,
+    parse_task_include_help_in_contents_slot, parse_task_number_allowed_length_slot,
+    parse_task_number_auto_prefix_slot,
 };
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{
@@ -427,38 +427,55 @@ mod characteristics {
             &types_from,
             object_refs,
         )?;
-        let data_path_field = decode_field(
-            family,
-            item_index,
-            fields[9],
-            CharacteristicRole::DataPathField,
-            &types_from,
-            object_refs,
-        )?;
-        let multiple_values_use_field = decode_field(
-            family,
-            item_index,
-            fields[10],
-            CharacteristicRole::MultipleValuesUseField,
-            &types_from,
-            object_refs,
-        )?;
-        let multiple_values_key_field = decode_field(
-            family,
-            item_index,
-            fields[11],
-            CharacteristicRole::MultipleValuesKeyField,
-            &values_from,
-            object_refs,
-        )?;
-        let multiple_values_order_field = decode_field(
-            family,
-            item_index,
-            fields[12],
-            CharacteristicRole::MultipleValuesOrderField,
-            &values_from,
-            object_refs,
-        )?;
+        // Roles the declared layout stops short of are absent, not malformed:
+        // the platform writes each of them as the `-1` sentinel. Only the
+        // trailing four can be missing -- layout 3 stops after
+        // `DataPathField`, layout 1 stops after `KeyField`.
+        let omitted = || CharacteristicField::Sentinel(CharacteristicFieldSentinel::Undefined);
+        let data_path_field = match fields.get(9) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::DataPathField,
+                &types_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
+        let multiple_values_use_field = match fields.get(10) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::MultipleValuesUseField,
+                &types_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
+        let multiple_values_key_field = match fields.get(11) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::MultipleValuesKeyField,
+                &values_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
+        let multiple_values_order_field = match fields.get(12) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::MultipleValuesOrderField,
+                &values_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
         let types = CharacteristicTypes::new(
             types_from,
             key_field,
@@ -5445,15 +5462,22 @@ fn parse_exchange_plan_content_blob(
             format!("ExchangePlanContent item {item_index} has no AutoRecord value")
         })?;
         let auto_record = exchange_plan_auto_record_xml(auto_record_slot.trim());
-        let metadata = object_refs
+        // A content slot whose metadata id names nothing in the configuration
+        // is dropped, not fatal. Both of `uh`'s unfinished exchange plans
+        // prove it by count: `ОбновлениеЧерезКопию` declares 5383 slots, 18 of
+        // them name ids that occur nowhere in the native tree, and the
+        // platform writes exactly 5365 `<Item>`s; `НалоговыйМониторинг`
+        // declares 4212, one is unresolvable, and the platform writes 4211.
+        // Every other exchange plan of the corpus resolves all of its slots
+        // and loses nothing.
+        let Some(metadata) = object_refs
             .get(&object_id)
             .or_else(|| type_index.get(&object_id))
             .cloned()
-            .with_context(|| {
-                format!(
-                    "ExchangePlanContent item {item_index} references unsupported metadata id {object_id}"
-                )
-            })?;
+        else {
+            index += 2;
+            continue;
+        };
         items.push(ExchangePlanContentItem {
             metadata_id: object_id,
             metadata,
@@ -6511,7 +6535,10 @@ fn parse_flowchart_addressing_attribute_value(
             .filter(|reference| !reference.is_empty())
             .map(FlowchartAddressingAttributeValue::DesignTimeRef);
     }
-    let owner_type_id = parse_data_processor_empty_ref_fill_owner(value)?;
+    let (owner_type_id, value_id) = parse_data_processor_design_time_fill_reference(value)?;
+    if !information_register_uuid_is_zero(&value_id) {
+        return None;
+    }
     let type_reference =
         unique_metadata_type_reference(type_index, type_index_collisions, &owner_type_id)?;
     let owner_reference =
@@ -17505,7 +17532,22 @@ fn parse_data_processor_empty_ref_fill_values(
         }
         let pattern = data_processor_code27_type_pattern(&fields, &header)?;
         let pattern_type_ids = data_processor_reference_pattern_type_ids(pattern)?;
-        let fill_owner_type_id = parse_data_processor_empty_ref_fill_owner(fill_value)?;
+        let (fill_owner_type_id, fill_value_id) =
+            parse_data_processor_design_time_fill_reference(fill_value)?;
+        // Only the owner's *empty* reference has to be rebuilt here, because
+        // only it has no value id to resolve: it is spelled from the owner
+        // type alone. A slot that names a concrete value of the owner (an enum
+        // value, a predefined item) is already resolved by the generic child
+        // reader through the owner-qualified reference index, so this
+        // expectation layer must leave it alone instead of refusing the whole
+        // data processor. Census over the nineteen ERP UH data processors that
+        // write a design-time-ref `FillValue`: thirteen name only `EmptyRef`
+        // and were already byte-exact; the six that name at least one concrete
+        // value (`Enum.ЕдиницыИзмеренияВремени.EnumValue.День` and five more)
+        // were refused outright.
+        if !information_register_uuid_is_zero(&fill_value_id) {
+            continue;
+        }
         let selected_count = pattern_type_ids
             .iter()
             .filter(|type_id| type_id.eq_ignore_ascii_case(&fill_owner_type_id))
@@ -17521,13 +17563,21 @@ fn parse_data_processor_empty_ref_fill_values(
             unique_metadata_type_reference(type_index, type_index_collisions, &fill_owner_type_id)?;
         let owner_reference =
             parse_generated_metadata_reference_owner(type_reference)?.owner_reference();
+        // A zero value id is the owner's empty reference; a non-zero one names
+        // one of the owner's own values, and the object reference index already
+        // spells it (`Enum.<owner>.EnumValue.<name>`). Census over the nineteen
+        // ERP UH data processors that write a design-time-ref `FillValue`:
+        // thirteen name only `EmptyRef` -- every one of them already
+        // byte-exact -- and six name at least one concrete value; those six
+        // were the ones refused outright.
+        let fill_value = format!("{owner_reference}.EmptyRef");
         let key = header.uuid.to_ascii_lowercase();
         if attributes
             .insert(
                 key,
                 DataProcessorEmptyRefExpectation {
                     type_reference: type_reference.to_string(),
-                    fill_value: format!("{owner_reference}.EmptyRef"),
+                    fill_value,
                 },
             )
             .is_some()
@@ -17631,7 +17681,12 @@ fn data_processor_reference_pattern_type_ids(pattern: &str) -> Option<Vec<String
         .collect()
 }
 
-fn parse_data_processor_empty_ref_fill_owner(value: &str) -> Option<String> {
+/// The owner type id and the value id one design-time-ref fill value names.
+///
+/// The value id is the nil UUID when the slot means the owner's empty
+/// reference, and a real value id -- an enum value, a predefined item -- when
+/// the slot names one concrete value.
+fn parse_data_processor_design_time_fill_reference(value: &str) -> Option<(String, String)> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3
         || fields.first()?.trim() != r##""#""##
@@ -17648,7 +17703,7 @@ fn parse_data_processor_empty_ref_fill_owner(value: &str) -> Option<String> {
     }
     let owner_type_id = parse_information_register_non_zero_uuid(reference.get(1)?)?;
     let value_id = parse_information_register_uuid(reference.get(2)?)?;
-    information_register_uuid_is_zero(&value_id).then_some(owner_type_id)
+    Some((owner_type_id, value_id))
 }
 
 fn apply_data_processor_empty_ref_fill_values(
@@ -25433,38 +25488,7 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
     ) {
         return Some(("Begin", "DontUse", "Directly"));
     }
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3 {
-        return None;
-    }
-    Some((
-        match fields.first()?.trim() {
-            "1" => "Begin",
-            "2" => "AnyPart",
-            _ => return None,
-        },
-        // The middle slot is FullTextSearchOnInputByString, not a constant.
-        // 1C:Trade Management 11.5.27.75 writes `{1,1,0}` for
-        // Catalog.ВидыОповещенийКлиентам, whose native export reads
-        // `<FullTextSearchOnInputByString>Use</FullTextSearchOnInputByString>`;
-        // every other catalog writes 2 and exports `DontUse`.
-        match fields.get(1)?.trim() {
-            "1" => "Use",
-            "2" => "DontUse",
-            _ => return None,
-        },
-        // The third slot is ChoiceDataGetModeOnInputByString, not a constant
-        // either. `do` `Catalogs/АдресатыПочтовыхСообщений` writes `{1,2,1}`
-        // and the platform exports
-        // `<ChoiceDataGetModeOnInputByString>Background</...>`; it is the one
-        // object of the stand that does, against 584 that write `Directly`
-        // with a `0` there. Pinning the slot lost that object whole.
-        match fields.get(2)?.trim() {
-            "0" => "Directly",
-            "1" => "Background",
-            _ => return None,
-        },
-    ))
+    parse_owner_input_modes(value)
 }
 
 const CATALOG_STANDARD_ATTRIBUTES: [(&str, &str); 9] = [
@@ -26114,13 +26138,20 @@ fn parse_document_properties_from_text(
             return None;
         }
     };
+    // `DataLockFields` names standard attributes exactly the way `Catalog`'s
+    // own lock list does -- through the family's full standard-attribute
+    // marker table, not through a narrower list. Census over the eight stand
+    // configurations: four `uh` documents put a standard attribute in the
+    // list (`Date` three times, `Number` once) and every other Document in
+    // the corpus names only its own attributes, so both values are observed.
+    // The empty table refused all four documents outright.
     let data_lock_fields = match parse_document_field_references(
         fields,
         47,
         &header.name,
         object_refs,
         &attribute_references,
-        &[],
+        &DOCUMENT_STANDARD_ATTRIBUTES,
     ) {
         Ok(references) => references,
         Err(diagnostic) => {
@@ -26212,9 +26243,15 @@ fn parse_document_properties_from_text(
                 "1" => "Variable",
                 _ => return None,
             },
+            // Census over the 1 237 documents of the stand that name a
+            // numbering periodicity: `Year` 886 (`1`), `Nonperiodical` 350
+            // (`0`) and `Day` 1 (`4`, `uh`'s
+            // `Documents/РеестрСведенийНеобходимыхДляНазначенияИВыплатыПособий`).
+            // Codes the corpus never writes stay refused.
             number_periodicity: match fields.get(13)?.trim() {
                 "0" => "Nonperiodical",
                 "1" => "Year",
+                "4" => "Day",
                 _ => return None,
             },
             check_unique: information_register_bool(fields.get(14)?)?,
@@ -28192,8 +28229,15 @@ fn parse_task_properties_from_text(
         auxiliary_object_form,
         auxiliary_list_form,
         auxiliary_choice_form,
-        choice_history_on_input: parse_task_choice_history_on_input_slot(fields.get(43)?)?
-            .xml_value(),
+        // `ChoiceHistoryOnInput` rides slot 48, not slot 43. Slot 43 already
+        // decides `NumberAllowedLength` right above, and the two only look
+        // interchangeable while every observed Task agrees on both: the five
+        // `ЗадачаИсполнителя` captures hold `0` in both slots and write
+        // `Fixed`/`Auto`. `uh`'s `БюджетнаяЗадача` separates them -- slot 43
+        // is `1` and it writes `Variable`, slot 48 is `1` and it writes
+        // `DontUse` -- so reading the element off 43 spelt `Auto` and reading
+        // slot 48 as a reserved zero refused the object outright.
+        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(48)?.trim())?,
         include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(24)?)?,
         data_lock_fields,
         data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(33)?)?
@@ -28244,13 +28288,38 @@ fn parse_task_internal_uuid_slots(
     })
 }
 
+/// The three input-by-string modes every owner family stores in one envelope.
+///
+/// The slots are not constants. `SearchStringModeOnInputByString` is `1`/Begin
+/// or `2`/AnyPart; `FullTextSearchOnInputByString` is `1`/Use or `2`/DontUse;
+/// `ChoiceDataGetModeOnInputByString` is `0`/Directly or `1`/Background --
+/// the same three tables `Catalog` already reads, established there by census
+/// over the stand. Documents were pinned to the single `{1,2,0}` triple:
+/// 363 of the corpus write exactly that and `uh`'s
+/// `Documents/УправлениеПериодомСценария` writes `{2,1,0}` against a native
+/// `AnyPart`/`Use`/`Directly`, so the pin refused it whole.
 fn parse_owner_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
     let fields = split_information_register_braced_fields(value)?;
-    (fields.len() == 3
-        && fields.first()?.trim() == "1"
-        && fields.get(1)?.trim() == "2"
-        && fields.get(2)?.trim() == "0")
-        .then_some(("Begin", "DontUse", "Directly"))
+    if fields.len() != 3 {
+        return None;
+    }
+    Some((
+        match fields.first()?.trim() {
+            "1" => "Begin",
+            "2" => "AnyPart",
+            _ => return None,
+        },
+        match fields.get(1)?.trim() {
+            "1" => "Use",
+            "2" => "DontUse",
+            _ => return None,
+        },
+        match fields.get(2)?.trim() {
+            "0" => "Directly",
+            "1" => "Background",
+            _ => return None,
+        },
+    ))
 }
 
 struct TaskRootCollection<'a> {
@@ -30755,13 +30824,21 @@ fn parse_common_attribute_additional_order_tail(
         (10, "0"),
         (11, "0"),
         (12, "0"),
-        (13, "0"),
         (14, "1"),
     ] {
         if fields.get(index)?.trim() != expected {
             return None;
         }
     }
+    // Slot 13 is not a constant of this profile: it is
+    // `ConfigurationExtensionsSeparation`, exactly as the general separation
+    // reader below decodes it. Census over the 53 common attributes of the
+    // stand: of the thirteen that carry this profile (`Indexing` =
+    // `IndexWithAdditionalOrder`), twelve hold `0` and write `DontUse` while
+    // `uh`'s `CommonAttributes/КлассВНА` holds `1` and writes `Separate`;
+    // pinning the slot to `0` refused that one object whole.
+    let configuration_extensions_separation =
+        common_attribute_separation_xml(fields.get(13)?.trim())?;
     if !(7..=9).all(|index| common_attribute_zero_reference_envelope(fields[index])) {
         return None;
     }
@@ -30774,7 +30851,7 @@ fn parse_common_attribute_additional_order_tail(
         conditional_separation: None,
         users_separation: "DontUse",
         authentication_separation: "DontUse",
-        configuration_extensions_separation: "DontUse",
+        configuration_extensions_separation,
         indexing: "IndexWithAdditionalOrder",
         full_text_search: "Use",
         data_history: "Use",

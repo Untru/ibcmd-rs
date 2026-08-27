@@ -1486,6 +1486,63 @@ pub(super) fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
     format!("{uuid}.{suffix}")
 }
 
+/// The members of one `WSReference` body container, split by the role their
+/// stored names give them.
+pub(super) struct WsReferenceDefinitionMembers {
+    /// The WSDL member, already carrying the UTF-8 BOM the platform writes.
+    pub(super) definition: Vec<u8>,
+    /// Every other member, under the exact name the container stores.
+    pub(super) imports: Vec<(String, Vec<u8>)>,
+}
+
+/// Splits a `WSReference` body into the WSDL member and its sibling imports.
+///
+/// The body is a Format15 container, not a bare XML blob: its member names are
+/// authoritative, so this reads the declared table of contents instead of
+/// scanning the payload for a `<?xml` marker. Exactly one member must carry
+/// the `.wsdl` extension -- that member becomes `Ext/WSDefinition.xml`; any
+/// other member keeps its own name. A container that does not name exactly one
+/// WSDL member is refused rather than guessed at.
+pub(super) fn ws_reference_definition_members(
+    inflated: &[u8],
+) -> Result<WsReferenceDefinitionMembers> {
+    let elements = crate::v8_container::parse_v8_container(inflated)?;
+    let mut definition = None;
+    let mut imports = Vec::new();
+    for element in elements {
+        if Path::new(&element.name)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(std::ffi::OsStr::new("wsdl")))
+        {
+            if definition.is_some() {
+                bail!(
+                    "web service definition container names more than one WSDL member \
+                     (second is `{}`)",
+                    element.name
+                );
+            }
+            let mut content = Vec::with_capacity(3 + element.data.len());
+            content.extend_from_slice(b"\xEF\xBB\xBF");
+            content.extend_from_slice(&element.data);
+            definition = Some(content);
+            continue;
+        }
+        if Path::new(&element.name).file_name() != Some(std::ffi::OsStr::new(&element.name)) {
+            bail!(
+                "web service definition container member `{}` is not a plain file name",
+                element.name
+            );
+        }
+        imports.push((element.name, element.data));
+    }
+    let definition = definition
+        .ok_or_else(|| anyhow!("web service definition container names no WSDL member"))?;
+    Ok(WsReferenceDefinitionMembers {
+        definition,
+        imports,
+    })
+}
+
 pub(super) fn write_source_xml_file(
     path: &Path,
     xml: impl AsRef<[u8]>,
@@ -1806,13 +1863,38 @@ pub(super) fn write_source_asset(
                     asset.primary_path.display()
                 )
             })?;
-            let content = extract_ws_definition_xml(&inflated).unwrap_or(inflated);
+            let members = ws_reference_definition_members(&inflated).with_context(|| {
+                format!(
+                    "failed to read web service definition container for source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            let directory = path
+                .parent()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "web service definition asset {} has no parent directory",
+                        asset.primary_path.display()
+                    )
+                })?
+                .to_path_buf();
+            fs::create_dir_all(&directory)
+                .with_context(|| format!("failed to create {}", directory.display()))?;
+            write_source_xml_file(&path, members.definition, context.source_version)?;
+            // Imported schemas travel inside the very same container as the
+            // WSDL and are written out verbatim under their own member names
+            // -- no BOM, no dialect rewrite. Census over the whole corpus (five
+            // `WSReference` bodies, `uh` + `ut`): four containers carry the
+            // single `0.wsdl` member and write only `Ext/WSDefinition.xml`;
+            // `uh`'s `WSСборОтчетностиРосстата` carries `0.wsdl` plus
+            // `1.xsd`..`4.xsd` and the platform emits all four beside it, each
+            // byte-identical to the stored member payload.
+            for (member_name, member_bytes) in members.imports {
+                let member_path = directory.join(&member_name);
+                fs::write(&member_path, member_bytes)
+                    .with_context(|| format!("failed to write {}", member_path.display()))?;
             }
-            write_source_xml_file(&path, content, context.source_version)?;
         }
         SourceAssetKind::HomePageWorkArea => {
             let work_area =
@@ -4498,9 +4580,23 @@ pub(super) fn parse_schedule_number_list(
     Some(values)
 }
 
+/// A compact-schedule slot holds a signed integer, not a digit string.
+///
+/// Census over the `Schedule.xml` files of the eight stand configurations:
+/// `DayInMonth` is written 1441 times as `0`, 14 times as `1`, 6 times as `5`
+/// and once as `-1` (`uh`'s `ScheduledJobs/ОтправкаРасхожденийВГО`). Refusing
+/// the leading minus refused that whole schedule instead of the one slot.
 pub(super) fn parse_schedule_number(value: &str) -> Option<String> {
     let value = value.trim();
-    if value.chars().all(|ch| ch.is_ascii_digit()) {
+    let digits = value.strip_prefix('-');
+    if digits.is_some_and(str::is_empty) {
+        return None;
+    }
+    if digits
+        .unwrap_or(value)
+        .chars()
+        .all(|ch| ch.is_ascii_digit())
+    {
         Some(value.to_string())
     } else {
         None

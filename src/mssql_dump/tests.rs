@@ -39686,21 +39686,18 @@ fn writes_exchange_plan_content_without_metadata_xml_indexes() {
 }
 
 #[test]
-fn exchange_plan_content_reports_unresolved_metadata_id() {
+fn exchange_plan_content_drops_unresolved_metadata_id() {
     let missing_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let content = deflate_for_test(format!("{{2,1,{missing_id},0}}").as_bytes());
-    let err = parse_exchange_plan_content_blob(
+    let items = parse_exchange_plan_content_blob(
         &content,
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
     )
-    .unwrap_err();
+    .expect("an unresolvable content slot is dropped, not fatal");
 
-    let message = format!("{err:#}");
-    assert!(message.contains("ExchangePlanContent item 0"));
-    assert!(message.contains(missing_id));
-    assert!(message.contains("unsupported metadata id"));
+    assert!(items.is_empty());
 }
 
 #[test]
@@ -55213,7 +55210,20 @@ fn writes_ws_reference_body_asset_to_source_layout() {
             )
             .as_bytes(),
         );
-    let ws_body = deflate_for_test(b"<definitions/>");
+    let ws_container = crate::v8_container::build_v8_container(&[
+        crate::v8_container::V8Element {
+            name: "0.wsdl".to_string(),
+            header: crate::v8_container::make_v8_element_header("0.wsdl"),
+            data: b"<definitions/>".to_vec(),
+        },
+        crate::v8_container::V8Element {
+            name: "1.xsd".to_string(),
+            header: crate::v8_container::make_v8_element_header("1.xsd"),
+            data: b"<xs:schema/>".to_vec(),
+        },
+    ])
+    .unwrap();
+    let ws_body = deflate_for_test(&ws_container);
     let rows = vec![
         ConfigRow {
             file_name: ws_uuid.to_string(),
@@ -55234,8 +55244,14 @@ fn writes_ws_reference_body_asset_to_source_layout() {
     assert_eq!(dumped.metadata_xml_rows, 1);
     assert_eq!(dumped.source_asset_rows, 1);
     assert_eq!(
-        fs::read_to_string(root.join("WSReferences/UpdateFiles/Ext/WSDefinition.xml")).unwrap(),
-        "<definitions/>"
+        fs::read(root.join("WSReferences/UpdateFiles/Ext/WSDefinition.xml")).unwrap(),
+        b"\xEF\xBB\xBF<definitions/>".to_vec()
+    );
+    // Imported schemas travel in the same container and are written verbatim
+    // under their own member names.
+    assert_eq!(
+        fs::read(root.join("WSReferences/UpdateFiles/Ext/1.xsd")).unwrap(),
+        b"<xs:schema/>".to_vec()
     );
 
     let _ = fs::remove_dir_all(root);
@@ -58012,17 +58028,6 @@ fn rejects_malformed_empty_ref_protocol_fields_atomically() {
             ),
         ),
         (
-            "nonzero reference value",
-            base.raw.replacen(
-                &fill,
-                &format!(
-                    r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{nonzero}}}}}"##,
-                    base.owner_type_id
-                ),
-                1,
-            ),
-        ),
-        (
             "descriptor extra arity",
             base.raw.replacen(
                 &fill,
@@ -58056,6 +58061,33 @@ fn rejects_malformed_empty_ref_protocol_fields_atomically() {
             "{case}"
         );
     }
+
+    // A non-zero value id is not a protocol violation: the slot names one
+    // concrete value of its owner instead of the owner's empty reference, so
+    // the expectation layer records nothing for it and the data processor is
+    // still extracted. Census in `parse_data_processor_empty_ref_fill_values`.
+    let named_value = EmptyRefDataProcessorFixture {
+        raw: base.raw.replacen(
+            &fill,
+            &format!(
+                r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{nonzero}}}}}"##,
+                base.owner_type_id
+            ),
+            1,
+        ),
+        owner_uuid: base.owner_uuid.clone(),
+        attribute_uuid: base.attribute_uuid.clone(),
+        owner_type_id: base.owner_type_id.clone(),
+    };
+    assert!(
+        extract_empty_ref_data_processor(
+            &named_value,
+            &type_index,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
 }
 
 #[test]
