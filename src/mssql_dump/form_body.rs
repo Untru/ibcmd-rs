@@ -14997,11 +14997,58 @@ pub(super) fn parse_form_input_field_type_link(
         table_column_names_by_id,
         owner_scoped_bindings,
         object_refs,
-    )?;
+    )
+    .or_else(|| form_physical_chain_spelling(&fields[2..fields.len() - 1]))?;
     Some(FormTypeLink {
         data_path,
         link_item,
     })
+}
+
+/// The platform's own physical spelling of a bound chain: each segment's
+/// members joined by `:`, the segments joined by `/`.
+///
+/// It is the same spelling a choice-parameter link falls back to, in the same
+/// role -- a reference the configuration cannot name is written out rather than
+/// dropped -- and here it is what a `<TypeLink>` whose chain does not resolve
+/// is written as. ERP УХ 3.2.12.6
+/// `Documents/ОтражениеФактическихДанныхБюджетирования/Forms/ФормаДокумента`
+/// carries `{3,2,{578,02023637-7868-4a5f-8576-835a76e0c9ba},
+/// {1,5bdad865-f2c5-434b-8041-ba4aad3b6687},0}` and the platform writes
+/// `<xr:DataPath>578:02023637-7868-4a5f-8576-835a76e0c9ba/1:5bdad865-f2c5-434b-8041-ba4aad3b6687</xr:DataPath>`;
+/// `Documents/ПланируемыйДоход/Forms/ФормаДокумента` writes six
+/// `13:02023637-…/0:<uuid>` values the same way. Fourteen `<TypeLink>` data
+/// paths of the stand are spelled physically and none of them carries a name.
+///
+/// A probe over the whole ERP УХ export counted every type-link slot the
+/// audited `36`/66 option bag carries: 113 537 hold the absent chain `{3,0,0}`,
+/// 234 resolve to a name, and 31 do not resolve at all, in three shapes --
+/// 28 `{3,2,{<table>,02023637-…},{<n>,<uuid>},0}`, two
+/// `{3,2,{<table>,02023637-…},{<column>},0}` and one `{3,1,{<attribute>},0}`.
+/// Those 31 are the whole of what this fallback answers for.
+///
+/// A chain with no segment at all has nothing to spell and keeps the refusal.
+fn form_physical_chain_spelling(segments: &[&str]) -> Option<String> {
+    if segments.is_empty() {
+        return None;
+    }
+    segments
+        .iter()
+        .map(|segment| {
+            let members = split_1c_braced_fields(segment.trim(), 0)?;
+            if members.is_empty() {
+                return None;
+            }
+            Some(
+                members
+                    .iter()
+                    .map(|member| member.trim())
+                    .collect::<Vec<_>>()
+                    .join(":"),
+            )
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|segments| segments.join("/"))
 }
 
 /// Resolves the chain a type-link slot frames, through the same routes a data
