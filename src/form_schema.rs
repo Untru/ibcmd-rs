@@ -7198,6 +7198,7 @@ pub(crate) enum FormTableSearchStringLocation {
     CommandBar,
     Top,
     Bottom,
+    FormCaption,
     PullFromTop,
 }
 
@@ -7208,6 +7209,7 @@ impl FormTableSearchStringLocation {
             Self::CommandBar => "CommandBar",
             Self::Top => "Top",
             Self::Bottom => "Bottom",
+            Self::FormCaption => "FormCaption",
             Self::PullFromTop => "PullFromTop",
         }
     }
@@ -7544,6 +7546,13 @@ impl FormTableSchema {
             "2" => Some(FormTableSearchStringLocation::CommandBar),
             "3" => Some(FormTableSearchStringLocation::Top),
             "4" => Some(FormTableSearchStringLocation::Bottom),
+            // Code `5` occurs in no other stand corpus at all -- not in БСП
+            // demo, not in УТ, and in Документооборот КОРП 3.0.21.3 on
+            // exactly two tables, which are exactly the two the platform
+            // writes `<SearchStringLocation>FormCaption</...>` on anywhere in
+            // the eight native trees.  It is the only unmapped non-zero code
+            // any of the three configurations spells in this slot.
+            "5" => Some(FormTableSearchStringLocation::FormCaption),
             "6" => Some(FormTableSearchStringLocation::PullFromTop),
             _ => None,
         }
