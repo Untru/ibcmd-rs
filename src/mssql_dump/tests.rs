@@ -42470,7 +42470,6 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
                 "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,1}}}}"
             ),
         ),
-        (2, "{\"B\",1}".to_string()),
         (
             4,
             information_register_standard_attribute_nested_enum_for_test(
@@ -42528,6 +42527,41 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
             "immutable property {index} was accepted"
         );
     }
+
+    // Property 2 is `MultiLine`, and it is not immutable either: census over
+    // the 62 387 `<xr:StandardAttribute>` elements of the eight reference
+    // trees of the stand finds `<xr:MultiLine>false</xr:MultiLine>` 62 386
+    // times and `true` once -- the `Description` standard attribute of `uh`
+    // `Catalogs/ПредметыКомментирования`, whose whole file the refusal was
+    // costing. Both stored values are read; a value outside the closed pair
+    // still refuses the attribute.
+    for (stored, expected) in [("0", Some(false)), ("1", Some(true))] {
+        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        values[2] = format!("{{\"B\",{stored}}}");
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert_eq!(
+            parse_information_register_standard_attribute("Active", &bag)
+                .map(|attribute| attribute.multi_line),
+            expected
+        );
+    }
+    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    values[2] = "{\"B\",2}".to_string();
+    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+
+    // Property 10 is `ChoiceForm`. The empty reference is read as the
+    // self-closed element; a named form is refused by this scopeless family,
+    // which has no form index to name it with.
+    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    values[10] = format!(
+        "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,7d3a4bd6-0c30-4d5a-bd51-9f6a5e0f2a11}}}}"
+    );
+    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
 
     // Property 12 is `ChoiceHistoryOnInput`, and it is not immutable: the
     // stand writes `DontUse` for it on the `Date` standard attribute of `do`

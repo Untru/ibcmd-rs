@@ -8512,7 +8512,19 @@ enum MetadataChildFillValue {
 struct RegisterStandardAttribute {
     name: &'static str,
     fill_checking: &'static str,
+    /// `<xr:MultiLine>`. The writer used to print `false` and the reader
+    /// refused `true`, losing the whole owner. The record declares the value
+    /// per standard attribute; census over the eight corpora of the stand
+    /// (62 387 `<xr:StandardAttribute>` elements) finds `false` 62 386 times
+    /// and `true` once -- `Description` of `uh`
+    /// `Catalogs/ПредметыКомментирования`, the file the refusal was costing.
+    multi_line: bool,
     fill_from_filling_value: bool,
+    /// `<xr:ChoiceForm>`. Same story: the reader admitted only the empty
+    /// reference. The same census finds the element empty 62 386 times and
+    /// naming one of the owner's own forms once -- the `Parent` standard
+    /// attribute of `uh` `Catalogs/ГруппыСотрудников`.
+    choice_form: MetadataChoiceForm,
     tooltip: Vec<(String, String)>,
     format: Vec<(String, String)>,
     edit_format: Vec<(String, String)>,
@@ -14476,24 +14488,35 @@ fn information_register_standard_attribute_nested_values_are(
     })
 }
 
-fn information_register_standard_attribute_choice_form_is_valid(value: &str) -> bool {
-    let Some(fields) = split_information_register_braced_fields(value) else {
-        return false;
-    };
+/// `<xr:ChoiceForm>` of a standard attribute. The slot is a metadata-object
+/// reference wrapper; the zero uuid is the empty reference the platform
+/// self-closes, and a named form is resolved through the same form index the
+/// owner's own forms are named by.
+///
+/// A named form is admitted only for the families that pass a resolution
+/// scope -- the same boundary `Mask` and `ChoiceParameters` already draw here.
+/// A scopeless family keeps the historical refusal rather than inventing a
+/// name it has no index for.
+fn parse_register_standard_attribute_choice_form(
+    value: &str,
+    form_refs: Option<&BTreeMap<String, FormSourceReference>>,
+) -> Option<MetadataChoiceForm> {
+    let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3
-        || fields.first().map(|field| field.trim()) != Some(r##""#""##)
-        || !fields.get(1).is_some_and(|field| {
-            information_register_uuid_matches(field, METADATA_OBJECT_REF_TYPE_UUID)
-        })
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(fields.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
     {
-        return false;
+        return None;
     }
-    split_information_register_braced_fields(fields[2]).is_some_and(|nested| {
-        nested.len() == 2
-            && nested[0].trim() == "1"
-            && parse_information_register_uuid(nested[1])
-                .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
-    })
+    let nested = split_information_register_braced_fields(fields[2])?;
+    if nested.len() != 2 || nested[0].trim() != "1" {
+        return None;
+    }
+    let uuid = parse_information_register_uuid(nested[1])?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(MetadataChoiceForm::Empty);
+    }
+    information_register_form_reference(&uuid, form_refs?).map(MetadataChoiceForm::Reference)
 }
 
 fn parse_information_register_standard_attribute_fill_value(
@@ -14581,6 +14604,7 @@ fn parse_register_standard_attribute_with_comment<'a>(
             fill_value,
             expected_type_reduction_mode,
             None,
+            None,
         )?;
     information_register_standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
         .then_some((attribute, comment))
@@ -14592,6 +14616,7 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
     fill_value: MetadataChildFillValue,
     expected_type_reduction_mode: &str,
     choice_parameter_scope: Option<StandardAttributeChoiceParameterScope<'_>>,
+    choice_form_refs: Option<&BTreeMap<String, FormSourceReference>>,
 ) -> Option<(RegisterStandardAttribute, String, &'a str)> {
     let link_by_type =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
@@ -14635,15 +14660,16 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
     let choice_parameters =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID)?;
 
+    let multi_line = parse_information_register_standard_attribute_bool(multi_line)?;
+    let choice_form = parse_register_standard_attribute_choice_form(choice_form, choice_form_refs)?;
     if !information_register_standard_attribute_nested_values_are(
         link_by_type,
         INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID,
         &["3", "0", "0"],
-    ) || parse_information_register_standard_attribute_bool(multi_line)?
-        || parse_information_register_standard_attribute_nested_enum(
-            create_on_input,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
-        )? != "0"
+    ) || parse_information_register_standard_attribute_nested_enum(
+        create_on_input,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
+    )? != "0"
         || (bag.has_type_reduction_mode
             && parse_information_register_standard_attribute_nested_enum(
                 type_reduction_mode?,
@@ -14651,7 +14677,6 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             )? != expected_type_reduction_mode)
         || !information_register_standard_attribute_nil_is_valid(max_value)
         || parse_information_register_standard_attribute_bool(extended_edit)?
-        || !information_register_standard_attribute_choice_form_is_valid(choice_form)
         || parse_information_register_standard_attribute_nested_enum(
             quick_choice,
             INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
@@ -14707,9 +14732,11 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
         RegisterStandardAttribute {
             name,
             fill_checking,
+            multi_line,
             fill_from_filling_value: parse_information_register_standard_attribute_bool(
                 fill_from_filling_value,
             )?,
+            choice_form,
             tooltip: parse_information_register_standard_attribute_localized(tooltip)?,
             format: parse_information_register_standard_attribute_localized(format)?,
             edit_format: parse_information_register_standard_attribute_localized(edit_format)?,
@@ -15558,7 +15585,12 @@ fn register_standard_attribute(
     RegisterStandardAttribute {
         name,
         fill_checking,
+        // This family's standard-attribute set is synthesized from the name
+        // table, not read from a property bag, so both properties keep the
+        // value this writer has always printed for it.
+        multi_line: false,
         fill_from_filling_value: false,
+        choice_form: MetadataChoiceForm::Empty,
         tooltip: override_values
             .map(|values| values.tooltip.clone())
             .unwrap_or_default(),
@@ -23105,7 +23137,7 @@ fn parse_chart_standard_attributes(
             };
             let (attribute, comment, choice_parameter_links) =
                 parse_register_standard_attribute_with_comment_and_choice_parameter_links(
-                    name, &bag, fill_value, "0", scope,
+                    name, &bag, fill_value, "0", scope, None,
                 )?;
             (comment.is_empty()
                 && information_register_standard_attribute_choice_parameter_links_is_empty(
@@ -24880,6 +24912,7 @@ fn parse_strict_catalog_properties_from_text(
             type_index,
             metadata_object_refs,
             object_refs,
+            form_refs,
         )?,
         characteristics,
         predefined_data_update: match fields.get(55)?.trim() {
@@ -25533,6 +25566,7 @@ fn parse_catalog_standard_attributes(
     type_index: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<Option<Vec<MetadataStandardAttribute>>> {
     let outer = split_information_register_braced_fields(value)?;
     if outer.len() == 1 && outer.first()?.trim() == "0" {
@@ -25594,6 +25628,7 @@ fn parse_catalog_standard_attributes(
                         type_index,
                         object_refs: metadata_object_refs,
                     }),
+                    Some(form_refs),
                 )?;
             let choice_parameter_links = parse_catalog_standard_attribute_choice_parameter_links(
                 choice_parameter_links,
@@ -37246,6 +37281,26 @@ fn push_task_based_on_xml(xml: &mut String, references: &[String]) {
     xml.push_str("\t\t\t</BasedOn>\r\n");
 }
 
+/// `<xr:ChoiceForm>` of a standard attribute: self-closed for the empty
+/// reference, spelled out for a named form.
+fn push_xr_standard_attribute_choice_form_xml(
+    xml: &mut String,
+    indent: &str,
+    choice_form: &MetadataChoiceForm,
+) {
+    match choice_form {
+        MetadataChoiceForm::Empty => {
+            xml.push_str(&format!("{indent}<xr:ChoiceForm/>\r\n"));
+        }
+        MetadataChoiceForm::Reference(reference) => {
+            xml.push_str(&format!(
+                "{indent}<xr:ChoiceForm>{}</xr:ChoiceForm>\r\n",
+                escape_xml_element_text(reference)
+            ));
+        }
+    }
+}
+
 fn push_metadata_standard_attributes_xml(
     xml: &mut String,
     attributes: &[MetadataStandardAttribute],
@@ -37271,21 +37326,22 @@ fn push_metadata_standard_attributes_xml(
         }
         xml.push_str(&format!(
             "\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
-\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:MultiLine>{}</xr:MultiLine>\r\n\
 \t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
 \t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
 \t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
 \t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
             attribute.fill_checking,
+            xml_bool(attribute.multi_line),
             xml_bool(attribute.fill_from_filling_value),
             parsed_attribute.type_reduction_mode,
         ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
         xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Format", &attribute.format);
+        push_xr_standard_attribute_choice_form_xml(xml, "\t\t\t\t\t", &attribute.choice_form);
         xml.push_str(&format!(
-            "\t\t\t\t\t<xr:ChoiceForm/>\r\n\
-\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+            "\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
 \t\t\t\t\t<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
             attribute.choice_history_on_input,
         ));
@@ -37948,12 +38004,13 @@ fn push_register_standard_attributes_xml_with_indent(
         }
         xml.push_str(&format!(
             "{property_indent}<xr:FillChecking>{}</xr:FillChecking>\r\n\
-{property_indent}<xr:MultiLine>false</xr:MultiLine>\r\n\
+{property_indent}<xr:MultiLine>{}</xr:MultiLine>\r\n\
 {property_indent}<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
 {property_indent}<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
 {property_indent}<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
 {property_indent}<xr:MaxValue xsi:nil=\"true\"/>\r\n",
             attribute.fill_checking,
+            xml_bool(attribute.multi_line),
             xml_bool(attribute.fill_from_filling_value),
         ));
         push_xr_localized_property_xml(xml, &property_indent, "ToolTip", &attribute.tooltip);
@@ -37961,9 +38018,9 @@ fn push_register_standard_attributes_xml_with_indent(
             "{property_indent}<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n"
         ));
         push_xr_localized_property_xml(xml, &property_indent, "Format", &attribute.format);
+        push_xr_standard_attribute_choice_form_xml(xml, &property_indent, &attribute.choice_form);
         xml.push_str(&format!(
-            "{property_indent}<xr:ChoiceForm/>\r\n\
-{property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+            "{property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
 {property_indent}<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
             attribute.choice_history_on_input,
         ));
