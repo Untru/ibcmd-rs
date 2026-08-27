@@ -25047,7 +25047,7 @@ pub(super) fn parse_form_command_interface_command(
     if let Some(name) = form_command_record_single_field_name(&fields) {
         return Some(name);
     }
-    match kind {
+    let named = match kind {
         "0" => {
             let Some(target) = target else {
                 return Some("0".to_string());
@@ -25230,7 +25230,33 @@ pub(super) fn parse_form_command_interface_command(
             (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
         }
         _ => None,
-    }
+    };
+    // A well-formed uuid that names nothing in this configuration is a
+    // reference the platform cannot construct a name for, and it writes the raw
+    // `kind:uuid` sentinel for it — in *every* record slot, not only in the
+    // three the rule was first measured in. The `0` arm and the `5`/`6`/`7` arm
+    // above each carry their own copy of it; this is the same reading, applied
+    // once for every kind, so a slot the arms above leave unresolved no longer
+    // takes the whole item down with it.
+    //
+    // Evidence: ERP УХ 3.2.12.6, the whole differing set. The platform writes
+    // 65 `<Command>` values inside `<CommandInterface>` that this export does
+    // not, on 21 forms; 44 distinct uuids carry them, and a scan of all 56 697
+    // metadata documents of the configuration finds 38 of the 44 nowhere at
+    // all — they name no object, no command and no subsystem. They are spelled
+    // `1:`, `2:`, `3:`, `4:`, `5:` and `8:`, so the sentinel is not a property
+    // of the slot number. `Catalogs/ОбъектыЭксплуатации/Forms/ФормаЭлемента`
+    // alone carries fifteen of them, `Catalogs/Сценарии/Forms/ФормаЭлемента`
+    // seven; in each case the refusal dropped the whole `<Item>`, and where the
+    // refused item was the container's only one it dropped the container.
+    //
+    // The six uuids that *do* name something stay refused here: their targets
+    // exist, so their case is a rule about the target, not about the name being
+    // unconstructible, and they are open.
+    named.or_else(|| {
+        let uuid = target.and_then(parse_non_zero_uuid)?;
+        (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
+    })
 }
 
 #[cfg(test)]
