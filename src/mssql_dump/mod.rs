@@ -427,38 +427,55 @@ mod characteristics {
             &types_from,
             object_refs,
         )?;
-        let data_path_field = decode_field(
-            family,
-            item_index,
-            fields[9],
-            CharacteristicRole::DataPathField,
-            &types_from,
-            object_refs,
-        )?;
-        let multiple_values_use_field = decode_field(
-            family,
-            item_index,
-            fields[10],
-            CharacteristicRole::MultipleValuesUseField,
-            &types_from,
-            object_refs,
-        )?;
-        let multiple_values_key_field = decode_field(
-            family,
-            item_index,
-            fields[11],
-            CharacteristicRole::MultipleValuesKeyField,
-            &values_from,
-            object_refs,
-        )?;
-        let multiple_values_order_field = decode_field(
-            family,
-            item_index,
-            fields[12],
-            CharacteristicRole::MultipleValuesOrderField,
-            &values_from,
-            object_refs,
-        )?;
+        // Roles the declared layout stops short of are absent, not malformed:
+        // the platform writes each of them as the `-1` sentinel. Only the
+        // trailing four can be missing -- layout 3 stops after
+        // `DataPathField`, layout 1 stops after `KeyField`.
+        let omitted = || CharacteristicField::Sentinel(CharacteristicFieldSentinel::Undefined);
+        let data_path_field = match fields.get(9) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::DataPathField,
+                &types_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
+        let multiple_values_use_field = match fields.get(10) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::MultipleValuesUseField,
+                &types_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
+        let multiple_values_key_field = match fields.get(11) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::MultipleValuesKeyField,
+                &values_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
+        let multiple_values_order_field = match fields.get(12) {
+            Some(value) => decode_field(
+                family,
+                item_index,
+                value,
+                CharacteristicRole::MultipleValuesOrderField,
+                &values_from,
+                object_refs,
+            )?,
+            None => omitted(),
+        };
         let types = CharacteristicTypes::new(
             types_from,
             key_field,

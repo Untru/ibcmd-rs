@@ -218,8 +218,28 @@ impl CharacteristicsPhysicalSchema {
         discriminator == Some(0) && field_count == 2
     }
 
+    /// Member count of one characteristics body, keyed by its declared layout.
+    ///
+    /// The corpus writes three layouts. Layout 4 carries all twelve roles and
+    /// covers every characteristics body of the eight stand configurations bar
+    /// two: `uh`'s `Catalogs/КлассификаторЕдиницИзмерения` declares layout 3
+    /// with ten members and `Catalogs/ДопАналитикаРасхожденийВГО` declares
+    /// layout 1 with nine. A shorter layout drops its trailing roles, and the
+    /// platform writes each dropped role as the `-1` sentinel -- both native
+    /// files spell `MultipleValuesUseField`, `MultipleValuesKeyField` and
+    /// `MultipleValuesOrderField` as `-1`, and the layout-1 file spells
+    /// `DataPathField` as `-1` too.
+    pub(crate) const fn body_arity(discriminator: Option<usize>) -> Option<usize> {
+        match discriminator {
+            Some(1) => Some(9),
+            Some(3) => Some(10),
+            Some(4) => Some(13),
+            _ => None,
+        }
+    }
+
     pub(crate) fn body(discriminator: Option<usize>, field_count: usize) -> bool {
-        discriminator == Some(4) && field_count == 13
+        Self::body_arity(discriminator) == Some(field_count)
     }
 
     /// Catalog layout 57 stores its legacy choice-history state in the slot
@@ -277,12 +297,19 @@ impl CharacteristicsPhysicalSchema {
         discriminator == Some(1) && field_count == 2
     }
 
+    /// The two field envelopes the corpus writes.
+    ///
+    /// Layouts 3 and 4 wrap a field as `{1,<payload>,0}`; layout 1 wraps it as
+    /// `{0,<payload>}` -- observed on every one of the eight fields of `uh`'s
+    /// `Catalogs/ДопАналитикаРасхожденийВГО`, whose native XML names the
+    /// payloads (`-1` five times, the `-2` standard attribute once).
     pub(crate) fn field(
         discriminator: Option<usize>,
         tail: Option<usize>,
         field_count: usize,
     ) -> bool {
-        discriminator == Some(1) && tail == Some(0) && field_count == 3
+        (discriminator == Some(1) && tail == Some(0) && field_count == 3)
+            || (discriminator == Some(0) && tail.is_none() && field_count == 2)
     }
 
     pub(crate) fn uuid_field(kind: Option<usize>, field_count: usize) -> bool {
