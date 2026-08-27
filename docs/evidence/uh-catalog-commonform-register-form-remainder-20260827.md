@@ -280,7 +280,33 @@ The register pair reads like one rule — `OpenByValue` belongs to an independen
 register and `OpenByRecorder` to a recorder-subordinate one — but the
 population is four forms, so it is stated here and not implemented.
 
-### 3.3 Still open in this section
+### 3.3 `Owner` on a catalogue that declares no owner — measured, not plumbed
+
+`form_choice_parameter_link_standard_terminal_member` answers the marker `-5`
+with `Owner` for every owner it is given, and the physical fallback beside it
+(`{attribute_id}/{marker}`) is therefore never reached. The platform reaches it:
+`Catalogs/ВидыДвиженийМСФО/Forms/ФормаЭлемента` writes
+`<xr:DataPath xsi:type="xs:string">1/-5</xr:DataPath>` and
+`Catalogs/УдалитьКонтрольныеСоотношения/Forms/ФормаЭлемента` writes it twice.
+
+The census separates the two outcomes with no overlap. Over the five corpora
+that carry the element at all, every `<xr:DataPath>` naming `.Owner` — 46 of
+them — sits on an attribute whose catalogue declares at least one `<Owners>`
+member (36 declare one, two declare two, two declare three, one declares four,
+and five sit on a multi-typed attribute this scan does not resolve but which is
+named all the same), and all three physical `<id>/-5` values sit on a catalogue
+whose `<Owners/>` is empty. It is the same law
+`docs/evidence/uh-declared-owner-of-a-name-20260827.md` states, and
+`MetadataTableStandardAttributes::declares("Owner")` — the very index the root
+command set already reads for `Parent` and `IsFolder` — already answers it.
+
+What is missing is only the plumbing: the declaration index reaches
+`extract_form_body_attributes_with_dcs_type_index` and the root command set, but
+not `parse_form_child_item_with_metadata_owners`, and threading it there touches
+every call site of the child-item parser. Three elements on two forms did not
+justify that here; the measurement is done and the change is mechanical.
+
+### 3.4 Still open in this section
 
 * `Attribute`/`Field` on a dynamic list, and the `~Список.Code~Список.Код`
   double spelling: the research task `EVIDENCE-form-bodies.md` §9 already
