@@ -1791,7 +1791,42 @@ pub fn parse_form_choice_parameter_links_with_optional_mirror<F>(
 where
     F: FnMut(&FormChoiceParameterLinkReference) -> Option<String>,
 {
+    // An unmirrored collection names itself `5004` as well as `5006`, and the
+    // two are the same collection in the same grammar. ERP УХ 3.2.12.6 spells
+    // ten of them across seven forms, every one of them at slot 26 of an option
+    // bag whose revision ends before the `5007` mirror, and every one of them
+    // is written out by the platform as a `<ChoiceParameterLinks>` block whose
+    // count, names, value changes and references match the collection member
+    // for member: `Catalogs/ВидыВыручкиМСФО/Forms/ФормаЭлемента`
+    // `{5004,1,"Отбор.Владелец",1,{2},0}` -> `ПланСчетов`;
+    // `Catalogs/ШаблоныЗаполнения/Forms/ФормаВыбора`
+    // `{5004,2,"Отбор.ИмяРодителя",1,{3},0,"Отбор.Назначение",1,{2},0}` ->
+    // `ИмяРодителяФильтр` and `НазначениеФильтр`;
+    // `Catalogs/Удалить_ШаблоныОперацийЭлиминации/Forms/ФормаЭлемента` two
+    // table-current-data collections -> `Items.ПоказателиДляСравнения.
+    // CurrentData.ВидОтчетаБазис` and `…ВидОтчетаСравнение`;
+    // `InformationRegisters/КорреспонденцииВидовДвиженийМСФО/Forms/ФормаЗаписи`
+    // two -> `Запись.ПланСчетовБД`;
+    // `DataProcessors/МатрицаПолномочий/Forms/ФормаРедактированияОтветственных`
+    // -> `ТипОбъектаСогласования`;
+    // `Documents/УдалитьРегистрацияОстатковДЗО/Forms/ФормаДокумента` ->
+    // `Items.ОстаткиНоменклатуры.CurrentData.Номенклатура` with `DontChange`;
+    // `InformationRegisters/СоответствиеДанныхБюджетированияПлатежномуКалендарю/
+    // Forms/ФормаЗаписи` -> `ВидОтчета`. Seven native blocks in each of the
+    // seven forms, and no block without a collection nor a collection without a
+    // block.
+    //
+    // The alternative name is admitted only where the mirror is genuinely
+    // absent, which is the only place the corpus shows it: what a mirrored
+    // record would name its duplicate collection is not evidenced, and a
+    // mismatched pair is a hard refusal that must not be reached by a guess.
     let primary = parse_raw_form_choice_parameter_links(primary, "5006", false)
+        .or_else(|| {
+            duplicate
+                .is_none()
+                .then(|| parse_raw_form_choice_parameter_links(primary, "5004", false))
+                .flatten()
+        })
         .ok_or(FormChoiceParameterLinksParseError::PrimaryMalformed)?;
     if let Some(duplicate) = duplicate {
         let duplicate = parse_raw_form_choice_parameter_links(duplicate, "5007", true)

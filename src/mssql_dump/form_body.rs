@@ -2372,9 +2372,36 @@ pub(super) fn extract_form_report_form_type(fields: &[&str]) -> Option<&'static 
     }
 }
 
+/// The report root's three view-mode properties ride with `<ReportFormType>`,
+/// and each is written at its own default when the root property bag declares
+/// no entry for it.
+///
+/// Both halves are measured over every native `Form.xml` of the eight stand
+/// corpora. The trio and `<ReportFormType>` are one block: 324 documents carry
+/// `<ReportFormType>`, all 324 carry `<AutoShowState>`, `<ReportResultViewMode>`
+/// and `<ViewModeApplicationOnSetReportResult>` as well, and no document
+/// carries any of the three without it. That is why all three are gated on the
+/// form type rather than only the first: outside a report root the bag has no
+/// entry either, and defaulting there would invent three elements on every
+/// ordinary form.
+///
+/// The default itself is what the platform writes when the entry is missing,
+/// not an assumption about a missing entry. ERP УХ 3.2.12.6 has 210 report
+/// roots; 25 of them omit at least one of the three keys from a bag that reads
+/// perfectly well and declares its own entry count -- 25 omit key `29`, 17 omit
+/// key `27`, 7 omit key `21` -- and the platform writes `Auto` on every one of
+/// the 49 omissions. Every root of the stand that writes a value other than
+/// `Auto` -- 23 `AutoShowState` (`DontShow`, `ShowOnComposition`) and 3
+/// `ReportResultViewMode` (`Compact`, `Default`) across ERP УХ, Документооборот
+/// КОРП, УТ, БСП демо and БСП базовая -- carries its key, so no observed
+/// non-default value rides on an absent entry.
+const FORM_REPORT_VIEW_MODE_DEFAULT: &str = "Auto";
+
 pub(super) fn extract_form_auto_show_state(fields: &[&str]) -> Option<&'static str> {
     extract_form_report_form_type(fields)?;
-    let value = form_root_property_bag_value(fields, "21")?;
+    let Some(value) = form_root_property_bag_entry(fields, "21")? else {
+        return Some(FORM_REPORT_VIEW_MODE_DEFAULT);
+    };
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
         value_fields.first().map(|field| field.trim()),
@@ -2389,7 +2416,10 @@ pub(super) fn extract_form_auto_show_state(fields: &[&str]) -> Option<&'static s
 }
 
 pub(super) fn extract_form_report_result_view_mode(fields: &[&str]) -> Option<&'static str> {
-    let value = form_root_property_bag_value(fields, "27")?;
+    extract_form_report_form_type(fields)?;
+    let Some(value) = form_root_property_bag_entry(fields, "27")? else {
+        return Some(FORM_REPORT_VIEW_MODE_DEFAULT);
+    };
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
         value_fields.first().map(|field| field.trim()),
@@ -2413,7 +2443,10 @@ pub(super) fn extract_form_report_result_view_mode(fields: &[&str]) -> Option<&'
 pub(super) fn extract_form_view_mode_application_on_set_report_result(
     fields: &[&str],
 ) -> Option<&'static str> {
-    let value = form_root_property_bag_value(fields, "29")?;
+    extract_form_report_form_type(fields)?;
+    let Some(value) = form_root_property_bag_entry(fields, "29")? else {
+        return Some(FORM_REPORT_VIEW_MODE_DEFAULT);
+    };
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
         value_fields.first().map(|field| field.trim()),
@@ -7926,6 +7959,31 @@ fn parse_form_warning_on_edit_localized_strings(field: &str) -> Option<Vec<(Stri
         .collect()
 }
 
+/// The reference collection a `<FunctionalOptions>` block is written from.
+///
+/// The slot states its own arity: `{0, <count>, <uuid>…}` with exactly `count`
+/// identifiers after the count. Read that way, every member the collection
+/// declares is written, including the two the previous scan-for-a-resolvable-
+/// uuid reading dropped -- the nil identifier, which the platform writes as an
+/// empty `<Item/>`, and an identifier this configuration cannot name, which it
+/// writes out as it stands.
+///
+/// Evidence, byte for byte. ERP УХ 3.2.12.6
+/// `Catalogs/БланкиОтчетов/Forms/ФормаМакета` attribute `ФлагУтверждено` is a
+/// 16-member record whose slot 15 is
+/// `{0,1,00000000-0000-0000-0000-000000000000}`, and the platform writes
+/// `<FunctionalOptions><Item/></FunctionalOptions>`;
+/// `Documents/ВыбытиеВНАМСФО/Forms/ФормаДокумента` command
+/// `ЗаполнитьИзУчетнойСистемы` holds `{0,1,5bb5d945-b19f-4cf0-ab29-0e25cda7f13d}`
+/// and the platform writes
+/// `<Item>5bb5d945-b19f-4cf0-ab29-0e25cda7f13d</Item>` -- that identifier
+/// occurs nowhere else in the configuration.
+///
+/// Corpus over all eight stand trees: 10 812 `<Item>` elements naming an
+/// object, 11 empty `<Item/>` and 2 spelling a bare identifier, the last
+/// thirteen all in ERP УХ form bodies and all on a `<Command>` or an
+/// `<Attribute>`. A slot that does not state that shape keeps the previous
+/// reading unchanged.
 pub(super) fn parse_form_reference_list(
     field: &str,
     object_refs: &BTreeMap<String, String>,
@@ -7933,12 +7991,45 @@ pub(super) fn parse_form_reference_list(
     let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
         return Vec::new();
     };
+    if let Some(declared) = form_reference_list_declared_members(&fields) {
+        return declared
+            .iter()
+            .map(|value| {
+                let uuid = value.trim();
+                if parse_non_zero_uuid(uuid).is_none() {
+                    return String::new();
+                }
+                object_refs
+                    .get(uuid)
+                    .cloned()
+                    .unwrap_or_else(|| uuid.to_string())
+            })
+            .collect();
+    }
     fields
         .iter()
         .filter_map(|value| {
             parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
         })
         .collect()
+}
+
+/// The declared members of a `{0, <count>, <uuid>…}` reference collection, or
+/// `None` when the slot does not state that shape.
+fn form_reference_list_declared_members<'a>(fields: &'a [&'a str]) -> Option<&'a [&'a str]> {
+    if fields.first().map(|field| field.trim()) != Some("0") {
+        return None;
+    }
+    let count_text = fields.get(1)?.trim();
+    let count = count_text.parse::<usize>().ok()?;
+    if count_text != count.to_string() || fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let members = fields.get(2..)?;
+    members
+        .iter()
+        .all(|value| Uuid::parse_str(value.trim()).is_ok())
+        .then_some(members)
 }
 
 pub(super) fn parse_form_type_pattern(
@@ -8999,14 +9090,37 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
             );
         }
     }
+    // A `UserSettingsGroup` whose declared item id names no item of this form
+    // is written by the platform physically, `<id>:<form item type uuid>`, the
+    // same way an unresolved choice-parameter link is written. Corpus of the
+    // eight stand configurations: 4 845 `<UserSettingsGroup>` elements, of
+    // which 4 839 spell an item name and 6 spell `1:02023637-7868-4a5f-8576-
+    // 835a76e0c9ba` -- the ERP УХ 3.2.12.6 list forms
+    // `Documents/ЗаявкаНаРасход/Forms/ФормаВыбора`,
+    // `Documents/ОперативныйПлан/Forms/ФормаВыбора`,
+    // `Documents/ПланируемыйДоход/Forms/ФормаВыбора`,
+    // `Documents/Резервирование/Forms/ФормаВыбора`,
+    // `InformationRegisters/НастройкаЗаменыНоменклатуры/Forms/ФормаСписка` and
+    // `InformationRegisters/НастройкаЗаменыНоменклатурыЗакупок/Forms/
+    // ФормаСписка`, each of which declares id `1` for a *form attribute*
+    // (`Список`) and has no child item with that id at all. No other physical
+    // spelling occurs anywhere in the eight corpora.
+    //
+    // Zero stays what it is everywhere else in this format -- the absent
+    // reference -- and keeps writing no element.
     indexes.user_settings_group_by_table_id = indexes
         .user_settings_group_id_by_table_id
         .iter()
         .filter_map(|(table_id, group_id)| {
-            indexes
-                .item_name_by_id
-                .get(group_id)
-                .map(|name| (table_id.clone(), name.clone()))
+            if let Some(name) = indexes.item_name_by_id.get(group_id) {
+                return Some((table_id.clone(), name.clone()));
+            }
+            (group_id.trim() != "0").then(|| {
+                (
+                    table_id.clone(),
+                    format!("{group_id}:{FORM_ITEM_TYPE_UUID}"),
+                )
+            })
         })
         .collect();
     indexes
@@ -14460,6 +14574,56 @@ fn form_choice_parameter_link_standard_terminal_member(
         })
 }
 
+/// Resolve every reference of a choice-parameter-link collection.
+///
+/// A link the configuration cannot name is not a malformed link. The platform
+/// writes its `<xr:DataPath>` physically -- the owner id on its own for a
+/// reference with no terminal, `<owner>/0:<uuid>` for one with a metadata
+/// terminal -- and the collection is written in full around it. Answering
+/// nothing for such a link made the whole collection unresolved, and an
+/// unresolved mirrored collection is a hard refusal of the whole form.
+///
+/// The two spellings and the mixed case are one block of one form. ERP УХ
+/// 3.2.12.6 `Documents/ВерсияСоглашенияАккредитив/Forms/ФормаДокумента` has a
+/// five-member collection whose members read, in order,
+/// `{"ВыборПараметровУчетаФИУХ",1,{24}}`,
+/// `{"Организация",2,{22},{0,c6df5da6-5f12-4138-9714-83d4d70f8716}}`,
+/// `{"Стоимость",2,{22},{0,99ddd49c-39d8-42b0-a54c-520c7d05692b}}`,
+/// `{"ДатаНачала",2,{1},{0,4160df69-b5de-495c-a2a9-c18d712ac0bc}}` and
+/// `{"СрокДействия",2,{1},{0,9a17447a-3b1a-49e7-809f-b7f5fdb1f111}}`, and the
+/// platform writes `ВыборПараметровУчетаФИУХ`,
+/// `22/0:c6df5da6-5f12-4138-9714-83d4d70f8716`,
+/// `22/0:99ddd49c-39d8-42b0-a54c-520c7d05692b`, `Объект.ДатаНачалаДействия` and
+/// `Объект.ДатаОкончанияДействия`. Same owner `22`, same physical shape, two
+/// spellings: the two that name a member of the attribute's own type resolve,
+/// the two whose uuid belongs to `Catalogs/ДоговорыКонтрагентов` do not. Another
+/// block of the same form pairs `{"Отбор.Владелец",2,{1},{-5}}` -> `Объект.Ref`
+/// with `{"Отбор.Банк",1,{42}}` -> `42`, and the form declares attributes
+/// `1..40` and `43` -- there is no attribute `42`.
+///
+/// Corpus of the physical uuid spelling: 43 `<xr:DataPath>` values of the form
+/// `<owner>/0:<uuid>` over ten ERP УХ forms, and none in the other seven stand
+/// corpora. Of the uuids they name, `c6df5da6`, `54915f85`, `f0678f5e` and
+/// `99ddd49c` are attributes of `Catalogs/ДоговорыКонтрагентов` reached from an
+/// owner that is not that catalog, and `a9ee8d4d`, `498857e1` and `dfa4634d`
+/// occur nowhere in the configuration at all -- a foreign owner and an absent
+/// reference are written the same way, so the fallback is the answer to every
+/// outcome that is not a resolution.
+///
+/// The spelling is mechanical rather than a table of shapes: the reference is a
+/// chain of braced tuples, each tuple's members are joined by `:` and the tuples
+/// by `/`. Every physical `<xr:DataPath>` of the eight stand corpora reads that
+/// way -- 169 values over six distinct shapes, with no counter-example: `41`
+/// bare owner ids, `43` `<owner>/0:<uuid>`, `43` `<owner>:<type uuid>`, `37`
+/// `<owner>:<type uuid>/<n>:<uuid>`, three `1/-5` (a standard marker terminal,
+/// ERP УХ `Catalogs/ВидыДвиженийМСФО/Forms/ФормаЭлемента` and
+/// `Catalogs/УдалитьКонтрольныеСоотношения/Forms/ФормаЭлемента`) and two `0/0`.
+/// A table's current data is owned by a form item, so its owner tuple is
+/// `{table id, 02023637-7868-4a5f-8576-835a76e0c9ba}` and spells
+/// `<table>:02023637-…`: `Documents/КорректировкаПланов/Forms/ФормаДокумента`
+/// writes `20:02023637-…/0:2829c630-…` and `68:02023637-…/0:229f3065-…`, and
+/// `Documents/ВерсияСоглашенияКоммерческийДоговор/Forms/ФормаДокумента` writes
+/// `1932:02023637-…/0:47f6b07d-…`.
 pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     primary: &str,
     duplicate: Option<&str>,
@@ -14477,18 +14641,29 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                 attribute_id,
                 terminal,
             } => match terminal {
-                FormChoiceParameterLinkTerminal::Absent => {
-                    attribute_names_by_id.get(attribute_id).cloned()
-                }
+                // A reference this configuration cannot name is written by the
+                // platform physically, not dropped: the owner id alone when the
+                // reference carries no terminal, and `<owner>/0:<uuid>` when it
+                // carries a metadata terminal. The doc comment above states the
+                // corpus.
+                FormChoiceParameterLinkTerminal::Absent => Some(
+                    attribute_names_by_id
+                        .get(attribute_id)
+                        .cloned()
+                        .unwrap_or_else(|| attribute_id.to_string()),
+                ),
                 FormChoiceParameterLinkTerminal::Standard(standard) => {
-                    let member = form_choice_parameter_link_standard_terminal_member(
+                    form_choice_parameter_link_standard_terminal_member(
                         attribute_id,
                         *standard,
                         attribute_metadata_owners_by_id,
-                    )?;
-                    attribute_names_by_id
-                        .get(attribute_id)
-                        .map(|attribute| format!("{attribute}.{member}"))
+                    )
+                    .and_then(|member| {
+                        attribute_names_by_id
+                            .get(attribute_id)
+                            .map(|attribute| format!("{attribute}.{member}"))
+                    })
+                    .or_else(|| Some(format!("{attribute_id}/{}", standard.marker_text())))
                 }
                 FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
                     match resolve_form_owner_scoped_metadata_uuid_data_path_status(
@@ -14502,12 +14677,15 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         FormMetadataDataPathResolution::NotMetadata
                         | FormMetadataDataPathResolution::ReferenceAbsent
                         | FormMetadataDataPathResolution::Invalid
-                        | FormMetadataDataPathResolution::ForeignOwner => None,
+                        | FormMetadataDataPathResolution::ForeignOwner => {
+                            Some(format!("{attribute_id}/0:{uuid}"))
+                        }
                     }
                 }
             },
             FormChoiceParameterLinkReference::TableCurrentData { table_id, terminal } => {
                 let table_id = table_id.to_string();
+                let physical_owner = format!("{table_id}:{FORM_ITEM_TYPE_UUID}");
                 match terminal {
                     FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(column_id) => {
                         let column_id = column_id.to_string();
@@ -14523,6 +14701,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                                     data_path_by_binding_key,
                                 )
                             })
+                            .or_else(|| Some(format!("{physical_owner}/{column_id}")))
                     }
                     FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
                         type_link_data_path_by_table_column
@@ -14536,6 +14715,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                                     object_refs,
                                 )
                             })
+                            .or_else(|| Some(format!("{physical_owner}/0:{uuid}")))
                     }
                     FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
                         binding_id,
@@ -14571,7 +14751,9 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         // whose layout route the platform writes were rejected
                         // in favour of an `AdditionalColumns` name the platform
                         // never writes there.
-                        numeric_route.or(uuid_route)
+                        numeric_route
+                            .or(uuid_route)
+                            .or_else(|| Some(format!("{physical_owner}/{binding_id}:{uuid}")))
                     }
                 }
             }
@@ -14961,11 +15143,58 @@ pub(super) fn parse_form_input_field_type_link(
         table_column_names_by_id,
         owner_scoped_bindings,
         object_refs,
-    )?;
+    )
+    .or_else(|| form_physical_chain_spelling(&fields[2..fields.len() - 1]))?;
     Some(FormTypeLink {
         data_path,
         link_item,
     })
+}
+
+/// The platform's own physical spelling of a bound chain: each segment's
+/// members joined by `:`, the segments joined by `/`.
+///
+/// It is the same spelling a choice-parameter link falls back to, in the same
+/// role -- a reference the configuration cannot name is written out rather than
+/// dropped -- and here it is what a `<TypeLink>` whose chain does not resolve
+/// is written as. ERP УХ 3.2.12.6
+/// `Documents/ОтражениеФактическихДанныхБюджетирования/Forms/ФормаДокумента`
+/// carries `{3,2,{578,02023637-7868-4a5f-8576-835a76e0c9ba},
+/// {1,5bdad865-f2c5-434b-8041-ba4aad3b6687},0}` and the platform writes
+/// `<xr:DataPath>578:02023637-7868-4a5f-8576-835a76e0c9ba/1:5bdad865-f2c5-434b-8041-ba4aad3b6687</xr:DataPath>`;
+/// `Documents/ПланируемыйДоход/Forms/ФормаДокумента` writes six
+/// `13:02023637-…/0:<uuid>` values the same way. Fourteen `<TypeLink>` data
+/// paths of the stand are spelled physically and none of them carries a name.
+///
+/// A probe over the whole ERP УХ export counted every type-link slot the
+/// audited `36`/66 option bag carries: 113 537 hold the absent chain `{3,0,0}`,
+/// 234 resolve to a name, and 31 do not resolve at all, in three shapes --
+/// 28 `{3,2,{<table>,02023637-…},{<n>,<uuid>},0}`, two
+/// `{3,2,{<table>,02023637-…},{<column>},0}` and one `{3,1,{<attribute>},0}`.
+/// Those 31 are the whole of what this fallback answers for.
+///
+/// A chain with no segment at all has nothing to spell and keeps the refusal.
+fn form_physical_chain_spelling(segments: &[&str]) -> Option<String> {
+    if segments.is_empty() {
+        return None;
+    }
+    segments
+        .iter()
+        .map(|segment| {
+            let members = split_1c_braced_fields(segment.trim(), 0)?;
+            if members.is_empty() {
+                return None;
+            }
+            Some(
+                members
+                    .iter()
+                    .map(|member| member.trim())
+                    .collect::<Vec<_>>()
+                    .join(":"),
+            )
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|segments| segments.join("/"))
 }
 
 /// Resolves the chain a type-link slot frames, through the same routes a data
@@ -15103,13 +15332,45 @@ pub(super) fn parse_form_button_group_representation(field: &str) -> Option<&'st
 /// on exactly the 48 elements whose XML has no `<PagesRepresentation>` at all,
 /// where the second member still reads `1` while the last one reads `6` — the
 /// code the platform never writes out.
+/// The container states its own length in its leading member, and the short
+/// revision is the long one minus its trailing representation member.
+///
+/// The long revision `4` holds six members -- `{4, s1, <event record>, 2, 0,
+/// s5}` -- and its last one is the representation the comment above measures.
+/// The short revision `3` holds five, ending before `s5`: ERP УХ 3.2.12.6
+/// `Catalogs/ОчередьЭлектронныхЧековКОтправке/Forms/ФормаЭлемента` carries
+/// `{3,1,{0,1,0},2,0}` on its `Страницы` and the platform writes
+/// `<PagesRepresentation>TabsOnTop</PagesRepresentation>`, while the trailing
+/// member the long revision keeps its answer in is simply not there -- reading
+/// slot 4 instead answered the constant `0` and wrote `None` on every short
+/// container. `s1` is the member that survives, and it is the same member the
+/// long revision agrees with on all 2 325 elements that carry the property.
+/// Eight ERP УХ forms ride on this, and no other configuration of the stand
+/// writes a short container at all.
+///
+/// `4` is `TabsOnRightHorizontal`, the one member the code table was missing.
+/// `Documents/НастраиваемыйОтчет/Forms/ФормаВыбораСпособаЗаполненияНО` holds
+/// `{4,4,{1,526c501f-ed3f-4db4-8731-fd0324707501},2,0,4}` and the platform
+/// writes it out; it is the only occurrence in the eight stand corpora, which
+/// spell 7 181 `None`, 2 320 `TabsOnTop`, 15 `TabsOnLeftHorizontal`, 13
+/// `TabsOnBottom`, 2 `Swipe` and this one.
 pub(super) fn parse_form_pages_representation(field: &str) -> Option<&'static str> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    match fields.last().map(|value| value.trim()) {
+    let short_revision = fields.len() == 5
+        && fields.first().map(|value| value.trim()) == Some("3")
+        && fields.get(3).map(|value| value.trim()) == Some("2")
+        && fields.get(4).map(|value| value.trim()) == Some("0");
+    let code = if short_revision {
+        fields.get(1).map(|value| value.trim())
+    } else {
+        fields.last().map(|value| value.trim())
+    };
+    match code {
         Some("0") => Some("None"),
         Some("1") => Some("TabsOnTop"),
         Some("2") => Some("TabsOnBottom"),
         Some("3") => Some("TabsOnLeftHorizontal"),
+        Some("4") => Some("TabsOnRightHorizontal"),
         Some("5") => Some("Swipe"),
         _ => None,
     }
@@ -18630,9 +18891,23 @@ fn parse_form_schema_backed_event_record(
             return Vec::new();
         };
         let handler = handler.trim();
+        // An entry whose handler member is the empty string is an event the
+        // item declares and binds to nothing, and the platform writes no
+        // `<Event>` element for it. It is not a malformed entry: the record
+        // still declares it, still carries its identifier and still repeats it
+        // in the metadata trailer below, so the collection is read as far as it
+        // states and only the unbound entry goes unwritten.
+        //
+        // The all-or-nothing refusal below cost the whole `<Events>` block of
+        // every item that has one. ERP УХ 3.2.12.6
+        // `Catalogs/ПоказателиОтчетов/Forms/ФормаВыбора`
+        // `SpreadSheetDocumentField` `ТабДокВыборПоказателя` declares two
+        // entries -- `22287505` bound to `ТабДокВыборПоказателяВыбор` and
+        // `2988b2a5` bound to `""` -- with a well-formed 13-member record whose
+        // trailer names both identifiers, and the platform writes exactly one
+        // element, `<Event name="Selection">ТабДокВыборПоказателяВыбор</Event>`.
         if consumed != handler_field.len()
-            || handler.is_empty()
-            || !is_probable_form_event_handler(handler)
+            || (!handler.is_empty() && !is_probable_form_event_handler(handler))
         {
             return Vec::new();
         }
@@ -18643,6 +18918,9 @@ fn parse_form_schema_backed_event_record(
             || fields[metadata_start + 2].trim() != "1"
         {
             return Vec::new();
+        }
+        if handler.is_empty() {
+            continue;
         }
         events.push(FormBodyEvent {
             name: name.to_string(),
@@ -23772,9 +24050,6 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(group) = properties.group.filter(|group| *group != "Vertical") {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
     }
-    if properties.auto_fill_check == Some(false) {
-        xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
-    }
     // The root's spacing pair sits between `Group` and the `*Align` pair, which
     // is where both other owners of the property put it. UT 11.5.27.75 native
     // tree: `HorizontalSpacing` trails `AutoTitle` (23), `Title` (22),
@@ -23826,6 +24101,27 @@ fn format_form_body_xml_with_dcs_profiles(
             vertical_align.xml_value()
         ));
     }
+    // `AutoFillCheck` closes the alignment run, not the `Group` line. Every
+    // native `Form.xml` of the eight stand corpora that carries it at the root
+    // -- 163 documents -- was read for the order of its root children. Before
+    // it: `AutoTitle` (130), `WindowOpeningMode` (99), `AutoURL` (88), `Title`
+    // (59), `AutoSaveDataInSettings` (22), `Width` (21), `Group` (18),
+    // `EnterKeyBehavior` (14), `Height` (8), `SaveWindowSettings` (5),
+    // `SettingsStorage` (1), `VerticalSpacing` (1), `HorizontalAlign` (1) and
+    // `VerticalAlign` (1). After it: `CommandBarLocation` (95), `Customizable`
+    // (86), `CommandSet` (84), `VerticalScroll` (50), `CommandInterface` (12),
+    // `ShowCloseButton` (12), `UseForFoldersAndItems` (11),
+    // `ConversationsRepresentation` (11), `Enabled` (9), the document trio (8
+    // each), `ShowTitle` (5), `CollapseItemsByImportanceVariant` (4),
+    // `MobileDeviceCommandBarContent` (4) and every collection section. No pair
+    // is observed in both directions, and `HorizontalSpacing`, `ChildrenAlign`
+    // and `ChildItemsWidth` never share a root with it at all, so the move past
+    // them is unconstrained. The old placement behind `Group` came from a
+    // census that had never seen the property beside the spacing or alignment
+    // pairs.
+    if properties.auto_fill_check == Some(false) {
+        xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
+    }
     // `ChildItemsWidth` follows the `*Align` pair, as it does on `Page`. UT
     // 11.5.27.75 native tree, 14 occurrences: it trails `AutoTitle` (9), `Title`
     // (6), `Width` (5), `Group` (5), `WindowOpeningMode` (4),
@@ -23854,20 +24150,31 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(command_bar_location)
         ));
     }
-    // `ScalingMode` follows `Customizable` (3) and `CommandBarLocation` (6) and
-    // precedes `CommandSet` (3), `ConversationsRepresentation` (1), `ShowTitle`
-    // (1), `ShowCloseButton` (1) and `UseForFoldersAndItems` (1) in the native
-    // tree, with no counter-example.
-    if let Some(value) = properties.scaling_mode {
-        xml.push_str(&format!(
-            "\t<ScalingMode>{}</ScalingMode>\r\n",
-            escape_xml_text(value)
-        ));
-    }
     if let Some(vertical_scroll) = properties.vertical_scroll {
         xml.push_str(&format!(
             "\t<VerticalScroll>{}</VerticalScroll>\r\n",
             escape_xml_text(vertical_scroll)
+        ));
+    }
+    // `ScalingMode` trails `VerticalScroll`, not the other way round. Every
+    // native `Form.xml` of the eight stand corpora that carries `ScalingMode`
+    // at the root -- 75 documents -- was read for the order of its root
+    // children: `VerticalScroll` leads it on all 17 documents that carry both
+    // and follows it on none, alongside `AutoTitle` (50), `Title` (43),
+    // `WindowOpeningMode` (30), `CommandBarLocation` (25), `Customizable` (12),
+    // `AutoSaveDataInSettings` (7), `AutoURL` (7), `Width` (7), `Group` (3),
+    // `ChildItemsWidth` (2), `SaveWindowSettings` (2), `SaveDataInSettings` (1),
+    // `SettingsStorage` (1) and `Height` (1). It still leads
+    // `UseForFoldersAndItems` (11), `CommandSet` (10),
+    // `ConversationsRepresentation` (2), `ShowTitle` (2), `ShowCloseButton` (2),
+    // the report run (1 each), the document trio (1 each) and every collection
+    // section, with no pair observed in both directions. The previous placement
+    // ahead of `VerticalScroll` came from a census that had never seen the two
+    // together.
+    if let Some(value) = properties.scaling_mode {
+        xml.push_str(&format!(
+            "\t<ScalingMode>{}</ScalingMode>\r\n",
+            escape_xml_text(value)
         ));
     }
     if let Some(conversations_representation) = properties.conversations_representation {
@@ -24121,10 +24428,13 @@ fn format_form_body_xml_with_dcs_profiles(
             if !command.functional_options.is_empty() {
                 xml.push_str("\t\t\t<FunctionalOptions>\r\n");
                 for item in &command.functional_options {
-                    xml.push_str(&format!(
-                        "\t\t\t\t<Item>{}</Item>\r\n",
-                        escape_xml_text(item)
-                    ));
+                    xml.push_str(&if item.is_empty() {
+                        // The nil identifier the collection declares is an
+                        // empty element, not an empty pair of tags.
+                        "\t\t\t\t<Item/>\r\n".to_string()
+                    } else {
+                        format!("\t\t\t\t<Item>{}</Item>\r\n", escape_xml_text(item))
+                    });
                 }
                 xml.push_str("\t\t\t</FunctionalOptions>\r\n");
             }
@@ -28996,10 +29306,11 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
         if !attribute.functional_options.is_empty() {
             xml.push_str("\t\t\t<FunctionalOptions>\r\n");
             for item in &attribute.functional_options {
-                xml.push_str(&format!(
-                    "\t\t\t\t<Item>{}</Item>\r\n",
-                    escape_xml_text(item)
-                ));
+                xml.push_str(&if item.is_empty() {
+                    "\t\t\t\t<Item/>\r\n".to_string()
+                } else {
+                    format!("\t\t\t\t<Item>{}</Item>\r\n", escape_xml_text(item))
+                });
             }
             xml.push_str("\t\t\t</FunctionalOptions>\r\n");
         }
@@ -29244,10 +29555,11 @@ pub(super) fn format_form_attribute_column_xml(
     if !column.functional_options.is_empty() {
         xml.push_str(&format!("{indent}\t<FunctionalOptions>\r\n"));
         for item in &column.functional_options {
-            xml.push_str(&format!(
-                "{indent}\t\t<Item>{}</Item>\r\n",
-                escape_xml_text(item)
-            ));
+            xml.push_str(&if item.is_empty() {
+                format!("{indent}\t\t<Item/>\r\n")
+            } else {
+                format!("{indent}\t\t<Item>{}</Item>\r\n", escape_xml_text(item))
+            });
         }
         xml.push_str(&format!("{indent}\t</FunctionalOptions>\r\n"));
     }

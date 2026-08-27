@@ -24273,42 +24273,61 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         ibcmd_schema::FormChoiceParameterLinkValueChange::DontChange
     );
 
+    // A reference the configuration cannot name is written physically, not
+    // dropped: an absent reference and a foreign owner both spell
+    // `<owner>/0:<uuid>`, which is what the platform writes.
+    let absent = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        Some(&duplicate),
+        &attribute_names,
+        &attribute_owners,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
     assert_eq!(
-        parse_form_input_field_choice_parameter_links_with_metadata(
-            &primary,
-            Some(&duplicate),
-            &attribute_names,
-            &attribute_owners,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        ),
-        Err(ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("1".to_string()))
+        absent
+            .iter()
+            .map(|link| link.data_path())
+            .collect::<Vec<_>>(),
+        vec![
+            format!("1/0:{organization_uuid}"),
+            format!("1/0:{lines_uuid}"),
+        ]
     );
+    let foreign = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        Some(&duplicate),
+        &attribute_names,
+        &attribute_owners,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::from([
+            (
+                organization_uuid.to_string(),
+                "Document.Other.Attribute.Organization".to_string(),
+            ),
+            (
+                lines_uuid.to_string(),
+                "Document.Other.TabularSection.Lines".to_string(),
+            ),
+        ]),
+    )
+    .unwrap();
     assert_eq!(
-        parse_form_input_field_choice_parameter_links_with_metadata(
-            &primary,
-            Some(&duplicate),
-            &attribute_names,
-            &attribute_owners,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::from([
-                (
-                    organization_uuid.to_string(),
-                    "Document.Other.Attribute.Organization".to_string(),
-                ),
-                (
-                    lines_uuid.to_string(),
-                    "Document.Other.TabularSection.Lines".to_string(),
-                ),
-            ]),
-        ),
-        Err(ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("1".to_string()))
+        foreign
+            .iter()
+            .map(|link| link.data_path())
+            .collect::<Vec<_>>(),
+        vec![
+            format!("1/0:{organization_uuid}"),
+            format!("1/0:{lines_uuid}"),
+        ]
     );
 
     let make_schema = |options: &[&str]| {
@@ -24344,7 +24363,9 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         ),
         CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 2
     ));
-    let opaque = canonical_form_input_field_choice_parameter_links_with_metadata(
+    // The collection is written in full around a physically spelled link, so a
+    // reference no object index can name is no longer a whole-form refusal.
+    let unnamed = canonical_form_input_field_choice_parameter_links_with_metadata(
         make_schema(&options),
         &options,
         &attribute_names,
@@ -24356,13 +24377,57 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         &BTreeMap::new(),
     );
     assert!(matches!(
-        opaque,
-        CanonicalFormChoiceParameterLinks::Opaque(value)
-            if value.error
-                == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
-                    "1".to_string()
-                )
+        unnamed,
+        CanonicalFormChoiceParameterLinks::Typed(links)
+            if links.iter().map(|link| link.data_path()).collect::<Vec<_>>()
+                == vec![
+                    format!("1/0:{organization_uuid}"),
+                    format!("1/0:{lines_uuid}"),
+                ]
     ));
+}
+
+/// A form-attribute reference with no terminal whose owner id names no
+/// attribute is written as the bare owner id.
+///
+/// Evidence: ERP УХ 3.2.12.6 `Documents/ОписьВложений/Forms/ФормаДокумента`
+/// declares attributes `1`, `3` and `4` and carries the single-member
+/// collection `{5006,1,"Отбор.Владелец",1,{2},0}`; the platform writes
+/// `<xr:DataPath xsi:type="xs:string">2</xr:DataPath>`.
+/// `Documents/ЗаявкаНаРасход/Forms/ФормаДокумента` declares `1`, `3`, `40`,
+/// `48`, `57`, `71`, `73`, `82`, `83`, `85` and `87` and carries
+/// `{5006,1,"Отбор.ПриходРасход",1,{86},0}`; the platform writes `86`.
+#[test]
+fn input_field_choice_parameter_links_spell_an_unnamed_owner_physically() {
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        r#"{5006,1,"Отбор.Владелец",1,{2},0}"#,
+        Some(r#"{5007,1,"Отбор.Владелец",1,{2},0,"",""}"#),
+        &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].name(), "Отбор.Владелец");
+    assert_eq!(links[0].data_path(), "2");
+
+    let named = parse_form_input_field_choice_parameter_links_with_metadata(
+        r#"{5006,1,"Отбор.Владелец",1,{2},0}"#,
+        Some(r#"{5007,1,"Отбор.Владелец",1,{2},0,"",""}"#),
+        &BTreeMap::from([("2".to_string(), "Объект".to_string())]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(named[0].data_path(), "Объект");
 }
 
 #[test]
@@ -24421,23 +24486,23 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
         r#"{5006,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0}"#;
     let duplicate =
         r#"{5007,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0,"",""}"#;
+    // With no column index the route is not guessed; the reference falls back
+    // to the platform's own physical spelling of the chain.
+    let physical = parse_form_input_field_choice_parameter_links_with_metadata(
+        primary,
+        Some(duplicate),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &table_names,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
     assert_eq!(
-        parse_form_input_field_choice_parameter_links_with_metadata(
-            primary,
-            Some(duplicate),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &table_names,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        ),
-        Err(
-            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
-                "1050".to_string()
-            )
-        )
+        physical[0].data_path(),
+        "1050:02023637-7868-4a5f-8576-835a76e0c9ba/21"
     );
 
     let make_schema = |options: &[&str]| {
@@ -24473,6 +24538,8 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
         ),
         CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 1
     ));
+    // The collection is written around the physically spelled reference, so an
+    // unindexed column is no longer a whole-form refusal.
     assert!(matches!(
         canonical_form_input_field_choice_parameter_links_with_metadata(
             make_schema(&options),
@@ -24485,11 +24552,9 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
             &BTreeMap::new(),
             &BTreeMap::new(),
         ),
-        CanonicalFormChoiceParameterLinks::Opaque(value)
-            if value.error
-                == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
-                    "1050".to_string()
-                )
+        CanonicalFormChoiceParameterLinks::Typed(links)
+            if links.len() == 1
+                && links[0].data_path() == "1050:02023637-7868-4a5f-8576-835a76e0c9ba/21"
     ));
 }
 
@@ -24532,21 +24597,23 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
         link.value_change() == ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
     }));
 
+    // Without the authoritative route the metadata terminal is not guessed; it
+    // falls back to the platform's own physical spelling of the chain.
+    let physical = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        Some(&duplicate),
+        &attribute_names,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
     assert_eq!(
-        parse_form_input_field_choice_parameter_links_with_metadata(
-            &primary,
-            Some(&duplicate),
-            &attribute_names,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        ),
-        Err(
-            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("81".to_string())
-        )
+        physical[1].data_path(),
+        "81:02023637-7868-4a5f-8576-835a76e0c9ba/0:461bb43b-8803-4f48-811f-6beef397ee4c"
     );
 
     let make_schema = |options: &[&str]| {
@@ -24650,22 +24717,23 @@ fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
     .unwrap();
     assert_eq!(links[0].data_path(), layout);
 
-    // Neither key stated: still a typed refusal, never a guessed path.
+    // Neither key stated: no route is guessed, and the reference falls back to
+    // the platform's own physical spelling of the chain.
+    let physical = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        Some(&duplicate),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
     assert_eq!(
-        parse_form_input_field_choice_parameter_links_with_metadata(
-            &primary,
-            Some(&duplicate),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        ),
-        Err(
-            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("35".to_string())
-        )
+        physical[0].data_path(),
+        format!("35:02023637-7868-4a5f-8576-835a76e0c9ba/18:{binding_uuid}")
     );
 }
 
@@ -72543,22 +72611,26 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
         ]
     );
 
-    // A marker the family table does not name has no spelling to invent, so the
-    // whole collection stays a typed refusal.
-    assert!(
-        parse_form_input_field_choice_parameter_links_with_metadata(
-            r#"{5006,1,"Ссылка",2,{1},{-4},0}"#,
-            Some(r#"{5007,1,"Ссылка",2,{1},{-4},0,"",""}"#),
-            &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
-            &form_attribute_metadata_owners_by_id(&attributes),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
-        .is_err()
-    );
+    // A marker the family table does not name still has the platform's own
+    // physical spelling: the chain is written out, `<owner>/<marker>`. ERP УХ
+    // 3.2.12.6 `Catalogs/ВидыДвиженийМСФО/Forms/ФормаЭлемента` and
+    // `Catalogs/УдалитьКонтрольныеСоотношения/Forms/ФормаЭлемента` carry the
+    // three `<xr:DataPath xsi:type="xs:string">1/-5</xr:DataPath>` values of the
+    // whole stand.
+    let unnamed_marker = parse_form_input_field_choice_parameter_links_with_metadata(
+        r#"{5006,1,"Ссылка",2,{1},{-4},0}"#,
+        Some(r#"{5007,1,"Ссылка",2,{1},{-4},0,"",""}"#),
+        &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+        &form_attribute_metadata_owners_by_id(&attributes),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(unnamed_marker.len(), 1);
+    assert_eq!(unnamed_marker[0].data_path(), "1/-4");
 
     // The positive space belongs to the binding ids of the other terminal
     // shapes, and a non-canonical marker is not a marker.
