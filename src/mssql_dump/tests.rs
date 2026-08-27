@@ -29719,6 +29719,7 @@ fn parses_metadata_child_choice_parameter_links_from_wrapped_collection() {
                 r##"{5006,3,"Отбор.ВладелецНоменклатуры",1,{0,fb9f5bff-ad18-4694-8e4f-9a8e7bd9aa5d},0,"Отбор.Номенклатура",2,{0,acec7e3d-9efa-4656-84e3-e2f90b295e8a},{0,296cd400-da83-4189-a85c-0945600b3033},1,"Отбор.Характеристика",2,{0,acec7e3d-9efa-4656-84e3-e2f90b295e8a},{0,0bb9272d-3127-4e50-8dc2-6651432168b0},1}"##,
             ),
             &object_refs,
+            "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.",
         )
         .unwrap();
 
@@ -29865,6 +29866,7 @@ fn reads_metadata_child_link_change_mode_from_the_trailing_atom() {
             r##"{5006,1,"Номенклатура",2,{0,4438e3aa-37d2-485b-9f8f-27653f9473b0},{0,4e5b7a37-6e75-430c-b26a-4a30b4d68f92},0}"##,
         ),
         &object_refs,
+        "DataProcessor.ПечатьЭтикетокИЦенников.",
     )
     .unwrap();
 
@@ -29978,6 +29980,7 @@ fn wrapped_data_processor_child_reads_the_proven_property_slots() {
     let properties = parse_data_processor_wrapped_child_properties(
         &fields,
         1,
+        "DataProcessor.Owner.",
         &[],
         &BTreeMap::new(),
         &object_refs,
@@ -58259,6 +58262,7 @@ fn parses_data_processor_wrapped_child_edit_format_from_tail_slot() {
 
     let properties = parse_metadata_child_properties(
         "DataProcessor",
+        "Owner",
         &raw,
         raw.find(attribute_uuid).unwrap(),
         attribute_uuid,
@@ -58458,6 +58462,7 @@ fn parses_data_processor_tabular_section_child_attribute_property_tail_from_wrap
 
     let properties = parse_metadata_child_properties(
         "DataProcessor",
+        "Owner",
         &raw,
         raw.find(attribute_uuid).unwrap(),
         attribute_uuid,

@@ -7346,8 +7346,16 @@ fn parse_information_register_child_commands(
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<MetadataChildCommand> {
     nested_headers_with_offsets_from_text(text, owner_uuid, |marker_start| {
-        is_offset_inside_metadata_object_code(text, marker_start, 9)
-            && register_child_object_tag("InformationRegister", text, marker_start).is_none()
+        // The collection an offset sits in is what names it, exactly as
+        // `nested_command_headers_for_owner_from_text` already reads it: a
+        // command written in the short shape wraps its payload in `{8, …}` and
+        // was invisible to the code-9 test alone. Four ERP УХ 3.2.12.6
+        // information registers lose their whole `<Command>` that way. The
+        // property reader below already knows both the 13- and the 12-member
+        // shape.
+        is_offset_inside_command_collection(text, marker_start)
+            || (is_offset_inside_metadata_object_code(text, marker_start, 9)
+                && register_child_object_tag("InformationRegister", text, marker_start).is_none())
     })
     .into_iter()
     .map(|(header, marker_start)| MetadataChildCommand {
@@ -15025,6 +15033,7 @@ fn parse_register_properties_from_text(
                     parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
                 let properties = parse_metadata_child_properties(
                     kind,
+                    &owner_name,
                     text,
                     marker_start,
                     &header.uuid,
@@ -16942,6 +16951,7 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
         } else if tag == "Attribute" {
             parse_metadata_child_properties(
                 owner_kind,
+                owner_name,
                 text,
                 marker_start,
                 &header.uuid,
@@ -17892,8 +17902,10 @@ fn parse_data_processor_tabular_section_generated_types(
     Vec::new()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_metadata_child_properties(
     owner_kind: &str,
+    owner_name: &str,
     text: &str,
     marker_start: usize,
     child_uuid: &str,
@@ -17903,6 +17915,7 @@ fn parse_metadata_child_properties(
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<MetadataChildProperties> {
+    let owner_prefix = format!("{owner_kind}.{owner_name}.");
     if owner_kind == "AccountingRegister" {
         for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid)
         {
@@ -17916,6 +17929,7 @@ fn parse_metadata_child_properties(
     for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
         if let Some(mut properties) = parse_metadata_child_properties_from_fields(
             owner_kind,
+            &owner_prefix,
             &fields,
             child_uuid,
             value_types,
@@ -20655,8 +20669,10 @@ fn parse_accounting_register_child_properties_from_fields(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_metadata_child_properties_from_fields(
     owner_kind: &str,
+    owner_prefix: &str,
     fields: &[&str],
     child_uuid: &str,
     value_types: &[ConstantValueType],
@@ -20671,6 +20687,7 @@ fn parse_metadata_child_properties_from_fields(
         && let Some(properties) = parse_data_processor_wrapped_child_properties(
             &flattened,
             header_index,
+            owner_prefix,
             value_types,
             type_index,
             object_refs,
@@ -20714,6 +20731,7 @@ fn parse_metadata_child_properties_from_fields(
         choice_parameter_links: parse_metadata_child_choice_parameter_links(
             fields.get(header_index + 15).copied(),
             object_refs,
+            owner_prefix,
         ),
         choice_parameters: parse_metadata_child_choice_parameters(
             fields.get(header_index + 16).copied(),
@@ -20812,9 +20830,11 @@ fn flatten_data_processor_wrapped_child_fields<'a>(fields: &[&'a str]) -> Option
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_data_processor_wrapped_child_properties(
     fields: &[&str],
     header_index: usize,
+    owner_prefix: &str,
     value_types: &[ConstantValueType],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
@@ -20873,6 +20893,7 @@ fn parse_data_processor_wrapped_child_properties(
         choice_parameter_links: parse_metadata_child_choice_parameter_links(
             fields.get(15).copied(),
             object_refs,
+            owner_prefix,
         ),
         choice_parameters: parse_metadata_child_choice_parameters(
             fields.get(17).copied(),
@@ -29684,6 +29705,7 @@ fn parse_metadata_choice_parameter_value(
 fn parse_metadata_child_choice_parameter_links(
     field: Option<&str>,
     object_refs: &BTreeMap<String, String>,
+    owner_prefix: &str,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let field = field?;
     if metadata_child_collection_is_empty(Some(field)) {
@@ -29719,16 +29741,27 @@ fn parse_metadata_child_choice_parameter_links(
         // dialect encodes it (`0` = Clear, `1` = DontChange).
         index += 2;
 
-        let mut data_path = None;
+        // A segment that names a child of a *foreign* object is written back
+        // as the raw `0:<uuid>` the record carries -- resolving it by name is
+        // what the platform never does. See
+        // `classify_resolved_data_path_reference` for the corpus-wide perepis.
+        let mut segments = Vec::new();
         while let Some(field) = fields.get(index) {
-            if let Some(reference) = parse_design_time_reference(field, object_refs) {
-                data_path = Some(reference);
-                index += 1;
-                continue;
+            let trimmed = field.trim();
+            if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+                break;
             }
-            break;
+            let Some(uuid) = uuid_like_values(trimmed).into_iter().next_back() else {
+                break;
+            };
+            segments.push(classify_resolved_data_path_reference(
+                object_refs.get(&uuid),
+                &uuid,
+                owner_prefix,
+            ));
+            index += 1;
         }
-        let Some(data_path) = data_path else {
+        let Some(data_path) = render_resolved_data_path(segments) else {
             break;
         };
         let mut value_change = "Clear";
