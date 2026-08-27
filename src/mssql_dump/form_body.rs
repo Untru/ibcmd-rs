@@ -31589,9 +31589,14 @@ pub(super) fn format_form_choice_list_xml(
                     }
                     xml.push_str(&tab);
                     xml.push_str(FORM_CHOICE_LIST_VALUE_INDENT);
+                    // `append_xml_escaped` escapes the wire shape's *text* and
+                    // never its opening tag, so this is element-text position
+                    // and takes the element-text escaper: the platform writes
+                    // the quote raw there, and writes `&quot;` nowhere in any
+                    // of the eight stand corpora.
                     item.value
                         .wire_shape()
-                        .append_xml_escaped(&mut xml, escape_xml_text);
+                        .append_xml_escaped(&mut xml, escape_xml_character_data);
                     xml.push_str(FORM_XML_LINE_ENDING);
                     xml.push_str(&format!("{tab}\t\t</xr:Value>\r\n"));
                 }
