@@ -10420,6 +10420,57 @@ pub(super) fn parse_form_child_item_with_attrs(
     )
 }
 
+/// The same fixture entry point as `parse_form_child_item_with_attrs`, with the
+/// owner-scoped binding index seeded: a table's `<AllowGettingCurrentRowURL>`
+/// and its row-set commands both exist only where the attribute the table's
+/// data path names is declared as the built-in dynamic list, so a fixture that
+/// exercises either has to say so.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn parse_form_child_item_with_dynamic_list_attrs(
+    field: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    dynamic_list_attribute_ids: &[&str],
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    let owner_scoped_bindings = FormOwnerScopedBindingIndexes {
+        dynamic_list_attribute_ids: dynamic_list_attribute_ids
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect(),
+        ..FormOwnerScopedBindingIndexes::default()
+    };
+    parse_form_child_item_with_metadata_owners(
+        field,
+        main_data_path,
+        parent_data_path,
+        None,
+        attribute_names_by_id,
+        &BTreeMap::new(),
+        table_name_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        table_column_names_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
+        &owner_scoped_bindings,
+        commands,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+        None,
+    )
+}
+
 #[cfg(test)]
 pub(super) fn parse_form_child_item_with_context(
     field: &str,
