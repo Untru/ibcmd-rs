@@ -16907,9 +16907,19 @@ fn parse_form_font_mask_tuple_xml(
                 ));
             }
             attributes.push(("kind", "Absolute".to_string()));
-            if (mask >> FORM_FONT_MASK_SCALE_BIT) & 1 == 1 {
-                attributes.push(("scale", fields.get(18)?.trim().to_string()));
-            }
+            // The absolute kind spells `scale` unconditionally: it is not one
+            // of the members the mask makes optional, and the fixed 19-slot
+            // layout always carries it. All 1 460 `kind="Absolute"` fonts of
+            // the eight native stand trees write the attribute, with no
+            // exception. Gating it on the mask bit the other kinds use dropped
+            // it from the two records that spell the whole tuple with an empty
+            // mask -- ERP УХ 3.2.12.6
+            // `Reports/РегламентированноеУведомлениеОрганизацияВнутреннегоКонтроля`
+            // `Форма2021_1` and `Форма2022_1`, LabelDecoration
+            // `НаименованиеЭтапа`, whose tuple is
+            // `{7,0,0,110,0,0,0,400,0,0,0,1,3,2,1,34,"Arial",1,100}` and whose
+            // element the platform writes with `scale="100"` like every other.
+            attributes.push(("scale", fields.get(18)?.trim().to_string()));
             let rendered = attributes
                 .iter()
                 .map(|(name, value)| format!(" {name}=\"{}\"", escape_xml_text(value)))
@@ -19109,6 +19119,30 @@ fn form_property_bag_canonical_revision(lead: &str, len: usize) -> Option<(&'sta
     match lead {
         "32" if len == 62 => Some(("36", 4)),
         "28" if len == 28 => Some(("29", 1)),
+        // The spreadsheet-document field's own bag, one member short of its
+        // canonical `13`/32 under the same `len - lead` of 19. The shape alone
+        // does not prove a tail truncation -- the `28`/28 group bag has the
+        // same invariant and is not one -- so this revision is confirmed by
+        // value on a platform record: ERP УХ 3.2.12.6
+        // `Reports/ГрафическийОтчетСвязейОтчетов/Forms/ФормаРасшифровокУправляемая`,
+        // `SpreadSheetDocumentField` `ПолеРасшифровки`, whose bag reads
+        // `{12,50,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{1,2988b2a5-…,
+        // "ПолеРасшифровкиОбработкаРасшифровки",…},0,1,0,0,1,0,0,0,0,1,1,1}`.
+        // Every coordinate the canonical layout names lands on its own value
+        // there: the event collection at 18 is the well-formed
+        // `DetailProcessing` record the platform writes, the border colour at
+        // 15 is the unset `{3,4,{0}}` of an item with no `<BorderColor>`, the
+        // extent pair at 1/2 holds the `50`/`10` of an item with no extent,
+        // and the scroll pair at 28/29 holds `1`/`1` -- which is exactly the
+        // `<VerticalScrollBar>true</VerticalScrollBar>` and
+        // `<HorizontalScrollBar>true</HorizontalScrollBar>` the platform
+        // writes on it.
+        //
+        // The dropped member is the bag's last, `DrawingSelectionShowMode`,
+        // whose unwritten default is the code the truncation stands for, so the
+        // placeholder the padding leaves reads as the absence the platform
+        // spells.
+        "12" if len == 31 => Some(("13", 1)),
         _ => None,
     }
 }

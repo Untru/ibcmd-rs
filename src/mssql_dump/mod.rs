@@ -32762,6 +32762,17 @@ fn parse_common_command_shortcut_value_with_style(
         // VK_DIVIDE=111). Evidenced: `ssl`-demo's `DataProcessors/
         // КонсольЗапросов/Forms/Форма` carries key_code 111 twice (modifier 8
         // and 12), native `Cmd+Num /` and `Cmd+Shift+Num /`.
+        // VK_ADD=107 and VK_SUBTRACT=109, the two of the 106..=109 run the
+        // stand spells. ERP УХ 3.2.12.6 `Reports/ДеревоСебестоимостиПродукции/
+        // Forms/ФормаОтчета` and
+        // `Reports/СтруктураЗаказаНаПроизводствоДинамическая/Forms/ФормаОтчета`
+        // each carry `{0,107,12}` and `{0,109,12}` on their expand-all and
+        // collapse-all commands, and the platform writes `Cmd+Shift+Num +` and
+        // `Cmd+Shift+Num -` for them. VK_MULTIPLY=106 and VK_SEPARATOR=108
+        // occur nowhere in the eight trees and stay unread rather than guessed
+        // from the run.
+        107 => "Num +".to_string(),
+        109 => "Num -".to_string(),
         110 => "Num .".to_string(),
         111 => "Num /".to_string(),
         112..=123 => format!("F{}", key_code - 111),

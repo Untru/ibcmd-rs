@@ -26965,6 +26965,13 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,83,12}", "Ctrl+Shift+S"),
         ("{0,70,24}", "Ctrl+Alt+F"),
         ("{0,70,28}", "Ctrl+Alt+Shift+F"),
+        // Real bytes: ERP УХ 3.2.12.6
+        // `Reports/ДеревоСебестоимостиПродукции/Forms/ФормаОтчета` and
+        // `Reports/СтруктураЗаказаНаПроизводствоДинамическая/Forms/ФормаОтчета`
+        // carry `{0,107,12}` and `{0,109,12}` on their expand-all and
+        // collapse-all commands (`VK_ADD` and `VK_SUBTRACT`).
+        ("{0,107,12}", "Ctrl+Shift+Num +"),
+        ("{0,109,12}", "Ctrl+Shift+Num -"),
     ] {
         assert_eq!(
             parse_common_command_shortcut_value_with_style(raw, ShortcutModifierStyle::Windows)
@@ -26991,6 +26998,10 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,83,12}", "Cmd+Shift+S"),
         ("{0,70,24}", "Cmd+Option+F"),
         ("{0,70,28}", "Cmd+Option+Shift+F"),
+        // The same two records, in the spelling the platform itself wrote
+        // them: `Cmd+Shift+Num +` and `Cmd+Shift+Num -`.
+        ("{0,107,12}", "Cmd+Shift+Num +"),
+        ("{0,109,12}", "Cmd+Shift+Num -"),
     ] {
         assert_eq!(
             parse_common_command_shortcut_value_with_style(raw, ShortcutModifierStyle::Macos)
@@ -27008,8 +27019,11 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         "{0,58,0}",
         "{0,91,0}",
         "{0,95,0}",
+        // `VK_MULTIPLY` and `VK_SEPARATOR` occur in none of the eight trees,
+        // so neither is read; their neighbours `VK_ADD` and `VK_SUBTRACT` are,
+        // and are asserted above.
         "{0,106,0}",
-        "{0,109,0}",
+        "{0,108,0}",
         "{0,124,0}",
         "{0,70,1}",
         "{0,70,32}",
