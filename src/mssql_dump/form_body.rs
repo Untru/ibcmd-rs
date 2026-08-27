@@ -30629,11 +30629,25 @@ fn format_form_chart_settings_xml(
     color!("ttlTxtColor", 28);
     color!("legTxtColor", 29);
     color!("chTxtColor", 30);
+    // The chart's three own fonts are ordinary form font tuples, and the two
+    // UT 11.5.27.75 records this writer was derived from both carry the
+    // auto-font shape `{7,3,0,1,100}` in all three slots -- which is why they
+    // were spelled as a constant.  A tuple of any other shape refused the
+    // whole `<Settings>` block: the 12 chart records of Документооборот КОРП
+    // 3.0.21.3 carry `{7,2,0,{-20},1,100}` there, and the platform writes
+    // `ref="style:TextFont" kind="StyleItem"` for it -- exactly what the
+    // shared font-tuple writer renders from that tuple, under the element name
+    // this block spells.  The auto-font shape keeps its own spelling because
+    // the shared writer refuses a mask-less auto font outright.
     for (name, slot) in [("ttlFont", 31usize), ("legFont", 32), ("chFont", 33)] {
-        if form_chart_compact(t.get(slot)?) != "{7,3,0,1,100}" {
-            return None;
+        let raw = t.get(slot)?;
+        if form_chart_compact(raw) == "{7,3,0,1,100}" {
+            xml.push_str(&format!("{child_tab}<d4p1:{name} kind=\"AutoFont\"/>\r\n"));
+        } else {
+            let rendered =
+                parse_form_font_tuple_xml_tag(raw.trim(), object_refs, &format!("d4p1:{name}"))?;
+            xml.push_str(&format!("{child_tab}{rendered}\r\n"));
         }
-        xml.push_str(&format!("{child_tab}<d4p1:{name} kind=\"AutoFont\"/>\r\n"));
     }
     scalar!("isShowScale", form_chart_bool(t.get(34)?)?);
     scalar!("isShowScaleVL", form_chart_bool(t.get(35)?)?);
