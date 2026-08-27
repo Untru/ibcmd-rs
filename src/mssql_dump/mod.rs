@@ -8754,7 +8754,10 @@ struct BusinessProcessProperties {
     number_length: u32,
     number_allowed_length: &'static str,
     check_unique: bool,
-    standard_attributes: Vec<MetadataStandardAttribute>,
+    /// `None` when the record's standard-attribute slot is the bare `{0}`:
+    /// the platform then writes no `<StandardAttributes>` element at all,
+    /// exactly as the Catalog root already does for the same slot value.
+    standard_attributes: Option<Vec<MetadataStandardAttribute>>,
     autonumbering: bool,
     based_on: Vec<String>,
     number_periodicity: &'static str,
@@ -27791,12 +27794,25 @@ const BUSINESS_PROCESS_STANDARD_ATTRIBUTES: [(&str, &str); 7] = [
     ("-2", "Number"),
 ];
 
+/// The standard-attribute slot of a BusinessProcess root, read with the same
+/// two-member envelope the Catalog root already uses: `{0}` is "this object
+/// overrides nothing", and the platform then writes no `<StandardAttributes>`
+/// element at all.
+///
+/// Evidence, ERP УХ 3.2.12.6: of its 20 business processes exactly one --
+/// `СогласованиеПродажи` -- stores `{0}` here, and it is the only one of the
+/// 20 whose reference XML carries no root-level `<StandardAttributes>`. The
+/// other 19 store the `{1,{...}}` envelope, print the element, and already
+/// match byte for byte through this reader.
 fn parse_business_process_standard_attributes(
     value: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<MetadataStandardAttribute>> {
+) -> Option<Option<Vec<MetadataStandardAttribute>>> {
     let outer = split_information_register_braced_fields(value)?;
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(None);
+    }
     if outer.len() != 2 || outer.first()?.trim() != "1" {
         return None;
     }
@@ -27846,7 +27862,8 @@ fn parse_business_process_standard_attributes(
                 choice_parameter_links: Vec::new(),
             })
         })
-        .collect()
+        .collect::<Option<Vec<_>>>()
+        .map(Some)
 }
 
 fn parse_business_process_tabular_sections_indexed(
@@ -36978,10 +36995,9 @@ fn format_business_process_source_xml(
             business_process.number_allowed_length,
             xml_bool(business_process.check_unique),
         ));
-        push_metadata_standard_attributes_xml(
-            &mut properties,
-            &business_process.standard_attributes,
-        );
+        if let Some(standard_attributes) = &business_process.standard_attributes {
+            push_metadata_standard_attributes_xml(&mut properties, standard_attributes);
+        }
         properties.push_str(
             &render_metadata_characteristics_xml(&business_process.characteristics).ok()?,
         );

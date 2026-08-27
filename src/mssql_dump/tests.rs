@@ -72928,6 +72928,31 @@ fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_
 }
 
 #[test]
+fn business_process_standard_attribute_slot_admits_the_absent_envelope() {
+    // Census, ERP УХ 3.2.12.6: of its 20 business processes exactly one --
+    // `СогласованиеПродажи` -- stores the bare `{0}` in the standard-attribute
+    // slot, and it is the only one of the 20 whose reference XML carries no
+    // root-level `<StandardAttributes>` element. The other 19 store the
+    // `{1,{...}}` envelope and print the element. `{0}` therefore means
+    // "this object overrides nothing", exactly as it already does on the
+    // Catalog root -- it is not a shape this reader may refuse.
+    assert!(matches!(
+        parse_business_process_standard_attributes("{0}", &BTreeMap::new(), &BTreeMap::new()),
+        Some(None)
+    ));
+    // The envelope itself is still verified: a present collection whose
+    // declared arity is not this family's is refused, not silently emptied.
+    assert!(
+        parse_business_process_standard_attributes("{1,{1,0}}", &BTreeMap::new(), &BTreeMap::new())
+            .is_none()
+    );
+    assert!(
+        parse_business_process_standard_attributes("{2}", &BTreeMap::new(), &BTreeMap::new())
+            .is_none()
+    );
+}
+
+#[test]
 fn business_process_owned_templates_resolve_like_every_other_owner_family() {
     // `BusinessProcess.Ознакомление` owns one template, and the platform
     // writes it as a `<Template>` child after the forms. The collection is the
