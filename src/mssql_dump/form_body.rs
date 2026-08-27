@@ -23725,9 +23725,6 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(group) = properties.group.filter(|group| *group != "Vertical") {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
     }
-    if properties.auto_fill_check == Some(false) {
-        xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
-    }
     // The root's spacing pair sits between `Group` and the `*Align` pair, which
     // is where both other owners of the property put it. UT 11.5.27.75 native
     // tree: `HorizontalSpacing` trails `AutoTitle` (23), `Title` (22),
@@ -23778,6 +23775,27 @@ fn format_form_body_xml_with_dcs_profiles(
             "\t<VerticalAlign>{}</VerticalAlign>\r\n",
             vertical_align.xml_value()
         ));
+    }
+    // `AutoFillCheck` closes the alignment run, not the `Group` line. Every
+    // native `Form.xml` of the eight stand corpora that carries it at the root
+    // -- 163 documents -- was read for the order of its root children. Before
+    // it: `AutoTitle` (130), `WindowOpeningMode` (99), `AutoURL` (88), `Title`
+    // (59), `AutoSaveDataInSettings` (22), `Width` (21), `Group` (18),
+    // `EnterKeyBehavior` (14), `Height` (8), `SaveWindowSettings` (5),
+    // `SettingsStorage` (1), `VerticalSpacing` (1), `HorizontalAlign` (1) and
+    // `VerticalAlign` (1). After it: `CommandBarLocation` (95), `Customizable`
+    // (86), `CommandSet` (84), `VerticalScroll` (50), `CommandInterface` (12),
+    // `ShowCloseButton` (12), `UseForFoldersAndItems` (11),
+    // `ConversationsRepresentation` (11), `Enabled` (9), the document trio (8
+    // each), `ShowTitle` (5), `CollapseItemsByImportanceVariant` (4),
+    // `MobileDeviceCommandBarContent` (4) and every collection section. No pair
+    // is observed in both directions, and `HorizontalSpacing`, `ChildrenAlign`
+    // and `ChildItemsWidth` never share a root with it at all, so the move past
+    // them is unconstrained. The old placement behind `Group` came from a
+    // census that had never seen the property beside the spacing or alignment
+    // pairs.
+    if properties.auto_fill_check == Some(false) {
+        xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
     }
     // `ChildItemsWidth` follows the `*Align` pair, as it does on `Page`. UT
     // 11.5.27.75 native tree, 14 occurrences: it trails `AutoTitle` (9), `Title`
