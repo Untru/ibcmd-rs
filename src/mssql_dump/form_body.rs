@@ -7813,6 +7813,31 @@ fn parse_form_warning_on_edit_localized_strings(field: &str) -> Option<Vec<(Stri
         .collect()
 }
 
+/// The reference collection a `<FunctionalOptions>` block is written from.
+///
+/// The slot states its own arity: `{0, <count>, <uuid>…}` with exactly `count`
+/// identifiers after the count. Read that way, every member the collection
+/// declares is written, including the two the previous scan-for-a-resolvable-
+/// uuid reading dropped -- the nil identifier, which the platform writes as an
+/// empty `<Item/>`, and an identifier this configuration cannot name, which it
+/// writes out as it stands.
+///
+/// Evidence, byte for byte. ERP УХ 3.2.12.6
+/// `Catalogs/БланкиОтчетов/Forms/ФормаМакета` attribute `ФлагУтверждено` is a
+/// 16-member record whose slot 15 is
+/// `{0,1,00000000-0000-0000-0000-000000000000}`, and the platform writes
+/// `<FunctionalOptions><Item/></FunctionalOptions>`;
+/// `Documents/ВыбытиеВНАМСФО/Forms/ФормаДокумента` command
+/// `ЗаполнитьИзУчетнойСистемы` holds `{0,1,5bb5d945-b19f-4cf0-ab29-0e25cda7f13d}`
+/// and the platform writes
+/// `<Item>5bb5d945-b19f-4cf0-ab29-0e25cda7f13d</Item>` -- that identifier
+/// occurs nowhere else in the configuration.
+///
+/// Corpus over all eight stand trees: 10 812 `<Item>` elements naming an
+/// object, 11 empty `<Item/>` and 2 spelling a bare identifier, the last
+/// thirteen all in ERP УХ form bodies and all on a `<Command>` or an
+/// `<Attribute>`. A slot that does not state that shape keeps the previous
+/// reading unchanged.
 pub(super) fn parse_form_reference_list(
     field: &str,
     object_refs: &BTreeMap<String, String>,
@@ -7820,12 +7845,45 @@ pub(super) fn parse_form_reference_list(
     let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
         return Vec::new();
     };
+    if let Some(declared) = form_reference_list_declared_members(&fields) {
+        return declared
+            .iter()
+            .map(|value| {
+                let uuid = value.trim();
+                if parse_non_zero_uuid(uuid).is_none() {
+                    return String::new();
+                }
+                object_refs
+                    .get(uuid)
+                    .cloned()
+                    .unwrap_or_else(|| uuid.to_string())
+            })
+            .collect();
+    }
     fields
         .iter()
         .filter_map(|value| {
             parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
         })
         .collect()
+}
+
+/// The declared members of a `{0, <count>, <uuid>…}` reference collection, or
+/// `None` when the slot does not state that shape.
+fn form_reference_list_declared_members<'a>(fields: &'a [&'a str]) -> Option<&'a [&'a str]> {
+    if fields.first().map(|field| field.trim()) != Some("0") {
+        return None;
+    }
+    let count_text = fields.get(1)?.trim();
+    let count = count_text.parse::<usize>().ok()?;
+    if count_text != count.to_string() || fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let members = fields.get(2..)?;
+    members
+        .iter()
+        .all(|value| Uuid::parse_str(value.trim()).is_ok())
+        .then_some(members)
 }
 
 pub(super) fn parse_form_type_pattern(
@@ -24145,10 +24203,13 @@ fn format_form_body_xml_with_dcs_profiles(
             if !command.functional_options.is_empty() {
                 xml.push_str("\t\t\t<FunctionalOptions>\r\n");
                 for item in &command.functional_options {
-                    xml.push_str(&format!(
-                        "\t\t\t\t<Item>{}</Item>\r\n",
-                        escape_xml_text(item)
-                    ));
+                    xml.push_str(&if item.is_empty() {
+                        // The nil identifier the collection declares is an
+                        // empty element, not an empty pair of tags.
+                        "\t\t\t\t<Item/>\r\n".to_string()
+                    } else {
+                        format!("\t\t\t\t<Item>{}</Item>\r\n", escape_xml_text(item))
+                    });
                 }
                 xml.push_str("\t\t\t</FunctionalOptions>\r\n");
             }
@@ -29020,10 +29081,11 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
         if !attribute.functional_options.is_empty() {
             xml.push_str("\t\t\t<FunctionalOptions>\r\n");
             for item in &attribute.functional_options {
-                xml.push_str(&format!(
-                    "\t\t\t\t<Item>{}</Item>\r\n",
-                    escape_xml_text(item)
-                ));
+                xml.push_str(&if item.is_empty() {
+                    "\t\t\t\t<Item/>\r\n".to_string()
+                } else {
+                    format!("\t\t\t\t<Item>{}</Item>\r\n", escape_xml_text(item))
+                });
             }
             xml.push_str("\t\t\t</FunctionalOptions>\r\n");
         }
@@ -29268,10 +29330,11 @@ pub(super) fn format_form_attribute_column_xml(
     if !column.functional_options.is_empty() {
         xml.push_str(&format!("{indent}\t<FunctionalOptions>\r\n"));
         for item in &column.functional_options {
-            xml.push_str(&format!(
-                "{indent}\t\t<Item>{}</Item>\r\n",
-                escape_xml_text(item)
-            ));
+            xml.push_str(&if item.is_empty() {
+                format!("{indent}\t\t<Item/>\r\n")
+            } else {
+                format!("{indent}\t\t<Item>{}</Item>\r\n", escape_xml_text(item))
+            });
         }
         xml.push_str(&format!("{indent}\t</FunctionalOptions>\r\n"));
     }
