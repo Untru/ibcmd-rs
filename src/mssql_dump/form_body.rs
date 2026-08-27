@@ -4009,9 +4009,16 @@ fn parse_form_attribute_with_dcs_type_index(
         .get(4)
         .map(|field| parse_form_localized_strings(field))
         .unwrap_or_default();
+    // An attribute's own pattern names a platform type exactly as one of its
+    // columns does, so it is read through the same overlay: ERP УХ 3.2.12.6
+    // `Catalogs/ТиповыеОперацииМеждународныйУчет/Forms/ФормаЭлемента` declares
+    // six attributes as `{"Pattern",{"#",741ae838-…}}` and the platform writes
+    // `<v8:Type>ent:AccountingRecordType</v8:Type>` for each, while the plain
+    // index -- which carries only the configuration's own generated types --
+    // could not name the identifier and refused the whole tuple.
     let parsed_value_types = fields
         .get(5)
-        .and_then(|field| parse_form_type_pattern(field, type_index));
+        .and_then(|field| parse_form_attribute_column_type_pattern(field, type_index));
     let exact_single_type_uuid = fields
         .get(5)
         .and_then(|field| parse_form_exact_single_type_uuid(field));

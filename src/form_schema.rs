@@ -57,17 +57,48 @@ pub(crate) fn form_text_document_context_menu_child_is_valid(tag: &str) -> bool 
     tag == "ContextMenu"
 }
 
-// Platform type IDs used by serialized Form column patterns. Every prefix below
-// - `dcscor`, `dcsset` and `v8` - is declared on the root element of every
-// `Form.xml` the platform writes, so these references are emitted bare, with no
-// namespace attribute of their own, exactly as the platform writes them.
+// Platform type IDs used by serialized Form type patterns. Every prefix below
+// - `dcscor`, `dcsset`, `v8`, `ent` and `v8ui` - is declared on the root element
+// of every `Form.xml` the platform writes, so these references are emitted bare,
+// with no namespace attribute of their own, exactly as the platform writes them.
 //
-// The whole table is scoped to a Form attribute column because that is the only
-// role in which these identifiers occur: across the 1 245 files that still
-// differ from the native UT 11.5.27.75 tree, the seven references below appear
-// on 13 native-only lines in 6 files and every one of those lines is inside a
-// `<Column>` of a Form attribute. None of the seven appears on our side at all,
-// in any role, so resolving them can only add lines that the platform writes.
+// The table was first measured on a Form attribute *column*, because that was
+// the only role UT 11.5.27.75 showed these identifiers in: across the 1 245
+// files that still differed from its native tree, the first eight references
+// below appeared on 13 native-only lines in 6 files and every one of those
+// lines was inside a `<Column>` of a Form attribute. ERP УХ 3.2.12.6 shows the
+// same grammar one level up -- `Catalogs/ТиповыеОперацииМеждународныйУчет/
+// Forms/ФормаЭлемента` declares the attributes `ВидДвиженияДебет` and
+// `ВидДвиженияКредит` as `{"Pattern",{"#",741ae838-…}}` and the platform writes
+// `<v8:Type>ent:AccountingRecordType</v8:Type>` for each -- so the overlay is
+// read for an attribute's own pattern too. The role never changes what a type
+// identifier is called; it only changes which record the pattern sits in.
+//
+// The last three rows are ERP УХ's own, one native spelling each and no other:
+//
+// * `741ae838-…` -- `ent:AccountingRecordType`, the two attributes above and
+//   four more like them, six `<v8:Type>` lines on one form.
+// * `b1b064f3-…` -- `ent:ComparisonType`. `Catalogs/ЭтапыСогласования/Forms/
+//   ФормаНастройкиУсловногоПерехода` column `Значение` is
+//   `{"Pattern",{"#",67e063e3-…},{"#",b1b064f3-…},{"#",f2c84078-…}}`, and the
+//   platform writes `cfg:EnumRef.ВидСравненияЛимитовЗаявок`,
+//   `ent:ComparisonType`, `cfg:CatalogRef.ЭтапыСогласования` in that order --
+//   `67e063e3` and `f2c84078` are the two generated `Ref` type ids the
+//   configuration declares, so the middle element is the platform type, named
+//   in the middle position the pattern puts it in.
+// * `43f9c095-…` -- `v8ui:HorizontalAlign`. `Catalogs/ЭлементыФинансовыхОтчетов/
+//   Forms/РедактированиеЭлементаУсловногоОформления` declares the neighbouring
+//   columns `ГоризонтальноеПоложение` `{"#",43f9c095-…}` and
+//   `ВертикальноеПоложение` `{"#",52616226-…}`; the configuration's own type
+//   index already names the second `v8ui:VerticalAlign` and the export writes
+//   it, and the platform writes `v8ui:HorizontalAlign` for the first.
+//
+// A census of every `<v8:Type>` the platform writes and the export does not,
+// over the whole differing set of ERP УХ 3.2.12.6, names exactly these three
+// platform types (7, 6 and 1 occurrences) and nothing else; the `cfg:` siblings
+// that vanish with them -- 7 `EnumRef.ВидСравненияЛимитовЗаявок`, 5
+// `CatalogRef.ЭтапыУниверсальныхПроцессов`, 2 `CatalogRef.ЭтапыСогласования` --
+// are the rest of the tuples the unresolved element refuses whole.
 const FORM_COLUMN_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     ("f6841c6b-6c71-4c82-ae9e-d08b49db326c", "dcsset:Filter"),
     (
@@ -92,6 +123,15 @@ const FORM_COLUMN_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     ),
     ("913e8016-6e90-47a0-b2a0-4513f4edad61", "dcscor:Field"),
     ("98ea8e5a-b586-442b-b944-6e3447734aa7", "v8:FillChecking"),
+    (
+        "741ae838-6e42-4ac0-b6a4-17e5604b0669",
+        "ent:AccountingRecordType",
+    ),
+    ("b1b064f3-ae38-49bf-8c6d-390c65fd94af", "ent:ComparisonType"),
+    (
+        "43f9c095-40e8-441a-8fad-20a45798c71b",
+        "v8ui:HorizontalAlign",
+    ),
 ];
 
 pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Option<&'static str> {
