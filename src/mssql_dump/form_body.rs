@@ -31280,6 +31280,30 @@ fn form_chart_bool(value: &str) -> Option<&'static str> {
     }
 }
 
+/// The marker code a legend-list entry carries in its second member.
+///
+/// The list entry is the same ten-member record the spreadsheet-document
+/// chart carries -- `{<colour>,<marker>,0,0,0,"",{1,0},{1,0},{1,0},0}` slot
+/// for slot, as `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ` of
+/// 1С:УТ 11.5.27.75 spells it (`{{3,0,{4737096}},3,0,0,0,"",{1,0},{1,0},
+/// {1,0},0}`) and as every form-chart record of the stand spells it -- so
+/// this is `moxel_chart_marker`'s table, kept here rather than shared across
+/// the module boundary. The form corpus observes three of its five codes and
+/// agrees with it on all three: `"0"`/`None` twice (`do`
+/// `УправлениеРасчетомПрав` and `Метрики`), `"3"`/`Rhomb` five times (`do`
+/// `ОчисткаУстаревшихВерсийФайлов` and the four `ПротоколРаботыСотрудников`
+/// records) and `"4"`/`Auto` twenty times.
+fn form_chart_marker(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("None"),
+        "1" => Some("Rect"),
+        "2" => Some("Circle"),
+        "3" => Some("Rhomb"),
+        "4" => Some("Auto"),
+        _ => None,
+    }
+}
+
 fn form_chart_integer(value: &str) -> Option<&str> {
     let value = value.trim();
     value.parse::<i64>().ok()?;
@@ -31481,19 +31505,28 @@ fn form_chart_rectangle_xml(name: &str, fields: &[&str], indent: usize) -> Optio
 /// `{"U"}` placeholders and the colour-priority flag, in that order -- the
 /// same eleven members the spreadsheet chart reader already walks.
 ///
-/// The stored colour is not what the platform writes: both records hold an
-/// RGB there and both are written `auto`, with the colour-priority flag clear.
-/// A record with that flag set is refused rather than guessed at.
+/// The colour and the marker the platform *publishes* are not the ones this
+/// record holds: they are the resolved pair the record carries in its own
+/// per-scale-item legend list, which the caller reads and passes in. The
+/// record's own two slots are the design-time cache; the marker slot keeps
+/// its existing integer check and the colour slot stays unread, exactly as
+/// before.
 ///
-/// The stored marker is the same story: a `chart-form-1series` seed
-/// (`tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/`)
-/// carries a real `realSeriesData` record whose marker slot reads `3`
-/// alongside the always-present `realExSeriesData` placeholder's `1` --
-/// both platform-round-tripped to `<d4p1:marker>Auto</d4p1:marker>`. Neither
-/// code is `moxel_chart_marker`'s `0..3` shape enum (that table belongs to
-/// the spreadsheet-document chart drawing, a different record family); here
-/// the slot is only ever validated as an integer and never rendered.
-fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<String> {
+/// The two agree on most records and disagree on plenty: `do`
+/// `Reports/Метрики` holds `{3,0,{1644953}}` and marker `0` in the record and
+/// the same pair in the list, and publishes `#991919`/`None`, while `uh`
+/// `DataProcessors/ПланированиеГрафикаПроизводства2_2` holds that very same
+/// `{3,0,{1644953}}` with marker `3` and publishes `auto`/`Auto` -- its list
+/// entry reads `{3,4,{0}}`/`4`. The old literal pair (`auto`/`Auto`, from the
+/// `chart-form-1series` seed, whose list entry happens to be `{3,4,{0}}`/`4`
+/// too) was right only for records whose list says `auto`.
+fn form_chart_series_xml(
+    name: &str,
+    fields: &[&str],
+    color: &str,
+    marker: &str,
+    indent: usize,
+) -> Option<String> {
     let tab = "\t".repeat(indent);
     let inner = indent + 1;
     let inner_tab = "\t".repeat(inner);
@@ -31508,9 +31541,11 @@ fn form_chart_series_xml(name: &str, fields: &[&str], indent: usize) -> Option<S
     form_chart_integer(fields.get(2)?)?;
     let mut xml = format!("{tab}<d4p1:{name}>\r\n");
     xml.push_str(&format!("{inner_tab}<d4p1:id>{id}</d4p1:id>\r\n"));
-    xml.push_str(&format!("{inner_tab}<d4p1:color>auto</d4p1:color>\r\n"));
+    xml.push_str(&format!("{inner_tab}<d4p1:color>{color}</d4p1:color>\r\n"));
     xml.push_str(&form_chart_line_xml("line", fields.get(1)?, inner)?);
-    xml.push_str(&format!("{inner_tab}<d4p1:marker>Auto</d4p1:marker>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:marker>{marker}</d4p1:marker>\r\n"
+    ));
     xml.push_str(&form_chart_localized_xml("text", fields.get(3)?, inner)?);
     xml.push_str(&format!(
         "{inner_tab}<d4p1:strIsChanged>{}</d4p1:strIsChanged>\r\n",
@@ -31600,10 +31635,18 @@ fn format_form_chart_settings_xml(
     let n_scale = 1 + series_count;
     let shift_a = 2 * series_count;
     let shift_b = series_count;
+    // `shift_b` is the growth of the per-scale-item legend list itself, and
+    // the list *starts* at fixed `147`: at `series_count = 4` (native UT/УХ
+    // `DataProcessors/ПроверкаКонтрагента/Forms/Форма`) its five ten-member
+    // entries occupy `t[155..160]`, i.e. `147 + shift_a` through
+    // `147 + shift_a + shift_b`, and the slot the zero-series records hold at
+    // fixed `148` sits at `t[160]` -- `148 + shift_a + shift_b`. The boundary
+    // is therefore `148`, not `147`; no read used fixed `147` before, so this
+    // only makes room for the list read below.
     let tidx = |fixed: usize| -> usize {
         if fixed < 126 {
             fixed
-        } else if fixed < 147 {
+        } else if fixed < 148 {
             fixed + shift_a
         } else {
             fixed + shift_a + shift_b
@@ -31657,10 +31700,44 @@ fn format_form_chart_settings_xml(
     scalar!("pointsCurId", form_chart_integer(data.get(2)?)?);
     scalar!("isSeriesDesign", form_chart_bool(data.get(3)?)?);
     scalar!("realSeriesCount", series_count);
-    for chunk in real_series.chunks(FORM_CHART_SERIES_FIELDS) {
-        xml.push_str(&form_chart_series_xml("realSeriesData", chunk, child)?);
+    // The published colour and marker of every series come from the record's
+    // own per-scale-item legend list at `tidx(147)`: `series_count + 1`
+    // ten-member entries whose first two members are the resolved colour and
+    // the marker code, in the order the series themselves are published
+    // (`realSeriesData` first, the `realExSeriesData` placeholder last) --
+    // the same list, in the same order, that the spreadsheet-document chart
+    // reads at `axes_position + 20`. `point_count` is zero on every
+    // form-chart record of the stand, so the list has no point prefix here.
+    let legend_start = tidx(147);
+    let mut appearance = Vec::with_capacity(n_scale);
+    for offset in 0..n_scale {
+        let entry = split_1c_braced_fields(t.get(legend_start.checked_add(offset)?)?, 0)?;
+        if entry.len() != 10 {
+            return None;
+        }
+        appearance.push((
+            form_chart_color(entry.first()?, object_refs)?,
+            form_chart_marker(entry.get(1)?)?,
+        ));
     }
-    xml.push_str(&form_chart_series_xml("realExSeriesData", series, child)?);
+    for (index, chunk) in real_series.chunks(FORM_CHART_SERIES_FIELDS).enumerate() {
+        let (color, marker) = appearance.get(index)?;
+        xml.push_str(&form_chart_series_xml(
+            "realSeriesData",
+            chunk,
+            color,
+            marker,
+            child,
+        )?);
+    }
+    let (color, marker) = appearance.get(series_count)?;
+    xml.push_str(&form_chart_series_xml(
+        "realExSeriesData",
+        series,
+        color,
+        marker,
+        child,
+    )?);
     scalar!(
         "isPointsDesign",
         form_chart_bool(data.get(ex_series_start + FORM_CHART_SERIES_FIELDS)?)?
@@ -32075,27 +32152,66 @@ fn format_form_chart_settings_xml(
         }
         _ => return None,
     }
+    // Three placement slots, `tidx(160..163)`, each written only when its own
+    // slot names a placement and each reading its own code off its own slot.
+    // Their stored order -- `plotAreaPlacement`, `legendPlacement`,
+    // `titleAreaPlacement` -- is not their published order: the platform
+    // writes `legendPlacement` first, then `plotAreaPlacement`, then
+    // `titleAreaPlacement`, exactly as the spreadsheet-document chart does.
+    //
+    // The corpus is every form-chart record of the stand -- 19 records in 15
+    // forms of `ut`, `do` and `uh` (`ws`, `mdm`, `wms`, `sslbase` and `ssl`
+    // publish no `xsi:type="d4p1:Chart"` at all), paired document by
+    // document against the `<Settings xsi:type="d4p1:Chart">` blocks of the
+    // same `Form.xml`. See
+    // `docs/evidence/form-chart-legend-list-and-placements-20260827.md`.
+    //
     // The legend placement is written only when its slot names one: the two
     // original records read `0` and `6`, and the platform writes nothing on
     // the first and `None` on the second. `"4"` (`Bottom`) is proven by seed
     // `chart-form-legendbottom`, a `chart-form-4series` control with only
     // `<d4p1:legendPlacement>Bottom</d4p1:legendPlacement>` added -- the
-    // same `tidx(161)` slot changes from `"0"` to `"4"`.
+    // same `tidx(161)` slot changes from `"0"` to `"4"`. `"3"` (`Top`) and
+    // `"5"` (`UseCoordinates`) come from the corpus above: one
+    // `ПротоколРаботыСотрудников` record stores `"3"` and publishes `Top`,
+    // four further `do` records store `"5"` and publish `UseCoordinates`.
     if t.get(tidx(161))?.trim() != "0" {
         scalar!(
             "legendPlacement",
-            form_chart_code(t.get(tidx(161))?, &[("4", "Bottom"), ("6", "None")])?
+            form_chart_code(
+                t.get(tidx(161))?,
+                &[
+                    ("3", "Top"),
+                    ("4", "Bottom"),
+                    ("5", "UseCoordinates"),
+                    ("6", "None")
+                ]
+            )?
+        );
+    }
+    // `tidx(160)`, the slot before legendPlacement's, is plotAreaPlacement,
+    // published between the other two. It splits the corpus 7/12 without
+    // exception: the seven `do` records store `"1"` and publish
+    // `<d4p1:plotAreaPlacement>UseCoordinates</d4p1:plotAreaPlacement>`, the
+    // twelve `ut`/`uh` records store `"0"` and publish nothing. It was never
+    // read before, so the element was lost on every record that has it.
+    if t.get(tidx(160))?.trim() != "0" {
+        scalar!(
+            "plotAreaPlacement",
+            form_chart_code(t.get(tidx(160))?, &[("1", "UseCoordinates")])?
         );
     }
     // `tidx(162)`, right after legendPlacement's slot, is titleAreaPlacement
     // -- same present-only-when-nonzero shape, proven by seed
     // `chart-form-titleareaplacement` (`chart-form-4series` control plus
     // only `<d4p1:titleAreaPlacement>None</d4p1:titleAreaPlacement>`
-    // added): the slot flips from `"0"` to `"8"`.
+    // added): the slot flips from `"0"` to `"8"`. `"1"`
+    // (`UseCoordinates`) is the six `do` records that store it and publish
+    // it, against the same corpus.
     if t.get(tidx(162))?.trim() != "0" {
         scalar!(
             "titleAreaPlacement",
-            form_chart_code(t.get(tidx(162))?, &[("8", "None")])?
+            form_chart_code(t.get(tidx(162))?, &[("1", "UseCoordinates"), ("8", "None")])?
         );
     }
     // `tidx(183)` holds a 5-member tuple carrying three independent,
