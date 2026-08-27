@@ -15186,13 +15186,45 @@ pub(super) fn parse_form_button_group_representation(field: &str) -> Option<&'st
 /// on exactly the 48 elements whose XML has no `<PagesRepresentation>` at all,
 /// where the second member still reads `1` while the last one reads `6` — the
 /// code the platform never writes out.
+/// The container states its own length in its leading member, and the short
+/// revision is the long one minus its trailing representation member.
+///
+/// The long revision `4` holds six members -- `{4, s1, <event record>, 2, 0,
+/// s5}` -- and its last one is the representation the comment above measures.
+/// The short revision `3` holds five, ending before `s5`: ERP УХ 3.2.12.6
+/// `Catalogs/ОчередьЭлектронныхЧековКОтправке/Forms/ФормаЭлемента` carries
+/// `{3,1,{0,1,0},2,0}` on its `Страницы` and the platform writes
+/// `<PagesRepresentation>TabsOnTop</PagesRepresentation>`, while the trailing
+/// member the long revision keeps its answer in is simply not there -- reading
+/// slot 4 instead answered the constant `0` and wrote `None` on every short
+/// container. `s1` is the member that survives, and it is the same member the
+/// long revision agrees with on all 2 325 elements that carry the property.
+/// Eight ERP УХ forms ride on this, and no other configuration of the stand
+/// writes a short container at all.
+///
+/// `4` is `TabsOnRightHorizontal`, the one member the code table was missing.
+/// `Documents/НастраиваемыйОтчет/Forms/ФормаВыбораСпособаЗаполненияНО` holds
+/// `{4,4,{1,526c501f-ed3f-4db4-8731-fd0324707501},2,0,4}` and the platform
+/// writes it out; it is the only occurrence in the eight stand corpora, which
+/// spell 7 181 `None`, 2 320 `TabsOnTop`, 15 `TabsOnLeftHorizontal`, 13
+/// `TabsOnBottom`, 2 `Swipe` and this one.
 pub(super) fn parse_form_pages_representation(field: &str) -> Option<&'static str> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    match fields.last().map(|value| value.trim()) {
+    let short_revision = fields.len() == 5
+        && fields.first().map(|value| value.trim()) == Some("3")
+        && fields.get(3).map(|value| value.trim()) == Some("2")
+        && fields.get(4).map(|value| value.trim()) == Some("0");
+    let code = if short_revision {
+        fields.get(1).map(|value| value.trim())
+    } else {
+        fields.last().map(|value| value.trim())
+    };
+    match code {
         Some("0") => Some("None"),
         Some("1") => Some("TabsOnTop"),
         Some("2") => Some("TabsOnBottom"),
         Some("3") => Some("TabsOnLeftHorizontal"),
+        Some("4") => Some("TabsOnRightHorizontal"),
         Some("5") => Some("Swipe"),
         _ => None,
     }
