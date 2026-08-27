@@ -18720,20 +18720,44 @@ pub(super) fn parse_form_table_command_set_excluded_commands_for_table_test(
     parse_form_table_command_set_excluded_commands_for_table(FormTableSchema, fields, true)
 }
 
+/// A document field's own `<CommandSet>`, read at the offset the record itself
+/// declares.
+///
+/// The conditional-appearance prefix ahead of the name shifts every member of
+/// the record by one, and which shape a record is is read off its own name slot
+/// -- the same reading `form_input_field_top_level_offset` already does for the
+/// whole field family -- rather than fixed at zero.
+///
+/// Census over the dumped item layouts of the seven stand corpora that carry
+/// forms, joined to the `<ExcludedCommand>` elements the platform writes for
+/// the element of the same name: 2 566 `SpreadSheetDocumentField` and 171
+/// `FormattedDocumentField` records at the unprefixed length 59, on every one
+/// of which the declared uuid count and the native name count agree; and 152 +
+/// 15 at the prefixed length 60, of which 165 declare an empty list and write
+/// no element. The two prefixed records that do declare one are ERP УХ
+/// `DataProcessors/ЗагрузкаДанныхИзВнешнихФайлов/Forms/Форма`
+/// (`ТабличныйДокумент`, one uuid against the platform's one
+/// `<ExcludedCommand>Print`) and
+/// `Reports/СетеваяДиаграммаШаблонаУниверсальногоПроцесса/Forms/Форма`
+/// (`ТабличноеПолеВозможныхЭтапов`, 51 uuids against 50 names). Both were
+/// written with no `<CommandSet>` at all.
 fn parse_form_field_command_set_excluded_commands(
     wrapper: &str,
     item_tag: &str,
     fields: &[&str],
 ) -> Vec<&'static str> {
-    if wrapper != "37"
-        || fields.len() != 59
-        || fields.get(47).map(|field| field.trim()) != Some("\"\"")
-        || fields.get(49).map(|field| field.trim()) != Some("0")
+    if wrapper != "37" {
+        return Vec::new();
+    }
+    let offset = form_input_field_top_level_offset(fields);
+    if fields.len() != 59 + offset
+        || fields.get(47 + offset).map(|field| field.trim()) != Some("\"\"")
+        || fields.get(49 + offset).map(|field| field.trim()) != Some("0")
     {
         return Vec::new();
     }
     let mapper: fn(&str) -> Option<&'static str> =
-        match (item_tag, fields.get(5).map(|field| field.trim())) {
+        match (item_tag, fields.get(5 + offset).map(|field| field.trim())) {
             ("SpreadSheetDocumentField", Some("6")) => {
                 form_spreadsheet_document_standard_command_suffix
             }
@@ -18743,7 +18767,7 @@ fn parse_form_field_command_set_excluded_commands(
             _ => return Vec::new(),
         };
     let Some(uuids) = fields
-        .get(48)
+        .get(48 + offset)
         .and_then(|field| parse_form_table_counted_uuid_list(field))
     else {
         return Vec::new();
