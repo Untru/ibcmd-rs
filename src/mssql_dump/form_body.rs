@@ -952,7 +952,7 @@ pub(super) struct FormAttribute {
     pub(super) functional_options: Vec<String>,
     pub(super) settings: Option<FormDynamicListSettings>,
     pub(super) spreadsheet_document_settings: Option<String>,
-    pub(super) chart_settings: Option<String>,
+    pub(super) design_time_settings: Option<String>,
     pub(super) type_description_settings: Option<Vec<ConstantValueType>>,
     /// The field-map ids of a dynamic list whose field name is outside the
     /// list's resolvable-field universe. The platform marks a path onto one of
@@ -1357,7 +1357,6 @@ pub(super) struct FormChildItem {
     /// Reproduced synthetically by seed `gsf4`. `Edit` does *not* follow the
     /// same rule -- see the comment on its own branch in
     /// `format_form_child_item_xml`.
-    pub(super) parent_child_items_width: Option<&'static str>,
     pub(super) control_representation: Option<&'static str>,
     pub(super) collapsed: Option<bool>,
     pub(super) usual_group_collapsed_representation_title: Vec<(String, String)>,
@@ -1554,6 +1553,12 @@ pub(super) struct FormChildItem {
     pub(super) table_footer_height: Option<String>,
     pub(super) table_output: Option<&'static str>,
     pub(super) html_document_output: Option<&'static str>,
+    /// A graphical scheme field's own `<Edit>` flag, read off its option
+    /// tuple rather than derived from `<ReadOnly>`.
+    pub(super) graphical_scheme_edit: Option<bool>,
+    /// The `<ExcludedCommand>` names of a graphical scheme field's own
+    /// `<CommandSet>`, already sorted the way the platform writes them.
+    pub(super) excluded_commands: Vec<&'static str>,
     pub(super) pages_read_only: Option<bool>,
     pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
     pub(super) list_addition_tooltip_representation: Option<&'static str>,
@@ -3167,7 +3172,6 @@ pub(super) fn parse_form_auto_command_bar_fields(
             &BTreeMap::new(),
             &BTreeSet::new(),
             object_refs,
-            None,
         )
         .unwrap_or_default(),
     })
@@ -4058,9 +4062,11 @@ fn parse_form_attribute_with_dcs_type_index(
     let spreadsheet_document_settings = fields.get(14).and_then(|field| {
         parse_form_spreadsheet_document_settings(field, &value_types, object_refs)
     });
-    let chart_settings = fields
-        .get(14)
-        .and_then(|field| parse_form_chart_settings_xml(field, &value_types, object_refs, 3));
+    let design_time_settings = fields.get(14).and_then(|field| {
+        parse_form_chart_settings_xml(field, &value_types, object_refs, 3)
+            .or_else(|| parse_form_flowchart_settings_xml(field, &value_types, object_refs, 3))
+            .or_else(|| parse_form_planner_settings_xml(field, &value_types, object_refs, 3))
+    });
     let mut use_always = parse_form_attribute_direct_use_always(
         &name,
         fields.get(8).copied(),
@@ -4150,7 +4156,7 @@ fn parse_form_attribute_with_dcs_type_index(
         functional_options,
         settings,
         spreadsheet_document_settings,
-        chart_settings,
+        design_time_settings,
         type_description_settings,
         unresolvable_field_item_ids,
     })
@@ -8499,7 +8505,6 @@ pub(super) fn extract_form_child_items(
         type_index,
         type_index_collisions,
         object_refs,
-        None,
     )
     .unwrap_or_default();
     apply_form_table_user_settings_groups(&mut items, &indexes.user_settings_group_by_table_id);
@@ -10155,7 +10160,6 @@ pub(super) fn parse_form_child_item_pairs(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
-    parent_child_items_width: Option<&'static str>,
 ) -> Option<Vec<FormChildItem>> {
     let mut best = Vec::new();
     for index in 0..fields.len() {
@@ -10198,7 +10202,6 @@ pub(super) fn parse_form_child_item_pairs(
                 type_index,
                 type_index_collisions,
                 object_refs,
-                parent_child_items_width,
             ) {
                 items.push(item);
             }
@@ -10374,7 +10377,6 @@ pub(super) fn parse_form_child_item_with_attrs(
         &BTreeMap::new(),
         &BTreeSet::new(),
         object_refs,
-        None,
     )
 }
 
@@ -10415,7 +10417,6 @@ pub(super) fn parse_form_child_item_with_context(
         &BTreeMap::new(),
         &BTreeSet::new(),
         object_refs,
-        None,
     )
 }
 
@@ -10468,7 +10469,6 @@ fn parse_form_child_item_with_metadata_owners(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
-    parent_child_items_width: Option<&'static str>,
 ) -> Option<FormChildItem> {
     let split_fields = split_1c_braced_fields(field.trim(), 0)?;
     let revision_fields = normalize_form_item_record_revision(&split_fields);
@@ -10866,15 +10866,6 @@ fn parse_form_child_item_with_metadata_owners(
         })
         .flatten()
         .and_then(|options| FormPopupColorSchema::from_raw_layout(wrapper, tag, &options));
-    // Only `Page`'s own `child_items_width` (via `page_properties`) is
-    // proven to suppress a child `GraphicalSchemaField`'s `Width`/`Height`
-    // (seed `gsf4`, native UT `ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`).
-    // `UsualGroup`'s `extended_group_options` isn't available this early in
-    // the function and untested for the same effect, so it deliberately
-    // isn't folded in here the way the item's own `child_items_width` field
-    // (below) combines both sources.
-    let child_items_width_for_children =
-        page_properties.and_then(|properties| properties.child_items_width());
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
@@ -10895,7 +10886,6 @@ fn parse_form_child_item_with_metadata_owners(
         type_index,
         type_index_collisions,
         object_refs,
-        child_items_width_for_children,
     )
     .unwrap_or_default();
     if tag == "Table" {
@@ -11279,7 +11269,6 @@ fn parse_form_child_item_with_metadata_owners(
                     .as_ref()
                     .and_then(|options| options.child_items_width)
             }),
-        parent_child_items_width,
         control_representation: extended_group_options
             .as_ref()
             .and_then(|options| options.control_representation),
@@ -11378,7 +11367,14 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        enable_start_drag: table_schema.and_then(|schema| schema.enable_start_drag(&fields)),
+        // A `PlannerField` keeps the same switch in its own option tuple, at
+        // the slot seed `plx-drag` moves; see the `PlannerField` row of
+        // `FORM_DOCUMENT_FIELD_GEOMETRY`.
+        enable_start_drag: table_schema
+            .and_then(|schema| schema.enable_start_drag(&fields))
+            .or_else(|| {
+                parse_form_document_field_on_flag(tag, fields, |layout| layout.enable_start_drag)
+            }),
         enable_drag: table_schema.and_then(|schema| schema.enable_drag(&fields)),
         file_drag_mode: if tag == "Table" {
             if let Some(schema) = table_schema {
@@ -12297,6 +12293,8 @@ fn parse_form_child_item_with_metadata_owners(
         html_document_output: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| schema.html_document_output(options)),
+        graphical_scheme_edit: parse_form_document_field_flag(tag, fields, |layout| layout.edit),
+        excluded_commands: parse_form_excluded_commands(tag, fields),
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
         auto_add_incomplete: table_schema.and_then(|schema| schema.auto_add_incomplete(&fields)),
         format: if tag == "UsualGroup" {
@@ -12407,12 +12405,6 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|options| options.get(1))
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value != "16" && value.parse::<u32>().is_ok())
-        } else if tag == "GraphicalSchemaField" {
-            document_field_options
-                .as_deref()
-                .and_then(|options| options.get(1))
-                .map(|field| field.trim().to_string())
-                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else if tag == "UsualGroup" {
             parse_form_usual_group_width(&fields)
         } else if tag == "PictureField" {
@@ -12468,17 +12460,12 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|options| options.get(2))
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value != "9" && value.parse::<u32>().is_ok())
-        } else if matches!(tag, "GraphicalSchemaField" | "HTMLDocumentField") {
-            let default_height = (tag == "HTMLDocumentField").then_some("10");
+        } else if tag == "HTMLDocumentField" {
             document_field_options
                 .as_deref()
                 .and_then(|options| options.get(2))
                 .map(|field| field.trim().to_string())
-                .filter(|value| {
-                    value != "0"
-                        && default_height != Some(value.as_str())
-                        && value.parse::<u32>().is_ok()
-                })
+                .filter(|value| value != "0" && value != "10" && value.parse::<u32>().is_ok())
         } else if let Some(value) = special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.height(options))
@@ -13576,6 +13563,7 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
             | "PDFDocumentField"
+            | "PlannerField"
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
@@ -13682,10 +13670,6 @@ pub(super) fn append_form_child_items_by_tag(
             type_index,
             type_index_collisions,
             object_refs,
-            // `ContextMenu`/`AutoCommandBar`/search-addition items, never a
-            // `GraphicalSchemaField`: no parent `ChildItemsWidth` observation
-            // applies here.
-            None,
         ) else {
             continue;
         };
@@ -13754,10 +13738,6 @@ pub(super) fn parse_form_text_document_context_menu(
             type_index,
             type_index_collisions,
             object_refs,
-            // A text-document context menu item, never a
-            // `GraphicalSchemaField`: no parent `ChildItemsWidth`
-            // observation applies here.
-            None,
         )
         .filter(|item| form_text_document_context_menu_child_is_valid(&item.tag))
     })? {
@@ -14387,6 +14367,11 @@ struct FormDocumentFieldGeometry {
     auto_max_height: Option<usize>,
     horizontal_stretch: Option<usize>,
     vertical_stretch: Option<usize>,
+    /// Slot of the kind's own `<Edit>` flag, which shares the same `1` default.
+    edit: Option<usize>,
+    /// Slot of the kind's own `<EnableStartDrag>`, whose unwritten default is
+    /// the opposite `0`.
+    enable_start_drag: Option<usize>,
     /// Slot of the field's own `<Font>` tuple, where the kind has one.
     font: Option<usize>,
 }
@@ -14405,6 +14390,8 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(9),
             horizontal_stretch: Some(11),
             vertical_stretch: Some(12),
+            edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14428,6 +14415,8 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(13),
             horizontal_stretch: None,
             vertical_stretch: None,
+            edit: None,
+            enable_start_drag: None,
             font: Some(9),
         },
     ),
@@ -14444,6 +14433,8 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(23),
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
+            edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14460,6 +14451,8 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(20),
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
+            edit: None,
+            enable_start_drag: None,
             font: Some(12),
         },
     ),
@@ -14484,6 +14477,8 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(14),
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
+            edit: None,
+            enable_start_drag: None,
             font: Some(9),
         },
     ),
@@ -14521,6 +14516,8 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: Some(22),
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
+            edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14546,6 +14543,101 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: None,
             horizontal_stretch: None,
             vertical_stretch: None,
+            edit: None,
+            enable_start_drag: None,
+            font: None,
+        },
+    ),
+    (
+        // The graphical scheme field's own 14-member tuple. It leads with the
+        // same `3` discriminator its `HTMLDocumentField` sibling does and is
+        // told apart from it by the declared member count alone (14 against
+        // 13), so no white list of tags decides which row answers.
+        //
+        // The extent pair sits in the same first two slots every other
+        // character-metric document field keeps it in and carries the same
+        // `50`/`10` unwritten defaults; slot 4 is the field's own `<Edit>`
+        // flag and slot 7 its `<AutoMaxWidth>`, both with the usual `1`
+        // default that means "unwritten".
+        //
+        // Evidence, member by member. Seeds against 8.3.27.2214, each one the
+        // same tree with a single element changed: `gsx-wh` (`<Width>80</Width>
+        // <Height>25</Height>` added to `gsx-base`) moves exactly slots 1 and 2,
+        // `50`->`80` and `10`->`25`; `gsx-wh5010` (`<Width>50</Width>
+        // <Height>10</Height>`) stores bytes identical to `gsx-base` and the
+        // platform writes neither element back, which is what pins the pair's
+        // defaults; `gsx-wonly` and `gsx-honly` move one slot each and the
+        // platform writes only the element that left its default. `gsx-edit`
+        // (`<Edit>false</Edit>`) moves exactly slot 4, `1`->`0`; `gsx-amw`
+        // (`<AutoMaxWidth>false</AutoMaxWidth>`) moves exactly slot 7, `1`->`0`;
+        // `gsx-amwedit` moves both.
+        //
+        // Census over the whole native population of the construct in the two
+        // corpora that carry a stored record for every state -- the 8 items of
+        // ERP УХ 3.2.12.6 and the 7 of Документооборот КОРП 3.0.21.3 -- joins
+        // slot for slot with the platform's own element: slot 1 reads `80` on
+        // exactly the 2 items written `<Width>80</Width>` and `50` on the other
+        // 13, which are written none; slot 2 reads `25`, `18` and `15` on
+        // exactly the 3 written `<Height>`, `10` on the other 12; slot 4 reads
+        // `0` on exactly the 6 written `<Edit>false</Edit>` and `1` on the other
+        // 9; slot 7 reads `0` on exactly the 6 written
+        // `<AutoMaxWidth>false</AutoMaxWidth>` and `1` on the other 9.
+        //
+        // The `<Edit>` flag used to be derived from `<ReadOnly>`, which the
+        // census refutes: of the 11 read-only items 8 write `<Edit>false</Edit>`
+        // and 3 do not, and the 3 that do not are exactly the ones whose slot 4
+        // reads `1`.
+        "GraphicalSchemaField",
+        FormDocumentFieldGeometry {
+            discriminator: "3",
+            len: 14,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: None,
+            auto_max_width: Some(7),
+            auto_max_height: None,
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            edit: Some(4),
+            enable_start_drag: None,
+            font: None,
+        },
+    ),
+    (
+        // The planner field's own 11-member tuple. Its extent pair sits in the
+        // same first two slots and carries the same `50`/`10` unwritten
+        // defaults the other character-metric document fields do.
+        //
+        // Evidence: seeds against 8.3.27.2214, each the control tree with one
+        // element added -- `plx-w40` (`<Width>40</Width>`) moves only slot 1,
+        // `50`->`40`; `plx-h15` (`<Height>15</Height>`) moves only slot 2,
+        // `10`->`15`; `plx-drag` (`<EnableStartDrag>true</EnableStartDrag>`)
+        // moves only slot 5, `0`->`1`. Census of the construct's whole native
+        // population -- the five `PlannerField` items of Документооборот КОРП
+        // 3.0.21.3 -- agrees: slot 1 reads `40` on the one item written
+        // `<Width>40</Width>` and `50` on the other four, written none; slot 2
+        // reads `15` on the three written `<Height>15</Height>` and `10` on the
+        // other two; slot 5 reads `1` on exactly the two written
+        // `<EnableStartDrag>true</EnableStartDrag>`.
+        //
+        // No max-extent, stretch or font coordinate is claimed: all five items
+        // agree slot for slot across the rest of the tuple and none of them
+        // carries any such element.
+        "PlannerField",
+        FormDocumentFieldGeometry {
+            discriminator: "1",
+            len: 11,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: None,
+            auto_max_width: None,
+            auto_max_height: None,
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            edit: None,
+            enable_start_drag: Some(5),
             font: None,
         },
     ),
@@ -14588,6 +14680,8 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             auto_max_height: None,
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
+            edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14653,6 +14747,149 @@ fn parse_form_document_field_font_xml(
 ) -> Option<String> {
     let (layout, options) = form_document_field_geometry_options(tag, fields)?;
     parse_form_font_tuple_xml(options.get(layout.font?)?, object_refs)
+}
+
+/// The `<ExcludedCommand>` list of a graphical scheme field's `<CommandSet>`.
+///
+/// Top-level slot 48 of the wrapper-`37` field record holds `{<count>,<command
+/// id>*count}` -- a declared count, walked as declared. It reads `{0}` on all
+/// 620 wrapper-`37` field records of every kind across the form bodies traced
+/// for this pass and a 31-entry list on exactly one: Документооборот КОРП
+/// 3.0.21.3's `DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма`, the
+/// only item of the eight stand corpora whose native XML carries a
+/// `<CommandSet>` of its own.
+///
+/// The identifiers are named by seed, not by that single record. Seed
+/// `gsxcmd-all` writes all 31 names the record publishes and stores exactly
+/// its 31 identifiers; five further seeds (`gsxcmd-b0`..`gsxcmd-b4`) write
+/// binary-coded halves of the same list, so each identifier appears in a
+/// unique subset of the five and every one of the 31 resolves to exactly one
+/// name with no collision. A 32nd name, `Print`, is the one command the
+/// native record does *not* exclude; seed `gsxq-Print` names it. Twenty-four
+/// further spellings were tried and refused by the XDTO enumeration itself.
+///
+/// The written order is not the stored one: the record stores the identifiers
+/// sorted by identifier, and the platform writes the names sorted by name --
+/// `gsxcmd-b0`'s sixteen commands come back alphabetical against a stored
+/// order that is not.
+///
+/// An identifier this table does not name leaves the whole block unwritten
+/// rather than publishing a partial list.
+fn parse_form_excluded_commands(tag: &str, fields: &[&str]) -> Vec<&'static str> {
+    if tag != "GraphicalSchemaField" {
+        return Vec::new();
+    }
+    let offset = form_input_field_layout_is_extended(fields)
+        .then(|| form_input_field_top_level_offset(fields))
+        .unwrap_or(0);
+    let Some(list) = fields
+        .get(FORM_EXCLUDED_COMMAND_SLOT + offset)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return Vec::new();
+    };
+    let Some(count) = list
+        .first()
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    if count == 0 || list.len() != count + 1 {
+        return Vec::new();
+    }
+    let mut names = Vec::with_capacity(count);
+    for id in &list[1..] {
+        let id = id.trim();
+        let Some(name) = FORM_GRAPHICAL_SCHEME_COMMANDS
+            .iter()
+            .find_map(|(candidate, name)| candidate.eq_ignore_ascii_case(id).then_some(*name))
+        else {
+            return Vec::new();
+        };
+        names.push(name);
+    }
+    names.sort_unstable();
+    names
+}
+
+/// Top-level slot of the excluded-command list in the wrapper-`37` field
+/// record.
+const FORM_EXCLUDED_COMMAND_SLOT: usize = 48;
+
+/// The graphical scheme's own command identifiers, each named by the seeds
+/// `parse_form_excluded_commands` records.
+const FORM_GRAPHICAL_SCHEME_COMMANDS: &[(&str, &'static str)] = &[
+    ("ea0bafc6-647c-46eb-bb8b-6417593546cc", "AlignBottom"),
+    ("1c7ec5be-53a6-43cc-8bc8-9a73ca72a44e", "AlignCenter"),
+    ("c4ac110c-99d4-4c75-882e-f2a5b9c199ad", "AlignLeft"),
+    ("e22c2307-5585-4491-a106-3fca57a987ac", "AlignMiddle"),
+    ("767690d6-cf3b-4f04-a28c-f91fb83a6a0a", "AlignRight"),
+    ("3ddfe26e-81bc-453f-bd88-5185aca5b2f0", "AlignTop"),
+    ("a5a41937-c459-438d-b2f5-81b561dc67c5", "BringToBack"),
+    ("bfd14d15-932b-4f08-8090-395e4816e174", "BringToFront"),
+    (
+        "23176829-e3f7-46dc-af32-6af1f6d67643",
+        "DistributeHorizontally",
+    ),
+    (
+        "56f9684a-d741-44c0-bf84-652b987507dd",
+        "DistributeVertically",
+    ),
+    ("356928f8-1b7d-4579-9813-d19699de6b76", "EqualHeight"),
+    ("89a42f51-7f8b-4efe-a257-94a623242a0a", "EqualSize"),
+    ("3667f2a8-3912-4b56-a3b5-d69a1b7eec5d", "EqualWidth"),
+    ("87ddfbaa-b8e9-4f2b-884a-88c203115854", "Group"),
+    ("df450081-a8c6-46bb-9370-0ee8e4687e2d", "InsertItemActivity"),
+    (
+        "c54de1e2-eadf-4ad7-ba5e-f165ed302c29",
+        "InsertItemCompletion",
+    ),
+    (
+        "d80a7ec0-3dc2-4777-9752-8fec196eb655",
+        "InsertItemCondition",
+    ),
+    (
+        "494c5e0a-f4f0-4184-9d10-2b57e780e428",
+        "InsertItemDecoration",
+    ),
+    (
+        "5eee88e8-c2c7-45b1-8303-049edb58170d",
+        "InsertItemDecorativeLine",
+    ),
+    ("d80be1de-253f-4a06-8c1a-b3920137e0ac", "InsertItemJoin"),
+    (
+        "c58155b0-29dc-4905-a0c0-1ed2d6f88c4c",
+        "InsertItemProcessing",
+    ),
+    ("e915596d-e318-452b-9ba9-95cf99432b2c", "InsertItemSplit"),
+    ("abaddb09-44e1-4d85-b473-cd3db79f5fa3", "InsertItemStart"),
+    (
+        "fdc8da8c-430b-4ea3-b0a3-f8a5d91a0a59",
+        "InsertItemSubBusinessProcess",
+    ),
+    ("8b35d4bf-46b1-4a46-9e89-e69ccd6cacdc", "InsertItemSwitch"),
+    ("01db2225-b62d-4112-a4b6-d39d627bf79f", "PageSetup"),
+    ("1d13f9a3-402a-46cb-9c68-1709356840f2", "Preview"),
+    ("e2d6f793-b786-4640-a91b-8d77f73860f1", "Print"),
+    ("7b53bef7-3811-4375-810a-672bf817ace4", "PrintImmediately"),
+    ("b4a65823-eb91-4b2c-9be6-a349566d9a63", "SendBackward"),
+    ("5f8efacc-cd77-4bc9-8ae8-74af39dc5535", "SendForward"),
+    ("f27f75fc-027d-4c8e-9f7d-337f985f0ee9", "Ungroup"),
+];
+
+/// The mirror of `parse_form_document_field_flag` for a flag whose unwritten
+/// default is `0`: only the `1` state reaches the XML.
+fn parse_form_document_field_on_flag(
+    tag: &str,
+    fields: &[&str],
+    pick: fn(&FormDocumentFieldGeometry) -> Option<usize>,
+) -> Option<bool> {
+    let (layout, options) = form_document_field_geometry_options(tag, fields)?;
+    let slot = pick(layout)?;
+    match options.get(slot).map(|field| field.trim()) {
+        Some("1") => Some(true),
+        _ => None,
+    }
 }
 
 /// The auto-max and stretch flags all default to `1`, which the platform
@@ -18775,6 +19012,14 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
                 // tree, name for name and id for id. The reader had no arm for
                 // the code at all, so all five items were dropped whole.
                 "20" => (wrapper == "37").then_some("PDFDocumentField"),
+                // The planner field. Census of Документооборот КОРП 3.0.21.3
+                // -- the only corpus of the eight that carries the construct
+                // at all: the configuration holds exactly five items whose
+                // wrapper-`37` record spells `19` in the discriminator slot,
+                // and they are exactly the five `<PlannerField>` elements of
+                // the native tree, name for name and id for id. The reader had
+                // no arm for the code, so all five items were dropped whole.
+                "19" => (wrapper == "37").then_some("PlannerField"),
                 _ => None,
             }
         }
@@ -20383,7 +20628,12 @@ pub(super) fn parse_form_child_item_data_path(
         // other document fields do: all five items of UT 11.5.27.75 hold a
         // one-segment chain there naming the form attribute the platform
         // writes in `<DataPath>`, and none of them falls back to a parent path.
-        | "PDFDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        | "PDFDocumentField"
+        // The planner field spells its binding in the same slot 11 the other
+        // document fields do: all five items of Документооборот КОРП 3.0.21.3
+        // hold a one-segment chain there naming the form attribute the
+        // platform writes in `<DataPath>`.
+        | "PlannerField" => resolve_slots(&input_slots, &parse_bound),
         "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
         "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
         "Button" => button_data_path_slot
@@ -26917,6 +27167,12 @@ pub(super) fn format_form_child_item_xml(
             | "TrackBarField"
             | "ChartField"
             | "FormattedDocumentField"
+            // A `PlannerField` writes its `<Title>` ahead of
+            // `<TitleLocation>` and its geometry, the way every other field
+            // kind of the wrapper-`37` family does: all five native items of
+            // Документооборот КОРП 3.0.21.3 carry a title and write it
+            // directly behind `<DataPath>`.
+            | "PlannerField"
             | "ColumnGroup"
     );
     let title_location_follows_title =
@@ -27312,6 +27568,22 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_location)
         ));
     }
+    // A graphical scheme field's `<CommandSet>` sits between its
+    // `<TitleLocation>` and its geometry: the corpus's only such block --
+    // Документооборот КОРП 3.0.21.3's
+    // `DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма` -- writes it
+    // directly behind `<TitleLocation>None</TitleLocation>` and directly
+    // ahead of `<Width>80</Width>`, and every seed that adds one to the
+    // minimal `gsx-base` tree puts it in the same place.
+    if !item.excluded_commands.is_empty() {
+        xml.push_str(&format!("{tab}\t<CommandSet>\r\n"));
+        for command in &item.excluded_commands {
+            xml.push_str(&format!(
+                "{tab}\t\t<ExcludedCommand>{command}</ExcludedCommand>\r\n"
+            ));
+        }
+        xml.push_str(&format!("{tab}\t</CommandSet>\r\n"));
+    }
     if matches!(
         item.tag,
         "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
@@ -27655,20 +27927,6 @@ pub(super) fn format_form_child_item_xml(
         item,
         indent + 1,
     ));
-    // A `GraphicalSchemaField` inside a `Page` whose own `ChildItemsWidth` is
-    // `LeftWidest` publishes neither `Width`, `Height` nor `Edit`: the parent
-    // page's width-distribution mode manages the field's effective size, so
-    // the platform treats explicit geometry as moot even though the raw
-    // options tuple still stores the same nonzero width/height numbers a
-    // non-nested field of the same shape publishes verbatim. Evidence: seed
-    // `gsf4` (synthetic, same nesting) and native UT 11.5.27.75's own
-    // `DataProcessors/ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`, both
-    // against the non-nested, non-suppressed native UT/SSL
-    // `DataProcessors/КартаМаршрутаБизнесПроцесса` counter-example. Only
-    // `LeftWidest` is proven; any other or absent `ChildItemsWidth` leaves
-    // geometry untouched.
-    let graphical_schema_field_geometry_suppressed_by_parent_page =
-        item.tag == "GraphicalSchemaField" && item.parent_child_items_width == Some("LeftWidest");
     // `Page`, `Popup` and `ButtonGroup` write their width behind the title
     // block, with the rest of their geometry (see the page order table, the
     // popup run below and the button-group header above).
@@ -27683,7 +27941,6 @@ pub(super) fn format_form_child_item_xml(
             | "Popup"
             | "ButtonGroup"
     ) && !pages_geometry_after_title
-        && !graphical_schema_field_geometry_suppressed_by_parent_page
         && let Some(width) = &item.width
     {
         xml.push_str(&format!(
@@ -27720,7 +27977,6 @@ pub(super) fn format_form_child_item_xml(
             | "Page"
             | "Popup"
     ) && !pages_geometry_after_title
-        && !graphical_schema_field_geometry_suppressed_by_parent_page
         && let Some(height) = &item.height
     {
         xml.push_str(&format!(
@@ -27730,21 +27986,26 @@ pub(super) fn format_form_child_item_xml(
     }
     // A `GraphicalSchemaField` writes `Edit` immediately behind its geometry
     // (`Width`/`Height` when set, else right behind `TitleLocation`) and
-    // ahead of everything else. Traced across SSL demo, SSL base, UT
-    // 11.5.27.75 and ERP УХ 3.2.12.6 (14 native items, the construct's whole
-    // population): the 9 that carry `<ReadOnly>true</ReadOnly>` all also
-    // write `<Edit>false</Edit>` right there, and the other 5 -- `ReadOnly`
-    // false or absent -- write neither, with no counter-example. Unlike
-    // `Width`/`Height` above, this holds even when the parent page's
-    // `ChildItemsWidth` is `LeftWidest`: native UT's own
-    // `ИнтеграцияС1СОблачнаяКартаПрикладныхРешений` sits in exactly that
-    // nesting and still publishes `Edit` -- seed `gsf4`'s minimal
-    // reproduction (no `ContextMenu`/`ExtendedTooltip`/`Events`, unlike the
-    // real field) suppressed it too, so whatever differs between the two
-    // is not `ChildItemsWidth`; `Edit` deliberately does not gate on
-    // `graphical_schema_field_geometry_suppressed_by_parent_page`.
-    if item.tag == "GraphicalSchemaField" && item.read_only == Some(true) {
+    // ahead of everything else. The flag itself is the field's own option
+    // slot 4 -- see the `GraphicalSchemaField` row of
+    // `FORM_DOCUMENT_FIELD_GEOMETRY` for the seed and the census that name it.
+    // It used to be derived from `<ReadOnly>true</ReadOnly>` instead, which
+    // the full native population refutes: three read-only items write no
+    // `<Edit>`, and they are exactly the three whose slot 4 holds the
+    // unwritten default.
+    if item.graphical_scheme_edit == Some(false) {
         xml.push_str(&format!("{tab}\t<Edit>false</Edit>\r\n"));
+    }
+    // A `PlannerField` writes `EnableStartDrag` in the same place, directly
+    // behind its geometry: both native items that carry it -- ERP
+    // Документооборот КОРП's `Catalogs/ЗаписиРабочегоКалендаря/Forms/Календарь`
+    // and `Catalogs/Мероприятия/Forms/ФормаСписка` -- put it between
+    // `<Height>15</Height>` and `<ContextMenu>`, and the three that do not
+    // carry it write nothing there.
+    if item.tag == "PlannerField" && item.enable_start_drag == Some(true) {
+        xml.push_str(&format!(
+            "{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"
+        ));
     }
     if item.tag == "LabelDecoration"
         && let Some(skip_on_input) = item.skip_on_input
@@ -31088,8 +31349,8 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
                 "\t\t\t\t",
             ));
             xml.push_str("\t\t\t</Settings>\r\n");
-        } else if let Some(chart_settings) = &attribute.chart_settings {
-            xml.push_str(chart_settings);
+        } else if let Some(design_time_settings) = &attribute.design_time_settings {
+            xml.push_str(design_time_settings);
         } else if let Some(type_description_settings) = &attribute.type_description_settings {
             if type_description_settings.is_empty() {
                 xml.push_str("\t\t\t<Settings xsi:type=\"v8:TypeDescription\"/>\r\n");
@@ -31697,6 +31958,793 @@ pub(super) fn form_body_module_text_bytes(body: &ParsedFormBodyBlob) -> Option<V
     bytes.extend_from_slice(body.module_text.as_bytes());
     Some(bytes)
 }
+
+/// The `<Settings>` block a form attribute of planner type carries.
+///
+/// The attribute stores its whole design in the same slot 14 every other
+/// attribute keeps its settings in, as
+/// `{0,1,"Planner",{"#",<planner type uuid>,{8,<item count>,<item>*,…}}}`.
+/// Nothing read that slot for a planner, so the block went unwritten on every
+/// planner attribute of every corpus.
+///
+/// The record declares how many `<pl:item>` blocks it carries in its second
+/// member and the reader walks that count: seed `plx-two` (a second
+/// `<pl:item>` added to the control) moves the member from `1` to `2` and
+/// grows the record by exactly one member, and seed `plx-zero` (no item at
+/// all) moves it to `0` and shrinks it by one, with the 31 tail members
+/// unchanged in both.
+///
+/// Every named member below is pinned by a seed against 8.3.27.2214, each the
+/// control tree with one element changed:
+///
+/// * `plx-distinct` gives every number, date, colour and free-form string of
+///   the block a value of its own in one tree; 52 raw tokens move, one run per
+///   element, which is what assigns the extent, colour, date, format and
+///   indent members and the two nested records (`<pl:timeScale>`'s level and
+///   `<pl:period>`).
+/// * `plx-bitsA`..`plx-bitsD` flip the block's twelve boolean elements in four
+///   different combinations, so each boolean has a code of its own across the
+///   four seeds and no two of them share a member.
+/// * `plx-fontp` and `plx-fonti` each switch one `<pl:font>` from `AutoFont`
+///   to `ref="style:TextFont" kind="StyleItem"`, which tells the planner's own
+///   font member from the item's and rules out the item's other font-shaped
+///   member, which the platform never publishes.
+/// * The enumeration members are each named by trying every spelling the XDTO
+///   type accepts: `<pl:itemsTimeRepresentation>` (`DontDisplay` 0,
+///   `BeginTime` 1, `BeginAndEndTime` 2), `<pl:editMode>` (`DisableEdit` 0,
+///   `EnableEdit` 3), `<pl:newItemsTextType>` (`String` 0, `FormattedString`
+///   1), the two `BWAValue` headers (`false` 0, `true` 1, `auto` 2), the time
+///   unit shared by `<pl:periodicVariantUnit>` and the scale level's
+///   `<measure>` (`Second` 5, `Minute` 10, `Hour` 20, `Day` 30, `Week` 40,
+///   `Month` 50, `Quarter` 60, `Year` 70), the scale `<placement>` (`Top` 0,
+///   `Bottom` 1, `Left` 2, `Right` 3), `<dayFormatRule>` (`MonthDay` 1,
+///   `WeekDay` 2, `MonthDayWeekDay` 3) and the line `<v8ui:style>`
+///   (`None` 0, `Solid` 1, `Dotted` 2, `Dashed` 3, `DashDotted` 4).
+///
+/// Census: the five planner attributes of Документооборот КОРП 3.0.21.3 --
+/// the construct's whole population across the eight stand corpora -- differ
+/// from each other in exactly four members (the item, the wrap-header format,
+/// the time scale and the period) and are reproduced byte for byte by the same
+/// walk.
+///
+/// Members no observation varies -- the record's leading `8`, the `0` that
+/// follows the item run, the `1` and `0` on either side of `<pl:period>`, and
+/// the item's own leading `3`, its `{"U"}` value, its second font-shaped
+/// member and its three padding `0`s -- are required to read as observed
+/// rather than interpreted, so a record outside the proven shape is refused.
+fn parse_form_planner_settings_xml(
+    field: &str,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let is_planner = matches!(
+        value_types,
+        [ConstantValueType::Reference { reference }] if reference == FORM_PLANNER_TYPE_REFERENCE
+    );
+    if !is_planner {
+        return None;
+    }
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 4
+        || outer.first()?.trim() != "0"
+        || outer.get(1)?.trim() != "1"
+        || outer.get(2)?.trim() != r#""Planner""#
+    {
+        return None;
+    }
+    let holder = split_1c_braced_fields(outer.get(3)?.trim(), 0)?;
+    if holder.len() != 3
+        || holder.first()?.trim() != r##""#""##
+        || !holder
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_PLANNER_VALUE_TYPE_UUID)
+    {
+        return None;
+    }
+    let record = split_1c_braced_fields(holder.get(2)?.trim(), 0)?;
+    format_form_planner_settings_xml(&record, object_refs, indent)
+}
+
+/// Renders the planner design record `parse_form_planner_settings_xml` has
+/// unwrapped.
+#[allow(clippy::too_many_lines)]
+fn format_form_planner_settings_xml(
+    record: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let child = indent + 1;
+    let child_tab = "\t".repeat(child);
+    if record.first()?.trim() != "8" {
+        return None;
+    }
+    let item_count: usize = record.get(1)?.trim().parse().ok()?;
+    if item_count > MAX_FORM_PLANNER_ITEMS {
+        return None;
+    }
+    let tail_start = 2 + item_count;
+    if record.len() != tail_start + FORM_PLANNER_TAIL_FIELDS {
+        return None;
+    }
+    let t = |offset: usize| record.get(tail_start + offset);
+    if t(0)?.trim() != "0" || t(17)?.trim() != "1" || t(19)?.trim() != "0" {
+        return None;
+    }
+    let mut xml = format!(
+        "{tab}<Settings xmlns:pl=\"http://v8.1c.ru/8.3/data/planner\" xsi:type=\"pl:Planner\">\r\n"
+    );
+    for raw in record.get(2..tail_start)? {
+        xml.push_str(&format_form_planner_item_xml(raw, object_refs, child)?);
+    }
+    macro_rules! scalar {
+        ($name:expr, $value:expr) => {
+            xml.push_str(&format!(
+                "{child_tab}<pl:{}>{}</pl:{}>\r\n",
+                $name, $value, $name
+            ))
+        };
+    }
+    macro_rules! color {
+        ($name:expr, $offset:expr) => {
+            scalar!($name, form_chart_color(t($offset)?, object_refs)?)
+        };
+    }
+    color!("borderColor", 1);
+    // Same text-then-back storage order the item's own pair uses.
+    color!("backColor", 3);
+    color!("textColor", 2);
+    color!("lineColor", 4);
+    xml.push_str(&form_planner_font_xml("font", t(5)?, object_refs, child)?);
+    scalar!(
+        "beginOfRepresentationPeriod",
+        form_planner_date(t(6)?.trim())?
+    );
+    scalar!(
+        "endOfRepresentationPeriod",
+        form_planner_date(t(7)?.trim())?
+    );
+    scalar!("alignElementsOfTimeScale", form_chart_bool(t(8)?)?);
+    scalar!("displayTimeScaleWrapHeaders", form_chart_bool(t(9)?)?);
+    scalar!("displayWrapHeaders", form_chart_bool(t(10)?)?);
+    xml.push_str(&form_planner_localized_xml(
+        "pl:timeScaleWrapHeadersFormat",
+        t(11)?,
+        child,
+    )?);
+    scalar!(
+        "periodicVariantUnit",
+        form_chart_code(t(12)?, FORM_PLANNER_TIME_UNITS)?
+    );
+    scalar!("periodicVariantRepetition", form_chart_integer(t(13)?)?);
+    scalar!("timeScaleWrapBeginIndent", form_chart_integer(t(14)?)?);
+    scalar!("timeScaleWrapEndIndent", form_chart_integer(t(15)?)?);
+    xml.push_str(&form_planner_time_scale_xml(t(16)?, object_refs, child)?);
+    let period = split_1c_braced_fields(t(18)?.trim(), 0)?;
+    if period.len() != 4 || period.first()?.trim() != "1" || period.get(3)?.trim() != "0" {
+        return None;
+    }
+    xml.push_str(&format!("{child_tab}<pl:period>\r\n"));
+    xml.push_str(&format!(
+        "{child_tab}\t<pl:begin>{}</pl:begin>\r\n",
+        form_planner_date(period.get(1)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{child_tab}\t<pl:end>{}</pl:end>\r\n",
+        form_planner_date(period.get(2)?.trim())?
+    ));
+    xml.push_str(&format!("{child_tab}</pl:period>\r\n"));
+    scalar!("displayCurrentDate", form_chart_bool(t(20)?)?);
+    scalar!(
+        "itemsTimeRepresentation",
+        form_chart_code(
+            t(21)?,
+            &[
+                ("0", "DontDisplay"),
+                ("1", "BeginTime"),
+                ("2", "BeginAndEndTime"),
+            ]
+        )?
+    );
+    scalar!(
+        "itemsBehaviorWhenSpaceInsufficient",
+        // The one code the corpus carries, and the only spelling the XDTO
+        // enumeration accepted of the twelve tried; any other ordinal is
+        // refused rather than guessed.
+        form_chart_code(t(22)?, &[("0", "CollapseItems")])?
+    );
+    scalar!("autoMinColumnWidth", form_chart_bool(t(23)?)?);
+    scalar!("autoMinRowHeight", form_chart_bool(t(24)?)?);
+    scalar!("minColumnWidth", form_chart_integer(t(25)?)?);
+    scalar!("minRowHeight", form_chart_integer(t(26)?)?);
+    scalar!(
+        "fixDimensionsHeader",
+        form_chart_code(t(27)?, FORM_PLANNER_BWA_VALUES)?
+    );
+    scalar!(
+        "fixTimeScaleHeader",
+        form_chart_code(t(28)?, FORM_PLANNER_BWA_VALUES)?
+    );
+    xml.push_str(&form_planner_border_xml("border", t(29)?, child)?);
+    scalar!(
+        "newItemsTextType",
+        form_chart_code(t(30)?, &[("0", "String"), ("1", "FormattedString")])?
+    );
+    xml.push_str(&format!("{tab}</Settings>\r\n"));
+    Some(xml)
+}
+
+/// One `<pl:item>` of the planner design record.
+fn format_form_planner_item_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let item = split_1c_braced_fields(field.trim(), 0)?;
+    if item.len() != FORM_PLANNER_ITEM_FIELDS
+        || item.first()?.trim() != "3"
+        || form_chart_compact(item.get(1)?) != r#"{"U"}"#
+        || form_chart_compact(item.get(2)?) != r#"{4,0,{0},"",-1,-1,1,0,""}"#
+        || form_chart_compact(item.get(12)?) != "{0}"
+        || item.get(13)?.trim() != "0"
+        || item.get(14)?.trim() != "0"
+        || item.get(18)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut xml = format!("{tab}<pl:item>\r\n");
+    xml.push_str(&format!("{inner_tab}<pl:value xsi:nil=\"true\"/>\r\n"));
+    xml.push_str(&form_planner_text_xml("text", item.get(5)?, inner)?);
+    xml.push_str(&form_planner_text_xml("tooltip", item.get(15)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<pl:begin>{}</pl:begin>\r\n",
+        form_planner_date(item.get(3)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:end>{}</pl:end>\r\n",
+        form_planner_date(item.get(4)?.trim())?
+    ));
+    // The stored pair is text-then-back, the written pair back-then-text:
+    // seed `plx-distinct` gives the two colours values of their own and the
+    // platform writes each back under the other member's name.
+    for (name, slot) in [("borderColor", 6usize), ("backColor", 8), ("textColor", 7)] {
+        xml.push_str(&format!(
+            "{inner_tab}<pl:{name}>{}</pl:{name}>\r\n",
+            form_chart_color(item.get(slot)?, object_refs)?
+        ));
+    }
+    xml.push_str(&form_planner_font_xml(
+        "font",
+        item.get(9)?,
+        object_refs,
+        inner,
+    )?);
+    xml.push_str(&format!("{inner_tab}<pl:dimensionValues/>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:replacementDate>{}</pl:replacementDate>\r\n",
+        form_planner_date(item.get(11)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:deleted>{}</pl:deleted>\r\n",
+        form_chart_bool(item.get(10)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:id>{}</pl:id>\r\n",
+        form_planner_uuid(item.get(16)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:textFormatted>{}</pl:textFormatted>\r\n",
+        form_chart_bool(item.get(19)?)?
+    ));
+    xml.push_str(&form_planner_border_xml("border", item.get(17)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<pl:editMode>{}</pl:editMode>\r\n",
+        form_chart_code(item.get(20)?, &[("0", "DisableEdit"), ("3", "EnableEdit")])?
+    ));
+    xml.push_str(&format!("{tab}</pl:item>\r\n"));
+    Some(xml)
+}
+
+/// `<pl:timeScale>`: `{3,<placement>,<level count>,<level>*,<transparent>,
+/// <backColor>,<textColor>,<currentLevel>}`. The level count is declared, so
+/// the reader walks it rather than assuming the one level every planner of the
+/// corpus carries.
+///
+/// The block's own children sit in the chart namespace, which the platform
+/// spells inline on each direct child rather than on `<pl:timeScale>` itself;
+/// the level's own children inherit it and carry no attribute.
+fn form_planner_time_scale_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let scale = split_1c_braced_fields(field.trim(), 0)?;
+    if scale.first()?.trim() != "3" {
+        return None;
+    }
+    let level_count: usize = scale.get(2)?.trim().parse().ok()?;
+    if level_count > MAX_FORM_PLANNER_TIME_SCALE_LEVELS || scale.len() != 3 + level_count + 4 {
+        return None;
+    }
+    let placement = form_chart_code(
+        scale.get(1)?,
+        &[("0", "Top"), ("1", "Bottom"), ("2", "Left"), ("3", "Right")],
+    )?;
+    let mut xml = format!("{tab}<pl:timeScale>\r\n");
+    xml.push_str(&format!(
+        "{inner_tab}<placement{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{placement}</placement>\r\n"
+    ));
+    for raw in scale.get(3..3 + level_count)? {
+        xml.push_str(&form_planner_time_scale_level_xml(raw, object_refs, inner)?);
+    }
+    let rest = 3 + level_count;
+    xml.push_str(&format!(
+        "{inner_tab}<transparent{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</transparent>\r\n",
+        form_chart_bool(scale.get(rest)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<backColor{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</backColor>\r\n",
+        form_chart_color(scale.get(rest + 1)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<textColor{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</textColor>\r\n",
+        form_chart_color(scale.get(rest + 2)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<currentLevel{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</currentLevel>\r\n",
+        form_chart_integer(scale.get(rest + 3)?)?
+    ));
+    xml.push_str(&format!("{tab}</pl:timeScale>\r\n"));
+    Some(xml)
+}
+
+/// One `<level>` of `<pl:timeScale>`: a twelve-member record led by `8`.
+fn form_planner_time_scale_level_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let level = split_1c_braced_fields(field.trim(), 0)?;
+    if level.len() != FORM_PLANNER_TIME_SCALE_LEVEL_FIELDS || level.first()?.trim() != "8" {
+        return None;
+    }
+    let labels = split_1c_braced_fields(level.get(8)?.trim(), 0)?;
+    if labels.len() != 2 || labels.first()?.trim() != "0" {
+        return None;
+    }
+    let ticks_record = split_1c_braced_fields(labels.get(1)?.trim(), 0)?;
+    if ticks_record.len() != 3
+        || ticks_record.first()?.trim() != "1"
+        || ticks_record.get(1)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut xml = format!("{tab}<level{FORM_PLANNER_CHART_NAMESPACE_ATTR}>\r\n");
+    xml.push_str(&format!(
+        "{inner_tab}<measure>{}</measure>\r\n",
+        form_chart_code(level.get(1)?, FORM_PLANNER_TIME_UNITS)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<interval>{}</interval>\r\n",
+        form_chart_integer(level.get(2)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<show>{}</show>\r\n",
+        form_chart_bool(level.get(3)?)?
+    ));
+    xml.push_str(&form_planner_line_xml("line", level.get(4)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<scaleColor>{}</scaleColor>\r\n",
+        form_chart_color(level.get(5)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<dayFormatRule>{}</dayFormatRule>\r\n",
+        form_chart_code(
+            level.get(6)?,
+            &[
+                ("1", "MonthDay"),
+                ("2", "WeekDay"),
+                ("3", "MonthDayWeekDay")
+            ]
+        )?
+    ));
+    xml.push_str(&form_planner_localized_xml("format", level.get(7)?, inner)?);
+    xml.push_str(&format!("{inner_tab}<labels>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}\t<ticks>{}</ticks>\r\n",
+        form_chart_integer(ticks_record.get(2)?)?
+    ));
+    xml.push_str(&format!("{inner_tab}</labels>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}<backColor>{}</backColor>\r\n",
+        form_chart_color(level.get(9)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<textColor>{}</textColor>\r\n",
+        form_chart_color(level.get(10)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<showPereodicalLabels>{}</showPereodicalLabels>\r\n",
+        form_chart_bool(level.get(11)?)?
+    ));
+    xml.push_str(&format!("{tab}</level>\r\n"));
+    Some(xml)
+}
+
+/// `{4,0,{0},<style>,<width>,0,<line uuid>,<gap>}` -- the same eight-member
+/// line the chart family carries, except that the planner's own scale line
+/// varies both its style and its `gap` attribute (seeds `plx-distinct` and
+/// `plx-bitsB`/`plx-bitsC`), so neither is spelled as a literal here.
+fn form_planner_line_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 8
+        || fields.first()?.trim() != "4"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_LINE_UUID)
+    {
+        return None;
+    }
+    let style = form_chart_code(
+        fields.get(3)?,
+        &[
+            ("0", "None"),
+            ("1", "Solid"),
+            ("2", "Dotted"),
+            ("3", "Dashed"),
+            ("4", "DashDotted"),
+        ],
+    )?;
+    let width = form_chart_integer(fields.get(4)?)?;
+    let gap = form_chart_bool(fields.get(7)?)?;
+    Some(format!(
+        "{tab}<{name} width=\"{width}\" gap=\"{gap}\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">{style}</v8ui:style>\r\n\
+{tab}</{name}>\r\n"
+    ))
+}
+
+/// `{3,0,{0},<style>,<width>,0,<border uuid>}`, under the planner prefix.
+fn form_planner_border_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 7
+        || fields.first()?.trim() != "3"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_BORDER_UUID)
+    {
+        return None;
+    }
+    let style = form_chart_code(
+        fields.get(3)?,
+        &[("0", "WithoutBorder"), ("1", "Single"), ("200", "Double")],
+    )?;
+    let width = form_chart_integer(fields.get(4)?)?;
+    Some(format!(
+        "{tab}<pl:{name} width=\"{width}\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
+{tab}</pl:{name}>\r\n"
+    ))
+}
+
+/// A `<pl:font>`: the auto shape keeps its own spelling because the shared
+/// font-tuple writer refuses a mask-less auto font outright, exactly as the
+/// chart family's three fonts do.
+fn form_planner_font_xml(
+    name: &str,
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    if form_chart_compact(field) == "{7,3,0,1,100}" {
+        return Some(format!("{tab}<pl:{name} kind=\"AutoFont\"/>\r\n"));
+    }
+    let rendered = parse_form_font_tuple_xml_tag(field.trim(), object_refs, &format!("pl:{name}"))?;
+    Some(format!("{tab}{rendered}\r\n"))
+}
+
+/// A localized member of the planner block, written under the element name the
+/// caller spells (the planner's own members carry the `pl:` prefix, the scale
+/// level's `<format>` inherits the chart namespace and carries none).
+fn form_planner_localized_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let values = parse_form_localized_strings(field.trim());
+    if values.is_empty() {
+        let fields = split_1c_braced_fields(field.trim(), 0)?;
+        if fields.len() != 2 || fields.first()?.trim() != "1" || fields.get(1)?.trim() != "0" {
+            return None;
+        }
+        return Some(format!("{tab}<{name}/>\r\n"));
+    }
+    Some(format_form_localized_section(name, &values, indent))
+}
+
+/// A plain (unlocalized) string member: the platform writes the empty one as
+/// an empty element, which is what the corpus's own empty `<pl:tooltip/>`
+/// shows.
+fn form_planner_text_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let value = parse_1c_string(field.trim())?;
+    if value.is_empty() {
+        return Some(format!("{tab}<pl:{name}/>\r\n"));
+    }
+    Some(format!(
+        "{tab}<pl:{name}>{}</pl:{name}>\r\n",
+        escape_xml_element_text(&value)
+    ))
+}
+
+/// A stored `YYYYMMDDHHMMSS` date, spelled the way the platform writes it.
+fn form_planner_date(text: &str) -> Option<String> {
+    if text.len() != 14 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}T{}:{}:{}",
+        &text[0..4],
+        &text[4..6],
+        &text[6..8],
+        &text[8..10],
+        &text[10..12],
+        &text[12..14]
+    ))
+}
+
+fn form_planner_uuid(text: &str) -> Option<&str> {
+    let text = text.trim();
+    (text.len() == 36
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'))
+    .then_some(text)
+}
+
+/// Decodes a raw `{0,1,"Planner",{"#",<uuid>,{8,…}}}` field -- the whole
+/// `field` argument a planner-typed form attribute carries -- and renders it at
+/// the indent a `<Settings>` element sits at three levels into `<Attribute>`.
+#[cfg(test)]
+pub(super) fn parse_and_render_form_planner_settings_for_test(text: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_PLANNER_TYPE_REFERENCE.to_string(),
+    }];
+    let object_refs = BTreeMap::new();
+    parse_form_planner_settings_xml(text, &value_types, &object_refs, 3)
+}
+
+/// The QName a planner-typed attribute's `<v8:Type>` spells, and the platform
+/// type ID behind it.
+const FORM_PLANNER_TYPE_REFERENCE: &str = "pl:Planner";
+const FORM_PLANNER_VALUE_TYPE_UUID: &str = "43dc7f37-5b1d-42a7-8f28-f545080d0255";
+/// Members behind the declared item run.
+const FORM_PLANNER_TAIL_FIELDS: usize = 31;
+const FORM_PLANNER_ITEM_FIELDS: usize = 21;
+const FORM_PLANNER_TIME_SCALE_LEVEL_FIELDS: usize = 12;
+/// Bounds on the two declared counts, so a corrupt count cannot make the
+/// reader walk a record it does not have.
+const MAX_FORM_PLANNER_ITEMS: usize = 4096;
+const MAX_FORM_PLANNER_TIME_SCALE_LEVELS: usize = 16;
+/// The time unit shared by `<pl:periodicVariantUnit>` and a scale level's
+/// `<measure>`; every ordinal was named by a seed that spells it.
+const FORM_PLANNER_TIME_UNITS: &[(&str, &'static str)] = &[
+    ("5", "Second"),
+    ("10", "Minute"),
+    ("20", "Hour"),
+    ("30", "Day"),
+    ("40", "Week"),
+    ("50", "Month"),
+    ("60", "Quarter"),
+    ("70", "Year"),
+];
+/// The `BWAValue` header switches: a boolean with an `auto` state of its own.
+const FORM_PLANNER_BWA_VALUES: &[(&str, &'static str)] =
+    &[("0", "false"), ("1", "true"), ("2", "auto")];
+/// The chart namespace the platform spells inline on every direct child of
+/// `<pl:timeScale>` and on the scale level itself.
+const FORM_PLANNER_CHART_NAMESPACE_ATTR: &str = r#" xmlns="http://v8.1c.ru/8.2/data/chart""#;
+
+/// The `<Settings>` block a form attribute of graphical-scheme type carries.
+///
+/// The attribute stores its design in the same slot 14 every other attribute
+/// keeps its settings in, as
+/// `{0,1,"Flowchart",{"#",<scheme type uuid>,{5,{<record>},0,0}}}`. Nothing
+/// read that slot for a graphical scheme, so the block went unwritten on every
+/// such attribute of every corpus.
+///
+/// The record itself declares how many print-property pairs trail it, and the
+/// reader walks that count rather than a fixed arity: `{1,<backColor>,
+/// <enableGrid>,<gridHorizontalStep>,<gridVerticalStep>,<drawGridMode>,<count>}`
+/// followed by `count` `<key>,{"N",<val>}` pairs.
+///
+/// Evidence, member by member. Seeds against 8.3.27.2214, each the same tree
+/// with one element changed against `gsx-base`: `gsx-backred`
+/// (`<d4p1:backColor>#FF0000`) moves only the colour tuple; `gsx-gridoff`
+/// (`enableGrid` false) moves only member 2; `gsx-steps` (steps 33/44) moves
+/// only members 3 and 4; `gsx-gridnone` (`drawGridMode` `None`) and
+/// `gsx-gridmode3` (`Dots`) move only member 5, to `0` and `1` against the
+/// `3` `Lines` carries; `gsx-printvals` moves exactly the six stored values
+/// and `gsx-printfew` (two pairs instead of six) moves member 6 from `6` to
+/// `2` and drops exactly the four dropped pairs. The whole native population
+/// of the construct -- the 7 graphical-scheme attributes of Документооборот
+/// КОРП 3.0.21.3, the only corpus of the eight that carries one -- is
+/// reproduced byte for byte by the same walk; those 7 differ from each other
+/// only in member 5 (`3` on the 6 written `Lines`, `0` on the one written
+/// `None`).
+///
+/// Two written members are not stored at all, and the seeds are what proves
+/// it rather than the absence of an obvious slot: `gsx-bpuuid`
+/// (`<d4p1:bpUUID>11112222-…`), `gsx-outenable` and `gsx-outdisable`
+/// (`<d4p1:useOutput>` `Enable`/`Disable`) each store bytes identical to
+/// `gsx-base`, and the platform writes the zero UUID and `Auto` back on all
+/// three. The two constants are therefore written as constants, and the
+/// members the corpus never varies -- the record's leading `1` and the
+/// holder's trailing `0,0` -- are required to read as observed rather than
+/// ignored, so a record outside the proven shape is refused, not approximated.
+fn parse_form_flowchart_settings_xml(
+    field: &str,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let is_flowchart = matches!(
+        value_types,
+        [ConstantValueType::Reference { reference }] if reference == FORM_FLOWCHART_TYPE_REFERENCE
+    );
+    if !is_flowchart {
+        return None;
+    }
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 4
+        || outer.first()?.trim() != "0"
+        || outer.get(1)?.trim() != "1"
+        || outer.get(2)?.trim() != r#""Flowchart""#
+    {
+        return None;
+    }
+    let holder = split_1c_braced_fields(outer.get(3)?.trim(), 0)?;
+    if holder.len() != 3
+        || holder.first()?.trim() != r##""#""##
+        || !holder
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_FLOWCHART_VALUE_TYPE_UUID)
+    {
+        return None;
+    }
+    let value = split_1c_braced_fields(holder.get(2)?.trim(), 0)?;
+    if value.len() != 4
+        || value.first()?.trim() != "5"
+        || value.get(2)?.trim() != "0"
+        || value.get(3)?.trim() != "0"
+    {
+        return None;
+    }
+    let wrapped = split_1c_braced_fields(value.get(1)?.trim(), 0)?;
+    if wrapped.len() != 1 {
+        return None;
+    }
+    let record = split_1c_braced_fields(wrapped.first()?.trim(), 0)?;
+    format_form_flowchart_settings_xml(&record, object_refs, indent)
+}
+
+/// Renders the graphical-scheme design record `parse_form_flowchart_settings_xml`
+/// has unwrapped. Split out so `tests.rs` can drive a platform-proven raw
+/// record straight through the writer, the way the chart family already is.
+fn format_form_flowchart_settings_xml(
+    record: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let child_tab = "\t".repeat(indent + 1);
+    let item_tab = "\t".repeat(indent + 2);
+    if record.len() < FORM_FLOWCHART_RECORD_HEAD || record.first()?.trim() != "1" {
+        return None;
+    }
+    let print_property_count = record
+        .get(FORM_FLOWCHART_RECORD_HEAD - 1)?
+        .trim()
+        .parse::<usize>()
+        .ok()?;
+    if record.len() != FORM_FLOWCHART_RECORD_HEAD + 2 * print_property_count {
+        return None;
+    }
+    let back_color = parse_form_control_color(record.get(1)?, object_refs)?;
+    let enable_grid = form_chart_bool(record.get(2)?)?;
+    let grid_horizontal_step = form_chart_integer(record.get(3)?)?;
+    let grid_vertical_step = form_chart_integer(record.get(4)?)?;
+    let draw_grid_mode = form_chart_code(
+        record.get(5)?,
+        &[("0", "None"), ("1", "Dots"), ("3", "Lines")],
+    )?;
+    let mut xml = format!(
+        "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/graphscheme\" xsi:type=\"d4p1:FlowchartContextType\">\r\n"
+    );
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:backColor>{back_color}</d4p1:backColor>\r\n"
+    ));
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:enableGrid>{enable_grid}</d4p1:enableGrid>\r\n"
+    ));
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:drawGridMode>{draw_grid_mode}</d4p1:drawGridMode>\r\n"
+    ));
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:gridHorizontalStep>{grid_horizontal_step}</d4p1:gridHorizontalStep>\r\n"
+    ));
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:gridVerticalStep>{grid_vertical_step}</d4p1:gridVerticalStep>\r\n"
+    ));
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:bpUUID>{FORM_FLOWCHART_UNSTORED_BP_UUID}</d4p1:bpUUID>\r\n"
+    ));
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:useOutput>{FORM_FLOWCHART_UNSTORED_USE_OUTPUT}</d4p1:useOutput>\r\n"
+    ));
+    for pair in record
+        .get(FORM_FLOWCHART_RECORD_HEAD..)?
+        .chunks_exact(2)
+        .take(print_property_count)
+    {
+        let key = form_chart_integer(pair.first()?)?;
+        let value = parse_form_setting_number(pair.get(1)?)?;
+        if value.parse::<i64>().is_err() {
+            return None;
+        }
+        xml.push_str(&format!("{child_tab}<d4p1:printPropItem>\r\n"));
+        xml.push_str(&format!("{item_tab}<d4p1:key>{key}</d4p1:key>\r\n"));
+        xml.push_str(&format!("{item_tab}<d4p1:val>{value}</d4p1:val>\r\n"));
+        xml.push_str(&format!("{child_tab}</d4p1:printPropItem>\r\n"));
+    }
+    xml.push_str(&format!("{tab}</Settings>\r\n"));
+    Some(xml)
+}
+
+/// Decodes a raw `{0,1,"Flowchart",{"#",<uuid>,{5,{…},0,0}}}` field -- the
+/// whole `field` argument a graphical-scheme-typed form attribute carries --
+/// and renders it at the indent a `<Settings>` element sits at three levels
+/// into `<Attribute>`, mirroring the chart family's own test hook.
+#[cfg(test)]
+pub(super) fn parse_and_render_form_flowchart_settings_for_test(text: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_FLOWCHART_TYPE_REFERENCE.to_string(),
+    }];
+    let object_refs = BTreeMap::new();
+    parse_form_flowchart_settings_xml(text, &value_types, &object_refs, 3)
+}
+
+/// The QName a graphical-scheme-typed attribute's `<v8:Type>` spells, and the
+/// platform type ID behind it.
+const FORM_FLOWCHART_TYPE_REFERENCE: &str = "d5p1:FlowchartContextType";
+const FORM_FLOWCHART_VALUE_TYPE_UUID: &str = "4af83795-fc2a-48cd-9bea-ce665789a62c";
+/// Members before the print-property pairs, the last of which declares their
+/// count.
+const FORM_FLOWCHART_RECORD_HEAD: usize = 7;
+/// The two members the platform writes but does not store; see
+/// `parse_form_flowchart_settings_xml` for the seeds that prove it.
+const FORM_FLOWCHART_UNSTORED_BP_UUID: &str = "00000000-0000-0000-0000-000000000000";
+const FORM_FLOWCHART_UNSTORED_USE_OUTPUT: &str = "Auto";
 
 /// The `<Settings>` block a form attribute of chart type carries.
 ///

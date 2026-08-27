@@ -3040,6 +3040,10 @@ impl FormFieldTitleLocationSchema {
             // 11.5.27.75 and the platform writes `<TitleLocation>None</TitleLocation>`
             // on all five, the same code-to-value pair the other field kinds use.
             "PDFDocumentField" => "20",
+            // Slot 7 reads `0` on all five `PlannerField` items of
+            // Документооборот КОРП 3.0.21.3 and the platform writes
+            // `<TitleLocation>None</TitleLocation>` on all five.
+            "PlannerField" => "19",
             _ => return None,
         };
         if !matches!(wrapper, "37" | "48")
@@ -3307,6 +3311,7 @@ pub(crate) enum FormChildItemEventCollectionOwner {
     SpreadSheetDocumentField,
     CalendarField,
     GraphicalSchemaField,
+    PlannerField,
     Pages,
 }
 
@@ -3341,6 +3346,22 @@ const FORM_CALENDAR_SELECTION_EVENT_UUID: &str = "2feb1ee9-b750-4352-bb4c-67ba1c
 const FORM_CALENDAR_ON_ACTIVATE_DATE_EVENT_UUID: &str = "3793cac5-9f9a-4b7c-adda-386e5cccf794";
 const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
 const FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID: &str = "526c501f-ed3f-4db4-8731-fd0324707501";
+// The planner's own eight events. Each identifier is named by the whole
+// native population of the construct: the five `PlannerField` items of
+// Документооборот КОРП 3.0.21.3 store between six and eight of them, in the
+// order the platform prints, and every `<Event name>` the five write is
+// matched by exactly one identifier, with no identifier left unnamed and no
+// name used twice.
+const FORM_PLANNER_BEFORE_CREATE_EVENT_UUID: &str = "2c8ad9e0-53f0-406d-9c8b-460f6cb6fd74";
+const FORM_PLANNER_ON_CURRENT_REPRESENTATION_PERIOD_CHANGE_EVENT_UUID: &str =
+    "5e6c8466-44d0-4fd0-8d87-ac749c16ff60";
+const FORM_PLANNER_ON_EDIT_END_EVENT_UUID: &str = "68fc3ed6-a517-4843-a7a4-473cf4e27209";
+const FORM_PLANNER_BEFORE_DELETE_EVENT_UUID: &str = "6f758c30-b414-4949-a236-584bccb0102a";
+const FORM_PLANNER_BEFORE_START_EDIT_EVENT_UUID: &str = "82f5f464-5aa5-4efc-9813-51432c74ff8e";
+const FORM_PLANNER_BEFORE_START_QUICK_EDIT_EVENT_UUID: &str =
+    "b56fa930-855b-4e67-a87c-8ea917d1dfab";
+const FORM_PLANNER_SELECTION_EVENT_UUID: &str = "b6aaed5c-8a5a-4a03-bd5b-1f14d0f099ec";
+const FORM_PLANNER_ON_ACTIVATE_EVENT_UUID: &str = "be7d3bef-f900-44da-a5e9-88da3c0a9a8a";
 
 impl FormChildItemEventCollectionSchema {
     pub(crate) fn from_field_schema(
@@ -3356,6 +3377,7 @@ impl FormChildItemEventCollectionSchema {
             ),
             "CalendarField" => (FormChildItemEventCollectionOwner::CalendarField, 14),
             "GraphicalSchemaField" => (FormChildItemEventCollectionOwner::GraphicalSchemaField, 6),
+            "PlannerField" => (FormChildItemEventCollectionOwner::PlannerField, 7),
             _ => return None,
         };
         Some(Self {
@@ -3464,6 +3486,22 @@ impl FormChildItemEventCollectionSchema {
                 // already-named `Selection`, and the platform prints
                 // `OnActivate` for it.
                 (FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
+            ],
+            FormChildItemEventCollectionOwner::PlannerField => &[
+                (FORM_PLANNER_BEFORE_CREATE_EVENT_UUID, "BeforeCreate"),
+                (
+                    FORM_PLANNER_ON_CURRENT_REPRESENTATION_PERIOD_CHANGE_EVENT_UUID,
+                    "OnCurrentRepresentationPeriodChange",
+                ),
+                (FORM_PLANNER_ON_EDIT_END_EVENT_UUID, "OnEditEnd"),
+                (FORM_PLANNER_BEFORE_DELETE_EVENT_UUID, "BeforeDelete"),
+                (FORM_PLANNER_BEFORE_START_EDIT_EVENT_UUID, "BeforeStartEdit"),
+                (
+                    FORM_PLANNER_BEFORE_START_QUICK_EDIT_EVENT_UUID,
+                    "BeforeStartQuickEdit",
+                ),
+                (FORM_PLANNER_SELECTION_EVENT_UUID, "Selection"),
+                (FORM_PLANNER_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
             ],
             FormChildItemEventCollectionOwner::Pages => &[(
                 FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID,
@@ -3626,6 +3664,15 @@ impl FormFieldSchema {
             // holds a colour in any option slot, so no colour coordinate is
             // claimed here.
             "PDFDocumentField" => ("20", 14, "1", None, None, None),
+            // The planner field's own 11-member option tuple. Its
+            // discriminator `19` had no arm anywhere, so every
+            // `<PlannerField>` of the corpus was dropped whole. No colour
+            // coordinate is claimed: all five items of Документооборот КОРП
+            // 3.0.21.3 -- the construct's whole population across the eight
+            // stand corpora -- agree slot for slot outside the extent pair,
+            // the drag flag and the event collection, and none of them
+            // carries a colour element.
+            "PlannerField" => ("19", 11, "1", None, None, None),
             _ => return None,
         };
         let field_count_base = if item_tag == "PDFDocumentField" {

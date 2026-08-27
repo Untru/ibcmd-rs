@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-planner-settings",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "A minimal synthetic DataProcessor (ChartFormTest) with one Form carrying a single pl:Planner-typed attribute \"Планировщик\" and a PlannerField bound to it, built from the shape the five native planner attributes of Документооборот КОРП 3.0.21.3 carry. Each variant changes one axis of the control and is round-tripped through ibcmd 8.3.27.2214 itself; the raw entry is the whole slot-14 field of the attribute record as the round-tripped .cf stores it."
+  },
+  "claims": [
+    "The design record is unwrapped as {0,1,\"Planner\",{\"#\",<type uuid>,{8,<item count>,…}}}.",
+    "Member 1 declares how many <pl:item> blocks follow, and the 31 tail members sit behind them; seeds items-two and items-zero move the count and the record length together.",
+    "The stored colour pair is text-then-back where the platform writes back-then-text, in the planner block and in each item.",
+    "A <pl:timeScale> declares its own level count in member 2 and the reader walks it."
+  ],
+  "non_claims": [
+    "The record members no observation varies -- the leading 8, the 0 behind the item run, the 1 and 0 on either side of <pl:period>, the item's leading 3, its {\"U\"} value, its second font-shaped member and its three padding zeroes -- are required to read as observed rather than interpreted.",
+    "<pl:itemsBehaviorWhenSpaceInsufficient> names only the ordinal 0 (CollapseItems): it is the only spelling the XDTO enumeration accepted of the twelve tried, so any other ordinal is refused.",
+    "The <dayFormatRule> ordinal 0 is unnamed: no spelling the XDTO enumeration accepts maps to it."
+  ],
+  "objects": [
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-base",
+      "variant": "control: one <pl:item>, everything at the shape the five native records share",
+      "raw_entry": {
+        "path": "raw/control.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/control-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-distinct",
+      "variant": "every number, date, colour and free-form string given a value of its own",
+      "raw_entry": {
+        "path": "raw/distinct-values.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/distinct-values-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-bitsA",
+      "variant": "boolean pattern A",
+      "raw_entry": {
+        "path": "raw/bits-a.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/bits-a-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-bitsB",
+      "variant": "boolean pattern B",
+      "raw_entry": {
+        "path": "raw/bits-b.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/bits-b-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-bitsC",
+      "variant": "boolean pattern C",
+      "raw_entry": {
+        "path": "raw/bits-c.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/bits-c-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-bitsD",
+      "variant": "boolean pattern D",
+      "raw_entry": {
+        "path": "raw/bits-d.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/bits-d-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-fontp",
+      "variant": "the planner's own <pl:font> switched to ref=\"style:TextFont\" kind=\"StyleItem\"",
+      "raw_entry": {
+        "path": "raw/font-planner.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/font-planner-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-fonti",
+      "variant": "the item's <pl:font> switched to ref=\"style:TextFont\" kind=\"StyleItem\"",
+      "raw_entry": {
+        "path": "raw/font-item.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/font-item-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-two",
+      "variant": "two <pl:item> blocks: the declared count reads 2",
+      "raw_entry": {
+        "path": "raw/items-two.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/items-two-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Планировщик",
+      "seed": "plx-zero",
+      "variant": "no <pl:item> at all: the declared count reads 0",
+      "raw_entry": {
+        "path": "raw/items-zero.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/items-zero-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "Catalogs/ЗаписиРабочегоКалендаря/Forms/ВыборВремени",
+      "form": "ВыборВремени",
+      "attribute": "Планировщик",
+      "seed": null,
+      "variant": "native Документооборот КОРП 3.0.21.3 record",
+      "raw_entry": {
+        "path": "raw/native-do-vremya.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/native-do-vremya-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "Documents/Бронь/Forms/БронированиеПомещений",
+      "form": "БронированиеПомещений",
+      "attribute": "Планировщик",
+      "seed": null,
+      "variant": "native Документооборот КОРП 3.0.21.3 record",
+      "raw_entry": {
+        "path": "raw/native-do-bron.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/native-do-bron-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributePlannerSettings",
+      "owner": "Catalogs/Мероприятия/Forms/ФормаСписка",
+      "form": "ФормаСписка",
+      "attribute": "Планировщик",
+      "seed": null,
+      "variant": "native Документооборот КОРП 3.0.21.3 record",
+      "raw_entry": {
+        "path": "raw/native-do-meropriyatiya.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/native-do-meropriyatiya-settings.xml"
+        }
+      ]
+    }
+  ]
+}

@@ -9861,7 +9861,7 @@ fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
 
 #[test]
 fn formats_dynamic_list_server_state_xml_in_settings() {
-    let xml = format_form_attributes_xml(&[FormAttribute { chart_settings: None,
+    let xml = format_form_attributes_xml(&[FormAttribute { design_time_settings: None,
         view_rights: None,
         edit_rights: None,
             id: "2".to_string(),
@@ -10642,7 +10642,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
     apply_implicit_form_dynamic_list_settings(&mut settings);
 
     let xml = format_form_attributes_xml(&[FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "2".to_string(),
@@ -11032,7 +11032,7 @@ fn rejects_non_dcs_or_malformed_dynamic_list_appearance() {
 #[test]
 fn formats_explicit_false_dynamic_data_read() {
     let xml = format_form_attributes_xml(&[FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "2".to_string(),
@@ -11304,7 +11304,7 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
     );
 
     let mut attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -12229,7 +12229,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
 
     fn attribute(dynamic_list: bool) -> FormAttribute {
         FormAttribute {
-            chart_settings: None,
+            design_time_settings: None,
             view_rights: None,
             edit_rights: None,
             id: "1".to_string(),
@@ -12805,7 +12805,7 @@ fn extracts_form_child_items_from_layout_pairs() {
     );
     let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
     let attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -14594,7 +14594,7 @@ fn extracts_wrapper55_table_row_picture_data_path() {
 #[test]
 fn extracts_wrapper55_table_user_settings_group() {
     let attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -15977,7 +15977,7 @@ fn extracts_form_standard_command_names_from_kind0_buttons() {
 #[test]
 fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
     let attribute = FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "8".to_string(),
@@ -16142,7 +16142,7 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
 #[test]
 fn resolves_document_form_paths_from_the_typed_metadata_owner() {
     let attribute = FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16287,7 +16287,7 @@ fn typed_form_metadata_paths_cover_members_and_fail_closed() {
     }
 
     let chart_owner = form_attribute_metadata_owner(&FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16373,7 +16373,7 @@ fn indexes_direct_table_columns_from_their_structural_table_parent() {
     let table = r#"{73,{785,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"ТаблицаСумм",0,0,1,{1,0},0,{1,{19}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#
         .replacen("{1,0}", &child_container, 1);
     let attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "19".to_string(),
@@ -16496,7 +16496,7 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
     let line_b = line_number_field("42", "SecondaryLineNumber");
     let line_c = line_number_field("43", "TertiaryLineNumber");
     let mut attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16671,7 +16671,7 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
 #[test]
 fn extracts_nested_table_additional_columns_group() {
     let attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16718,7 +16718,7 @@ fn extracts_nested_table_additional_columns_group() {
 #[test]
 fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_unindexed() {
     let attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16773,7 +16773,7 @@ fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_u
 fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
     let metadata_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -16876,7 +16876,7 @@ fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
 #[test]
 fn resolves_additional_columns_binding_per_owner_and_rejects_collisions() {
     let attribute = |id: &str, name: &str| FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: id.to_string(),
@@ -20855,6 +20855,8 @@ fn formats_table_search_additions_as_direct_sections() {
         footer_picture_transparent_pixel: None,
         picture_transparent_pixel: None,
         html_document_output: None,
+        graphical_scheme_edit: None,
+        excluded_commands: Vec::new(),
         button_check: None,
         tag: "Table",
         id: "25".to_string(),
@@ -20874,7 +20876,6 @@ fn formats_table_search_additions_as_direct_sections() {
         usual_group_shortcut: None,
         enable_content_change: None,
         child_items_width: None,
-        parent_child_items_width: None,
         control_representation: None,
         collapsed: None,
         usual_group_horizontal_align: None,
@@ -21118,6 +21119,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
                 html_document_output: None,
+                graphical_scheme_edit: None,
+                excluded_commands: Vec::new(),
                 button_check: None,
                 tag: "SearchStringAddition",
                 id: "26".to_string(),
@@ -21137,7 +21140,6 @@ fn formats_table_search_additions_as_direct_sections() {
                 usual_group_shortcut: None,
                 enable_content_change: None,
                 child_items_width: None,
-                parent_child_items_width: None,
                 control_representation: None,
                 collapsed: None,
                 usual_group_horizontal_align: None,
@@ -21382,6 +21384,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
                 html_document_output: None,
+                graphical_scheme_edit: None,
+                excluded_commands: Vec::new(),
                 button_check: None,
                 tag: "InputField",
                 id: "40".to_string(),
@@ -21401,7 +21405,6 @@ fn formats_table_search_additions_as_direct_sections() {
                 usual_group_shortcut: None,
                 enable_content_change: None,
                 child_items_width: None,
-                parent_child_items_width: None,
                 control_representation: None,
                 collapsed: None,
                 usual_group_horizontal_align: None,
@@ -24437,7 +24440,7 @@ fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct()
 #[test]
 fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_terminals() {
     let attribute = FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
@@ -25108,7 +25111,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
     };
     let attributes = vec![
         FormAttribute {
-            chart_settings: None,
+            design_time_settings: None,
             view_rights: None,
             edit_rights: None,
             id: "1".to_string(),
@@ -25138,7 +25141,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
             unresolvable_field_item_ids: BTreeSet::new(),
         },
         FormAttribute {
-            chart_settings: None,
+            design_time_settings: None,
             view_rights: None,
             edit_rights: None,
             id: "2".to_string(),
@@ -27158,16 +27161,25 @@ fn label_decoration_writes_shortcut_from_fixed_slot_sixteen() {
 }
 
 #[test]
-fn graphical_schema_field_writes_edit_false_exactly_when_read_only() {
-    // Real bytes: DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма/
-    // Ext/Form.xml, SSL demo 3.1.12.297 (storage element
-    // `2d885109-4c96-41c0-a996-785bfd793c2d.0`). Traced across SSL demo, SSL
-    // base, UT 11.5.27.75 and ERP УХ 3.2.12.6 -- 14 native
-    // `GraphicalSchemaField` items, the construct's whole population -- the 9
-    // that carry `<ReadOnly>true</ReadOnly>` all also write
-    // `<Edit>false</Edit>` immediately behind their geometry (`Width`/
-    // `Height`), and the other 5 write neither, with no counter-example.
-    let read_only_item = parse_form_child_item(
+fn graphical_schema_field_writes_edit_and_auto_max_width_from_its_own_option_slots() {
+    // Real bytes, both records. The positive item is
+    // DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма/Ext/Form.xml of
+    // SSL demo 3.1.12.297 (storage element
+    // `2d885109-4c96-41c0-a996-785bfd793c2d.0`); the negative one is
+    // BusinessProcesses/КомплексныйПроцесс/Forms/КарточкаСхемы/Ext/Form.xml of
+    // Документооборот КОРП 3.0.21.3 (`905e6ce1-6815-429d-abfb-11ff59cb056c.0`).
+    //
+    // Both carry `<ReadOnly>true</ReadOnly>`, and the platform writes
+    // `<Edit>false</Edit>` on the first and none on the second -- which is
+    // what refutes the rule this test used to state, that a read-only
+    // graphical scheme field always writes `<Edit>`. The two items differ in
+    // option slot 4 (`0` against `1`), the slot seed `gsx-edit` moves and
+    // nothing else; the same pair differs in option slot 7 (`1` against `0`),
+    // the slot seed `gsx-amw` moves, and the platform writes
+    // `<AutoMaxWidth>false</AutoMaxWidth>` on exactly the second. The negative
+    // item's extent pair holds the unwritten `50`/`10` defaults seed
+    // `gsx-wh5010` pins, so it publishes no `<Width>`/`<Height>` either.
+    let edit_item = parse_form_child_item(
         r#"{37,
 {3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,14,"КартаМаршрута",0,0,
 {1,1,
@@ -27292,45 +27304,96 @@ fn graphical_schema_field_writes_edit_false_exactly_when_read_only() {
         &BTreeMap::new(),
     )
     .unwrap();
-    assert_eq!(read_only_item.tag, "GraphicalSchemaField");
-    assert_eq!(read_only_item.read_only, Some(true));
-    assert_eq!(read_only_item.width.as_deref(), Some("80"));
-    assert_eq!(read_only_item.height.as_deref(), Some("25"));
-    let xml = format_form_child_items_xml(std::slice::from_ref(&read_only_item), 1);
+    assert_eq!(edit_item.tag, "GraphicalSchemaField");
+    assert_eq!(edit_item.read_only, Some(true));
+    assert_eq!(edit_item.width.as_deref(), Some("80"));
+    assert_eq!(edit_item.height.as_deref(), Some("25"));
+    assert_eq!(edit_item.graphical_scheme_edit, Some(false));
+    assert_eq!(edit_item.auto_max_width, None);
+    let xml = format_form_child_items_xml(std::slice::from_ref(&edit_item), 1);
     let height = xml.find("<Height>25</Height>").unwrap();
     let edit = xml.find("<Edit>false</Edit>").unwrap();
     let context_menu = xml.find("<ContextMenu").unwrap();
     assert!(height < edit, "Edit trails Height: {xml}");
     assert!(edit < context_menu, "Edit leads ContextMenu: {xml}");
+    assert!(
+        !xml.contains("<AutoMaxWidth>"),
+        "no AutoMaxWidth expected: {xml}"
+    );
 
-    // Negative control: the project's own synthetic document-field record
-    // (`document_field_record_for_test`, already used above and at
-    // `dispatches_wrapper_37_document_fields_without_owner_specific_conditions`
-    // and `parses_document_field_properties_from_common_and_typed_slots`)
-    // with slot 14 -- the `show_title`-shaped slot `GraphicalSchemaField`
-    // shares with `TextDocumentField`/`HTMLDocumentField`/`RadioButtonField`
-    // and the one this tag's `read_only` is actually read from, since
-    // `FormFieldSchema::read_only_slot` does not cover `GraphicalSchemaField`
-    // -- flipped from the template's default `"1"` to `"0"`. A native
-    // `GraphicalSchemaField` with `<ReadOnly>` absent behaves the same way:
-    // `DataProcessors/СтруктураВладения` and `DataProcessors/СхемыСправки` of
-    // ERP УХ 3.2.12.6 both carry it, but neither form round-trips through the
-    // single-item harness in isolation (both are rejected upstream by an
-    // unrelated DCS conditional-appearance gap, out of scope here), so the
-    // negative side is exercised through the existing synthetic record
-    // instead of real bytes.
-    let mut editable_fields: Vec<String> = split_1c_braced_fields(
-        &document_field_record_for_test("14", r#"{1,1,{"en","Schema"}}"#),
-        0,
-    )
-    .unwrap()
-    .into_iter()
-    .map(str::to_string)
-    .collect();
-    editable_fields[14] = "0".to_string();
-    let editable_record = format!("{{{}}}", editable_fields.join(","));
-    let editable_item = parse_form_child_item(
-        &editable_record,
+    let auto_max_width_item = parse_form_child_item(
+        r#"{37,
+{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,14,"Схема",0,0,
+{1,1,
+{"ru","Схема"}
+},
+{1,0},
+{1,
+{3}
+},
+{0},1,1,2,1,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{3,50,10,0,1,
+{3,4,
+{0}
+},
+{0,1,0},0,0,0,1,0,1,1},
+{0,1,0},1,
+{22,
+{2,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СхемаКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СхемаРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
         None,
         None,
         &BTreeMap::new(),
@@ -27339,12 +27402,22 @@ fn graphical_schema_field_writes_edit_false_exactly_when_read_only() {
         &BTreeMap::new(),
     )
     .unwrap();
-    assert_eq!(editable_item.tag, "GraphicalSchemaField");
-    assert_ne!(editable_item.read_only, Some(true));
-    let xml_editable = format_form_child_items_xml(std::slice::from_ref(&editable_item), 1);
+    assert_eq!(auto_max_width_item.tag, "GraphicalSchemaField");
+    assert_eq!(auto_max_width_item.read_only, Some(true));
+    assert_eq!(auto_max_width_item.graphical_scheme_edit, None);
+    assert_eq!(auto_max_width_item.auto_max_width, Some(false));
+    assert_eq!(auto_max_width_item.width, None);
+    assert_eq!(auto_max_width_item.height, None);
+    let xml = format_form_child_items_xml(std::slice::from_ref(&auto_max_width_item), 1);
+    assert!(!xml.contains("<Edit>"), "no Edit expected: {xml}");
+    assert!(!xml.contains("<Width>"), "no Width expected: {xml}");
+    assert!(!xml.contains("<Height>"), "no Height expected: {xml}");
+    let title_location = xml.find("<TitleLocation>None</TitleLocation>").unwrap();
+    let auto_max_width = xml.find("<AutoMaxWidth>false</AutoMaxWidth>").unwrap();
+    let context_menu = xml.find("<ContextMenu").unwrap();
     assert!(
-        !xml_editable.contains("<Edit>"),
-        "no Edit expected: {xml_editable}"
+        title_location < auto_max_width && auto_max_width < context_menu,
+        "AutoMaxWidth sits between TitleLocation and ContextMenu: {xml}"
     );
 }
 
@@ -68318,7 +68391,7 @@ fn data_path_input_field(id: &str, name: &str, binding: &str) -> String {
 
 fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>) -> FormAttribute {
     FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: id.to_string(),
@@ -74153,24 +74226,636 @@ fn parses_bot_properties_with_short_header_wrapper() {
     assert!(!short_text.contains("{3,"));
 }
 
+#[test]
+fn planner_field_writes_its_own_geometry_drag_flag_and_events() {
+    // Real bytes: Catalogs/Мероприятия/Forms/ФормаСписка/Ext/Form.xml of
+    // Документооборот КОРП 3.0.21.3 (storage element
+    // `401478f9-e86f-4ab8-84ef-bc5ec084581e.0`). The wrapper-`37`
+    // discriminator `19` had no arm at all, so all five `<PlannerField>`
+    // elements of the corpus were dropped whole.
+    //
+    // This item exercises three of the four things the kind reads out of its
+    // own option tuple: `<Height>15</Height>` from slot 2 (against the `10`
+    // default seed `plx-h15` pins), `<EnableStartDrag>true</EnableStartDrag>`
+    // from slot 5 (seed `plx-drag`), and the six-entry event collection at
+    // slot 7 -- this item is the one of the five that carries no
+    // `BeforeCreate`, so the walk is over the stored entries and not over a
+    // fixed list. Its width holds the unwritten `50` default, so no `<Width>`
+    // is published.
+    let item = parse_form_child_item(
+        r#"{37,
+{544,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,19,"Планировщик",0,0,
+{1,1,
+{"ru","Планировщик"}
+},
+{1,0},
+{1,
+{7}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,50,15,1,1,1,0,
+{6,5e6c8466-44d0-4fd0-8d87-ac749c16ff60,"ПланировщикПриСменеТекущегоПериодаОтображения",68fc3ed6-a517-4843-a7a4-473cf4e27209,"ПланировщикПриОкончанииРедактирования",6f758c30-b414-4949-a236-584bccb0102a,"ПланировщикПередУдалением",82f5f464-5aa5-4efc-9813-51432c74ff8e,"ПланировщикПередНачаломРедактирования",b56fa930-855b-4e67-a87c-8ea917d1dfab,"ПланировщикПередНачаломБыстрогоРедактирования",b6aaed5c-8a5a-4a03-bd5b-1f14d0f099ec,"ПланировщикВыбор",1,0,5e6c8466-44d0-4fd0-8d87-ac749c16ff60,0,1,68fc3ed6-a517-4843-a7a4-473cf4e27209,0,1,6f758c30-b414-4949-a236-584bccb0102a,0,1,82f5f464-5aa5-4efc-9813-51432c74ff8e,0,1,b56fa930-855b-4e67-a87c-8ea917d1dfab,0,1,b6aaed5c-8a5a-4a03-bd5b-1f14d0f099ec,0,1},0,0,0},
+{0,1,0},1,
+{22,
+{545,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПланировщикКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{546,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПланировщикРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "PlannerField");
+    assert_eq!(item.name, "Планировщик");
+    assert_eq!(item.id, "544");
+    assert_eq!(item.width, None);
+    assert_eq!(item.height.as_deref(), Some("15"));
+    assert_eq!(item.enable_start_drag, Some(true));
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    assert!(!xml.contains("<Width>"), "no Width expected: {xml}");
+    let title = xml.find("<Title>").unwrap();
+    let title_location = xml.find("<TitleLocation>None</TitleLocation>").unwrap();
+    let height = xml.find("<Height>15</Height>").unwrap();
+    let drag = xml.find("<EnableStartDrag>true</EnableStartDrag>").unwrap();
+    let context_menu = xml.find("<ContextMenu").unwrap();
+    assert!(
+        title < title_location && title_location < height && height < drag && drag < context_menu,
+        "Title, TitleLocation, Height, EnableStartDrag, ContextMenu in that order: {xml}"
+    );
+    for (name, handler) in [
+        (
+            "OnCurrentRepresentationPeriodChange",
+            "ПланировщикПриСменеТекущегоПериодаОтображения",
+        ),
+        ("OnEditEnd", "ПланировщикПриОкончанииРедактирования"),
+        ("BeforeDelete", "ПланировщикПередУдалением"),
+        ("BeforeStartEdit", "ПланировщикПередНачаломРедактирования"),
+        (
+            "BeforeStartQuickEdit",
+            "ПланировщикПередНачаломБыстрогоРедактирования",
+        ),
+        ("Selection", "ПланировщикВыбор"),
+    ] {
+        assert!(
+            xml.contains(&format!("<Event name=\"{name}\">{handler}</Event>")),
+            "event {name} expected: {xml}"
+        );
+    }
+    assert!(
+        !xml.contains("<Event name=\"BeforeCreate\">"),
+        "this item stores no BeforeCreate: {xml}"
+    );
+}
+
+#[test]
+fn graphical_schema_field_writes_its_excluded_command_set_sorted_by_name() {
+    // Real bytes: DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма/
+    // Ext/Form.xml of Документооборот КОРП 3.0.21.3 (storage element
+    // `2d885109-4c96-41c0-a996-785bfd793c2d.0`) -- the only item of the eight
+    // stand corpora whose native XML carries a `<CommandSet>` of its own. Its
+    // top-level slot 48 declares 31 command identifiers; every other
+    // wrapper-`37` field record of every kind reads `{0}` there.
+    //
+    // The identifiers are named by seed, not by this record: see
+    // `parse_form_excluded_commands`. The record stores them sorted by
+    // identifier and the platform writes the names sorted by name, which is
+    // what this test pins alongside the block's position.
+    let item = parse_form_child_item(
+        r#"{37,
+{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,14,"КартаМаршрута",0,0,
+{1,1,
+{"ru","Карта маршрута"}
+},
+{1,0},
+{1,
+{3}
+},
+{0},1,1,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{3,80,18,0,0,
+{3,4,
+{0}
+},
+{1,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,"КартаМаршрутаВыбор",1,0,3c3da18f-fc18-4f77-8c2d-96c25bec40a5,0,1},1,0,0,1,0,1,1},
+{0,1,0},1,
+{22,
+{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартаМаршрутаКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},1,a9f3b1ac-f51b-431e-b102-55a69acdecad,
+{31,
+{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Задачи",
+{1,1,
+{"ru","Задачи в точке маршрута"}
+},1,
+{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},
+{0},3,0,0,0,2,2,0,0,0,
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},0,
+{4,0,
+{0},"",-1,-1,1,0,""},0,
+{"Pattern"},"",0,0,1,
+{12,
+{47,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗадачиExtendedTooltip",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},
+{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0},1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{31,01db2225-b62d-4112-a4b6-d39d627bf79f,1c7ec5be-53a6-43cc-8bc8-9a73ca72a44e,1d13f9a3-402a-46cb-9c68-1709356840f2,23176829-e3f7-46dc-af32-6af1f6d67643,356928f8-1b7d-4579-9813-d19699de6b76,3667f2a8-3912-4b56-a3b5-d69a1b7eec5d,3ddfe26e-81bc-453f-bd88-5185aca5b2f0,494c5e0a-f4f0-4184-9d10-2b57e780e428,56f9684a-d741-44c0-bf84-652b987507dd,5eee88e8-c2c7-45b1-8303-049edb58170d,5f8efacc-cd77-4bc9-8ae8-74af39dc5535,767690d6-cf3b-4f04-a28c-f91fb83a6a0a,7b53bef7-3811-4375-810a-672bf817ace4,87ddfbaa-b8e9-4f2b-884a-88c203115854,89a42f51-7f8b-4efe-a257-94a623242a0a,8b35d4bf-46b1-4a46-9e89-e69ccd6cacdc,a5a41937-c459-438d-b2f5-81b561dc67c5,abaddb09-44e1-4d85-b473-cd3db79f5fa3,b4a65823-eb91-4b2c-9be6-a349566d9a63,bfd14d15-932b-4f08-8090-395e4816e174,c4ac110c-99d4-4c75-882e-f2a5b9c199ad,c54de1e2-eadf-4ad7-ba5e-f165ed302c29,c58155b0-29dc-4905-a0c0-1ed2d6f88c4c,d80a7ec0-3dc2-4777-9752-8fec196eb655,d80be1de-253f-4a06-8c1a-b3920137e0ac,df450081-a8c6-46bb-9370-0ee8e4687e2d,e22c2307-5585-4491-a106-3fca57a987ac,e915596d-e318-452b-9ba9-95cf99432b2c,ea0bafc6-647c-46eb-bb8b-6417593546cc,f27f75fc-027d-4c8e-9f7d-337f985f0ee9,fdc8da8c-430b-4ea3-b0a3-f8a5d91a0a59},0,0,1,
+{12,
+{48,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартаМаршрутаExtendedTooltip",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "GraphicalSchemaField");
+    assert_eq!(item.excluded_commands.len(), 31);
+    assert_eq!(item.excluded_commands.first().copied(), Some("AlignBottom"));
+    assert_eq!(item.excluded_commands.last().copied(), Some("Ungroup"));
+    assert!(
+        !item.excluded_commands.contains(&"Print"),
+        "Print is the one command this record does not exclude"
+    );
+    let mut sorted = item.excluded_commands.clone();
+    sorted.sort_unstable();
+    assert_eq!(item.excluded_commands, sorted);
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    let title_location = xml.find("<TitleLocation>None</TitleLocation>").unwrap();
+    let command_set = xml.find("<CommandSet>").unwrap();
+    let width = xml.find("<Width>80</Width>").unwrap();
+    assert!(
+        title_location < command_set && command_set < width,
+        "CommandSet sits between TitleLocation and Width: {xml}"
+    );
+    assert_eq!(xml.matches("<ExcludedCommand>").count(), 31);
+}
+
+/// Evidence: fixture `form-planner-settings`. Three of its thirteen pairs are
+/// native bytes -- planner attribute records of Документооборот КОРП 3.0.21.3,
+/// the only corpus of the eight that carries the construct -- and the other
+/// ten are `plx-*` seeds on the Web_Service skeleton, each the control with one
+/// axis changed and round-tripped through platform 8.3.27.2214. Asserts the
+/// whole `<Settings xsi:type="pl:Planner">` fragment comes back byte for byte;
+/// see the fixture's `manifest.json` for the claim and non-claim list.
+fn assert_platform_proven_form_planner_settings(raw_field: &str, native_settings_xml: &str) {
+    let rendered = parse_and_render_form_planner_settings_for_test(raw_field)
+        .expect("platform-proven planner settings field must decode");
+    assert_eq!(
+        rendered, native_settings_xml,
+        "rendered <Settings xsi:type=\"pl:Planner\"> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_native_do_vremya_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/native-do-vremya.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/native-do-vremya-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_native_do_bron_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/native-do-bron.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/native-do-bron-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_native_do_meropriyatiya_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/native-do-meropriyatiya.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/native-do-meropriyatiya-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_control_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/control.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/control-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_distinct_values_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/distinct-values.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/distinct-values-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_a_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-a.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-a-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_b_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-b.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-b-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_c_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-c.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-c-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_d_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-d.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-d-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_font_planner_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/font-planner.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/font-planner-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_font_item_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/font-item.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/font-item-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_items_two_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/items-two.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/items-two-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_items_zero_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/items-zero.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/items-zero-settings.xml"
+        ),
+    );
+}
+
+/// Evidence: fixture `form-graphical-scheme-settings`. Two of its ten pairs are
+/// native bytes -- the graphical-scheme attribute records of Документооборот
+/// КОРП 3.0.21.3's `Catalogs/СхемыПроцессов/Forms/КарточкаСхемы` and
+/// `DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма`, the only two
+/// distinct records the whole eight-corpus stand carries -- and the other
+/// eight are `gsx-*` seeds on the Web_Service skeleton, each the control with
+/// exactly one element changed and round-tripped through platform
+/// 8.3.27.2214. Asserts the whole `<Settings xsi:type="d4p1:FlowchartContextType">`
+/// fragment comes back byte for byte; see the fixture's `manifest.json` for
+/// the claim and non-claim list.
+fn assert_platform_proven_form_flowchart_settings(raw_field: &str, native_settings_xml: &str) {
+    let rendered = parse_and_render_form_flowchart_settings_for_test(raw_field)
+        .expect("platform-proven graphical scheme settings field must decode");
+    assert_eq!(
+        rendered, native_settings_xml,
+        "rendered <Settings xsi:type=\"d4p1:FlowchartContextType\"> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_native_do_lines_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/native-do-lines.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/native-do-lines-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_native_do_none_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/native-do-none.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/native-do-none-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_lines_six_print_props_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/lines-six-print-props.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/lines-six-print-props-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_grid_mode_none_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/grid-mode-none.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/grid-mode-none-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_grid_mode_dots_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/grid-mode-dots.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/grid-mode-dots-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_grid_off_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/grid-off.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/grid-off-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_back_color_web_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/back-color-web.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/back-color-web-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_grid_steps_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/grid-steps.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/grid-steps-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_print_props_two_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/print-props-two.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/print-props-two-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_graphical_scheme_settings_print_props_values_to_platform_proven_xml() {
+    assert_platform_proven_form_flowchart_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/raw/print-props-values.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-graphical-scheme-settings/native/print-props-values-settings.xml"
+        ),
+    );
+}
+
 /// Evidence: fixture `graphical-schema-field-leftwidest-page`, a minimal
 /// synthetic Form seeded on the Web_Service skeleton and round-tripped
 /// through platform 8.3.27.2214: one `Page` (`Group=Horizontal`,
 /// `ChildItemsWidth=LeftWidest`) wraps one `GraphicalSchemaField`
-/// (`ReadOnly=true`, `Width=50`, `Height=10`). Native publishes neither
-/// `Width` nor `Height` for the field (see
-/// `native/DataProcessors/GSFTest/Forms/Форма/Ext/Form.xml` in the fixture),
-/// confirmed against native UT 11.5.27.75's own
-/// `ИнтеграцияС1СОблачнаяКартаПрикладныхРешений`, which carries the same
-/// nesting and the same suppression. Asserts on the `ChildItems` snippet
-/// only, not the whole document: the fixture's `Attributes` block needs a
-/// real `type_index` (built from the whole configuration's rows during a
-/// real `cf export`) to resolve correctly, which is orthogonal to this
-/// fix and not worth reproducing here. See
-/// `FormChildItem::parent_child_items_width` and the `GraphicalSchemaField`
-/// branch of `format_form_child_item_xml`.
+/// (`ReadOnly=true`), whose option tuple reads
+/// `{3,50,10,0,1,{3,4,{0}},{0,1,0},1,0,0,1,0,1,1}`. Native publishes neither
+/// `Width`, `Height` nor `Edit` for the field (see
+/// `native/DataProcessors/GSFTest/Forms/Форма/Ext/Form.xml` in the fixture).
+///
+/// The nesting is not what suppresses the geometry: the extent pair holds the
+/// kind's own unwritten `50`/`10` defaults (seed `gsx-wh5010` stores the same
+/// bytes for an explicit `<Width>50</Width><Height>10</Height>` and the
+/// platform writes neither back), and option slot 4 holds the unwritten `1`
+/// that means "no `<Edit>`". The reader used to suppress `Width`/`Height`
+/// on the parent page's `ChildItemsWidth` instead and to derive `<Edit>` from
+/// `<ReadOnly>`, which made this very fixture assert an `<Edit>` its own
+/// native XML does not contain. Asserts on the `ChildItems` snippet only, not
+/// the whole document: the fixture's `Attributes` block needs a real
+/// `type_index` (built from the whole configuration's rows during a real
+/// `cf export`) to resolve correctly, which is orthogonal and not worth
+/// reproducing here.
 #[test]
-fn suppresses_graphical_schema_field_geometry_under_leftwidest_page() {
+fn graphical_schema_field_under_leftwidest_page_publishes_no_default_geometry() {
     let raw = include_str!(
         "../../tests/fixtures/native-evidence/8.3.27.2214/graphical-schema-field-leftwidest-page/raw/gsftest-form-body.txt"
     );
@@ -74186,15 +74871,11 @@ fn suppresses_graphical_schema_field_geometry_under_leftwidest_page() {
         .find("</GraphicalSchemaField>")
         .expect("GraphicalSchemaField must close");
     let field_xml = &form_xml[field_start..field_start + field_end];
+    assert!(field_xml.contains("<ReadOnly>true</ReadOnly>"));
     assert!(!field_xml.contains("<Width>"));
     assert!(!field_xml.contains("<Height>"));
-    // `Edit` deliberately does not gate on the parent page's
-    // `ChildItemsWidth`: this minimal reproduction's own native XML has no
-    // `Edit` either, but native UT's real, richer field (which additionally
-    // carries a `ContextMenu`/`ExtendedTooltip`/`Events`) keeps publishing
-    // it even when nested the same way -- see the manifest's `non_claims`
-    // and the comment on this branch.
-    assert!(field_xml.contains("<Edit>false</Edit>"));
+    assert!(!field_xml.contains("<Edit>"));
+    assert!(!field_xml.contains("<AutoMaxWidth>"));
 }
 
 /// `parse_metadata_code27_payload_fields`'s attribute-header check hardcoded
