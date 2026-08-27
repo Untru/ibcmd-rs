@@ -943,6 +943,10 @@ pub(super) struct FormAttributeMetadataOwner {
     exact_single_type_reference: Option<String>,
     has_dynamic_list_settings: bool,
     main_table: Option<String>,
+    /// The attribute's own `<AdditionalColumns>` groups, so a bound chain that
+    /// reaches one of their tables can name a column by its declared id
+    /// instead of falling back to the item's own name.
+    additional_columns: Vec<FormAttributeAdditionalColumns>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4772,9 +4776,18 @@ fn resolve_form_attribute_additional_column_name<'a>(
     table: &str,
     column_id: &str,
 ) -> Option<&'a str> {
+    form_attribute_additional_column_name_in(&attribute.additional_columns, table, column_id)
+}
+
+/// The declared name of one additional column of `table`, or nothing when the
+/// id is unknown there or two groups of the same table spell it differently.
+fn form_attribute_additional_column_name_in<'a>(
+    groups: &'a [FormAttributeAdditionalColumns],
+    table: &str,
+    column_id: &str,
+) -> Option<&'a str> {
     let mut name = None;
-    for candidate in attribute
-        .additional_columns
+    for candidate in groups
         .iter()
         .filter(|additional| additional.table == table)
         .flat_map(|additional| additional.columns.iter())
@@ -8572,6 +8585,7 @@ pub(super) fn form_attribute_metadata_owner(
         exact_single_type_reference,
         has_dynamic_list_settings: attribute.settings.is_some(),
         main_table,
+        additional_columns: attribute.additional_columns.clone(),
     }
 }
 
@@ -20636,7 +20650,23 @@ fn resolve_form_document_register_records_data_path(
                 )?
                 .to_string(),
                 [marker, uuid] => {
-                    if let Some(name) = form_register_record_set_ext_dimension_name(
+                    if uuid
+                        .trim()
+                        .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID)
+                    {
+                        // The record set carries the additional columns the
+                        // form declares on it, and the terminal names one of
+                        // them by its declared id — the same segment the
+                        // group's own nested binding speaks. Without this the
+                        // slot fell through to the item's own name, which the
+                        // platform spells as the column name alone.
+                        form_attribute_additional_column_name_in(
+                            &attribute.additional_columns,
+                            &path,
+                            marker.trim(),
+                        )?
+                        .to_string()
+                    } else if let Some(name) = form_register_record_set_ext_dimension_name(
                         register_family,
                         marker.trim(),
                         uuid.trim(),
@@ -22737,6 +22767,19 @@ fn resolve_form_table_row_picture_member(
             &extended,
             table_name_by_id,
             owner_scoped_bindings,
+            object_refs,
+        )
+    })
+    // A table standing on a document's register-records set names its row
+    // picture inside that set, and the extended chain is the same grammar the
+    // data-path slot already reads -- one segment longer. Nothing else answers
+    // it, so the property was omitted where the platform writes it: ERP УХ
+    // 3.2.12.6 `Documents/ОперацияБух` and `ОперацияМеждународный` between them
+    // carry four such tables.
+    .or_else(|| {
+        resolve_form_document_register_records_data_path(
+            &extended,
+            attribute_metadata_owners_by_id,
             object_refs,
         )
     })
