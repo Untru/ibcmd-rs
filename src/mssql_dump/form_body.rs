@@ -3289,6 +3289,19 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "49ede602-af78-4a50-b821-ec81f6778f2d" => Some("MultipleValuesDelete"),
         "2971b9a9-1724-4f34-aaa4-f3db584c3ca0" => Some("OnCurrentParentChange"),
         "b98da5a8-349c-4159-a6a8-17a34ceb10ec" => Some("OnChangeDisplaySettings"),
+        // Three more platform event identifiers, read off the native
+        // "Документооборот КОРП" 3.0.21.3 tree, the only one of the eight
+        // stand corpora that writes any of the three names.  The decoder
+        // already emits the handler verbatim beside the raw identifier, so
+        // each occurrence pairs one identifier with one platform-written
+        // name, and every occurrence agrees: `2c5f182c` with
+        // `OnPasteFromClipboard` (2 of 2), `e6e68c5f` with
+        // `MultipleValueOpening` (6 of 6) and `7de586c4` with `BeforePrint`
+        // (3 of 3, beside the spreadsheet field's own `BeforePrint`
+        // identifier, which the item-scoped table already names).
+        "2c5f182c-1a2b-4fe1-a340-71979d5c39a8" => Some("OnPasteFromClipboard"),
+        "e6e68c5f-dc83-43c1-b6ca-438be00b77c1" => Some("MultipleValueOpening"),
+        "7de586c4-b5b7-40f7-917f-8049b127e015" => Some("BeforePrint"),
         _ => None,
     }
 }

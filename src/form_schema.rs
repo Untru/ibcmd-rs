@@ -6697,8 +6697,14 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // `EnableStartDrag` (3), `RowFilter` (3), `DataPath` (3), `Title` (2) and
     // the three search/status locations (1 each), on all 3 native tables that
     // carry it, with no pair counted both ways.
-    FormTableXmlProperty::Enabled,
+    //
+    // `Autofill` leads it: over all eight native stand trees the platform
+    // writes `Autofill` before `Enabled` on the 3 tables that carry both, and
+    // never the other way round. `Autofill` also leads `ReadOnly` (22) and
+    // `SkipOnInput` (200) there, so it takes the slot ahead of `Enabled`
+    // rather than between `Enabled` and `ReadOnly`.
     FormTableXmlProperty::Autofill,
+    FormTableXmlProperty::Enabled,
     FormTableXmlProperty::ReadOnly,
     FormTableXmlProperty::SkipOnInput,
     FormTableXmlProperty::DefaultItem,
@@ -6747,16 +6753,21 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::SelectionMode,
     FormTableXmlProperty::RowSelectionMode,
     FormTableXmlProperty::Header,
-    // `FooterHeight` follows the header switch and opens the line/scrollbar
-    // run: on all 5 native tables that carry it, it trails `Representation`
-    // (5), `ChangeRowSet` (3), `ChangeRowOrder` (3), `Width` (2),
-    // `CommandBarLocation` (2), `TitleLocation` (1), `SkipOnInput` (1),
-    // `MaxWidth` (1), `HeightInTableRows` (1), `Height` (1), `Header` (1) and
-    // `AutoMaxWidth` (1), and leads `HorizontalScrollBar` (1),
-    // `HorizontalLines` (1), `VerticalLines` (1), `AutoInsertNewRow` (3), the
-    // stretch pair (1 each), `EnableStartDrag` (3), `EnableDrag` (3),
-    // `FileDragMode` (3), `DataPath` (5), `RowPictureDataPath` (1),
-    // `RowsPicture` (1), `Title` (4), `CommandSet` (3) and `RowFilter` (5).
+    // The two header/footer switches and their two heights run
+    // `Header HeaderHeight Footer FooterHeight`, ahead of the scrollbar and
+    // line run, not inside it.  Census over all eight native stand trees, with
+    // no pair counted both ways anywhere: `HeaderHeight` precedes `Footer` (9),
+    // `HorizontalScrollBar` (1), `HorizontalLines` (2), `VerticalLines` (3),
+    // `UseAlternationRowColor` (62), `Title` (87) and `CommandSet` (78);
+    // `Footer` precedes `FooterHeight` (4), `HorizontalScrollBar` (1),
+    // `HorizontalLines` (4), `VerticalLines` (4), `UseAlternationRowColor`
+    // (25), `Title` (170), `TitleFont` (8), `TitleTextColor` (7) and
+    // `CommandSet` (62); `FooterHeight` precedes `HorizontalScrollBar` (6),
+    // `HorizontalLines` (9), `VerticalLines` (9), `Title` (20) and `CommandSet`
+    // (20).  Reading the heights as members of the line run is what put
+    // `HeaderHeight` and `Footer` behind `VerticalLines`.
+    FormTableXmlProperty::HeaderHeight,
+    FormTableXmlProperty::Footer,
     FormTableXmlProperty::FooterHeight,
     FormTableXmlProperty::HorizontalScrollBar,
     // `VerticalScrollBar` trails `HorizontalScrollBar` (4), `Header` (13),
@@ -6766,24 +6777,6 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::VerticalScrollBar,
     FormTableXmlProperty::HorizontalLines,
     FormTableXmlProperty::VerticalLines,
-    // `HeaderHeight` trails `Representation`, `CommandBarLocation`, `ReadOnly`,
-    // `SkipOnInput`, `DefaultItem`, `ChangeRowSet`, `ChangeRowOrder`, `Width`,
-    // `Height`, `HeightInTableRows`, `SelectionMode`, `RowSelectionMode` and
-    // `Header`, and precedes `UseAlternationRowColor`, `AutoInsertNewRow`,
-    // `EnableStartDrag`, `FileDragMode`, `DataPath`, `Title` and `CommandSet`
-    // on all 32 native occurrences, with no counter-example.
-    FormTableXmlProperty::HeaderHeight,
-    // `Footer` trails `Representation` (31), `SkipOnInput` (13),
-    // `ChangeRowOrder` (8), `ChangeRowSet` (8), `ReadOnly` (4),
-    // `TitleLocation` (4), `CommandBarLocation` (3), `AutoMaxHeight` (2),
-    // `HeightInTableRows` (2), `AutoMaxWidth` (1), `DefaultItem` (1),
-    // `HeaderHeight` (1) and `Height` (1), and precedes `DataPath` (39),
-    // `Events` (31), `FileDragMode` (29), `Title` (27), `EnableDrag` (23),
-    // `EnableStartDrag` (23), `AutoInsertNewRow` (22), `CommandSet` (9),
-    // `AutoAddIncomplete` (7), the three search/status locations (4 each),
-    // `VerticalStretch` (3) and `UseAlternationRowColor` (2), across all 39
-    // native occurrences with no pair counted both ways.
-    FormTableXmlProperty::Footer,
     FormTableXmlProperty::UseAlternationRowColor,
     FormTableXmlProperty::AutoInsertNewRow,
     FormTableXmlProperty::AutoAddIncomplete,
@@ -6832,18 +6825,23 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::BackColor,
     FormTableXmlProperty::TextColor,
     FormTableXmlProperty::BorderColor,
+    // A table's own `Font` leads its title block, not trails it.  The UT
+    // 11.5.27.75 census that first placed it saw only 2 occurrences and
+    // neither shared a table with `Title` or `TitleFont`, so it took the
+    // position beside `TitleFont`.  Over all eight native stand trees the
+    // pair is observed: `Font` precedes `Title` (8) and `TitleFont` (3), and
+    // never follows either.  It still trails `UseAlternationRowColor` (2),
+    // `HorizontalScrollBar` (5), `VerticalScrollBar` (4), `HorizontalLines`
+    // (10) and `VerticalLines` (12), all of which this block already writes
+    // ahead of the colour triple.
+    FormTableXmlProperty::Font,
     FormTableXmlProperty::Title,
     // A table's `TitleFont` follows its title block and precedes the command
-    // set, like every other titled owner: it trails `Title` (22) and
-    // `TitleTextColor` (11) and leads `CommandSet` (18), `RowFilter` (20),
+    // set, like every other titled owner: it trails `Title` (73) and
+    // `TitleTextColor` (58) and leads `CommandSet` (48), `RowFilter` (20),
     // `SearchStringLocation`, `ViewStatusLocation` and `SearchControlLocation`
-    // (12 each) and `ToolTip` (1) on all 27 native occurrences.  `Font` (2)
-    // trails `DataPath` and `FileDragMode` and leads `CommandSet`, `RowFilter`
-    // and the three locations; it never shares a table with `Title`,
-    // `TitleFont` or the colour triple, so it stays beside `TitleFont`, the
-    // nearest position that satisfies every observed pair.
+    // (12 each) and `ToolTip` (1) on all native occurrences.
     FormTableXmlProperty::TitleFont,
-    FormTableXmlProperty::Font,
     // A table's `Shortcut` sits between its title block and its command set.
     // UT 11.5.27.75 native tree, the 3 tables that carry one: it trails
     // `Title` (2), `RowPictureDataPath` (1), `DataPath` (3),
@@ -6875,7 +6873,6 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // block writes ever follows it.
     FormTableXmlProperty::GroupHorizontalAlign,
     FormTableXmlProperty::GroupVerticalAlign,
-    FormTableXmlProperty::CurrentRowUse,
     // `RefreshRequest` closes the table's own scalar block, immediately ahead of
     // the `AutoRefresh` group.  UT 11.5.27.75 native tree, 4 543 `Table`
     // instances and 30 carrying the property: it trails `CommandBarLocation`
@@ -6887,8 +6884,17 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // `RestoreCurrentRow`, `TopLevelParent`, `ShowRoot`, `AllowRootChoice`,
     // `UpdateOnDataChange` and `AllowGettingCurrentRowURL` (6 each), plus
     // `RowFilter` (23), `Events` (30) and `ChildItems` (30).  No pair is observed
-    // in both directions, and `CurrentRowUse` never co-occurs with it.
+    // in both directions.
+    //
+    // That census saw no table carrying both `RefreshRequest` and
+    // `CurrentRowUse`, so their relative order was a guess.  Over all eight
+    // native stand trees the pair is observed 6 times, every one of them
+    // `RefreshRequest` first, so `CurrentRowUse` moves behind it -- still
+    // ahead of `AutoRefresh` (108) and behind the three search/status
+    // locations (97 / 102 / 83), `ToolTip` (4), `ToolTipRepresentation` (6)
+    // and `GroupVerticalAlign` (1), with no pair counted both ways.
     FormTableXmlProperty::RefreshRequest,
+    FormTableXmlProperty::CurrentRowUse,
     FormTableXmlProperty::AutoRefresh,
     FormTableXmlProperty::AutoRefreshPeriod,
     FormTableXmlProperty::Period,
