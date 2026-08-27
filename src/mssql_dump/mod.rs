@@ -21778,35 +21778,11 @@ fn parse_chart_of_accounts_properties(
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<ChartOfAccountsProperties> {
-    macro_rules! gate {
-        ($label:expr, $e:expr) => {{
-            let value = $e;
-            if value.is_none() && std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
-                eprintln!("STRICTROOT ChartOfAccounts {} gate={}", header.name, $label);
-            }
-            value?
-        }};
-    }
-    let parsed_header = gate!(
-        "header",
-        parse_wrapped_register_owner_header(fields.get(15)?)
-    );
+    let parsed_header = parse_wrapped_register_owner_header(fields.get(15)?)?;
     let header_occurrences = fields
         .iter()
         .filter(|field| metadata_header_field_index(&[**field], &header.uuid) == Some(0))
         .count();
-    if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
-        eprintln!(
-            "STRICTROOT ChartOfAccounts {} pre: idx={:?} occ={} match={} p18={} idx48={} lock50={}",
-            header.name,
-            metadata_header_field_index(fields, &header.uuid),
-            header_occurrences,
-            strict_metadata_headers_match(&parsed_header, header),
-            cct_pair_is(fields.get(18)?, "0", "0"),
-            chart_physical_index_list_shape_is_known(fields.get(48)?),
-            cct_data_lock_fields_are_empty(fields.get(50)?),
-        );
-    }
     if metadata_header_field_index(fields, &header.uuid) != Some(15)
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
@@ -21847,34 +21823,27 @@ fn parse_chart_of_accounts_properties(
             ),
         ],
         &mut all_uuids,
-    );
-    let generated_types = gate!("generated_types", generated_types);
+    )?;
 
-    let form_uuids = gate!("form_uuids", parse_task_form_uuids(collections.get(3)?));
-    let child_forms = gate!(
-        "child_forms",
-        parse_strict_chart_child_forms(
-            text,
-            "ChartOfAccounts",
-            &form_uuids,
-            &header.name,
-            form_refs,
-        )
-    );
+    let form_uuids = parse_task_form_uuids(collections.get(3)?)?;
+    let child_forms = parse_strict_chart_child_forms(
+        text,
+        "ChartOfAccounts",
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
     let mut attribute_names = BTreeSet::new();
-    let mut child_objects = gate!(
-        "attributes",
-        parse_chart_of_accounts_child_collection(
-            collections.get(4)?,
-            "Attribute",
-            &header.name,
-            type_index,
-            metadata_object_refs,
-            form_refs,
-            &mut all_uuids,
-            &mut attribute_names,
-        )
-    );
+    let mut child_objects = parse_chart_of_accounts_child_collection(
+        collections.get(4)?,
+        "Attribute",
+        &header.name,
+        type_index,
+        metadata_object_refs,
+        form_refs,
+        &mut all_uuids,
+        &mut attribute_names,
+    )?;
     // The owner's own attributes, by uuid: `<InputByString>` names one of them
     // as a `{0,<uuid>}` field reference on all three ERP УХ charts.
     let own_attributes = child_objects
@@ -21887,33 +21856,27 @@ fn parse_chart_of_accounts_properties(
         })
         .collect::<BTreeMap<_, _>>();
     let mut accounting_flag_names = BTreeSet::new();
-    child_objects.extend(gate!(
-        "accounting_flags",
-        parse_chart_of_accounts_child_collection(
-            collections.get(5)?,
-            "AccountingFlag",
-            &header.name,
-            type_index,
-            metadata_object_refs,
-            form_refs,
-            &mut all_uuids,
-            &mut accounting_flag_names,
-        )
-    ));
+    child_objects.extend(parse_chart_of_accounts_child_collection(
+        collections.get(5)?,
+        "AccountingFlag",
+        &header.name,
+        type_index,
+        metadata_object_refs,
+        form_refs,
+        &mut all_uuids,
+        &mut accounting_flag_names,
+    )?);
     let mut ext_dimension_flag_names = BTreeSet::new();
-    child_objects.extend(gate!(
-        "ext_dimension_flags",
-        parse_chart_of_accounts_child_collection(
-            collections.get(6)?,
-            "ExtDimensionAccountingFlag",
-            &header.name,
-            type_index,
-            metadata_object_refs,
-            form_refs,
-            &mut all_uuids,
-            &mut ext_dimension_flag_names,
-        )
-    ));
+    child_objects.extend(parse_chart_of_accounts_child_collection(
+        collections.get(6)?,
+        "ExtDimensionAccountingFlag",
+        &header.name,
+        type_index,
+        metadata_object_refs,
+        form_refs,
+        &mut all_uuids,
+        &mut ext_dimension_flag_names,
+    )?);
     if form_uuids
         .iter()
         .any(|uuid| !all_uuids.insert(uuid.to_ascii_lowercase()))
@@ -21921,35 +21884,28 @@ fn parse_chart_of_accounts_properties(
         return None;
     }
 
-    let template_uuids = gate!("template_uuids", parse_task_form_uuids(collections.get(1)?));
+    let template_uuids = parse_task_form_uuids(collections.get(1)?)?;
     if template_uuids
         .iter()
         .any(|uuid| !all_uuids.insert(uuid.to_ascii_lowercase()))
     {
         return None;
     }
-    let child_templates = gate!(
-        "child_templates",
-        parse_chart_of_accounts_child_templates(&header.name, &template_uuids, template_refs)
-    );
-    let command_identity_slots = gate!(
-        "command_slots",
-        parse_owner_graph_command_identity_slots_indexed(collections.first()?).ok()
-    );
-    let child_commands = gate!(
-        "child_commands",
-        parse_strict_owned_commands(
-            "ChartOfAccounts",
-            text,
-            &header.uuid,
-            &command_identity_slots,
-            type_index,
-            object_refs,
-            &mut all_uuids,
-        )
-    );
+    let child_templates =
+        parse_chart_of_accounts_child_templates(&header.name, &template_uuids, template_refs)?;
+    let command_identity_slots =
+        parse_owner_graph_command_identity_slots_indexed(collections.first()?).ok()?;
+    let child_commands = parse_strict_owned_commands(
+        "ChartOfAccounts",
+        text,
+        &header.uuid,
+        &command_identity_slots,
+        type_index,
+        object_refs,
+        &mut all_uuids,
+    )?;
 
-    let input_modes = gate!("input_modes", parse_catalog_input_modes(fields.get(52)?));
+    let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
     let probe_ext_dimension_types = parse_chart_direct_object_reference(
         fields.get(19)?,
         "ChartOfCharacteristicTypes",
@@ -21967,32 +21923,6 @@ fn parse_chart_of_accounts_properties(
         fields.get(39)?,
         CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
     );
-    let probe_input_by_string = parse_chart_input_by_string(
-        fields.get(33)?,
-        "ChartOfAccounts",
-        &header.name,
-        &[("-7", "Code"), ("-8", "Description")],
-        &own_attributes,
-    );
-    if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
-        eprintln!(
-            "STRICTROOT ChartOfAccounts {} tail: ext={} stdattr={} stdts={} inputby={} f24={:?} f49={:?} f26={:?} f31={:?} f51={:?} f53={:?} f54={:?} f36={:?} f37={:?}",
-            header.name,
-            probe_ext_dimension_types.is_some(),
-            probe_standard_attributes.is_some(),
-            probe_standard_tabular_sections.is_some(),
-            probe_input_by_string.is_some(),
-            fields.get(24).map(|f| f.trim()),
-            fields.get(49).map(|f| f.trim()),
-            fields.get(26).map(|f| f.trim()),
-            fields.get(31).map(|f| f.trim()),
-            fields.get(51).map(|f| f.trim()),
-            fields.get(53).map(|f| f.trim()),
-            fields.get(54).map(|f| f.trim()),
-            fields.get(36).map(|f| f.trim()),
-            fields.get(37).map(|f| f.trim()),
-        );
-    }
     // Field 24 is `"1"` on every chart of accounts of the stand, exactly as it
     // is on every characteristic-type plan. It used to be read as
     // `<CodeSeries>`, which made all four charts write
@@ -22206,35 +22136,6 @@ fn parse_chart_of_calculation_types_properties_from_text(
     // when the rest of its record still does not read: the relaxation may add
     // a complete file, never take one away.
     let owns_children = !collections[0].is_empty() || !collections[1].is_empty();
-    if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
-        eprintln!(
-            "STRICTROOT ChartOfCalculationTypes {} coll={:?} children={} full={}",
-            header.name,
-            collections.iter().map(Vec::len).collect::<Vec<_>>(),
-            parse_chart_of_calculation_types_child_objects(
-                &collections,
-                text,
-                &header.uuid,
-                &header.name,
-                type_index,
-                metadata_object_refs,
-                form_refs,
-            )
-            .map(|children| children.len() as i64)
-            .unwrap_or(-1),
-            parse_chart_of_calculation_types_properties(
-                text,
-                header,
-                &fields,
-                &collections,
-                type_index,
-                object_refs,
-                metadata_object_refs,
-                form_refs,
-            )
-            .is_some(),
-        );
-    }
     parse_chart_of_calculation_types_properties(
         text,
         header,
@@ -22826,40 +22727,6 @@ fn parse_chart_of_accounts_child_collection(
                 return None;
             }
             let common = split_information_register_braced_fields(wrapper.get(1)?)?;
-            if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
-                let probe_common = common.clone();
-                let attr = parse_strict_common_metadata_attribute(
-                    probe_common,
-                    "ChartOfAccounts",
-                    owner_name,
-                    type_index,
-                    object_refs,
-                    form_refs,
-                    true,
-                );
-                eprintln!(
-                    "STRICTROOT COAchild {owner_name} {tag} attr_ok={} hdr={} types={} props={} idx={:?} fts={:?} dh={:?}",
-                    attr.is_some(),
-                    common
-                        .get(1)
-                        .map(|field| field.chars().take(60).collect::<String>())
-                        .unwrap_or_default(),
-                    common.len(),
-                    parse_information_register_common_child_properties(
-                        &common,
-                        "ChartOfAccounts",
-                        owner_name,
-                        type_index,
-                        object_refs,
-                        form_refs,
-                        false,
-                    )
-                    .is_some(),
-                    wrapper.get(2).map(|field| field.trim()),
-                    wrapper.get(3).map(|field| field.trim()),
-                    wrapper.get(4).map(|field| field.trim()),
-                );
-            }
             let mut child = parse_strict_common_metadata_attribute(
                 common,
                 "ChartOfAccounts",
@@ -25749,47 +25616,6 @@ fn parse_chart_of_calculation_types_child_objects(
 ) -> Option<Vec<MetadataChildObject>> {
     let mut child_uuids = BTreeSet::new();
     let mut root_names = BTreeSet::new();
-    if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
-        let attrs = collections
-            .get(1)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter(|value| {
-                        parse_chart_of_calculation_types_attribute(
-                            value,
-                            owner_name,
-                            false,
-                            type_index,
-                            object_refs,
-                            form_refs,
-                        )
-                        .is_some()
-                    })
-                    .count()
-            })
-            .unwrap_or(0);
-        let generic = parse_attribute_tabular_section_child_objects(
-            "ChartOfCalculationTypes",
-            owner_name,
-            text,
-            owner_uuid,
-            None,
-            type_index,
-            object_refs,
-            object_refs,
-            form_refs,
-        );
-        eprintln!(
-            "STRICTROOT COTchild {owner_name} attrs_ok={attrs}/{} generic_ts={} generic_total={}",
-            collections.get(1).map(Vec::len).unwrap_or(0),
-            generic
-                .iter()
-                .filter(|child| child.tag == "TabularSection")
-                .count(),
-            generic.len(),
-        );
-    }
     let mut child_objects = collections
         .get(1)?
         .iter()
