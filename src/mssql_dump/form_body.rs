@@ -378,6 +378,10 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     let attributes_section =
         extract_form_body_attributes_section(&body.trailing, context.object_refs);
 
+    // Read once from the attribute collection and shared by both consumers of
+    // the fact: the root event reader and the button's standard-command name.
+    let main_attribute_extension = form_main_attribute_extension(&attributes);
+
     let started = Instant::now();
     let events = extract_form_body_events(
         &form_fields,
@@ -458,11 +462,15 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     // Only the declaration table travels with the command bar: every other
     // index it reads stays exactly as empty as it was, so the bar's own
     // data-path resolution is untouched.
+    // The form's own main attribute travels with it for the same reason: the
+    // bar's buttons name form standard commands exactly as any other button
+    // does, and the fact belongs to the form, not to the item tree.
     let auto_command_bar_command_facts = FormOwnerScopedBindingIndexes {
         metadata_command_facts: context
             .metadata_command_facts
             .map(Arc::clone)
             .unwrap_or_default(),
+        form_main_attribute: main_attribute_extension.clone(),
         ..Default::default()
     };
     let mut auto_command_bar = extract_form_auto_command_bar(
@@ -513,6 +521,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         context.metadata_command_facts.map(Arc::clone),
     );
     collect_form_item_rooted_chain_roots(&mut child_item_indexes, &attributes, context.object_refs);
+    child_item_indexes.owner_scoped_bindings.form_main_attribute = main_attribute_extension;
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
@@ -3178,6 +3187,38 @@ pub(super) fn form_root_write_extension(attributes: &[FormAttribute]) -> Option<
             .map_or(reference, |(family, _)| family)
             .to_string(),
     )
+}
+
+/// What the form's own main attribute declares, as far as a name only a form
+/// extension can carry needs to know.
+///
+/// `form_root_write_extension` answers `None` both for a form that declares no
+/// main attribute and for one whose main attribute declares anything but a
+/// single reference type; the event rule refuses in both states, and it is
+/// measured in both. A button's standard-command name is only measured
+/// refusing in the first, so the two have to be told apart here.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) enum FormMainAttributeExtension {
+    /// Nothing has been read about the form's main attribute. Every name
+    /// resolves exactly as it did before the fact existed.
+    #[default]
+    Unread,
+    /// The form declares no main attribute at all, so it brings no extension.
+    Absent,
+    /// A main attribute is declared; the payload is the family of the single
+    /// reference type it declares, or `None` when it declares anything else.
+    Declared(Option<String>),
+}
+
+/// The form's main-attribute state, read off the same attribute collection
+/// `form_root_write_extension` reads.
+pub(super) fn form_main_attribute_extension(
+    attributes: &[FormAttribute],
+) -> FormMainAttributeExtension {
+    if !attributes.iter().any(|attribute| attribute.main_attribute) {
+        return FormMainAttributeExtension::Absent;
+    }
+    FormMainAttributeExtension::Declared(form_root_write_extension(attributes))
 }
 
 /// Whether the extension the form's main attribute brings owns the event this
@@ -8747,6 +8788,12 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// command only when the target declares it has one, and that declaration
     /// belongs to the target, not to this form.
     metadata_command_facts: Arc<BTreeMap<String, MetadataCommandReference>>,
+    /// What this form's own main attribute declares. Form-wide rather than
+    /// owner-scoped, and carried here for the same reason
+    /// `metadata_command_facts` is: a button names a form standard command
+    /// only when the form carries the extension that owns it, and the button
+    /// reader is reached through this bundle.
+    form_main_attribute: FormMainAttributeExtension,
     /// Additional columns reachable through a *form item* rather than through
     /// the attribute, keyed by the table item id and the column id.
     table_additional_columns: BTreeMap<(String, String), Option<String>>,
@@ -10825,12 +10872,13 @@ fn parse_form_child_item_with_metadata_owners(
     let table_schema_skip_on_input = table_schema.and_then(|schema| schema.skip_on_input(&fields));
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
-            parse_form_button_command_name(
+            parse_form_button_command_name_with_main_attribute(
                 field,
                 commands,
                 object_refs,
                 standard_command_owner_name_by_id,
                 &owner_scoped_bindings.metadata_command_facts,
+                &owner_scoped_bindings.form_main_attribute,
             )
         })
     } else {
@@ -23075,12 +23123,34 @@ fn form_command_target_declares_standard_command(
     true
 }
 
+/// The five-argument reader, for the call sites that carry no fact about the
+/// form's own main attribute. It answers exactly as the reader did before that
+/// fact existed.
+#[cfg(test)]
 pub(super) fn parse_form_button_command_name(
     field: &str,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     metadata_command_facts: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<String> {
+    parse_form_button_command_name_with_main_attribute(
+        field,
+        commands,
+        object_refs,
+        standard_command_owner_name_by_id,
+        metadata_command_facts,
+        &FormMainAttributeExtension::Unread,
+    )
+}
+
+pub(super) fn parse_form_button_command_name_with_main_attribute(
+    field: &str,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
+    metadata_command_facts: &BTreeMap<String, MetadataCommandReference>,
+    main_attribute: &FormMainAttributeExtension,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let kind = fields.first()?.trim();
@@ -23089,7 +23159,9 @@ pub(super) fn parse_form_button_command_name(
     }
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
-        if let Some(command_name) = form_standard_command_name(&uuid) {
+        if let Some(command_name) = form_standard_command_name(&uuid)
+            && form_extension_owns_standard_command(&command_name, main_attribute)
+        {
             return Some(command_name);
         }
         if let Some(reference) = object_refs.get(&uuid) {
@@ -23472,6 +23544,83 @@ fn form_standard_command_suffix(uuid: &str) -> Option<&'static str> {
 /// The full `Form.StandardCommand.<name>` spelling of the one fact table.
 pub(super) fn form_standard_command_name(uuid: &str) -> Option<String> {
     form_standard_command_suffix(uuid).map(|suffix| format!("Form.StandardCommand.{suffix}"))
+}
+
+/// Whether the form carries the extension that owns the standard command this
+/// name spells.
+///
+/// The same construction as `form_root_event_extension_owns`, on the same axis
+/// and from the same declaration: a form standard command belongs to a form
+/// *extension*, the extension is brought by the form's main attribute, and
+/// what the platform cannot name it writes physically as `0:<uuid>` -- which
+/// is exactly what `form_command_record_sentinel` already spells.
+///
+/// Evidence: every `<CommandName>` of every native form of the eight stand
+/// corpora, joined to the family of its own form's main attribute (a single
+/// declared reference type; `<none>` when the form declares no main attribute
+/// at all). Of the 6 468 that spell `Form.StandardCommand.X`, the ten names
+/// below are named on 1 269 forms and *never* on a form with no main
+/// attribute and never on one whose main attribute is a `DataProcessorObject`:
+/// `Write` (Document 228, Catalog 141, InformationRegisterRecordManager 45,
+/// Task 33, BusinessProcess 28, ConstantsSet 5, InformationRegisterRecordSet
+/// 2, ChartOfCharacteristicTypes 2, AccountingRegisterRecordSet 1,
+/// ExchangePlan 1), `WriteAndClose` (Catalog 109,
+/// InformationRegisterRecordManager 37, Document 32, ConstantsSet 6,
+/// InformationRegisterRecordSet 3, ChartOfCharacteristicTypes 2, ExchangePlan
+/// 2), `Reread` (Document 90, Task 39, Catalog 29,
+/// InformationRegisterRecordManager 11, InformationRegisterRecordSet 5),
+/// `PostAndClose` (Document 154), `Post` (Document 157, DynamicList 2),
+/// `UndoPosting` (Document 106, DynamicList 2), `Generate` (Report 17),
+/// `CancelEdit` (Report 9, SettingsComposer 5), `EndEdit` (Report 3) and
+/// `SetDateInterval` (DynamicList 5).
+///
+/// The reverse side of the same join -- the `0:<uuid>` values the platform
+/// writes where our table does carry a name -- has exactly three records on
+/// the two states this refuses: two `WriteAndClose` on forms with no main
+/// attribute (ERP УХ
+/// `Catalogs/МониторыКлючевыхПоказателей/Forms/ФормаПроизвольногоОтчетаПоМКП`
+/// and `Catalogs/ПроизвольныеОтчеты/Forms/ФормаПроизвольногоОтчетаПоИсточнику`,
+/// both `0:32df4349-…`) and one `Generate` on a `DataProcessorObject`
+/// (`DataProcessors/СтруктураВладения/Forms/Форма`, `0:b5e6da6b-…`).
+///
+/// Only those two states refuse. `SetDateInterval` is also written raw once on
+/// a `DynamicList` form (`DataProcessors/НалоговыйМониторинг/Forms/
+/// РегламентированнаяОтчетность`, `0:eb880cb2-…`) while five other
+/// `DynamicList` forms name it, so whatever separates those six is not the
+/// main attribute's family and is not decided here. Every other command of the
+/// table is named on a form with no main attribute or on a data processor --
+/// `Close`, `Help`, `CustomizeForm`, `Cancel`, `OK`, `Yes`, `No`, `Ignore`,
+/// `SaveValues`, `RestoreValues`, `OpenFromMainServer`,
+/// `OpenFromStandaloneServer` -- so none of them is gated.
+fn form_extension_owns_standard_command(
+    command_name: &str,
+    main_attribute: &FormMainAttributeExtension,
+) -> bool {
+    let Some(suffix) = command_name.strip_prefix("Form.StandardCommand.") else {
+        return true;
+    };
+    if !matches!(
+        suffix,
+        "CancelEdit"
+            | "EndEdit"
+            | "Generate"
+            | "Post"
+            | "PostAndClose"
+            | "Reread"
+            | "SetDateInterval"
+            | "UndoPosting"
+            | "Write"
+            | "WriteAndClose"
+    ) {
+        return true;
+    }
+    match main_attribute {
+        FormMainAttributeExtension::Unread => true,
+        FormMainAttributeExtension::Absent => false,
+        FormMainAttributeExtension::Declared(family) => {
+            family.as_deref() != Some("DataProcessorObject")
+        }
+    }
 }
 
 pub(super) fn form_object_reference_command_name(reference: &str) -> String {
