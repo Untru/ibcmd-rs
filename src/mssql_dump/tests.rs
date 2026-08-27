@@ -15223,11 +15223,17 @@ fn formats_hierarchical_table_properties_in_schema_order() {
     // rationale), and slot 52 (`EnableStartDrag`) flipped to `1` so the
     // `<EnableStartDrag>true</EnableStartDrag>` ordering assertion below has a
     // value to find.
-    let mut item = parse_form_child_item(
+    let mut item = parse_form_child_item_with_attrs(
             r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,2,13,{"U"},19,{"S",""},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
+            // The table is bound to the form attribute the record names, so the
+            // attribute index carries it: a binding onto an id the form does not
+            // declare is written physically, not guessed from the item's name.
             &BTreeMap::from([("7".to_string(), "Список".to_string())]),
+            &BTreeMap::from([("7".to_string(), "Список".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
@@ -15332,18 +15338,25 @@ fn extracts_change_row_order_from_zero_marker_ordinary_table_variant() {
 
 #[test]
 fn extracts_ordinary_wrapper55_table_rows_picture_and_command_set() {
-    let item = parse_form_child_item(
+    let item = parse_form_child_item_with_attrs(
             // Padded to the current `FormTableSchema` minimum tail length (see
             // `extracts_business_network_table_flags_from_ordinary_wrapper55`
             // for the rationale).
             r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,1,{"ru","Rows"}},{1,0},{1,{2}},0,0,0,0,0,0,0,0,0,2,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,1,2,0,0,1,1,{1,{8}},{4,1,{0,e112dfa4-4cb7-402d-85b9-f0234915989b},"",-1,-1,0,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{1,1282f000-23b6-4887-87f4-9e8e79db3d32,"RowsSelection",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1},{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,fa51b106-eae6-44c7-8054-76cbb3100603},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
+            // The table is bound to the form attribute the real record names,
+            // so the attribute index carries it: a binding onto an id the form
+            // does not declare is written physically, not guessed from the
+            // item's own name.
+            &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
             &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
             &BTreeMap::from([(
                 "2".to_string(),
                 BTreeMap::from([("8".to_string(), "RowsRowPicture".to_string())]),
             )]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::from([(
                 "e112dfa4-4cb7-402d-85b9-f0234915989b".to_string(),
@@ -16009,7 +16022,6 @@ fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
     assert_eq!(
         parse_form_bound_data_path(
             r#"{2,{8},{1}}"#,
-            "ПериодВыборкиДокументовДатаНачала",
             &attribute_names_by_id,
             &BTreeMap::new(),
             &table_column_names_by_id,
@@ -16022,7 +16034,6 @@ fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
     assert_eq!(
         parse_form_bound_data_path(
             r#"{2,{8},{2}}"#,
-            "ПериодВыборкиДокументовДатаОкончания",
             &attribute_names_by_id,
             &BTreeMap::new(),
             &table_column_names_by_id,
@@ -16088,7 +16099,6 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
     assert_eq!(
         parse_form_bound_data_path(
             r#"{2,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca}}"#,
-            "Товары",
             &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -16101,7 +16111,6 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
     assert_eq!(
         parse_form_bound_data_path(
             r#"{3,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca},{-2}}"#,
-            "ТоварыНомерСтроки",
             &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -16114,7 +16123,6 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
     assert_eq!(
             parse_form_bound_data_path(
                 r#"{3,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca},{0,76858240-71b9-4ab8-b072-c211bb45594b}}"#,
-                "ТоварыНоменклатура",
                 &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
@@ -16127,7 +16135,6 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
     assert_eq!(
             parse_form_bound_data_path(
                 r#"{3,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca},{1,5bdad865-f2c5-434b-8041-ba4aad3b6687}}"#,
-                "ТоварыВыбран",
                 &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
@@ -16414,6 +16421,7 @@ fn indexes_direct_table_columns_from_their_structural_table_parent() {
         Some(r#"{5007,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0,"",""}"#),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &indexes.table_name_by_id,
         &indexes.table_column_names_by_id,
         &indexes.type_link_data_path_by_table_column,
@@ -18098,11 +18106,17 @@ fn extracts_checkbox_edit_mode_from_layout_code() {
 fn extracts_radio_button_field_with_choice_list_from_layout_code() {
     let mut attribute_names = BTreeMap::new();
     attribute_names.insert("2".to_string(), "ВариантОбработки".to_string());
-    let item = parse_form_child_item(
+    let item = parse_form_child_item_with_attrs(
             r##"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ВариантОбработки",1,0,{1,1,{"ru","Выберите действие"}},{1,0},{1,{2}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{3,2,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Архивирование чеков ККМ"}}}},"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",1},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Удаление чеков ККМ"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}},0,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2},{0,1,0},1,{22,{39,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ВариантОбработкиКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ВариантОбработкиРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##,
             None,
             None,
+            // The field is bound to the form attribute the record names, so the
+            // attribute index carries it: a binding onto an id the form does not
+            // declare is written physically, not guessed from the item's name.
             &attribute_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
@@ -24491,6 +24505,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         Some(&duplicate),
         &attribute_names,
         &attribute_owners,
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24520,6 +24535,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         Some(&duplicate),
         &attribute_names,
         &attribute_owners,
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24542,6 +24558,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         Some(&duplicate),
         &attribute_names,
         &attribute_owners,
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24594,6 +24611,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
             &options,
             &attribute_names,
             &attribute_owners,
+        &BTreeSet::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -24609,6 +24627,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         &options,
         &attribute_names,
         &attribute_owners,
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24643,6 +24662,7 @@ fn input_field_choice_parameter_links_spell_an_unnamed_owner_physically() {
         Some(r#"{5007,1,"Отбор.Владелец",1,{2},0,"",""}"#),
         &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24659,6 +24679,7 @@ fn input_field_choice_parameter_links_spell_an_unnamed_owner_physically() {
         Some(r#"{5007,1,"Отбор.Владелец",1,{2},0,"",""}"#),
         &BTreeMap::from([("2".to_string(), "Объект".to_string())]),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24705,6 +24726,7 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
             Some(duplicate),
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeSet::new(),
             &table_names,
             &table_columns,
             &BTreeMap::new(),
@@ -24732,6 +24754,7 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
         Some(duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &table_names,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24769,6 +24792,7 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
             &options,
             &BTreeMap::new(),
             &BTreeMap::new(),
+        &BTreeSet::new(),
             &table_names,
             &table_columns,
             &BTreeMap::new(),
@@ -24785,6 +24809,7 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
             &options,
             &BTreeMap::new(),
             &BTreeMap::new(),
+        &BTreeSet::new(),
             &table_names,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -24817,6 +24842,7 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
         Some(&duplicate),
         &attribute_names,
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &table_routes,
@@ -24843,6 +24869,7 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
         Some(&duplicate),
         &attribute_names,
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24880,6 +24907,7 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
             &options,
             &attribute_names,
             &BTreeMap::new(),
+        &BTreeSet::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &table_routes,
@@ -24925,6 +24953,7 @@ fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
         Some(&duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &disagreeing_routes,
@@ -24947,6 +24976,7 @@ fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
         Some(&duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &supplemental_only,
@@ -24963,6 +24993,7 @@ fn input_field_choice_parameter_links_prefer_the_layout_binding_route() {
         Some(&duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -24998,6 +25029,7 @@ fn input_field_choice_parameter_links_read_agreeing_binding_uuid_routes() {
         Some(&duplicate),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &agreeing_routes,
@@ -25053,6 +25085,7 @@ fn input_field_choice_parameter_links_resolve_live_hybrid_table_routes_and_date(
         Some(duplicate),
         &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &table_names,
         &BTreeMap::new(),
         &type_routes,
@@ -70459,6 +70492,7 @@ fn choice_parameter_link_standard_terminals_follow_the_attribute_family() {
             Some(&duplicate),
             &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
             &form_attribute_metadata_owners_by_id(&attributes),
+            &BTreeSet::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -73395,6 +73429,7 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
         Some(duplicate),
         &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
         &form_attribute_metadata_owners_by_id(&attributes),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -73425,6 +73460,7 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
         Some(r#"{5007,1,"Ссылка",2,{1},{-4},0,"",""}"#),
         &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
         &form_attribute_metadata_owners_by_id(&attributes),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -73446,6 +73482,7 @@ fn choice_parameter_link_terminals_admit_any_marker_the_family_table_names() {
                 )),
                 &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
                 &form_attribute_metadata_owners_by_id(&attributes),
+                &BTreeSet::new(),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 &BTreeMap::new(),

@@ -387,6 +387,14 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     // the same one table, and what the platform cannot name it leaves out.
     let main_list_settings = form_main_attribute_list_settings(&attributes);
     let main_list_table = main_list_settings.and_then(|settings| settings.main_table.as_deref());
+    // The same main attribute, addressed by id rather than by its settings, for
+    // the one root reader that asks about the *table* showing the list instead
+    // of about the list itself -- the row-set rule below, which needs a fact
+    // only the item tree carries and therefore runs after it is parsed.
+    let main_list_attribute_id = attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute && attribute.settings.is_some())
+        .map(|attribute| attribute.id.clone());
     properties.command_set_excluded_commands.retain(|command| {
         form_extension_owns_standard_command(command, &main_attribute_extension)
             && form_list_owner_declares_standard_command(
@@ -537,6 +545,10 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     );
     collect_form_item_rooted_chain_roots(&mut child_item_indexes, &attributes, context.object_refs);
     child_item_indexes.owner_scoped_bindings.form_main_attribute = main_attribute_extension;
+    child_item_indexes
+        .owner_scoped_bindings
+        .attribute_ids_without_declared_owner =
+        form_attribute_ids_without_declared_owner(&attributes, context.metadata_field_declarations);
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
@@ -553,6 +565,21 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &child_item_indexes,
         context.trace_sink,
     );
+    // The root command set is the second reader of the very fact the table's
+    // own set already reads: a dynamic list whose row set the form declares
+    // unchangeable has no commands that change it, so the platform names none
+    // of them -- at the root exactly as inside the table.
+    if let Some(main_list_attribute_id) = main_list_attribute_id.as_deref()
+        && form_main_list_row_set_is_unchangeable(
+            &child_items,
+            main_list_attribute_id,
+            &child_item_indexes.bound_attribute_id_by_table_id,
+        )
+    {
+        properties
+            .command_set_excluded_commands
+            .retain(|command| !FORM_TABLE_ROW_SET_EXCLUDED_COMMANDS.contains(command));
+    }
     resolve_form_choice_form_references(
         &mut child_items,
         context.form_reference_index.unwrap_or(context.object_refs),
@@ -3990,9 +4017,16 @@ fn parse_form_attribute_with_dcs_type_index(
         .get(4)
         .map(|field| parse_form_localized_strings(field))
         .unwrap_or_default();
+    // An attribute's own pattern names a platform type exactly as one of its
+    // columns does, so it is read through the same overlay: ERP УХ 3.2.12.6
+    // `Catalogs/ТиповыеОперацииМеждународныйУчет/Forms/ФормаЭлемента` declares
+    // six attributes as `{"Pattern",{"#",741ae838-…}}` and the platform writes
+    // `<v8:Type>ent:AccountingRecordType</v8:Type>` for each, while the plain
+    // index -- which carries only the configuration's own generated types --
+    // could not name the identifier and refused the whole tuple.
     let parsed_value_types = fields
         .get(5)
-        .and_then(|field| parse_form_type_pattern(field, type_index));
+        .and_then(|field| parse_form_attribute_column_type_pattern(field, type_index));
     let exact_single_type_uuid = fields
         .get(5)
         .and_then(|field| parse_form_exact_single_type_uuid(field));
@@ -8650,6 +8684,54 @@ fn table_emits_auto_max_width_false(
     effective_auto_max_width == Some(false)
 }
 
+/// The attributes whose single declared type is a catalogue the configuration
+/// declares no owner for.
+///
+/// `Owner` is a standard attribute a catalogue has only while its `<Owners>`
+/// declares at least one member, and a terminal that names one on a catalogue
+/// without owners is a name the platform cannot construct: it writes the
+/// terminal physically instead, as `<attribute id>/<marker>`.
+///
+/// Evidence over the five stand corpora that carry the element at all: every
+/// one of the 46 native `<xr:DataPath>` values naming `.Owner` sits on an
+/// attribute whose catalogue declares owners — 36 declare one, two declare two,
+/// two declare three, one declares four, and five sit on a multi-typed
+/// attribute this reading does not claim — and all three that the platform
+/// writes physically as `1/-5` sit on a catalogue whose `<Owners/>` is empty:
+/// ERP УХ 3.2.12.6 `Catalogs/ВидыДвиженийМСФО/Forms/ФормаЭлемента` once and
+/// `Catalogs/УдалитьКонтрольныеСоотношения/Forms/ФормаЭлемента` twice. No
+/// overlap in either direction.
+///
+/// An index that carries no entry for the table answers nothing, and the
+/// attribute is left exactly as it was.
+fn form_attribute_ids_without_declared_owner(
+    attributes: &[FormAttribute],
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> BTreeSet<String> {
+    let Some(declarations) = declarations else {
+        return BTreeSet::new();
+    };
+    attributes
+        .iter()
+        .filter(|attribute| {
+            let [ConstantValueType::Reference { reference }] = attribute.value_types.as_slice()
+            else {
+                return false;
+            };
+            let Some(owner) = form_generated_owner_type_from_type_reference(reference) else {
+                return false;
+            };
+            if owner.family() != GeneratedMetadataOwnerFamily::Catalog {
+                return false;
+            }
+            declarations
+                .table(&owner.owner_reference())
+                .is_some_and(|table| !table.declares("Owner"))
+        })
+        .map(|attribute| attribute.id.clone())
+        .collect()
+}
+
 pub(super) fn form_attribute_metadata_owners_by_id(
     attributes: &[FormAttribute],
 ) -> BTreeMap<String, FormAttributeMetadataOwner> {
@@ -9000,6 +9082,13 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// resolvable-field universe. A data path onto one of them carries the
     /// platform's `~` marker, the same marker `<UseAlways>` already writes.
     unresolvable_columns: BTreeSet<FormAttributeColumnKey>,
+    /// Attribute ids whose single declared type is a catalogue the
+    /// configuration declares no `<Owners>` member for. Such a catalogue has no
+    /// `Owner` standard attribute, so a terminal that names one is a name the
+    /// platform cannot construct — and what it cannot name it writes
+    /// physically. Read from the very declaration index the root command set
+    /// reads `Parent` and `IsFolder` from.
+    attribute_ids_without_declared_owner: BTreeSet<String>,
 }
 
 /// The attribute-namespace root a chain rooted at a form item continues from.
@@ -9982,7 +10071,6 @@ fn collect_form_child_item_indexes_from_field_traced(
                 if let Some(binding_key) = parse_form_bound_data_binding_key(binding)
                     && let Some(data_path) = parse_form_bound_data_path_with_metadata_owner(
                         binding,
-                        &name,
                         attribute_names_by_id,
                         attribute_metadata_owners_by_id,
                         &indexes.table_name_by_id,
@@ -11226,7 +11314,22 @@ fn parse_form_child_item_with_metadata_owners(
                         .and_then(|field| parse_form_child_item_group(field))
                 })
         } else if tag == "Page" {
-            page_properties.and_then(|properties| properties.group())
+            page_properties
+                .and_then(|properties| properties.group())
+                // The short revision of the page option bag carries the same
+                // grouping triple in the same three slots; nothing else of it
+                // is measured, so nothing else is read.
+                .or_else(|| {
+                    show_title_options.as_deref().and_then(|options| {
+                        FormPageSchema::short_revision_group(
+                            wrapper,
+                            fields.len(),
+                            tag,
+                            direct_discriminator,
+                            options,
+                        )
+                    })
+                })
         } else {
             None
         },
@@ -11705,11 +11808,26 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         scroll_on_compress: page_properties.and_then(|properties| properties.scroll_on_compress()),
-        show_title: show_title_schema.and_then(|schema| {
-            show_title_options
-                .as_deref()
-                .and_then(|options| schema.show_title(options))
-        }),
+        show_title: show_title_schema
+            .and_then(|schema| {
+                show_title_options
+                    .as_deref()
+                    .and_then(|options| schema.show_title(options))
+            })
+            // The short revision of the page option bag carries the flag in the
+            // same slot; nothing else of it is measured, so nothing else is
+            // read.
+            .or_else(|| {
+                show_title_options.as_deref().and_then(|options| {
+                    FormPageSchema::short_revision_show_title(
+                        wrapper,
+                        fields.len(),
+                        tag,
+                        direct_discriminator,
+                        options,
+                    )
+                })
+            }),
         header_horizontal_align: if tag == "ColumnGroup" {
             column_group_options
                 .as_ref()
@@ -13345,6 +13463,7 @@ fn parse_form_child_item_with_metadata_owners(
                         options,
                         attribute_names_by_id,
                         attribute_metadata_owners_by_id,
+                        &owner_scoped_bindings.attribute_ids_without_declared_owner,
                         table_name_by_id,
                         table_column_names_by_id,
                         type_link_data_path_by_table_column,
@@ -15533,12 +15652,21 @@ pub(super) fn parse_form_input_field_choice_parameter_links(
 /// the link is refused and the caller keeps the whole collection opaque. The
 /// four `cfg:ChartOfCharacteristicTypesObject`/`-2` terminals are the only ones
 /// the corpus puts through that door, and the table now names them.
+///
+/// A catalogue that declares no owner is the one further refusal: it has no
+/// `Owner` standard attribute for `-5` to name, and the platform writes the
+/// terminal physically instead. See
+/// `form_attribute_ids_without_declared_owner` for the census.
 fn form_choice_parameter_link_standard_terminal_member(
     attribute_id: &str,
     standard: FormChoiceParameterLinkStandardTerminal,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    attribute_ids_without_declared_owner: &BTreeSet<String>,
 ) -> Option<&'static str> {
     let marker = standard.marker_text();
+    if marker == "-5" && attribute_ids_without_declared_owner.contains(attribute_id) {
+        return None;
+    }
     attribute_metadata_owners_by_id
         .get(attribute_id)
         .and_then(|owner| owner.exact_single_type_reference.as_deref())
@@ -15606,6 +15734,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     duplicate: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    attribute_ids_without_declared_owner: &BTreeSet<String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
@@ -15634,6 +15763,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         attribute_id,
                         *standard,
                         attribute_metadata_owners_by_id,
+                        attribute_ids_without_declared_owner,
                     )
                     .and_then(|member| {
                         attribute_names_by_id
@@ -15804,6 +15934,7 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     options: &[&str],
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    attribute_ids_without_declared_owner: &BTreeSet<String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
@@ -15856,6 +15987,7 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
         duplicate,
         attribute_names_by_id,
         attribute_metadata_owners_by_id,
+        attribute_ids_without_declared_owner,
         table_name_by_id,
         table_column_names_by_id,
         type_link_data_path_by_table_column,
@@ -20431,7 +20563,6 @@ pub(super) fn parse_form_child_item_data_path(
                 let data_path = if owner_scoped_metadata {
                     parse_form_bound_data_path_with_metadata_owner(
                         field,
-                        name,
                         attribute_names_by_id,
                         attribute_metadata_owners_by_id,
                         table_name_by_id,
@@ -20443,7 +20574,6 @@ pub(super) fn parse_form_child_item_data_path(
                 } else {
                     parse_form_bound_data_path(
                         field,
-                        name,
                         attribute_names_by_id,
                         table_name_by_id,
                         table_column_names_by_id,
@@ -22345,7 +22475,6 @@ fn resolve_form_attribute_column_data_path(
 
 fn parse_form_bound_data_path_with_metadata_owner(
     field: &str,
-    name: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
@@ -22363,7 +22492,6 @@ fn parse_form_bound_data_path_with_metadata_owner(
         FormMetadataDataPathResolution::NotMetadata
         | FormMetadataDataPathResolution::ReferenceAbsent => parse_form_bound_data_path(
             field,
-            name,
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
@@ -22565,6 +22693,9 @@ fn form_standard_attribute_table_for_type_reference(
         (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Object) => {
             Some(chart_of_accounts_standard_attribute_definitions())
         }
+        (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Ref) => {
+            Some(CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES)
+        }
         (GeneratedMetadataOwnerFamily::BusinessProcess, GeneratedMetadataOwnerRole::Object) => {
             Some(&BUSINESS_PROCESS_STANDARD_ATTRIBUTES)
         }
@@ -22651,6 +22782,31 @@ const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-5", "Owner"),
     ("-7", "DeletionMark"),
 ];
+/// Reached by dereferencing a value whose declared type is exactly one chart of
+/// accounts reference — a form attribute, one of its columns, or a metadata
+/// field the chain walks onto.
+///
+/// The marker is the family's own: `-8` is `Description` in
+/// `CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS`, the table the metadata
+/// compiler writes `<xr:StandardAttribute name="Description">` from, and the
+/// reference role names it by the same number. Only that one row is claimed,
+/// because only that one is observed: over the eight native stand trees every
+/// data path whose last step leaves a `cfg:ChartOfAccountsRef.*` value spells
+/// `Description` — fourteen of them, on nine ERP УХ forms, among them
+/// `Catalogs/СоответствияОборотовМеждународногоУчета/Forms/ФормаЭлемента`
+/// (`Объект.СчетРеглУчетаДт.Description` and three more, each a
+/// `{3,{1},{0,<metadata field>},{-8}}` chain),
+/// `InformationRegisters/ПравилаУточненияСчетовВМеждународномУчете/Forms/НастройкаУточненияСчетов`
+/// (`ШаблоныПроводок.СчетУчета.Description`, `{3,{1},{5},{-8}}`, a form
+/// attribute's own column) and `CommonForms/НастройкаСчетовУчетаОперации`
+/// (`СчетУчета.Description`, the attribute itself). A census of every native
+/// `<xr:Value>`, `<xr:DataPath>`, `<xr:LinkItem>` and `<DataPath>` naming a
+/// member of an attribute or column declared exactly one chart-of-accounts
+/// reference finds that single spelling and no other, so the `-8 => Ref`
+/// reading of last resort in
+/// `form_choice_parameter_link_standard_terminal_member` — which this table now
+/// takes precedence over for this family — has no case in the corpus.
+const CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-8", "Description")];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),
@@ -22982,7 +23138,6 @@ fn form_generated_owner_type_from_type_reference(
 
 pub(super) fn parse_form_bound_data_path(
     field: &str,
-    name: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
@@ -22991,7 +23146,7 @@ pub(super) fn parse_form_bound_data_path(
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     match fields.first().map(|value| value.trim()) {
-        Some("1") => parse_form_attribute_data_path(field, name, attribute_names_by_id),
+        Some("1") => parse_form_attribute_data_path(field, attribute_names_by_id),
         Some("2") => {
             let table = fields
                 .get(1)
@@ -23530,7 +23685,6 @@ pub(super) fn parse_form_attribute_binding_id(field: &str) -> Option<String> {
 
 pub(super) fn parse_form_attribute_data_path(
     field: &str,
-    name: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -23539,10 +23693,28 @@ pub(super) fn parse_form_attribute_data_path(
     }
     let ids = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let attribute_id = ids.first()?.trim();
+    // A binding onto an attribute the form does not declare is a reference the
+    // platform cannot name, and it writes the id physically instead — the same
+    // reading the command record already uses for a uuid nothing names.
+    // Answering with the *item's own name* was an invention: it is not the
+    // attribute's name, because there is no such attribute.
+    //
+    // Evidence: over the eight native stand trees, exactly twelve `<DataPath>`
+    // elements hold a bare integer, all twelve in ERP УХ 3.2.12.6 and all of
+    // them on an item whose binding is `{1,{<id>}}` with an id past the last
+    // one the form's `<Attributes>` collection declares —
+    // `Catalogs/АналитическаяПодписка/Forms/ФормаЭлемента` binds `22` and `23`
+    // against a collection that ends at 19 and the platform writes `22` and
+    // `23`. Nothing else in any of the eight trees spells a data path that way.
+    //
+    // The old fallback cost nothing to drop: over all 12 658 byte-exact ERP УХ
+    // forms there is not one single-segment `<DataPath>` equal to the enclosing
+    // item's own name that the form does not also declare as an attribute, so
+    // no file that matches today matches *because* of it.
     attribute_names_by_id
         .get(attribute_id)
         .cloned()
-        .or_else(|| Some(name.to_string()))
+        .or_else(|| Some(attribute_id.to_string()))
 }
 
 /// Whether the target a `{kind, uuid}` command record names declares the
@@ -24255,6 +24427,51 @@ fn form_list_without_main_table_declares_standard_command(
             | "Tree"
             | "UndoPosting"
     )
+}
+
+/// Whether the table showing the form's own main list declares its row set
+/// unchangeable.
+///
+/// `<ChangeRowSet>false</ChangeRowSet>` belongs to the list, not to the table's
+/// grammar -- `parse_form_table_command_set_excluded_commands_for_table`
+/// already reads it that way for the table's own `<CommandSet>`, against the
+/// same binding index. The root set is the second reader of the same fact, so
+/// it asks the same question of the same table rather than keeping a flag of
+/// its own.
+///
+/// Evidence, the native trees of the eight stand corpora: of the 1 867 root
+/// `<CommandSet>` blocks that sit on a form whose main attribute is a
+/// `cfg:DynamicList`, 79 are shown by a table declaring `<ChangeRowSet>false`,
+/// and **not one** of the 79 names any of `Copy`, `Create`, `CreateFolder`,
+/// `Delete`, `MoveItem` or `SetDeletionMark`, while 1 620 of the remaining
+/// 1 788 name at least one. The split holds on every corpus that has the
+/// population at all -- ERP УХ 41/0 against 884/828, УТ 23/0 against 539/508,
+/// ДО 13/0 against 235/161, БСП демо 1/0 against 68/64, БСП базовая 1/0
+/// against 62/59 -- with no counter-example anywhere.
+///
+/// ERP УХ 3.2.12.6 states it three times over:
+/// `Catalogs/ВидыДоговоровКонтрагентовУХ/Forms/ФормаВыбора` and
+/// `.../ФормаСписка` are hierarchical-catalog lists whose whole root set the
+/// platform leaves out, and
+/// `InformationRegisters/УниверсальныеКомментарии/Forms/ФормаСпискаКомментариев`
+/// keeps its `Change` and loses exactly `Copy` and `Create`.
+fn form_main_list_row_set_is_unchangeable(
+    items: &[FormChildItem],
+    main_attribute_id: &str,
+    bound_attribute_id_by_table_id: &BTreeMap<String, String>,
+) -> bool {
+    items.iter().any(|item| {
+        (item.tag == "Table"
+            && item.change_row_set == Some(false)
+            && bound_attribute_id_by_table_id
+                .get(&item.id)
+                .is_some_and(|attribute_id| attribute_id == main_attribute_id))
+            || form_main_list_row_set_is_unchangeable(
+                &item.child_items,
+                main_attribute_id,
+                bound_attribute_id_by_table_id,
+            )
+    })
 }
 
 pub(super) fn form_object_reference_command_name(reference: &str) -> String {
@@ -25013,7 +25230,6 @@ pub(super) fn parse_form_command_interface_attribute(
     }
     parse_form_bound_data_path(
         field,
-        "",
         attribute_names_by_id,
         &child_item_indexes.table_name_by_id,
         &child_item_indexes.table_column_names_by_id,
@@ -25166,7 +25382,7 @@ pub(super) fn parse_form_command_interface_command(
     if let Some(name) = form_command_record_single_field_name(&fields) {
         return Some(name);
     }
-    match kind {
+    let named = match kind {
         "0" => {
             let Some(target) = target else {
                 return Some("0".to_string());
@@ -25349,7 +25565,33 @@ pub(super) fn parse_form_command_interface_command(
             (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
         }
         _ => None,
-    }
+    };
+    // A well-formed uuid that names nothing in this configuration is a
+    // reference the platform cannot construct a name for, and it writes the raw
+    // `kind:uuid` sentinel for it — in *every* record slot, not only in the
+    // three the rule was first measured in. The `0` arm and the `5`/`6`/`7` arm
+    // above each carry their own copy of it; this is the same reading, applied
+    // once for every kind, so a slot the arms above leave unresolved no longer
+    // takes the whole item down with it.
+    //
+    // Evidence: ERP УХ 3.2.12.6, the whole differing set. The platform writes
+    // 65 `<Command>` values inside `<CommandInterface>` that this export does
+    // not, on 21 forms; 44 distinct uuids carry them, and a scan of all 56 697
+    // metadata documents of the configuration finds 38 of the 44 nowhere at
+    // all — they name no object, no command and no subsystem. They are spelled
+    // `1:`, `2:`, `3:`, `4:`, `5:` and `8:`, so the sentinel is not a property
+    // of the slot number. `Catalogs/ОбъектыЭксплуатации/Forms/ФормаЭлемента`
+    // alone carries fifteen of them, `Catalogs/Сценарии/Forms/ФормаЭлемента`
+    // seven; in each case the refusal dropped the whole `<Item>`, and where the
+    // refused item was the container's only one it dropped the container.
+    //
+    // The six uuids that *do* name something stay refused here: their targets
+    // exist, so their case is a rule about the target, not about the name being
+    // unconstructible, and they are open.
+    named.or_else(|| {
+        let uuid = target.and_then(parse_non_zero_uuid)?;
+        (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
+    })
 }
 
 #[cfg(test)]
