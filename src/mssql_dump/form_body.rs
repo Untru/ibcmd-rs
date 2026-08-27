@@ -378,9 +378,22 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     let attributes_section =
         extract_form_body_attributes_section(&body.trailing, context.object_refs);
 
-    // Read once from the attribute collection and shared by both consumers of
-    // the fact: the root event reader and the button's standard-command name.
+    // Read once from the attribute collection and shared by every consumer of
+    // the fact: the root event reader, the root command set and the button's
+    // standard-command name.
     let main_attribute_extension = form_main_attribute_extension(&attributes);
+    // The root command set names a standard command only when the form has it,
+    // exactly as a button does -- both are the same list of uuids read against
+    // the same one table, and what the platform cannot name it leaves out.
+    let main_list_table = form_main_attribute_list_table(&attributes);
+    properties.command_set_excluded_commands.retain(|command| {
+        form_extension_owns_standard_command(command, &main_attribute_extension)
+            && form_list_owner_declares_standard_command(
+                command,
+                main_list_table,
+                context.metadata_field_declarations,
+            )
+    });
 
     let started = Instant::now();
     let events = extract_form_body_events(
@@ -23592,22 +23605,48 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<String> {
 /// `Close`, `Help`, `CustomizeForm`, `Cancel`, `OK`, `Yes`, `No`, `Ignore`,
 /// `SaveValues`, `RestoreValues`, `OpenFromMainServer`,
 /// `OpenFromStandaloneServer` -- so none of them is gated.
+///
+/// The form's own `<CommandSet>` names the very same commands from the very
+/// same uuids, and it is joined on the same axis: over the 6 727 native root
+/// command sets of the eight corpora, 2 850 of them on a form with no main
+/// attribute and 319 on a `DataProcessorObject`, not one of those 3 169 names
+/// any of the commands below, while the same names are written 34..660 times
+/// each on the families that own them. That join also pins the report family,
+/// which the button join sees on `ReportObject` only: `ChangeVariant` 88,
+/// `ReportSettings` 95, `LoadVariant` 91, `SaveVariant` 89, `StandardSettings`
+/// 68, `LoadReportSettings` 58, `SaveReportSettings` 58, `Save` 53, `Print` 49,
+/// `NewWindow` 43 -- all of them on `ReportObject` and nowhere else, `EndEdit`
+/// additionally on all five `SettingsComposer` forms. The button join agrees
+/// name for name (`SaveReportSettings` 143, `LoadReportSettings` 143,
+/// `NewWindow` 101, `LoadVariant` 36, `SaveVariant` 29, `Print` 20,
+/// `ReportSettings` 13, `ChangeVariant` 11, `StandardSettings` 5, `Save` 4 --
+/// `ReportObject` throughout), so the one list serves both readers.
 fn form_extension_owns_standard_command(
     command_name: &str,
     main_attribute: &FormMainAttributeExtension,
 ) -> bool {
-    let Some(suffix) = command_name.strip_prefix("Form.StandardCommand.") else {
-        return true;
-    };
+    let command = command_name
+        .strip_prefix("Form.StandardCommand.")
+        .unwrap_or(command_name);
     if !matches!(
-        suffix,
+        command,
         "CancelEdit"
+            | "ChangeVariant"
             | "EndEdit"
             | "Generate"
+            | "LoadReportSettings"
+            | "LoadVariant"
+            | "NewWindow"
             | "Post"
             | "PostAndClose"
+            | "Print"
+            | "ReportSettings"
             | "Reread"
+            | "Save"
+            | "SaveReportSettings"
+            | "SaveVariant"
             | "SetDateInterval"
+            | "StandardSettings"
             | "UndoPosting"
             | "Write"
             | "WriteAndClose"
@@ -23621,6 +23660,68 @@ fn form_extension_owns_standard_command(
             family.as_deref() != Some("DataProcessorObject")
         }
     }
+}
+
+/// The main table of the form's own dynamic list, when the main attribute is
+/// one and declares a main table.
+fn form_main_attribute_list_table(attributes: &[FormAttribute]) -> Option<&str> {
+    attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute)?
+        .settings
+        .as_ref()?
+        .main_table
+        .as_deref()
+}
+
+/// Whether the table the form's list is built over has the standard command
+/// this name spells.
+///
+/// The hierarchy commands of a list are the list's, not the form's, and they
+/// exist only where the table's own hierarchy exists. This reads the very
+/// declarations the dynamic list's resolvable-field universe already reads --
+/// `<Hierarchical>` answers the `Parent` standard attribute and
+/// `<HierarchyType>` the `IsFolder` one -- so the two consumers share one
+/// table of facts rather than each keeping its own hierarchy flag.
+///
+/// Evidence: the 6 727 native root `<CommandSet>` blocks of the eight stand
+/// corpora, split by the declarations of the main table each form's list names.
+/// `HierarchicalList`, `LevelDown`, `LevelUp`, `List`, `MoveItem` and `Tree`
+/// are written 51..61 times on the 237 forms over a folder-hierarchy catalog
+/// and 11..21 times on the 56 over an item-hierarchy one -- and *zero* times on
+/// the 504 forms over a catalog that declares `<Hierarchical>false`. Over the
+/// 5 929 remaining root command sets (4 701 with no main table at all, 750 over
+/// a document, 407 over an information register, 37 over a document journal,
+/// 13 over a business process, 11 over an accumulation register, 5 over an
+/// enumeration, 3 over an exchange plan, 1 over an accounting register) the
+/// only hierarchy name written at all is `MoveItem`, on the two forms over
+/// `ChartOfAccounts.Хозрасчетный` -- a chart of accounts is hierarchical
+/// without declaring it, and this index carries no entry for one, so it is not
+/// refused. `CreateFolder` is narrower still: 100 of the 237 folder-hierarchy
+/// catalogs write it and none of the 56 item-hierarchy ones does, which is the
+/// same split `IsFolder` already answers.
+///
+/// A main table this index carries no declarations for withholds nothing.
+fn form_list_owner_declares_standard_command(
+    command: &str,
+    main_table: Option<&str>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> bool {
+    let standard_attribute = match command {
+        "HierarchicalList" | "LevelDown" | "LevelUp" | "List" | "MoveItem" | "Tree" => "Parent",
+        "CreateFolder" => "IsFolder",
+        _ => return true,
+    };
+    let Some(main_table) = main_table else {
+        return true;
+    };
+    let Some(declarations) = declarations else {
+        return true;
+    };
+    let Some(table) = declarations.table(main_table) else {
+        return true;
+    };
+    table.declares(standard_attribute)
 }
 
 pub(super) fn form_object_reference_command_name(reference: &str) -> String {
