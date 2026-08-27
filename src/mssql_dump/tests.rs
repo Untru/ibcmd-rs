@@ -431,18 +431,23 @@ fn form_navigation_panel_preserves_raw_item_order_and_rejects_bad_counts() {
     assert!(extract_form_command_interface(&malformed, &object_refs).is_none());
 }
 
+/// The owners of a named type set are derived from the leaves the set declares,
+/// not stored beside them: one table answers both this route and the
+/// `<FillValue>` writer.
 #[test]
 fn information_register_type_set_uses_defined_type_owner_index() {
     let value_types = [ConstantValueType::ReferenceTypeSet {
         reference: "cfg:DefinedType.ProductOwner".to_string(),
     }];
-    let defined_types = BTreeMap::from([(
+    let type_set_leaves = BTreeMap::from([(
         "cfg:DefinedType.ProductOwner".to_string(),
-        BTreeSet::from(["Catalog.Products".to_string()]),
+        vec![ConstantValueType::Reference {
+            reference: "cfg:CatalogRef.Products".to_string(),
+        }],
     )]);
 
     assert_eq!(
-        information_register_value_owner_references(&value_types, &defined_types),
+        information_register_value_owner_references(&value_types, &type_set_leaves),
         BTreeSet::from(["Catalog.Products".to_string()])
     );
     assert!(information_register_value_owner_references(&value_types, &BTreeMap::new()).is_empty());
@@ -503,7 +508,7 @@ fn parses_accumulation_register_code4_attribute_defaults() {
         child_objects: Vec::new(),
     };
     let mut xml = String::new();
-    push_metadata_child_object_xml(&mut xml, &child);
+    push_metadata_child_object_xml(&mut xml, &child, &MetadataTypeSetLeafIndex::new());
     for expected in [
         "<PasswordMode>false</PasswordMode>",
         "<ToolTip>",
@@ -29981,6 +29986,7 @@ fn parses_and_formats_metadata_child_fill_value_variants() {
         format_metadata_child_fill_value_xml(
             &MetadataChildFillValue::DateTime("0001-01-01T00:00:00".to_string()),
             &[],
+            &MetadataTypeSetLeafIndex::new(),
         ),
         r#"<FillValue xsi:type="xs:dateTime">0001-01-01T00:00:00</FillValue>"#
     );
@@ -29988,6 +29994,7 @@ fn parses_and_formats_metadata_child_fill_value_variants() {
         format_metadata_child_fill_value_xml(
             &MetadataChildFillValue::Decimal("0".to_string()),
             &[],
+            &MetadataTypeSetLeafIndex::new(),
         ),
         r#"<FillValue xsi:type="xs:decimal">0</FillValue>"#
     );
@@ -29995,6 +30002,7 @@ fn parses_and_formats_metadata_child_fill_value_variants() {
         format_metadata_child_fill_value_xml(
             &MetadataChildFillValue::DesignTimeRef("Catalog.Валюты.EmptyRef".to_string()),
             &[],
+            &MetadataTypeSetLeafIndex::new(),
         ),
         r#"<FillValue xsi:type="xr:DesignTimeRef">Catalog.Валюты.EmptyRef</FillValue>"#
     );
@@ -30013,8 +30021,8 @@ fn parses_and_formats_metadata_child_fill_value_variants() {
 /// `DataProcessors/ОтменаИсполненияПлатежныхПозиций` carries it on `Сумма`,
 /// typed the same way but naming `DefinedType.ДенежнаяСуммаЛюбогоЗнака`, a
 /// number, and the platform writes the nil element. Nothing in the attribute's
-/// own bytes tells the last two apart, so a type set leaves the list undecided
-/// and the stored spelling stands.
+/// own bytes tells the last two apart, so a type set the leaf index cannot
+/// answer leaves the list undecided and the stored spelling stands.
 #[test]
 fn empty_string_fill_value_follows_the_declared_type() {
     let empty = MetadataChildFillValue::String(String::new());
@@ -30053,13 +30061,13 @@ fn empty_string_fill_value_follows_the_declared_type() {
         }][..],
     ] {
         assert_eq!(
-            format_metadata_child_fill_value_xml(&empty, types),
+            format_metadata_child_fill_value_xml(&empty, types, &MetadataTypeSetLeafIndex::new(),),
             r#"<FillValue xsi:nil="true"/>"#
         );
     }
     for types in [&string_type[..], &type_set[..], &mixed[..], &[][..]] {
         assert_eq!(
-            format_metadata_child_fill_value_xml(&empty, types),
+            format_metadata_child_fill_value_xml(&empty, types, &MetadataTypeSetLeafIndex::new(),),
             r#"<FillValue xsi:type="xs:string"/>"#
         );
     }
@@ -30068,8 +30076,131 @@ fn empty_string_fill_value_follows_the_declared_type() {
         format_metadata_child_fill_value_xml(
             &MetadataChildFillValue::String("x".to_string()),
             &number_type,
+            &MetadataTypeSetLeafIndex::new(),
         ),
         r#"<FillValue xsi:type="xs:string">x</FillValue>"#
+    );
+}
+
+/// Once the leaves a named type set declares are read, they decide the same
+/// spelling the attribute's own primitive leaves decide.
+///
+/// Evidence, ERP УХ 3.2.12.6: `DataProcessors/ФормированиеЗаказовПоставщикуПоПлану`
+/// carries `{"S",""}` on `Артикул`, whose declared type is
+/// `DefinedType.Артикул` (`xs:string`), and the platform writes
+/// `<FillValue xsi:type="xs:string"/>`;
+/// `DataProcessors/ОтменаИсполненияПлатежныхПозиций` carries the very same
+/// value on `Сумма`, whose declared type is
+/// `DefinedType.ДенежнаяСуммаЛюбогоЗнака` (`xs:decimal`), and the platform
+/// writes `<FillValue xsi:nil="true"/>`. Both attributes spell the identical
+/// bare `{"Pattern",{"#",<uuid>}}`, so only the declaration of the named set
+/// tells them apart.
+#[test]
+fn empty_string_fill_value_reads_the_leaves_a_named_type_set_declares() {
+    let empty = MetadataChildFillValue::String(String::new());
+    let article = [ConstantValueType::ReferenceTypeSet {
+        reference: "cfg:DefinedType.Артикул".to_string(),
+    }];
+    let amount = [ConstantValueType::ReferenceTypeSet {
+        reference: "cfg:DefinedType.ДенежнаяСуммаЛюбогоЗнака".to_string(),
+    }];
+    let leaves = MetadataTypeSetLeafIndex::from([
+        (
+            "cfg:DefinedType.Артикул".to_string(),
+            vec![ConstantValueType::String {
+                length: Some(25),
+                allowed_length_flag: 1,
+            }],
+        ),
+        (
+            "cfg:DefinedType.ДенежнаяСуммаЛюбогоЗнака".to_string(),
+            vec![ConstantValueType::Number {
+                digits: 15,
+                fraction_digits: 2,
+                allowed_sign_flag: 0,
+            }],
+        ),
+        // `Characteristic.X` is read the same way: the leaves are the chart's
+        // own declared `<Type>`. `Characteristic.ВидыКонтроляДокументов` of
+        // ERP УХ declares five catalogue references and no string, and the
+        // platform writes the nil element for the register field that names it.
+        (
+            "cfg:Characteristic.ВидыКонтроляДокументов".to_string(),
+            vec![ConstantValueType::Reference {
+                reference: "cfg:CatalogRef.КлючиКонтроляПоДоговорам".to_string(),
+            }],
+        ),
+        // A set whose own leaf names another set resolves through it.
+        (
+            "cfg:DefinedType.ЧерезДругой".to_string(),
+            vec![ConstantValueType::ReferenceTypeSet {
+                reference: "cfg:DefinedType.ДенежнаяСуммаЛюбогоЗнака".to_string(),
+            }],
+        ),
+        // A set that names itself is a cycle and decides nothing.
+        (
+            "cfg:DefinedType.Кольцо".to_string(),
+            vec![ConstantValueType::ReferenceTypeSet {
+                reference: "cfg:DefinedType.Кольцо".to_string(),
+            }],
+        ),
+    ]);
+
+    assert_eq!(
+        format_metadata_child_fill_value_xml(&empty, &article, &leaves),
+        r#"<FillValue xsi:type="xs:string"/>"#
+    );
+    assert_eq!(
+        format_metadata_child_fill_value_xml(&empty, &amount, &leaves),
+        r#"<FillValue xsi:nil="true"/>"#
+    );
+    for reference in [
+        "cfg:Characteristic.ВидыКонтроляДокументов",
+        "cfg:DefinedType.ЧерезДругой",
+    ] {
+        assert_eq!(
+            format_metadata_child_fill_value_xml(
+                &empty,
+                &[ConstantValueType::ReferenceTypeSet {
+                    reference: reference.to_string(),
+                }],
+                &leaves,
+            ),
+            r#"<FillValue xsi:nil="true"/>"#,
+            "{reference}"
+        );
+    }
+    // A name the index cannot answer, and a cycle, keep the stored spelling.
+    for reference in ["cfg:AnyIBRef", "cfg:DefinedType.Кольцо"] {
+        assert_eq!(
+            format_metadata_child_fill_value_xml(
+                &empty,
+                &[ConstantValueType::ReferenceTypeSet {
+                    reference: reference.to_string(),
+                }],
+                &leaves,
+            ),
+            r#"<FillValue xsi:type="xs:string"/>"#,
+            "{reference}"
+        );
+    }
+    // One string leaf among several decides the whole list, whatever the set
+    // beside it declares.
+    assert_eq!(
+        format_metadata_child_fill_value_xml(
+            &empty,
+            &[
+                ConstantValueType::ReferenceTypeSet {
+                    reference: "cfg:DefinedType.ДенежнаяСуммаЛюбогоЗнака".to_string(),
+                },
+                ConstantValueType::String {
+                    length: Some(10),
+                    allowed_length_flag: 1,
+                },
+            ],
+            &leaves,
+        ),
+        r#"<FillValue xsi:type="xs:string"/>"#
     );
 }
 
@@ -44425,7 +44556,13 @@ fn parses_exact_information_register_legacy_and_new_child_wrappers() {
             assert_eq!(properties.main_filter, Some(true));
             assert_eq!(properties.deny_incomplete_values, Some(false));
             let mut xml = String::new();
-            push_metadata_child_properties_xml(&mut xml, "\t", &properties, &[]);
+            push_metadata_child_properties_xml(
+                &mut xml,
+                "\t",
+                &properties,
+                &[],
+                &MetadataTypeSetLeafIndex::new(),
+            );
             let ordered = [
                 "<ChoiceHistoryOnInput>",
                 "<Master>",
@@ -51000,6 +51137,7 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
         &BTreeMap::new(),
         &BTreeMap::new(),
         source_version,
+        &MetadataTypeSetLeafIndex::new(),
     )
 }
 
@@ -51026,6 +51164,7 @@ fn audit_strict_filter_criterion(
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_20,
+        &MetadataTypeSetLeafIndex::new(),
     )
 }
 
@@ -56865,6 +57004,7 @@ fn formats_data_processor_with_empty_child_objects_as_self_closing_node() {
             child_commands: Vec::new(),
         },
         InfobaseConfigSourceVersion::V2_20,
+        &MetadataTypeSetLeafIndex::new(),
     );
 
     assert!(xml.contains("\t\t<ChildObjects/>\r\n"), "{xml}");
@@ -56912,6 +57052,7 @@ fn formats_data_processor_attribute_without_resolved_type_as_empty_type_node() {
             child_commands: Vec::new(),
         },
         InfobaseConfigSourceVersion::V2_20,
+        &MetadataTypeSetLeafIndex::new(),
     );
 
     assert!(xml.contains("\t\t\t\t\t<Type/>\r\n"), "{xml}");
@@ -61465,8 +61606,13 @@ fn document_formatter_stably_orders_root_child_groups() {
         comment: String::new(),
         template_type_code: None,
     };
-    let xml =
-        format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21).unwrap();
+    let xml = format_document_source_xml(
+        &header,
+        &document,
+        InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
+    )
+    .unwrap();
     let field1 = xml.find("<Name>Field1</Name>").unwrap();
     let field2 = xml.find("<Name>Field2</Name>").unwrap();
     let form = xml.find("<Form>Main</Form>").unwrap();
@@ -64549,6 +64695,7 @@ fn accumulation_presentations_change_only_the_mandatory_exact_trio() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.emit_accumulation_presentations = false;
     let without_presentations = format_register_source_xml(
@@ -64556,6 +64703,7 @@ fn accumulation_presentations_change_only_the_mandatory_exact_trio() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     let stripped = with_presentations
         .replace("\t\t\t<ListPresentation/>\r\n", "")
@@ -64622,6 +64770,7 @@ fn calculation_presentations_emit_mandatory_empty_triple_in_schema_position() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     assert!(
         ordered
@@ -64783,6 +64932,7 @@ fn calculation_presentations_change_only_the_mandatory_empty_trio() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.emit_calculation_presentations = false;
     let without_presentations = format_register_source_xml(
@@ -64790,6 +64940,7 @@ fn calculation_presentations_change_only_the_mandatory_empty_trio() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     let stripped = with_presentations
         .replace("\t\t\t<ListPresentation/>\r\n", "")
@@ -64903,6 +65054,7 @@ fn calculation_period_alternative_scalars_remain_accepted_omissions() {
                 &header,
                 &register,
                 InfobaseConfigSourceVersion::V2_21,
+                &MetadataTypeSetLeafIndex::new(),
             );
             register.calculation_period = None;
             let after = format_register_source_xml(
@@ -64910,6 +65062,7 @@ fn calculation_period_alternative_scalars_remain_accepted_omissions() {
                 &header,
                 &register,
                 InfobaseConfigSourceVersion::V2_21,
+                &MetadataTypeSetLeafIndex::new(),
             );
             assert_eq!(before, after, "period marker changed slot {slot}={value}");
 
@@ -65030,6 +65183,7 @@ fn calculation_period_changes_only_the_fixed_trio() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.calculation_period = None;
     let without_period = format_register_source_xml(
@@ -65037,6 +65191,7 @@ fn calculation_period_changes_only_the_fixed_trio() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     let stripped = with_period
         .replace("\t\t\t<Periodicity>Month</Periodicity>\r\n", "")
@@ -65299,6 +65454,7 @@ fn calculation_include_help_changes_only_the_fixed_false_line() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.include_help_in_contents = None;
     let without_include_help = format_register_source_xml(
@@ -65306,6 +65462,7 @@ fn calculation_include_help_changes_only_the_fixed_false_line() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     let stripped = with_include_help.replace(
         "\t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n",
@@ -65735,6 +65892,7 @@ fn calculation_form_pair_changes_only_the_two_mandatory_lines() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.calculation_form_pair = None;
     let without_pair = format_register_source_xml(
@@ -65742,6 +65900,7 @@ fn calculation_form_pair_changes_only_the_two_mandatory_lines() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     let stripped = with_pair
         .replace(
@@ -66167,6 +66326,7 @@ fn calculation_schedule_changes_only_the_four_tuple_lines() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.calculation_schedule = None;
     let without_schedule = format_register_source_xml(
@@ -66174,6 +66334,7 @@ fn calculation_schedule_changes_only_the_four_tuple_lines() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     let stripped = with_schedule
         .replace("\t\t\t<Schedule>InformationRegister.WorkSchedule</Schedule>\r\n", "")
@@ -66457,6 +66618,7 @@ fn calculation_full_text_search_changes_only_the_fixed_line() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.full_text_search = None;
     let without_full_text_search = format_register_source_xml(
@@ -66464,6 +66626,7 @@ fn calculation_full_text_search_changes_only_the_fixed_line() {
         &header,
         &register,
         InfobaseConfigSourceVersion::V2_21,
+        &MetadataTypeSetLeafIndex::new(),
     );
     let stripped =
         with_full_text_search.replace("\t\t\t<FullTextSearch>DontUse</FullTextSearch>\r\n", "");
@@ -66923,6 +67086,7 @@ fn calculation_recalculation_root_emits_exact_ordered_escaped_references() {
         header,
         &register,
         InfobaseConfigSourceVersion::V2_20,
+        &MetadataTypeSetLeafIndex::new(),
     );
     insert_metadata_child_objects_xml(
         &mut ordered,
@@ -67375,6 +67539,7 @@ fn calculation_recalculation_root_has_one_line_target_and_no_corpus_literals() {
         owner.header.as_ref().unwrap(),
         &register,
         InfobaseConfigSourceVersion::V2_20,
+        &MetadataTypeSetLeafIndex::new(),
     );
     register.recalculations = vec!["BaseData".to_string()];
     let exact = format_register_source_xml(
@@ -67382,6 +67547,7 @@ fn calculation_recalculation_root_has_one_line_target_and_no_corpus_literals() {
         owner.header.as_ref().unwrap(),
         &register,
         InfobaseConfigSourceVersion::V2_20,
+        &MetadataTypeSetLeafIndex::new(),
     );
     assert_eq!(exact.matches("<Recalculation>").count(), 1);
     assert_eq!(legacy.matches("<Recalculation>").count(), 0);

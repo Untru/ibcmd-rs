@@ -1859,7 +1859,7 @@ pub(super) fn build_information_register_master_dimension_index_from_texts(
 pub(super) fn build_information_register_field_reference_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,
-    defined_type_value_owner_refs: &DefinedTypeValueOwnerReferenceIndex,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> InformationRegisterFieldReferenceIndex {
     let mut fields_by_register = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
     for row in rows {
@@ -1885,10 +1885,8 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
             ) else {
                 continue;
             };
-            let value_owner_references = information_register_value_owner_references(
-                &value_types,
-                defined_type_value_owner_refs,
-            );
+            let value_owner_references =
+                information_register_value_owner_references(&value_types, type_set_leaves);
             if value_owner_references.is_empty() {
                 continue;
             }
@@ -1922,38 +1920,103 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
         .collect()
 }
 
-pub(super) fn build_defined_type_value_owner_reference_index_from_texts(
+/// The leaves every *named type set* of the configuration declares.
+///
+/// A `cfg:DefinedType.X` or a `cfg:Characteristic.X` is a name, not a type: the
+/// leaves it stands for are declared by another metadata object, and nothing in
+/// the bytes of a field that carries the name says what they are. Two readers
+/// need exactly that declaration -- the information-register value-owner route,
+/// which used to keep the owners of the reference leaves and throw the leaves
+/// away, and the `<FillValue>` writer, which has to know whether a string is
+/// among them. Keeping the leaves keeps one table: the owners are derived from
+/// them where they are needed, so the two readers cannot drift apart.
+pub(super) fn build_metadata_type_set_leaf_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,
-) -> DefinedTypeValueOwnerReferenceIndex {
+) -> MetadataTypeSetLeafIndex {
     rows.iter()
         .filter_map(|row| {
-            let (Some("DefinedType"), Some(header)) = (row.kind.as_deref(), row.header.as_ref())
-            else {
-                return None;
-            };
-            let properties =
-                parse_defined_type_properties_from_text(&row.text, &header.uuid, type_index)?;
-            let owners = properties
-                .value_types
-                .iter()
-                .filter_map(|value_type| match value_type {
-                    ConstantValueType::Reference { reference } => {
-                        parse_generated_metadata_reference_owner(reference)
-                            .map(|owner| owner.owner_reference())
-                    }
-                    ConstantValueType::ReferenceTypeSet { .. } => None,
-                    _ => None,
-                })
-                .collect::<BTreeSet<_>>();
-            (!owners.is_empty()).then(|| (format!("cfg:DefinedType.{}", header.name), owners))
+            let header = row.header.as_ref()?;
+            // A defined type is recognised the way its own writer recognises
+            // it -- object code `0` plus the header/pattern shape -- and not
+            // through `row.kind`, which never spells `DefinedType`: object code
+            // `0` with the header in field 1 is a functional-option parameter,
+            // a language or an integration service, and a defined type carries
+            // its header in field 3 instead. The predecessor index keyed off
+            // `row.kind` and was therefore empty on every configuration of the
+            // stand.
+            if row.object_code == Some(0)
+                && is_defined_type_metadata_text(&row.text, &row.file_name)
+            {
+                let properties =
+                    parse_defined_type_properties_from_text(&row.text, &header.uuid, type_index)?;
+                return Some((
+                    format!("cfg:DefinedType.{}", header.name),
+                    properties.value_types,
+                ));
+            }
+            // The characteristic type set of a chart of characteristic types is
+            // the chart's own declared `<Type>`, read from the very same slot
+            // and with the very same pattern parser the chart's own writer
+            // reads it with.
+            if row.kind.as_deref() == Some("ChartOfCharacteristicTypes") {
+                let value_types = chart_of_characteristic_types_declared_value_types(
+                    &row.text, header, type_index,
+                )?;
+                return Some((format!("cfg:Characteristic.{}", header.name), value_types));
+            }
+            None
         })
         .collect()
 }
 
+/// Whether the declared leaves of a type list provably exclude the `String`
+/// type.
+///
+/// A leaf that names a type set is resolved through the index and its own
+/// leaves are read in its place; a name the index cannot answer, or a cycle,
+/// leaves the whole list undecided, and so does an empty list. Only a decided
+/// list answers `true`.
+pub(super) fn metadata_declared_leaves_exclude_string(
+    value_types: &[ConstantValueType],
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) -> bool {
+    fn walk(
+        value_types: &[ConstantValueType],
+        type_set_leaves: &MetadataTypeSetLeafIndex,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<bool> {
+        if value_types.is_empty() {
+            return None;
+        }
+        let mut excludes = true;
+        for value_type in value_types {
+            match value_type {
+                ConstantValueType::Boolean
+                | ConstantValueType::Number { .. }
+                | ConstantValueType::DateTime { .. }
+                | ConstantValueType::Reference { .. } => {}
+                ConstantValueType::String { .. } => excludes = false,
+                ConstantValueType::ReferenceTypeSet { reference } => {
+                    let leaves = type_set_leaves.get(reference)?;
+                    if !visiting.insert(reference.clone()) {
+                        return None;
+                    }
+                    let nested = walk(leaves, type_set_leaves, visiting);
+                    visiting.remove(reference);
+                    excludes &= nested?;
+                }
+            }
+        }
+        Some(excludes)
+    }
+
+    walk(value_types, type_set_leaves, &mut BTreeSet::new()).unwrap_or(false)
+}
+
 pub(super) fn information_register_value_owner_references(
     value_types: &[ConstantValueType],
-    defined_type_value_owner_refs: &DefinedTypeValueOwnerReferenceIndex,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> BTreeSet<String> {
     value_types
         .iter()
@@ -1964,9 +2027,23 @@ pub(super) fn information_register_value_owner_references(
                     .into_iter()
                     .collect::<BTreeSet<_>>()
             }
-            ConstantValueType::ReferenceTypeSet { reference } => defined_type_value_owner_refs
+            // The owners of a named set are the owners of the leaves it
+            // declares -- derived here rather than stored beside them, so the
+            // leaves and their owners are one fact read one way.
+            ConstantValueType::ReferenceTypeSet { reference } => type_set_leaves
                 .get(reference)
-                .cloned()
+                .map(|leaves| {
+                    leaves
+                        .iter()
+                        .filter_map(|value_type| match value_type {
+                            ConstantValueType::Reference { reference } => {
+                                parse_generated_metadata_reference_owner(reference)
+                                    .map(|owner| owner.owner_reference())
+                            }
+                            _ => None,
+                        })
+                        .collect::<BTreeSet<_>>()
+                })
                 .unwrap_or_default(),
             _ => BTreeSet::new(),
         })

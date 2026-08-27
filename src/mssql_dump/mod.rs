@@ -2465,6 +2465,12 @@ struct DumpRowContext<'a> {
     metadata_order: &'a BTreeMap<String, usize>,
     field_refs: &'a BTreeMap<String, String>,
     field_type_refs: &'a Arc<BTreeMap<String, String>>,
+    /// The leaves every named type set of the configuration declares. The
+    /// `<FillValue>` writer needs them: an attribute whose declared type is
+    /// `cfg:DefinedType.X` says nothing in its own bytes about whether a string
+    /// is among the leaves, and that is what decides the spelling of a stored
+    /// empty string.
+    type_set_leaves: &'a MetadataTypeSetLeafIndex,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
     information_register_master_dimensions: &'a Arc<InformationRegisterMasterDimensionIndex>,
     /// What every table declares about the existence of its own standard
@@ -2732,13 +2738,19 @@ fn dump_table_rows_with_options_mode(
     } else {
         BTreeMap::new()
     });
+    // One index, two readers: the information-register value-owner route and
+    // the `<FillValue>` writer both need what a named type set declares, so it
+    // is built once here and handed to both.
+    let type_set_leaves = if extract_metadata_xml {
+        build_metadata_type_set_leaf_index_from_texts(&metadata_texts, &type_index)
+    } else {
+        MetadataTypeSetLeafIndex::new()
+    };
     let information_register_field_refs = if extract_metadata_xml {
-        let defined_type_value_owner_refs =
-            build_defined_type_value_owner_reference_index_from_texts(&metadata_texts, &type_index);
         build_information_register_field_reference_index_from_texts(
             &metadata_texts,
             &type_index,
-            &defined_type_value_owner_refs,
+            &type_set_leaves,
         )
     } else {
         BTreeMap::new()
@@ -2921,6 +2933,7 @@ fn dump_table_rows_with_options_mode(
     }
 
     let context = DumpRowContext {
+        type_set_leaves: &type_set_leaves,
         output_dir,
         table,
         source_version,
@@ -3814,17 +3827,18 @@ fn dump_table_rows_streamed(
             BTreeMap::new()
         },
     );
+    // One index, two readers -- see the sibling construction site.
+    let type_set_leaves = if extract_metadata_xml {
+        build_metadata_type_set_leaf_index_from_texts(&index_metadata_texts, &type_index)
+    } else {
+        MetadataTypeSetLeafIndex::new()
+    };
     let information_register_field_refs =
         if extract_metadata_xml && source_reference_needs.field_refs {
-            let defined_type_value_owner_refs =
-                build_defined_type_value_owner_reference_index_from_texts(
-                    &index_metadata_texts,
-                    &type_index,
-                );
             build_information_register_field_reference_index_from_texts(
                 &index_metadata_texts,
                 &type_index,
-                &defined_type_value_owner_refs,
+                &type_set_leaves,
             )
         } else {
             BTreeMap::new()
@@ -4084,6 +4098,7 @@ fn dump_table_rows_streamed(
     timings.prepare_indexes_ms = elapsed_ms(prepare_started);
 
     let context = DumpRowContext {
+        type_set_leaves: &type_set_leaves,
         output_dir,
         table,
         source_version,
@@ -4983,6 +4998,7 @@ fn dump_table_row_bytes(
                 context.template_refs,
                 context.subsystem_refs,
                 context.source_version,
+                context.type_set_leaves,
             )
         } else {
             extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
@@ -5001,6 +5017,7 @@ fn dump_table_row_bytes(
                 context.template_refs,
                 context.subsystem_refs,
                 context.source_version,
+                context.type_set_leaves,
             )
             .ok_or_else(|| {
                 MetadataSourceExtractionDiagnostic::legacy_option_none(
@@ -7873,7 +7890,32 @@ pub(crate) type InformationRegisterFieldReferenceIndex =
 /// Register uuid -> its master dimension names in declaration order.
 pub(crate) type InformationRegisterMasterDimensionIndex = BTreeMap<String, Vec<String>>;
 
-type DefinedTypeValueOwnerReferenceIndex = BTreeMap<String, BTreeSet<String>>;
+/// The leaves a named type set declares, keyed by the name the set is written
+/// under (`cfg:DefinedType.X`, `cfg:Characteristic.X`).
+type MetadataTypeSetLeafIndex = BTreeMap<String, Vec<ConstantValueType>>;
+
+/// The declared `<Type>` of a chart of characteristic types -- the leaves its
+/// `cfg:Characteristic.X` set stands for -- read from the same slot, with the
+/// same pattern parser and the same classification the chart's own writer uses.
+fn chart_of_characteristic_types_declared_value_types(
+    text: &str,
+    header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    let mut diagnostic = None;
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        text,
+        header,
+        &mut diagnostic,
+    )?;
+    Some(stable_partition_metadata_types(
+        classify_metadata_reference_type_sets(parse_metadata_type_pattern(
+            owner_graph.owner_fields.get(18)?,
+            type_index,
+        )?),
+    ))
+}
 
 struct TemplateSourceReference {
     relative_path: PathBuf,
@@ -10409,6 +10451,10 @@ fn extract_metadata_source_xml_with_refs(
         template_refs,
         subsystem_refs,
         source_version,
+        // A compatibility wrapper carries no configuration-wide index; the
+        // empty one reproduces exactly the spelling this route wrote before
+        // the leaves were read at all.
+        &MetadataTypeSetLeafIndex::new(),
     )
 }
 
@@ -10437,6 +10483,10 @@ fn extract_metadata_source_xml_with_type_collisions(
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
+        // A compatibility wrapper carries no configuration-wide index; the
+        // empty one reproduces exactly the spelling this route wrote before
+        // the leaves were read at all.
+        &MetadataTypeSetLeafIndex::new(),
     )
 }
 
@@ -10474,6 +10524,10 @@ fn extract_metadata_source_xml_with_recalculation_refs(
         template_refs,
         subsystem_refs,
         source_version,
+        // A compatibility wrapper carries no configuration-wide index; the
+        // empty one reproduces exactly the spelling this route wrote before
+        // the leaves were read at all.
+        &MetadataTypeSetLeafIndex::new(),
     )
 }
 
@@ -10493,6 +10547,7 @@ fn extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutio
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<ExtractedMetadataSourceXml> {
     if uuid.contains('.') {
         return None;
@@ -10513,6 +10568,7 @@ fn extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutio
         template_refs,
         subsystem_refs,
         source_version,
+        type_set_leaves,
     )
 }
 
@@ -10548,6 +10604,10 @@ fn extract_metadata_source_xml_from_text_row(
         template_refs,
         subsystem_refs,
         source_version,
+        // A compatibility wrapper carries no configuration-wide index; the
+        // empty one reproduces exactly the spelling this route wrote before
+        // the leaves were read at all.
+        &MetadataTypeSetLeafIndex::new(),
     )
 }
 
@@ -10566,6 +10626,7 @@ fn extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<ExtractedMetadataSourceXml> {
     let mut owner_graph_diagnostic = None;
     extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
@@ -10584,6 +10645,7 @@ fn extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
         subsystem_refs,
         source_version,
         &mut owner_graph_diagnostic,
+        type_set_leaves,
     )
 }
 
@@ -10603,6 +10665,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
     owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<ExtractedMetadataSourceXml> {
     let uuid = row.file_name.as_str();
     if uuid.contains('.') {
@@ -10882,7 +10945,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             owner_graph_diagnostic,
         )?;
-        format_catalog_source_xml(&header, &catalog, source_version)?.into_bytes()
+        format_catalog_source_xml(&header, &catalog, source_version, type_set_leaves)?.into_bytes()
     } else if kind == "Report" {
         let report = parse_report_properties_from_text(
             text,
@@ -10892,7 +10955,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             object_refs,
         )?;
-        format_report_source_xml(&header, &report, source_version).into_bytes()
+        format_report_source_xml(&header, &report, source_version, type_set_leaves).into_bytes()
     } else if kind == "DataProcessor" {
         let data_processor = parse_data_processor_properties_from_text(
             text,
@@ -10904,7 +10967,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             template_refs,
         )?;
-        format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
+        format_data_processor_source_xml(&header, &data_processor, source_version, type_set_leaves)
+            .into_bytes()
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(
             text,
@@ -10917,7 +10981,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             owner_graph_diagnostic,
         )?;
-        format_document_source_xml(&header, &document, source_version)?.into_bytes()
+        format_document_source_xml(&header, &document, source_version, type_set_leaves)?
+            .into_bytes()
     } else if kind == "ChartOfCharacteristicTypes" {
         let chart = parse_chart_of_characteristic_types_properties_from_text(
             text,
@@ -10929,8 +10994,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             owner_graph_diagnostic,
         )?;
-        format_chart_of_characteristic_types_source_xml(header, &chart, source_version)?
-            .into_bytes()
+        format_chart_of_characteristic_types_source_xml(
+            header,
+            &chart,
+            source_version,
+            type_set_leaves,
+        )?
+        .into_bytes()
     } else if kind == "DocumentJournal" {
         let document_journal = parse_document_journal_properties_from_text(
             text,
@@ -10956,7 +11026,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             owner_graph_diagnostic,
         )?;
-        format_business_process_source_xml(&header, &business_process, source_version)?.into_bytes()
+        format_business_process_source_xml(
+            &header,
+            &business_process,
+            source_version,
+            type_set_leaves,
+        )?
+        .into_bytes()
     } else if kind == "Task" {
         let task = parse_task_properties_from_text(
             text,
@@ -10967,7 +11043,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             owner_graph_diagnostic,
         )?;
-        format_task_source_xml(&header, &task, source_version)?.into_bytes()
+        format_task_source_xml(&header, &task, source_version, type_set_leaves)?.into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid, form_refs)?;
         format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
@@ -10995,7 +11071,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             object_refs,
             form_refs,
         )?;
-        format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
+        format_exchange_plan_source_xml(&header, &exchange_plan, source_version, type_set_leaves)
+            .into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
         let register_object_refs = if kind == "InformationRegister" {
             metadata_object_refs
@@ -11018,7 +11095,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                 root_recalculation_refs,
             )?;
         }
-        format_register_source_xml(kind, &header, &register, source_version).into_bytes()
+        format_register_source_xml(kind, &header, &register, source_version, type_set_leaves)
+            .into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
         format_language_source_xml(&header, &language, source_version).into_bytes()
@@ -11089,7 +11167,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                 // of that wrote every owned command twice -- the same seam the
                 // filter criterion already closes above.
                 nested_commands = Vec::new();
-                format_chart_of_accounts_source_xml(header, &chart, source_version)?.into_bytes()
+                format_chart_of_accounts_source_xml(
+                    header,
+                    &chart,
+                    source_version,
+                    type_set_leaves,
+                )?
+                .into_bytes()
             }
             StrictMetadataRoot::Unsupported => {
                 let properties = parse_default_list_form_metadata_properties_from_text(
@@ -11116,8 +11200,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         ) {
             StrictMetadataRoot::Parsed(chart) => {
                 strict_chart_root_formatted = true;
-                format_chart_of_calculation_types_source_xml(header, &chart, source_version)?
-                    .into_bytes()
+                format_chart_of_calculation_types_source_xml(
+                    header,
+                    &chart,
+                    source_version,
+                    type_set_leaves,
+                )?
+                .into_bytes()
             }
             StrictMetadataRoot::Unsupported => {
                 let properties = parse_default_list_form_metadata_properties_from_text(
@@ -11232,6 +11321,10 @@ fn extract_metadata_source_xml_from_text_row_audited(
         template_refs,
         subsystem_refs,
         source_version,
+        // A compatibility wrapper carries no configuration-wide index; the
+        // empty one reproduces exactly the spelling this route wrote before
+        // the leaves were read at all.
+        &MetadataTypeSetLeafIndex::new(),
     )
 }
 
@@ -11250,6 +11343,7 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
     let mut owner_graph_diagnostic = None;
     if let Some(extracted) = extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
@@ -11268,6 +11362,7 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
         subsystem_refs,
         source_version,
         &mut owner_graph_diagnostic,
+        type_set_leaves,
     ) {
         return Ok(extracted);
     }
@@ -34744,6 +34839,7 @@ fn format_exchange_plan_source_xml(
     header: &MetadataHeader,
     exchange_plan: &ExchangePlanProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("ExchangePlan", header, source_version);
     // V2.21 palette namespace placement follows the shared metadata-source formatter branch;
@@ -34887,7 +34983,7 @@ fn format_exchange_plan_source_xml(
     if !exchange_plan.child_objects.is_empty() {
         let mut child_objects = String::new();
         for child in &exchange_plan.child_objects {
-            push_metadata_child_object_xml(&mut child_objects, child);
+            push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
         }
         insert_metadata_child_objects_xml(&mut xml, "ExchangePlan", &child_objects);
     } else if exchange_plan.emit_empty_child_objects
@@ -35200,6 +35296,7 @@ fn format_register_source_xml(
     header: &MetadataHeader,
     register: &RegisterProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> String {
     let mut xml = format_full_metadata_source_xml(kind, header, source_version);
     if kind == "InformationRegister" && source_version == InfobaseConfigSourceVersion::V2_21 {
@@ -35310,7 +35407,7 @@ fn format_register_source_xml(
                 } else {
                     let mut child_objects = String::new();
                     for child in &register.child_objects {
-                        push_metadata_child_object_xml(&mut child_objects, child);
+                        push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
                     }
                     insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
                     xml
@@ -35446,7 +35543,7 @@ fn format_register_source_xml(
     }
     let mut child_objects = String::new();
     for child in &register.child_objects {
-        push_metadata_child_object_xml(&mut child_objects, child);
+        push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
     }
     for recalculation in &register.recalculations {
         child_objects.push_str(&format!(
@@ -35462,6 +35559,7 @@ fn format_chart_of_accounts_source_xml(
     header: &MetadataHeader,
     chart: &ChartOfAccountsProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<String> {
     let mut xml = format_full_metadata_source_xml("ChartOfAccounts", header, source_version);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
@@ -35578,7 +35676,7 @@ fn format_chart_of_accounts_source_xml(
 
     let mut children = String::new();
     for child in &chart.child_objects {
-        push_metadata_child_object_xml(&mut children, child);
+        push_metadata_child_object_xml(&mut children, child, type_set_leaves);
     }
     for form in &chart.child_forms {
         children.push_str(&format!(
@@ -35603,6 +35701,7 @@ fn format_chart_of_calculation_types_source_xml(
     header: &MetadataHeader,
     chart: &ChartOfCalculationTypesProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<String> {
     let mut xml =
         format_full_metadata_source_xml("ChartOfCalculationTypes", header, source_version);
@@ -35720,7 +35819,7 @@ fn format_chart_of_calculation_types_source_xml(
 
     let mut children = String::new();
     for child in &chart.child_objects {
-        push_metadata_child_object_xml(&mut children, child);
+        push_metadata_child_object_xml(&mut children, child, type_set_leaves);
     }
     for form in &chart.child_forms {
         children.push_str(&format!(
@@ -35792,6 +35891,7 @@ fn format_chart_of_characteristic_types_source_xml(
     header: &MetadataHeader,
     chart: &ChartOfCharacteristicTypesProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<String> {
     let mut xml =
         format_full_metadata_source_xml("ChartOfCharacteristicTypes", header, source_version);
@@ -35937,7 +36037,7 @@ fn format_chart_of_characteristic_types_source_xml(
     };
     if !chart.child_metadata_objects.is_empty() || !chart.child_forms.is_empty() {
         for child in &chart.child_metadata_objects {
-            push_cct_metadata_child_object_xml(&mut children, child);
+            push_cct_metadata_child_object_xml(&mut children, child, type_set_leaves);
         }
         for form in &chart.child_forms {
             children.push_str(&format!(
@@ -35975,6 +36075,7 @@ fn format_catalog_source_xml(
     header: &MetadataHeader,
     catalog: &CatalogProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<String> {
     let palette_namespace = if source_version == InfobaseConfigSourceVersion::V2_21 {
         " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""
@@ -36230,7 +36331,7 @@ fn format_catalog_source_xml(
     } else {
         xml.push_str("\t\t<ChildObjects>\r\n");
         for child in &catalog.child_metadata_objects {
-            push_metadata_child_object_xml(&mut xml, child);
+            push_metadata_child_object_xml(&mut xml, child, type_set_leaves);
         }
         for form in &catalog.child_forms {
             xml.push_str(&format!(
@@ -36257,6 +36358,7 @@ fn format_report_source_xml(
     header: &MetadataHeader,
     report: &ReportProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> String {
     let palette_namespace = if source_version == InfobaseConfigSourceVersion::V2_21 {
         " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""
@@ -36362,7 +36464,7 @@ fn format_report_source_xml(
     {
         xml.push_str("\t\t<ChildObjects>\r\n");
         for child in &report.child_metadata_objects {
-            push_metadata_child_object_xml(&mut xml, child);
+            push_metadata_child_object_xml(&mut xml, child, type_set_leaves);
         }
         for form in &report.child_forms {
             xml.push_str(&format!(
@@ -36390,6 +36492,7 @@ fn format_document_source_xml(
     header: &MetadataHeader,
     document: &DocumentProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<String> {
     let mut xml = format_full_metadata_source_xml("Document", header, source_version);
     let internal_info = format_schema_ordered_generated_types_internal_info_xml(
@@ -36543,7 +36646,7 @@ fn format_document_source_xml(
                 .iter()
                 .filter(|child| child.tag == "Attribute")
             {
-                push_metadata_child_object_xml(&mut child_objects, child);
+                push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
             for form in &document.child_forms {
                 child_objects.push_str(&format!(
@@ -36556,7 +36659,7 @@ fn format_document_source_xml(
                 .iter()
                 .filter(|child| child.tag == "TabularSection")
             {
-                push_metadata_child_object_xml(&mut child_objects, child);
+                push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
             for template in &document.child_templates {
                 child_objects.push_str(&format!(
@@ -36593,6 +36696,7 @@ fn format_business_process_source_xml(
     header: &MetadataHeader,
     business_process: &BusinessProcessProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<String> {
     let mut xml = format_full_metadata_source_xml("BusinessProcess", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&business_process.generated_types);
@@ -36743,10 +36847,10 @@ fn format_business_process_source_xml(
         } else {
             let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
             for child in &business_process.child_attributes {
-                push_metadata_child_object_xml(&mut child_objects, child);
+                push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
             for child in &business_process.child_tabular_sections {
-                push_metadata_child_object_xml(&mut child_objects, child);
+                push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
             for form in &business_process.child_forms {
                 child_objects.push_str(&format!(
@@ -36774,6 +36878,7 @@ fn format_task_source_xml(
     header: &MetadataHeader,
     task: &TaskProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> Option<String> {
     task.internal_uuid_slots.acknowledge_internal_only();
     let mut xml = format_full_metadata_source_xml("Task", header, source_version);
@@ -36922,10 +37027,10 @@ fn format_task_source_xml(
         } else {
             let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
             for child in &task.child_attributes {
-                push_metadata_child_object_xml(&mut child_objects, child);
+                push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
             for child in &task.child_tabular_sections {
-                push_metadata_child_object_xml(&mut child_objects, child);
+                push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
             for form in &task.child_forms {
                 child_objects.push_str(&format!(
@@ -36934,7 +37039,7 @@ fn format_task_source_xml(
                 ));
             }
             for attribute in &task.addressing_attributes {
-                push_task_addressing_attribute_xml(&mut child_objects, attribute);
+                push_task_addressing_attribute_xml(&mut child_objects, attribute, type_set_leaves);
             }
             for command in &task.child_commands {
                 push_metadata_child_command_xml(&mut child_objects, command);
@@ -37067,7 +37172,11 @@ fn push_metadata_standard_attribute_choice_parameter_links_xml(
     xml.push_str("\t\t\t\t\t</xr:ChoiceParameterLinks>\r\n");
 }
 
-fn push_task_addressing_attribute_xml(xml: &mut String, attribute: &TaskAddressingAttribute) {
+fn push_task_addressing_attribute_xml(
+    xml: &mut String,
+    attribute: &TaskAddressingAttribute,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) {
     let child = &attribute.child;
     let mut properties = child
         .properties
@@ -37109,7 +37218,13 @@ fn push_task_addressing_attribute_xml(xml: &mut String, attribute: &TaskAddressi
             "\t\t\t\t\t",
         ));
     }
-    push_metadata_child_properties_xml(xml, "\t\t\t\t\t", &properties, &child.value_types);
+    push_metadata_child_properties_xml(
+        xml,
+        "\t\t\t\t\t",
+        &properties,
+        &child.value_types,
+        type_set_leaves,
+    );
     xml.push_str(&format!(
         "\t\t\t\t\t<Indexing>{indexing}</Indexing>\r\n\
 \t\t\t\t\t<AddressingDimension>{}</AddressingDimension>\r\n\
@@ -37173,6 +37288,7 @@ fn format_data_processor_source_xml(
     header: &MetadataHeader,
     data_processor: &DataProcessorProperties,
     source_version: InfobaseConfigSourceVersion,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("DataProcessor", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&data_processor.generated_types);
@@ -37226,7 +37342,7 @@ fn format_data_processor_source_xml(
     } else {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
         for child in &data_processor.child_metadata_objects {
-            push_metadata_child_object_xml(&mut child_objects, child);
+            push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
         }
         for form in &data_processor.child_forms {
             child_objects.push_str(&format!(
@@ -37946,6 +38062,9 @@ fn insert_metadata_child_objects_xml(xml: &mut String, owner_kind: &str, child_o
     );
 }
 
+/// A child object that is a header and nothing else: it declares no properties,
+/// so it carries no `<FillValue>` and the leaf index the writer would read it
+/// against is empty by construction.
 fn push_metadata_header_child_object_xml(
     xml: &mut String,
     tag: &'static str,
@@ -37964,6 +38083,7 @@ fn push_metadata_header_child_object_xml(
             tabular_section_properties: None,
             child_objects: Vec::new(),
         },
+        &MetadataTypeSetLeafIndex::new(),
     );
 }
 
@@ -38027,18 +38147,27 @@ fn push_metadata_child_command_properties_xml(
     ));
 }
 
-fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject) {
-    push_metadata_child_object_xml_with_tail_order(xml, child, false);
+fn push_metadata_child_object_xml(
+    xml: &mut String,
+    child: &MetadataChildObject,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) {
+    push_metadata_child_object_xml_with_tail_order(xml, child, false, type_set_leaves);
 }
 
-fn push_cct_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject) {
-    push_metadata_child_object_xml_with_tail_order(xml, child, true);
+fn push_cct_metadata_child_object_xml(
+    xml: &mut String,
+    child: &MetadataChildObject,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) {
+    push_metadata_child_object_xml_with_tail_order(xml, child, true, type_set_leaves);
 }
 
 fn push_metadata_child_object_xml_with_tail_order(
     xml: &mut String,
     child: &MetadataChildObject,
     indexing_before_use: bool,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) {
     xml.push_str(&format!(
         "\t\t\t<{tag} uuid=\"{}\">\r\n",
@@ -38080,6 +38209,7 @@ fn push_metadata_child_object_xml_with_tail_order(
             properties,
             &child.value_types,
             indexing_before_use,
+            type_set_leaves,
         );
     }
     if let Some(properties) = &child.register_properties {
@@ -38092,7 +38222,13 @@ fn push_metadata_child_object_xml_with_tail_order(
     if !child.child_objects.is_empty() {
         xml.push_str("\t\t\t\t<ChildObjects>\r\n");
         for nested_child in &child.child_objects {
-            push_nested_metadata_child_object_xml(xml, nested_child, 5, indexing_before_use);
+            push_nested_metadata_child_object_xml(
+                xml,
+                nested_child,
+                5,
+                indexing_before_use,
+                type_set_leaves,
+            );
         }
         xml.push_str("\t\t\t\t</ChildObjects>\r\n");
     } else if child.tag == "TabularSection" {
@@ -38116,6 +38252,7 @@ fn push_nested_metadata_child_object_xml(
     child: &MetadataChildObject,
     indent: usize,
     indexing_before_use: bool,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) {
     let tab = "\t".repeat(indent);
     xml.push_str(&format!(
@@ -38158,6 +38295,7 @@ fn push_nested_metadata_child_object_xml(
             properties,
             &child.value_types,
             indexing_before_use,
+            type_set_leaves,
         );
     }
     if let Some(properties) = &child.register_properties {
@@ -38175,6 +38313,7 @@ fn push_nested_metadata_child_object_xml(
                 nested_child,
                 indent + 2,
                 indexing_before_use,
+                type_set_leaves,
             );
         }
         xml.push_str(&format!("{tab}\t</ChildObjects>\r\n"));
@@ -38187,8 +38326,16 @@ fn push_metadata_child_properties_xml(
     indent: &str,
     properties: &MetadataChildProperties,
     value_types: &[ConstantValueType],
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) {
-    push_metadata_child_properties_xml_with_tail_order(xml, indent, properties, value_types, false);
+    push_metadata_child_properties_xml_with_tail_order(
+        xml,
+        indent,
+        properties,
+        value_types,
+        false,
+        type_set_leaves,
+    );
 }
 
 fn push_metadata_child_properties_xml_with_tail_order(
@@ -38197,6 +38344,7 @@ fn push_metadata_child_properties_xml_with_tail_order(
     properties: &MetadataChildProperties,
     value_types: &[ConstantValueType],
     indexing_before_use: bool,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) {
     xml.push_str(&format!(
         "{indent}<PasswordMode>{}</PasswordMode>\r\n",
@@ -38231,7 +38379,7 @@ fn push_metadata_child_properties_xml_with_tail_order(
     {
         xml.push_str(&format!(
             "{indent}{}\r\n",
-            format_metadata_child_fill_value_xml(fill_value, value_types)
+            format_metadata_child_fill_value_xml(fill_value, value_types, type_set_leaves,)
         ));
     }
     xml.push_str(&format!(
@@ -38718,9 +38866,10 @@ fn push_metadata_line_number_standard_attribute_xml(
 fn format_metadata_child_fill_value_xml(
     value: &MetadataChildFillValue,
     value_types: &[ConstantValueType],
+    type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> String {
     if matches!(value, MetadataChildFillValue::String(value) if value.is_empty())
-        && metadata_types_exclude_string(value_types)
+        && metadata_declared_leaves_exclude_string(value_types, type_set_leaves)
     {
         return "<FillValue xsi:nil=\"true\"/>".to_string();
     }
@@ -38763,28 +38912,6 @@ fn format_metadata_child_fill_value_xml(
             escape_xml_element_text(member)
         ),
     }
-}
-
-/// Whether the declared leaves provably exclude the `String` type.
-///
-/// Only leaves this writer can decide on its own count: a primitive, or a
-/// reference to a named type. A `ReferenceTypeSet` -- `cfg:DefinedType.X`,
-/// `cfg:Characteristic.X`, `cfg:AnyIBRef` and the bare family sets -- names a
-/// set whose members live in another metadata object, and this writer does not
-/// read that object, so such a leaf leaves the whole list undecided and the
-/// stored spelling stands. `DefinedType.Артикул` is a string and
-/// `DefinedType.ДенежнаяСуммаЛюбогоЗнака` is a number, and nothing in the
-/// attribute's own bytes tells them apart -- both carry the bare
-/// `{"Pattern",{"#",<uuid>}}`.
-fn metadata_types_exclude_string(value_types: &[ConstantValueType]) -> bool {
-    !value_types.is_empty()
-        && value_types.iter().all(|value_type| match value_type {
-            ConstantValueType::Boolean
-            | ConstantValueType::Number { .. }
-            | ConstantValueType::DateTime { .. }
-            | ConstantValueType::Reference { .. } => true,
-            ConstantValueType::String { .. } | ConstantValueType::ReferenceTypeSet { .. } => false,
-        })
 }
 
 fn format_common_command_source_xml_native(

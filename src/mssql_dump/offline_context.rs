@@ -160,8 +160,7 @@ impl OfflineFormContextFactory {
             &metadata,
             &type_index,
         ));
-        let defined =
-            build_defined_type_value_owner_reference_index_from_texts(&metadata, &type_index);
+        let defined = build_metadata_type_set_leaf_index_from_texts(&metadata, &type_index);
         let information_register_field_refs =
             build_information_register_field_reference_index_from_texts(
                 &metadata,
