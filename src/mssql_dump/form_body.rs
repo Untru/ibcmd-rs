@@ -13293,7 +13293,29 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
         // `Объект.НалогообложениеНДС` with `DontChange`, and `Номенклатура` ->
         // `Items.ТаблицаКорректировки.CurrentData.НоменклатураНабора` with
         // `Clear`.  The blanking removed both.
-        item.type_link = None;
+        //
+        // `<TypeLink>` is not one of them either, and it was the last property
+        // still being blanked here. Conditional-ness is a property of the
+        // group's *record* -- the `UserVisible` rights tuple ahead of its
+        // discriminator -- and the platform writes no `<UserVisible>` at all
+        // when that tuple holds its default `true`, so the blanking reached
+        // groups nothing in the document marks. It removed 36 links on 14 ERP
+        // УХ 3.2.12.6 forms, among them `Catalogs/ПоложениеОЗакупках/Forms/
+        // ФормаЭлемента` (`Items.ДеревоПараметров.CurrentData.Параметр`),
+        // `DataProcessors/РаботаСДоговорамиУХ/Forms/ФормаПозицияГрафика`
+        // (`ВидБюджета`, a plain form attribute) and the six physically
+        // spelled `13:02023637-…/0:<uuid>` links of `Documents/
+        // НачислениеОперацийМСФО/Forms/ФормаДокумента`.
+        //
+        // With the blanking gone the export writes 158 `<TypeLink>` elements
+        // across 77 forms of ERP УХ 3.2.12.6 -- the same count, on the same
+        // forms, as the platform's own tree, with no element to spare on
+        // either side; 13 of the 14 forms become byte-exact and the
+        // fourteenth is left with an unrelated `<CommandInterface>` difference.
+        // The other seven stand corpora carry no `<TypeLink>` on a
+        // conditional group's descendant and are unchanged, exact set for
+        // exact set.
+        //
         // The bound title is not one of the properties a conditional group
         // withholds from its descendants. UT 11.5.27.75 carries four groups
         // that are both a conditional group's descendant and title-bound --
