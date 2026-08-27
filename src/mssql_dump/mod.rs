@@ -11010,6 +11010,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             header,
             type_index,
             object_refs,
+            metadata_object_refs,
             form_refs,
             template_refs,
         ) {
@@ -11037,6 +11038,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             header,
             type_index,
             object_refs,
+            metadata_object_refs,
             form_refs,
         ) {
             StrictMetadataRoot::Parsed(chart) => {
@@ -21676,11 +21678,16 @@ fn attribute_tabular_section_child_object_tag(
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_chart_of_accounts_properties_from_text(
     text: &str,
     header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    // The wider index, the only one that carries predefined-item and
+    // enumeration-value references; a chart of accounts names one of them in
+    // an attribute's `<ChoiceParameters>`.
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> StrictMetadataRoot<ChartOfAccountsProperties> {
@@ -21747,6 +21754,7 @@ fn parse_chart_of_accounts_properties_from_text(
         &collections,
         type_index,
         object_refs,
+        metadata_object_refs,
         form_refs,
         template_refs,
     )
@@ -21766,6 +21774,7 @@ fn parse_chart_of_accounts_properties(
     collections: &[Vec<&str>],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<ChartOfAccountsProperties> {
@@ -21860,7 +21869,7 @@ fn parse_chart_of_accounts_properties(
             "Attribute",
             &header.name,
             type_index,
-            object_refs,
+            metadata_object_refs,
             form_refs,
             &mut all_uuids,
             &mut attribute_names,
@@ -21885,7 +21894,7 @@ fn parse_chart_of_accounts_properties(
             "AccountingFlag",
             &header.name,
             type_index,
-            object_refs,
+            metadata_object_refs,
             form_refs,
             &mut all_uuids,
             &mut accounting_flag_names,
@@ -21899,7 +21908,7 @@ fn parse_chart_of_accounts_properties(
             "ExtDimensionAccountingFlag",
             &header.name,
             type_index,
-            object_refs,
+            metadata_object_refs,
             form_refs,
             &mut all_uuids,
             &mut ext_dimension_flag_names,
@@ -22139,6 +22148,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
     header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> StrictMetadataRoot<ChartOfCalculationTypesProperties> {
     let Some(root) = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))
@@ -22207,7 +22217,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
                 &header.uuid,
                 &header.name,
                 type_index,
-                object_refs,
+                metadata_object_refs,
                 form_refs,
             )
             .map(|children| children.len() as i64)
@@ -22219,6 +22229,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
                 &collections,
                 type_index,
                 object_refs,
+                metadata_object_refs,
                 form_refs,
             )
             .is_some(),
@@ -22231,6 +22242,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
         &collections,
         type_index,
         object_refs,
+        metadata_object_refs,
         form_refs,
     )
     .map(StrictMetadataRoot::Parsed)
@@ -22241,6 +22253,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_chart_of_calculation_types_properties(
     text: &str,
     header: &MetadataHeader,
@@ -22248,6 +22261,7 @@ fn parse_chart_of_calculation_types_properties(
     collections: &[Vec<&str>],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<ChartOfCalculationTypesProperties> {
     let parsed_header = parse_wrapped_register_owner_header(fields.get(1)?)?;
@@ -22259,7 +22273,15 @@ fn parse_chart_of_calculation_types_properties(
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
         || !cct_pair_is(fields.get(36)?, "0", "0")
-        || !cct_based_on_is_empty(fields.get(54)?)
+        // Field 54 is the physical index list, not `<BasedOn>`, exactly as
+        // field 48 is on a chart of accounts: both ERP УХ 3.2.12.6 charts of
+        // calculation types declare descriptors there (3 and 2, of the same
+        // `fe839d42-…` family the chart of accounts writes) and the platform
+        // still exports `<BasedOn/>`. `<BasedOn>` rides field 36, checked
+        // above with the same `{0,0}` empty form. Only the declared shape is
+        // validated here; the descriptors are not exported. The БСП demo chart
+        // declares none and passed either way.
+        || !chart_physical_index_list_shape_is_known(fields.get(54)?)
         || !cct_data_lock_fields_are_empty(fields.get(56)?)
     {
         return None;
@@ -22299,13 +22321,16 @@ fn parse_chart_of_calculation_types_properties(
         ],
         &mut all_uuids,
     )?;
+    // The child collections resolve through the wider index: the only one that
+    // carries enumeration-value and predefined-item references, which a chart
+    // of calculation types names in an attribute's `<FillValue>`.
     let child_objects = parse_chart_of_calculation_types_child_objects(
         collections,
         text,
         &header.uuid,
         &header.name,
         type_index,
-        object_refs,
+        metadata_object_refs,
         form_refs,
     )?;
     for child in &child_objects {
@@ -23467,15 +23492,6 @@ fn chart_physical_index_list_shape_is_known(value: &str) -> bool {
                         .is_some_and(|count| count.checked_add(1) == Some(nested.len()))
                 })
             })
-    })
-}
-
-fn cct_based_on_is_empty(value: &str) -> bool {
-    split_information_register_braced_fields(value).is_some_and(|fields| {
-        fields.len() == 2
-            && fields[0].trim() == "0"
-            && split_information_register_braced_fields(fields[1])
-                .is_some_and(|nested| nested.len() == 1 && nested[0].trim() == "0")
     })
 }
 
