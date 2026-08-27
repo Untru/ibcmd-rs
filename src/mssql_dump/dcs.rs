@@ -1647,6 +1647,22 @@ struct DcsElementFrame {
     /// would also delete a sibling item that does carry text, and no
     /// measurement says it should.
     omit_localized_item: bool,
+    /// This element is a `SettingsParameterValue` item and a `value` child of
+    /// its own has already been written.
+    ///
+    /// A standalone `Settings` document leaves the child out entirely when the
+    /// parameter carries no value, or spells it as an empty `DesignTimeValue`;
+    /// the platform writes the element either way. Over the `Templates/*/Ext/
+    /// Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП
+    /// demo/base 3.1.12.297, Документооборот КОРП 3.0.21.3, MDM_Management,
+    /// Web_Service and WMS5 all 61 415 published
+    /// `xsi:type="dcsset:SettingsParameterValue"` items carry a `dcscor:value`
+    /// -- 2 187 of them `xsi:nil="true"` -- and not one is published without.
+    /// The rule is the standalone document's: the same item inside a packed
+    /// form's `ListSettings` *is* published without a value 32 times over the
+    /// same trees, so the writer applies this only in
+    /// [`DataCompositionDocumentMode::Settings`].
+    saw_settings_parameter_value: Option<bool>,
     /// Output offset right before this element's opening `<` was written.
     start_tag_begin_offset: usize,
     /// Output offset right after this element's opening tag's own closing
@@ -1747,6 +1763,15 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         frame.empty_element_action = empty_element_action;
                         frame.start_tag_begin_offset = start_tag_begin_offset;
                         frame.start_tag_end_offset = start_tag_end_offset;
+                        if mode == DataCompositionDocumentMode::Settings {
+                            if frame.xsi_type_local.as_deref() == Some("SettingsParameterValue") {
+                                frame.saw_settings_parameter_value = Some(false);
+                            }
+                            self.note_settings_parameter_value_child(
+                                namespace_ref(&namespace),
+                                local,
+                            );
+                        }
                         self.element_stack.push(frame);
                     }
                 }
@@ -1760,9 +1785,13 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         // carries this shape whenever the element's source
                         // form was already self-closed instead of an
                         // open/close pair with nothing in between.
-                        let omit = namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
+                        let omit = (namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
                             && matches!(local.as_ref(), b"outputParameters" | b"dataParameters")
-                            && !event_has_ordinary_attributes(&event)?;
+                            && !event_has_ordinary_attributes(&event)?)
+                            // A `DesignTimeValue` with nothing in it states
+                            // that there is no value -- see
+                            // `event_is_empty_design_time_value`.
+                            || event_is_empty_design_time_value(&reader, &event)?;
                         // A localized string item whose `content` is empty is
                         // published by nothing at all -- see
                         // `DcsElementFrame::omit_localized_item`.
@@ -1795,6 +1824,12 @@ impl<'a> DataCompositionXmlWriter<'a> {
                                 true,
                                 &mode,
                             )?;
+                            if mode == DataCompositionDocumentMode::Settings {
+                                self.note_settings_parameter_value_child(
+                                    namespace_ref(&namespace),
+                                    local.as_ref(),
+                                );
+                            }
                         }
                     }
                 }
@@ -1807,15 +1842,6 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     {
                         return None;
                     }
-                    // Whitespace-only, not strictly zero-length: the storage
-                    // document's own pretty-printing writes indentation text
-                    // nodes as siblings around a now-omitted child (or inside
-                    // a childless element), and the platform's own source
-                    // XML does not preserve that indentation once there is
-                    // nothing left for it to indent.
-                    let interior_is_blank = self.output[frame.start_tag_end_offset..]
-                        .bytes()
-                        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
                     // A `content` spelled as an open/close pair with nothing
                     // between the tags carries the same empty string its
                     // self-closed spelling does, and drops its item the same
@@ -1842,6 +1868,22 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         }
                         continue;
                     }
+                    // A standalone `Settings` document's parameter value is
+                    // mandatory in the published direction even when storage
+                    // states no value at all -- see
+                    // `DcsElementFrame::saw_settings_parameter_value`.
+                    if frame.saw_settings_parameter_value == Some(false) {
+                        self.write_absent_settings_parameter_value(&frame);
+                    }
+                    // Whitespace-only, not strictly zero-length: the storage
+                    // document's own pretty-printing writes indentation text
+                    // nodes as siblings around a now-omitted child (or inside
+                    // a childless element), and the platform's own source
+                    // XML does not preserve that indentation once there is
+                    // nothing left for it to indent.
+                    let interior_is_blank = self.output[frame.start_tag_end_offset..]
+                        .bytes()
+                        .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
                     let is_empty = frame.empty_element_action.is_some() && interior_is_blank;
                     match frame.empty_element_action {
                         Some(DcsEmptyElementAction::OmitIfEmpty) if is_empty => {
@@ -1909,6 +1951,46 @@ impl<'a> DataCompositionXmlWriter<'a> {
             }
         }
         self.element_stack.is_empty().then_some(())
+    }
+
+    /// Records that a `{dcs core}value` child has just been written under the
+    /// element currently on top of the stack, so its `End` arm knows the
+    /// mandatory child is already there.
+    fn note_settings_parameter_value_child(&mut self, namespace: Option<&[u8]>, local: &[u8]) {
+        if namespace != Some(DCS_CORE_NS) || local != b"value" {
+            return;
+        }
+        if let Some(parent) = self.element_stack.last_mut()
+            && parent.saw_settings_parameter_value == Some(false)
+        {
+            parent.saw_settings_parameter_value = Some(true);
+        }
+    }
+
+    /// Writes the `value` child a `SettingsParameterValue` item states no
+    /// value for, as the platform's own `xsi:nil="true"` spelling.
+    ///
+    /// The element takes the item's own prefix: both are `{dcs core}` names,
+    /// and every one of the 61 415 published items spells the pair
+    /// `dcscor:item`/`dcscor:value`. It is placed one indentation step inside
+    /// the item, reusing the storage document's own pretty-printing -- the
+    /// whitespace run that already leads up to the closing tag -- rather than
+    /// inventing a layout of its own.
+    fn write_absent_settings_parameter_value(&mut self, frame: &DcsElementFrame) {
+        let prefix = frame
+            .rendered_name
+            .rsplit_once(':')
+            .map_or(String::new(), |(prefix, _)| format!("{prefix}:"));
+        let closing_indent_start = self
+            .output
+            .trim_end_matches(['\r', '\n', '\t', ' '])
+            .len()
+            .max(frame.start_tag_end_offset);
+        let closing_indent = self.output[closing_indent_start..].to_string();
+        self.output.push('\t');
+        self.output
+            .push_str(&format!("<{prefix}value xsi:nil=\"true\"/>"));
+        self.output.push_str(&closing_indent);
     }
 
     fn write_start_tag(
@@ -2904,6 +2986,9 @@ fn data_composition_element_frame(
         empty_element_action: None,
         dropped_child: false,
         omit_localized_item: false,
+        // Set by `write_document`'s `Event::Start` arm, which is the only
+        // caller that can see the document mode this rule is keyed to.
+        saw_settings_parameter_value: None,
         start_tag_begin_offset: 0,
         start_tag_end_offset: 0,
     })
@@ -2944,6 +3029,49 @@ fn event_has_ordinary_attributes(event: &quick_xml::events::BytesStart<'_>) -> O
         }
     }
     Some(false)
+}
+
+/// Whether this self-closed event is a `DesignTimeValue` carrying nothing --
+/// storage's spelling for "this value is not set at all".
+///
+/// The platform never publishes that spelling. Over the `Templates/*/Ext/
+/// Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base
+/// 3.1.12.297, Документооборот КОРП 3.0.21.3, MDM_Management, Web_Service
+/// and WMS5 there is not one self-closed `xsi:type="dcscor:DesignTimeValue"`
+/// element -- every published `DesignTimeValue` carries content -- which the
+/// primary schema document's own rewriter already records (see
+/// `ibcmd_xml`'s `rewrite_dcs_primary_schema_storage_document`). What the
+/// storage element denotes is an absent value, so it is dropped here and
+/// whatever holds it decides what an absent value renders as: a
+/// `dcsset:FilterItemComparison`'s `right` is simply not written
+/// (`Reports/АнализИсполненияПрограммыЗакупок/Templates/
+/// ОсновнаяСхемаКомпоновкиДанных` of ERP УХ 3.2.12.6 stores `<right
+/// xsi:type="dcscor:DesignTimeValue"/>` and the platform publishes no
+/// `dcsset:right` at all), while a `SettingsParameterValue`'s mandatory
+/// `value` comes back as `xsi:nil="true"` through
+/// [`DcsElementFrame::saw_settings_parameter_value`].
+fn event_is_empty_design_time_value(
+    reader: &NsReader<&[u8]>,
+    event: &quick_xml::events::BytesStart<'_>,
+) -> Option<bool> {
+    let mut ordinary = 0usize;
+    let mut design_time = false;
+    for attribute in event.attributes().with_checks(false) {
+        let attribute = attribute.ok()?;
+        if is_xmlns_attribute(attribute.key.as_ref()) {
+            continue;
+        }
+        ordinary += 1;
+        let (attr_namespace, attr_local) = reader.resolve_attribute(attribute.key);
+        if namespace_ref(&attr_namespace) != Some(XSI_NS) || attr_local.as_ref() != b"type" {
+            continue;
+        }
+        let value = attribute.decode_and_unescape_value(reader.decoder()).ok()?;
+        let expanded = resolve_data_composition_qname(reader, &value)?;
+        design_time = expanded.namespace.as_deref() == Some(DCS_CORE_NS)
+            && expanded.local == "DesignTimeValue";
+    }
+    Some(ordinary == 1 && design_time)
 }
 
 fn resolve_data_composition_qname(
