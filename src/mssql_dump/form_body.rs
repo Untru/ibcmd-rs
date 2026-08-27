@@ -15336,7 +15336,7 @@ pub(super) fn parse_form_input_field_choice_parameters(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceParameters> {
     let parameters = parse_form_choice_parameters(field, |type_id, value_id| {
-        parse_form_enum_design_time_reference(
+        parse_form_choice_parameter_design_time_reference(
             type_id,
             value_id,
             type_index,
@@ -15345,6 +15345,61 @@ pub(super) fn parse_form_input_field_choice_parameters(
         )
     })?;
     Some(parameters)
+}
+
+/// The name a choice-parameter design-time reference carries, or -- when the
+/// configuration names the type but not the value -- the identifier pair the
+/// platform itself writes in that case.
+///
+/// The choice *list* one grammar over already spells an unnamed pair this way
+/// (`FormChoiceListValue::LiteralDesignTimeRef`), and the reason is the same:
+/// the platform does not drop a reference it cannot name, it writes it
+/// physically.
+///
+/// The fallback is deliberately narrower than "resolution failed". A type
+/// identifier this export cannot name *uniquely* -- a collision in the type
+/// index -- is a different failure: the configuration does carry that type and
+/// the platform does name it, so the pair would be a guess and the value stays
+/// refused. Only a value the named type does not carry gets the pair.
+///
+/// Evidence, ERP УХ 3.2.12.6
+/// `Reports/ПлатежныйКалендарьУХ/Forms/ФормаПереводаКонверсии`: both
+/// `Отбор.ПриходРасход` fixed arrays hold two members under the same type
+/// `4b2c53c8-d593-4b27-8e3a-3b44ff5452a7`
+/// (`Enum.ВидыДвиженийПриходРасход`) -- the first,
+/// `d3af0748-…`/`a1914f0e-…`, is written
+/// `Enum.ВидыДвиженийПриходРасход.EnumValue.Расход` and `.Приход`, and the
+/// second, `836f82c0-023e-0000-8076-63823e020000`, which is no member of that
+/// enumeration, is written
+/// `4b2c53c8-d593-4b27-8e3a-3b44ff5452a7.836f82c0-023e-0000-8076-63823e020000`.
+/// Those two are the only choice-parameter references spelled as an identifier
+/// pair on the whole stand.
+fn parse_form_choice_parameter_design_time_reference(
+    type_id: &str,
+    value_id: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if let Some(reference) = parse_form_enum_design_time_reference(
+        type_id,
+        value_id,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
+        return Some(reference);
+    }
+    let type_uuid = Uuid::parse_str(type_id.trim()).ok()?;
+    let value_uuid = Uuid::parse_str(value_id.trim()).ok()?;
+    if type_uuid.is_nil() || value_uuid.is_nil() {
+        return None;
+    }
+    // The type must be one this export can name on its own; only then is the
+    // unresolved half exactly the value.
+    unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())
+        .and_then(parse_generated_metadata_reference_owner)?;
+    Some(format!("{type_uuid}.{value_uuid}"))
 }
 
 pub(super) fn parse_form_enum_design_time_reference(

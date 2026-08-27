@@ -161,9 +161,17 @@ pub enum FormChoiceParameterValue {
     Undefined,
     Boolean(bool),
     String(String),
+    /// A `{"N",…}` number member, kept in the exact canonical spelling the slot
+    /// carries so the writer never has to reformat it -- the same member the
+    /// fixed array already admits, one level up.
+    Decimal(String),
     /// A `{"D",<14 digits>}` member, kept in the ISO spelling the platform
     /// writes: `YYYY-MM-DDThh:mm:ss`.
     DateTime(String),
+    /// The `{"U"}` marker *inside* the typed wrapper. Unlike `Undefined`, which
+    /// is the whole value field, this one keeps the wrapper and its
+    /// presentation and only the innermost value element is the nil one.
+    Nil,
     DesignTimeRef(String),
     FixedArray(Vec<FormChoiceParameterArrayItem>),
 }
@@ -572,6 +580,10 @@ pub enum FormChoiceListValue {
     Boolean(bool),
     Decimal(String),
     Nil,
+    /// A value list with no items at all. The platform names the class in the
+    /// `xsi:type` and writes the element empty, and nothing the payload carries
+    /// besides its item count reaches the XML.
+    EmptyValueList,
     String(String),
     EmptyRef(String),
     LiteralDesignTimeRef(String),
@@ -648,6 +660,11 @@ impl FormChoiceListValue {
             },
             Self::Nil => FormChoiceListValueWireShape {
                 xml_opening: Cow::Borrowed("<Value xsi:nil=\"true\"/>"),
+                xml_closing: "",
+                text: None,
+            },
+            Self::EmptyValueList => FormChoiceListValueWireShape {
+                xml_opening: Cow::Borrowed("<Value xsi:type=\"xr:ValueList\"/>"),
                 xml_closing: "",
                 text: None,
             },
@@ -808,6 +825,35 @@ where
                 && literal_ids_are(type_id, value_id, FORM_CHOICE_LIST_STRING_TYPE_ID) =>
         {
             FormChoiceListValue::String(exact_1c_string(string)?)
+        }
+        // A value list with no items.  The class identifier in the value
+        // member is what picks this shape, exactly as the class identifier in
+        // front of a form item record picks its reader, and the item's own
+        // type slot either repeats it or is unset like every other literal
+        // above.  The platform names the class in the `xsi:type` and writes
+        // the element empty; the emptiness comes from the item collection's
+        // own declared count, and a list that declares any item is refused
+        // because no configuration of the stand writes one here.
+        //
+        // Evidence: ERP УХ 3.2.12.6
+        // `Documents/ВходящийДокументСЭДОФСС/Forms/ФормаВыбораТребования`,
+        // InputField `ОтборВидДокумента`, both items -- the only two
+        // `<Value xsi:type="xr:ValueList"/>` elements on the whole stand --
+        // carry `{"#",4772b3b4-…,{6,1e512aab-…,0,0,{0},{"Pattern"},0,-1}}`
+        // under the nil identifier pair.  Seed `vgr-cl1` reproduces those
+        // bytes exactly from that XML, and seed `vgr-cl3` shows what changes
+        // when the list is not empty: the item collection declares `1` and
+        // carries `1e512aab-…` again in front of the item record, and the
+        // trailing member turns from `-1` into `0`.
+        ("#", [_, class_id, payload])
+            if mode.trim() == "1"
+                && class_id
+                    .trim()
+                    .eq_ignore_ascii_case(FORM_CHOICE_LIST_VALUE_LIST_TYPE_ID)
+                && literal_ids_are(type_id, value_id, class_id)
+                && parse_empty_form_value_list_payload(payload).is_some() =>
+        {
+            FormChoiceListValue::EmptyValueList
         }
         // A design-time value of a platform-defined type.  The value member
         // carries the type identifier and the member ordinal; the item's own
@@ -992,6 +1038,50 @@ fn parse_form_choice_list_empty_sidecar(raw: &str) -> Option<()> {
 /// `Catalogs/УсловияОплаты/Forms/ФормаЭлемента` spells its `{"N",30}`,
 /// `{"N",60}`, `{"N",90}`, `{"N",180}` under `b0be78f2` as four
 /// `<Value xsi:type="xs:decimal">` elements, value for value.
+/// Platform class identifier of a value list, and of the records its item
+/// collection holds. Both are fixed: an infobase created empty by
+/// 8.3.27.2214 writes the very same pair as ERP УХ 3.2.12.6 does.
+const FORM_CHOICE_LIST_VALUE_LIST_TYPE_ID: &str = "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3";
+const FORM_CHOICE_LIST_VALUE_LIST_ITEM_TYPE_ID: &str = "1e512aab-1b41-4ef6-9375-f0137be9dd91";
+
+/// The payload of a value list that declares no items.
+///
+/// Eight members: the record kind, the class its items carry, two reserved
+/// zeroes, the item collection, the list's own value-type pattern, a reserved
+/// zero and the current-item index. The emptiness is read off the collection's
+/// own declared count, and the index is `-1` exactly when there is no item to
+/// point at.
+fn parse_empty_form_value_list_payload(raw: &str) -> Option<()> {
+    let fields = braced_fields_bounded(raw, 8)?;
+    let [
+        kind,
+        item_type_id,
+        first_reserved,
+        second_reserved,
+        items,
+        value_type,
+        trailing,
+        index,
+    ] = fields.as_slice()
+    else {
+        return None;
+    };
+    let items = braced_fields_bounded(items, 1)?;
+    let count = items.first()?.trim().parse::<usize>().ok()?;
+    (kind.trim() == "6"
+        && item_type_id
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHOICE_LIST_VALUE_LIST_ITEM_TYPE_ID)
+        && first_reserved.trim() == "0"
+        && second_reserved.trim() == "0"
+        && count == 0
+        && items.len() == 1
+        && value_type.trim() == r#"{"Pattern"}"#
+        && trailing.trim() == "0"
+        && index.trim() == "-1")
+        .then_some(())
+}
+
 const FORM_CHOICE_LIST_STRING_TYPE_ID: &str = "9b6abf8b-0173-48e5-b0a0-83b21fcf63c5";
 const FORM_CHOICE_LIST_NUMBER_TYPE_ID: &str = "b0be78f2-0ee6-4d31-a3bb-77dd32ba5bec";
 const FORM_CHOICE_LIST_BOOLEAN_TYPE_ID: &str = "5d4125ad-f6e7-4313-be32-f71d0ab60915";
@@ -1160,6 +1250,76 @@ mod form_choice_list_tests {
             literal.items()[0].value(),
             &FormChoiceListValue::LiteralDesignTimeRef(format!("{TYPE_ID}.{VALUE_ID}"))
         );
+    }
+
+    /// An empty value list is decoded from its own declared item count, and a
+    /// list that declares an item is refused.
+    ///
+    /// Evidence: ERP УХ 3.2.12.6
+    /// `Documents/ВходящийДокументСЭДОФСС/Forms/ФормаВыбораТребования`, whose
+    /// two items are the only `<Value xsi:type="xr:ValueList"/>` elements on
+    /// the whole stand, and seeds `vgr-cl1`/`vgr-cl3` (8.3.27.2214), which
+    /// produce the empty and the one-item payload from the two XML spellings.
+    #[test]
+    fn empty_value_list_is_decoded_and_a_populated_one_is_refused() {
+        let payload = |items: &str, index: &str| {
+            format!(
+                r##"{{"#",{FORM_CHOICE_LIST_VALUE_LIST_TYPE_ID},{{6,{FORM_CHOICE_LIST_VALUE_LIST_ITEM_TYPE_ID},0,0,{items},{{"Pattern"}},0,{index}}}}}"##
+            )
+        };
+        let decoded = parse(
+            &envelope(&item("1", &payload("{0}", "-1"), NIL, NIL)),
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        )
+        .unwrap();
+        assert_eq!(
+            decoded.items()[0].value(),
+            &FormChoiceListValue::EmptyValueList
+        );
+        let shape = decoded.items()[0].value().wire_shape();
+        assert_eq!(shape.xml_opening(), "<Value xsi:type=\"xr:ValueList\"/>");
+        assert_eq!(shape.text(), None);
+        assert_eq!(shape.xml_closing(), "");
+
+        // The item slot may repeat the value list's own class, exactly as the
+        // literals repeat theirs.
+        assert_eq!(
+            parse(
+                &envelope(&item(
+                    "1",
+                    &payload("{0}", "-1"),
+                    FORM_CHOICE_LIST_VALUE_LIST_TYPE_ID,
+                    NIL
+                )),
+                FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+            )
+            .unwrap()
+            .items()[0]
+                .value(),
+            &FormChoiceListValue::EmptyValueList
+        );
+
+        // A list that declares an item, a collection whose declared count and
+        // length disagree, and a current-item index that does not match an
+        // empty list are all refused rather than flattened to the empty shape.
+        for (items, index) in [
+            (
+                format!(
+                    r#"{{1,{FORM_CHOICE_LIST_VALUE_LIST_ITEM_TYPE_ID},{{"",0,{{"S","x"}},{{4,0,{{0}},"",-1,-1,0,0,""}},0,0,""}}}}"#
+                ),
+                "0",
+            ),
+            ("{1}".to_owned(), "-1"),
+            ("{0}".to_owned(), "0"),
+        ] {
+            assert!(
+                parse(
+                    &envelope(&item("1", &payload(&items, index), NIL, NIL)),
+                    FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+                )
+                .is_none()
+            );
+        }
     }
 
     #[test]
@@ -2037,6 +2197,20 @@ where
         {
             FormChoiceParameterValue::String(exact_1c_string(value)?)
         }
+        // The same `{"N",…}` member the fixed array already admits, in the same
+        // mode-1 nil-identified envelope, at the top level.
+        //
+        // Evidence, seed `vgr-cp1` (8.3.27.2214): a form whose `InputField`
+        // declares `Отбор.Число` `<Value xsi:type="xs:decimal">2` and
+        // `Отбор.ЧислоДробное` `-12.75` is stored by the platform as `{"N",2}`
+        // and `{"N",-12.75}` and exported back to the very same XML. ERP УХ
+        // 3.2.12.6 writes nine such parameters, ут one, and no other corpus
+        // any.
+        [kind, value]
+            if kind.trim() == r#""N""# && payload[1].trim() == "1" && nil_ids(&payload) =>
+        {
+            FormChoiceParameterValue::Decimal(canonical_1c_number(value)?)
+        }
         // A `{"D",<14 digits>}` member in the same mode-1 nil-identified
         // envelope. The shape had no reader, and the refusal took the whole
         // `<ChoiceParameters>` block of its item with it. It occurs once in
@@ -2044,10 +2218,36 @@ where
         // no other stand corpus; the platform writes
         // `<Value xsi:type="xs:dateTime">2024-05-07T00:00:00</Value>` for the
         // Документооборот one, which is `20240507000000` spelled out.
+        //
+        // Seed `vgr-cp1` (8.3.27.2214) shows the same equivalence on the
+        // platform's own round trip: `<Value xsi:type="xs:dateTime">
+        // 2020-01-01T00:00:00` and `2021-02-03T04:05:06` are stored as
+        // `{"D",20200101000000}` and `{"D",20210203040506}` and exported back
+        // unchanged. Fourteen bare digits are the whole value -- never a
+        // quoted string.
         [kind, value]
             if kind.trim() == r#""D""# && payload[1].trim() == "1" && nil_ids(&payload) =>
         {
             FormChoiceParameterValue::DateTime(format_1c_choice_parameter_date_time(value.trim())?)
+        }
+        // The `{"U"}` marker under mode `1` with the nil identity pair is not a
+        // reference that failed to resolve: it is the literal `Undefined` value
+        // *inside* the typed wrapper, which keeps its presentation while the
+        // innermost value element is the nil one.
+        //
+        // Evidence, seed `vgr-cp1`: `Отбор.Нил`, declared
+        // `<Value xsi:nil="true"/>` inside the wrapper, is stored as `{"U"}`
+        // under mode `1` with both identifiers nil, while `Отбор.Неопределено`,
+        // declared `<app:value xsi:nil="true"/>` with no wrapper at all, is
+        // stored as the bare `{"U"}` this function already reads above. ERP УХ
+        // 3.2.12.6 `Catalogs/РесурсныеСпецификации/Forms/ФормаЭлемента`
+        // (`ВыборДействующихМаршрутныхКарт`) is the only corpus instance.
+        [kind]
+            if kind.trim() == UNDEFINED_VALUE_KIND
+                && payload[1].trim() == "1"
+                && nil_ids(&payload) =>
+        {
+            FormChoiceParameterValue::Nil
         }
         // A design-time reference identifies its value by a *pair*. The nil
         // value id is not an absent id: it is the empty reference of the type,
@@ -2464,8 +2664,9 @@ mod form_choice_parameters_tests {
             presentation()
         );
         assert!(parse_form_choice_parameters(&envelope(&fixed), resolver).is_none());
-        // A member kind the platform was never observed to write here stays
-        // refused: widening is driven by observed bytes, not by symmetry.
+        // A date the platform never spells this way stays refused: the member
+        // it does write is fourteen bare digits, never a quoted string, and
+        // widening is driven by observed bytes rather than by symmetry.
         let unsupported = format!(
             "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"D\",\"20240101\"}},{NIL},{NIL},{}}}}}",
             presentation()
@@ -2517,6 +2718,102 @@ mod form_choice_parameters_tests {
             parsed.items()[0].value(),
             &FormChoiceParameterValue::Undefined
         );
+    }
+
+    /// The three remaining scalar members of the same mode-1 nil-identified
+    /// envelope: a number, a date and the literal `Undefined`.
+    ///
+    /// Evidence, seed `vgr-cp1` (8.3.27.2214): a `DataProcessor` form whose
+    /// `InputField` declares `Отбор.Число` `<Value xsi:type="xs:decimal">2`,
+    /// `Отбор.ЧислоДробное` `-12.75`, `Отбор.Дата`
+    /// `<Value xsi:type="xs:dateTime">2020-01-01T00:00:00`,
+    /// `Отбор.ДатаСВременем` `2021-02-03T04:05:06` and `Отбор.Нил`
+    /// `<Value xsi:nil="true"/>` is stored by the platform as `{"N",2}`,
+    /// `{"N",-12.75}`, `{"D",20200101000000}`, `{"D",20210203040506}` and
+    /// `{"U"}` -- every one of them under mode `1` with both identifiers nil --
+    /// and exported back to the very same XML.
+    ///
+    /// Corpus: ERP УХ 3.2.12.6 writes nine top-level `xs:decimal` parameters
+    /// (`Отбор.РежимБланка` in eight forms plus a second one in
+    /// `Reports/НастройкаОбработкиШаблоновДокументов/Forms/ФормаВводаЗначенийНастройки`),
+    /// two `xs:dateTime` (`Отбор.ДатаПримененияОтбора` of the two
+    /// `Documents/РегистрацияТрудовойДеятельности` forms) and one nil
+    /// (`ВыборДействующихМаршрутныхКарт` of
+    /// `Catalogs/РесурсныеСпецификации/Forms/ФормаЭлемента`); Документооборот
+    /// КОРП 3.0.21.3 writes one more `xs:dateTime`
+    /// (`Отбор.ВидДокумента` of `Catalogs/ШаблоныЗадач/Forms/ФормаНазначения`).
+    /// No other configuration of the stand writes any of the three.
+    #[test]
+    fn form_choice_parameters_decode_scalar_number_date_and_nil_values() {
+        let scalar = |member: &str| {
+            format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{member},{NIL},{NIL},{}}}}}",
+                presentation()
+            )
+        };
+        let decoded = |member: &str| {
+            parse_form_choice_parameters(&envelope(&scalar(member)), |_, _| {
+                panic!("a literal must never reach the design-time resolver")
+            })
+            .map(|parsed| parsed.items()[0].value().clone())
+        };
+        assert_eq!(
+            decoded(r#"{"N",2}"#),
+            Some(FormChoiceParameterValue::Decimal("2".to_owned()))
+        );
+        assert_eq!(
+            decoded(r#"{"N",-12.75}"#),
+            Some(FormChoiceParameterValue::Decimal("-12.75".to_owned()))
+        );
+        assert_eq!(
+            decoded(r#"{"D",20200101000000}"#),
+            Some(FormChoiceParameterValue::DateTime(
+                "2020-01-01T00:00:00".to_owned()
+            ))
+        );
+        assert_eq!(
+            decoded(r#"{"D",20210203040506}"#),
+            Some(FormChoiceParameterValue::DateTime(
+                "2021-02-03T04:05:06".to_owned()
+            ))
+        );
+        assert_eq!(decoded(r#"{"U"}"#), Some(FormChoiceParameterValue::Nil));
+        // The presentation survives, exactly as it does for a string: the nil
+        // value keeps the typed wrapper, unlike the bare `Undefined` marker
+        // that replaces the wrapper itself.
+        let parsed =
+            parse_form_choice_parameters(&envelope(&scalar(r#"{"U"}"#)), |_, _| None).unwrap();
+        assert_eq!(
+            parsed.items()[0].presentation(),
+            [("en".to_owned(), "value".to_owned())]
+        );
+        // Only the exact spellings survive. A date is fourteen digits and
+        // nothing else; a number keeps the canonical form the fixed array
+        // already pins.
+        for member in [
+            r#"{"D","20240101"}"#,
+            r#"{"D",20240101}"#,
+            r#"{"D",2024010100000}"#,
+            r#"{"D",202401011200000}"#,
+            r#"{"D",2024010112000x}"#,
+            r#"{"N",04}"#,
+            r#"{"N",4.10}"#,
+        ] {
+            assert!(decoded(member).is_none(), "{member} must stay refused");
+        }
+        // Mode and identity pair still carry the literal.
+        for wrong in [
+            format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,0,{{\"N\",2}},{NIL},{NIL},{}}}}}",
+                presentation()
+            ),
+            format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"D\",20200101000000}},{OWNER},{NIL},{}}}}}",
+                presentation()
+            ),
+        ] {
+            assert!(parse_form_choice_parameters(&envelope(&wrong), resolver).is_none());
+        }
     }
 
     /// A scalar string is the same `{"S",…}` member the fixed array already
