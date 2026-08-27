@@ -8880,6 +8880,7 @@ pub(super) fn collect_form_chain_walk_member_indexes(
     // picking one: 84 of the 96 such slots in UT 11.5.27.75 name exactly one
     // column and every one of them agrees with the platform.
     let mut table_additional_columns = BTreeMap::new();
+    let mut standard_attribute_current_data_routes = Vec::new();
     for (table_id, attribute_id) in &indexes.bound_attribute_id_by_table_id {
         let (Some(table_name), Some(attribute)) = (
             indexes.table_name_by_id.get(table_id),
@@ -8903,6 +8904,47 @@ pub(super) fn collect_form_chain_walk_member_indexes(
                 ),
             );
         }
+        // The standard attributes of the type the table's data is declared as
+        // reach the very same `Items.<table>.CurrentData.<member>` route its
+        // declared columns do, and a choice-parameter link addresses them by
+        // the same strictly negative marker a form attribute's own standard
+        // terminal uses. They are recorded beside the table's other
+        // current-data routes and keyed by the marker; the negative space never
+        // collides with the binding ids the other terminals carry.
+        //
+        // Evidence: ERP УХ 3.2.12.6
+        // `InformationRegisters/ПрименяемыеТарифыСтраховыхВзносов/Forms/РедактированиеИстории`,
+        // InputField `ВидТарифа`, whose link collection reads
+        // `{"Организация",2,{6,02023637-...},{0,ab2e2a8f-...},1}` and
+        // `{"Период",2,{6,02023637-...},{-2},1}`: the platform writes
+        // `Items.НаборЗаписей.CurrentData.ГоловнаяОрганизация` -- the
+        // register's dimension `ab2e2a8f-...` -- and
+        // `Items.НаборЗаписей.CurrentData.Period`, and attribute `НаборЗаписей`
+        // is declared
+        // `cfg:InformationRegisterRecordSet.ПрименяемыеТарифыСтраховыхВзносов`,
+        // whose standard-attribute table names `-2` `Period`. That link is the
+        // only standard-marker terminal a table's current data carries on the
+        // whole stand, and `Items.<...>.CurrentData.Period` is the only such
+        // data path the eight native trees write.
+        let [ConstantValueType::Reference { reference }] = attribute.value_types.as_slice() else {
+            continue;
+        };
+        let Some(standard_attributes) = form_standard_attribute_table_for_type_reference(reference)
+        else {
+            continue;
+        };
+        for (marker, member) in standard_attributes {
+            standard_attribute_current_data_routes.push((
+                (table_id.clone(), (*marker).to_owned()),
+                format!("Items.{table_name}.CurrentData.{member}"),
+            ));
+        }
+    }
+    for (key, data_path) in standard_attribute_current_data_routes {
+        indexes
+            .type_link_data_path_by_table_column
+            .entry(key)
+            .or_insert(data_path);
     }
     let owner_scoped_bindings = &mut indexes.owner_scoped_bindings;
     owner_scoped_bindings.table_additional_columns = table_additional_columns;
@@ -15081,6 +15123,20 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                                 )
                             })
                             .or_else(|| Some(format!("{physical_owner}/{column_id}")))
+                    }
+                    // A standard attribute of the table's own data. The route
+                    // is the one the table's declared type states, recorded
+                    // beside the table's other current-data routes and keyed by
+                    // the marker itself; a marker that type does not name keeps
+                    // the physical spelling, exactly as the form-attribute
+                    // terminal above does.
+                    FormChoiceParameterLinkTableCurrentDataTerminal::Standard(standard) => {
+                        type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), standard.marker_text()))
+                            .cloned()
+                            .or_else(|| {
+                                Some(format!("{physical_owner}/{}", standard.marker_text()))
+                            })
                     }
                     FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
                         type_link_data_path_by_table_column
@@ -21872,46 +21928,53 @@ fn form_standard_attribute_name_for_type_reference(
     reference: &str,
     marker: &str,
 ) -> Option<&'static str> {
+    lookup_form_standard_attribute(
+        form_standard_attribute_table_for_type_reference(reference)?,
+        marker,
+    )
+}
+
+/// The family table a generated owner type's standard attributes live in.
+///
+/// The name lookup and the enumeration of a type's members are the same fact
+/// read two ways, so both go through this one dispatch rather than through two
+/// copies of the family match.
+fn form_standard_attribute_table_for_type_reference(
+    reference: &str,
+) -> Option<&'static [(&'static str, &'static str)]> {
     let owner = form_generated_owner_type_from_type_reference(reference)?;
     match (owner.family(), owner.role()) {
         (GeneratedMetadataOwnerFamily::Document, GeneratedMetadataOwnerRole::Object) => {
-            DOCUMENT_STANDARD_ATTRIBUTES
-                .iter()
-                .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+            Some(&DOCUMENT_STANDARD_ATTRIBUTES)
         }
         (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Object) => {
-            chart_of_accounts_standard_attribute_name(marker)
+            Some(chart_of_accounts_standard_attribute_definitions())
         }
         (GeneratedMetadataOwnerFamily::BusinessProcess, GeneratedMetadataOwnerRole::Object) => {
-            BUSINESS_PROCESS_STANDARD_ATTRIBUTES
-                .iter()
-                .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+            Some(&BUSINESS_PROCESS_STANDARD_ATTRIBUTES)
         }
         (GeneratedMetadataOwnerFamily::Catalog, GeneratedMetadataOwnerRole::Object) => {
-            lookup_form_standard_attribute(CATALOG_OBJECT_STANDARD_ATTRIBUTES, marker)
+            Some(CATALOG_OBJECT_STANDARD_ATTRIBUTES)
         }
         (GeneratedMetadataOwnerFamily::Catalog, GeneratedMetadataOwnerRole::Ref) => {
-            lookup_form_standard_attribute(CATALOG_REF_STANDARD_ATTRIBUTES, marker)
+            Some(CATALOG_REF_STANDARD_ATTRIBUTES)
         }
         (GeneratedMetadataOwnerFamily::Task, GeneratedMetadataOwnerRole::Object) => {
-            lookup_form_standard_attribute(TASK_OBJECT_STANDARD_ATTRIBUTES, marker)
+            Some(TASK_OBJECT_STANDARD_ATTRIBUTES)
         }
         (
             GeneratedMetadataOwnerFamily::ChartOfCharacteristicTypes,
             GeneratedMetadataOwnerRole::Object,
-        ) => lookup_form_standard_attribute(
-            CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES,
-            marker,
-        ),
+        ) => Some(CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES),
         (GeneratedMetadataOwnerFamily::ExchangePlan, GeneratedMetadataOwnerRole::Object) => {
-            lookup_form_standard_attribute(EXCHANGE_PLAN_OBJECT_STANDARD_ATTRIBUTES, marker)
+            Some(EXCHANGE_PLAN_OBJECT_STANDARD_ATTRIBUTES)
         }
         (
             GeneratedMetadataOwnerFamily::InformationRegister,
             GeneratedMetadataOwnerRole::RecordManager | GeneratedMetadataOwnerRole::RecordSet,
-        ) => lookup_form_standard_attribute(INFORMATION_REGISTER_STANDARD_ATTRIBUTES, marker),
+        ) => Some(INFORMATION_REGISTER_STANDARD_ATTRIBUTES),
         (GeneratedMetadataOwnerFamily::Document, GeneratedMetadataOwnerRole::Ref) => {
-            lookup_form_standard_attribute(DOCUMENT_REF_STANDARD_ATTRIBUTES, marker)
+            Some(DOCUMENT_REF_STANDARD_ATTRIBUTES)
         }
         _ => None,
     }

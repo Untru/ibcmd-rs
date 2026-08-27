@@ -22382,10 +22382,11 @@ fn parse_chart_standard_attributes(
         .collect()
 }
 
-fn chart_of_accounts_standard_attribute_name(marker: &str) -> Option<&'static str> {
+/// The `ChartOfAccounts` standard-attribute table, as one slice, so a caller
+/// that needs the whole family reads the same rows the name lookup does.
+pub(super) const fn chart_of_accounts_standard_attribute_definitions()
+-> &'static [(&'static str, &'static str)] {
     CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS
-        .iter()
-        .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
 }
 
 /// The `ChartOfAccounts` standard tabular section a bound slot names by

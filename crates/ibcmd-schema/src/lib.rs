@@ -306,8 +306,16 @@ pub enum FormChoiceParameterLinkReference {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormChoiceParameterLinkTableCurrentDataTerminal {
     BindingId(u64),
+    /// A standard-attribute *position* in the type the table's data is declared
+    /// as, spelled the same way a form attribute's own standard terminal is:
+    /// one strictly negative canonical marker. The positive space next to it
+    /// belongs to the binding ids above, so the two never collide.
+    Standard(FormChoiceParameterLinkStandardTerminal),
     MetadataUuid(String),
-    BindingUuid { binding_id: u64, uuid: String },
+    BindingUuid {
+        binding_id: u64,
+        uuid: String,
+    },
 }
 
 /// The exact native Form item type used by `TableCurrentData` links.
@@ -2090,6 +2098,16 @@ fn parse_raw_form_choice_parameter_links(
             {
                 let terminal = braced_fields_bounded(fields.get(cursor)?, 2)?;
                 let terminal = match terminal.as_slice() {
+                    // The single member is a binding id in the positive space
+                    // and a standard-attribute marker in the negative one --
+                    // the same split the form-attribute terminal above already
+                    // reads, in the same slot, on the other owner shape.
+                    [terminal]
+                        if let Some(standard) =
+                            FormChoiceParameterLinkStandardTerminal::from_raw_marker(terminal) =>
+                    {
+                        FormChoiceParameterLinkTableCurrentDataTerminal::Standard(standard)
+                    }
                     [binding_id] => FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(
                         canonical_positive_id(binding_id)?.parse().ok()?,
                     ),
@@ -3181,6 +3199,89 @@ mod form_choice_parameters_tests {
             parse_form_choice_parameter_links(one_primary, one_duplicate, |_| Some("Owner".into())),
             Err(FormChoiceParameterLinksParseError::PrimaryMalformed)
         );
+    }
+
+    /// A table's current data addresses a standard attribute of its own
+    /// declared type by the same strictly negative marker a form attribute's
+    /// terminal uses, in the same slot the positive binding ids occupy.
+    ///
+    /// Evidence: ERP УХ 3.2.12.6
+    /// `InformationRegisters/ПрименяемыеТарифыСтраховыхВзносов/Forms/РедактированиеИстории`,
+    /// InputField `ВидТарифа`, whose collection reads
+    /// `{"Организация",2,{6,02023637-...},{0,ab2e2a8f-...},1}` and
+    /// `{"Период",2,{6,02023637-...},{-2},1}`; the platform writes
+    /// `Items.НаборЗаписей.CurrentData.ГоловнаяОрганизация` and
+    /// `Items.НаборЗаписей.CurrentData.Period`. That is the only standard-marker
+    /// terminal a table's current data carries on the whole stand.
+    #[test]
+    fn form_choice_parameter_links_parse_a_table_current_data_standard_terminal() {
+        let item = FORM_CHOICE_PARAMETER_LINK_TABLE_CURRENT_DATA_ITEM_TYPE;
+        let primary = format!(
+            r#"{{5006,2,"Организация",2,{{6,{item}}},{{0,ab2e2a8f-fcf2-47e2-8505-c68857fb556c}},1,"Период",2,{{6,{item}}},{{-2}},1}}"#
+        );
+        let duplicate = format!(
+            r#"{{5007,2,"Организация",2,{{6,{item}}},{{0,ab2e2a8f-fcf2-47e2-8505-c68857fb556c}},1,"","","Период",2,{{6,{item}}},{{-2}},1,"",""}}"#
+        );
+        let mut seen = Vec::new();
+        let links = parse_form_choice_parameter_links_with_reference_resolver(
+            &primary,
+            &duplicate,
+            |reference| {
+                seen.push(reference.clone());
+                match reference {
+                    FormChoiceParameterLinkReference::TableCurrentData {
+                        table_id: 6,
+                        terminal: FormChoiceParameterLinkTableCurrentDataTerminal::Standard(marker),
+                    } => Some(format!(
+                        "Items.НаборЗаписей.CurrentData.{}",
+                        match marker.marker() {
+                            -2 => "Period",
+                            _ => return None,
+                        }
+                    )),
+                    FormChoiceParameterLinkReference::TableCurrentData {
+                        table_id: 6,
+                        terminal:
+                            FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid),
+                    } if uuid == "ab2e2a8f-fcf2-47e2-8505-c68857fb556c" => {
+                        Some("Items.НаборЗаписей.CurrentData.ГоловнаяОрганизация".to_owned())
+                    }
+                    _ => None,
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            links
+                .iter()
+                .map(FormChoiceParameterLink::data_path)
+                .collect::<Vec<_>>(),
+            [
+                "Items.НаборЗаписей.CurrentData.ГоловнаяОрганизация",
+                "Items.НаборЗаписей.CurrentData.Period",
+            ]
+        );
+        // The positive space still belongs to the binding ids, so the two
+        // spellings never collide in the same slot.
+        let positive = primary.replace("{-2}", "{2}");
+        let positive_duplicate = duplicate.replace("{-2}", "{2}");
+        let mut kinds = Vec::new();
+        let _ = parse_form_choice_parameter_links_with_reference_resolver(
+            &positive,
+            &positive_duplicate,
+            |reference| {
+                kinds.push(reference.clone());
+                Some("x".to_owned())
+            },
+        )
+        .unwrap();
+        assert!(kinds.iter().any(|reference| matches!(
+            reference,
+            FormChoiceParameterLinkReference::TableCurrentData {
+                terminal: FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(2),
+                ..
+            }
+        )));
     }
 
     #[test]

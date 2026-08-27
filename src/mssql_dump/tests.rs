@@ -75853,3 +75853,74 @@ fn revision_three_button_names_its_location_in_command_bar() {
         Some("InCommandBarAndInAdditionalSubmenu")
     );
 }
+
+/// A `ListSettings` child whose colour names a style item the configuration no
+/// longer carries keeps the stored `0:<uuid>` reference; a colour that does
+/// name one still resolves, and a genuine QName the fragment cannot render
+/// still refuses the whole document.
+///
+/// Evidence: ERP УХ 3.2.12.6
+/// `DataProcessors/СопоставлениеПланФактОперацийМСФО/Forms/Форма` stores
+/// `<value ... xsi:type="d5p1:Color">0:615512b6-4378-4fce-86f1-a56725f945da</value>`
+/// in its conditional appearance and the platform writes
+/// `<dcscor:value xsi:type="v8ui:Color">0:615512b6-4378-4fce-86f1-a56725f945da</dcscor:value>`.
+/// That uuid occurs nowhere else in the whole configuration, and it is the only
+/// `0:<uuid>` colour on the whole stand.
+#[test]
+fn transliterated_list_settings_colour_keeps_an_unnamed_style_item_reference() {
+    let document = |value: &str| {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ConditionalAppearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" \
+xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" \
+xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<item>\r\n\
+\t\t<appearance>\r\n\
+\t\t\t<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" \
+xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" \
+xsi:type=\"dcsset:SettingsParameterValue\">\r\n\
+\t\t\t\t<parameter>ЦветФона</parameter>\r\n\
+\t\t\t\t<value xmlns:d5p1=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"d5p1:Color\">{value}</value>\r\n\
+\t\t\t</item>\r\n\
+\t\t</appearance>\r\n\
+\t</item>\r\n\
+</ConditionalAppearance>"
+        )
+    };
+    let transliterate = |value: &str, object_refs: &BTreeMap<String, String>| {
+        crate::mssql_dump::dcs::transliterate_form_list_settings_child_document(
+            document(value).as_bytes(),
+            crate::mssql_dump::dcs::FormListSettingsChildKind::ConditionalAppearance,
+            object_refs,
+            "",
+        )
+    };
+    let uuid = "615512b6-4378-4fce-86f1-a56725f945da";
+    let Some(crate::mssql_dump::dcs::FormListSettingsChildTransliteration::Fragment(unnamed)) =
+        transliterate(&format!("0:{uuid}"), &BTreeMap::new())
+    else {
+        panic!("an unnamed style item must keep its physical reference");
+    };
+    assert!(
+        unnamed.contains(&format!(
+            "<dcscor:value xsi:type=\"v8ui:Color\">0:{uuid}</dcscor:value>"
+        )),
+        "{unnamed}"
+    );
+
+    let object_refs = BTreeMap::from([(uuid.to_string(), "StyleItem.ЦветПоля".to_string())]);
+    let Some(crate::mssql_dump::dcs::FormListSettingsChildTransliteration::Fragment(named)) =
+        transliterate(&format!("0:{uuid}"), &object_refs)
+    else {
+        panic!("a named style item must resolve");
+    };
+    assert!(
+        named.contains("<dcscor:value xsi:type=\"v8ui:Color\">style:ЦветПоля</dcscor:value>"),
+        "{named}"
+    );
+
+    // A colour value that really is a QName and names a namespace the fragment
+    // cannot render still refuses the document rather than emitting a prefix
+    // nothing declares.
+    assert_eq!(transliterate("xs:string", &BTreeMap::new()), None);
+}
