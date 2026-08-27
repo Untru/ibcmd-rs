@@ -3773,11 +3773,17 @@ mod predefined_code_tests {
             data,
             children: Vec::new(),
         };
+        let chart_names = ChartOfAccountsPredefinedNames {
+            ext_dimension_types_owner: "ChartOfCharacteristicTypes.Субконто".to_string(),
+            accounting_flags: Vec::new(),
+            ext_dimension_accounting_flags: Vec::new(),
+        };
         format_predefined_data_xml(
             predefined_data_source_model(kind).unwrap(),
             &[item],
             &BTreeMap::new(),
             &BTreeMap::new(),
+            Some(&chart_names),
         )
         .unwrap()
     }
@@ -3797,6 +3803,7 @@ mod predefined_code_tests {
             &[item],
             &BTreeMap::new(),
             &BTreeMap::new(),
+            None,
         )
         .unwrap();
 
