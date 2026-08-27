@@ -23916,11 +23916,26 @@ pub(super) fn parse_form_command_interface_command(
             if !form_command_interface_target_use_standard_commands(&uuid, context) {
                 return Some(format!("{kind}:{uuid}"));
             }
-            form_object_family_standard_command_name(
+            let name = form_object_family_standard_command_name(
                 kind,
                 reference,
                 FormCommandRecordReader::CommandInterfaceItem,
-            )
+            )?;
+            // The same declaration the button reads: a target whose `<BasedOn>`
+            // is empty has no "create based on" command, and the platform keeps
+            // the raw sentinel. ERP УХ 3.2.12.6 writes
+            // `2:2aba076a-…`/`2:d72012cf-…` on the eight
+            // `Documents/ВерсияСоглашения*` forms whose submenu names
+            // `Document.УдалитьЗаявкаНаКорректировкуЛимитов` and
+            // `Document.УдалитьКорректировкаЛимитов`, both `<BasedOn/>`.
+            if !form_command_target_declares_standard_command(
+                &uuid,
+                &name,
+                context.metadata_command_refs,
+            ) {
+                return Some(format!("{kind}:{uuid}"));
+            }
+            Some(name)
         }
         "3" => {
             let target = target?;
@@ -23946,12 +23961,24 @@ pub(super) fn parse_form_command_interface_command(
             }
             let reference = context.object_refs.get(&uuid)?;
             // A catalog names its "create based on" command from slot 3, where a
-            // document or business process names the same command from slot 2.
+            // document or business process names the same command from slot 2 --
+            // and it reads the same empty-`<BasedOn>` declaration there.
             form_object_family_standard_command_name(
                 kind,
                 reference,
                 FormCommandRecordReader::CommandInterfaceItem,
             )
+            .map(|name| {
+                if form_command_target_declares_standard_command(
+                    &uuid,
+                    &name,
+                    context.metadata_command_refs,
+                ) {
+                    name
+                } else {
+                    format!("{kind}:{uuid}")
+                }
+            })
             .or_else(|| {
                 (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
                     .then(|| reference.clone())
