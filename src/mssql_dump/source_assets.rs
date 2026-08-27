@@ -262,7 +262,10 @@ pub(super) fn dynamic_source_asset(
         let route = predefined_data_route(&owner.kind)?;
         return Some(SourceAsset {
             primary_path: owner.object_path.join(route.relative_path()),
-            kind: SourceAssetKind::PredefinedData { model },
+            kind: SourceAssetKind::PredefinedData {
+                model,
+                owner_uuid: owner_uuid.to_string(),
+            },
         });
     }
     if let Some(module_route) = module_owner_route(&owner.kind, suffix)
@@ -694,21 +697,33 @@ pub(crate) struct AdditionalIndexesOwner {
 
 #[derive(Clone)]
 pub(crate) enum SourceAssetKind {
-    AccumulationRegisterAggregates { register_name: String },
-    AdditionalIndexes { owner: AdditionalIndexesOwner },
+    AccumulationRegisterAggregates {
+        register_name: String,
+    },
+    AdditionalIndexes {
+        owner: AdditionalIndexesOwner,
+    },
     CommandInterface,
     ClientApplicationInterface,
     ExchangePlanContent,
     BusinessProcessFlowchart,
     DataCompositionSchema,
     ExtPicture,
-    Form { owner_reference: Option<String> },
+    Form {
+        owner_reference: Option<String>,
+    },
     Help,
     HomePageWorkArea,
     InflatedBase64OrBinary,
     InflatedBinary,
     MoxelSpreadsheet,
-    PredefinedData { model: PredefinedDataSourceModel },
+    PredefinedData {
+        model: PredefinedDataSourceModel,
+        /// The metadata object that owns the body. A chart of accounts names
+        /// its accounting flags and its ext dimension types through its own
+        /// record, and a predefined item uuid is unique only inside its owner.
+        owner_uuid: String,
+    },
     RoleRights,
     Schedule,
     StandaloneContent,
@@ -1442,7 +1457,10 @@ pub(super) fn source_assets_from_metadata_text_inner(
                         (*body_id).to_string(),
                         SourceAsset {
                             primary_path: object_path.join(route.relative_path()),
-                            kind: SourceAssetKind::PredefinedData { model },
+                            kind: SourceAssetKind::PredefinedData {
+                                model,
+                                owner_uuid: row_id.owner().to_string(),
+                            },
                         },
                     ));
                 }
@@ -2011,7 +2029,7 @@ pub(super) fn write_source_asset(
                     .with_context(|| format!("failed to write {}", path.display()))?;
             }
         }
-        SourceAssetKind::PredefinedData { model } => {
+        SourceAssetKind::PredefinedData { model, owner_uuid } => {
             let items = parse_predefined_data_blob_with_model(bytes, context.type_index, *model)
                 .with_context(|| {
                     format!(
@@ -2019,11 +2037,36 @@ pub(super) fn write_source_asset(
                         asset.primary_path.display()
                     )
                 })?;
+            let chart_names = match model.item_layout {
+                PredefinedItemLayout::Account => Some(
+                    context
+                        .metadata_texts_by_file_name
+                        .get(owner_uuid.as_str())
+                        .with_context(|| {
+                            format!("no metadata text for chart of accounts {owner_uuid}")
+                        })
+                        .and_then(|row| {
+                            chart_of_accounts_predefined_names(
+                                &row.text,
+                                owner_uuid,
+                                context.object_refs,
+                            )
+                        })
+                        .with_context(|| {
+                            format!(
+                                "failed to read declared names for source asset {}",
+                                asset.primary_path.display()
+                            )
+                        })?,
+                ),
+                _ => None,
+            };
             let xml = format_predefined_data_xml(
                 *model,
                 &items,
                 context.object_refs,
                 context.predefined_item_refs,
+                chart_names.as_ref(),
             )
             .with_context(|| {
                 format!(
@@ -3262,6 +3305,32 @@ fn predefined_rowset_item_value<'a>(
     fields.get(3usize.checked_add(value_offset)?).copied()
 }
 
+/// The value a row stores for `column_id`, distinguishing "the row declares no
+/// value that far" from "there is no such column".
+///
+/// A row carries its own value count in field 2 and may stop short of the
+/// schema: the seed `accflag-seed1` -- three declared accounting flags, a
+/// twelve-column schema -- stores eleven values, and the platform exports the
+/// twelfth column's flag as `false`. Every synthetic `Счета` root row of the
+/// stand is truncated the same way.
+///
+/// * `None` -- the schema has no such column;
+/// * `Some(None)` -- the column exists and the row's declared count stops
+///   before it;
+/// * `Some(Some(value))` -- the stored value.
+fn predefined_rowset_stored_value<'a>(
+    fields: &[&'a str],
+    schema: &PredefinedRowsetSchema,
+    column_id: i64,
+) -> Option<Option<&'a str>> {
+    let value_offset = *schema.value_offsets.get(&column_id)?;
+    let declared_values = fields.get(2)?.trim().parse::<usize>().ok()?;
+    if value_offset >= declared_values {
+        return Some(None);
+    }
+    Some(Some(*fields.get(3usize.checked_add(value_offset)?)?))
+}
+
 fn parse_predefined_item_list(
     value: &str,
     mut parse_item: impl FnMut(&str) -> Option<PredefinedItem>,
@@ -3325,8 +3394,14 @@ fn parse_account_predefined_item(
         parse_predefined_ext_dimension_types(predefined_rowset_item_value(&fields, schema, 6)?)?;
     let order =
         parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 10_000)?)?;
-    if parse_predefined_number_value(predefined_rowset_item_value(&fields, schema, 20_000)?)? != 0 {
-        return None;
+    // Column 20000 carries no exported property and is `0` wherever it is
+    // stored. `uh` `МСФО` and `Международный` declare no such column at all,
+    // and their `Ext/Predefined.xml` is the same shape as the charts that do:
+    // its absence is not a missing property, so it is not a refusal.
+    match predefined_rowset_stored_value(&fields, schema, 20_000) {
+        None | Some(None) => {}
+        Some(Some(value)) if parse_predefined_number_value(value)? == 0 => {}
+        Some(Some(_)) => return None,
     }
 
     let accounting_flags = parse_predefined_dynamic_flags(&fields, schema, FIXED_COLUMNS)?;
@@ -3364,11 +3439,16 @@ fn parse_predefined_dynamic_flags(
             if !column.is_boolean {
                 return None;
             }
+            let value = match predefined_rowset_stored_value(fields, schema, column.id)? {
+                Some(value) => parse_predefined_bool_value(value)?,
+                // The row's own declared value count stops before this
+                // column. Measured on `accflag-seed1`: the platform writes
+                // `false` for exactly that flag.
+                None => false,
+            };
             Some(PredefinedFlag {
                 reference_uuid: column.reference_uuid.clone()?,
-                value: parse_predefined_bool_value(predefined_rowset_item_value(
-                    fields, schema, column.id,
-                )?)?,
+                value,
             })
         })
         .collect()
@@ -3699,11 +3779,17 @@ mod predefined_code_tests {
             data,
             children: Vec::new(),
         };
+        let chart_names = ChartOfAccountsPredefinedNames {
+            ext_dimension_types_owner: "ChartOfCharacteristicTypes.Субконто".to_string(),
+            accounting_flags: Vec::new(),
+            ext_dimension_accounting_flags: Vec::new(),
+        };
         format_predefined_data_xml(
             predefined_data_source_model(kind).unwrap(),
             &[item],
             &BTreeMap::new(),
             &BTreeMap::new(),
+            Some(&chart_names),
         )
         .unwrap()
     }
@@ -3723,6 +3809,7 @@ mod predefined_code_tests {
             &[item],
             &BTreeMap::new(),
             &BTreeMap::new(),
+            None,
         )
         .unwrap();
 
@@ -3972,17 +4059,60 @@ pub(super) fn format_help_xml(pages: &[HelpPage]) -> String {
     xml
 }
 
+/// What a chart of accounts' own record says about the names its predefined
+/// data has to spell out: the two flag collections in declaration order, and
+/// the chart of characteristic types its ext dimensions come from.
+pub(super) struct ChartOfAccountsPredefinedNames {
+    ext_dimension_types_owner: String,
+    accounting_flags: Vec<(String, String)>,
+    ext_dimension_accounting_flags: Vec<(String, String)>,
+}
+
+pub(super) fn chart_of_accounts_predefined_names(
+    text: &str,
+    owner_uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<ChartOfAccountsPredefinedNames> {
+    let ext_dimension_types_owner =
+        crate::mssql_dump::refs::chart_of_accounts_ext_dimension_types_reference(text, object_refs)
+            .with_context(|| {
+                format!("chart of accounts {owner_uuid} does not name its ext dimension types")
+            })?;
+    let named = |family: crate::mssql_dump::refs::ChartOfAccountsFlagFamily| {
+        crate::mssql_dump::refs::chart_of_accounts_declared_flag_uuids(text, owner_uuid, family)
+            .into_iter()
+            .map(|uuid| {
+                let reference = object_refs.get(&uuid).with_context(|| {
+                    format!("missing metadata reference for declared {family:?} flag {uuid}")
+                })?;
+                Ok((uuid, reference.clone()))
+            })
+            .collect::<Result<Vec<_>>>()
+    };
+    Ok(ChartOfAccountsPredefinedNames {
+        ext_dimension_types_owner,
+        accounting_flags: named(crate::mssql_dump::refs::ChartOfAccountsFlagFamily::Accounting)?,
+        ext_dimension_accounting_flags: named(
+            crate::mssql_dump::refs::ChartOfAccountsFlagFamily::ExtDimensionAccounting,
+        )?,
+    })
+}
+
 pub(super) fn format_predefined_data_xml(
     model: PredefinedDataSourceModel,
     items: &[PredefinedItem],
     object_refs: &BTreeMap<String, String>,
     predefined_item_refs: &BTreeMap<String, String>,
+    chart_names: Option<&ChartOfAccountsPredefinedNames>,
 ) -> Result<String> {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <PredefinedData xmlns=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"{}\" version=\"2.20\">\r\n",
         escape_xml_text(model.xsi_type)
     );
+    if matches!(model.item_layout, PredefinedItemLayout::Account) && chart_names.is_none() {
+        bail!("chart of accounts predefined data without its owner's declared names");
+    }
     for item in items {
         push_predefined_item_xml(
             &mut xml,
@@ -3990,6 +4120,7 @@ pub(super) fn format_predefined_data_xml(
             model.item_layout,
             object_refs,
             predefined_item_refs,
+            chart_names,
             1,
         )?;
     }
@@ -4003,6 +4134,7 @@ pub(super) fn push_predefined_item_xml(
     layout: PredefinedItemLayout,
     object_refs: &BTreeMap<String, String>,
     predefined_item_refs: &BTreeMap<String, String>,
+    chart_names: Option<&ChartOfAccountsPredefinedNames>,
     indent: usize,
 ) -> Result<()> {
     let tab = "\t".repeat(indent);
@@ -4066,11 +4198,23 @@ pub(super) fn push_predefined_item_xml(
                 xml_bool(*off_balance),
                 escape_xml_text(order),
             ));
-            push_predefined_flags_xml(xml, accounting_flags, object_refs, indent + 1)?;
+            let chart_names = chart_names.with_context(|| {
+                format!(
+                    "predefined account {} without its chart's declared names",
+                    item.id
+                )
+            })?;
+            push_predefined_flags_xml(
+                xml,
+                "AccountingFlags",
+                &chart_names.accounting_flags,
+                accounting_flags,
+                indent + 1,
+            )?;
             push_predefined_ext_dimension_types_xml(
                 xml,
                 ext_dimension_types,
-                object_refs,
+                chart_names,
                 predefined_item_refs,
                 indent + 1,
             )?;
@@ -4125,6 +4269,7 @@ pub(super) fn push_predefined_item_xml(
                 layout,
                 object_refs,
                 predefined_item_refs,
+                chart_names,
                 indent + 2,
             )?;
         }
@@ -4145,38 +4290,72 @@ fn push_predefined_text_element(xml: &mut String, tab: &str, name: &str, value: 
     }
 }
 
+/// Writes one `<AccountingFlags>` block against the owner's *declared* flags.
+///
+/// The stored rowset is not the authority for which flags exist, only for
+/// their values: `uh` `МСФО` declares four accounting flags and stores columns
+/// for two, `Международный` declares four and stores three, and both export
+/// all four -- the ones with no column as `false`, each at its declaration
+/// position. `Хозрасчетный` and `ssl` `_ДемоОсновной` store a column for every
+/// declared flag and export them in the same order. A stored column the owner
+/// no longer declares is unobserved on the stand and refuses the file rather
+/// than being named or dropped.
 fn push_predefined_flags_xml(
     xml: &mut String,
-    flags: &[PredefinedFlag],
-    object_refs: &BTreeMap<String, String>,
+    element_name: &str,
+    declared: &[(String, String)],
+    stored: &[PredefinedFlag],
     indent: usize,
 ) -> Result<()> {
-    if flags.is_empty() {
+    let mut declared_positions = BTreeMap::new();
+    for (position, (uuid, _)) in declared.iter().enumerate() {
+        declared_positions.insert(uuid.as_str(), position);
+    }
+    let mut previous = None;
+    let mut values = BTreeMap::new();
+    for flag in stored {
+        let position = declared_positions
+            .get(flag.reference_uuid.as_str())
+            .copied()
+            .with_context(|| {
+                format!(
+                    "stored predefined flag {} is not declared by its owner",
+                    flag.reference_uuid
+                )
+            })?;
+        // Every stored column list of the stand runs in declaration order, and
+        // a re-imported seed rebuilds it that way. A rowset that disagrees
+        // would leave the emitted order unmeasured, so it refuses.
+        if previous.is_some_and(|previous| previous >= position) {
+            bail!(
+                "stored predefined flag {} is out of its owner's declaration order",
+                flag.reference_uuid
+            );
+        }
+        previous = Some(position);
+        values.insert(flag.reference_uuid.as_str(), flag.value);
+    }
+
+    if declared.is_empty() {
         return Ok(());
     }
     let tab = "\t".repeat(indent);
-    xml.push_str(&format!("{tab}<AccountingFlags>\r\n"));
-    for flag in flags {
-        let reference = object_refs.get(&flag.reference_uuid).with_context(|| {
-            format!(
-                "missing metadata reference for predefined accounting flag {}",
-                flag.reference_uuid
-            )
-        })?;
+    xml.push_str(&format!("{tab}<{element_name}>\r\n"));
+    for (uuid, reference) in declared {
         xml.push_str(&format!(
             "{tab}\t<Flag ref=\"{}\">{}</Flag>\r\n",
             escape_xml_text(reference),
-            xml_bool(flag.value),
+            xml_bool(values.get(uuid.as_str()).copied().unwrap_or(false)),
         ));
     }
-    xml.push_str(&format!("{tab}</AccountingFlags>\r\n"));
+    xml.push_str(&format!("{tab}</{element_name}>\r\n"));
     Ok(())
 }
 
 fn push_predefined_ext_dimension_types_xml(
     xml: &mut String,
     ext_dimension_types: &[PredefinedExtDimensionType],
-    object_refs: &BTreeMap<String, String>,
+    chart_names: &ChartOfAccountsPredefinedNames,
     predefined_item_refs: &BTreeMap<String, String>,
     indent: usize,
 ) -> Result<()> {
@@ -4188,14 +4367,20 @@ fn push_predefined_ext_dimension_types_xml(
 
     xml.push_str(&format!("{tab}<ExtDimensionTypes>\r\n"));
     for ext_dimension_type in ext_dimension_types {
-        let reference = predefined_item_refs
-            .get(&ext_dimension_type.item_uuid)
-            .with_context(|| {
-                format!(
-                    "missing predefined item reference for ext dimension type {}",
-                    ext_dimension_type.item_uuid
-                )
-            })?;
+        // Scoped to the chart's own `<ExtDimensionTypes>` owner: a predefined
+        // item uuid is unique only inside its owner, and `uh` stores
+        // `23114858-dd43-4912-aa6c-cf52cfa4b660` under two charts of
+        // characteristic types at once.
+        let key = metadata_owner_value_reference_key(
+            &chart_names.ext_dimension_types_owner,
+            &ext_dimension_type.item_uuid,
+        );
+        let reference = predefined_item_refs.get(&key).with_context(|| {
+            format!(
+                "missing predefined item reference for ext dimension type {} of {}",
+                ext_dimension_type.item_uuid, chart_names.ext_dimension_types_owner
+            )
+        })?;
         xml.push_str(&format!(
             "{tab}\t<ExtDimensionType name=\"{}\">\r\n\
 {tab}\t\t<Turnover>{}</Turnover>\r\n",
@@ -4204,14 +4389,219 @@ fn push_predefined_ext_dimension_types_xml(
         ));
         push_predefined_flags_xml(
             xml,
+            "AccountingFlags",
+            &chart_names.ext_dimension_accounting_flags,
             &ext_dimension_type.accounting_flags,
-            object_refs,
             indent + 2,
         )?;
         xml.push_str(&format!("{tab}\t</ExtDimensionType>\r\n"));
     }
     xml.push_str(&format!("{tab}</ExtDimensionTypes>\r\n"));
     Ok(())
+}
+
+#[cfg(test)]
+mod chart_of_accounts_predefined_tests {
+    use super::*;
+
+    const ITEM_TYPE: &str = "ae135932-4f94-44df-92c1-c91f15a92848";
+    const EXT_DIMENSION_TYPE: &str = "acf6192e-81ca-46ef-93a6-5a6968b78663";
+    const FLAG_ONE: &str = "11111111-1111-4111-8111-111111111111";
+    const FLAG_TWO: &str = "22222222-2222-4222-8222-222222222222";
+    const FLAG_THREE: &str = "33333333-3333-4333-8333-333333333333";
+    const ACCOUNT: &str = "44444444-4444-4444-8444-444444444444";
+
+    /// A rowset shaped like the stand's: seven fixed columns, `column_ids`
+    /// worth of accounting flags, and the order column. The account row
+    /// declares `declared_values` values, so a caller can stop it short of the
+    /// schema exactly as the platform's own records do.
+    ///
+    /// Written with `%`-placeholders rather than `format!`: the layout is
+    /// almost all braces.
+    fn account_rowset(column_ids: &[(&str, &str)], declared_values: usize) -> (String, String) {
+        let mut schema = String::new();
+        schema.push_str(&(column_ids.len() + 8).to_string());
+        schema.push_str(
+            ",\r\n{0,\"\",{\"Pattern\",{\"#\",%I}},\"\",0},\
+\r\n{1,\"\",{\"Pattern\",{\"S\"}},\"\",0},\
+\r\n{2,\"\",{\"Pattern\",{\"S\",5,1}},\"\",0},\
+\r\n{3,\"\",{\"Pattern\",{\"S\",120,1}},\"\",0},\
+\r\n{4,\"\",{\"Pattern\",{\"N\"}},\"\",0},\
+\r\n{5,\"\",{\"Pattern\",{\"B\"}},\"\",0},\
+\r\n{6,\"\",{\"Pattern\"},\"\",0},\r\n",
+        );
+        for (id, uuid) in column_ids {
+            schema.push_str(
+                &"{%D,\"%U\",{\"Pattern\",{\"B\"}},\"\",0},\r\n"
+                    .replace("%D", id)
+                    .replace("%U", uuid),
+            );
+        }
+        schema.push_str("{10000,\"\",{\"Pattern\",{\"S\",5,1}},\"\",0}\r\n");
+        let schema = format!("{{{schema}}}").replace("%I", ITEM_TYPE);
+
+        // Values 0..6 are the fixed columns, value 7 is the order column and
+        // the flag values follow it -- the same permutation `uh` writes.
+        let mut mappings = String::new();
+        for index in 0..7 {
+            mappings.push_str(&format!("{index},{index},"));
+        }
+        for (offset, (id, _)) in column_ids.iter().enumerate() {
+            mappings.push_str(&format!("{},{id},", offset + 8));
+        }
+        mappings.push_str("7,10000,");
+
+        // Seven values: reference, name, code, description, account type, off
+        // balance, and an ext dimension rowset with no rows.
+        let head = "{\"#\",%I,{1,%U}},{\"S\",\"%N\"},{\"S\",\"%C\"},{\"S\",\"%N\"},\
+{\"N\",0},{\"B\",0},\
+{\"#\",%E,{9,{2,{0,\"\",{\"Pattern\",{\"#\",%I}},\"\",0},\
+{1,\"\",{\"Pattern\",{\"B\"}},\"\",0}},{2,2,0,0,1,1,{1,0},1,-1},{0,0}}}";
+        let head = |uuid: &str, name: &str, code: &str| {
+            head.replace("%I", ITEM_TYPE)
+                .replace("%E", EXT_DIMENSION_TYPE)
+                .replace("%U", uuid)
+                .replace("%N", name)
+                .replace("%C", code)
+        };
+
+        let mut account = format!("{{2,1,{declared_values},{}", head(ACCOUNT, "Счет", "01"));
+        account.push_str(",{\"S\",\"01\"}");
+        for _ in 8..declared_values {
+            account.push_str(",{\"B\",1}");
+        }
+        account.push_str(",0}");
+        let root = format!(
+            "{{2,0,7,{},1,{{1,1,{account}}}}}",
+            head("00000000-0000-0000-0000-000000000000", "Счета", "")
+        );
+        let rowset = format!("{{2,{},{mappings}{{1,1,{root}}}}}", column_ids.len() + 8);
+        (schema, rowset)
+    }
+
+    fn names(declared: &[(&str, &str)]) -> ChartOfAccountsPredefinedNames {
+        ChartOfAccountsPredefinedNames {
+            ext_dimension_types_owner: "ChartOfCharacteristicTypes.Субконто".to_string(),
+            accounting_flags: declared
+                .iter()
+                .map(|(uuid, name)| {
+                    (
+                        (*uuid).to_string(),
+                        format!("ChartOfAccounts.План.AccountingFlag.{name}"),
+                    )
+                })
+                .collect(),
+            ext_dimension_accounting_flags: Vec::new(),
+        }
+    }
+
+    fn emit(
+        column_ids: &[(&str, &str)],
+        declared_values: usize,
+        declared: &[(&str, &str)],
+    ) -> Result<String> {
+        let (schema, rowset) = account_rowset(column_ids, declared_values);
+        let items = parse_account_predefined_rowset(&schema, &rowset)
+            .expect("the account rowset must read");
+        format_predefined_data_xml(
+            predefined_data_source_model("ChartOfAccounts").unwrap(),
+            &items,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Some(&names(declared)),
+        )
+    }
+
+    #[test]
+    fn row_shorter_than_its_schema_writes_false_for_the_columns_it_omits() {
+        // Nine values cover offsets 0..8: the seven fixed columns, the order
+        // column and the first flag. The second flag's column exists and the
+        // row stops before it. `accflag-seed1` is this shape, and the platform
+        // writes `false` for exactly that flag.
+        let xml = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_TWO)],
+            9,
+            &[(FLAG_ONE, "Первый"), (FLAG_TWO, "Второй")],
+        )
+        .unwrap();
+
+        assert!(
+            xml.contains(
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Первый\">true</Flag>\r\n"
+            ),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Второй\">false</Flag>\r\n"
+            ),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn declared_flag_without_a_stored_column_is_written_false_in_place() {
+        // `uh` `МСФО` declares four accounting flags and stores two;
+        // `Международный` declares four and stores three. Both export all
+        // four, the unstored ones `false`, each at its declaration position.
+        // On both the unstored flags trail the stored ones; the gap in the
+        // middle used here is those two measured facts composed -- the value
+        // of a flag with no column, and the position every flag takes.
+        let xml = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_THREE)],
+            10,
+            &[
+                (FLAG_ONE, "Первый"),
+                (FLAG_TWO, "Второй"),
+                (FLAG_THREE, "Третий"),
+            ],
+        )
+        .unwrap();
+
+        let flags = xml
+            .lines()
+            .filter(|line| line.contains("<Flag "))
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            flags,
+            [
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Первый\">true</Flag>",
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Второй\">false</Flag>",
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Третий\">true</Flag>",
+            ],
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn stored_flag_the_owner_no_longer_declares_refuses_the_file() {
+        let error = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_TWO)],
+            10,
+            &[(FLAG_ONE, "Первый")],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("is not declared by its owner"), "{error}");
+    }
+
+    #[test]
+    fn stored_flags_out_of_declaration_order_refuse_the_file() {
+        let error = emit(
+            &[("7", FLAG_TWO), ("8", FLAG_ONE)],
+            10,
+            &[(FLAG_ONE, "Первый"), (FLAG_TWO, "Второй")],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("out of its owner's declaration order"),
+            "{error}"
+        );
+    }
 }
 
 fn push_predefined_calculation_type_refs_xml(
