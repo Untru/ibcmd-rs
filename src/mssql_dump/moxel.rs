@@ -860,6 +860,12 @@ pub(super) struct MoxelChart {
     title: Vec<MoxelLocalizedValue>,
     is_show_title: bool,
     is_show_legend: bool,
+    /// The one thing the old `post[0]`/`post[1]` two-state gate still stands
+    /// for: whether a real series publishes its stored name or the automatic
+    /// one. Derived now from the document palette being named at all, which
+    /// agrees with the old reading on every record of the stand -- every
+    /// record that names a palette has no real series -- and is the reading
+    /// that was actually measured. See `push_moxel_chart_series_text_xml`.
     has_extended_scales: bool,
     is_title_init: bool,
     ttl_border: MoxelChartBorder,
@@ -901,6 +907,70 @@ pub(super) struct MoxelChart {
     elements_title: MoxelChartRectangle,
     values_axis: MoxelChartAxis,
     points_axis: MoxelChartAxis,
+    /// `post[1]`, the same code `pointsScale`'s own record carries in its
+    /// orientation slot. See `moxel_chart_labels_orientation`.
+    x_labels_orientation: Option<&'static str>,
+    /// `post[rectangle_start + 16]` and `post[rectangle_start + 17]`: the
+    /// document's own colour palette and its reference-bands palette. See
+    /// `parse_moxel_chart_palette`.
+    color_palette: MoxelChartPalette,
+    reference_bands_palette: MoxelChartPalette,
+    points_scale: MoxelChartScale,
+    values_scale: MoxelChartScale,
+    is_show_scale: bool,
+    is_show_scale_vl: bool,
+    is_show_series_scale: bool,
+    is_show_points_scale: bool,
+    is_show_values_scale: bool,
+}
+
+/// A `{0,<palette code>,<gradient start colour>,{3,4,{0}},0,0}` record.
+///
+/// Code `14` is "no palette named": the chart publishes
+/// `<d3p1:paletteKind>Auto</d3p1:paletteKind>` and no
+/// `colorPaletteDescription` block at all. Any other code names a palette,
+/// which the chart publishes twice -- once as `paletteKind` and once as the
+/// block's `colorPalette` -- and the block also carries the gradient start
+/// colour when the record's third member is not `auto`.
+///
+/// Evidence: all 58 chart records of the stand paired against the
+/// `<object xsi:type="d3p1:Chart">`/`<d3p1:chart>` block of the same
+/// `Template.xml`, plus twelve one-element seed variants of
+/// `МакетФакторныйАнализВодопад`. See
+/// `docs/evidence/form-chart-legend-list-and-placements-20260827.md`.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub(super) struct MoxelChartPalette {
+    name: Option<&'static str>,
+    gradient_start_color: Option<String>,
+}
+
+/// One of the three scale records (`pointsScale`, `valuesScale`,
+/// `seriesScale`) the chart carries at `axes_position + 12`, `+ 13` and
+/// `+ 14`.
+///
+/// The record is 22 members, or 23 when member 8 declares a grid-line
+/// record inserted at member 9. Everything the block publishes is optional
+/// and each child has its own member; a record whose every child is at its
+/// default publishes no block at all.
+#[derive(Clone, Default)]
+pub(super) struct MoxelChartScale {
+    grid_lines_show_mode: Option<&'static str>,
+    grid_line: Option<(usize, &'static str)>,
+    label_font: Option<MoxelFont>,
+    label_color: Option<String>,
+    label_orientation: Option<&'static str>,
+    label_format: Vec<MoxelLocalizedValue>,
+}
+
+impl MoxelChartScale {
+    fn is_empty(&self) -> bool {
+        self.grid_lines_show_mode.is_none()
+            && self.grid_line.is_none()
+            && self.label_font.is_none()
+            && self.label_color.is_none()
+            && self.label_orientation.is_none()
+            && self.label_format.is_empty()
+    }
 }
 
 /// `ttlBorder`/`lgBorder`/`chBorder`'s own width and style, decoded from the
@@ -1435,7 +1505,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let empty_headers_footers = parse_moxel_empty_headers_footers(&fields);
     let header_footer_slots = parse_moxel_header_footer_slots(&fields);
     let header_footer_format_ref = parse_moxel_uniform_header_footer_format_ref(&fields);
-    let drawings = parse_moxel_drawings(&fields);
+    let drawings = parse_moxel_drawings(&fields, object_refs);
     // A cell note is a drawing record of its own -- `drawingType` `Comment`,
     // its own `<formatIndex>` -- and the format it names *can* be a drawing
     // format: of the 23 `<format>` elements that publish `<print>` across the
@@ -5119,10 +5189,13 @@ pub(super) fn normalize_moxel_picture_payload(payload: &str) -> String {
 /// publish 695 drawings and every one of them writes its 1-based ordinal, with
 /// no gaps and no repeats, while the `<id>` beside it skips freely (3, 4, 5, 6,
 /// 7, 10, 11 ... in `CommonTemplates/ОшибкиОтчетовСПАРКРиски`).
-pub(super) fn parse_moxel_drawings(fields: &[&str]) -> Vec<MoxelDrawing> {
+pub(super) fn parse_moxel_drawings(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<MoxelDrawing> {
     let mut drawings = Vec::new();
     for field in fields {
-        let Some(mut drawing) = parse_moxel_drawing(field) else {
+        let Some(mut drawing) = parse_moxel_drawing(field, object_refs) else {
             continue;
         };
         drawing.z_order = drawings.len() + 1;
@@ -5228,7 +5301,10 @@ fn parse_moxel_drawing_format_record(text: &str) -> Option<(usize, MoxelDrawingM
 /// not ordered or non-negative: 9 records end left of where they begin, 2 end
 /// above, and one publishes `beginColumnOffset` `-1`.  The range guard this
 /// replaces refused those.
-pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
+pub(super) fn parse_moxel_drawing(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelDrawing> {
     const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
     const GANTT_CHART_TYPE_UUID: &str = "e5fdc112-5c84-4a16-9728-72b85692b6e2";
 
@@ -5294,7 +5370,7 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
                 && fields.get(13)?.trim() == "0" =>
             {
                 (
-                    MoxelDrawingKind::Chart(parse_moxel_chart(fields.get(12)?)?),
+                    MoxelDrawingKind::Chart(parse_moxel_chart(fields.get(12)?, object_refs)?),
                     false,
                 )
             }
@@ -5319,7 +5395,10 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
                     return None;
                 }
                 (
-                    MoxelDrawingKind::GanttChart(parse_moxel_gantt_chart(wrapped.first()?)?),
+                    MoxelDrawingKind::GanttChart(parse_moxel_gantt_chart(
+                        wrapped.first()?,
+                        object_refs,
+                    )?),
                     false,
                 )
             }
@@ -5365,6 +5444,11 @@ const MAX_MOXEL_CHART_DECIMAL_EXPONENT: u64 = 4096;
 fn moxel_chart_type(code: &str) -> Option<&'static str> {
     match code.trim() {
         "0" => Some("Line"),
+        // `DataProcessors/АналитическийБланкСводнаяТаблица/Templates/
+        // МакетФакторныйАнализВодопад` of ERP УХ 3.2.12.6 is the stand's only
+        // record storing `5`, and it publishes
+        // `<d3p1:chartType>StackedColumn</d3p1:chartType>`.
+        "5" => Some("StackedColumn"),
         "9" => Some("StackedBar"),
         "38" => Some("Gauge"),
         // Evidence: both of native UT 11.5.27.75's `GanttChart` templates
@@ -5378,7 +5462,7 @@ fn moxel_chart_type(code: &str) -> Option<&'static str> {
     }
 }
 
-fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
+fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Option<MoxelChart> {
     if text.len() > MAX_MOXEL_CHART_BYTES {
         return None;
     }
@@ -5673,15 +5757,56 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     let rectangle_start = 63usize
         .checked_add(3usize.checked_mul(series_count)?)?
         .checked_add(point_count)?;
-    // `has_extended_scales` (`post[0]`/`post[1]`) and `is_title_init`
-    // (`post[7..10)`) are two independent gates -- see
-    // `validate_moxel_chart_v74_post_prefix` for the seed pairs that pin
-    // each one down separately.
-    let has_extended_scales = match (post.get(0)?.trim(), post.get(1)?.trim()) {
-        ("0", "0") => true,
-        ("14", "2") => false,
-        _ => return None,
+    // `post[0]` and `post[1]` used to be read as a single two-state gate,
+    // `("0","0")` or `("14","2")` and nothing else. They are two independent
+    // codes, each mirroring the block that owns it: `post[0]` is the
+    // document's colour-palette code (`14` = none named) and `post[1]` the
+    // labels-orientation code (`2` = `Auto`). The two-state reading refused
+    // `DataProcessors/АналитическийБланкСводнаяТаблица/Templates/
+    // МакетФакторныйАнализВодопад` of ERP УХ 3.2.12.6, whose `("13","1")` is
+    // simply `Gradient` and `Vertical`. See
+    // `docs/evidence/form-chart-legend-list-and-placements-20260827.md`.
+    let color_palette =
+        parse_moxel_chart_palette(post.get(rectangle_start.checked_add(16)?)?, object_refs)?;
+    let reference_bands_palette =
+        parse_moxel_chart_palette(post.get(rectangle_start.checked_add(17)?)?, object_refs)?;
+    if moxel_chart_palette_name(post.first()?)? != color_palette.name {
+        return None;
+    }
+    let points_scale =
+        parse_moxel_chart_scale(post.get(axes_position.checked_add(12)?)?, object_refs)?;
+    let values_scale =
+        parse_moxel_chart_scale(post.get(axes_position.checked_add(13)?)?, object_refs)?;
+    // `axes_position + 14` is `seriesScale`'s own record; no chart record of
+    // the stand carries anything but the default there, and none publishes a
+    // `<d3p1:seriesScale>` block, so it is walked for shape only.
+    parse_moxel_chart_scale(post.get(axes_position.checked_add(14)?)?, object_refs)?;
+    let x_labels_orientation = moxel_chart_labels_orientation(post.get(1)?)?;
+    if x_labels_orientation != points_scale.label_orientation {
+        return None;
+    }
+    // `axes_position + 17` mirrors the palette record's own gradient start
+    // colour; the pair is cross-checked rather than either being asserted a
+    // literal.
+    let mirrored_start = post.get(axes_position.checked_add(17)?)?;
+    let mirrored_start = if compact_moxel_chart_token(mirrored_start) == "{3,4,{0}}" {
+        None
+    } else {
+        Some(parse_moxel_chart_color_with_refs(
+            mirrored_start,
+            object_refs,
+        )?)
     };
+    if mirrored_start != color_palette.gradient_start_color {
+        return None;
+    }
+    // The one thing `post[0]` still gates that the corpus cannot name from
+    // its own slot: whether a real series' published name is the stored one
+    // or the automatic one. Over the whole corpus every record that names a
+    // palette has no real series at all, so the two readings agree; this
+    // keeps the previously measured behaviour rather than inventing a new
+    // one. See `push_moxel_chart_series_text_xml`.
+    let has_extended_scales = color_palette.name.is_some();
     let is_title_init = match post.get(7)?.trim() {
         "1" => true,
         "0" => false,
@@ -5755,7 +5880,6 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     validate_moxel_chart_v74_post(
         post,
         series_count,
-        has_extended_scales,
         is_title_init,
         axes_position,
         rectangle_start,
@@ -5829,6 +5953,16 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         elements_title,
         values_axis,
         points_axis,
+        x_labels_orientation,
+        is_show_scale: parse_moxel_chart_bool(tail.get(34)?)?,
+        is_show_scale_vl: parse_moxel_chart_bool(tail.get(35)?)?,
+        is_show_series_scale: parse_moxel_chart_bool(tail.get(36)?)?,
+        is_show_points_scale: parse_moxel_chart_bool(tail.get(37)?)?,
+        is_show_values_scale: parse_moxel_chart_bool(tail.get(38)?)?,
+        color_palette,
+        reference_bands_palette,
+        points_scale,
+        values_scale,
     })
 }
 
@@ -6037,7 +6171,10 @@ fn parse_moxel_gantt_date(text: &str) -> Option<String> {
 /// `АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий` and
 /// `ДлительностьОтложенногоОбновления/ДиаграммаГанта`), so every literal
 /// below is validated against both, not derived from a larger sample.
-fn parse_moxel_gantt_chart(text: &str) -> Option<MoxelGanttChart> {
+fn parse_moxel_gantt_chart(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelGanttChart> {
     if text.len() > MAX_MOXEL_GANTT_CHART_BYTES {
         return None;
     }
@@ -6071,11 +6208,10 @@ fn parse_moxel_gantt_chart(text: &str) -> Option<MoxelGanttChart> {
     if chart_triple.len() != 3 || chart_triple.first()?.trim() != "0" {
         return None;
     }
-    let chart = parse_moxel_chart(&format!(
-        "{{{},{}}}",
-        chart_triple.get(1)?,
-        chart_triple.get(2)?
-    ))?;
+    let chart = parse_moxel_chart(
+        &format!("{{{},{}}}", chart_triple.get(1)?, chart_triple.get(2)?),
+        object_refs,
+    )?;
 
     let points = parse_gantt_points_data(fields.get(2)?)?;
     let series = parse_gantt_series_data(fields.get(3)?)?;
@@ -6200,7 +6336,7 @@ fn parse_moxel_gantt_chart(text: &str) -> Option<MoxelGanttChart> {
 /// `MoxelChart`'s private fields.
 #[cfg(test)]
 pub(super) fn parse_and_render_moxel_chart_for_test(text: &str) -> Option<String> {
-    let chart = parse_moxel_chart(text)?;
+    let chart = parse_moxel_chart(text, &BTreeMap::new())?;
     let mut xml = String::new();
     push_moxel_chart_xml(&mut xml, &chart);
     Some(xml)
@@ -6214,7 +6350,7 @@ pub(super) fn parse_and_render_moxel_chart_for_test(text: &str) -> Option<String
 /// `push_moxel_gantt_chart_xml` writes.
 #[cfg(test)]
 pub(super) fn parse_and_render_moxel_gantt_chart_for_test(text: &str) -> Option<String> {
-    let gantt = parse_moxel_gantt_chart(text)?;
+    let gantt = parse_moxel_gantt_chart(text, &BTreeMap::new())?;
     let mut xml = String::new();
     push_moxel_gantt_chart_xml(&mut xml, &gantt);
     Some(xml)
@@ -6300,6 +6436,12 @@ fn parse_moxel_chart_color(text: &str) -> Option<String> {
             "-1" => Some("style:FormBackColor".to_string()),
             "-3" => Some("style:FormTextColor".to_string()),
             "-10" => Some("style:FieldBackColor".to_string()),
+            // `-14` is new: `DataProcessors/АналитическийБланкСводнаяТаблица/
+            // Templates/МакетФакторныйАнализВодопад` of ERP УХ 3.2.12.6
+            // stores its `pointsScale`'s `labelColor` as `{3,3,{-14}}` and
+            // publishes
+            // `<d3p1:labelColor>style:FieldSelectionBackColor</d3p1:labelColor>`.
+            "-14" => Some("style:FieldSelectionBackColor".to_string()),
             "-22" => Some("style:BorderColor".to_string()),
             "-23" => Some("style:ToolTipBackColor".to_string()),
             _ => None,
@@ -6386,6 +6528,234 @@ fn parse_moxel_chart_line(text: &str) -> Option<MoxelChartLine> {
     }
     Some(MoxelChartLine {
         width: parse_moxel_chart_usize(fields.get(4)?)?,
+    })
+}
+
+/// The same line record `parse_moxel_chart_line` reads, but with member 3 --
+/// the `ChartLineType` -- read rather than required to be `Solid`.
+///
+/// `МакетФакторныйАнализВодопад`'s `valuesScale` grid line stores
+/// `{4,0,{0},2,1,0,e5cabe59-...,0}` and publishes
+/// `<v8ui:style xsi:type="v8ui:ChartLineType">Dotted</v8ui:style>` -- the
+/// same `1`/`Solid`, `2`/`Dotted` pair the form chart's own line reader
+/// spells, and the only two codes either corpus carries.
+fn parse_moxel_chart_styled_line(text: &str) -> Option<(usize, &'static str)> {
+    const SOLID_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
+
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 8
+        || fields.first()?.trim() != "4"
+        || fields.get(1)?.trim() != "0"
+        || compact_moxel_chart_token(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields.get(6)?.trim().eq_ignore_ascii_case(SOLID_LINE_UUID)
+        || fields.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let style = match fields.get(3)?.trim() {
+        "1" => "Solid",
+        "2" => "Dotted",
+        _ => return None,
+    };
+    Some((parse_moxel_chart_usize(fields.get(4)?)?, style))
+}
+
+/// The orientation code a scale record carries, and the very same code
+/// `post[1]` mirrors for the chart's own `xLabelsOrientation`.
+///
+/// `"2"` is `Auto`, which no block publishes. Evidence: over all 58 chart
+/// records of the stand the code is a total function of the published
+/// spelling -- 55 store `"2"` and publish no orientation at all, the two
+/// `СравнительныйАнализМенеджеров` records store `"0"` and publish
+/// `Horizontal`, and `МакетФакторныйАнализВодопад` stores `"1"` and
+/// publishes `Vertical` -- and `post[1]` carries the same three values on the
+/// same records for `xLabelsOrientation`. Seed `chartA-wf-lorient`, a
+/// `МакетФакторныйАнализВодопад` copy with only
+/// `<d3p1:labelOrientation>` flipped from `Vertical` to `Horizontal`, moves
+/// exactly `post[1]`, the scale record's own slot and `tail[40]` together,
+/// and flips both published spellings.
+fn moxel_chart_labels_orientation(code: &str) -> Option<Option<&'static str>> {
+    match code.trim() {
+        "0" => Some(Some("Horizontal")),
+        "1" => Some(Some("Vertical")),
+        "2" => Some(None),
+        _ => None,
+    }
+}
+
+/// Palette codes, read off the same records that publish their names.
+///
+/// `14` is "none named". `0` (`Palette8`) is the two
+/// `СравнительныйАнализМенеджеров` records, `13` (`Gradient`) and `1`
+/// (`Palette32`, in the reference-bands slot) are
+/// `МакетФакторныйАнализВодопад`; seeds `chartA-wf-cpal` and
+/// `chartA-wf-rbpal` -- the same template with only one `<d3p1:colorPalette>`
+/// changed to `Palette8` -- move exactly the corresponding code to `0`.
+fn moxel_chart_palette_name(code: &str) -> Option<Option<&'static str>> {
+    match code.trim() {
+        "0" => Some(Some("Palette8")),
+        "1" => Some(Some("Palette32")),
+        "13" => Some(Some("Gradient")),
+        "14" => Some(None),
+        _ => None,
+    }
+}
+
+/// A chart colour that may name a configuration style item by uuid.
+///
+/// `parse_moxel_chart_color` answers the palette-index spellings
+/// (`{3,3,{-14}}`) and the direct RGB ones; a colour the designer picked from
+/// the configuration's own style items is stored as `{3,3,{0,<uuid>}}` and
+/// published `style:<имя>`, which needs the document's object list.
+/// `МакетФакторныйАнализВодопад` stores its `gradientPaletteStartColor` as
+/// `{3,3,{0,b9576f61-d334-40df-b47e-804cd30ee4ba}}` -- the uuid of ERP УХ
+/// 3.2.12.6's `StyleItems/ТекстИнформационнойНадписиИС` -- and publishes
+/// `style:ТекстИнформационнойНадписиИС`.
+fn parse_moxel_chart_color_with_refs(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if let Some(color) = parse_moxel_chart_color(text) {
+        return Some(color);
+    }
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 3 || fields.first()?.trim() != "3" || fields.get(1)?.trim() != "3" {
+        return None;
+    }
+    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
+    if payload.len() != 2 || payload.first()?.trim() != "0" {
+        return None;
+    }
+    moxel_style_ref_for_uuid(&parse_uuid_field(payload.get(1)?.trim())?, object_refs)
+}
+
+fn parse_moxel_chart_palette(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelChartPalette> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 6
+        || fields.first()?.trim() != "0"
+        || compact_moxel_chart_token(fields.get(3)?) != "{3,4,{0}}"
+        || fields.get(4)?.trim() != "0"
+        || fields.get(5)?.trim() != "0"
+    {
+        return None;
+    }
+    let name = moxel_chart_palette_name(fields.get(1)?)?;
+    let start = fields.get(2)?;
+    let gradient_start_color = if compact_moxel_chart_token(start) == "{3,4,{0}}" {
+        None
+    } else {
+        Some(parse_moxel_chart_color_with_refs(start, object_refs)?)
+    };
+    Some(MoxelChartPalette {
+        name,
+        gradient_start_color,
+    })
+}
+
+/// The `titleArea` every scale record of the stand carries, in the two
+/// spellings the 174 records of the corpus use: 153 name the shared border
+/// uuid in the title area's own border record and 21 (all of them
+/// `ФинансовыйАнализ` value scales) leave it nil. The two publish the same
+/// `<d3p1:titleArea>` byte for byte -- the published `<d3p1:border>` carries
+/// only the width and the style -- so the member is accepted in both
+/// spellings and nothing downstream depends on which.
+const MOXEL_CHART_SCALE_TITLE_AREAS: [&str; 2] = [
+    "{1,4,0.5,0.5,{7,3,0,1,100},{3,4,{0}},{3,4,{0}},1,\
+{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},{3,4,{0}},4,2,0}",
+    "{1,4,0.5,0.5,{7,3,0,1,100},{3,4,{0}},{3,4,{0}},1,\
+{3,0,{0},0,1,0,00000000-0000-0000-0000-000000000000},{3,4,{0}},4,2,0}",
+];
+
+/// One scale record, member by member.
+///
+/// Layout, with `g` = 1 when member 8 declares a grid-line record and 0
+/// otherwise: `2,0,0,2,{1,0},<titleArea>,<gridLinesShowMode>,0,<g>,`
+/// `[<gridLine>],{3,4,{0}},<labelFont>,<labelColor>,<labelOrientation>,`
+/// `<labelFormat>,0,{3,4,{0}},0,0,0,0,0,0` -- 22 members, 23 with the grid
+/// line. Every published child reads its own member, and the block itself is
+/// published exactly when at least one of them is off its default.
+///
+/// Evidence: all 58 chart records of the stand paired against the block of
+/// the same `Template.xml`, plus twelve one-element seed variants of
+/// `МакетФакторныйАнализВодопад`. Over the corpus `pointsScale` takes three
+/// shapes (55 records entirely default and publishing nothing; the two
+/// `СравнительныйАнализМенеджеров` records with orientation `Horizontal`
+/// alone; the waterfall with a label font, a label colour and `Vertical`),
+/// and `valuesScale` five (10 default and silent; 7 with
+/// `gridLinesShowMode Show` and no grid-line record; 20 with a `labelFormat`
+/// alone, in four distinct spellings; the waterfall with `Show`, a `Dotted`
+/// grid line and a label font). `chartA-wf-vsgrid` -- the waterfall with only
+/// `<d3p1:gridLinesShowMode>` changed to `DontShow` -- moves member 6 to
+/// `"1"` and nothing else in the record.
+fn parse_moxel_chart_scale(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelChartScale> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "2"
+        || fields.get(1)?.trim() != "0"
+        || fields.get(2)?.trim() != "0"
+        || fields.get(3)?.trim() != "2"
+        || compact_moxel_chart_token(fields.get(4)?) != "{1,0}"
+        || !MOXEL_CHART_SCALE_TITLE_AREAS
+            .contains(&compact_moxel_chart_token(fields.get(5)?).as_str())
+        || fields.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let grid_lines_show_mode = match fields.get(6)?.trim() {
+        "0" => Some("Show"),
+        "1" => Some("DontShow"),
+        "2" => None,
+        _ => return None,
+    };
+    let has_grid_line = match fields.get(8)?.trim() {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+    let grid = usize::from(has_grid_line);
+    if fields.len() != 22 + grid {
+        return None;
+    }
+    let grid_line = if has_grid_line {
+        Some(parse_moxel_chart_styled_line(fields.get(9)?)?)
+    } else {
+        None
+    };
+    if compact_moxel_chart_token(fields.get(9 + grid)?) != "{3,4,{0}}"
+        || fields.get(14 + grid)?.trim() != "0"
+        || compact_moxel_chart_token(fields.get(15 + grid)?) != "{3,4,{0}}"
+        || (16 + grid..22 + grid)
+            .any(|index| fields.get(index).is_none_or(|field| field.trim() != "0"))
+    {
+        return None;
+    }
+    let label_font = match compact_moxel_chart_token(fields.get(10 + grid)?).as_str() {
+        "{7,3,0,1,100}" => None,
+        _ => Some(parse_moxel_font(fields.get(10 + grid)?, &BTreeMap::new())?),
+    };
+    let label_color = if compact_moxel_chart_token(fields.get(11 + grid)?) == "{3,4,{0}}" {
+        None
+    } else {
+        Some(parse_moxel_chart_color_with_refs(
+            fields.get(11 + grid)?,
+            object_refs,
+        )?)
+    };
+    let label_orientation = moxel_chart_labels_orientation(fields.get(12 + grid)?)?;
+    let label_format = parse_moxel_chart_localized(fields.get(13 + grid)?)?;
+    Some(MoxelChartScale {
+        grid_lines_show_mode,
+        grid_line,
+        label_font,
+        label_color,
+        label_orientation,
+        label_format,
     })
 }
 
@@ -6557,6 +6927,17 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
 /// the pre-existing corpus's shared default at a different subset of them,
 /// which a single hard-coded literal cannot spell for both at once.
 fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
+    // `tail[40]` was a literal `"0"` and is not one:
+    // `МакетФакторныйАнализВодопад` stores `"1"`. It is also not
+    // `xLabelsOrientation`, whatever its neighbourhood suggests -- `"0"`
+    // covers both the 55 records that publish `Auto` and the two
+    // `СравнительныйАнализМенеджеров` records that publish `Horizontal`,
+    // while `post[1]` separates all three spellings exactly. Nothing in the
+    // corpus names it, so it is checked for being one of the two values
+    // observed and nothing more.
+    if !matches!(tail.get(40)?.trim(), "0" | "1") {
+        return None;
+    }
     let expected = [
         (3, "0"),
         (4, "\", \""),
@@ -6578,12 +6959,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (28, "{3,3,{-3}}"),
         (29, "{3,3,{-3}}"),
         (30, "{3,3,{-3}}"),
-        (34, "1"),
-        (35, "1"),
-        (36, "1"),
-        (37, "1"),
-        (38, "1"),
-        (40, "0"),
         (41, "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"),
         (45, "0"),
         (47, "30"),
@@ -6650,33 +7025,23 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
 /// gates, both pinned down by controlled seed pairs that toggle exactly one
 /// XML element each against the same base record:
 ///
-/// * `post[0]`/`post[1]` are `"0","0"` exactly when the record carries the
-///   `pointsScale`/`valuesScale`/`colorPaletteDescription` blocks and an
-///   explicit (non-`Auto`) `xLabelsOrientation`/`paletteKind` --
-///   `has_extended_scales` in `parse_moxel_chart` -- and `"14","2"`
-///   otherwise. A seed that strips those three blocks and resets
-///   `xLabelsOrientation`/`paletteKind` back to `Auto` (nothing else
-///   touched) flips `post[0]`/`post[1]` from `"0","0"` to `"14","2"`; the
-///   pre-existing 13-corpus records (none of which carry `pointsScale`) all
-///   read `"14","2"` too.
+/// * `post[0]` and `post[1]` are not a two-state gate: `post[0]` is the
+///   document's colour-palette code and `post[1]` the labels-orientation
+///   code, each mirroring the slot its own block already carries
+///   (`post[rectangle_start + 16]` member 1 and `pointsScale`'s orientation
+///   member). They are read, not asserted, and this validator only requires
+///   that each mirror agrees with its own block -- see `color_palette` and
+///   `x_labels_orientation` in `parse_moxel_chart`.
 /// * `post[7..10)` (`"1","1","1"` vs `"0","0","0"`) is
 ///   `titleIsInit`/`legendIsInit`/`chartIsInit` -- see `is_title_init` et
 ///   al. in `parse_moxel_chart`. A seed that only flips those three XML
 ///   booleans to `true` (leaving `pointsScale` etc. untouched) flips
 ///   `post[7..10)` to `"1","1","1"`.
-fn validate_moxel_chart_v74_post_prefix(
-    post: &[&str],
-    has_extended_scales: bool,
-    is_title_init: bool,
-) -> Option<()> {
-    let leading = if has_extended_scales { "0" } else { "14" };
-    let following = if has_extended_scales { "0" } else { "2" };
+fn validate_moxel_chart_v74_post_prefix(post: &[&str], is_title_init: bool) -> Option<()> {
     let trio = if is_title_init { "1" } else { "0" };
     // `post[20]` is where `elements_is_init` itself is read from (see
     // `parse_moxel_chart`), so it is not re-checked here.
     let expected = [
-        (0, leading),
-        (1, following),
         (2, "{7,3,0,1,100}"),
         (3, "1"),
         (4, "{3,4,{0}}"),
@@ -6773,7 +7138,11 @@ fn validate_moxel_chart_v74_post_axes_tail(post: &[&str], axes_position: usize) 
         (11, "0"),
         (15, "0"),
         (16, "0"),
-        (17, "{3,4,{0}}"),
+        // `axes_position + 17` was a literal `{3,4,{0}}` and is not one: it
+        // mirrors the colour-palette record's own gradient start colour, and
+        // `МакетФакторныйАнализВодопад` stores its style reference there.
+        // `parse_moxel_chart` reads it and requires the mirror to agree with
+        // the palette record.
         (18, "{3,4,{0}}"),
         (19, "0"),
     ];
@@ -6817,12 +7186,11 @@ fn validate_moxel_chart_v74_rectangle_check(post: &[&str], rectangle_start: usiz
 fn validate_moxel_chart_v74_post(
     post: &[&str],
     series_count: usize,
-    has_extended_scales: bool,
     is_title_init: bool,
     axes_position: usize,
     rectangle_start: usize,
 ) -> Option<()> {
-    validate_moxel_chart_v74_post_prefix(post, has_extended_scales, is_title_init)?;
+    validate_moxel_chart_v74_post_prefix(post, is_title_init)?;
     validate_moxel_chart_v74_scale_id_list(post, series_count)?;
     validate_moxel_chart_v74_post_axes_tail(post, axes_position)?;
     validate_moxel_chart_v74_rectangle_check(post, rectangle_start)
@@ -8378,7 +8746,7 @@ pub(super) fn spreadsheet_number_format_hint_from_text(
     } else {
         column_sets
     };
-    let drawings = parse_moxel_drawings(&fields);
+    let drawings = parse_moxel_drawings(&fields, &BTreeMap::new());
     // A cell note is a drawing record of its own -- `drawingType` `Comment`,
     // its own `<formatIndex>` -- so the format it names is a drawing format,
     // and that format's members 1, 3 and 4 are `drawingBorder`,
@@ -12321,20 +12689,33 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_font_xml(xml, "ttlFont", &chart.ttl_font);
     push_moxel_chart_font_xml(xml, "legFont", &chart.leg_font);
     push_moxel_chart_font_xml(xml, "chFont", &chart.ch_font);
-    push_moxel_chart_bool(xml, "isShowScale", true);
-    push_moxel_chart_bool(xml, "isShowScaleVL", true);
-    push_moxel_chart_bool(xml, "isShowSeriesScale", true);
-    push_moxel_chart_bool(xml, "isShowPointsScale", true);
-    push_moxel_chart_bool(xml, "isShowValuesScale", true);
+    // The five scale flags were five literal `true`s asserted on
+    // `tail[34..39)`. They are the same five slots the form chart's own
+    // writer reads as `isShowScale`, `isShowScaleVL`, `isShowSeriesScale`,
+    // `isShowPointsScale` and `isShowValuesScale`, and seed
+    // `chartA-wf-vsgrid` -- `МакетФакторныйАнализВодопад` with only
+    // `<d3p1:gridLinesShowMode>` changed to `DontShow` -- moves `tail[35]`
+    // from `"1"` to `"0"` and publishes
+    // `<d3p1:isShowScaleVL>false</d3p1:isShowScaleVL>` along with it. All 58
+    // chart records of the stand store `"1"` in all five, so the literals
+    // were right for the corpus and wrong for the platform.
+    for (tag, flag) in [
+        ("isShowScale", chart.is_show_scale),
+        ("isShowScaleVL", chart.is_show_scale_vl),
+        ("isShowSeriesScale", chart.is_show_series_scale),
+        ("isShowPointsScale", chart.is_show_points_scale),
+        ("isShowValuesScale", chart.is_show_values_scale),
+    ] {
+        push_moxel_chart_bool(xml, tag, flag);
+    }
     push_moxel_chart_localized_xml(xml, "vsFormat", &chart.values_scale_format, 3);
+    // `xLabelsOrientation` reads `post[1]`'s own code, cross-checked against
+    // `pointsScale`'s orientation member, which mirrors it. `Auto` is the
+    // code `"2"`, not "the record has no extended scales".
     push_moxel_chart_literal(
         xml,
         "xLabelsOrientation",
-        if chart.has_extended_scales {
-            "Horizontal"
-        } else {
-            "Auto"
-        },
+        chart.x_labels_orientation.unwrap_or("Auto"),
     );
     push_moxel_chart_line_xml(xml, "scaleLine", &MoxelChartLine { width: 1 }, 3, "Solid");
     push_moxel_chart_literal(xml, "scaleColor", &chart.scale_color);
@@ -12358,19 +12739,15 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "dtHAlign", "Right");
     push_moxel_chart_empty(xml, "dtFormat");
     push_moxel_chart_bool(xml, "dtKeys", true);
-    // Evidence: only one non-`Auto` example observed so far (the seed pair
-    // documented on `validate_moxel_chart_v74_post_prefix`), so this is not
-    // yet a general "read the palette name" decoder -- just the two states
-    // proven: `Auto` when `has_extended_scales` is clear, `Palette8` when it
-    // is set.
+    // `paletteKind` is the document palette's own name, read from
+    // `post[rectangle_start + 16]`'s code (`14` = none named, published
+    // `Auto`) and cross-checked against `post[0]`, which mirrors it. The
+    // same name is published a second time inside
+    // `colorPaletteDescription` below.
     push_moxel_chart_literal(
         xml,
         "paletteKind",
-        if chart.has_extended_scales {
-            "Palette8"
-        } else {
-            "Auto"
-        },
+        chart.color_palette.name.unwrap_or("Auto"),
     );
     push_moxel_chart_literal(
         xml,
@@ -12442,47 +12819,15 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "multiStageLinkColor", "#000000");
     push_moxel_chart_axis_xml(xml, "valuesAxis", &chart.values_axis);
     push_moxel_chart_axis_xml(xml, "pointsAxis", &chart.points_axis);
-    // `pointsScale` is new: no pre-existing corpus record carries it (all
-    // 13 have `has_extended_scales == false`); the target record and the
-    // seed pair on `validate_moxel_chart_v74_post_prefix` that isolated
-    // `has_extended_scales` both carry it with this exact fixed content
-    // (`labelOrientation` always `Horizontal` in the one example seen).
-    if chart.has_extended_scales {
-        xml.push_str("\t\t\t<d3p1:pointsScale>\r\n");
-        push_moxel_chart_scale_title_area_xml(xml);
-        xml.push_str("\t\t\t\t<d3p1:labelOrientation>Horizontal</d3p1:labelOrientation>\r\n");
-        xml.push_str("\t\t\t</d3p1:pointsScale>\r\n");
-    }
-    // `valuesScale` has three independent triggers proven so far: non-empty
-    // `vsFormat` writes a `labelFormat` child (the pre-existing corpus
-    // shape, e.g. `ДосьеКонтрагента/ФинансовыйАнализ`'s Gauge charts);
-    // `has_extended_scales` writes a `gridLinesShowMode` child instead (the
-    // already-closed `СравнительныйАнализМенеджеров` target, `vsFormat`
-    // empty); and `isShowTitle && elementsIsInit` writes the same
-    // `gridLinesShowMode` shape even with `has_extended_scales` clear --
-    // evidenced by all three factorial combinations of those two flags the
-    // corpus spells: `АнализЖурналаРегистрации/...`
-    // (`isShowTitle==true,elementsIsInit==true`, `valuesScale` present),
-    // `ДлительностьОтложенногоОбновления/...`
-    // (`isShowTitle==true,elementsIsInit==false`, absent) and the
-    // pre-existing `empty-no-extended-scales` fixture
-    // (`isShowTitle==false,elementsIsInit==true`, absent) -- only the
-    // conjunction fits all three. No record observed carries both `vsFormat`
-    // and either extended trigger at once, so that combination is not this
-    // writer's case.
-    let values_scale_gridlines =
-        chart.has_extended_scales || (chart.is_show_title && chart.elements_is_init);
-    if !chart.values_scale_format.is_empty() {
-        xml.push_str("\t\t\t<d3p1:valuesScale>\r\n");
-        push_moxel_chart_scale_title_area_xml(xml);
-        push_moxel_chart_localized_xml(xml, "labelFormat", &chart.values_scale_format, 4);
-        xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
-    } else if values_scale_gridlines {
-        xml.push_str("\t\t\t<d3p1:valuesScale>\r\n");
-        push_moxel_chart_scale_title_area_xml(xml);
-        xml.push_str("\t\t\t\t<d3p1:gridLinesShowMode>Show</d3p1:gridLinesShowMode>\r\n");
-        xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
-    }
+    push_moxel_chart_scale_xml(xml, "pointsScale", &chart.points_scale);
+    // `valuesScale` used to be reconstructed from three flags outside the
+    // record -- non-empty `vsFormat`, `has_extended_scales`, and
+    // `isShowTitle && elementsIsInit`. It has its own record, at
+    // `axes_position + 13`, and every child reads its own member of it. The
+    // three-flag rule happened to fit the 58 records because each flag
+    // tracked one of those members; it could not spell
+    // `МакетФакторныйАнализВодопад`'s grid line or label font at all.
+    push_moxel_chart_scale_xml(xml, "valuesScale", &chart.values_scale);
     // `legendPlacement`/`titleAreaPlacement` are gated on `areas_are_placed`
     // (`post[20]`), not written unconditionally: the five
     // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` copies publish
@@ -12518,13 +12863,12 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
             },
         );
     }
-    // `colorPaletteDescription` is new, same trigger and same single
-    // observation as `paletteKind` above.
-    if chart.has_extended_scales {
-        xml.push_str("\t\t\t<d3p1:colorPaletteDescription>\r\n");
-        xml.push_str("\t\t\t\t<d3p1:colorPalette>Palette8</d3p1:colorPalette>\r\n");
-        xml.push_str("\t\t\t</d3p1:colorPaletteDescription>\r\n");
-    }
+    push_moxel_chart_palette_xml(xml, "colorPaletteDescription", &chart.color_palette);
+    push_moxel_chart_palette_xml(
+        xml,
+        "referenceBandsColorPaletteDescription",
+        &chart.reference_bands_palette,
+    );
     xml.push_str("\t\t</object>\r\n");
 }
 
@@ -12871,7 +13215,16 @@ fn push_moxel_chart_border_xml(xml: &mut String, tag: &str, width: usize, style:
 /// and self-closing, so they get their own writer rather than sharing that
 /// one's tag/indent literals.
 fn push_moxel_chart_font_xml(xml: &mut String, tag: &str, font: &MoxelFont) {
-    xml.push_str(&format!("\t\t\t<d3p1:{tag}"));
+    push_moxel_chart_font_xml_indented(xml, tag, font, 3);
+}
+
+fn push_moxel_chart_font_xml_indented(
+    xml: &mut String,
+    tag: &str,
+    font: &MoxelFont,
+    indent: usize,
+) {
+    xml.push_str(&format!("{}<d3p1:{tag}", "\t".repeat(indent)));
     if let Some(ref_name) = &font.ref_name {
         xml.push_str(&format!(" ref=\"{}\"", escape_xml_text(ref_name)));
     }
@@ -13029,6 +13382,52 @@ fn push_moxel_chart_scale_title_area_xml(xml: &mut String) {
     xml.push_str("\t\t\t\t\t</d3p1:border>\r\n");
     xml.push_str("\t\t\t\t\t<d3p1:borderColor>auto</d3p1:borderColor>\r\n");
     xml.push_str("\t\t\t\t</d3p1:titleArea>\r\n");
+}
+
+/// One scale block, written only when at least one of its children is off
+/// its default. Children appear in the order the platform writes them:
+/// `titleArea`, `labelFormat`, `gridLinesShowMode`, `gridLine`, `labelFont`,
+/// `labelColor`, `labelOrientation`. No record of the stand carries
+/// `labelFormat` together with any of the four that follow it, so its place
+/// in that order is the one the previous writer already used.
+fn push_moxel_chart_scale_xml(xml: &mut String, tag: &str, scale: &MoxelChartScale) {
+    if scale.is_empty() {
+        return;
+    }
+    xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
+    push_moxel_chart_scale_title_area_xml(xml);
+    if !scale.label_format.is_empty() {
+        push_moxel_chart_localized_xml(xml, "labelFormat", &scale.label_format, 4);
+    }
+    if let Some(mode) = scale.grid_lines_show_mode {
+        push_moxel_chart_literal_indented(xml, "gridLinesShowMode", mode, 4);
+    }
+    if let Some((width, style)) = scale.grid_line {
+        push_moxel_chart_line_xml(xml, "gridLine", &MoxelChartLine { width }, 4, style);
+    }
+    if let Some(font) = &scale.label_font {
+        push_moxel_chart_font_xml_indented(xml, "labelFont", font, 4);
+    }
+    if let Some(color) = &scale.label_color {
+        push_moxel_chart_literal_indented(xml, "labelColor", color, 4);
+    }
+    if let Some(orientation) = scale.label_orientation {
+        push_moxel_chart_literal_indented(xml, "labelOrientation", orientation, 4);
+    }
+    xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
+}
+
+/// A palette block, written only when its record names a palette.
+fn push_moxel_chart_palette_xml(xml: &mut String, tag: &str, palette: &MoxelChartPalette) {
+    let Some(name) = palette.name else {
+        return;
+    };
+    xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
+    push_moxel_chart_literal_indented(xml, "colorPalette", name, 4);
+    if let Some(color) = &palette.gradient_start_color {
+        push_moxel_chart_literal_indented(xml, "gradientPaletteStartColor", color, 4);
+    }
+    xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
 }
 
 fn push_moxel_chart_rectangle_xml(xml: &mut String, tag: &str, rect: &MoxelChartRectangle) {
