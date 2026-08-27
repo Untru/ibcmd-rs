@@ -1093,6 +1093,11 @@ const CHART_OF_CALCULATION_TYPES_RESERVED_COLLECTION_UUIDS: [&str; 3] = [
 ];
 const CHART_OF_CALCULATION_TYPES_FORM_COLLECTION_UUID: &str =
     "a7f8f92a-7a4b-484b-937e-42d242e64144";
+/// The family a chart of calculation types serialises a tabular section's own
+/// attributes into. All ten sections of the two ERP УХ 3.2.12.6 charts nest
+/// exactly this collection and nothing else.
+const CHART_OF_CALCULATION_TYPES_TABULAR_ATTRIBUTE_GROUP_UUID: &str =
+    "888744e1-b616-11d4-9436-004095e12fc7";
 const REPORT_ATTRIBUTE_COLLECTION_UUID: &str = "7e7123e0-29e2-11d6-a3c7-0050bae0a776";
 const REPORT_FORM_COLLECTION_UUID: &str = "a3b368c0-29e2-11d6-a3c7-0050bae0a776";
 const REPORT_TABULAR_SECTION_COLLECTION_UUID: &str = "b077d780-29e2-11d6-a3c7-0050bae0a776";
@@ -7963,6 +7968,7 @@ struct ChartOfCalculationTypesProperties {
     data_history: &'static str,
     update_data_history_immediately_after_write: bool,
     execute_after_write_data_history_version_processing: bool,
+    child_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
 }
 
@@ -8143,7 +8149,11 @@ struct ExactCalculationRegisterOwnerProperties {
 }
 
 struct CalculationRegisterFormPair {
-    default_list_form: String,
+    /// `None` when the register names no default list form: the two ERP УХ
+    /// 3.2.12.6 calculation registers own no form at all and the platform
+    /// writes `<DefaultListForm/>` for both, where the single БСП demo
+    /// calculation register names one.
+    default_list_form: Option<String>,
 }
 
 struct CalculationRegisterPeriodProperties {
@@ -8153,9 +8163,15 @@ struct CalculationRegisterPeriodProperties {
 }
 
 struct CalculationRegisterScheduleProperties {
-    schedule: String,
-    schedule_value: String,
-    schedule_date: String,
+    /// The three schedule references are `None` when the register names no
+    /// schedule: one of the two ERP УХ 3.2.12.6 calculation registers holds a
+    /// nil uuid in all three slots and the platform writes `<Schedule/>`,
+    /// `<ScheduleValue/>` and `<ScheduleDate/>` while still naming its
+    /// `<ChartOfCalculationTypes>`. The other ERP УХ register and the single
+    /// БСП demo one name all four.
+    schedule: Option<String>,
+    schedule_value: Option<String>,
+    schedule_date: Option<String>,
     chart_of_calculation_types: String,
 }
 
@@ -11015,11 +11031,18 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             header,
             type_index,
             object_refs,
+            metadata_object_refs,
             form_refs,
             template_refs,
         ) {
             StrictMetadataRoot::Parsed(chart) => {
                 strict_chart_root_formatted = true;
+                // The strict decoder writes `<ChildObjects>` itself, from the
+                // chart's own declared form, template and command collections.
+                // Leaving the generic text-scanning command pass armed on top
+                // of that wrote every owned command twice -- the same seam the
+                // filter criterion already closes above.
+                nested_commands = Vec::new();
                 format_chart_of_accounts_source_xml(header, &chart, source_version).into_bytes()
             }
             StrictMetadataRoot::Unsupported => {
@@ -11042,6 +11065,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             header,
             type_index,
             object_refs,
+            metadata_object_refs,
             form_refs,
         ) {
             StrictMetadataRoot::Parsed(chart) => {
@@ -12283,6 +12307,15 @@ fn parse_strict_tabular_sections(
                     return None;
                 }
             }
+            // A chart of calculation types writes the same three-member
+            // envelope, whose third member is the section's stored
+            // `LineNumberLength` and is read -- not pinned -- by
+            // `parse_tabular_section_envelope`.
+            "ChartOfCalculationTypes" => {
+                if wrapper.len() != 3 || wrapper.first()?.trim() != "1" {
+                    return None;
+                }
+            }
             _ => return None,
         }
         let section_fields = split_information_register_braced_fields(wrapper.get(1)?)?;
@@ -12311,6 +12344,14 @@ fn parse_strict_tabular_sections(
                         form_refs,
                     ),
                     "Report" => parse_report_attribute(
+                        value,
+                        owner_name,
+                        true,
+                        type_index,
+                        object_refs,
+                        form_refs,
+                    ),
+                    "ChartOfCalculationTypes" => parse_chart_of_calculation_types_attribute(
                         value,
                         owner_name,
                         true,
@@ -15052,18 +15093,31 @@ fn parse_register_properties_from_text(
             } else {
                 let value_types =
                     parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
-                let properties = parse_metadata_child_properties(
+                let properties = parse_accounting_register_common_child_properties(
                     kind,
-                    &owner_name,
                     text,
                     marker_start,
                     &header.uuid,
-                    &value_types,
+                    &owner_name,
                     type_index,
                     object_refs,
-                    object_refs,
                     form_refs,
-                );
+                    source_version == InfobaseConfigSourceVersion::V2_21,
+                )
+                .or_else(|| {
+                    parse_metadata_child_properties(
+                        kind,
+                        &owner_name,
+                        text,
+                        marker_start,
+                        &header.uuid,
+                        &value_types,
+                        type_index,
+                        object_refs,
+                        object_refs,
+                        form_refs,
+                    )
+                });
                 let properties = properties.map(|properties| {
                     parse_register_child_extra_properties(
                         kind,
@@ -15090,7 +15144,13 @@ fn parse_register_properties_from_text(
             })
         })
         .collect::<Vec<_>>();
-    if kind == "InformationRegister" {
+    // A calculation register serialises its own attributes first (family
+    // `1b304502-…`), then resources, then dimensions, while the platform
+    // writes `<Resource>`, `<Attribute>`, `<Dimension>` -- the same order an
+    // information register uses. Both ERP УХ 3.2.12.6 calculation registers
+    // show it (6/25/4 and 1/9/2 children); the single БСП demo calculation
+    // register declares no attribute at all and so is unaffected either way.
+    if kind == "InformationRegister" || kind == "CalculationRegister" {
         child_objects.sort_by_key(|child| match child.tag {
             "Resource" => 0,
             "Attribute" => 1,
@@ -15289,6 +15349,14 @@ fn register_standard_attributes(
 struct RegisterStandardAttributeOverrides {
     tooltip: Vec<(String, String)>,
     synonym: Vec<(String, String)>,
+    /// `<xr:FullTextSearch>` and `<xr:DataHistory>`, read from the standard
+    /// attribute's own property bag instead of being printed as `Use`.
+    /// `КорректировкиНалоговойБазы`'s `PeriodAdjustment` is the one standard
+    /// attribute of the stand's 68 that writes `DontUse`, against
+    /// `Хозрасчетный`'s `PeriodAdjustment` -- the same standard attribute of
+    /// the same family -- which writes `Use`.
+    full_text_search: Option<&'static str>,
+    data_history: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -15316,8 +15384,12 @@ fn register_standard_attribute(
         synonym: override_values
             .map(|values| values.synonym.clone())
             .unwrap_or_default(),
-        data_history: "Use",
-        full_text_search: "Use",
+        data_history: override_values
+            .and_then(|values| values.data_history)
+            .unwrap_or("Use"),
+        full_text_search: override_values
+            .and_then(|values| values.full_text_search)
+            .unwrap_or("Use"),
         choice_history_on_input: "Auto",
         fill_value: MetadataChildFillValue::Nil,
         link_by_type,
@@ -15387,7 +15459,7 @@ fn parse_accounting_register_standard_attribute_collection(
             None => expected_type_reduction_mode = Some(bag.has_type_reduction_mode),
             _ => {}
         }
-        let (tooltip, synonym) = if name.is_some() {
+        let (tooltip, synonym, full_text_search, data_history) = if name.is_some() {
             (
                 parse_information_register_standard_attribute_localized(
                     bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?,
@@ -15395,25 +15467,44 @@ fn parse_accounting_register_standard_attribute_collection(
                 parse_information_register_standard_attribute_localized(
                     bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
                 )?,
+                Some(register_child_full_text_search_xml(
+                    parse_information_register_standard_attribute_nested_enum(
+                        bag.get(
+                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID,
+                        )?,
+                        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+                    )?,
+                )?),
+                Some(metadata_data_history_xml(
+                    parse_information_register_standard_attribute_nested_enum(
+                        bag.get(
+                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID,
+                        )?,
+                        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+                    )?,
+                )?),
             )
         } else {
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), None, None)
         };
-        validated.push((name, tooltip, synonym));
+        validated.push((name, tooltip, synonym, full_text_search, data_history));
     }
 
     let mut attributes = AccountingRegisterStandardAttributes::default();
-    for (name, tooltip, synonym) in validated {
+    for (name, tooltip, synonym, full_text_search, data_history) in validated {
         let Some(name) = name else {
             continue;
         };
         attributes.present.insert(name);
-        if !tooltip.is_empty() || !synonym.is_empty() {
-            attributes.overrides.insert(
-                name,
-                RegisterStandardAttributeOverrides { tooltip, synonym },
-            );
-        }
+        attributes.overrides.insert(
+            name,
+            RegisterStandardAttributeOverrides {
+                tooltip,
+                synonym,
+                full_text_search,
+                data_history,
+            },
+        );
     }
     Some(attributes)
 }
@@ -15832,15 +15923,26 @@ fn parse_calculation_register_fixed_period(
     {
         return Some(None);
     }
-    if fields.get(16)?.trim() != "2"
-        || fields.get(17)?.trim() != "1"
-        || fields.get(18)?.trim() != "1"
-    {
+    // `<ActionPeriod>` and `<BasePeriod>` ride slots 17 and 18 and were pinned
+    // to `1`/`true`, which refused the whole period block of one of the two ERP
+    // УХ 3.2.12.6 calculation registers: it holds `0` in slot 17 and the
+    // platform writes `<ActionPeriod>false</ActionPeriod>` there, against
+    // `<ActionPeriod>true` for the other ERP УХ register and the single БСП
+    // demo one. Slot 18 is `1` on all three and slot 16 is `2`/`Month` on all
+    // three; both stay checked constants so an unobserved code refuses rather
+    // than being invented.
+    let (Some("2"), Some(action_period), Some("1")) = (
+        fields.get(16).map(|field| field.trim()),
+        fields
+            .get(17)
+            .and_then(|field| parse_1c_bool_field(Some(*field))),
+        fields.get(18).map(|field| field.trim()),
+    ) else {
         return Some(None);
-    }
+    };
     Some(Some(CalculationRegisterPeriodProperties {
         periodicity: "Month",
-        action_period: true,
+        action_period,
         base_period: true,
     }))
 }
@@ -15858,23 +15960,46 @@ fn parse_calculation_register_fixed_schedule(
     }
 
     let resolved = (|| {
+        let chart_uuid = parse_information_register_non_zero_uuid(fields.get(22)?)?;
+        let chart_of_calculation_types =
+            unique_case_insensitive_object_reference(&chart_uuid, object_refs)?;
+        let chart_parts = chart_of_calculation_types.split('.').collect::<Vec<_>>();
+        let ["ChartOfCalculationTypes", chart_name] = chart_parts.as_slice() else {
+            return None;
+        };
+        if chart_name.is_empty() {
+            return None;
+        }
+
+        // A register that names no schedule holds a nil uuid in all three
+        // schedule slots and the platform writes the three elements empty; a
+        // partially filled triple is not an observed shape and refuses.
+        let schedule_slots = [fields.get(19)?, fields.get(20)?, fields.get(21)?];
+        if schedule_slots
+            .iter()
+            .all(|field| parse_information_register_non_zero_uuid(field).is_none())
+        {
+            return Some(CalculationRegisterScheduleProperties {
+                schedule: None,
+                schedule_value: None,
+                schedule_date: None,
+                chart_of_calculation_types: chart_of_calculation_types.to_string(),
+            });
+        }
+
         let schedule_uuid = parse_information_register_non_zero_uuid(fields.get(19)?)?;
         let schedule_value_uuid = parse_information_register_non_zero_uuid(fields.get(20)?)?;
         let schedule_date_uuid = parse_information_register_non_zero_uuid(fields.get(21)?)?;
-        let chart_uuid = parse_information_register_non_zero_uuid(fields.get(22)?)?;
 
         let schedule = unique_case_insensitive_object_reference(&schedule_uuid, object_refs)?;
         let schedule_value =
             unique_case_insensitive_object_reference(&schedule_value_uuid, object_refs)?;
         let schedule_date =
             unique_case_insensitive_object_reference(&schedule_date_uuid, object_refs)?;
-        let chart_of_calculation_types =
-            unique_case_insensitive_object_reference(&chart_uuid, object_refs)?;
 
         let schedule_parts = schedule.split('.').collect::<Vec<_>>();
         let schedule_value_parts = schedule_value.split('.').collect::<Vec<_>>();
         let schedule_date_parts = schedule_date.split('.').collect::<Vec<_>>();
-        let chart_parts = chart_of_calculation_types.split('.').collect::<Vec<_>>();
         let ["InformationRegister", owner] = schedule_parts.as_slice() else {
             return None;
         };
@@ -15888,13 +16013,9 @@ fn parse_calculation_register_fixed_schedule(
         else {
             return None;
         };
-        let ["ChartOfCalculationTypes", chart_name] = chart_parts.as_slice() else {
-            return None;
-        };
         if owner.is_empty()
             || value_name.is_empty()
             || date_name.is_empty()
-            || chart_name.is_empty()
             || owner != value_owner
             || owner != date_owner
         {
@@ -15902,9 +16023,9 @@ fn parse_calculation_register_fixed_schedule(
         }
 
         Some(CalculationRegisterScheduleProperties {
-            schedule: schedule.to_string(),
-            schedule_value: schedule_value.to_string(),
-            schedule_date: schedule_date.to_string(),
+            schedule: Some(schedule.to_string()),
+            schedule_value: Some(schedule_value.to_string()),
+            schedule_date: Some(schedule_date.to_string()),
             chart_of_calculation_types: chart_of_calculation_types.to_string(),
         })
     })();
@@ -15935,12 +16056,6 @@ fn parse_calculation_register_fixed_form_pair(
         return Some(None);
     }
 
-    let Some(default_form_uuid) = fields
-        .get(23)
-        .and_then(|field| parse_information_register_non_zero_uuid(field))
-    else {
-        return Some(None);
-    };
     let Some(auxiliary_form_uuid) = fields
         .get(29)
         .and_then(|field| parse_information_register_uuid(field))
@@ -15949,6 +16064,22 @@ fn parse_calculation_register_fixed_form_pair(
     };
     if !information_register_uuid_is_zero(&auxiliary_form_uuid) {
         return Some(None);
+    }
+    // A nil default-list-form uuid is the register naming no form, not an
+    // unreadable record: `uh` `CalculationRegisters/Начисления` and
+    // `.../Удержания` own no form at all and the platform still writes
+    // `<DefaultListForm/>` and `<AuxiliaryListForm/>`, which the whole-block
+    // refusal dropped.
+    let Some(default_form_uuid) = fields
+        .get(23)
+        .and_then(|field| parse_information_register_uuid(field))
+    else {
+        return Some(None);
+    };
+    if information_register_uuid_is_zero(&default_form_uuid) {
+        return Some(Some(CalculationRegisterFormPair {
+            default_list_form: None,
+        }));
     }
 
     let mut matches = form_refs
@@ -15985,7 +16116,9 @@ fn parse_calculation_register_fixed_form_pair(
         return Some(None);
     }
 
-    Some(Some(CalculationRegisterFormPair { default_list_form }))
+    Some(Some(CalculationRegisterFormPair {
+        default_list_form: Some(default_list_form),
+    }))
 }
 
 fn parse_calculation_register_fixed_include_help(
@@ -16027,7 +16160,18 @@ fn parse_register_full_text_search(
 ) -> Option<&'static str> {
     let header_index = metadata_header_field_index(fields, uuid)?;
     let field_offset = match kind {
-        "AccountingRegister" => 14,
+        // Slot header+14 is `<PeriodAdjustmentLength>`, not
+        // `<FullTextSearch>`: `uh` `КорректировкиНалоговойБазы` and
+        // `Хозрасчетный` write `1` there and export
+        // `<PeriodAdjustmentLength>1</PeriodAdjustmentLength>` together with
+        // `<FullTextSearch>DontUse`, and reading the one slot for both made
+        // exactly those two registers write `Use`. All seven accounting
+        // registers of the stand export `DontUse`, so this family separates no
+        // second value: header+6 -- the only slot no other property claims and
+        // `0` on all seven -- carries it as a checked constant, and an
+        // unobserved code refuses rather than being read as something it has
+        // never been.
+        "AccountingRegister" => 6,
         "AccumulationRegister" => 6,
         _ => return None,
     };
@@ -17582,6 +17726,7 @@ fn parse_exact_metadata_tabular_section(
             | "Document"
             | "ExchangePlan"
             | "ChartOfCharacteristicTypes"
+            | "ChartOfCalculationTypes"
             | "Report"
             | "BusinessProcess"
             | "DataProcessor"
@@ -17695,6 +17840,12 @@ fn parse_exact_tabular_section_standard_attributes_presence(
                 | "Task"
                 | OWNER_KIND_BUSINESS_PROCESS => "-10",
                 "Report" | "DataProcessor" => "-3",
+                // A chart of calculation types names its tabular section's
+                // `LineNumber` with `-100`; all ten sections of the two ERP УХ
+                // 3.2.12.6 charts carry that marker and their native XML
+                // writes the same single `<xr:StandardAttribute
+                // name="LineNumber">` the other families write.
+                "ChartOfCalculationTypes" => "-100",
                 _ => return None,
             };
             let payload = split_information_register_braced_fields(payload)?;
@@ -17826,7 +17977,14 @@ fn tabular_section_envelope_spec(owner_kind: &str) -> Option<(u32, bool, bool)> 
         "Catalog" => (2, true, true),
         "Document" => (2, false, true),
         "ChartOfCharacteristicTypes" => (1, true, true),
-        OWNER_KIND_BUSINESS_PROCESS | "ExchangePlan" | "Task" => (1, false, true),
+        // A chart of calculation types writes the same code-1 envelope with a
+        // trailing `LineNumberLength` and no `Use`: all ten tabular sections of
+        // ERP УХ 3.2.12.6 `ChartsOfCalculationTypes/Начисления` (7) and
+        // `.../Удержания` (3) carry `{1,<nine-field payload>,5}` and their
+        // native XML writes `<LineNumberLength>5` and no `<Use>`.
+        OWNER_KIND_BUSINESS_PROCESS | "ExchangePlan" | "Task" | "ChartOfCalculationTypes" => {
+            (1, false, true)
+        }
         "Report" | "DataProcessor" => (0, false, false),
         _ => return None,
     })
@@ -18102,6 +18260,7 @@ fn parse_accumulation_calculation_register_child_tag_from_fields(
     let tag = match (owner_kind, fields.first()?.trim(), fields.len()) {
         ("AccumulationRegister", "5", 3) | ("CalculationRegister", "4", 3) => "Resource",
         ("AccumulationRegister", "8", 6) | ("CalculationRegister", "5", 7) => "Dimension",
+        ("CalculationRegister", "3", 7) => "Attribute",
         _ => return None,
     };
     let common_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
@@ -18191,6 +18350,49 @@ fn parse_accumulation_calculation_register_child_payload_from_fields(
                 use_in_totals: None,
             },
         ),
+        // A calculation register's own attribute: `{3, <common body>,
+        // <schedule dimension uuid>, <indexing>, <full-text search>, 0,
+        // {1, <zero uuid>}}`. Measured with `cf extract` on ERP УХ 3.2.12.6,
+        // both `CalculationRegisters/*`: 25 + 9 = 34 attributes, every one of
+        // them this seven-field shape, and the family list marker
+        // `1b304502-…` contains exactly those 34 headers and nothing else
+        // (see `is_offset_inside_calculation_register_attribute_list`).
+        // `register_child_object_tag` recognised none of them -- code 3 sits
+        // in none of its containment arms -- so every calculation register was
+        // written with its `<Attribute>` children missing entirely.
+        //
+        // Both values observed for each member this arm reads: the schedule
+        // uuid is nil in 27 and names an `InformationRegister.…Dimension.…` in
+        // 7, matching the 7 non-empty `<ScheduleLink>` of the native XML
+        // against 27 `<ScheduleLink/>`; `<Indexing>` is `0` in 32 and `1` in
+        // the two `Начисления` attributes native writes `<Indexing>Index`;
+        // `<FullTextSearch>` is `1` in 33 and `0` in the one native writes
+        // `<FullTextSearch>DontUse`. The fifth member is `0` and the sixth
+        // `{1,<zero uuid>}` in all 34 -- both stay proven constants, refusing
+        // an unseen value rather than dropping it.
+        ("CalculationRegister", "3", 7) => {
+            let schedule_link = parse_calculation_register_dimension_reference(
+                fields.get(2)?,
+                calculation_schedule,
+                object_refs,
+            )?;
+            if fields.get(5)?.trim() != "0"
+                || !information_register_new_child_tail_is_valid(fields.get(6)?)
+            {
+                return None;
+            }
+            (
+                "Attribute",
+                RegisterMetadataChildProperties {
+                    deny_incomplete_values: None,
+                    base_dimension: None,
+                    schedule_link: Some(schedule_link),
+                    indexing: Some(metadata_attribute_indexing_xml(fields.get(3)?.trim())?),
+                    full_text_search: register_child_full_text_search_xml(fields.get(4)?.trim())?,
+                    use_in_totals: None,
+                },
+            )
+        }
         ("CalculationRegister", "5", 7) => {
             let schedule_link = parse_calculation_register_dimension_reference(
                 fields.get(4)?,
@@ -18244,7 +18446,7 @@ fn parse_calculation_register_dimension_reference(
     }
     let schedule = calculation_schedule?;
     let reference = unique_case_insensitive_object_reference(&uuid, object_refs)?.to_string();
-    let schedule_parts = schedule.schedule.split('.').collect::<Vec<_>>();
+    let schedule_parts = schedule.schedule.as_deref()?.split('.').collect::<Vec<_>>();
     let parts = reference.split('.').collect::<Vec<_>>();
     let ["InformationRegister", schedule_owner] = schedule_parts.as_slice() else {
         return None;
@@ -20634,6 +20836,84 @@ fn catalog_direct_attribute_wrapper_code(root_code: &str) -> Option<u32> {
     }
 }
 
+/// Reads an accounting register child's common `{27,…}` body with the same
+/// twenty-three-member map the information/accumulation/calculation registers
+/// already use.
+///
+/// The body an `AccountingRegister` child carries *is* that body: `cf extract`
+/// on all five ERP УХ 3.2.12.6 accounting registers yields 78 children, every
+/// one of them a 23-member code-27 record whose header sits at index 1. The
+/// hand-written reader below it read only twelve of those members and printed
+/// the rest as literals — `<EditFormat/>`, `<ChoiceParameters/>`,
+/// `<ChoiceParameterLinks/>`, `<QuickChoice>Auto`, `<CreateOnInput>Auto`,
+/// `<ChoiceForm/>`, `<LinkByType/>`, `<ChoiceHistoryOnInput>Auto`,
+/// `<ChoiceFoldersAndItems>Items` — so any register whose child deviated from
+/// those constants was written wrong.
+///
+/// Perepis over those 78 children, both values observed for every slot this
+/// change starts reading that the corpus separates at all:
+///
+/// * slot 18 `EditFormat`: empty in 75, `{2,"ru","ЧДЦ=2","en","NFD=2"}` in the
+///   three `МеждународныйБезКорреспонденции` resources whose native XML writes
+///   `<EditFormat>` — the same three that carry it in slot 3 `Format`. The two
+///   slots are byte-identical in every accounting observation, so the naming is
+///   *not* taken from this family: it is the map proven on the 4 074
+///   information registers, where slot 3 and slot 18 do separate.
+/// * slot 16 `ChoiceParameters`: `{0,0}` in 73, a one-item
+///   `{0,1,"Отбор.Статус",{"#",…}}` in the five `НаправлениеДеятельности`
+///   dimensions whose native XML writes a non-empty `<ChoiceParameters>`.
+/// * slot 13 `FillChecking`: `0` in 74, `1` in the four `Международный`
+///   children native writes `<FillChecking>ShowError`.
+/// * slot 5 `MarkNegatives`: `0` in 69, `1` in the nine
+///   `КорректировкиНалоговойБазы` children native writes
+///   `<MarkNegatives>true`.
+///
+/// The remaining slots (`ChoiceFoldersAndItems` 10, `ChoiceForm` 11,
+/// `QuickChoice` 12, `ChoiceParameterLinks` 14, `LinkByType` 15,
+/// `ExtendedEdit` 17, `CreateOnInput` 21, `ChoiceHistoryOnInput` 22) carry one
+/// value each across all 94 accounting-register children of the stand, so this
+/// family cannot separate them on its own; they are read through the same
+/// proven information-register map rather than reprinted as literals, and an
+/// unknown code now refuses the body instead of being silently flattened to the
+/// literal. `FillFromFillingValue`/`FillValue` stay unwritten: native emits
+/// neither for this family.
+fn parse_accounting_register_common_child_properties(
+    owner_kind: &str,
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> Option<MetadataChildProperties> {
+    if owner_kind != "AccountingRegister" {
+        return None;
+    }
+    for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
+        if metadata_header_field_index(&fields, child_uuid) != Some(1) {
+            continue;
+        }
+        let Some(mut properties) = parse_information_register_common_child_properties(
+            &fields,
+            owner_kind,
+            owner_name,
+            type_index,
+            object_refs,
+            form_refs,
+            preserve_raw_data_paths,
+        ) else {
+            continue;
+        };
+        // Native writes neither member for an accounting register child.
+        properties.emit_fill_from_filling_value = false;
+        properties.emit_fill_value = false;
+        return Some(properties);
+    }
+    None
+}
+
 fn parse_accounting_register_child_properties_from_fields(
     fields: &[&str],
     child_uuid: &str,
@@ -20997,6 +21277,33 @@ fn parse_register_child_extra_properties(
             }
             ("Attribute", Some("2"))
                 if fields.len() >= 4 && field_starts_with(fields.get(1), "{27") =>
+            {
+                properties.indexing = fields
+                    .get(2)
+                    .and_then(|field| metadata_attribute_indexing_xml(field.trim()));
+                properties.full_text_search = fields
+                    .get(3)
+                    .and_then(|field| register_child_full_text_search_xml(field.trim()));
+                return properties;
+            }
+            // The long attribute wrapper: `{3, <body>, <indexing>, <full-text
+            // search>, 0, {1,<zero uuid>}}`. `cf extract` on the five ERP УХ
+            // 3.2.12.6 accounting registers: `КорректировкиНалоговойБазы` (4),
+            // `Международный` (9), `МеждународныйБезКорреспонденции` (8) and
+            // `Хозрасчетный` (3) write only this form -- 24 attributes, every
+            // one of them six-membered -- against the short `{2,…}` form of
+            // `МСФО` (6) and the two БСП demo registers (3 each). Nothing read
+            // the long form, so those 24 attributes lost `<Indexing>` and
+            // `<FullTextSearch>` outright: 23 of them `DontIndex`, and
+            // `Хозрасчетный.НеКорректироватьПоНУ` `Index`, which the native XML
+            // writes.
+            ("Attribute", Some("3"))
+                if fields.len() == 6
+                    && field_starts_with(fields.get(1), "{27")
+                    && fields.get(4).map(|field| field.trim()) == Some("0")
+                    && fields.get(5).is_some_and(|field| {
+                        information_register_new_child_tail_is_valid(field)
+                    }) =>
             {
                 properties.indexing = fields
                     .get(2)
@@ -21398,11 +21705,16 @@ fn attribute_tabular_section_child_object_tag(
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_chart_of_accounts_properties_from_text(
     text: &str,
     header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    // The wider index, the only one that carries predefined-item and
+    // enumeration-value references; a chart of accounts names one of them in
+    // an attribute's `<ChoiceParameters>`.
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> StrictMetadataRoot<ChartOfAccountsProperties> {
@@ -21469,6 +21781,7 @@ fn parse_chart_of_accounts_properties_from_text(
         &collections,
         type_index,
         object_refs,
+        metadata_object_refs,
         form_refs,
         template_refs,
     )
@@ -21488,6 +21801,7 @@ fn parse_chart_of_accounts_properties(
     collections: &[Vec<&str>],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<ChartOfAccountsProperties> {
@@ -21552,18 +21866,29 @@ fn parse_chart_of_accounts_properties(
         "Attribute",
         &header.name,
         type_index,
-        object_refs,
+        metadata_object_refs,
         form_refs,
         &mut all_uuids,
         &mut attribute_names,
     )?;
+    // The owner's own attributes, by uuid: `<InputByString>` names one of them
+    // as a `{0,<uuid>}` field reference on all three ERP УХ charts.
+    let own_attributes = child_objects
+        .iter()
+        .map(|child| {
+            (
+                child.header.uuid.to_ascii_lowercase(),
+                child.header.name.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut accounting_flag_names = BTreeSet::new();
     child_objects.extend(parse_chart_of_accounts_child_collection(
         collections.get(5)?,
         "AccountingFlag",
         &header.name,
         type_index,
-        object_refs,
+        metadata_object_refs,
         form_refs,
         &mut all_uuids,
         &mut accounting_flag_names,
@@ -21574,7 +21899,7 @@ fn parse_chart_of_accounts_properties(
         "ExtDimensionAccountingFlag",
         &header.name,
         type_index,
-        object_refs,
+        metadata_object_refs,
         form_refs,
         &mut all_uuids,
         &mut ext_dimension_flag_names,
@@ -21608,6 +21933,23 @@ fn parse_chart_of_accounts_properties(
     )?;
 
     let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
+    let probe_ext_dimension_types = parse_chart_direct_object_reference(
+        fields.get(19)?,
+        "ChartOfCharacteristicTypes",
+        object_refs,
+    );
+    let probe_standard_attributes = parse_chart_standard_attributes(
+        fields.get(38)?,
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+        Some(("-6", "ChartOfAccounts")),
+        &header.name,
+        type_index,
+        object_refs,
+    );
+    let probe_standard_tabular_sections = parse_chart_standard_tabular_sections(
+        fields.get(39)?,
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+    );
     // Field 24 is `"1"` on every chart of accounts of the stand, exactly as it
     // is on every characteristic-type plan. It used to be read as
     // `<CodeSeries>`, which made all four charts write
@@ -21674,6 +22016,7 @@ fn parse_chart_of_accounts_properties(
             "ChartOfAccounts",
             &header.name,
             &[("-7", "Code"), ("-8", "Description")],
+            &own_attributes,
         )?,
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
@@ -21762,6 +22105,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
     header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> StrictMetadataRoot<ChartOfCalculationTypesProperties> {
     let Some(root) = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))
@@ -21802,13 +22146,23 @@ fn parse_chart_of_calculation_types_properties_from_text(
     else {
         return StrictMetadataRoot::Invalid;
     };
-    if collections[..4]
+    // Collection 0 holds the chart's tabular sections and collection 1 its own
+    // attributes; both used to be required empty, which sent every chart that
+    // declares either to the property-less default-list-form fallback.
+    // Collections 2 and 3 (the reserved family and the templates) stay
+    // required-empty: they are empty on all three charts of the stand and no
+    // observation names them.
+    if collections[2..4]
         .iter()
         .any(|collection| !collection.is_empty())
     {
         return StrictMetadataRoot::Unsupported;
     }
 
+    // An owner the previous gate rejected outright keeps that gate's outcome
+    // when the rest of its record still does not read: the relaxation may add
+    // a complete file, never take one away.
+    let owns_children = !collections[0].is_empty() || !collections[1].is_empty();
     parse_chart_of_calculation_types_properties(
         text,
         header,
@@ -21816,12 +22170,18 @@ fn parse_chart_of_calculation_types_properties_from_text(
         &collections,
         type_index,
         object_refs,
+        metadata_object_refs,
         form_refs,
     )
     .map(StrictMetadataRoot::Parsed)
-    .unwrap_or(StrictMetadataRoot::Invalid)
+    .unwrap_or(if owns_children {
+        StrictMetadataRoot::Unsupported
+    } else {
+        StrictMetadataRoot::Invalid
+    })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_chart_of_calculation_types_properties(
     text: &str,
     header: &MetadataHeader,
@@ -21829,6 +22189,7 @@ fn parse_chart_of_calculation_types_properties(
     collections: &[Vec<&str>],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<ChartOfCalculationTypesProperties> {
     let parsed_header = parse_wrapped_register_owner_header(fields.get(1)?)?;
@@ -21840,7 +22201,15 @@ fn parse_chart_of_calculation_types_properties(
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
         || !cct_pair_is(fields.get(36)?, "0", "0")
-        || !cct_based_on_is_empty(fields.get(54)?)
+        // Field 54 is the physical index list, not `<BasedOn>`, exactly as
+        // field 48 is on a chart of accounts: both ERP УХ 3.2.12.6 charts of
+        // calculation types declare descriptors there (3 and 2, of the same
+        // `fe839d42-…` family the chart of accounts writes) and the platform
+        // still exports `<BasedOn/>`. `<BasedOn>` rides field 36, checked
+        // above with the same `{0,0}` empty form. Only the declared shape is
+        // validated here; the descriptors are not exported. The БСП demo chart
+        // declares none and passed either way.
+        || !chart_physical_index_list_shape_is_known(fields.get(54)?)
         || !cct_data_lock_fields_are_empty(fields.get(56)?)
     {
         return None;
@@ -21880,6 +22249,28 @@ fn parse_chart_of_calculation_types_properties(
         ],
         &mut all_uuids,
     )?;
+    // The child collections resolve through the wider index: the only one that
+    // carries enumeration-value and predefined-item references, which a chart
+    // of calculation types names in an attribute's `<FillValue>`.
+    let child_objects = parse_chart_of_calculation_types_child_objects(
+        collections,
+        text,
+        &header.uuid,
+        &header.name,
+        type_index,
+        metadata_object_refs,
+        form_refs,
+    )?;
+    for child in &child_objects {
+        if !all_uuids.insert(child.header.uuid.to_ascii_lowercase()) {
+            return None;
+        }
+        for nested in &child.child_objects {
+            if !all_uuids.insert(nested.header.uuid.to_ascii_lowercase()) {
+                return None;
+            }
+        }
+    }
     let form_uuids = parse_task_form_uuids(collections.get(4)?)?;
     let child_forms = parse_strict_chart_child_forms(
         text,
@@ -21896,6 +22287,13 @@ fn parse_chart_of_calculation_types_properties(
     }
 
     let input_modes = parse_catalog_input_modes(fields.get(58)?)?;
+    // Fields 27 and 55 are `1` on every chart of calculation types of the stand
+    // and used to be read as `<CodeAllowedLength>` and `<DataLockControlMode>`,
+    // whose separating carriers are fields 53 and 41. Both are kept as
+    // validated constants so an unobserved value fails closed.
+    if fields.get(27)?.trim() != "1" || fields.get(55)?.trim() != "1" {
+        return None;
+    }
     Some(ChartOfCalculationTypesProperties {
         generated_types,
         use_standard_commands: information_register_bool(fields.get(24)?)?,
@@ -21906,7 +22304,11 @@ fn parse_chart_of_calculation_types_properties(
             "1" => "String",
             _ => return None,
         },
-        code_allowed_length: match fields.get(27)?.trim() {
+        // `<CodeAllowedLength>` rides field 53, not field 27: one ERP УХ chart
+        // writes `0` there and exports `Fixed`, while the other and the БСП
+        // demo chart write `1` and export `Variable`; field 27 is `1` on all
+        // three and is kept as a checked constant below.
+        code_allowed_length: match fields.get(53)?.trim() {
             "0" => "Fixed",
             "1" => "Variable",
             _ => return None,
@@ -21917,13 +22319,25 @@ fn parse_chart_of_calculation_types_properties(
             _ => return None,
         },
         edit_type: parse_chart_edit_type(fields.get(38)?)?,
-        quick_choice: information_register_bool(fields.get(37)?)?,
-        choice_mode: parse_chart_choice_mode(fields.get(41)?)?,
+        // No chart of calculation types of the stand separates `<QuickChoice>`:
+        // all three export `false`. Field 37, against which this used to be
+        // read, carries `<IncludeHelpInContents>` and is `1` on the two charts
+        // that include help.
+        quick_choice: false,
+        // No chart of calculation types of the stand separates `<ChoiceMode>`:
+        // all three export `BothWays`. Field 41, against which this used to be
+        // pinned, carries `<DataLockControlMode>` below.
+        choice_mode: "BothWays",
         input_by_string: parse_chart_input_by_string(
             fields.get(40)?,
             "ChartOfCalculationTypes",
             &header.name,
             &[("-3", "Description"), ("-2", "Code")],
+            // A chart of calculation types whose strict root reads has an
+            // empty attribute collection by construction (the gate above), so
+            // it can own no attribute for `<InputByString>` to name; a
+            // `{0,<uuid>}` member therefore still refuses the object.
+            &BTreeMap::new(),
         )?,
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
@@ -22033,8 +22447,16 @@ fn parse_chart_of_calculation_types_properties(
             ],
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(57)?)?,
-        include_help_in_contents: !information_register_bool(fields.get(53)?)?,
-        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(55)?)?,
+        // `<IncludeHelpInContents>` rides field 37 straight, not the negation
+        // of field 53: the БСП demo chart writes `0` and exports `false`, both
+        // ERP УХ charts write `1` and export `true`. Field 53 is
+        // `<CodeAllowedLength>` and disagreed with that reading on one of them.
+        include_help_in_contents: information_register_bool(fields.get(37)?)?,
+        // `<DataLockControlMode>` rides field 41 with the shared 0/1 encoding:
+        // the БСП demo chart writes `1`/`Managed`, both ERP УХ charts write
+        // `0`/`Automatic`. Field 55, against which this used to be read, is `1`
+        // on all three and is kept as a checked constant below.
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(41)?)?,
         full_text_search: register_child_full_text_search_xml(fields.get(42)?.trim())?,
         object_presentation: parse_information_register_owner_localized_value(fields.get(48)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
@@ -22050,6 +22472,7 @@ fn parse_chart_of_calculation_types_properties(
         execute_after_write_data_history_version_processing: information_register_bool(
             fields.get(62)?,
         )?,
+        child_objects,
         child_forms,
     })
 }
@@ -22118,25 +22541,54 @@ fn strict_chart_owner_reference(reference: &str, expected_kind: &str) -> bool {
     matches!(fields.as_slice(), [kind, name] if *kind == expected_kind && !name.is_empty())
 }
 
+/// A chart's `<InputByString>`: a field reference list whose members are
+/// either a standard-attribute marker or the owner's own attribute.
+///
+/// The two-member `{0,<uuid>}` payload is the same own-child form the
+/// owner-graph decoder already reads for catalogs, documents and tasks
+/// (`parse_owner_graph_field_references`), and the chart reader had no arm for
+/// it at all: it accepted only the single-member marker and refused the whole
+/// object otherwise. All three ERP УХ 3.2.12.6 charts of accounts list three
+/// fields -- `-8` Description, `-7` Code and one `{0,<uuid>}` naming their own
+/// `КодБыстрогоВыбора` attribute -- against БСП demo `_ДемоОсновной`, which
+/// lists the two markers only. `ChartsOfAccounts/Международный` lost its whole
+/// file to this and `МСФО`/`Хозрасчетный` fell back to the property-less
+/// default-list-form writer.
+///
+/// Only the owner's own attributes resolve, exactly as the owner-graph decoder
+/// requires: a uuid that is not among them refuses the object rather than
+/// being resolved through the global reference index.
 fn parse_chart_input_by_string(
     value: &str,
     owner_kind: &str,
     owner_name: &str,
     definitions: &[(&str, &str)],
+    own_attributes: &BTreeMap<String, String>,
 ) -> Option<Vec<String>> {
     let mut seen = BTreeSet::new();
     parse_exchange_plan_field_ref_collection(value)?
         .into_iter()
         .map(|field| {
             let payload = parse_exchange_plan_field_ref_payload(field)?;
-            let [marker] = payload.as_slice() else {
-                return None;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    let (_, name) = definitions
+                        .iter()
+                        .find(|(candidate, _)| marker.trim() == *candidate)?;
+                    format!("{owner_kind}.{owner_name}.StandardAttribute.{name}")
+                }
+                [kind, uuid] => {
+                    if parse_information_register_usize(kind) != Some(0) {
+                        return None;
+                    }
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?.to_ascii_lowercase();
+                    let name = own_attributes.get(&uuid)?;
+                    format!("{owner_kind}.{owner_name}.Attribute.{name}")
+                }
+                _ => return None,
             };
-            let (_, name) = definitions
-                .iter()
-                .find(|(candidate, _)| marker.trim() == *candidate)?;
-            seen.insert(marker.trim())
-                .then(|| format!("{owner_kind}.{owner_name}.StandardAttribute.{name}"))
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
         })
         .collect()
 }
@@ -22153,13 +22605,6 @@ fn parse_chart_predefined_data_update(value: &str) -> Option<&'static str> {
 fn parse_chart_edit_type(value: &str) -> Option<&'static str> {
     match value.trim() {
         "2" => Some("InDialog"),
-        _ => None,
-    }
-}
-
-fn parse_chart_choice_mode(value: &str) -> Option<&'static str> {
-    match value.trim() {
-        "1" => Some("BothWays"),
         _ => None,
     }
 }
@@ -22286,9 +22731,26 @@ fn parse_chart_of_accounts_child_collection(
                 return None;
             }
             let wrapper = split_information_register_braced_fields(item.first()?)?;
-            let expected_code = if tag == "Attribute" { "2" } else { "6" };
-            let expected_len = if tag == "Attribute" { 5 } else { 3 };
-            if wrapper.len() != expected_len || wrapper.first()?.trim() != expected_code {
+            // An attribute is written in two wrapper forms and a flag in one.
+            // `{2, <body>, <indexing>, <full-text search>, <data history>}` is
+            // the short attribute form; `{3, …, 0, {1,<zero uuid>}}` is the
+            // same five members plus the trailing pair every family writes.
+            // `cf extract` on the four charts of accounts of the stand: the
+            // short form on 16 attributes of one ERP УХ chart and 3 of the БСП
+            // demo chart, the long form on all 12 attributes of the other two
+            // ERP УХ charts. Only the short form was read, so those two charts
+            // never got past their attribute collection and fell back to the
+            // property-less default-list-form writer.
+            let expected = match (tag, wrapper.first()?.trim(), wrapper.len()) {
+                ("Attribute", "2", 5) => true,
+                ("Attribute", "3", 7) => {
+                    wrapper.get(5)?.trim() == "0"
+                        && information_register_new_child_tail_is_valid(wrapper.get(6)?)
+                }
+                (_, "6", 3) if tag != "Attribute" => true,
+                _ => false,
+            };
+            if !expected {
                 return None;
             }
             let common = split_information_register_braced_fields(wrapper.get(1)?)?;
@@ -22943,15 +23405,6 @@ fn chart_physical_index_list_shape_is_known(value: &str) -> bool {
                         .is_some_and(|count| count.checked_add(1) == Some(nested.len()))
                 })
             })
-    })
-}
-
-fn cct_based_on_is_empty(value: &str) -> bool {
-    split_information_register_braced_fields(value).is_some_and(|fields| {
-        fields.len() == 2
-            && fields[0].trim() == "0"
-            && split_information_register_braced_fields(fields[1])
-                .is_some_and(|nested| nested.len() == 1 && nested[0].trim() == "0")
     })
 }
 
@@ -25110,6 +25563,131 @@ fn parse_report_attribute(
         form_refs,
         nested,
     )
+}
+
+/// One attribute of a chart of calculation types, direct or tabular-section.
+///
+/// Both wrappers are `{<code>, <code27 payload>, <indexing>, <full-text
+/// search>, <data history>, …}`; the direct one carries two further members --
+/// a `0` and the `{1,<zero uuid>}` tail every family writes -- and the
+/// tabular-section one stops after the data-history member. Measured with `cf
+/// extract` on ERP УХ 3.2.12.6: `ChartsOfCalculationTypes/Начисления` 95 direct
+/// (`{4,…}`, seven members) and 20 tabular-section attributes (`{8,…}`, five),
+/// `.../Удержания` 33 and 9, no other arity in either.
+///
+/// The direct attribute writes `<FillFromFillingValue>` and `<FillValue>` --
+/// `Начисления.КатегорияНачисленияИлиНеоплаченногоВремени` writes `true` and a
+/// `xr:DesignTimeRef` -- and the tabular-section attribute writes neither, the
+/// same split every other family makes between a root attribute and a nested
+/// one.
+fn parse_chart_of_calculation_types_attribute(
+    value: &str,
+    owner_name: &str,
+    nested: bool,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChildObject> {
+    let item = split_information_register_braced_fields(value)?;
+    if item.len() != 2 || item.get(1)?.trim() != "0" {
+        return None;
+    }
+    let wrapper = split_information_register_braced_fields(item.first()?)?;
+    let (expected_code, expected_len) = if nested { ("8", 5) } else { ("4", 7) };
+    if wrapper.len() != expected_len || wrapper.first()?.trim() != expected_code {
+        return None;
+    }
+    if !nested
+        && (wrapper.get(5)?.trim() != "0"
+            || !information_register_new_child_tail_is_valid(wrapper.get(6)?))
+    {
+        return None;
+    }
+    let common = split_information_register_braced_fields(wrapper.get(1)?)?;
+    let mut child = parse_strict_common_metadata_attribute(
+        common,
+        "ChartOfCalculationTypes",
+        owner_name,
+        type_index,
+        object_refs,
+        form_refs,
+        !nested,
+    )?;
+    let properties = child.properties.as_mut()?;
+    properties.indexing = Some(metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?);
+    properties.full_text_search =
+        Some(register_child_full_text_search_xml(wrapper.get(3)?.trim())?);
+    properties.data_history = Some(metadata_data_history_xml(wrapper.get(4)?.trim())?);
+    Some(child)
+}
+
+/// The `<Attribute>` and `<TabularSection>` children a chart of calculation
+/// types declares, in the order the platform writes them.
+///
+/// The two collections are the root's first two: `054aa8cf-…` holds the
+/// tabular sections and `0dc22ad2-…` the direct attributes. Both were required
+/// empty, which sent the two ERP УХ 3.2.12.6 charts of calculation types (7
+/// sections with 95 attributes, and 3 with 33) to the property-less
+/// default-list-form writer; the single БСП demo chart declares neither and is
+/// unaffected. The record stores sections before attributes and the platform
+/// writes every `<Attribute>` first, then every `<TabularSection>`.
+#[allow(clippy::too_many_arguments)]
+fn parse_chart_of_calculation_types_child_objects(
+    collections: &[Vec<&str>],
+    text: &str,
+    owner_uuid: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<MetadataChildObject>> {
+    let mut child_uuids = BTreeSet::new();
+    let mut root_names = BTreeSet::new();
+    let mut child_objects = collections
+        .get(1)?
+        .iter()
+        .map(|value| {
+            let child = parse_chart_of_calculation_types_attribute(
+                value,
+                owner_name,
+                false,
+                type_index,
+                object_refs,
+                form_refs,
+            )?;
+            strict_metadata_child_identity_is_unique(&child, &mut child_uuids, &mut root_names)
+                .then_some(child)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let generic_sections = parse_attribute_tabular_section_child_objects(
+        "ChartOfCalculationTypes",
+        owner_name,
+        text,
+        owner_uuid,
+        None,
+        type_index,
+        object_refs,
+        object_refs,
+        form_refs,
+    )
+    .into_iter()
+    .filter(|child| child.tag == "TabularSection")
+    .collect::<Vec<_>>();
+    let sections = parse_strict_tabular_sections(
+        collections.first()?,
+        false,
+        "ChartOfCalculationTypes",
+        owner_name,
+        CHART_OF_CALCULATION_TYPES_TABULAR_ATTRIBUTE_GROUP_UUID,
+        generic_sections,
+        type_index,
+        object_refs,
+        form_refs,
+        &mut child_uuids,
+        &mut root_names,
+    )?;
+    child_objects.extend(sections);
+    Some(child_objects)
 }
 
 fn parse_document_properties_from_text(
@@ -34632,7 +35210,7 @@ fn format_register_source_xml(
                     &mut properties,
                     "\t\t\t",
                     "DefaultListForm",
-                    Some(form_pair.default_list_form.as_str()),
+                    form_pair.default_list_form.as_deref(),
                 );
                 properties.push_str("\t\t\t<AuxiliaryListForm/>\r\n");
             }
@@ -34655,19 +35233,19 @@ fn format_register_source_xml(
                     &mut properties,
                     "\t\t\t",
                     "Schedule",
-                    Some(schedule.schedule.as_str()),
+                    schedule.schedule.as_deref(),
                 );
                 push_optional_text_element(
                     &mut properties,
                     "\t\t\t",
                     "ScheduleValue",
-                    Some(schedule.schedule_value.as_str()),
+                    schedule.schedule_value.as_deref(),
                 );
                 push_optional_text_element(
                     &mut properties,
                     "\t\t\t",
                     "ScheduleDate",
-                    Some(schedule.schedule_date.as_str()),
+                    schedule.schedule_date.as_deref(),
                 );
                 push_optional_text_element(
                     &mut properties,
@@ -35014,6 +35592,9 @@ fn format_chart_of_calculation_types_source_xml(
     }
 
     let mut children = String::new();
+    for child in &chart.child_objects {
+        push_metadata_child_object_xml(&mut children, child);
+    }
     for form in &chart.child_forms {
         children.push_str(&format!(
             "\t\t\t<Form>{}</Form>\r\n",
@@ -37049,10 +37630,19 @@ fn push_xr_localized_property_xml(
     xml.push_str(&format!("{indent}<xr:{name}>\r\n"));
     for (lang, content) in values {
         xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
-        xml.push_str(&format!(
-            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
-            escape_xml_element_text(lang)
-        ));
+        // An empty language code is written self-closed, like every other
+        // empty element the platform emits. Six `<v8:lang/>` in the whole
+        // stand and not one `<v8:lang></v8:lang>`; the only one in a metadata
+        // root is `uh` `ChartsOfAccounts/МСФО`, whose standard tabular section
+        // `ExtDimensionTypes` carries the synonym `{1,"","Виды субконто"}`.
+        if lang.is_empty() {
+            xml.push_str(&format!("{indent}\t\t<v8:lang/>\r\n"));
+        } else {
+            xml.push_str(&format!(
+                "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_element_text(lang)
+            ));
+        }
         xml.push_str(&format!(
             "{indent}\t\t<v8:content>{}</v8:content>\r\n",
             escape_xml_element_text(content)

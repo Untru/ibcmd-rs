@@ -238,7 +238,17 @@ impl FormAttributeAdditionalColumnsGroupSchema {
             return None;
         }
         let binding_kind = if target_arity == 1 {
-            if column_count != 0 || !binding.is_empty() {
+            // A group bound straight to the attribute carries columns just like
+            // every other binding kind; the column count was additionally
+            // pinned to zero, which refused the group whole and dropped it
+            // silently. Perepis of the eight stand corpora over every
+            // `<AdditionalColumns table="…">` whose table names an attribute
+            // and not one of its columns: 14 are written self-closed (no
+            // column) and 34 carry columns. The refusal cost 21 `uh` form
+            // bodies their whole `<Columns>` block, among them the sixteen
+            // `InformationRegisters/*/Forms/РедактированиеИстории` that declare
+            // one `ПериодСтрокой` column on their `НаборЗаписей` attribute.
+            if !binding.is_empty() {
                 return None;
             }
             FormAttributeAdditionalColumnsBindingKind::Attribute
