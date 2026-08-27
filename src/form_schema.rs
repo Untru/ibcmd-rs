@@ -348,6 +348,7 @@ pub(crate) enum FormPageXmlProperty {
     TitleFont,
     ToolTip,
     ToolTipRepresentation,
+    Shortcut,
     Width,
     Height,
     HorizontalStretch,
@@ -364,7 +365,6 @@ pub(crate) enum FormPageXmlProperty {
     VerticalAlign,
     ChildItemsWidth,
     ShowTitle,
-    BackColor,
 }
 
 pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
@@ -375,6 +375,15 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::TitleFont,
     FormPageXmlProperty::ToolTip,
     FormPageXmlProperty::ToolTipRepresentation,
+    // A page's `Shortcut` sits inside the ordered block, not behind it: over
+    // all eight native stand trees it trails `Title` (24) and `ToolTip` (1)
+    // and leads `Picture` (2), `Group` (1), `TitleDataPath` (6),
+    // `ExtendedTooltip` (24) and `ChildItems` (24), with no pair counted both
+    // ways.  The UT 11.5.27.75 census that first placed it saw neither the
+    // picture nor the group beside it, so it was written after the whole
+    // block.  It is never observed beside the geometry run, so opening the
+    // run is the earliest position the evidence allows.
+    FormPageXmlProperty::Shortcut,
     // A page's geometry sits behind its title block, not in front of it.  UT
     // 11.5.27.75 native tree, 7 016 `Page` instances: `Width` (57) trails
     // `Title` (57), `ToolTip` (6), `EnableContentChange` (4) and
@@ -436,7 +445,6 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::VerticalAlign,
     FormPageXmlProperty::ChildItemsWidth,
     FormPageXmlProperty::ShowTitle,
-    FormPageXmlProperty::BackColor,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -6555,15 +6563,21 @@ pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlPropert
     // `ChoiceFoldersAndItems`, `ContextMenu` and `ExtendedTooltip`.
     FormInputFieldTailXmlProperty::AllowInputEmptyMultipleValues,
     FormInputFieldTailXmlProperty::ListChoiceMode,
-    // `ShowCheckBoxesInDropList` trails `ListChoiceMode`, `ExtendedEdit`,
-    // `ClearButton` (2), `ChoiceButton`, `MaxWidth` (2), `AutoMaxWidth`,
-    // `Width`, `HorizontalStretch`, `TitleLocation` (2), `ToolTipRepresentation`
-    // and `DataPath` (2), and leads `ChooseType`, `TextEdit`, `ChoiceList`,
-    // `ContextMenu` (2), `ExtendedTooltip` (2) and `Events` (2), on the two
-    // native items that carry it.  It never shares an item with
-    // `AllowInputEmptyMultipleValues`, so their relative order is unobserved.
-    FormInputFieldTailXmlProperty::ShowCheckBoxesInDropList,
     FormInputFieldTailXmlProperty::ExtendedEditMultipleValues,
+    // `ShowCheckBoxesInDropList` trails `ListChoiceMode` (4),
+    // `ExtendedEditMultipleValues` (2), `ExtendedEdit` (2), `ClearButton` (6),
+    // `ChoiceButton` (3), `OpenButton` (2), `CreateButton` (1),
+    // `DropListButton` (1), `MaxWidth` (5), `AutoMaxWidth` (3), `Width` (3),
+    // `HorizontalStretch` (3), `Title` (3), `TitleLocation` (7),
+    // `ToolTipRepresentation` (2) and `DataPath` (8), and leads `ChooseType`
+    // (4), `TextEdit` (3), `InputHint` (3), `ChoiceList` (2), `ContextMenu`
+    // (8), `ExtendedTooltip` (8) and `Events` (8), over all eight native stand
+    // trees with no pair counted both ways.  The UT 11.5.27.75 census that
+    // first placed it saw neither of the two items that carry
+    // `ExtendedEditMultipleValues` beside it, so it took the slot ahead of it.
+    // It never shares an item with `AllowInputEmptyMultipleValues` or the two
+    // multiple-value paths, so those orders stay unobserved.
+    FormInputFieldTailXmlProperty::ShowCheckBoxesInDropList,
     // The two multiple-value bound paths trail `ExtendedEditMultipleValues`,
     // `ChoiceButton` and `DataPath` and precede `ContextMenu`, `ExtendedTooltip`
     // and `Events`, and the value path precedes the presentation path, on all 3

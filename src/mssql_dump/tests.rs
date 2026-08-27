@@ -67647,7 +67647,11 @@ fn form_table_visible_precedes_user_visible_and_title_location() {
 fn form_document_properties_trail_command_set_and_precede_show_title() {
     // Native document forms emit `CommandSet` then the `AutoTime`/
     // `UsePostingMode`/`RepostOnWrite` trio (238 co-occurrences), and place
-    // `ShowTitle` ahead of `UseForFoldersAndItems` (1).
+    // `ShowTitle` ahead of `UseForFoldersAndItems` (1).  `ShowTitle` itself is
+    // never observed beside the trio in any of the eight native stand trees,
+    // and it precedes `CollapseItemsByImportanceVariant` (3), which in turn
+    // precedes the trio (2 each) -- so the writer puts the two window switches
+    // ahead of the trio and this synthetic form sees `ShowTitle` there.
     let properties = FormBodyProperties {
         command_set_excluded_commands: vec!["Form.Command"],
         scaling_mode: Some("Normal"),
@@ -67677,10 +67681,10 @@ fn form_document_properties_trail_command_set_and_precede_show_title() {
             "<CommandBarLocation>Top</CommandBarLocation>",
             "<ScalingMode>Normal</ScalingMode>",
             "<CommandSet>",
+            "<ShowTitle>false</ShowTitle>",
             "<AutoTime>DontUse</AutoTime>",
             "<UsePostingMode>RegularPosting</UsePostingMode>",
             "<RepostOnWrite>true</RepostOnWrite>",
-            "<ShowTitle>false</ShowTitle>",
             "<UseForFoldersAndItems>Items</UseForFoldersAndItems>",
         ],
     );

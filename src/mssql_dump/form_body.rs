@@ -23743,30 +23743,9 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(conversations_representation)
         ));
     }
-    // `CollapseItemsByImportanceVariant` trails everything it is ever seen with
-    // except the collections: `AutoTitle` (26), `CommandBarLocation` (25),
-    // `Title` (23), `Customizable` (21), the spacing pair (20 each),
-    // `AutoSaveDataInSettings` (17), `WindowOpeningMode` (4), `VerticalScroll`
-    // (2), `Width` (2), `AutoURL` (2), `ConversationsRepresentation` (1),
-    // `HorizontalAlign` (1), `AutoFillCheck` (1) and `SaveWindowSettings` (1);
-    // it leads `UseForFoldersAndItems` (1) and every collection section, and no
-    // pair is observed in both directions in that (UT 11.5.27.75) corpus.
-    //
-    // SSL demo 3.1.12.297 is the only native form across five corpora that
-    // also carries `MobileDeviceCommandBarContent`
-    // (`Documents/_ДемоЗаказПокупателя`'s list form), and there it trails it
-    // rather than leading it -- the first observation of this particular
-    // pair, so it moves out from under the general "leads every collection"
-    // claim rather than contradicting an actually-measured direction.
     xml.push_str(&format_form_mobile_device_command_bar_content_xml(
         &properties.mobile_device_command_bar_content,
     ));
-    if let Some(value) = properties.collapse_items_by_importance_variant {
-        xml.push_str(&format!(
-            "\t<CollapseItemsByImportanceVariant>{}</CollapseItemsByImportanceVariant>\r\n",
-            escape_xml_text(value)
-        ));
-    }
     if !properties.command_set_excluded_commands.is_empty() {
         xml.push_str("\t<CommandSet>\r\n");
         for command in &properties.command_set_excluded_commands {
@@ -23777,17 +23756,44 @@ fn format_form_body_xml_with_dcs_profiles(
         }
         xml.push_str("\t</CommandSet>\r\n");
     }
-    // The document trio (`AutoTime`/`UsePostingMode`/`RepostOnWrite`) is always
-    // contiguous in the native tree and always follows `CommandSet` (238),
-    // `MobileDeviceCommandBarContent` (1), `CommandBarLocation` (14),
-    // `VerticalScroll` (20) and `Customizable` (2), with no counter-example.
-    append_form_document_properties_xml(&mut xml, properties);
     if properties.show_title == Some(false) {
         xml.push_str("\t<ShowTitle>false</ShowTitle>\r\n");
     }
     if properties.show_close_button == Some(false) {
         xml.push_str("\t<ShowCloseButton>false</ShowCloseButton>\r\n");
     }
+    // `CollapseItemsByImportanceVariant` trails everything it is ever seen with
+    // except the document trio and the collections: `AutoTitle` (66),
+    // `CommandBarLocation` (57), `Title` (54), `VerticalSpacing` (45),
+    // `Customizable` (44), `HorizontalSpacing` (43), `AutoSaveDataInSettings`
+    // (42), `WindowOpeningMode` (12), `VerticalScroll` (7), `Width` (7),
+    // `AutoURL` (7), `ConversationsRepresentation` (6), `AutoFillCheck` (4),
+    // `SaveWindowSettings` (4), `HorizontalAlign` (4), `CommandSet` (3),
+    // `MobileDeviceCommandBarContent` (3), `ShowTitle` (3), `ShowCloseButton`
+    // (2), `Group` (2), `VerticalAlign` (1) and `SaveDataInSettings` (1); it
+    // leads `AutoTime`, `UsePostingMode` and `RepostOnWrite` (2 each),
+    // `UseForFoldersAndItems` (2) and every collection section.  Census over
+    // all eight native stand trees, no pair counted both ways.  The UT
+    // 11.5.27.75 census that first placed it saw it beside neither
+    // `CommandSet` nor the two window switches, so it took the position ahead
+    // of the command set; it is written after all three.
+    //
+    // The two window switches in turn move ahead of the document trio, which
+    // they are never observed beside -- no native form in the eight trees
+    // carries both `ShowTitle`/`ShowCloseButton` and the trio, so that
+    // relative order is unmeasured either way, and only this arrangement
+    // leaves room for the collapse variant between them and the trio.
+    if let Some(value) = properties.collapse_items_by_importance_variant {
+        xml.push_str(&format!(
+            "\t<CollapseItemsByImportanceVariant>{}</CollapseItemsByImportanceVariant>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    // The document trio (`AutoTime`/`UsePostingMode`/`RepostOnWrite`) is always
+    // contiguous in the native tree and always follows `CommandSet` (238),
+    // `MobileDeviceCommandBarContent` (1), `CommandBarLocation` (14),
+    // `VerticalScroll` (20) and `Customizable` (2), with no counter-example.
+    append_form_document_properties_xml(&mut xml, properties);
     // `ShowTitle` precedes `UseForFoldersAndItems` in the native tree (1
     // co-occurrence, no counter-example).
     if let Some(value) = properties.use_for_folders_and_items {
@@ -25444,6 +25450,11 @@ pub(super) fn format_form_child_item_xml(
     // (2/2) and ahead of `Height` (2), `Width` (1), `EditMode` (1) and
     // `AutoMaxHeight` (1), never the reverse; both used to write it behind
     // their geometry.
+    // `HTMLDocumentField` carries it in the same slot, and used to write it
+    // behind its geometry too: over all eight native stand trees it trails
+    // `DataPath` (2), `Title` (2) and `TitleLocation` (2) and leads
+    // `ToolTipRepresentation` (1), `Width` (2), `Height` (1), `ContextMenu`
+    // (2), `Events` (2) and `ExtendedTooltip` (2), with no counter-example.
     if matches!(
         item.tag,
         "InputField"
@@ -25458,6 +25469,7 @@ pub(super) fn format_form_child_item_xml(
             | "ColumnGroup"
             | "TextDocumentField"
             | "FormattedDocumentField"
+            | "HTMLDocumentField"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -25756,8 +25768,9 @@ pub(super) fn format_form_child_item_xml(
     // geometry untouched.
     let graphical_schema_field_geometry_suppressed_by_parent_page =
         item.tag == "GraphicalSchemaField" && item.parent_child_items_width == Some("LeftWidest");
-    // `Page` and `Popup` write their width behind the title block, with the rest
-    // of their geometry (see the page order table and the popup run below).
+    // `Page`, `Popup` and `ButtonGroup` write their width behind the title
+    // block, with the rest of their geometry (see the page order table, the
+    // popup run below and the button-group header above).
     if !matches!(
         item.tag,
         "Table"
@@ -25767,6 +25780,7 @@ pub(super) fn format_form_child_item_xml(
             | "CommandBar"
             | "Page"
             | "Popup"
+            | "ButtonGroup"
     ) && !pages_geometry_after_title
         && !graphical_schema_field_geometry_suppressed_by_parent_page
         && let Some(width) = &item.width
@@ -25968,9 +25982,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(parameter)
         ));
     }
-    if item.tag == "Button" {
-        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
-    }
     if item.tag == "Button"
         && let Some(data_path) = &item.data_path
     {
@@ -25978,6 +25989,14 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
         ));
+    }
+    // A button's colour triple trails its `DataPath`: over all eight native
+    // stand trees the 2 buttons that carry both write `DataPath` first, and
+    // the same 2 put it ahead of `Font` as well.  The triple still trails
+    // `Type` (2 006), `CommandName` (2 006), `Visible` (215) and `Parameter`,
+    // and still leads `Font` (800) and `Picture` (77).
+    if item.tag == "Button" {
+        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
     }
     // A button's `Font` belongs in front of its `Picture`, not behind it: native
     // writes `Font` before `Picture` on all 13 buttons that carry both and never
@@ -26459,6 +26478,18 @@ pub(super) fn format_form_child_item_xml(
                 FormTooltipRepresentationXmlOrder::ButtonGroupHeader,
                 indent + 1,
             ));
+            // A `ButtonGroup` carries its width behind the title block, like
+            // the rest of its geometry: over all eight native stand trees the
+            // 2 groups that carry both write `Title` first, and `Width` leads
+            // `HorizontalStretch` (2), `ExtendedTooltip` (2) and `ChildItems`
+            // (2), with no pair counted both ways.  It used to be written by
+            // the shared geometry run, ahead of the title.
+            if let Some(width) = &item.width {
+                xml.push_str(&format!(
+                    "{tab}\t<Width>{}</Width>\r\n",
+                    escape_xml_text(width)
+                ));
+            }
         }
         if item.tag == "UsualGroup" {
             if let Some(horizontal_stretch) = item.horizontal_stretch {
@@ -26993,6 +27024,22 @@ pub(super) fn format_form_child_item_xml(
     // (29) trails `ShapeRepresentation` (5), `Shape` (1), `Representation`
     // (25), `Picture` (15) and `Title` (18) and leads `LocationInCommandBar`
     // (3) and `ExtendedTooltip` (29).  No pair is observed in both directions.
+    //
+    // `RepresentationInContextMenu` leads the whole shape run: over all eight
+    // native stand trees it precedes `ShapeRepresentation` on the 3 buttons
+    // that carry both and never follows it, and it never shares a button with
+    // `Shape` or `PictureLocation`.  It still trails `Type` (1 372),
+    // `CommandName` (1 372), `Representation` (184), `Title` (226),
+    // `ToolTipRepresentation` (14) and `Picture` (49), and leads
+    // `LocationInCommandBar` (463) and `ExtendedTooltip` (1 372).
+    if item.tag == "Button"
+        && let Some(representation) = item.representation_in_context_menu
+    {
+        xml.push_str(&format!(
+            "{tab}\t<RepresentationInContextMenu>{}</RepresentationInContextMenu>\r\n",
+            escape_xml_text(representation)
+        ));
+    }
     if item.tag == "Button"
         && let Some(shape) = item.shape
     {
@@ -27015,14 +27062,6 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<PictureLocation>{}</PictureLocation>\r\n",
             escape_xml_text(picture_location)
-        ));
-    }
-    if item.tag == "Button"
-        && let Some(representation) = item.representation_in_context_menu
-    {
-        xml.push_str(&format!(
-            "{tab}\t<RepresentationInContextMenu>{}</RepresentationInContextMenu>\r\n",
-            escape_xml_text(representation)
         ));
     }
     if item.tag == "CommandBar"
@@ -27175,6 +27214,7 @@ pub(super) fn format_form_child_item_xml(
             | "ColumnGroup"
             | "TextDocumentField"
             | "FormattedDocumentField"
+            | "HTMLDocumentField"
             | "Table"
             | "LabelDecoration"
             | "PictureDecoration"
@@ -27384,22 +27424,30 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
-    // A `Page` writes its `Shortcut` after `Title` and before `TitleDataPath` (1)
-    // and `ExtendedTooltip` (5), with no counter-example.
-    if item.tag == "Page"
-        && let Some(shortcut) = &item.item_shortcut
-    {
-        xml.push_str(&format!(
-            "{tab}\t<Shortcut>{}</Shortcut>\r\n",
-            escape_xml_text(shortcut)
-        ));
-    }
     if matches!(item.tag, "Page" | "UsualGroup")
         && let Some(title_data_path) = &item.title_data_path
     {
         xml.push_str(&format!(
             "{tab}\t<TitleDataPath>{}</TitleDataPath>\r\n",
             escape_xml_text(title_data_path)
+        ));
+    }
+    // A `Page`'s `BackColor` closes the run behind `TitleDataPath`, not with
+    // the rest of the page's ordered property block.  The UT 11.5.27.75
+    // census that put it there saw no page carrying both; over all eight
+    // native stand trees the pair is observed once, `TitleDataPath` first.
+    // Everything the ordered block writes still leads it -- `Title` (351),
+    // `Height` (77), `ShowTitle` (161), `Group` (201), `HorizontalStretch`
+    // (144), `VerticalStretch` (161), `HorizontalAlign` (125), `VerticalAlign`
+    // (68), the two spacings (62/82), `ToolTip` (37) and `Visible` (8) -- and
+    // it still leads `ScrollOnCompress` (70), `ExtendedTooltip` (411) and
+    // `ChildItems` (404), with no pair counted both ways.
+    if item.tag == "Page"
+        && let Some(back_color) = &item.back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BackColor>{}</BackColor>\r\n",
+            escape_xml_text(back_color)
         ));
     }
     // A `Page` closes its scalar run with `ScrollOnCompress`.  UT 11.5.27.75
@@ -27595,6 +27643,14 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
                     ));
                 }
             }
+            FormPageXmlProperty::Shortcut => {
+                if let Some(shortcut) = &item.item_shortcut {
+                    xml.push_str(&format!(
+                        "{tab}<Shortcut>{}</Shortcut>\r\n",
+                        escape_xml_text(shortcut)
+                    ));
+                }
+            }
             FormPageXmlProperty::Format => {
                 xml.push_str(&format_form_localized_section(
                     "Format",
@@ -27705,14 +27761,6 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
             FormPageXmlProperty::ShowTitle => {
                 if item.show_title == Some(false) {
                     xml.push_str(&format!("{tab}<ShowTitle>false</ShowTitle>\r\n"));
-                }
-            }
-            FormPageXmlProperty::BackColor => {
-                if let Some(back_color) = &item.back_color {
-                    xml.push_str(&format!(
-                        "{tab}<BackColor>{}</BackColor>\r\n",
-                        escape_xml_text(back_color)
-                    ));
                 }
             }
         }
