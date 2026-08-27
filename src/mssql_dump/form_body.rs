@@ -2372,9 +2372,36 @@ pub(super) fn extract_form_report_form_type(fields: &[&str]) -> Option<&'static 
     }
 }
 
+/// The report root's three view-mode properties ride with `<ReportFormType>`,
+/// and each is written at its own default when the root property bag declares
+/// no entry for it.
+///
+/// Both halves are measured over every native `Form.xml` of the eight stand
+/// corpora. The trio and `<ReportFormType>` are one block: 324 documents carry
+/// `<ReportFormType>`, all 324 carry `<AutoShowState>`, `<ReportResultViewMode>`
+/// and `<ViewModeApplicationOnSetReportResult>` as well, and no document
+/// carries any of the three without it. That is why all three are gated on the
+/// form type rather than only the first: outside a report root the bag has no
+/// entry either, and defaulting there would invent three elements on every
+/// ordinary form.
+///
+/// The default itself is what the platform writes when the entry is missing,
+/// not an assumption about a missing entry. ERP УХ 3.2.12.6 has 210 report
+/// roots; 25 of them omit at least one of the three keys from a bag that reads
+/// perfectly well and declares its own entry count -- 25 omit key `29`, 17 omit
+/// key `27`, 7 omit key `21` -- and the platform writes `Auto` on every one of
+/// the 49 omissions. Every root of the stand that writes a value other than
+/// `Auto` -- 23 `AutoShowState` (`DontShow`, `ShowOnComposition`) and 3
+/// `ReportResultViewMode` (`Compact`, `Default`) across ERP УХ, Документооборот
+/// КОРП, УТ, БСП демо and БСП базовая -- carries its key, so no observed
+/// non-default value rides on an absent entry.
+const FORM_REPORT_VIEW_MODE_DEFAULT: &str = "Auto";
+
 pub(super) fn extract_form_auto_show_state(fields: &[&str]) -> Option<&'static str> {
     extract_form_report_form_type(fields)?;
-    let value = form_root_property_bag_value(fields, "21")?;
+    let Some(value) = form_root_property_bag_entry(fields, "21")? else {
+        return Some(FORM_REPORT_VIEW_MODE_DEFAULT);
+    };
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
         value_fields.first().map(|field| field.trim()),
@@ -2389,7 +2416,10 @@ pub(super) fn extract_form_auto_show_state(fields: &[&str]) -> Option<&'static s
 }
 
 pub(super) fn extract_form_report_result_view_mode(fields: &[&str]) -> Option<&'static str> {
-    let value = form_root_property_bag_value(fields, "27")?;
+    extract_form_report_form_type(fields)?;
+    let Some(value) = form_root_property_bag_entry(fields, "27")? else {
+        return Some(FORM_REPORT_VIEW_MODE_DEFAULT);
+    };
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
         value_fields.first().map(|field| field.trim()),
@@ -2413,7 +2443,10 @@ pub(super) fn extract_form_report_result_view_mode(fields: &[&str]) -> Option<&'
 pub(super) fn extract_form_view_mode_application_on_set_report_result(
     fields: &[&str],
 ) -> Option<&'static str> {
-    let value = form_root_property_bag_value(fields, "29")?;
+    extract_form_report_form_type(fields)?;
+    let Some(value) = form_root_property_bag_entry(fields, "29")? else {
+        return Some(FORM_REPORT_VIEW_MODE_DEFAULT);
+    };
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
         value_fields.first().map(|field| field.trim()),
