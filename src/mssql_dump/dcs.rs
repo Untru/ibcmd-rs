@@ -1452,13 +1452,29 @@ fn indent_data_composition_settings(settings: &str) -> String {
     let mut offset = 0usize;
     for line in settings.split_inclusive('\n') {
         if !data_composition_offset_continues_character_data(&literal, offset) {
-            indented.push_str("\t\t");
+            for _ in 0..DCS_SETTINGS_INLINE_INDENT {
+                indented.push('\t');
+            }
         }
         indented.push_str(line);
         offset += line.len();
     }
     indented
 }
+
+/// Tabs [`indent_data_composition_settings`] shifts a rendered `Settings`
+/// document by, which is the whole of what the splice knows about where the
+/// fragment lands.
+const DCS_SETTINGS_INLINE_INDENT: usize = 2;
+
+/// 1-based depth of a rendered `Settings` document's own root element in the
+/// document it is spliced into.
+///
+/// The fragment's root is written at [`DCS_SETTINGS_INLINE_INDENT`] tabs, so
+/// it is that many elements deep plus itself: `DataCompositionSchema`(1) /
+/// `settingsVariant`(2) / `dcsset:settings`(3). Derived from the indent the
+/// splice actually applies rather than restated, so the two cannot drift.
+const DCS_SETTINGS_FRAGMENT_ROOT_DEPTH: usize = DCS_SETTINGS_INLINE_INDENT + 1;
 
 /// Byte ranges of the text runs that carry character data rather than
 /// pretty-printing whitespace.
@@ -1668,6 +1684,14 @@ struct DataCompositionXmlWriter<'a> {
     /// sit below those calls can see it without re-threading a parameter
     /// through every caller.
     mode: DataCompositionDocumentMode,
+    /// 1-based depth, inside the document being read, of the element a
+    /// namespace declaration minted right now would land on.
+    ///
+    /// A start tag is written before its frame is pushed, so the element is
+    /// one deeper than the stack; character data is written after, so the
+    /// element is the top of the stack. Set by the two write calls, read by
+    /// the QName resolvers below them.
+    declaring_depth: usize,
 }
 
 impl<'a> DataCompositionXmlWriter<'a> {
@@ -1685,6 +1709,7 @@ impl<'a> DataCompositionXmlWriter<'a> {
             element_stack: Vec::new(),
             object_refs,
             mode,
+            declaring_depth: 0,
         }
     }
 
@@ -1895,6 +1920,9 @@ impl<'a> DataCompositionXmlWriter<'a> {
         empty: bool,
         mode: &DataCompositionDocumentMode,
     ) -> Option<DcsWrittenStart> {
+        // The frame is pushed only after the start tag is written, so the
+        // element this tag opens sits one below the stack's own depth.
+        self.declaring_depth = self.element_stack.len().checked_add(1)?;
         let is_settings_root = matches!(mode, DataCompositionDocumentMode::Settings)
             && namespace == Some(DCS_SETTINGS_NS)
             && local == b"Settings";
@@ -2072,7 +2100,12 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 }
                 rendered.value
             } else {
-                canonical_data_composition_attr_value(&attr_name, &value, namespace)
+                canonical_data_composition_attr_value(
+                    &attr_name,
+                    &value,
+                    namespace,
+                    data_composition_default_namespace(reader).as_deref(),
+                )
             };
             rendered_attributes.push((attr_name, value));
         }
@@ -2144,15 +2177,23 @@ impl<'a> DataCompositionXmlWriter<'a> {
         event: &quick_xml::events::BytesText<'_>,
         mode: &DataCompositionDocumentMode,
     ) -> Option<()> {
+        // Character data is written while its own element is still open, so
+        // the element that would carry a declaration is the stack's top.
+        self.declaring_depth = self.element_stack.len();
         let text = std::str::from_utf8(event.as_ref()).ok()?;
         let is_qname_text = self.element_stack.last().is_some_and(|frame| {
             (frame.namespace.as_deref() == Some(DATA_CORE_NS)
                 && matches!(frame.local.as_slice(), b"Type" | b"TypeSet"))
-                // A `ListSettings` child spells a type as a settings element
-                // carrying `xsi:type="v8:Type"`, so the element's own name is
-                // not what makes its body a QName.
-                || (*mode == DataCompositionDocumentMode::FormListSettingsChild
-                    && frame.is_data_core_type_value)
+                // A settings element carrying `xsi:type="v8:Type"` holds a
+                // type QName just as a `{data/core}Type` element does, so the
+                // element's own name is not what makes its body one. A
+                // `ListSettings` child spells a type this way and so does a
+                // standalone `Settings` document's `dcscor:value`.
+                || (matches!(
+                    *mode,
+                    DataCompositionDocumentMode::FormListSettingsChild
+                        | DataCompositionDocumentMode::Settings
+                ) && frame.is_data_core_type_value)
         });
         if is_qname_text {
             let value = text.trim();
@@ -2177,6 +2218,48 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 let value_start = text.find(value)?;
                 self.output.push_str(&text[..value_start]);
                 self.output.push_str(&escape_xml_text(&rendered.value));
+                self.output.push_str(&text[value_start + value.len()..]);
+                return Some(());
+            }
+            // The type QName names a namespace no root declaration covers.
+            // Storage declares it on the element itself and spells the body
+            // against that declaration -- `Reports/ВедомостьПоНМА_МУ/
+            // Templates/ОсновнаяСхемаКомпоновкиДанных` stores `<dcscor:value
+            // xmlns:d4p1="http://v8.1c.ru/8.2/data/types" xsi:type="v8:Type">
+            // d4p1:Undefined</dcscor:value>` -- and the platform's own export
+            // does the same, renumbering the prefix to the element's depth in
+            // the document the fragment lands in
+            // (`xmlns:d6p1`/`d6p1:Undefined`). Dropping the declaration and
+            // copying the body through left a prefix nothing declared.
+            if *mode == DataCompositionDocumentMode::Settings
+                && !value.is_empty()
+                && let Some(expanded) = resolve_data_composition_qname(reader, value)
+                && let Some(uri) = expanded.namespace.as_deref()
+                && let Ok(uri) = std::str::from_utf8(uri)
+            {
+                let declared = self.output_prefix_for_namespace(uri, &[]);
+                let prefix = match declared {
+                    Some(prefix) => prefix,
+                    None => {
+                        let prefix = self.settings_text_scope_prefix()?;
+                        let mut minted = Vec::new();
+                        self.push_dynamic_namespace(&mut minted, prefix.clone(), uri.to_string())?;
+                        let offset = self.element_stack.last()?.output_namespace_offset;
+                        self.output.insert_str(
+                            offset,
+                            &format!(" xmlns:{prefix}=\"{}\"", escape_xml_text(uri)),
+                        );
+                        self.element_stack
+                            .last_mut()?
+                            .dynamic_namespaces
+                            .extend(minted);
+                        prefix
+                    }
+                };
+                let value_start = text.find(value)?;
+                self.output.push_str(&text[..value_start]);
+                self.output
+                    .push_str(&escape_xml_text(&format!("{prefix}:{}", expanded.local)));
                 self.output.push_str(&text[value_start + value.len()..]);
                 return Some(());
             }
@@ -2467,7 +2550,33 @@ impl<'a> DataCompositionXmlWriter<'a> {
             Some(DATA_CORE_NS)
         } else if value == "Field" {
             Some(DCS_CORE_NS)
-        } else if is_dcs_settings_xsi_type(value) {
+        } else if resolve_data_composition_qname(reader, value)
+            .and_then(|expanded| expanded.namespace)
+            .as_deref()
+            == Some(DCS_SETTINGS_NS)
+        {
+            // An unprefixed `xsi:type` names a type in the default namespace
+            // its own element resolves through, and the platform spells it
+            // with that namespace's prefix. The name table this used to
+            // consult was that measurement written out by hand, and it was
+            // short: `Reports/ПлатежныйКалендарьУХ/Templates/
+            // ОсновнаяСхемаКомпоновкиДанных` stores
+            // `<dcscor:value xsi:type="DataCompositionResourcesPlacementInChart">`
+            // under the settings default namespace and the platform exports
+            // `xsi:type="dcsset:DataCompositionResourcesPlacementInChart"`,
+            // while the table -- carrying its sibling
+            // `DataCompositionResourcesPlacement` but not it -- fell through
+            // to the element's own namespace and wrote `dcscor:`.
+            //
+            // Measured by pairing storage against publication over every DCS
+            // schema template of Документооборот КОРП 3.0.21.3: 100 storage
+            // elements, 438 documents, 9 415 unprefixed `xsi:type`
+            // occurrences over four distinct default namespaces (settings,
+            // core, schema, area-template). Every one is published with the
+            // prefix of the default namespace in scope, with no exception --
+            // including `Field`, which the corpus publishes as both
+            // `dcscor:Field` (994) and `dcsat:Field` (114) and which a
+            // name-keyed table therefore cannot spell at all.
             Some(DCS_SETTINGS_NS)
         } else if matches!(element_namespace, Some(DCS_CORE_NS | DCS_SETTINGS_NS)) {
             element_namespace
@@ -2662,7 +2771,59 @@ impl<'a> DataCompositionXmlWriter<'a> {
         )
     }
 
+    /// The generated prefix for a namespace declared on the element whose
+    /// character data is being written, numbered by that element's depth in
+    /// the document the settings fragment is spliced into.
+    ///
+    /// The element is already on the stack when its text is written, so its
+    /// depth inside the fragment is `element_stack.len()`, and the fragment's
+    /// own root sits at [`DCS_SETTINGS_FRAGMENT_ROOT_DEPTH`].
+    ///
+    /// **Corpus fact.** Over the `Templates/*/Ext/Template.xml` trees of ERP
+    /// УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП demo/base 3.1.12.297,
+    /// Документооборот КОРП 3.0.21.3, MDM_Management, Web_Service and WMS5,
+    /// all 15 195 published `dNpM` declarations carry `N` equal to the
+    /// 1-based depth of the element that declares them, with no exception --
+    /// across all seven namespaces that ever take a generated prefix there
+    /// (current-config 10 764, web colours 2 688, style 757, enterprise 634,
+    /// chart 210, windows colours 107, `8.2/data/types` 35).
+    fn settings_text_scope_prefix(&self) -> Option<String> {
+        Some(format!("d{}p1", self.spliced_declaring_depth()?))
+    }
+
+    /// The depth [`settings_text_scope_prefix`] numbers by, in the document
+    /// a rendered `Settings` fragment is spliced into: the fragment's own
+    /// root sits at [`DCS_SETTINGS_FRAGMENT_ROOT_DEPTH`], and the declaring
+    /// element is `declaring_depth - 1` elements below it.
+    ///
+    /// `None` for every other mode: only a mode whose fragment lands at a
+    /// depth the splice itself fixes can say what that depth is.
+    fn spliced_declaring_depth(&self) -> Option<usize> {
+        (self.mode == DataCompositionDocumentMode::Settings)
+            .then(|| {
+                DCS_SETTINGS_FRAGMENT_ROOT_DEPTH
+                    .checked_add(self.declaring_depth)?
+                    .checked_sub(1)
+            })
+            .flatten()
+    }
+
     fn scope_prefix(&self, base: usize) -> String {
+        // The `base` tables the callers carry are 1-based depths written out
+        // by hand, one per shape, plus a `nestedSchema` term that adds the
+        // two elements each nesting level inserts. Where this writer owns
+        // the splice it reads the depth off its own stack instead: over the
+        // `Templates/*/Ext/Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ
+        // 11.5.27.75, БСП demo/base 3.1.12.297, Документооборот КОРП
+        // 3.0.21.3, MDM_Management, Web_Service and WMS5, all 15 195
+        // published `dNpM` declarations carry `N` equal to the 1-based depth
+        // of the element declaring them, with no exception -- and the tables
+        // are short of one shape: `dcsset:conditionalAppearance/dcsset:item/
+        // dcsset:filter/dcsset:item/dcsset:right` is depth eight, which
+        // `enterprise_prefix` spelled `d5p1`.
+        if let Some(depth) = self.spliced_declaring_depth() {
+            return format!("d{depth}p1");
+        }
         let nested_schema_depth = self
             .element_stack
             .iter()
@@ -2779,6 +2940,12 @@ fn resolve_data_composition_qname(
         namespace,
         local: std::str::from_utf8(local.as_ref()).ok()?.to_string(),
     })
+}
+
+/// The default namespace currently in scope, which is what an unprefixed
+/// QName in this document resolves through.
+fn data_composition_default_namespace(reader: &NsReader<&[u8]>) -> Option<Vec<u8>> {
+    resolve_data_composition_qname(reader, "x").and_then(|expanded| expanded.namespace)
 }
 
 fn event_declares_namespace(event: &quick_xml::events::BytesStart<'_>, namespace: &[u8]) -> bool {
@@ -3440,6 +3607,7 @@ fn canonical_data_composition_attr_value(
     attr_name: &str,
     value: &str,
     element_namespace: Option<&[u8]>,
+    default_namespace: Option<&[u8]>,
 ) -> String {
     if attr_name != "xsi:type" {
         return value.to_string();
@@ -3452,7 +3620,12 @@ fn canonical_data_composition_attr_value(
         "LocalStringType" => "v8:LocalStringType".to_string(),
         "Field" => "dcscor:Field".to_string(),
         _ if is_data_core_xsi_type(suffix) => format!("v8:{suffix}"),
-        _ if is_dcs_settings_xsi_type(suffix) => format!("dcsset:{suffix}"),
+        // Same measurement as `render_xsi_type`'s settings arm: an
+        // unprefixed `xsi:type` is spelled with the prefix of the default
+        // namespace its own element resolves through.
+        _ if !value.contains(':') && default_namespace == Some(DCS_SETTINGS_NS) => {
+            format!("dcsset:{value}")
+        }
         _ if element_namespace == Some(DCS_CORE_NS) && !value.contains(':') => {
             format!("dcscor:{value}")
         }
@@ -3477,39 +3650,6 @@ fn canonical_data_composition_picture_ref(reader: &NsReader<&[u8]>, value: &str)
 
 fn is_data_core_xsi_type(value: &str) -> bool {
     matches!(value, "StandardPeriod" | "StandardPeriodVariant")
-}
-
-fn is_dcs_settings_xsi_type(value: &str) -> bool {
-    matches!(
-        value,
-        "DataCompositionAttributesPlacement"
-            | "DataCompositionChartLegendPlacement"
-            | "DataCompositionFixation"
-            | "DataCompositionGroupFieldsPlacement"
-            | "DataCompositionGroupPlacement"
-            | "DataCompositionGroupTemplateType"
-            | "DataCompositionGroupUseVariant"
-            | "DataCompositionPictureOutputType"
-            | "DataCompositionResourcesAutoPosition"
-            | "DataCompositionResourcesPlacement"
-            | "DataCompositionTextOutputType"
-            | "FilterItemComparison"
-            | "FilterItemGroup"
-            | "GroupItemAuto"
-            | "GroupItemField"
-            | "OrderItemAuto"
-            | "OrderItemField"
-            | "SelectedItemAuto"
-            | "SelectedItemField"
-            | "SelectedItemFolder"
-            | "SettingsParameterValue"
-            | "StructureItemChart"
-            | "StructureItemGroup"
-            | "StructureItemNestedObject"
-            | "StructureItemTable"
-            | "UserFieldCase"
-            | "UserFieldExpression"
-    )
 }
 
 #[cfg(test)]
@@ -5403,6 +5543,112 @@ mod tests {
                 canonical.as_str().contains(expected),
                 "the unowned child must survive the rewrite verbatim: {unknown} -> {}",
                 canonical.as_str()
+            );
+        }
+    }
+
+    /// A settings value whose type QName names the one namespace no root
+    /// declaration covers keeps a generated prefix, renumbered from the
+    /// storage document's own depth to the depth its element sits at in the
+    /// document the fragment is spliced into.
+    ///
+    /// This is `Reports/ВедомостьПоНМА_МУ/Templates/
+    /// ОсновнаяСхемаКомпоновкиДанных` of ERP УХ 3.2.12.6 verbatim: storage
+    /// declares `xmlns:d4p1="http://v8.1c.ru/8.2/data/types"` on the
+    /// `dcscor:value` itself -- depth four of the standalone `Settings`
+    /// document -- and the platform publishes `xmlns:d6p1`/`d6p1:Undefined`
+    /// at `DataCompositionSchema`/`settingsVariant`/`dcsset:settings`/
+    /// `dcsset:dataParameters`/`dcscor:item`/`dcscor:value`, depth six.
+    ///
+    /// The whole corpus agrees on the rule: over the `Templates/*/Ext/
+    /// Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75, БСП
+    /// demo/base 3.1.12.297, Документооборот КОРП 3.0.21.3, MDM_Management,
+    /// Web_Service and WMS5 all 15 195 published `dNpM` declarations carry
+    /// `N` equal to the 1-based depth of the element declaring them, and the
+    /// 35 `8.2/data/types` ones split exactly two ways -- 30 at
+    /// `DataCompositionSchema/parameter/value` (`d3p1`) and five at the
+    /// `dcsset:dataParameters` position above (`d6p1`).
+    #[test]
+    fn a_settings_type_value_mints_its_prefix_by_the_spliced_depth() {
+        let settings = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+            "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\n",
+            "\t<dataParameters>\n",
+            "\t\t<dcscor:item xsi:type=\"SettingsParameterValue\">\n",
+            "\t\t\t<dcscor:use>false</dcscor:use>\n",
+            "\t\t\t<dcscor:parameter>Тип</dcscor:parameter>\n",
+            "\t\t\t<dcscor:value xmlns:d4p1=\"http://v8.1c.ru/8.2/data/types\" ",
+            "xsi:type=\"v8:Type\">d4p1:Undefined</dcscor:value>\n",
+            "\t\t</dcscor:item>\n",
+            "\t</dataParameters>\n",
+            "</Settings>"
+        );
+        let rendered = transliterate_data_composition_settings_document(settings, &BTreeMap::new())
+            .expect("a settings document carrying a type value must transliterate");
+        assert!(
+            rendered.contains(concat!(
+                "<dcscor:value xmlns:d6p1=\"http://v8.1c.ru/8.2/data/types\" ",
+                "xsi:type=\"v8:Type\">d6p1:Undefined</dcscor:value>"
+            )),
+            "the declaration must be kept and renumbered by depth: {rendered}"
+        );
+    }
+
+    /// An unprefixed `xsi:type` is spelled with the prefix of the default
+    /// namespace its own element resolves through, whatever the element's own
+    /// namespace is.
+    ///
+    /// The first row is `Reports/ПлатежныйКалендарьУХ/Templates/
+    /// ОсновнаяСхемаКомпоновкиДанных` of ERP УХ 3.2.12.6 verbatim: a
+    /// `dcscor:value` under the settings default namespace, whose type the
+    /// platform publishes as `dcsset:`. The second holds the other direction
+    /// -- the same element name under the core default namespace keeps
+    /// `dcscor:` -- so what decides is the default declaration and not the
+    /// element.
+    ///
+    /// Measured by pairing storage against publication over every DCS schema
+    /// template of Документооборот КОРП 3.0.21.3: 438 storage documents,
+    /// 9 415 unprefixed `xsi:type` occurrences over four default namespaces,
+    /// no exception.
+    #[test]
+    fn an_unprefixed_xsi_type_takes_the_default_namespaces_prefix() {
+        for (default_namespace, expected) in [
+            (
+                DCS_SETTINGS_NS,
+                "dcsset:DataCompositionResourcesPlacementInChart",
+            ),
+            (
+                DCS_CORE_NS,
+                "dcscor:DataCompositionResourcesPlacementInChart",
+            ),
+        ] {
+            let settings = format!(
+                concat!(
+                    "<Settings xmlns=\"{}\" ",
+                    "xmlns:dcscor=\"{}\" ",
+                    "xmlns:xsi=\"{}\">\n",
+                    "\t<outputParameters xmlns=\"{}\">\n",
+                    "\t\t<dcscor:item xsi:type=\"SettingsParameterValue\">\n",
+                    "\t\t\t<dcscor:parameter>Р</dcscor:parameter>\n",
+                    "\t\t\t<dcscor:value xsi:type=",
+                    "\"DataCompositionResourcesPlacementInChart\">Series</dcscor:value>\n",
+                    "\t\t</dcscor:item>\n",
+                    "\t</outputParameters>\n",
+                    "</Settings>"
+                ),
+                std::str::from_utf8(DCS_SETTINGS_NS).unwrap(),
+                std::str::from_utf8(DCS_CORE_NS).unwrap(),
+                std::str::from_utf8(XSI_NS).unwrap(),
+                std::str::from_utf8(default_namespace).unwrap(),
+            );
+            let rendered =
+                transliterate_data_composition_settings_document(&settings, &BTreeMap::new())
+                    .expect("a settings document carrying a chart placement must transliterate");
+            assert!(
+                rendered.contains(&format!("<dcscor:value xsi:type=\"{expected}\">Series")),
+                "the type must take the default namespace's prefix: {rendered}"
             );
         }
     }

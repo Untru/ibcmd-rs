@@ -778,6 +778,20 @@ pub(super) struct MoxelDrawingMembers {
     /// order. Same container the cell record uses (see `MoxelCell::text`);
     /// a bilingual drawing publishes one `v8:item` per configured language.
     pub(super) text: Vec<MoxelLocalizedValue>,
+    /// Whether the record carries the text member at all, which is a
+    /// different question from whether that member has any language in it:
+    /// a declared-but-empty container publishes `<text/>`.
+    ///
+    /// Evidence: pairing every stored drawing record of the ERP УХ 3.2.12.6
+    /// templates whose storage this wave extracted against the published
+    /// `<drawing>` block carrying its `<id>` -- 900 drawings paired -- splits
+    /// three ways with no overlap. 801 records whose mask leaves bit 4 clear
+    /// publish no `<text>` at all; 53 whose container is the declared-empty
+    /// `{1,0}` publish `<text/>`; 7 whose container carries languages publish
+    /// them. (The 19 records whose container is a parameter -- a sole item
+    /// with an empty language -- publish `<parameter>` and no `<text>`, which
+    /// is the case this reader already separates.)
+    pub(super) text_present: bool,
     pub(super) parameter: Option<String>,
     pub(super) value: Option<String>,
     pub(super) detail_parameter: Option<String>,
@@ -965,6 +979,22 @@ pub(super) struct MoxelPicture {
     /// The record's seventh member, which decides whether the published element
     /// carries `t="false"` at all.
     pub(super) transparency: usize,
+    /// The record's fifth and sixth members: the coordinates of the pixel whose
+    /// colour the picture is drawn transparent in, or `None` for the `-1,-1`
+    /// pair that names no pixel.
+    ///
+    /// Evidence: pairing every stored picture record of the ERP УХ 3.2.12.6
+    /// templates whose storage this wave extracted with the `<picture>` element
+    /// that publishes it splits 375 records three ways with no exception --
+    /// 365 store `0` with `-1,-1` and publish `t="false"`; nine store `1` with
+    /// a real coordinate pair and publish `tx="…" ty="…"` and no `t`
+    /// (`Documents/ЗаявлениеВФССОВозмещенииРасходовНаПогребение/Templates/
+    /// ЗаявлениеВФССПогребение_2012` carries two of them, `185,70` and
+    /// `84,48`); and 1С:УТ 11.5.27.75's `DataProcessors/ПроверкаКонтрагента/
+    /// Templates/ФакторыРиска` stores `1` with `-1,-1` and publishes neither
+    /// attribute. So the flag decides `t` and the coordinate pair decides
+    /// `tx`/`ty`, independently.
+    pub(super) transparent_pixel: Option<(i64, i64)>,
 }
 
 #[derive(Clone, Default)]
@@ -994,6 +1024,17 @@ pub(super) struct MoxelPrintSettings {
     pub(super) page_height: Option<String>,
     pub(super) duplex_type: Option<&'static str>,
     pub(super) page_placement_alternation: Option<&'static str>,
+    /// Key 21, published as `<firstPageNumber>` behind
+    /// `<pagePlacementAlternation>`, exactly where its key sits in the record.
+    ///
+    /// Evidence: `Documents/РегистрацияДефекта/Templates/
+    /// ПФ_MXL_ДефектнаяВедомость` of ERP УХ 3.2.12.6 stores fourteen keys --
+    /// `1,2,5,6,7,8,9,10,11,12,14,19,20,21` -- and the platform publishes
+    /// exactly fourteen members, the last of them
+    /// `<firstPageNumber>0</firstPageNumber>`. The key was outside this
+    /// reader's domain, and a key outside the domain refuses the whole record
+    /// by design, so the document lost its entire `<printSettings>`.
+    pub(super) first_page_number: Option<usize>,
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -2230,7 +2271,27 @@ fn parse_moxel_column_sets_with_source_format_order(
         else {
             continue;
         };
-        if additional_count > 64 || index + 3 + additional_count >= fields.len() {
+        // The declared count's only bound is the body's own length: the
+        // additional sets have to fit behind it. The flat 64 this used to
+        // carry sat below real documents and cost them their whole column
+        // table -- ERP УХ 3.2.12.6 declares 66 additional sets in
+        // `Reports/РегламентированныйОтчетАкцизыПриложение7/Templates/
+        // ФормаОтчета2005Кв1_Раздел2`, 74 in
+        // `Reports/РегламентированныйОтчетСтатистикаФорма30/Templates/
+        // ФормаОтчета2019Кв1_Раздел6`, 74 in
+        // `Reports/ОценкаРискаНалоговойПроверки/Templates/ПечатнаяФорма`, 76
+        // in `.../ФормаОтчета2019Кв1_Раздел3` and 119 in
+        // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета`. With
+        // the table refused each of the five fell back to a synthetic default
+        // set, whose `<size>` is the sheet's column count rather than the
+        // set's own declared one.
+        let Some(last) = index
+            .checked_add(3)
+            .and_then(|start| start.checked_add(additional_count))
+        else {
+            continue;
+        };
+        if last >= fields.len() {
             continue;
         }
 
@@ -5014,6 +5075,17 @@ pub(super) fn parse_moxel_picture(
             .get(MOXEL_PICTURE_TRANSPARENCY_FIELD)
             .and_then(|field| field.trim().parse::<usize>().ok())
             .unwrap_or(0),
+        // See `MoxelPicture::transparent_pixel`. The walk above already
+        // required both members to parse as integers.
+        transparent_pixel: fields
+            .get(4)
+            .and_then(|field| field.trim().parse::<i64>().ok())
+            .zip(
+                fields
+                    .get(5)
+                    .and_then(|field| field.trim().parse::<i64>().ok()),
+            )
+            .filter(|(x, y)| *x >= 0 && *y >= 0),
     })
 }
 
@@ -5101,13 +5173,32 @@ fn parse_moxel_drawing_format_record(text: &str) -> Option<(usize, MoxelDrawingM
             Some(first) if first.lang.is_empty() => {
                 members.parameter = Some(first.content.clone());
             }
-            Some(_) => members.text = localized,
-            None => {}
+            Some(_) => {
+                members.text = localized;
+                members.text_present = true;
+            }
+            // A declared container with no language in it is still the text
+            // member -- see `MoxelDrawingMembers::text_present`.
+            None => members.text_present = true,
         }
-        if fields.get(cursor + 1)?.trim() != "0" {
-            return None;
+        cursor += 1;
+        // One more slot may follow the container, and the record's own length
+        // is what says whether it does. Of the 79 paired drawings whose mask
+        // sets bit 4, 76 carry a trailing `"0"` here and three do not --
+        // `Reports/РегламентированныйОтчетЕдиныйНалогНаВмененныйДоход/
+        // Templates/ФормаОтчета2012Кв1_Раздел2` and both
+        // `Reports/РегламентированныйОтчетПрибыль/Templates/
+        // ФормаОтчета20{15Кв1,16Кв4}_Лист02_6б` store
+        // `{16,<index>,{1,2,{"ru",…},{"en",…}}}` -- and the platform publishes
+        // the very same fifteen elements, in the same order, for both
+        // spellings. Demanding the slot cost those three documents their
+        // whole `Text` drawing.
+        if fields.len() == cursor.checked_add(1)? {
+            if fields.get(cursor)?.trim() != "0" {
+                return None;
+            }
+            cursor += 1;
         }
-        cursor += 2;
     }
     (cursor == fields.len()).then_some((format_index, members))
 }
@@ -6116,23 +6207,39 @@ fn parse_moxel_chart_color(text: &str) -> Option<String> {
 }
 
 /// `ttlBorder`/`lgBorder`/`chBorder`'s own record: `{3,0,{0},<style>,<width>,
-/// 0,48312c09-257f-4b29-b280-284dd89efc1e}`, where `<style>` is `0` for
-/// `WithoutBorder` or `1` for `Single` and `<width>` is the plain integer the
-/// XML publishes as the `width` attribute. The trailing uuid is the same
-/// `parse_moxel_chart_color`'s 7-field branch already names
-/// `style:BorderColor`, but that is the *adjacent*
-/// `ttlBorderColor`/`lgBorderColor`/`chBorderColor` slot's own value, not
-/// this one's -- the two are independent tokens sitting next to each other.
+/// 0,<style item>}`, where `<style>` is `0` for `WithoutBorder` or `1` for
+/// `Single` and `<width>` is the plain integer the XML publishes as the
+/// `width` attribute.
+///
+/// The seventh member is a style-item identifier -- the same slot
+/// `parse_moxel_chart_color`'s 7-field branch reads as the record's style
+/// colour -- and the `<...Border>` element publishes nothing from it: the
+/// colour it would name is written by the *adjacent*
+/// `ttlBorderColor`/`lgBorderColor`/`chBorderColor` slot, an independent
+/// token sitting next to this one. This reader used to demand one particular
+/// identifier there and refused the whole chart otherwise, which is what
+/// cost Документооборот КОРП 3.0.21.3 both of its `GanttChart` templates:
+/// `Reports/ДлительностьОтложенногоОбновления/Templates/ДиаграммаГанта` and
+/// `Reports/АнализЖурналаРегистрации/Templates/
+/// ПродолжительностьРаботыРегламентныхЗаданий` store their `chBorder` as
+/// `{3,0,{0},1,1,0,00000000-0000-0000-0000-000000000000}` and both publish
+/// `<d3p1:chBorder width="1"><v8ui:style xsi:type="v8ui:ControlBorderType">
+/// Single</v8ui:style></d3p1:chBorder>` -- the same two-member publication
+/// `{3,0,{0},1,1,0,48312c09-…}` produces in the `labelsBorder` slot of those
+/// same two documents and six more times in
+/// `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ`. Pairing every
+/// stored 7-member `{3,0,{0},…}` record of the Документооборот templates
+/// that publish a chart border against their published `width`/`style`
+/// leaves the seventh member naming nothing either way, so what is required
+/// here is its shape, not its value.
 fn parse_moxel_chart_border(text: &str) -> Option<MoxelChartBorder> {
-    const BORDER_LINE_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
-
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() != 7
         || fields.first()?.trim() != "3"
         || fields.get(1)?.trim() != "0"
         || compact_moxel_chart_token(fields.get(2)?) != "{0}"
         || fields.get(5)?.trim() != "0"
-        || !fields.get(6)?.trim().eq_ignore_ascii_case(BORDER_LINE_UUID)
+        || parse_uuid_field(fields.get(6)?).is_none()
     {
         return None;
     }
@@ -6916,9 +7023,25 @@ pub(super) fn parse_moxel_value_type(
         "D" if payload.len() == 1 => Some(MoxelValueType::Date {
             fractions: "DateTime",
         }),
-        "D" if payload.len() == 2 && unquote_moxel_string(payload.get(1)?)? == "D" => {
-            Some(MoxelValueType::Date { fractions: "Date" })
-        }
+        // The qualified date descriptor names its own fraction: `"D"` is the
+        // date half, `"T"` the time half.
+        //
+        // Evidence: `Reports/РегламентированноеУведомлениеРегистрацияККТ/
+        // Templates/Раздел4_2023` of ERP УХ 3.2.12.6 stores exactly five
+        // `Pattern` entries -- `{"S",1,1}`, `{"S",8,1}`, `{"D","D"}`,
+        // `{"D","T"}`, `{"S",10,1}` -- and publishes exactly five distinct
+        // `<valueType>` blocks, one per entry, among them
+        // `<v8:DateFractions>Date</v8:DateFractions>` and
+        // `<v8:DateFractions>Time</v8:DateFractions>`. `Раздел1_2023_2` of the
+        // same report pairs the same way over its own five entries.
+        // Refusing `"T"` emptied the whole table (one unreadable descriptor
+        // takes it down by design), so all four documents that carry the
+        // fraction lost every `<valueType>` they publish.
+        "D" if payload.len() == 2 => match unquote_moxel_string(payload.get(1)?)?.as_str() {
+            "D" => Some(MoxelValueType::Date { fractions: "Date" }),
+            "T" => Some(MoxelValueType::Date { fractions: "Time" }),
+            _ => None,
+        },
         "#" if payload.len() == 2 => {
             let uuid = parse_uuid_field(payload.get(1)?.trim())?;
             Some(match moxel_config_type_ref(&uuid, generated_types) {
@@ -7099,14 +7222,19 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if count == 0 || count > 20 || fields.len() != count * 2 + 2 {
+    // The declared count is bounded by the record's own length and, below, by
+    // the key domain itself: every key has to be in it and no key may repeat,
+    // so a record can never name more members than the domain has. The flat 20
+    // this used to carry stopped being that bound the moment key 21 joined the
+    // domain.
+    if count == 0 || fields.len() != count.checked_mul(2)?.checked_add(2)? {
         return None;
     }
     let mut settings = MoxelPrintSettings::default();
     let mut seen_keys = BTreeSet::new();
     for pair in fields[2..].chunks_exact(2) {
         let key = pair.first()?.trim().parse::<usize>().ok()?;
-        if !matches!(key, 0..=17 | 19 | 20) || !seen_keys.insert(key) {
+        if !matches!(key, 0..=17 | 19 | 20 | 21) || !seen_keys.insert(key) {
             return None;
         }
         let value = parse_moxel_print_settings_value(pair.get(1)?)?;
@@ -7140,6 +7268,7 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
                 settings.page_placement_alternation =
                     Some(moxel_page_placement_alternation(value.as_usize()?)?);
             }
+            21 => settings.first_page_number = Some(value.as_usize()?),
             _ => return None,
         }
     }
@@ -9279,6 +9408,12 @@ pub(super) fn moxel_page_orientation(value: usize) -> Option<&'static str> {
 pub(super) fn moxel_duplex_type(value: usize) -> Option<&'static str> {
     match value {
         1 => Some("None"),
+        // Evidence: `Reports/КонтрольПлатежаНаСоответствие275ФЗ/Templates/
+        // СоставКонтролей` of ERP УХ 3.2.12.6 stores `2` at key 19 and the
+        // platform publishes `<duplexType>FlipPagesLeft</duplexType>`. The
+        // code was outside this table, and an unspellable member refuses the
+        // whole record, so the document lost its entire `<printSettings>`.
+        2 => Some("FlipPagesLeft"),
         4 => Some("UsePrinterSettings"),
         _ => None,
     }
@@ -11303,6 +11438,7 @@ pub(super) fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPr
         "pagePlacementAlternation",
         settings.page_placement_alternation,
     );
+    push_moxel_format_usize(xml, "firstPageNumber", settings.first_page_number);
     xml.push_str("\t</printSettings>\r\n");
 }
 
@@ -11328,6 +11464,7 @@ impl MoxelPrintSettings {
             && self.page_height.is_none()
             && self.duplex_type.is_none()
             && self.page_placement_alternation.is_none()
+            && self.first_page_number.is_none()
     }
 }
 
@@ -11695,9 +11832,15 @@ pub(super) fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
     // writes none, and that one is the only record whose seventh member is not
     // 0.
     let transparency = if picture.transparency == 0 {
-        " t=\"false\""
+        " t=\"false\"".to_owned()
     } else {
-        ""
+        String::new()
+    };
+    // The transparent pixel's own coordinates, published beside (never with)
+    // the flag -- see `MoxelPicture::transparent_pixel`.
+    let transparency = match picture.transparent_pixel {
+        Some((x, y)) => format!("{transparency} tx=\"{x}\" ty=\"{y}\""),
+        None => transparency,
     };
     if let Some(payload) = &picture.payload {
         xml.push_str(&format!(
@@ -11742,7 +11885,11 @@ pub(super) fn push_moxel_drawing_xml(
     // Member publication order is `text`/`parameter`, `value`,
     // `detailParameter`, which is the reverse of their slot order in the record;
     // the 9 records that carry all three pin it.
-    if !drawing.members.text.is_empty() {
+    if drawing.members.text_present && drawing.members.text.is_empty() {
+        // The member is declared and carries no language -- see
+        // `MoxelDrawingMembers::text_present`.
+        xml.push_str("\t\t<text/>\r\n");
+    } else if !drawing.members.text.is_empty() {
         xml.push_str("\t\t<text>\r\n");
         for item in &drawing.members.text {
             xml.push_str("\t\t\t<v8:item>\r\n");
