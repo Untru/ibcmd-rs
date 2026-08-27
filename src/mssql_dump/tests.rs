@@ -11382,7 +11382,7 @@ fn unnameable_form_attribute_saved_field_is_written_physically() {
         &BTreeMap::new(),
     );
     let mut attributes = vec![FormAttribute {
-        chart_settings: None,
+        design_time_settings: None,
         view_rights: None,
         edit_rights: None,
         id: "1".to_string(),
