@@ -3201,6 +3201,16 @@ impl FormFieldTitleLocationSchema {
             "2" => Some("Left"),
             "3" => Some("Top"),
             "4" => Some("Right"),
+            // The fourth side of the same enumeration. Evidence:
+            // Документооборот КОРП 3.0.21.3
+            // `DataProcessors/УправлениеРасчетомПрав/Forms/Форма`, ChartField
+            // `Диаграмма` reads `5` in this slot and the platform writes
+            // `<TitleLocation>Bottom</TitleLocation>`; ERP УХ 3.2.12.6
+            // `Reports/УправлениеЛимитами/Forms/ФормаОтчета`, LabelField
+            // `СписокГруппКонтрольРезервов`, is the second. Those two are the
+            // only field items the eight native trees write `Bottom` on, and
+            // the code occurs nowhere else in the slot.
+            "5" => Some("Bottom"),
             _ => None,
         }
     }

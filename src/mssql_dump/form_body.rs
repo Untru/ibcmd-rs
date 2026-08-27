@@ -10690,6 +10690,21 @@ fn parse_form_child_item_with_metadata_owners(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            // The two field kinds the list used to leave out. The shift is not
+            // a property of the kind: `form_input_field_top_level_offset`
+            // detects it by whether slot 6 holds a name string, and
+            // `form_child_item_tag` already applies it to every wrapper-`37`
+            // field -- these two included -- to find their discriminator at
+            // all. Leaving them out here read every slot of such a record one
+            // member off. Evidence: ERP УХ 3.2.12.6
+            // `Documents/ВерсияДокументацииЗакупочныхПроцедур/Forms/
+            // ФормаРедактированияТекстаЗакупочнойПроцедуры`,
+            // FormattedDocumentField `ФорматированныйДокумент`, whose record
+            // carries the conditional `UserVisible` tuple in slot 5, its
+            // discriminator `17` in slot 6 and `0` in slot 8, and the platform
+            // writes `<TitleLocation>None</TitleLocation>`.
+            | "FormattedDocumentField"
+            | "PDFDocumentField"
     )
     .then(|| {
         form_input_field_layout_is_extended(&fields)
