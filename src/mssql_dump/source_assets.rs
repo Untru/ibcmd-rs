@@ -4544,6 +4544,9 @@ mod chart_of_accounts_predefined_tests {
         // `uh` `МСФО` declares four accounting flags and stores two;
         // `Международный` declares four and stores three. Both export all
         // four, the unstored ones `false`, each at its declaration position.
+        // On both the unstored flags trail the stored ones; the gap in the
+        // middle used here is those two measured facts composed -- the value
+        // of a flag with no column, and the position every flag takes.
         let xml = emit(
             &[("7", FLAG_ONE), ("8", FLAG_THREE)],
             10,
