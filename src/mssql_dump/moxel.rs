@@ -9472,16 +9472,21 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         67 => "LightCyan",
         68 => "LightGoldenRod",
         69 => "LightGoldenRodYellow",
-        // `70`/`71` are separated by ten templates, not by one: ERP УХ
-        // 3.2.12.6's `DataProcessors/ДиспетчированиеГрафикаПроизводства/
-        // Templates/ДиагностикаГрафика` and `Reports/
-        // ДиагностикаЭтапаПроизводства/Templates/ДиагностикаЭтапа` carry both
-        // codes and publish `LightGray` once and `LightGreen` once, while
-        // `71` is already corroborated as `LightGray` by the eight other
-        // templates of the stand that publish `LightGray` and are byte-exact
-        // -- so `70` is the remaining name. (Note that the two do not sit in
-        // ASCII order here; the enumeration's own order is not this table's
-        // evidence.)
+        // `70` and `138` are the two codes ERP УХ 3.2.12.6's `DataProcessors/
+        // ДиспетчированиеГрафикаПроизводства/Templates/ДиагностикаГрафика`
+        // and `Reports/ДиагностикаЭтапаПроизводства/Templates/
+        // ДиагностикаЭтапа` leave unnamed, and their two unaccounted
+        // published names -- `LightGreen` and `Tomato` -- are cited once
+        // each, so counting cannot orient them. Position can: the stored
+        // format records `{3008,0,48,6,0,7}` and `{3968,80,6,0,9,12}` are the
+        // only ones whose member set is "backColor = palette slot 7" and
+        // "textColor = slot 9, backColor = slot 12", and the published pool
+        // holds exactly one format carrying nothing but
+        // `backColor d3p1:LightGreen` and exactly one carrying
+        // `textColor d3p1:White` beside `backColor d3p1:Tomato`. Slot 9 is
+        // code `143` (`White`), already known, which pins the second pairing.
+        // (Note that `70` and `71` do not sit in ASCII order here; the
+        // enumeration's own order is not this table's evidence.)
         70 => "LightGreen",
         71 => "LightGray",
         72 => "LightPink",
@@ -9515,6 +9520,8 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         // as its only web colour.
         131 => "SlateGray",
         134 => "SteelBlue",
+        // Paired together with `70` -- see the note there.
+        138 => "Tomato",
         140 => "Violet",
         141 => "VioletRed",
         143 => "White",
