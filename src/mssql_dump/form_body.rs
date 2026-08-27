@@ -20243,7 +20243,6 @@ pub(super) fn parse_form_child_item_data_path(
                 } else {
                     parse_form_bound_data_path(
                         field,
-                        name,
                         attribute_names_by_id,
                         table_name_by_id,
                         table_column_names_by_id,
@@ -22158,7 +22157,6 @@ fn parse_form_bound_data_path_with_metadata_owner(
         FormMetadataDataPathResolution::NotMetadata
         | FormMetadataDataPathResolution::ReferenceAbsent => parse_form_bound_data_path(
             field,
-            name,
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
@@ -22805,7 +22803,6 @@ fn form_generated_owner_type_from_type_reference(
 
 pub(super) fn parse_form_bound_data_path(
     field: &str,
-    name: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
@@ -22814,7 +22811,7 @@ pub(super) fn parse_form_bound_data_path(
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     match fields.first().map(|value| value.trim()) {
-        Some("1") => parse_form_attribute_data_path(field, name, attribute_names_by_id),
+        Some("1") => parse_form_attribute_data_path(field, attribute_names_by_id),
         Some("2") => {
             let table = fields
                 .get(1)
@@ -23353,7 +23350,6 @@ pub(super) fn parse_form_attribute_binding_id(field: &str) -> Option<String> {
 
 pub(super) fn parse_form_attribute_data_path(
     field: &str,
-    name: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -23362,10 +23358,28 @@ pub(super) fn parse_form_attribute_data_path(
     }
     let ids = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let attribute_id = ids.first()?.trim();
+    // A binding onto an attribute the form does not declare is a reference the
+    // platform cannot name, and it writes the id physically instead — the same
+    // reading the command record already uses for a uuid nothing names.
+    // Answering with the *item's own name* was an invention: it is not the
+    // attribute's name, because there is no such attribute.
+    //
+    // Evidence: over the eight native stand trees, exactly twelve `<DataPath>`
+    // elements hold a bare integer, all twelve in ERP УХ 3.2.12.6 and all of
+    // them on an item whose binding is `{1,{<id>}}` with an id past the last
+    // one the form's `<Attributes>` collection declares —
+    // `Catalogs/АналитическаяПодписка/Forms/ФормаЭлемента` binds `22` and `23`
+    // against a collection that ends at 19 and the platform writes `22` and
+    // `23`. Nothing else in any of the eight trees spells a data path that way.
+    //
+    // The old fallback cost nothing to drop: over all 12 658 byte-exact ERP УХ
+    // forms there is not one single-segment `<DataPath>` equal to the enclosing
+    // item's own name that the form does not also declare as an attribute, so
+    // no file that matches today matches *because* of it.
     attribute_names_by_id
         .get(attribute_id)
         .cloned()
-        .or_else(|| Some(name.to_string()))
+        .or_else(|| Some(attribute_id.to_string()))
 }
 
 /// Whether the target a `{kind, uuid}` command record names declares the
@@ -24881,7 +24895,6 @@ pub(super) fn parse_form_command_interface_attribute(
     }
     parse_form_bound_data_path(
         field,
-        "",
         attribute_names_by_id,
         &child_item_indexes.table_name_by_id,
         &child_item_indexes.table_column_names_by_id,
