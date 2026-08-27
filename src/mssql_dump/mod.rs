@@ -21678,6 +21678,17 @@ fn parse_chart_of_accounts_properties(
         &mut all_uuids,
         &mut attribute_names,
     )?;
+    // The owner's own attributes, by uuid: `<InputByString>` names one of them
+    // as a `{0,<uuid>}` field reference on all three ERP УХ charts.
+    let own_attributes = child_objects
+        .iter()
+        .map(|child| {
+            (
+                child.header.uuid.to_ascii_lowercase(),
+                child.header.name.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut accounting_flag_names = BTreeSet::new();
     child_objects.extend(parse_chart_of_accounts_child_collection(
         collections.get(5)?,
@@ -21795,6 +21806,7 @@ fn parse_chart_of_accounts_properties(
             "ChartOfAccounts",
             &header.name,
             &[("-7", "Code"), ("-8", "Description")],
+            &own_attributes,
         )?,
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
@@ -22045,6 +22057,11 @@ fn parse_chart_of_calculation_types_properties(
             "ChartOfCalculationTypes",
             &header.name,
             &[("-3", "Description"), ("-2", "Code")],
+            // A chart of calculation types whose strict root reads has an
+            // empty attribute collection by construction (the gate above), so
+            // it can own no attribute for `<InputByString>` to name; a
+            // `{0,<uuid>}` member therefore still refuses the object.
+            &BTreeMap::new(),
         )?,
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
@@ -22239,25 +22256,54 @@ fn strict_chart_owner_reference(reference: &str, expected_kind: &str) -> bool {
     matches!(fields.as_slice(), [kind, name] if *kind == expected_kind && !name.is_empty())
 }
 
+/// A chart's `<InputByString>`: a field reference list whose members are
+/// either a standard-attribute marker or the owner's own attribute.
+///
+/// The two-member `{0,<uuid>}` payload is the same own-child form the
+/// owner-graph decoder already reads for catalogs, documents and tasks
+/// (`parse_owner_graph_field_references`), and the chart reader had no arm for
+/// it at all: it accepted only the single-member marker and refused the whole
+/// object otherwise. All three ERP УХ 3.2.12.6 charts of accounts list three
+/// fields -- `-8` Description, `-7` Code and one `{0,<uuid>}` naming their own
+/// `КодБыстрогоВыбора` attribute -- against БСП demo `_ДемоОсновной`, which
+/// lists the two markers only. `ChartsOfAccounts/Международный` lost its whole
+/// file to this and `МСФО`/`Хозрасчетный` fell back to the property-less
+/// default-list-form writer.
+///
+/// Only the owner's own attributes resolve, exactly as the owner-graph decoder
+/// requires: a uuid that is not among them refuses the object rather than
+/// being resolved through the global reference index.
 fn parse_chart_input_by_string(
     value: &str,
     owner_kind: &str,
     owner_name: &str,
     definitions: &[(&str, &str)],
+    own_attributes: &BTreeMap<String, String>,
 ) -> Option<Vec<String>> {
     let mut seen = BTreeSet::new();
     parse_exchange_plan_field_ref_collection(value)?
         .into_iter()
         .map(|field| {
             let payload = parse_exchange_plan_field_ref_payload(field)?;
-            let [marker] = payload.as_slice() else {
-                return None;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    let (_, name) = definitions
+                        .iter()
+                        .find(|(candidate, _)| marker.trim() == *candidate)?;
+                    format!("{owner_kind}.{owner_name}.StandardAttribute.{name}")
+                }
+                [kind, uuid] => {
+                    if parse_information_register_usize(kind) != Some(0) {
+                        return None;
+                    }
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?.to_ascii_lowercase();
+                    let name = own_attributes.get(&uuid)?;
+                    format!("{owner_kind}.{owner_name}.Attribute.{name}")
+                }
+                _ => return None,
             };
-            let (_, name) = definitions
-                .iter()
-                .find(|(candidate, _)| marker.trim() == *candidate)?;
-            seen.insert(marker.trim())
-                .then(|| format!("{owner_kind}.{owner_name}.StandardAttribute.{name}"))
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
         })
         .collect()
 }
@@ -37164,10 +37210,19 @@ fn push_xr_localized_property_xml(
     xml.push_str(&format!("{indent}<xr:{name}>\r\n"));
     for (lang, content) in values {
         xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
-        xml.push_str(&format!(
-            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
-            escape_xml_element_text(lang)
-        ));
+        // An empty language code is written self-closed, like every other
+        // empty element the platform emits. Six `<v8:lang/>` in the whole
+        // stand and not one `<v8:lang></v8:lang>`; the only one in a metadata
+        // root is `uh` `ChartsOfAccounts/МСФО`, whose standard tabular section
+        // `ExtDimensionTypes` carries the synonym `{1,"","Виды субконто"}`.
+        if lang.is_empty() {
+            xml.push_str(&format!("{indent}\t\t<v8:lang/>\r\n"));
+        } else {
+            xml.push_str(&format!(
+                "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_element_text(lang)
+            ));
+        }
         xml.push_str(&format!(
             "{indent}\t\t<v8:content>{}</v8:content>\r\n",
             escape_xml_element_text(content)
