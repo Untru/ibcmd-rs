@@ -14689,6 +14689,7 @@ mod moxel_exact_parity_tests {
         let spreadsheet = MoxelSpreadsheet {
             language_settings: None,
             template_mode: true,
+            step_direction: None,
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),

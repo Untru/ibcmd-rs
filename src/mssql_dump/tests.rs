@@ -31156,6 +31156,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: vec![MoxelColumnSet {
             id: None,
@@ -31553,6 +31554,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: vec![MoxelColumnSet {
             id: None,
@@ -32002,6 +32004,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 2,
         column_sets: vec![MoxelColumnSet {
             id: None,
@@ -32154,6 +32157,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 1,
         column_sets: vec![MoxelColumnSet {
             id: None,
@@ -32443,6 +32447,7 @@ fn parses_and_formats_moxel_vertical_groups() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 1,
         column_sets: default_moxel_column_sets(1),
         column_formats: vec![MoxelFormat {
@@ -33176,6 +33181,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
     let xml = format_moxel_spreadsheet_xml(&MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 1,
         column_sets: vec![MoxelColumnSet {
             id: None,
@@ -33268,6 +33274,7 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 2,
         column_sets: default_moxel_column_sets(2),
         column_formats: vec![
@@ -33350,6 +33357,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: default_moxel_column_sets(0),
         column_formats: Vec::new(),
@@ -34204,6 +34212,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
         let spreadsheet = MoxelSpreadsheet {
             language_settings: None,
             template_mode: true,
+            step_direction: None,
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),
@@ -34323,6 +34332,7 @@ fn formats_moxel_minus21_slot_uses_button_text_color() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: Vec::new(),
         column_formats: Vec::new(),
@@ -34374,6 +34384,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: Vec::new(),
         column_formats: Vec::new(),
@@ -34425,6 +34436,7 @@ fn formats_moxel_minus13_slot_uses_field_alternative_back_color() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: Vec::new(),
         column_formats: Vec::new(),
@@ -34476,6 +34488,7 @@ fn formats_moxel_field_selected_text_color_style() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: Vec::new(),
         column_formats: Vec::new(),
@@ -34559,6 +34572,7 @@ fn formats_moxel_report_back_color_styles() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: Vec::new(),
         column_formats: Vec::new(),
@@ -34816,6 +34830,7 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: Vec::new(),
         column_formats: Vec::new(),
@@ -34869,6 +34884,7 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 0,
         column_sets: Vec::new(),
         column_formats: Vec::new(),
@@ -35961,6 +35977,7 @@ fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 2,
         column_sets: vec![MoxelColumnSet {
             id: None,
@@ -36031,6 +36048,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 2,
         column_sets: vec![
             MoxelColumnSet {
@@ -36133,6 +36151,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
     let spreadsheet = MoxelSpreadsheet {
         language_settings: None,
         template_mode: true,
+        step_direction: None,
         column_count: 2,
         column_sets: vec![
             MoxelColumnSet {
@@ -48366,6 +48385,7 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
         min_value: None,
         max_value: None,
         fill_checking: "ShowError",
+        choice_parameter_links: Vec::new(),
         choice_parameters: Vec::new(),
         choice_history_on_input: "Auto",
         data_lock_control_mode: "Managed",
