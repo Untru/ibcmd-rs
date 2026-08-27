@@ -57955,17 +57955,6 @@ fn rejects_malformed_empty_ref_protocol_fields_atomically() {
             ),
         ),
         (
-            "nonzero reference value",
-            base.raw.replacen(
-                &fill,
-                &format!(
-                    r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{nonzero}}}}}"##,
-                    base.owner_type_id
-                ),
-                1,
-            ),
-        ),
-        (
             "descriptor extra arity",
             base.raw.replacen(
                 &fill,
@@ -57999,6 +57988,33 @@ fn rejects_malformed_empty_ref_protocol_fields_atomically() {
             "{case}"
         );
     }
+
+    // A non-zero value id is not a protocol violation: the slot names one
+    // concrete value of its owner instead of the owner's empty reference, so
+    // the expectation layer records nothing for it and the data processor is
+    // still extracted. Census in `parse_data_processor_empty_ref_fill_values`.
+    let named_value = EmptyRefDataProcessorFixture {
+        raw: base.raw.replacen(
+            &fill,
+            &format!(
+                r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{nonzero}}}}}"##,
+                base.owner_type_id
+            ),
+            1,
+        ),
+        owner_uuid: base.owner_uuid.clone(),
+        attribute_uuid: base.attribute_uuid.clone(),
+        owner_type_id: base.owner_type_id.clone(),
+    };
+    assert!(
+        extract_empty_ref_data_processor(
+            &named_value,
+            &type_index,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
 }
 
 #[test]

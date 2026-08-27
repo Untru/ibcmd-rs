@@ -6528,7 +6528,10 @@ fn parse_flowchart_addressing_attribute_value(
             .filter(|reference| !reference.is_empty())
             .map(FlowchartAddressingAttributeValue::DesignTimeRef);
     }
-    let owner_type_id = parse_data_processor_empty_ref_fill_owner(value)?;
+    let (owner_type_id, value_id) = parse_data_processor_design_time_fill_reference(value)?;
+    if !information_register_uuid_is_zero(&value_id) {
+        return None;
+    }
     let type_reference =
         unique_metadata_type_reference(type_index, type_index_collisions, &owner_type_id)?;
     let owner_reference =
@@ -17522,7 +17525,22 @@ fn parse_data_processor_empty_ref_fill_values(
         }
         let pattern = data_processor_code27_type_pattern(&fields, &header)?;
         let pattern_type_ids = data_processor_reference_pattern_type_ids(pattern)?;
-        let fill_owner_type_id = parse_data_processor_empty_ref_fill_owner(fill_value)?;
+        let (fill_owner_type_id, fill_value_id) =
+            parse_data_processor_design_time_fill_reference(fill_value)?;
+        // Only the owner's *empty* reference has to be rebuilt here, because
+        // only it has no value id to resolve: it is spelled from the owner
+        // type alone. A slot that names a concrete value of the owner (an enum
+        // value, a predefined item) is already resolved by the generic child
+        // reader through the owner-qualified reference index, so this
+        // expectation layer must leave it alone instead of refusing the whole
+        // data processor. Census over the nineteen ERP UH data processors that
+        // write a design-time-ref `FillValue`: thirteen name only `EmptyRef`
+        // and were already byte-exact; the six that name at least one concrete
+        // value (`Enum.ЕдиницыИзмеренияВремени.EnumValue.День` and five more)
+        // were refused outright.
+        if !information_register_uuid_is_zero(&fill_value_id) {
+            continue;
+        }
         let selected_count = pattern_type_ids
             .iter()
             .filter(|type_id| type_id.eq_ignore_ascii_case(&fill_owner_type_id))
@@ -17538,13 +17556,21 @@ fn parse_data_processor_empty_ref_fill_values(
             unique_metadata_type_reference(type_index, type_index_collisions, &fill_owner_type_id)?;
         let owner_reference =
             parse_generated_metadata_reference_owner(type_reference)?.owner_reference();
+        // A zero value id is the owner's empty reference; a non-zero one names
+        // one of the owner's own values, and the object reference index already
+        // spells it (`Enum.<owner>.EnumValue.<name>`). Census over the nineteen
+        // ERP UH data processors that write a design-time-ref `FillValue`:
+        // thirteen name only `EmptyRef` -- every one of them already
+        // byte-exact -- and six name at least one concrete value; those six
+        // were the ones refused outright.
+        let fill_value = format!("{owner_reference}.EmptyRef");
         let key = header.uuid.to_ascii_lowercase();
         if attributes
             .insert(
                 key,
                 DataProcessorEmptyRefExpectation {
                     type_reference: type_reference.to_string(),
-                    fill_value: format!("{owner_reference}.EmptyRef"),
+                    fill_value,
                 },
             )
             .is_some()
@@ -17648,7 +17674,12 @@ fn data_processor_reference_pattern_type_ids(pattern: &str) -> Option<Vec<String
         .collect()
 }
 
-fn parse_data_processor_empty_ref_fill_owner(value: &str) -> Option<String> {
+/// The owner type id and the value id one design-time-ref fill value names.
+///
+/// The value id is the nil UUID when the slot means the owner's empty
+/// reference, and a real value id -- an enum value, a predefined item -- when
+/// the slot names one concrete value.
+fn parse_data_processor_design_time_fill_reference(value: &str) -> Option<(String, String)> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3
         || fields.first()?.trim() != r##""#""##
@@ -17665,7 +17696,7 @@ fn parse_data_processor_empty_ref_fill_owner(value: &str) -> Option<String> {
     }
     let owner_type_id = parse_information_register_non_zero_uuid(reference.get(1)?)?;
     let value_id = parse_information_register_uuid(reference.get(2)?)?;
-    information_register_uuid_is_zero(&value_id).then_some(owner_type_id)
+    Some((owner_type_id, value_id))
 }
 
 fn apply_data_processor_empty_ref_fill_values(
