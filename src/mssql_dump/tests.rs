@@ -5987,6 +5987,7 @@ fn extracts_command_interface_subsystems_order() {
                 kind: "Subsystem".to_string(),
                 name: "Sales".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
         (
@@ -5995,6 +5996,7 @@ fn extracts_command_interface_subsystems_order() {
                 kind: "Subsystem".to_string(),
                 name: "Purchases".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
     ]);
@@ -6088,6 +6090,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 kind: "DocumentJournal".to_string(),
                 name: "РеестрТорговыхДокументов".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
         (
@@ -6096,6 +6099,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 kind: "Report".to_string(),
                 name: "КонтактнаяИнформация".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
         (
@@ -6104,6 +6108,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 kind: "Role".to_string(),
                 name: "ОтчетыМаркетолога".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
         (
@@ -6112,6 +6117,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 kind: "Role".to_string(),
                 name: "ОтчетыРуководителяОтделаПродаж".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
         (
@@ -6120,6 +6126,7 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 kind: "Role".to_string(),
                 name: "ПолныеПрава".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
     ]);
@@ -6184,6 +6191,7 @@ fn platform_command_interface_declines_standard_command_when_use_standard_comman
                 kind: "Catalog".to_string(),
                 name: "ТабличныеЧастиБД".to_string(),
                 use_standard_commands: false,
+                based_on_declared: None,
             },
         ),
         (
@@ -6192,6 +6200,7 @@ fn platform_command_interface_declines_standard_command_when_use_standard_comman
                 kind: "Catalog".to_string(),
                 name: "ТипыБазДанных".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
         (
@@ -6200,6 +6209,7 @@ fn platform_command_interface_declines_standard_command_when_use_standard_comman
                 kind: "Catalog".to_string(),
                 name: "ВнешниеИнформационныеБазы".to_string(),
                 use_standard_commands: true,
+                based_on_declared: None,
             },
         ),
     ]);
@@ -7743,15 +7753,18 @@ fn maps_form_event_uuid_aliases_to_names() {
         assert_eq!(form_event_name_from_identifier(uuid), Some(name));
     }
     assert_eq!(
-        parse_form_child_item_event_identifier("fe115cc8-9e33-4684-a166-bd5136fe7a9f").as_deref(),
+        parse_form_child_item_event_identifier("fe115cc8-9e33-4684-a166-bd5136fe7a9f", true)
+            .as_deref(),
         Some("OnChange")
     );
     assert_eq!(
-        parse_form_child_item_event_identifier("0d644ff6-443b-4390-86fa-7f9105e42711").as_deref(),
+        parse_form_child_item_event_identifier("0d644ff6-443b-4390-86fa-7f9105e42711", true)
+            .as_deref(),
         Some("DragCheck")
     );
     assert_eq!(
-        parse_form_child_item_event_identifier("8ad48496-8d0b-4f6c-ae48-99d95227884b").as_deref(),
+        parse_form_child_item_event_identifier("8ad48496-8d0b-4f6c-ae48-99d95227884b", true)
+            .as_deref(),
         Some("Drag")
     );
     for (uuid, name) in [
@@ -7767,7 +7780,7 @@ fn maps_form_event_uuid_aliases_to_names() {
         ("70636369-514c-4662-977e-1c3976c9756c", "Tuning"),
     ] {
         assert_eq!(
-            parse_form_child_item_event_identifier(uuid).as_deref(),
+            parse_form_child_item_event_identifier(uuid, true).as_deref(),
             Some(name)
         );
     }
@@ -7788,7 +7801,7 @@ fn parses_platform_before_load_user_settings_event_identifier() {
     const PLATFORM_EVENT_ID: &str = "c41e7b98-098c-433e-8ac3-56ec2a2c49e2";
 
     assert_eq!(
-        parse_form_body_event_pair(PLATFORM_EVENT_ID, r#""HandlerA""#),
+        parse_form_body_event_pair(PLATFORM_EVENT_ID, r#""HandlerA""#, None),
         Some(FormBodyEvent {
             name: "BeforeLoadUserSettingsAtServer".to_string(),
             handler: "HandlerA".to_string(),
@@ -7800,10 +7813,21 @@ fn parses_platform_before_load_user_settings_event_identifier() {
 fn parses_platform_update_user_settings_event_for_root_and_table_records() {
     const EVENT_ID: &str = "e91128e6-621d-4dc8-b12e-bd65aeb37e2d";
 
+    // The name belongs to the extension the form's main attribute brings, so
+    // the root reader is given one that owns it. A form that declares no main
+    // attribute keeps the identifier itself, which is what the platform writes
+    // there -- see `form_root_event_extension_owns`.
     assert_eq!(
-        parse_form_body_event_pair(EVENT_ID, r#""RootHandler""#),
+        parse_form_body_event_pair(EVENT_ID, r#""RootHandler""#, Some("ReportObject")),
         Some(FormBodyEvent {
             name: "OnUpdateUserSettingSetAtServer".to_string(),
+            handler: "RootHandler".to_string(),
+        })
+    );
+    assert_eq!(
+        parse_form_body_event_pair(EVENT_ID, r#""RootHandler""#, None),
+        Some(FormBodyEvent {
+            name: EVENT_ID.to_string(),
             handler: "RootHandler".to_string(),
         })
     );
@@ -7811,7 +7835,7 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
     let table_record =
         split_1c_braced_fields(&table_raw, 0).expect("well-formed table event record");
     assert_eq!(
-        parse_form_child_item_event_record(&table_record),
+        parse_form_child_item_event_record(&table_record, true),
         vec![FormBodyEvent {
             name: "OnUpdateUserSettingSetAtServer".to_string(),
             handler: "TableHandler".to_string(),
@@ -7824,8 +7848,10 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
             handler: "TableHandler".to_string(),
         }]
     );
-    assert!(parse_form_body_event_pair(EVENT_ID, r#"""#).is_none());
-    assert!(parse_form_body_event_pair(EVENT_ID, r#""bad handler""#).is_none());
+    assert!(parse_form_body_event_pair(EVENT_ID, r#"""#, Some("ReportObject")).is_none());
+    assert!(
+        parse_form_body_event_pair(EVENT_ID, r#""bad handler""#, Some("ReportObject")).is_none()
+    );
 }
 
 #[test]
@@ -15553,6 +15579,7 @@ fn resolves_document_standard_commands_only_for_their_structural_owner_kind() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             Some(format!("Form.Item.{owner_name}.StandardCommand.{suffix}"))
         );
@@ -15567,6 +15594,7 @@ fn resolves_document_standard_commands_only_for_their_structural_owner_kind() {
                     &[],
                     &BTreeMap::new(),
                     &indexes.standard_command_owner_name_by_id,
+                    &BTreeMap::new(),
                 ),
                 // Not a name: the platform's own dangling spelling of the very
                 // record, which is what it writes wherever no name fits.
@@ -15648,6 +15676,7 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             Some(format!("Form.Item.SheetRenamed.StandardCommand.{suffix}"))
         );
@@ -15657,6 +15686,7 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             Some(format!("102:{uuid}")),
             "{uuid} was named for GraphicalSchema"
@@ -15667,6 +15697,7 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             Some(format!("104:{uuid}")),
             "{uuid} was named for Table"
@@ -15697,6 +15728,7 @@ fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             formatted_expected,
             "{uuid} had an unexpected FormattedDocument result"
@@ -15726,6 +15758,7 @@ fn shares_only_observed_standard_commands_between_tables_and_spreadsheets() {
                     &[],
                     &BTreeMap::new(),
                     &indexes.standard_command_owner_name_by_id,
+                    &BTreeMap::new(),
                 ),
                 Some(format!("Form.Item.{owner_name}.StandardCommand.{suffix}"))
             );
@@ -15742,6 +15775,7 @@ fn shares_only_observed_standard_commands_between_tables_and_spreadsheets() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             Some(format!("Form.Item.RowsRenamed.StandardCommand.{suffix}"))
         );
@@ -15751,6 +15785,7 @@ fn shares_only_observed_standard_commands_between_tables_and_spreadsheets() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             Some(format!("101:{uuid}")),
             "table-only command {uuid} was named for SpreadsheetDocument"
@@ -15799,6 +15834,7 @@ fn resolves_report_form_standard_commands_only_for_kind_zero() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             )
             .as_deref(),
             Some(command_name)
@@ -15810,6 +15846,7 @@ fn resolves_report_form_standard_commands_only_for_kind_zero() {
                     &[],
                     &BTreeMap::new(),
                     &indexes.standard_command_owner_name_by_id,
+                    &BTreeMap::new(),
                 ),
                 Some(format!("{owner_id}:{uuid}")),
                 "form command {uuid} was named for owner {owner_id}"
@@ -19953,7 +19990,7 @@ fn parses_multiple_form_child_item_events_from_single_record() {
     .unwrap();
 
     assert_eq!(
-        parse_form_child_item_event_record(&fields),
+        parse_form_child_item_event_record(&fields, true),
         vec![
             FormBodyEvent {
                 name: "OnChange".to_string(),
@@ -20001,7 +20038,7 @@ fn parses_uuid_clearing_and_choice_processing_events() {
         .unwrap();
 
     assert_eq!(
-        parse_form_child_item_event_record(&fields),
+        parse_form_child_item_event_record(&fields, true),
         vec![
             FormBodyEvent {
                 name: "Clearing".to_string(),
@@ -20024,7 +20061,7 @@ fn parses_uuid_before_row_change_event() {
     .unwrap();
 
     assert_eq!(
-        parse_form_child_item_event_record(&fields),
+        parse_form_child_item_event_record(&fields, true),
         vec![FormBodyEvent {
             name: "BeforeRowChange".to_string(),
             handler: "BeforeChangeHandler".to_string(),
@@ -22284,6 +22321,7 @@ fn extracts_real_world_navigation_panel_declines_disabled_standard_command_and_s
             kind: "Catalog".to_string(),
             name: "СправочникиБД".to_string(),
             use_standard_commands: false,
+            based_on_declared: None,
         },
     )]);
 
@@ -68643,6 +68681,7 @@ fn chain_walk_indexes_with_metadata_field_types(
         &mut indexes,
         attributes,
         std::sync::Arc::new(metadata_field_types),
+        None,
     );
     indexes
 }
@@ -69413,7 +69452,12 @@ fn footer_family_child_items_xml(
     let layout = layout.iter().map(String::as_str).collect::<Vec<_>>();
     let mut indexes =
         collect_form_child_item_indexes_with_object_refs(&layout, attributes, object_refs, None);
-    collect_form_chain_walk_member_indexes(&mut indexes, attributes, Arc::new(BTreeMap::new()));
+    collect_form_chain_walk_member_indexes(
+        &mut indexes,
+        attributes,
+        Arc::new(BTreeMap::new()),
+        None,
+    );
     let items = extract_form_child_items(
         &layout,
         attributes,
@@ -70261,6 +70305,7 @@ fn resolves_the_seven_missing_form_standard_command_uuids() {
                 &[],
                 &BTreeMap::new(),
                 &BTreeMap::new(),
+                &BTreeMap::new(),
             )
             .as_deref(),
             Some(expected),
@@ -70297,6 +70342,7 @@ fn resolves_table_get_url_and_the_second_table_delete_uuid() {
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
+                &BTreeMap::new(),
             ),
             Some(format!("Form.Item.Список.StandardCommand.{suffix}")),
             "{uuid} did not resolve for its table owner"
@@ -70421,6 +70467,7 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
                 &[],
                 &object_refs,
                 &BTreeMap::new(),
+                &BTreeMap::new(),
             )
             .as_deref(),
             Some(button_expected.as_str()),
@@ -70457,6 +70504,7 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
                 &[],
                 &object_refs,
                 &BTreeMap::new(),
+                &BTreeMap::new(),
             )
             .as_deref(),
             Some(expected)
@@ -70492,6 +70540,7 @@ fn one_family_grammar_serves_both_readers_of_a_command_record() {
             &[],
             &object_refs,
             &BTreeMap::new(),
+            &BTreeMap::new(),
         )
         .as_deref(),
         Some(format!("3:{nested}").as_str())
@@ -70517,6 +70566,7 @@ fn an_item_owner_outranks_the_family_rule_on_the_same_kind() {
             &[],
             &object_refs,
             &indexes.standard_command_owner_name_by_id,
+            &BTreeMap::new(),
         )
         .as_deref(),
         Some("Form.Item.Товары.StandardCommand.GetURL")
@@ -70527,6 +70577,7 @@ fn an_item_owner_outranks_the_family_rule_on_the_same_kind() {
             &[],
             &object_refs,
             &indexes.standard_command_owner_name_by_id,
+            &BTreeMap::new(),
         )
         .as_deref(),
         Some("Catalog.СезонныеГруппы.StandardCommand.Create")

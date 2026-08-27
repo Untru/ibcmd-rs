@@ -2397,6 +2397,10 @@ struct DumpRowContext<'a> {
     metadata_texts_by_file_name: &'a BTreeMap<&'a str, &'a MetadataTextRow>,
     command_refs: &'a BTreeMap<String, String>,
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
+    /// The very same table, shared rather than borrowed, for the one reader
+    /// that has to carry it into a per-form index: what a target metadata
+    /// object declares about its own standard commands is configuration-wide.
+    metadata_command_facts: &'a Arc<BTreeMap<String, MetadataCommandReference>>,
     type_index: &'a BTreeMap<String, String>,
     type_index_collisions: &'a BTreeSet<String>,
     moxel_generated_types: &'a BTreeMap<String, String>,
@@ -2614,11 +2618,11 @@ fn dump_table_rows_with_options_mode(
     } else {
         BTreeMap::new()
     };
-    let metadata_refs = if extract_metadata_xml {
+    let metadata_refs = Arc::new(if extract_metadata_xml {
         build_metadata_command_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
-    };
+    });
     let MetadataTypeIndexes {
         references: type_index,
         reference_collisions: type_index_collisions,
@@ -2890,6 +2894,7 @@ fn dump_table_rows_with_options_mode(
         metadata_texts_by_file_name: &metadata_texts_by_file_name,
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
+        metadata_command_facts: &metadata_refs,
         type_index: &type_index,
         type_index_collisions: &type_index_collisions,
         moxel_generated_types: &moxel_generated_types,
@@ -3659,13 +3664,15 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_command_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let metadata_refs = if extract_metadata_xml
-        && (source_reference_needs.metadata_refs || build_selected_local_refs)
-    {
-        build_metadata_command_reference_index_from_texts(&index_metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
+    let metadata_refs = Arc::new(
+        if extract_metadata_xml
+            && (source_reference_needs.metadata_refs || build_selected_local_refs)
+        {
+            build_metadata_command_reference_index_from_texts(&index_metadata_texts)
+        } else {
+            BTreeMap::new()
+        },
+    );
     timings.prepare_metadata_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let MetadataTypeIndexes {
@@ -4050,6 +4057,7 @@ fn dump_table_rows_streamed(
         metadata_texts_by_file_name: &metadata_texts_by_file_name,
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
+        metadata_command_facts: &metadata_refs,
         type_index: &type_index,
         type_index_collisions: &type_index_collisions,
         moxel_generated_types: &moxel_generated_types,
@@ -5303,6 +5311,19 @@ struct FlowchartBase {
 struct MetadataCommandReference {
     kind: String,
     name: String,
+    /// How many members the target's own `<BasedOn>` list declares, or `None`
+    /// when this reader cannot name the slot for the target's kind. A target
+    /// that declares none has no `CreateBasedOn` standard command at all, and
+    /// the platform keeps the raw `code:uuid` sentinel for it exactly as it
+    /// does for `use_standard_commands == false`. Evidence: over the eight
+    /// stand corpora every one of the 5 123 `<Command>`/`<CommandName>` values
+    /// naming a `.StandardCommand.CreateBasedOn` names a target whose
+    /// `<BasedOn>` is non-empty, and the five ERP УХ 3.2.12.6 documents whose
+    /// `<BasedOn/>` is empty -- `УдалитьЗаявкаНаКорректировкуЛимитов`,
+    /// `УдалитьКорректировкаЛимитов`, `СтрокаПланаЗакупок`,
+    /// `ОбоснованиеТребованийКЗакупочнойПроцедуре` and `ЗаявкаНаРасход` -- are
+    /// carried by 22 buttons the platform writes as `2:<uuid>`.
+    based_on_declared: Option<usize>,
     /// Whether the target metadata object itself declares
     /// `<UseStandardCommands>true</UseStandardCommands>`. Both command-interface
     /// readers (this object's own `Ext/CommandInterface.xml` and a form's
