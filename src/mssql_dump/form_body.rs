@@ -12609,14 +12609,25 @@ fn parse_form_child_item_with_metadata_owners(
             .and_then(|slot| fields.get(slot))
             .and_then(|field| (field.trim() == "0").then_some(false)),
         // A `UsualGroup` keeps `CurrentRowUse` in member 25 of its extended
-        // option tuple: over all 26 720 native usual groups the member reads
-        // `2` on the 26 719 that carry no `<CurrentRowUse>` and `0` on the one
-        // that says `Use`, with no other code.
+        // option tuple. Census of the dumped layouts of all eight stand
+        // corpora, joined to the platform's own element for the same item id:
+        // the member reads `2` on all 92 806 usual groups that carry no
+        // `<CurrentRowUse>`, `1` on the 5 that say `DontUse` and `0` on the 2
+        // that say `Use`, with no code mapping to two answers. Only `0` had a
+        // reading, so the five `DontUse` groups -- one each on ERP УХ's
+        // `Documents/{ВходящийЗапросФССДляРасчетаПособия,
+        // ОтветНаЗапросРеквизитовДляВыплатыПособия, ОтветНаЗапросФССДляРасчетаПособия,
+        // СведенияДляОплатыОтпускаСФР, СведенияОЗастрахованномЛицеФСС}/Forms/
+        // ФормаДокумента` -- lost the element.
         usual_group_current_row_use: (tag == "UsualGroup")
             .then(|| fields.get(20))
             .flatten()
             .and_then(|field| split_1c_braced_fields(field.trim(), 0))
-            .and_then(|members| (members.get(25)?.trim() == "0").then_some("Use")),
+            .and_then(|members| match members.get(25)?.trim() {
+                "0" => Some("Use"),
+                "1" => Some("DontUse"),
+                _ => None,
+            }),
         decoration_enable_start_drag: picture_decoration_options.as_deref().and_then(|options| {
             let slot = FormPictureDecorationSchema.enable_start_drag_option_slot(options)?;
             (options.get(slot)?.trim() == "1").then_some(true)
@@ -14858,6 +14869,15 @@ pub(super) fn parse_form_container_enabled(tag: &str, fields: &[&str]) -> Option
         // `0` on exactly the 4 that carry `<Enabled>false</Enabled>` -- all
         // four in Документооборот, in two list forms -- and `1` on the other
         // 10 652, with no other code and no record length that shifts it.
+        //
+        // ERP УХ extends that census rather than contradicting it: with the
+        // conditional `UserVisible` prefix normalized away exactly as the
+        // reader does before addressing any slot, its 21 854 button groups
+        // read `1` on all 21 849 that carry no `<Enabled>` and `0` on the 5
+        // that carry `<Enabled>false</Enabled>`, so the whole stand is 32 536
+        // records with 9 carriers and no third code. Every one of the 32 536
+        // holds its option bag -- the `{2,…}` block -- in slot 20, so the slot
+        // is never reached through a record of another shape.
         "Page"
         | "Pages"
         | "ColumnGroup"
@@ -14865,6 +14885,35 @@ pub(super) fn parse_form_container_enabled(tag: &str, fields: &[&str]) -> Option
         | "SearchStringAddition"
         | "SearchControlAddition"
         | "ViewStatusAddition" => 10,
+        // A `Popup` keeps it in the same slot 10 -- the last grouping kind
+        // left. It is admitted only through its own option bag: the leading
+        // member of the block in slot 20, which is that block's declared
+        // length, is `7` on a popup, so a record whose slot 20 is not that
+        // block is not read at slot 10 at all.
+        //
+        // Census of the dumped layouts of all eight stand corpora, with the
+        // conditional `UserVisible` prefix normalized away exactly as the
+        // reader does before addressing any slot, joined to the platform's own
+        // element for the same item id: 15 842 `Popup` records, slot 10
+        // reading `1` on all 15 840 that carry no `<Enabled>` and `0` on the 2
+        // ERP УХ popups that write `<Enabled>false</Enabled>`. No third code,
+        // no record disagreeing, and both carrier files `differing`.
+        //
+        // The bag qualification is what keeps the *raw* slot out of it: 169
+        // popups in byte-exact ERP УХ files hold a `0` at raw slot 10, and
+        // every one of them is a prefixed record whose real slot 10 is one
+        // further out. Their bag sits at raw slot 21, so a record that reached
+        // this arm unnormalized would decline instead of inventing an
+        // `<Enabled>false</Enabled>`.
+        "Popup" => {
+            let bag = fields
+                .get(20)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+            if bag.first().map(|field| field.trim()) != Some("7") {
+                return None;
+            }
+            10
+        }
         _ => return None,
     };
     (fields.get(slot)?.trim() == "0").then_some(false)
@@ -18679,6 +18728,12 @@ pub(super) fn parse_form_child_item_tooltip(
     // `{1,0}` on 2 184 and a populated one on exactly the one the platform
     // writes the element for; no `ViewStatusAddition` or
     // `SearchControlAddition` in any of the eight native trees carries one.
+    // The same census run over the dumped layouts of all eight corpora and
+    // joined by item id puts the whole population at 68 217 addition records:
+    // slot 8 is the empty list on all of them but two, and the second carrier
+    // is ERP УХ
+    // `InformationRegisters/НастройкиИсключенийПроверкиДокументов/Forms/
+    // ФормаНастройкиПроверкиДокументов`, also a `SearchStringAddition`.
     let indexes: &[usize] = match wrapper {
         "22" => &[8],
         "5" if fields.len() == 24
@@ -26485,6 +26540,13 @@ pub(super) fn format_form_child_item_xml(
             | "Page"
             | "Pages"
             | "ColumnGroup"
+            // A `Popup` places it exactly there as well: both native popups
+            // of the stand that carry it write it ahead of `Title` (2),
+            // `Picture` (2), `ShapeRepresentation` (2), `ExtendedTooltip` (2)
+            // and `ChildItems` (2), and nothing precedes it. (A `ButtonGroup`
+            // writes it from its own title-first site further down, so it is
+            // deliberately not listed here.)
+            | "Popup"
     ) && item.enabled == Some(false)
     {
         xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
@@ -27986,10 +28048,11 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
         }
     }
-    // `PictureField` and `RadioButtonField` carry `TextColor` here as well:
-    // the native tree writes it behind `NonselectedPictureText` (17) and
-    // `ChoiceList` (1) and ahead of `Font` (4) and `ContextMenu` (12).
-    if matches!(item.tag, "PictureField" | "RadioButtonField")
+    // `PictureField` carries `TextColor` here as well: the native tree writes
+    // it behind `NonselectedPictureText` (17) and ahead of `Font` (12) and
+    // `ContextMenu`. A `RadioButtonField` is the one kind that puts its `Font`
+    // *first*, so it writes the element from the site below instead.
+    if item.tag == "PictureField"
         && let Some(text_color) = &item.text_color
     {
         xml.push_str(&format!(
@@ -28051,6 +28114,27 @@ pub(super) fn format_form_child_item_xml(
         && let Some(font_xml) = &item.font_xml
     {
         xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
+    }
+    // A `RadioButtonField` writes `TextColor` *behind* its `Font`, alone among
+    // the control kinds. Census of every native form of all eight stand
+    // corpora, over the items that carry both elements: `TextColor` leads
+    // `Font` on 4 780 `LabelDecoration`, 800 `Button`, 484 `LabelField`, 237
+    // `InputField`, 21 `PictureDecoration`, 14 `ExtendedTooltip` and 12
+    // `PictureField`, and `Font` leads `TextColor` on 2 `RadioButtonField` --
+    // no kind is observed in both directions, and no radio button is observed
+    // in the other one. Only 4 radio buttons in the whole corpus carry
+    // `TextColor` at all; on all 4 it trails `DataPath`, `TitleLocation`,
+    // `RadioButtonType` and `ChoiceList`, on 2 it trails `ToolTipRepresentation`
+    // (written far above this site), and on all 4 it leads `ContextMenu`,
+    // `ExtendedTooltip` and `Events`. Every one of those relations still holds
+    // from here.
+    if item.tag == "RadioButtonField"
+        && let Some(text_color) = &item.text_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TextColor>{}</TextColor>\r\n",
+            escape_xml_text(text_color)
+        ));
     }
     // `SpecialTextInputMode` closes the scalar run ahead of `InputHint`: on the
     // 7 native `InputField` items that carry it, it trails `DataPath` (7),
@@ -28622,6 +28706,18 @@ pub(super) fn format_form_child_item_xml(
     // `MaxWidth` (7) leads `HorizontalStretch` (1).  No pair is observed in
     // both directions, and all of them precede `ContextMenu` and
     // `ExtendedTooltip` on every occurrence.
+    // A table addition writes its `<ToolTip>` behind the title block, not up
+    // with the field kinds. Both additions of the whole stand that carry one
+    // write it behind `AdditionSource` (2), `Title` (1) and
+    // `ToolTipRepresentation` (1) and ahead of `ContextMenu` (2) and
+    // `ExtendedTooltip` (2); nothing else shares an addition with it.
+    if item.tag.ends_with("Addition") {
+        xml.push_str(&format_form_localized_section(
+            "ToolTip",
+            &item.tooltip,
+            indent + 1,
+        ));
+    }
     if let Some(properties) = item.search_string_addition_properties.as_ref() {
         if let Some(value) = properties.group_horizontal_align {
             xml.push_str(&format!(

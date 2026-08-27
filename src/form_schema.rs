@@ -4354,18 +4354,44 @@ impl FormButtonShapeSchema {
 ///     that say `Button`.
 ///
 /// None of the six had a reader, so the writer had nothing to emit.
+///
+/// The three addition kinds share the record but **not** the option tuple.
+/// Census of the dumped layouts of all eight stand corpora: every
+/// `SearchStringAddition` and `SearchControlAddition` carries an 11-member
+/// tuple and every `ViewStatusAddition` a 16-member one, one shape each and no
+/// exception, and the two 11-member shapes are not the same tuple -- the search
+/// string spends member 2 on `HorizontalStretch` where the search control
+/// already holds the first of its three colours, and the search control ends
+/// with a member the search string does not have. Only the coordinates
+/// measured against the platform's own elements are claimed here; the rest stay
+/// `None`, so a property this pass has not measured is absent rather than
+/// invented.
+///
+/// What the other two kinds write at all, over that whole corpus: 3
+/// `SearchControlAddition` carry `<AutoMaxWidth>` and 1 a
+/// `<ToolTipRepresentation>`; 3 `ViewStatusAddition` carry `<AutoMaxWidth>`
+/// (read by `parse_form_view_status_addition_auto_max_width`, from its own
+/// member 13) and 4 a `<ToolTipRepresentation>` (read from the top-level slot
+/// by `list_addition_tooltip_representation`). Neither kind carries `<Width>`,
+/// `<MaxWidth>`, `<HorizontalStretch>` or `<GroupHorizontalAlign>` anywhere in
+/// the corpus, so the one coordinate this schema adds for them is the search
+/// control's `AutoMaxWidth`: option member 7 is `1` on all 19 496 search
+/// controls without the element and `0` on all 6 records that carry
+/// `<AutoMaxWidth>false</AutoMaxWidth>`, across all eight corpora, with no
+/// counter-example.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormSearchStringAdditionSchema;
+pub(crate) struct FormSearchStringAdditionSchema {
+    width_option_slot: Option<usize>,
+    horizontal_stretch_option_slot: Option<usize>,
+    auto_max_width_option_slot: Option<usize>,
+    max_width_option_slot: Option<usize>,
+    group_horizontal_align_slot: Option<usize>,
+    tooltip_representation_slot: Option<usize>,
+}
 
 impl FormSearchStringAdditionSchema {
     pub(crate) const OPTIONS_SLOT: usize = 13;
     const FIELD_COUNT: usize = 24;
-    const OPTION_COUNT: usize = 11;
-    const WIDTH_OPTION_SLOT: usize = 1;
-    const HORIZONTAL_STRETCH_OPTION_SLOT: usize = 2;
-    const AUTO_MAX_WIDTH_OPTION_SLOT: usize = 8;
-    const MAX_WIDTH_OPTION_SLOT: usize = 9;
-    const GROUP_HORIZONTAL_ALIGN_SLOT: usize = 21;
     const TOOLTIP_REPRESENTATION_SLOT: usize = 11;
 
     pub(crate) fn from_raw_layout(
@@ -4374,11 +4400,37 @@ impl FormSearchStringAdditionSchema {
         item_tag: &str,
         options: &[&str],
     ) -> Option<Self> {
-        (wrapper == "5"
-            && field_count == Self::FIELD_COUNT
-            && item_tag == "SearchStringAddition"
-            && options.len() == Self::OPTION_COUNT)
-            .then_some(Self)
+        if wrapper != "5" || field_count != Self::FIELD_COUNT {
+            return None;
+        }
+        match (item_tag, options.len()) {
+            ("SearchStringAddition", 11) => Some(Self {
+                width_option_slot: Some(1),
+                horizontal_stretch_option_slot: Some(2),
+                auto_max_width_option_slot: Some(8),
+                max_width_option_slot: Some(9),
+                group_horizontal_align_slot: Some(21),
+                tooltip_representation_slot: Some(Self::TOOLTIP_REPRESENTATION_SLOT),
+            }),
+            // The search control's own tuple is 11 members like the search
+            // string's but is *not* the same tuple: it spends member 2 on the
+            // first of its three colours where the search string holds
+            // `HorizontalStretch`, and ends with a member the search string
+            // does not have. Only `AutoMaxWidth` is claimed for it, at the
+            // member measured below; its `ToolTipRepresentation` is answered
+            // from the top-level slot by `list_addition_tooltip_representation`,
+            // which covers this kind and its view-status sibling, so it stays
+            // unclaimed here rather than being read a second way.
+            ("SearchControlAddition", 11) => Some(Self {
+                width_option_slot: None,
+                horizontal_stretch_option_slot: None,
+                auto_max_width_option_slot: Some(7),
+                max_width_option_slot: None,
+                group_horizontal_align_slot: None,
+                tooltip_representation_slot: None,
+            }),
+            _ => None,
+        }
     }
 
     fn dimension(self, options: &[&str], slot: usize) -> Option<String> {
@@ -4387,16 +4439,16 @@ impl FormSearchStringAdditionSchema {
     }
 
     pub(crate) fn width(self, options: &[&str]) -> Option<String> {
-        self.dimension(options, Self::WIDTH_OPTION_SLOT)
+        self.dimension(options, self.width_option_slot?)
     }
 
     pub(crate) fn max_width(self, options: &[&str]) -> Option<String> {
-        self.dimension(options, Self::MAX_WIDTH_OPTION_SLOT)
+        self.dimension(options, self.max_width_option_slot?)
     }
 
     pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
         match options
-            .get(Self::HORIZONTAL_STRETCH_OPTION_SLOT)
+            .get(self.horizontal_stretch_option_slot?)
             .map(|field| field.trim())
         {
             Some("0") => Some(false),
@@ -4407,7 +4459,7 @@ impl FormSearchStringAdditionSchema {
 
     pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
         (options
-            .get(Self::AUTO_MAX_WIDTH_OPTION_SLOT)
+            .get(self.auto_max_width_option_slot?)
             .map(|field| field.trim())
             == Some("0"))
         .then_some(false)
@@ -4418,12 +4470,12 @@ impl FormSearchStringAdditionSchema {
         fields: &[&str],
     ) -> Option<FormFieldGroupHorizontalAlign> {
         FormFieldGroupHorizontalAlign::from_raw_value(
-            fields.get(Self::GROUP_HORIZONTAL_ALIGN_SLOT)?.trim(),
+            fields.get(self.group_horizontal_align_slot?)?.trim(),
         )
     }
 
     pub(crate) fn tooltip_representation(self, fields: &[&str]) -> Option<&'static str> {
-        decode_form_tooltip_representation(fields.get(Self::TOOLTIP_REPRESENTATION_SLOT)?.trim())
+        decode_form_tooltip_representation(fields.get(self.tooltip_representation_slot?)?.trim())
     }
 
     pub(crate) fn properties(
@@ -5369,9 +5421,26 @@ impl FormChildItemShowTitleSchema {
                 // same slot 4 the wide bag uses; see
                 // `parse_form_usual_group_extended_options`'s `"28"` arm for
                 // the evidence (five native records, two configurations).
-                // No colour has been observed at any slot of this bag, so
-                // neither colour coordinate is claimed.
-                ("UsualGroup", Some("5"), 28, Some("28")) => (4, None, None),
+                // The compact bag keeps `BackColor` at the same member 9 the
+                // wide one does. The note this replaces -- "no colour has been
+                // observed at any slot of this bag" -- was a UT-only reading,
+                // and UT writes no compact bag at all: the shape lives only in
+                // ERP УХ and its MDM_Management. Census of the dumped layouts
+                // of all eight stand corpora, joined to the platform's own
+                // element for the same item id: 662 compact-bag usual groups,
+                // member 9 holding the "no colour" tuple `{3,4,{0}}` on the 657
+                // that carry no `<BackColor>` and a real colour on all 5 that
+                // do -- `{3,3,{0,<style-item uuid>}}` on the 3 that write
+                // `style:…` and `{3,0,{<rgb>}}` on the 2 that write `#RRGGBB`
+                // -- with no counter-example. That is the same shape rule
+                // `parse_form_control_color` already applies to the wide bag's
+                // member 9, so the coordinate is shared rather than re-derived.
+                //
+                // `HiddenStateTitleBackColor` stays unclaimed: member 23 of the
+                // compact bag reads `{3,4,{0}}` on all 662 records and no
+                // compact-bag group carries the element, so the corpus says
+                // nothing about that coordinate either way.
+                ("UsualGroup", Some("5"), 28, Some("28")) => (4, Some(9), None),
                 _ => return None,
             };
         Some(Self {
@@ -5476,11 +5545,21 @@ pub(crate) struct FormRootEnabledSchema {
 impl FormRootEnabledSchema {
     const SLOT: usize = 15;
 
+    /// Both root revisions keep it in the same slot.
+    ///
+    /// Census of the dumped layouts of all eight stand corpora, joined to the
+    /// direct children of each form's own `<Form>` element: 21 392 roots, 1 650
+    /// of them under discriminator `49` and the rest under `50`, and slot 15
+    /// reads `1` on all 21 377 that carry no `<Enabled>` and `0` on all 15 that
+    /// carry `<Enabled>false</Enabled>` -- 13 under `50`, 2 under `49` -- with
+    /// no third code and no root disagreeing. Admitting only `50` hid exactly
+    /// those two: ERP УХ `Catalogs/{ВидыСобытийОповещений,
+    /// КатегорииСобытийОповещений}/Forms/ФормаЭлемента`.
     pub(crate) fn from_raw_layout(
         root_discriminator: Option<&str>,
         field_count: usize,
     ) -> Option<Self> {
-        (root_discriminator == Some("50") && field_count > Self::SLOT)
+        (matches!(root_discriminator, Some("49" | "50")) && field_count > Self::SLOT)
             .then_some(Self { slot: Self::SLOT })
     }
 
