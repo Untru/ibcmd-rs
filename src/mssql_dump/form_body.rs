@@ -455,6 +455,16 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
+    // Only the declaration table travels with the command bar: every other
+    // index it reads stays exactly as empty as it was, so the bar's own
+    // data-path resolution is untouched.
+    let auto_command_bar_command_facts = FormOwnerScopedBindingIndexes {
+        metadata_command_facts: context
+            .metadata_command_facts
+            .map(Arc::clone)
+            .unwrap_or_default(),
+        ..Default::default()
+    };
     let mut auto_command_bar = extract_form_auto_command_bar(
         &form_fields,
         &commands,
@@ -478,6 +488,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         // outright, and 21 of them are named only once the indexes are present.
         &child_item_indexes.table_column_names_by_id,
         &child_item_indexes.type_link_data_path_by_table_column,
+        &auto_command_bar_command_facts,
     );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_auto_command_bar_cpu_ms += elapsed_ms(started);
@@ -2953,6 +2964,7 @@ pub(super) fn extract_form_auto_command_bar(
     command_source_owner_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    metadata_command_facts: &FormOwnerScopedBindingIndexes,
 ) -> Option<FormAutoCommandBar> {
     find_form_auto_command_bar(
         fields,
@@ -2965,6 +2977,7 @@ pub(super) fn extract_form_auto_command_bar(
         command_source_owner_name_by_id,
         table_column_names_by_id,
         type_link_data_path_by_table_column,
+        metadata_command_facts,
     )
 }
 
@@ -2979,6 +2992,7 @@ pub(super) fn find_form_auto_command_bar(
     command_source_owner_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    metadata_command_facts: &FormOwnerScopedBindingIndexes,
 ) -> Option<FormAutoCommandBar> {
     for field in fields {
         let field = field.trim();
@@ -2999,6 +3013,7 @@ pub(super) fn find_form_auto_command_bar(
             command_source_owner_name_by_id,
             table_column_names_by_id,
             type_link_data_path_by_table_column,
+            metadata_command_facts,
         ) {
             return Some(command_bar);
         }
@@ -3013,6 +3028,7 @@ pub(super) fn find_form_auto_command_bar(
             command_source_owner_name_by_id,
             table_column_names_by_id,
             type_link_data_path_by_table_column,
+            metadata_command_facts,
         ) {
             return Some(command_bar);
         }
@@ -3031,6 +3047,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
     command_source_owner_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    metadata_command_facts_bindings: &FormOwnerScopedBindingIndexes,
 ) -> Option<FormAutoCommandBar> {
     let raw_fields = fields;
     let wrapper = raw_fields.first()?.trim();
@@ -3097,7 +3114,10 @@ pub(super) fn parse_form_auto_command_bar_fields(
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
-            &FormOwnerScopedBindingIndexes::default(),
+            // The root command bar's own buttons name a target's standard
+            // command exactly as any other button does, so they read the same
+            // declaration table the child items read.
+            metadata_command_facts_bindings,
             commands,
             &BTreeMap::new(),
             &BTreeSet::new(),
