@@ -14299,7 +14299,9 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     let mut attribute_names_by_id = BTreeMap::new();
     attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
 
-    let item = parse_form_child_item_with_attrs(
+    // Attribute `6` is the form's dynamic list: `<AllowGettingCurrentRowURL>`
+    // exists only on a table bound to one.
+    let item = parse_form_child_item_with_dynamic_list_attrs(
             // Padded to the FormTableSchema >= 99-field tail (BASE_FIELD_COUNT)
             // with neutral `0` scalars past the counted property bag, per the
             // cluster-4 technique (`extracts_business_network_table_flags_from_ordinary_wrapper55`).
@@ -14312,6 +14314,7 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
             None,
             None,
             &attribute_names_by_id,
+            &["6"],
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -70629,11 +70632,14 @@ fn strict_wrapper55_table_with_bag_records_for_test(pairs: usize, extra: &str) -
         r##"{{55,{{1,02023637-7868-4a5f-8576-835a76e0c9ba}},0,1,0,"Rows",0,0,0,{{1,1,{{"en","Rows"}}}},{{1,0}},{{1,{{6}}}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{{1,{{10000000}}}},{{4,0,{{0}},"",-1,-1,1,0,""}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,3,{{-22}}}},{{7,3,0,1,100}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,0,{count},{extra}5,{{"B",0}},6,{{"N",60}},7,{{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{{0,00010101000000,00010101000000}}}},8,{{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}},9,{{"B",0}},10,{{"U"}},11,{{"B",1}},12,{{"B",0}},14,{{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0}},15,{{"U"}},16,{{"N",141}},19,{{"S",""}},20,{{"B",1}},{{0}},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}}"##,
         count = 13 + pairs,
     );
-    parse_form_child_item_with_attrs(
+    // Attribute `6` is the form's dynamic list: `<AllowGettingCurrentRowURL>`
+    // exists only on a table bound to one.
+    parse_form_child_item_with_dynamic_list_attrs(
         &field,
         None,
         None,
         &attribute_names_by_id,
+        &["6"],
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),

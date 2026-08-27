@@ -2445,8 +2445,26 @@ pub(super) fn extract_form_repost_on_write(fields: &[&str]) -> Option<bool> {
     }
 }
 
+/// `AutoFillCheck` sits alone in root field 13, in both root revisions.
+///
+/// Census of the dumped root layouts of all eight stand corpora, joined to the
+/// direct children of each form's own `<Form>` element: 22 637 roots, 1 652 of
+/// them under discriminator `49` and 20 985 under `50`, and field 13 reads `0`
+/// on all 163 roots that carry `<AutoFillCheck>false</AutoFillCheck>` -- 153
+/// under `50` and 10 under `49` -- and `1` on all 22 474 that omit it, with no
+/// third code and no root disagreeing. Admitting only `50` dropped the element
+/// from exactly those ten ERP УХ forms:
+/// `DataProcessors/{ВыгрузкаЗагрузкаШаблоновТрансляции, ВыгрузкаЗагрузкаДанныхXML,
+/// УдалитьИнтеграцияСЕИС_v41, ЛичныйКабинетПоставщика, МастерГенерацииМакетаОтчета,
+/// ПереносМетодическихМоделейБПМСФО}/Forms/Форма`,
+/// `DataProcessors/ЕдиныйНалоговыйСчетЛичныйКабинет/Forms/ФормаДлительнаяОперация`,
+/// `Documents/ОперативныйПлан/Forms/ФормаДокумента` and
+/// `Documents/НастраиваемыйОтчет/Forms/{КонтрольныеСоотношения, ФормаДокументаНО}`.
 pub(super) fn extract_form_auto_fill_check(fields: &[&str]) -> Option<bool> {
-    if fields.first().map(|field| field.trim()) == Some("50") {
+    if matches!(
+        fields.first().map(|field| field.trim()),
+        Some("49") | Some("50")
+    ) {
         return (fields.get(13).map(|field| field.trim()) == Some("0")).then_some(false);
     }
     if fields.first().map(|field| field.trim()) != Some("59") {
@@ -2674,8 +2692,9 @@ fn parse_form_choice_folders_and_items_value(value: &str) -> Option<&'static str
 
 pub(super) fn extract_form_customizable(fields: &[&str]) -> Option<bool> {
     let root_discriminator = fields.first().map(|field| field.trim());
-    if root_discriminator == Some("50") {
-        // A `50` root that does not reach slot 14 is unreadable, not legacy.
+    if matches!(root_discriminator, Some("49") | Some("50")) {
+        // A `49`/`50` root that does not reach slot 14 is unreadable, not
+        // legacy.
         return FormRootCustomizableSchema::from_raw_layout(root_discriminator, fields.len())?
             .customizable(fields);
     }
@@ -3681,10 +3700,28 @@ pub(super) fn form_item_picture_owner_at(
             continue;
         };
         let revision_fields = normalize_form_item_record_revision(&split_fields);
-        let fields = revision_fields.as_deref().unwrap_or(&split_fields);
-        let Some(wrapper) = fields.first().map(|field| field.trim()) else {
+        let raw_fields = revision_fields.as_deref().unwrap_or(&split_fields);
+        let Some(wrapper) = raw_fields.first().map(|field| field.trim()) else {
             continue;
         };
+        // The conditional `UserVisible` prefix shifts every member of the
+        // record by one, and the asset scan has to see the same canonical
+        // record the item reader sees -- otherwise the picture slot it samples
+        // is the member in front of the picture. ERP УХ 3.2.12.6
+        // `DataProcessors/ВыгрузкаЗагрузкаДанныхXML/Forms/Форма` table
+        // `ДеревоМетаданных` is a prefixed wrapper-`55` record whose
+        // `<RowsPicture>` element the item reader writes correctly from the
+        // shifted slot, while the file beside it -- `RowsPicture.png` -- went
+        // unwritten because this scan sampled the unshifted one.
+        let prefixed_fields =
+            form_child_item_conditional_prefix_slot(wrapper, raw_fields).map(|prefix_slot| {
+                raw_fields
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, field)| (index != prefix_slot).then_some(*field))
+                    .collect::<Vec<_>>()
+            });
+        let fields = prefixed_fields.as_deref().unwrap_or(raw_fields);
         if form_child_item_id(fields).is_none() {
             continue;
         }
@@ -3726,6 +3763,27 @@ pub(super) fn form_item_picture_property_at(
         ("55", "Table") => {
             form_item_picture_value_matches_marker(text, marker_start, fields.get(44)?)
                 .then_some("RowsPicture")
+        }
+        // A page names its picture through the same option bag its other
+        // properties come from, so the asset scan reads it through the very
+        // schema the property reader uses rather than a slot of its own.
+        ("22", "Page") => {
+            let options = fields
+                .get(FormPageSchema::OPTIONS_SLOT)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+            let schema = FormPageSchema::from_raw_layout(
+                wrapper,
+                fields.len(),
+                tag,
+                fields.get(5).map(|field| field.trim()),
+                &options,
+            )?;
+            form_item_picture_value_matches_marker(
+                text,
+                marker_start,
+                options.get(schema.picture_option_slot())?,
+            )
+            .then_some("Picture")
         }
         ("37", "PictureField") => {
             let input_offset = form_input_field_top_level_offset(fields);
@@ -10468,6 +10526,56 @@ pub(super) fn parse_form_child_item_with_attrs(
     )
 }
 
+/// The same fixture entry point as `parse_form_child_item_with_attrs`, with the
+/// owner-scoped binding index seeded: a table's `<AllowGettingCurrentRowURL>`
+/// and its row-set commands both exist only where the attribute the table's
+/// data path names is declared as the built-in dynamic list, so a fixture that
+/// exercises either has to say so.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn parse_form_child_item_with_dynamic_list_attrs(
+    field: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    dynamic_list_attribute_ids: &[&str],
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    let owner_scoped_bindings = FormOwnerScopedBindingIndexes {
+        dynamic_list_attribute_ids: dynamic_list_attribute_ids
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect(),
+        ..FormOwnerScopedBindingIndexes::default()
+    };
+    parse_form_child_item_with_metadata_owners(
+        field,
+        main_data_path,
+        parent_data_path,
+        None,
+        attribute_names_by_id,
+        &BTreeMap::new(),
+        table_name_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        table_column_names_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
+        &owner_scoped_bindings,
+        commands,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+    )
+}
+
 #[cfg(test)]
 pub(super) fn parse_form_child_item_with_context(
     field: &str,
@@ -11281,6 +11389,18 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         };
+    // Whether this table's own data path names a form attribute the form
+    // declares as exactly the built-in dynamic list. Two properties turn on it
+    // -- the row-set commands of `<CommandSet>` and `<AllowGettingCurrentRowURL>`
+    // -- so the binding is resolved once instead of twice.
+    let table_bound_to_dynamic_list = data_path_resolution.as_ref().is_some_and(|resolved| {
+        attribute_names_by_id.iter().any(|(id, name)| {
+            *name == resolved.data_path
+                && owner_scoped_bindings
+                    .dynamic_list_attribute_ids
+                    .contains(id)
+        })
+    });
     let mut item = FormChildItem {
         tag,
         id: id.to_string(),
@@ -11517,14 +11637,7 @@ fn parse_form_child_item_with_metadata_owners(
             // no commands that change it, so the platform names none of them.
             let names_row_set_commands =
                 !(table_schema.and_then(|schema| schema.change_row_set(&fields)) == Some(false)
-                    && data_path_resolution.as_ref().is_some_and(|resolved| {
-                        attribute_names_by_id.iter().any(|(id, name)| {
-                            *name == resolved.data_path
-                                && owner_scoped_bindings
-                                    .dynamic_list_attribute_ids
-                                    .contains(id)
-                        })
-                    }));
+                    && table_bound_to_dynamic_list);
             let commands = table_schema
                 .map(|schema| {
                     parse_form_table_command_set_excluded_commands_for_table(
@@ -11723,7 +11836,25 @@ fn parse_form_child_item_with_metadata_owners(
         // (`AutoRefresh`) is present on every dynamic-list bag observed, so
         // its presence stands in for "this table carries the bag and simply
         // didn't write key 20", which reads as the default `true`.
-        allow_getting_current_row_url: if tag == "Table" {
+        //
+        // "The bag is dynamic-list-only" was measured on MDM_Management alone
+        // and is not true of the whole stand: a table over a value tree carries
+        // a counted bag of its own, and ERP УХ
+        // `DataProcessors/АналитическийБланк/Forms/ФормаПодбораПоказателейВидаОтчета`
+        // table `ДеревоСтрок` spells key 20 in it as `{"B",0}` while the
+        // platform writes no `<AllowGettingCurrentRowURL>` at all. The property
+        // belongs to the *list*, so the binding decides whether it exists,
+        // exactly as the row-set commands beside it already do.
+        //
+        // Census over the native `Form.xml` of all eight stand corpora, every
+        // `<Table>` element joined to the declared `<Type>` of the form
+        // attribute its own `<DataPath>` names: 19 029 tables, and the element
+        // is written on all 7 665 whose attribute declares exactly
+        // `cfg:DynamicList` and on none of the other 11 364 (4 752 value
+        // tables, 3 587 with no attribute of that name, 2 310 value trees, 561
+        // value lists, 122 register record sets, the rest single). No table
+        // disagrees in either direction.
+        allow_getting_current_row_url: if tag == "Table" && table_bound_to_dynamic_list {
             parse_form_table_property_bag_bool(&fields, TableBagKey::AllowGettingCurrentRowUrl)
                 .or_else(|| {
                     form_table_property_bag_value(&fields, TableBagKey::AutoRefresh)
@@ -13404,6 +13535,17 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_picture
                 .as_ref()
                 .and_then(|picture| picture.file_name.clone())
+        } else if tag == "Page" {
+            // A page's picture value is read by the same
+            // `FormPageSchema`/`parse_form_owned_picture` pair that already
+            // answers its reference and its transparency, and that reader
+            // answers `file_name` for the payload kind exactly as it answers
+            // `reference` for the reference kind. Only the reference half was
+            // carried out of it, so a page whose picture is stored inline lost
+            // both the element and the file the platform writes beside it.
+            page_picture
+                .as_ref()
+                .and_then(|picture| picture.file_name.clone())
         } else {
             embedded_picture
                 .as_ref()
@@ -14212,6 +14354,27 @@ fn form_control_window_color_name(code: i32) -> Option<&'static str> {
         // whose native document writes `<TextColor>win:ButtonDarkShadow</...>`.
         // Without it the whole colour declined and the element went unwritten.
         21 => Some("win:ButtonDarkShadow"), // 1
+        // Two more codes from the same join, run over the dumped item layouts
+        // of all seven stand corpora that carry forms: for every item record
+        // holding exactly one space-`1` colour tuple whose native element's own
+        // scalar run writes exactly one `win:` value, the code and the name are
+        // forced on each other. The pairing produces six distinct codes with no
+        // ambiguity at all -- not one code maps to two names -- and it
+        // reproduces the four above, index for index. The two it adds are the
+        // ones the table did not carry, and each of them cost the element
+        // outright: ERP УХ
+        // `DataProcessors/АналитическийБланкСводнаяТаблица/Forms/
+        // ФормаНастройкиРасположенияИзмерений` writes
+        // `<BorderColor>win:ActiveTitleBar</BorderColor>` on three of its
+        // tables, and `DataProcessors/ДокументооборотСКонтролирующимиОрганами/
+        // Forms/ДиагностикаОтчетности_ГлавноеОкно` writes
+        // `<BorderColor>win:ScrollBar</BorderColor>` on its `НадписьОтправить`
+        // label decoration. Both codes are the Win32 system-colour index the
+        // other four already are (`COLOR_SCROLLBAR` 0, `COLOR_ACTIVECAPTION` 2,
+        // `COLOR_MENU` 4, `COLOR_GRAYTEXT` 17, `COLOR_BTNTEXT` 18,
+        // `COLOR_3DDKSHADOW` 21).
+        0 => Some("win:ScrollBar"),      // 1
+        2 => Some("win:ActiveTitleBar"), // 3
         _ => None,
     }
 }
@@ -14256,6 +14419,25 @@ fn form_control_web_color_name(code: i32) -> Option<&'static str> {
         122 => Some("web:SaddleBrown"),   // 20
         132 => Some("web:Snow"),          // 2
         143 => Some("web:White"),         // 12
+        // Three codes the same join names that neither this table nor the
+        // shared style palette behind it answers. Re-run over the dumped item
+        // layouts of all seven stand corpora that carry forms, item by item
+        // rather than file by file, the pairing produces 46 distinct codes with
+        // no ambiguity, reproduces every code the two tables already answer --
+        // 43 of them, index for index, including the `31` override -- and
+        // leaves exactly these three unanswered. Each cost the element
+        // outright: ERP УХ
+        // `DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/
+        // Мастер_ПаспортныеДанные` writes `<TextColor>web:LightSalmon</...>` on
+        // its `КраснаяРазделительнаяЛиния` label decoration and
+        // `<BorderColor>web:LightSalmon</...>` on its `Силуэт` picture
+        // decoration; `DataProcessors/АналитическийБланкСводнаяТаблица/Forms/
+        // ФормаМакетаСводнаяТаблица` writes `web:Lime`; and
+        // `Documents/ЗаказНаПроизводство2_2/Forms/ФормаДокумента` writes
+        // `web:PapayaWhip`.
+        73 => Some("web:LightSalmon"), // 2
+        80 => Some("web:Lime"),        // 1
+        112 => Some("web:PapayaWhip"), // 2
         _ => style_web_color_name(code),
     }
 }
@@ -18687,20 +18869,44 @@ pub(super) fn parse_form_table_command_set_excluded_commands_for_table_test(
     parse_form_table_command_set_excluded_commands_for_table(FormTableSchema, fields, true)
 }
 
+/// A document field's own `<CommandSet>`, read at the offset the record itself
+/// declares.
+///
+/// The conditional-appearance prefix ahead of the name shifts every member of
+/// the record by one, and which shape a record is is read off its own name slot
+/// -- the same reading `form_input_field_top_level_offset` already does for the
+/// whole field family -- rather than fixed at zero.
+///
+/// Census over the dumped item layouts of the seven stand corpora that carry
+/// forms, joined to the `<ExcludedCommand>` elements the platform writes for
+/// the element of the same name: 2 566 `SpreadSheetDocumentField` and 171
+/// `FormattedDocumentField` records at the unprefixed length 59, on every one
+/// of which the declared uuid count and the native name count agree; and 152 +
+/// 15 at the prefixed length 60, of which 165 declare an empty list and write
+/// no element. The two prefixed records that do declare one are ERP УХ
+/// `DataProcessors/ЗагрузкаДанныхИзВнешнихФайлов/Forms/Форма`
+/// (`ТабличныйДокумент`, one uuid against the platform's one
+/// `<ExcludedCommand>Print`) and
+/// `Reports/СетеваяДиаграммаШаблонаУниверсальногоПроцесса/Forms/Форма`
+/// (`ТабличноеПолеВозможныхЭтапов`, 51 uuids against 50 names). Both were
+/// written with no `<CommandSet>` at all.
 fn parse_form_field_command_set_excluded_commands(
     wrapper: &str,
     item_tag: &str,
     fields: &[&str],
 ) -> Vec<&'static str> {
-    if wrapper != "37"
-        || fields.len() != 59
-        || fields.get(47).map(|field| field.trim()) != Some("\"\"")
-        || fields.get(49).map(|field| field.trim()) != Some("0")
+    if wrapper != "37" {
+        return Vec::new();
+    }
+    let offset = form_input_field_top_level_offset(fields);
+    if fields.len() != 59 + offset
+        || fields.get(47 + offset).map(|field| field.trim()) != Some("\"\"")
+        || fields.get(49 + offset).map(|field| field.trim()) != Some("0")
     {
         return Vec::new();
     }
     let mapper: fn(&str) -> Option<&'static str> =
-        match (item_tag, fields.get(5).map(|field| field.trim())) {
+        match (item_tag, fields.get(5 + offset).map(|field| field.trim())) {
             ("SpreadSheetDocumentField", Some("6")) => {
                 form_spreadsheet_document_standard_command_suffix
             }
@@ -18710,7 +18916,7 @@ fn parse_form_field_command_set_excluded_commands(
             _ => return Vec::new(),
         };
     let Some(uuids) = fields
-        .get(48)
+        .get(48 + offset)
         .and_then(|field| parse_form_table_counted_uuid_list(field))
     else {
         return Vec::new();
@@ -29501,6 +29707,11 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
     }
+    xml.push_str(&format_form_tooltip_representation_xml(
+        item,
+        FormTooltipRepresentationXmlOrder::CommandBarHeader,
+        indent + 1,
+    ));
     xml.push_str(&format_form_command_bar_properties_xml(item, indent + 1));
     if matches!(item.tag, "Popup" | "Pages") {
         xml.push_str(&format_form_localized_section(
@@ -30166,11 +30377,11 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
                 ));
             }
             FormPageXmlProperty::Picture => {
-                if let Some(reference) = &item.picture_ref {
+                if item.picture_ref.is_some() || item.picture_file_name.is_some() {
                     xml.push_str(&format_form_picture_element(
                         "Picture",
-                        Some(reference),
-                        None,
+                        item.picture_ref.as_deref(),
+                        item.picture_file_name.as_deref(),
                         item.picture_load_transparent,
                         item.picture_transparent_pixel,
                         indent,
