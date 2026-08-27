@@ -17,11 +17,11 @@ use crate::form_schema::{
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
     FormConditionalTableSchema, FormContainerReadOnlySchema, FormControlBorder,
-    FormControlBorderSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldGroupHorizontalAlign,
-    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
-    FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot, FormFieldVerticalAlign,
-    FormFixingInTable, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormControlBorderSchema, FormControlBorderStyle, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
+    FormFieldGroupHorizontalAlign, FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty,
+    FormFieldSchema, FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot,
+    FormFieldVerticalAlign, FormFixingInTable, FormInputFieldExtendedOptionSlot as InputFieldSlot,
     FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
@@ -31318,11 +31318,56 @@ fn form_chart_color(field: &str, object_refs: &BTreeMap<String, String>) -> Opti
         return Some(color);
     }
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    (fields.len() == 3
+    if fields.len() == 3
         && fields.first()?.trim() == "3"
         && fields.get(1)?.trim() == "4"
-        && fields.get(2)?.trim() == "{0}")
-        .then(|| "auto".to_string())
+        && fields.get(2)?.trim() == "{0}"
+    {
+        return Some("auto".to_string());
+    }
+    form_chart_dangling_style_color(&fields, object_refs)
+}
+
+/// A style-item colour whose uuid names no style item of the configuration.
+///
+/// The shared control-colour reader answers `{3,3,{0,<uuid>}}` with
+/// `style:<name>` by looking the uuid up in the form's own object list; when
+/// the lookup finds nothing it declines, and every owner that goes through it
+/// refuses the record. The platform does not: it publishes the reference
+/// verbatim, as `<kind>:<uuid>`, spelling the kind from the same member `0`
+/// the guarded shape already pins.
+///
+/// Evidence: `ffe11d70-240b-4ca3-a94d-d7f7d1225bb3` occurs nowhere in the
+/// 25 444 native files of Документооборот КОРП 3.0.21.3 except as the value
+/// the five chart records of `DataProcessors/ОчисткаУстаревшихВерсийФайлов`
+/// and `DataProcessors/ПротоколРаботыСотрудников` publish --
+/// `<d4p1:color>0:ffe11d70-240b-4ca3-a94d-d7f7d1225bb3</d4p1:color>` -- while
+/// the records store `{3,3,{0,ffe11d70-240b-4ca3-a94d-d7f7d1225bb3}}`. Across
+/// all eight native trees of the stand those five are the only elements whose
+/// name carries `color` at all and whose value is a `<digits>:<uuid>` instead
+/// of a named colour -- every other space-3 style reference names a style item
+/// and is published `style:<name>`.
+///
+/// The fallback stays local to the chart. A uuid the object list *does* name,
+/// as anything other than a style item, is still refused -- nothing in the
+/// corpus says what the platform writes then.
+fn form_chart_dangling_style_color(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if fields.len() != 3 || fields.first()?.trim() != "3" || fields.get(1)?.trim() != "3" {
+        return None;
+    }
+    let payload = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    if payload.len() != 2 {
+        return None;
+    }
+    let kind = form_chart_integer(payload.first()?)?;
+    let uuid = parse_non_zero_uuid(payload.get(1)?.trim())?;
+    object_refs
+        .get(&uuid)
+        .is_none()
+        .then(|| format!("{kind}:{uuid}"))
 }
 
 fn form_chart_localized_xml(name: &str, field: &str, indent: usize) -> Option<String> {
@@ -31392,11 +31437,19 @@ fn form_chart_border_xml(name: &str, field: &str, indent: usize) -> Option<Strin
     {
         return None;
     }
-    let style = match fields.get(3)?.trim() {
-        "0" => "WithoutBorder",
-        "1" => "Single",
-        _ => return None,
-    };
+    // Member 3 is the `ControlBorderType` code, and it is the very same code
+    // the control-border tuple carries -- both spell it into
+    // `<v8ui:style xsi:type="v8ui:ControlBorderType">`. The local two-arm
+    // match (`0`/`1` only) was a flat boundary fitted to the two records the
+    // chart writer had seen: `do`'s fourth
+    // `DataProcessors/ПротоколРаботыСотрудников/Forms/Форма` chart stores
+    // `{3,0,{0},2,1,0,<border uuid>}` for its `chBorder` and publishes
+    // `width="1"` with `Embossed`, which the two-arm match refused -- and
+    // with it the whole chart. `FormControlBorderStyle::from_raw_code` is
+    // the same enum read off the whole native UT 11.5.27.75 tree, where the
+    // code is a total function of the spelling on every owner that carries
+    // one.
+    let style = FormControlBorderStyle::from_raw_code(fields.get(3)?)?.xml_value();
     let width = form_chart_integer(fields.get(4)?)?;
     Some(format!(
         "{tab}<d4p1:{name} width=\"{width}\">\r\n\
@@ -31871,7 +31924,32 @@ fn format_form_chart_settings_xml(
         "paletteKind",
         form_chart_code(t.get(63)?, &[("0", "Auto")])?
     );
-    scalar!("animation", form_chart_code(t.get(64)?, &[("0", "Auto")])?);
+    // `animation` is `t[120]`, not `t[64]`. From `t[100]` on, the form
+    // chart's tail is the spreadsheet-document chart's `post` shifted by
+    // exactly one hundred -- `t[111]`/`post[11]` translucence,
+    // `t[112]`/`post[12]` spline strain, `t[113..116]`/`post[13..16]` the
+    // three funnel percentages, `t[116]`/`post[16]` the multi-stage link
+    // line, `t[117]`/`post[17]` its colour, `t[118]`/`post[18]` the literal
+    // `2`, `t[119]`/`post[19]` the literal `255`, `t[121]`/`post[21]`
+    // rebuild time, `t[122]`/`post[22]` the nil uuid, `t[123]`/`post[23]`
+    // the scale-item count -- and `post[20]` is where the spreadsheet chart
+    // reads `animation` from, with the same two codes.
+    //
+    // `t[64]` held `"0"` in every record the writer had seen and was fitted
+    // to it. Over the 19 form-chart records of the stand `t[120]` is a total
+    // function of the published spelling and `t[64]` is not: the five `do`
+    // records of `ОчисткаУстаревшихВерсийФайлов` and
+    // `ПротоколРаботыСотрудников` store `"2"` there and publish
+    // `<d4p1:animation>DontUse</d4p1:animation>`, and the other fourteen
+    // store `"0"` and publish `Auto`.
+    //
+    // Unlike the spreadsheet chart's corpus, this one separates `animation`
+    // from the area placements: all five `DontUse` records publish
+    // `legendPlacement` and `titleAreaPlacement` too.
+    scalar!(
+        "animation",
+        form_chart_code(t.get(120)?, &[("0", "Auto"), ("2", "DontUse")])?
+    );
     scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
     scalar!("isTransposed", "false");
     scalar!("autoTransposition", "false");
