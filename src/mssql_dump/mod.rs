@@ -5455,15 +5455,22 @@ fn parse_exchange_plan_content_blob(
             format!("ExchangePlanContent item {item_index} has no AutoRecord value")
         })?;
         let auto_record = exchange_plan_auto_record_xml(auto_record_slot.trim());
-        let metadata = object_refs
+        // A content slot whose metadata id names nothing in the configuration
+        // is dropped, not fatal. Both of `uh`'s unfinished exchange plans
+        // prove it by count: `ОбновлениеЧерезКопию` declares 5383 slots, 18 of
+        // them name ids that occur nowhere in the native tree, and the
+        // platform writes exactly 5365 `<Item>`s; `НалоговыйМониторинг`
+        // declares 4212, one is unresolvable, and the platform writes 4211.
+        // Every other exchange plan of the corpus resolves all of its slots
+        // and loses nothing.
+        let Some(metadata) = object_refs
             .get(&object_id)
             .or_else(|| type_index.get(&object_id))
             .cloned()
-            .with_context(|| {
-                format!(
-                    "ExchangePlanContent item {item_index} references unsupported metadata id {object_id}"
-                )
-            })?;
+        else {
+            index += 2;
+            continue;
+        };
         items.push(ExchangePlanContentItem {
             metadata_id: object_id,
             metadata,

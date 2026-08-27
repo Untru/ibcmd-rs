@@ -39613,21 +39613,18 @@ fn writes_exchange_plan_content_without_metadata_xml_indexes() {
 }
 
 #[test]
-fn exchange_plan_content_reports_unresolved_metadata_id() {
+fn exchange_plan_content_drops_unresolved_metadata_id() {
     let missing_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let content = deflate_for_test(format!("{{2,1,{missing_id},0}}").as_bytes());
-    let err = parse_exchange_plan_content_blob(
+    let items = parse_exchange_plan_content_blob(
         &content,
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
     )
-    .unwrap_err();
+    .expect("an unresolvable content slot is dropped, not fatal");
 
-    let message = format!("{err:#}");
-    assert!(message.contains("ExchangePlanContent item 0"));
-    assert!(message.contains(missing_id));
-    assert!(message.contains("unsupported metadata id"));
+    assert!(items.is_empty());
 }
 
 #[test]
