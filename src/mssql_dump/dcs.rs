@@ -1663,6 +1663,15 @@ struct DcsElementFrame {
     /// same trees, so the writer applies this only in
     /// [`DataCompositionDocumentMode::Settings`].
     saw_settings_parameter_value: Option<bool>,
+    /// Where an absent `SettingsParameterValue` value has to be written, and
+    /// the indentation run that leads up to it.
+    ///
+    /// The element goes right behind the item's own `parameter` child, which
+    /// is where the platform puts it without exception: over the
+    /// `Templates/*/Ext/Template.xml` trees of all eight stand corpora every
+    /// one of the 137 183 elements that follow a `dcscor:parameter` is a
+    /// `dcscor:value`.
+    settings_value_anchor: Option<(usize, String)>,
     /// Output offset right before this element's opening `<` was written.
     start_tag_begin_offset: usize,
     /// Output offset right after this element's opening tag's own closing
@@ -1915,6 +1924,9 @@ impl<'a> DataCompositionXmlWriter<'a> {
                             self.output.push('>');
                         }
                     }
+                    if mode == DataCompositionDocumentMode::Settings {
+                        self.note_settings_parameter_value_anchor(&frame);
+                    }
                 }
                 Event::Text(event) => {
                     if self.skip_depth == 0 {
@@ -1967,20 +1979,46 @@ impl<'a> DataCompositionXmlWriter<'a> {
         }
     }
 
+    /// Records where an absent `SettingsParameterValue` value would go: right
+    /// behind the `parameter` child that just closed, at that child's own
+    /// indentation. See [`DcsElementFrame::settings_value_anchor`].
+    fn note_settings_parameter_value_anchor(&mut self, frame: &DcsElementFrame) {
+        if frame.namespace.as_deref() != Some(DCS_CORE_NS) || frame.local != b"parameter" {
+            return;
+        }
+        let indent_start = self.output[..frame.start_tag_begin_offset]
+            .trim_end_matches(['\r', '\n', '\t', ' '])
+            .len();
+        let indent = self.output[indent_start..frame.start_tag_begin_offset].to_string();
+        let at = self.output.len();
+        if let Some(parent) = self.element_stack.last_mut()
+            && parent.saw_settings_parameter_value == Some(false)
+        {
+            parent.settings_value_anchor = Some((at, indent));
+        }
+    }
+
     /// Writes the `value` child a `SettingsParameterValue` item states no
     /// value for, as the platform's own `xsi:nil="true"` spelling.
     ///
     /// The element takes the item's own prefix: both are `{dcs core}` names,
     /// and every one of the 61 415 published items spells the pair
-    /// `dcscor:item`/`dcscor:value`. It is placed one indentation step inside
-    /// the item, reusing the storage document's own pretty-printing -- the
-    /// whitespace run that already leads up to the closing tag -- rather than
-    /// inventing a layout of its own.
+    /// `dcscor:item`/`dcscor:value`. It goes right behind the item's
+    /// `parameter` child; an item that carries no `parameter` at all has no
+    /// evidenced position for it, so it falls back to the last child's place,
+    /// reusing the storage document's own pretty-printing rather than
+    /// inventing a layout.
     fn write_absent_settings_parameter_value(&mut self, frame: &DcsElementFrame) {
         let prefix = frame
             .rendered_name
             .rsplit_once(':')
             .map_or(String::new(), |(prefix, _)| format!("{prefix}:"));
+        let element = format!("<{prefix}value xsi:nil=\"true\"/>");
+        if let Some((at, indent)) = &frame.settings_value_anchor {
+            let rendered = format!("{indent}{element}");
+            self.output.insert_str(*at, &rendered);
+            return;
+        }
         let closing_indent_start = self
             .output
             .trim_end_matches(['\r', '\n', '\t', ' '])
@@ -1988,8 +2026,7 @@ impl<'a> DataCompositionXmlWriter<'a> {
             .max(frame.start_tag_end_offset);
         let closing_indent = self.output[closing_indent_start..].to_string();
         self.output.push('\t');
-        self.output
-            .push_str(&format!("<{prefix}value xsi:nil=\"true\"/>"));
+        self.output.push_str(&element);
         self.output.push_str(&closing_indent);
     }
 
@@ -2989,6 +3026,7 @@ fn data_composition_element_frame(
         // Set by `write_document`'s `Event::Start` arm, which is the only
         // caller that can see the document mode this rule is keyed to.
         saw_settings_parameter_value: None,
+        settings_value_anchor: None,
         start_tag_begin_offset: 0,
         start_tag_end_offset: 0,
     })
