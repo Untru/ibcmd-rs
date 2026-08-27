@@ -73847,6 +73847,314 @@ fn parses_bot_properties_with_short_header_wrapper() {
     assert!(!short_text.contains("{3,"));
 }
 
+#[test]
+fn planner_field_writes_its_own_geometry_drag_flag_and_events() {
+    // Real bytes: Catalogs/Мероприятия/Forms/ФормаСписка/Ext/Form.xml of
+    // Документооборот КОРП 3.0.21.3 (storage element
+    // `401478f9-e86f-4ab8-84ef-bc5ec084581e.0`). The wrapper-`37`
+    // discriminator `19` had no arm at all, so all five `<PlannerField>`
+    // elements of the corpus were dropped whole.
+    //
+    // This item exercises three of the four things the kind reads out of its
+    // own option tuple: `<Height>15</Height>` from slot 2 (against the `10`
+    // default seed `plx-h15` pins), `<EnableStartDrag>true</EnableStartDrag>`
+    // from slot 5 (seed `plx-drag`), and the six-entry event collection at
+    // slot 7 -- this item is the one of the five that carries no
+    // `BeforeCreate`, so the walk is over the stored entries and not over a
+    // fixed list. Its width holds the unwritten `50` default, so no `<Width>`
+    // is published.
+    let item = parse_form_child_item(
+        r#"{37,
+{544,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,19,"Планировщик",0,0,
+{1,1,
+{"ru","Планировщик"}
+},
+{1,0},
+{1,
+{7}
+},
+{0},1,0,2,0,2,
+{1,0},
+{1,0},1,1,0,3,0,3,1,3,0,
+{4,0,
+{0},"",-1,-1,1,0,""},
+{4,0,
+{0},"",-1,-1,1,0,""},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,50,15,1,1,1,0,
+{6,5e6c8466-44d0-4fd0-8d87-ac749c16ff60,"ПланировщикПриСменеТекущегоПериодаОтображения",68fc3ed6-a517-4843-a7a4-473cf4e27209,"ПланировщикПриОкончанииРедактирования",6f758c30-b414-4949-a236-584bccb0102a,"ПланировщикПередУдалением",82f5f464-5aa5-4efc-9813-51432c74ff8e,"ПланировщикПередНачаломРедактирования",b56fa930-855b-4e67-a87c-8ea917d1dfab,"ПланировщикПередНачаломБыстрогоРедактирования",b6aaed5c-8a5a-4a03-bd5b-1f14d0f099ec,"ПланировщикВыбор",1,0,5e6c8466-44d0-4fd0-8d87-ac749c16ff60,0,1,68fc3ed6-a517-4843-a7a4-473cf4e27209,0,1,6f758c30-b414-4949-a236-584bccb0102a,0,1,82f5f464-5aa5-4efc-9813-51432c74ff8e,0,1,b56fa930-855b-4e67-a87c-8ea917d1dfab,0,1,b6aaed5c-8a5a-4a03-bd5b-1f14d0f099ec,0,1},0,0,0},
+{0,1,0},1,
+{22,
+{545,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПланировщикКонтекстноеМеню",
+{1,0},
+{1,0},0,1,0,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{1,1},0,1,0,0,0,3,3,0},1,
+{"Pattern"},
+{"Pattern"},"","",
+{0},0,0,1,
+{12,
+{546,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПланировщикРасширеннаяПодсказка",
+{1,0},
+{1,0},1,0,0,2,2,
+{3,4,
+{0}
+},
+{7,3,0,1,100},
+{0,0,0},1,
+{5,0,0,3,0,
+{0,1,0},
+{3,4,
+{0}
+},
+{3,4,
+{0}
+},
+{3,0,
+{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}
+},0,1,2,
+{1,
+{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.tag, "PlannerField");
+    assert_eq!(item.name, "Планировщик");
+    assert_eq!(item.id, "544");
+    assert_eq!(item.width, None);
+    assert_eq!(item.height.as_deref(), Some("15"));
+    assert_eq!(item.enable_start_drag, Some(true));
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
+    assert!(!xml.contains("<Width>"), "no Width expected: {xml}");
+    let title = xml.find("<Title>").unwrap();
+    let title_location = xml.find("<TitleLocation>None</TitleLocation>").unwrap();
+    let height = xml.find("<Height>15</Height>").unwrap();
+    let drag = xml.find("<EnableStartDrag>true</EnableStartDrag>").unwrap();
+    let context_menu = xml.find("<ContextMenu").unwrap();
+    assert!(
+        title < title_location && title_location < height && height < drag && drag < context_menu,
+        "Title, TitleLocation, Height, EnableStartDrag, ContextMenu in that order: {xml}"
+    );
+    for (name, handler) in [
+        (
+            "OnCurrentRepresentationPeriodChange",
+            "ПланировщикПриСменеТекущегоПериодаОтображения",
+        ),
+        ("OnEditEnd", "ПланировщикПриОкончанииРедактирования"),
+        ("BeforeDelete", "ПланировщикПередУдалением"),
+        ("BeforeStartEdit", "ПланировщикПередНачаломРедактирования"),
+        (
+            "BeforeStartQuickEdit",
+            "ПланировщикПередНачаломБыстрогоРедактирования",
+        ),
+        ("Selection", "ПланировщикВыбор"),
+    ] {
+        assert!(
+            xml.contains(&format!("<Event name=\"{name}\">{handler}</Event>")),
+            "event {name} expected: {xml}"
+        );
+    }
+    assert!(
+        !xml.contains("<Event name=\"BeforeCreate\">"),
+        "this item stores no BeforeCreate: {xml}"
+    );
+}
+
+/// Evidence: fixture `form-planner-settings`. Three of its thirteen pairs are
+/// native bytes -- planner attribute records of Документооборот КОРП 3.0.21.3,
+/// the only corpus of the eight that carries the construct -- and the other
+/// ten are `plx-*` seeds on the Web_Service skeleton, each the control with one
+/// axis changed and round-tripped through platform 8.3.27.2214. Asserts the
+/// whole `<Settings xsi:type="pl:Planner">` fragment comes back byte for byte;
+/// see the fixture's `manifest.json` for the claim and non-claim list.
+fn assert_platform_proven_form_planner_settings(raw_field: &str, native_settings_xml: &str) {
+    let rendered = parse_and_render_form_planner_settings_for_test(raw_field)
+        .expect("platform-proven planner settings field must decode");
+    assert_eq!(
+        rendered, native_settings_xml,
+        "rendered <Settings xsi:type=\"pl:Planner\"> must remain byte-identical to the native export"
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_native_do_vremya_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/native-do-vremya.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/native-do-vremya-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_native_do_bron_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/native-do-bron.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/native-do-bron-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_native_do_meropriyatiya_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/native-do-meropriyatiya.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/native-do-meropriyatiya-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_control_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/control.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/control-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_distinct_values_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/distinct-values.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/distinct-values-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_a_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-a.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-a-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_b_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-b.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-b-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_c_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-c.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-c-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_bits_d_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-d.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/bits-d-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_font_planner_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/font-planner.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/font-planner-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_font_item_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/font-item.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/font-item-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_items_two_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/items-two.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/items-two-settings.xml"
+        ),
+    );
+}
+
+#[test]
+fn renders_form_planner_settings_items_zero_to_platform_proven_xml() {
+    assert_platform_proven_form_planner_settings(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/items-zero.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/native/items-zero-settings.xml"
+        ),
+    );
+}
+
 /// Evidence: fixture `form-graphical-scheme-settings`. Two of its ten pairs are
 /// native bytes -- the graphical-scheme attribute records of Документооборот
 /// КОРП 3.0.21.3's `Catalogs/СхемыПроцессов/Forms/КарточкаСхемы` and

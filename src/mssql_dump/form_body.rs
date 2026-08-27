@@ -3995,6 +3995,7 @@ fn parse_form_attribute_with_dcs_type_index(
     let design_time_settings = fields.get(14).and_then(|field| {
         parse_form_chart_settings_xml(field, &value_types, object_refs, 3)
             .or_else(|| parse_form_flowchart_settings_xml(field, &value_types, object_refs, 3))
+            .or_else(|| parse_form_planner_settings_xml(field, &value_types, object_refs, 3))
     });
     let mut use_always = parse_form_attribute_direct_use_always(
         &name,
@@ -11135,7 +11136,14 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        enable_start_drag: table_schema.and_then(|schema| schema.enable_start_drag(&fields)),
+        // A `PlannerField` keeps the same switch in its own option tuple, at
+        // the slot seed `plx-drag` moves; see the `PlannerField` row of
+        // `FORM_DOCUMENT_FIELD_GEOMETRY`.
+        enable_start_drag: table_schema
+            .and_then(|schema| schema.enable_start_drag(&fields))
+            .or_else(|| {
+                parse_form_document_field_on_flag(tag, fields, |layout| layout.enable_start_drag)
+            }),
         enable_drag: table_schema.and_then(|schema| schema.enable_drag(&fields)),
         file_drag_mode: if tag == "Table" {
             if let Some(schema) = table_schema {
@@ -13303,6 +13311,7 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
             | "PDFDocumentField"
+            | "PlannerField"
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
@@ -14108,6 +14117,9 @@ struct FormDocumentFieldGeometry {
     vertical_stretch: Option<usize>,
     /// Slot of the kind's own `<Edit>` flag, which shares the same `1` default.
     edit: Option<usize>,
+    /// Slot of the kind's own `<EnableStartDrag>`, whose unwritten default is
+    /// the opposite `0`.
+    enable_start_drag: Option<usize>,
     /// Slot of the field's own `<Font>` tuple, where the kind has one.
     font: Option<usize>,
 }
@@ -14127,6 +14139,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(11),
             vertical_stretch: Some(12),
             edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14151,6 +14164,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: None,
             vertical_stretch: None,
             edit: None,
+            enable_start_drag: None,
             font: Some(9),
         },
     ),
@@ -14168,6 +14182,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14185,6 +14200,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             edit: None,
+            enable_start_drag: None,
             font: Some(12),
         },
     ),
@@ -14210,6 +14226,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             edit: None,
+            enable_start_drag: None,
             font: Some(9),
         },
     ),
@@ -14248,6 +14265,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14274,6 +14292,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: None,
             vertical_stretch: None,
             edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14329,6 +14348,44 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: None,
             vertical_stretch: None,
             edit: Some(4),
+            enable_start_drag: None,
+            font: None,
+        },
+    ),
+    (
+        // The planner field's own 11-member tuple. Its extent pair sits in the
+        // same first two slots and carries the same `50`/`10` unwritten
+        // defaults the other character-metric document fields do.
+        //
+        // Evidence: seeds against 8.3.27.2214, each the control tree with one
+        // element added -- `plx-w40` (`<Width>40</Width>`) moves only slot 1,
+        // `50`->`40`; `plx-h15` (`<Height>15</Height>`) moves only slot 2,
+        // `10`->`15`; `plx-drag` (`<EnableStartDrag>true</EnableStartDrag>`)
+        // moves only slot 5, `0`->`1`. Census of the construct's whole native
+        // population -- the five `PlannerField` items of Документооборот КОРП
+        // 3.0.21.3 -- agrees: slot 1 reads `40` on the one item written
+        // `<Width>40</Width>` and `50` on the other four, written none; slot 2
+        // reads `15` on the three written `<Height>15</Height>` and `10` on the
+        // other two; slot 5 reads `1` on exactly the two written
+        // `<EnableStartDrag>true</EnableStartDrag>`.
+        //
+        // No max-extent, stretch or font coordinate is claimed: all five items
+        // agree slot for slot across the rest of the tuple and none of them
+        // carries any such element.
+        "PlannerField",
+        FormDocumentFieldGeometry {
+            discriminator: "1",
+            len: 11,
+            width: Some((1, "50")),
+            height: Some((2, "10")),
+            max_width: None,
+            max_height: None,
+            auto_max_width: None,
+            auto_max_height: None,
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            edit: None,
+            enable_start_drag: Some(5),
             font: None,
         },
     ),
@@ -14372,6 +14429,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             edit: None,
+            enable_start_drag: None,
             font: None,
         },
     ),
@@ -14437,6 +14495,21 @@ fn parse_form_document_field_font_xml(
 ) -> Option<String> {
     let (layout, options) = form_document_field_geometry_options(tag, fields)?;
     parse_form_font_tuple_xml(options.get(layout.font?)?, object_refs)
+}
+
+/// The mirror of `parse_form_document_field_flag` for a flag whose unwritten
+/// default is `0`: only the `1` state reaches the XML.
+fn parse_form_document_field_on_flag(
+    tag: &str,
+    fields: &[&str],
+    pick: fn(&FormDocumentFieldGeometry) -> Option<usize>,
+) -> Option<bool> {
+    let (layout, options) = form_document_field_geometry_options(tag, fields)?;
+    let slot = pick(layout)?;
+    match options.get(slot).map(|field| field.trim()) {
+        Some("1") => Some(true),
+        _ => None,
+    }
 }
 
 /// The auto-max and stretch flags all default to `1`, which the platform
@@ -18559,6 +18632,14 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
                 // tree, name for name and id for id. The reader had no arm for
                 // the code at all, so all five items were dropped whole.
                 "20" => (wrapper == "37").then_some("PDFDocumentField"),
+                // The planner field. Census of Документооборот КОРП 3.0.21.3
+                // -- the only corpus of the eight that carries the construct
+                // at all: the configuration holds exactly five items whose
+                // wrapper-`37` record spells `19` in the discriminator slot,
+                // and they are exactly the five `<PlannerField>` elements of
+                // the native tree, name for name and id for id. The reader had
+                // no arm for the code, so all five items were dropped whole.
+                "19" => (wrapper == "37").then_some("PlannerField"),
                 _ => None,
             }
         }
@@ -20167,7 +20248,12 @@ pub(super) fn parse_form_child_item_data_path(
         // other document fields do: all five items of UT 11.5.27.75 hold a
         // one-segment chain there naming the form attribute the platform
         // writes in `<DataPath>`, and none of them falls back to a parent path.
-        | "PDFDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        | "PDFDocumentField"
+        // The planner field spells its binding in the same slot 11 the other
+        // document fields do: all five items of Документооборот КОРП 3.0.21.3
+        // hold a one-segment chain there naming the form attribute the
+        // platform writes in `<DataPath>`.
+        | "PlannerField" => resolve_slots(&input_slots, &parse_bound),
         "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
         "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
         "Button" => button_data_path_slot
@@ -26394,6 +26480,12 @@ pub(super) fn format_form_child_item_xml(
             | "TrackBarField"
             | "ChartField"
             | "FormattedDocumentField"
+            // A `PlannerField` writes its `<Title>` ahead of
+            // `<TitleLocation>` and its geometry, the way every other field
+            // kind of the wrapper-`37` family does: all five native items of
+            // Документооборот КОРП 3.0.21.3 carry a title and write it
+            // directly behind `<DataPath>`.
+            | "PlannerField"
             | "ColumnGroup"
     );
     let title_location_follows_title =
@@ -27200,6 +27292,17 @@ pub(super) fn format_form_child_item_xml(
     // unwritten default.
     if item.graphical_scheme_edit == Some(false) {
         xml.push_str(&format!("{tab}\t<Edit>false</Edit>\r\n"));
+    }
+    // A `PlannerField` writes `EnableStartDrag` in the same place, directly
+    // behind its geometry: both native items that carry it -- ERP
+    // Документооборот КОРП's `Catalogs/ЗаписиРабочегоКалендаря/Forms/Календарь`
+    // and `Catalogs/Мероприятия/Forms/ФормаСписка` -- put it between
+    // `<Height>15</Height>` and `<ContextMenu>`, and the three that do not
+    // carry it write nothing there.
+    if item.tag == "PlannerField" && item.enable_start_drag == Some(true) {
+        xml.push_str(&format!(
+            "{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"
+        ));
     }
     if item.tag == "LabelDecoration"
         && let Some(skip_on_input) = item.skip_on_input
@@ -31152,6 +31255,611 @@ pub(super) fn form_body_module_text_bytes(body: &ParsedFormBodyBlob) -> Option<V
     bytes.extend_from_slice(body.module_text.as_bytes());
     Some(bytes)
 }
+
+/// The `<Settings>` block a form attribute of planner type carries.
+///
+/// The attribute stores its whole design in the same slot 14 every other
+/// attribute keeps its settings in, as
+/// `{0,1,"Planner",{"#",<planner type uuid>,{8,<item count>,<item>*,…}}}`.
+/// Nothing read that slot for a planner, so the block went unwritten on every
+/// planner attribute of every corpus.
+///
+/// The record declares how many `<pl:item>` blocks it carries in its second
+/// member and the reader walks that count: seed `plx-two` (a second
+/// `<pl:item>` added to the control) moves the member from `1` to `2` and
+/// grows the record by exactly one member, and seed `plx-zero` (no item at
+/// all) moves it to `0` and shrinks it by one, with the 31 tail members
+/// unchanged in both.
+///
+/// Every named member below is pinned by a seed against 8.3.27.2214, each the
+/// control tree with one element changed:
+///
+/// * `plx-distinct` gives every number, date, colour and free-form string of
+///   the block a value of its own in one tree; 52 raw tokens move, one run per
+///   element, which is what assigns the extent, colour, date, format and
+///   indent members and the two nested records (`<pl:timeScale>`'s level and
+///   `<pl:period>`).
+/// * `plx-bitsA`..`plx-bitsD` flip the block's twelve boolean elements in four
+///   different combinations, so each boolean has a code of its own across the
+///   four seeds and no two of them share a member.
+/// * `plx-fontp` and `plx-fonti` each switch one `<pl:font>` from `AutoFont`
+///   to `ref="style:TextFont" kind="StyleItem"`, which tells the planner's own
+///   font member from the item's and rules out the item's other font-shaped
+///   member, which the platform never publishes.
+/// * The enumeration members are each named by trying every spelling the XDTO
+///   type accepts: `<pl:itemsTimeRepresentation>` (`DontDisplay` 0,
+///   `BeginTime` 1, `BeginAndEndTime` 2), `<pl:editMode>` (`DisableEdit` 0,
+///   `EnableEdit` 3), `<pl:newItemsTextType>` (`String` 0, `FormattedString`
+///   1), the two `BWAValue` headers (`false` 0, `true` 1, `auto` 2), the time
+///   unit shared by `<pl:periodicVariantUnit>` and the scale level's
+///   `<measure>` (`Second` 5, `Minute` 10, `Hour` 20, `Day` 30, `Week` 40,
+///   `Month` 50, `Quarter` 60, `Year` 70), the scale `<placement>` (`Top` 0,
+///   `Bottom` 1, `Left` 2, `Right` 3), `<dayFormatRule>` (`MonthDay` 1,
+///   `WeekDay` 2, `MonthDayWeekDay` 3) and the line `<v8ui:style>`
+///   (`None` 0, `Solid` 1, `Dotted` 2, `Dashed` 3, `DashDotted` 4).
+///
+/// Census: the five planner attributes of Документооборот КОРП 3.0.21.3 --
+/// the construct's whole population across the eight stand corpora -- differ
+/// from each other in exactly four members (the item, the wrap-header format,
+/// the time scale and the period) and are reproduced byte for byte by the same
+/// walk.
+///
+/// Members no observation varies -- the record's leading `8`, the `0` that
+/// follows the item run, the `1` and `0` on either side of `<pl:period>`, and
+/// the item's own leading `3`, its `{"U"}` value, its second font-shaped
+/// member and its three padding `0`s -- are required to read as observed
+/// rather than interpreted, so a record outside the proven shape is refused.
+fn parse_form_planner_settings_xml(
+    field: &str,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let is_planner = matches!(
+        value_types,
+        [ConstantValueType::Reference { reference }] if reference == FORM_PLANNER_TYPE_REFERENCE
+    );
+    if !is_planner {
+        return None;
+    }
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 4
+        || outer.first()?.trim() != "0"
+        || outer.get(1)?.trim() != "1"
+        || outer.get(2)?.trim() != r#""Planner""#
+    {
+        return None;
+    }
+    let holder = split_1c_braced_fields(outer.get(3)?.trim(), 0)?;
+    if holder.len() != 3
+        || holder.first()?.trim() != r##""#""##
+        || !holder
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_PLANNER_VALUE_TYPE_UUID)
+    {
+        return None;
+    }
+    let record = split_1c_braced_fields(holder.get(2)?.trim(), 0)?;
+    format_form_planner_settings_xml(&record, object_refs, indent)
+}
+
+/// Renders the planner design record `parse_form_planner_settings_xml` has
+/// unwrapped.
+#[allow(clippy::too_many_lines)]
+fn format_form_planner_settings_xml(
+    record: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let child = indent + 1;
+    let child_tab = "\t".repeat(child);
+    if record.first()?.trim() != "8" {
+        return None;
+    }
+    let item_count: usize = record.get(1)?.trim().parse().ok()?;
+    if item_count > MAX_FORM_PLANNER_ITEMS {
+        return None;
+    }
+    let tail_start = 2 + item_count;
+    if record.len() != tail_start + FORM_PLANNER_TAIL_FIELDS {
+        return None;
+    }
+    let t = |offset: usize| record.get(tail_start + offset);
+    if t(0)?.trim() != "0" || t(17)?.trim() != "1" || t(19)?.trim() != "0" {
+        return None;
+    }
+    let mut xml = format!(
+        "{tab}<Settings xmlns:pl=\"http://v8.1c.ru/8.3/data/planner\" xsi:type=\"pl:Planner\">\r\n"
+    );
+    for raw in record.get(2..tail_start)? {
+        xml.push_str(&format_form_planner_item_xml(raw, object_refs, child)?);
+    }
+    macro_rules! scalar {
+        ($name:expr, $value:expr) => {
+            xml.push_str(&format!(
+                "{child_tab}<pl:{}>{}</pl:{}>\r\n",
+                $name, $value, $name
+            ))
+        };
+    }
+    macro_rules! color {
+        ($name:expr, $offset:expr) => {
+            scalar!($name, form_chart_color(t($offset)?, object_refs)?)
+        };
+    }
+    color!("borderColor", 1);
+    // Same text-then-back storage order the item's own pair uses.
+    color!("backColor", 3);
+    color!("textColor", 2);
+    color!("lineColor", 4);
+    xml.push_str(&form_planner_font_xml("font", t(5)?, object_refs, child)?);
+    scalar!(
+        "beginOfRepresentationPeriod",
+        form_planner_date(t(6)?.trim())?
+    );
+    scalar!(
+        "endOfRepresentationPeriod",
+        form_planner_date(t(7)?.trim())?
+    );
+    scalar!("alignElementsOfTimeScale", form_chart_bool(t(8)?)?);
+    scalar!("displayTimeScaleWrapHeaders", form_chart_bool(t(9)?)?);
+    scalar!("displayWrapHeaders", form_chart_bool(t(10)?)?);
+    xml.push_str(&form_planner_localized_xml(
+        "pl:timeScaleWrapHeadersFormat",
+        t(11)?,
+        child,
+    )?);
+    scalar!(
+        "periodicVariantUnit",
+        form_chart_code(t(12)?, FORM_PLANNER_TIME_UNITS)?
+    );
+    scalar!("periodicVariantRepetition", form_chart_integer(t(13)?)?);
+    scalar!("timeScaleWrapBeginIndent", form_chart_integer(t(14)?)?);
+    scalar!("timeScaleWrapEndIndent", form_chart_integer(t(15)?)?);
+    xml.push_str(&form_planner_time_scale_xml(t(16)?, object_refs, child)?);
+    let period = split_1c_braced_fields(t(18)?.trim(), 0)?;
+    if period.len() != 4 || period.first()?.trim() != "1" || period.get(3)?.trim() != "0" {
+        return None;
+    }
+    xml.push_str(&format!("{child_tab}<pl:period>\r\n"));
+    xml.push_str(&format!(
+        "{child_tab}\t<pl:begin>{}</pl:begin>\r\n",
+        form_planner_date(period.get(1)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{child_tab}\t<pl:end>{}</pl:end>\r\n",
+        form_planner_date(period.get(2)?.trim())?
+    ));
+    xml.push_str(&format!("{child_tab}</pl:period>\r\n"));
+    scalar!("displayCurrentDate", form_chart_bool(t(20)?)?);
+    scalar!(
+        "itemsTimeRepresentation",
+        form_chart_code(
+            t(21)?,
+            &[
+                ("0", "DontDisplay"),
+                ("1", "BeginTime"),
+                ("2", "BeginAndEndTime"),
+            ]
+        )?
+    );
+    scalar!(
+        "itemsBehaviorWhenSpaceInsufficient",
+        // The one code the corpus carries, and the only spelling the XDTO
+        // enumeration accepted of the twelve tried; any other ordinal is
+        // refused rather than guessed.
+        form_chart_code(t(22)?, &[("0", "CollapseItems")])?
+    );
+    scalar!("autoMinColumnWidth", form_chart_bool(t(23)?)?);
+    scalar!("autoMinRowHeight", form_chart_bool(t(24)?)?);
+    scalar!("minColumnWidth", form_chart_integer(t(25)?)?);
+    scalar!("minRowHeight", form_chart_integer(t(26)?)?);
+    scalar!(
+        "fixDimensionsHeader",
+        form_chart_code(t(27)?, FORM_PLANNER_BWA_VALUES)?
+    );
+    scalar!(
+        "fixTimeScaleHeader",
+        form_chart_code(t(28)?, FORM_PLANNER_BWA_VALUES)?
+    );
+    xml.push_str(&form_planner_border_xml("border", t(29)?, child)?);
+    scalar!(
+        "newItemsTextType",
+        form_chart_code(t(30)?, &[("0", "String"), ("1", "FormattedString")])?
+    );
+    xml.push_str(&format!("{tab}</Settings>\r\n"));
+    Some(xml)
+}
+
+/// One `<pl:item>` of the planner design record.
+fn format_form_planner_item_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let item = split_1c_braced_fields(field.trim(), 0)?;
+    if item.len() != FORM_PLANNER_ITEM_FIELDS
+        || item.first()?.trim() != "3"
+        || form_chart_compact(item.get(1)?) != r#"{"U"}"#
+        || form_chart_compact(item.get(2)?) != r#"{4,0,{0},"",-1,-1,1,0,""}"#
+        || form_chart_compact(item.get(12)?) != "{0}"
+        || item.get(13)?.trim() != "0"
+        || item.get(14)?.trim() != "0"
+        || item.get(18)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut xml = format!("{tab}<pl:item>\r\n");
+    xml.push_str(&format!("{inner_tab}<pl:value xsi:nil=\"true\"/>\r\n"));
+    xml.push_str(&form_planner_text_xml("text", item.get(5)?, inner)?);
+    xml.push_str(&form_planner_text_xml("tooltip", item.get(15)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<pl:begin>{}</pl:begin>\r\n",
+        form_planner_date(item.get(3)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:end>{}</pl:end>\r\n",
+        form_planner_date(item.get(4)?.trim())?
+    ));
+    // The stored pair is text-then-back, the written pair back-then-text:
+    // seed `plx-distinct` gives the two colours values of their own and the
+    // platform writes each back under the other member's name.
+    for (name, slot) in [("borderColor", 6usize), ("backColor", 8), ("textColor", 7)] {
+        xml.push_str(&format!(
+            "{inner_tab}<pl:{name}>{}</pl:{name}>\r\n",
+            form_chart_color(item.get(slot)?, object_refs)?
+        ));
+    }
+    xml.push_str(&form_planner_font_xml(
+        "font",
+        item.get(9)?,
+        object_refs,
+        inner,
+    )?);
+    xml.push_str(&format!("{inner_tab}<pl:dimensionValues/>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:replacementDate>{}</pl:replacementDate>\r\n",
+        form_planner_date(item.get(11)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:deleted>{}</pl:deleted>\r\n",
+        form_chart_bool(item.get(10)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:id>{}</pl:id>\r\n",
+        form_planner_uuid(item.get(16)?.trim())?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<pl:textFormatted>{}</pl:textFormatted>\r\n",
+        form_chart_bool(item.get(19)?)?
+    ));
+    xml.push_str(&form_planner_border_xml("border", item.get(17)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<pl:editMode>{}</pl:editMode>\r\n",
+        form_chart_code(item.get(20)?, &[("0", "DisableEdit"), ("3", "EnableEdit")])?
+    ));
+    xml.push_str(&format!("{tab}</pl:item>\r\n"));
+    Some(xml)
+}
+
+/// `<pl:timeScale>`: `{3,<placement>,<level count>,<level>*,<transparent>,
+/// <backColor>,<textColor>,<currentLevel>}`. The level count is declared, so
+/// the reader walks it rather than assuming the one level every planner of the
+/// corpus carries.
+///
+/// The block's own children sit in the chart namespace, which the platform
+/// spells inline on each direct child rather than on `<pl:timeScale>` itself;
+/// the level's own children inherit it and carry no attribute.
+fn form_planner_time_scale_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let scale = split_1c_braced_fields(field.trim(), 0)?;
+    if scale.first()?.trim() != "3" {
+        return None;
+    }
+    let level_count: usize = scale.get(2)?.trim().parse().ok()?;
+    if level_count > MAX_FORM_PLANNER_TIME_SCALE_LEVELS || scale.len() != 3 + level_count + 4 {
+        return None;
+    }
+    let placement = form_chart_code(
+        scale.get(1)?,
+        &[("0", "Top"), ("1", "Bottom"), ("2", "Left"), ("3", "Right")],
+    )?;
+    let mut xml = format!("{tab}<pl:timeScale>\r\n");
+    xml.push_str(&format!(
+        "{inner_tab}<placement{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{placement}</placement>\r\n"
+    ));
+    for raw in scale.get(3..3 + level_count)? {
+        xml.push_str(&form_planner_time_scale_level_xml(raw, object_refs, inner)?);
+    }
+    let rest = 3 + level_count;
+    xml.push_str(&format!(
+        "{inner_tab}<transparent{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</transparent>\r\n",
+        form_chart_bool(scale.get(rest)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<backColor{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</backColor>\r\n",
+        form_chart_color(scale.get(rest + 1)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<textColor{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</textColor>\r\n",
+        form_chart_color(scale.get(rest + 2)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<currentLevel{FORM_PLANNER_CHART_NAMESPACE_ATTR}>{}</currentLevel>\r\n",
+        form_chart_integer(scale.get(rest + 3)?)?
+    ));
+    xml.push_str(&format!("{tab}</pl:timeScale>\r\n"));
+    Some(xml)
+}
+
+/// One `<level>` of `<pl:timeScale>`: a twelve-member record led by `8`.
+fn form_planner_time_scale_level_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    let level = split_1c_braced_fields(field.trim(), 0)?;
+    if level.len() != FORM_PLANNER_TIME_SCALE_LEVEL_FIELDS || level.first()?.trim() != "8" {
+        return None;
+    }
+    let labels = split_1c_braced_fields(level.get(8)?.trim(), 0)?;
+    if labels.len() != 2 || labels.first()?.trim() != "0" {
+        return None;
+    }
+    let ticks_record = split_1c_braced_fields(labels.get(1)?.trim(), 0)?;
+    if ticks_record.len() != 3
+        || ticks_record.first()?.trim() != "1"
+        || ticks_record.get(1)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut xml = format!("{tab}<level{FORM_PLANNER_CHART_NAMESPACE_ATTR}>\r\n");
+    xml.push_str(&format!(
+        "{inner_tab}<measure>{}</measure>\r\n",
+        form_chart_code(level.get(1)?, FORM_PLANNER_TIME_UNITS)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<interval>{}</interval>\r\n",
+        form_chart_integer(level.get(2)?)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<show>{}</show>\r\n",
+        form_chart_bool(level.get(3)?)?
+    ));
+    xml.push_str(&form_planner_line_xml("line", level.get(4)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<scaleColor>{}</scaleColor>\r\n",
+        form_chart_color(level.get(5)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<dayFormatRule>{}</dayFormatRule>\r\n",
+        form_chart_code(
+            level.get(6)?,
+            &[
+                ("1", "MonthDay"),
+                ("2", "WeekDay"),
+                ("3", "MonthDayWeekDay")
+            ]
+        )?
+    ));
+    xml.push_str(&form_planner_localized_xml("format", level.get(7)?, inner)?);
+    xml.push_str(&format!("{inner_tab}<labels>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}\t<ticks>{}</ticks>\r\n",
+        form_chart_integer(ticks_record.get(2)?)?
+    ));
+    xml.push_str(&format!("{inner_tab}</labels>\r\n"));
+    xml.push_str(&format!(
+        "{inner_tab}<backColor>{}</backColor>\r\n",
+        form_chart_color(level.get(9)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<textColor>{}</textColor>\r\n",
+        form_chart_color(level.get(10)?, object_refs)?
+    ));
+    xml.push_str(&format!(
+        "{inner_tab}<showPereodicalLabels>{}</showPereodicalLabels>\r\n",
+        form_chart_bool(level.get(11)?)?
+    ));
+    xml.push_str(&format!("{tab}</level>\r\n"));
+    Some(xml)
+}
+
+/// `{4,0,{0},<style>,<width>,0,<line uuid>,<gap>}` -- the same eight-member
+/// line the chart family carries, except that the planner's own scale line
+/// varies both its style and its `gap` attribute (seeds `plx-distinct` and
+/// `plx-bitsB`/`plx-bitsC`), so neither is spelled as a literal here.
+fn form_planner_line_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 8
+        || fields.first()?.trim() != "4"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_LINE_UUID)
+    {
+        return None;
+    }
+    let style = form_chart_code(
+        fields.get(3)?,
+        &[
+            ("0", "None"),
+            ("1", "Solid"),
+            ("2", "Dotted"),
+            ("3", "Dashed"),
+            ("4", "DashDotted"),
+        ],
+    )?;
+    let width = form_chart_integer(fields.get(4)?)?;
+    let gap = form_chart_bool(fields.get(7)?)?;
+    Some(format!(
+        "{tab}<{name} width=\"{width}\" gap=\"{gap}\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">{style}</v8ui:style>\r\n\
+{tab}</{name}>\r\n"
+    ))
+}
+
+/// `{3,0,{0},<style>,<width>,0,<border uuid>}`, under the planner prefix.
+fn form_planner_border_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 7
+        || fields.first()?.trim() != "3"
+        || fields.get(1)?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{0}"
+        || fields.get(5)?.trim() != "0"
+        || !fields
+            .get(6)?
+            .trim()
+            .eq_ignore_ascii_case(FORM_CHART_BORDER_UUID)
+    {
+        return None;
+    }
+    let style = form_chart_code(
+        fields.get(3)?,
+        &[("0", "WithoutBorder"), ("1", "Single"), ("200", "Double")],
+    )?;
+    let width = form_chart_integer(fields.get(4)?)?;
+    Some(format!(
+        "{tab}<pl:{name} width=\"{width}\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
+{tab}</pl:{name}>\r\n"
+    ))
+}
+
+/// A `<pl:font>`: the auto shape keeps its own spelling because the shared
+/// font-tuple writer refuses a mask-less auto font outright, exactly as the
+/// chart family's three fonts do.
+fn form_planner_font_xml(
+    name: &str,
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    if form_chart_compact(field) == "{7,3,0,1,100}" {
+        return Some(format!("{tab}<pl:{name} kind=\"AutoFont\"/>\r\n"));
+    }
+    let rendered = parse_form_font_tuple_xml_tag(field.trim(), object_refs, &format!("pl:{name}"))?;
+    Some(format!("{tab}{rendered}\r\n"))
+}
+
+/// A localized member of the planner block, written under the element name the
+/// caller spells (the planner's own members carry the `pl:` prefix, the scale
+/// level's `<format>` inherits the chart namespace and carries none).
+fn form_planner_localized_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let values = parse_form_localized_strings(field.trim());
+    if values.is_empty() {
+        let fields = split_1c_braced_fields(field.trim(), 0)?;
+        if fields.len() != 2 || fields.first()?.trim() != "1" || fields.get(1)?.trim() != "0" {
+            return None;
+        }
+        return Some(format!("{tab}<{name}/>\r\n"));
+    }
+    Some(format_form_localized_section(name, &values, indent))
+}
+
+/// A plain (unlocalized) string member: the platform writes the empty one as
+/// an empty element, which is what the corpus's own empty `<pl:tooltip/>`
+/// shows.
+fn form_planner_text_xml(name: &str, field: &str, indent: usize) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let value = parse_1c_string(field.trim())?;
+    if value.is_empty() {
+        return Some(format!("{tab}<pl:{name}/>\r\n"));
+    }
+    Some(format!(
+        "{tab}<pl:{name}>{}</pl:{name}>\r\n",
+        escape_xml_element_text(&value)
+    ))
+}
+
+/// A stored `YYYYMMDDHHMMSS` date, spelled the way the platform writes it.
+fn form_planner_date(text: &str) -> Option<String> {
+    if text.len() != 14 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}T{}:{}:{}",
+        &text[0..4],
+        &text[4..6],
+        &text[6..8],
+        &text[8..10],
+        &text[10..12],
+        &text[12..14]
+    ))
+}
+
+fn form_planner_uuid(text: &str) -> Option<&str> {
+    let text = text.trim();
+    (text.len() == 36
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'))
+    .then_some(text)
+}
+
+/// Decodes a raw `{0,1,"Planner",{"#",<uuid>,{8,…}}}` field -- the whole
+/// `field` argument a planner-typed form attribute carries -- and renders it at
+/// the indent a `<Settings>` element sits at three levels into `<Attribute>`.
+#[cfg(test)]
+pub(super) fn parse_and_render_form_planner_settings_for_test(text: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_PLANNER_TYPE_REFERENCE.to_string(),
+    }];
+    let object_refs = BTreeMap::new();
+    parse_form_planner_settings_xml(text, &value_types, &object_refs, 3)
+}
+
+/// The QName a planner-typed attribute's `<v8:Type>` spells, and the platform
+/// type ID behind it.
+const FORM_PLANNER_TYPE_REFERENCE: &str = "pl:Planner";
+const FORM_PLANNER_VALUE_TYPE_UUID: &str = "43dc7f37-5b1d-42a7-8f28-f545080d0255";
+/// Members behind the declared item run.
+const FORM_PLANNER_TAIL_FIELDS: usize = 31;
+const FORM_PLANNER_ITEM_FIELDS: usize = 21;
+const FORM_PLANNER_TIME_SCALE_LEVEL_FIELDS: usize = 12;
+/// Bounds on the two declared counts, so a corrupt count cannot make the
+/// reader walk a record it does not have.
+const MAX_FORM_PLANNER_ITEMS: usize = 4096;
+const MAX_FORM_PLANNER_TIME_SCALE_LEVELS: usize = 16;
+/// The time unit shared by `<pl:periodicVariantUnit>` and a scale level's
+/// `<measure>`; every ordinal was named by a seed that spells it.
+const FORM_PLANNER_TIME_UNITS: &[(&str, &'static str)] = &[
+    ("5", "Second"),
+    ("10", "Minute"),
+    ("20", "Hour"),
+    ("30", "Day"),
+    ("40", "Week"),
+    ("50", "Month"),
+    ("60", "Quarter"),
+    ("70", "Year"),
+];
+/// The `BWAValue` header switches: a boolean with an `auto` state of its own.
+const FORM_PLANNER_BWA_VALUES: &[(&str, &'static str)] =
+    &[("0", "false"), ("1", "true"), ("2", "auto")];
+/// The chart namespace the platform spells inline on every direct child of
+/// `<pl:timeScale>` and on the scale level itself.
+const FORM_PLANNER_CHART_NAMESPACE_ATTR: &str = r#" xmlns="http://v8.1c.ru/8.2/data/chart""#;
 
 /// The `<Settings>` block a form attribute of graphical-scheme type carries.
 ///

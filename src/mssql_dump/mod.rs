@@ -1030,11 +1030,18 @@ const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
         "95de81b0-81c3-4936-9dbb-6400e5c90378",
         GEOGRAPHICAL_SCHEMA_TYPE_REFERENCE,
     ),
+    (PLANNER_TYPE_UUID, PLANNER_TYPE_REFERENCE),
 ];
 // Both carry their namespace inline on the emitted `<v8:Type>` element; see
 // `form_metadata_type_xml_namespace_attr`.
 const PDF_DOCUMENT_TYPE_REFERENCE: &str = "pdfdoc:PDFDocument";
 const GEOGRAPHICAL_SCHEMA_TYPE_REFERENCE: &str = "d5p1:GeographicalSchema";
+/// The planner. Named by the five graphical-planner attributes of
+/// Документооборот КОРП 3.0.21.3, the only ones the eight stand corpora carry:
+/// each stores this type id and the platform writes this QName both in the
+/// attribute's `<v8:Type>` and in the `xsi:type` of its `<Settings>` block.
+const PLANNER_TYPE_UUID: &str = "43dc7f37-5b1d-42a7-8f28-f545080d0255";
+const PLANNER_TYPE_REFERENCE: &str = "pl:Planner";
 // Platform types serialized in DataProcessor Attribute patterns. SettingsComposer
 // stays on its stricter owner-wide admission path below.
 const DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
@@ -41339,6 +41346,12 @@ fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'st
             if reference == PDF_DOCUMENT_TYPE_REFERENCE =>
         {
             r#" xmlns:pdfdoc="http://v8.1c.ru/8.3/data/pdf""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == PLANNER_TYPE_REFERENCE =>
+        {
+            r#" xmlns:pl="http://v8.1c.ru/8.3/data/planner""#
         }
         ConstantValueType::Reference { reference }
         | ConstantValueType::ReferenceTypeSet { reference }
