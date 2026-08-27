@@ -30786,13 +30786,21 @@ fn parse_common_attribute_additional_order_tail(
         (10, "0"),
         (11, "0"),
         (12, "0"),
-        (13, "0"),
         (14, "1"),
     ] {
         if fields.get(index)?.trim() != expected {
             return None;
         }
     }
+    // Slot 13 is not a constant of this profile: it is
+    // `ConfigurationExtensionsSeparation`, exactly as the general separation
+    // reader below decodes it. Census over the 53 common attributes of the
+    // stand: of the thirteen that carry this profile (`Indexing` =
+    // `IndexWithAdditionalOrder`), twelve hold `0` and write `DontUse` while
+    // `uh`'s `CommonAttributes/КлассВНА` holds `1` and writes `Separate`;
+    // pinning the slot to `0` refused that one object whole.
+    let configuration_extensions_separation =
+        common_attribute_separation_xml(fields.get(13)?.trim())?;
     if !(7..=9).all(|index| common_attribute_zero_reference_envelope(fields[index])) {
         return None;
     }
@@ -30805,7 +30813,7 @@ fn parse_common_attribute_additional_order_tail(
         conditional_separation: None,
         users_separation: "DontUse",
         authentication_separation: "DontUse",
-        configuration_extensions_separation: "DontUse",
+        configuration_extensions_separation,
         indexing: "IndexWithAdditionalOrder",
         full_text_search: "Use",
         data_history: "Use",
