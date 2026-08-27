@@ -980,18 +980,67 @@ impl FormPageSchema {
         .then_some(Self)
     }
 
-    pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormPageProperties {
-        let group = match (
+    /// The grouping triple of a `Page`'s option bag, read off the three slots
+    /// that carry it in *both* revisions of the bag.
+    ///
+    /// Evidence, the compiled bodies of six ERP УХ 3.2.12.6 forms joined
+    /// against the pages the platform writes for them, fourteen pages in all
+    /// and no counter-example: the canonical `18`-lead 20-member bag
+    /// (`Catalogs/ЭлементыФинансовыхОтчетов/Forms/
+    /// РедактированиеЭлементаУсловногоОформления` page `СтраницаУсловие`
+    /// `(1,1,1)` -> `Horizontal`, `Catalogs/ТиповыеОперацииМеждународныйУчет/
+    /// Forms/ФормаЭлемента` page `СтраницаВыберитеПланСчетов` `(1,1,3)` ->
+    /// `AlwaysHorizontal`, four more `(0,0,0)` pages with no element) and the
+    /// short `17`-lead 18-member one
+    /// (`InformationRegisters/ЗапросыВычислявшиеРасхождения/Forms/ФормаЗаписи`
+    /// page `Группа1`, `Catalogs/ЭтапыСогласования/Forms/ФормаСписка` page
+    /// `ПустойМаршрут` and `.../ФормаНастройкиУсловногоПерехода` page
+    /// `УсловныйПереход`, all `(1,1,1)` -> `Horizontal`, against five sibling
+    /// pages of the same three forms reading `(0,0,0)` with no element) put the
+    /// same codes in the same three slots.
+    pub(crate) fn group_from_options(options: &[&str]) -> Option<&'static str> {
+        match (
             options.get(2).map(|field| field.trim()),
             options.get(16).map(|field| field.trim()),
             options.get(17).map(|field| field.trim()),
         ) {
-            (Some("0"), Some("0"), Some("0")) => None,
             (Some("1"), Some("1"), Some("1")) => Some("Horizontal"),
             (Some("1"), Some("2"), Some("2")) => Some("HorizontalIfPossible"),
             (Some("1"), Some("1"), Some("3")) => Some("AlwaysHorizontal"),
             _ => None,
-        };
+        }
+    }
+
+    /// The grouping of a `Page` whose option bag is the short `17`/18 revision.
+    ///
+    /// The short bag is *not* admitted as the whole schema: only the grouping
+    /// triple is measured against the platform in it, and its remaining members
+    /// -- the spacing pair, the alignment pair, the children width, the scroll
+    /// flag, the colour and the picture -- have no such measurement, so every
+    /// reader but this one keeps refusing it rather than reading a canonical
+    /// slot number in a bag that is two members shorter.
+    pub(crate) fn short_revision_group(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<&'static str> {
+        if wrapper != "22"
+            || field_count < 30
+            || (field_count - 30) % 2 != 0
+            || item_tag != "Page"
+            || direct_discriminator != Some("4")
+            || options.len() != 18
+            || options.first().map(|field| field.trim()) != Some("17")
+        {
+            return None;
+        }
+        Self::group_from_options(options)
+    }
+
+    pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormPageProperties {
+        let group = Self::group_from_options(options);
         FormPageProperties {
             enable_content_change: match fields.get(9).map(|field| field.trim()) {
                 Some("1") => Some(true),

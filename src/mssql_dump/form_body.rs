@@ -11266,7 +11266,22 @@ fn parse_form_child_item_with_metadata_owners(
                         .and_then(|field| parse_form_child_item_group(field))
                 })
         } else if tag == "Page" {
-            page_properties.and_then(|properties| properties.group())
+            page_properties
+                .and_then(|properties| properties.group())
+                // The short revision of the page option bag carries the same
+                // grouping triple in the same three slots; nothing else of it
+                // is measured, so nothing else is read.
+                .or_else(|| {
+                    show_title_options.as_deref().and_then(|options| {
+                        FormPageSchema::short_revision_group(
+                            wrapper,
+                            fields.len(),
+                            tag,
+                            direct_discriminator,
+                            options,
+                        )
+                    })
+                })
         } else {
             None
         },
