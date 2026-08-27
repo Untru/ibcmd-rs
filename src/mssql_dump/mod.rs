@@ -9281,6 +9281,11 @@ struct ConfigurationProperties {
     used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
     used_mobile_application_permission_messages:
         Vec<ConfigurationMobileApplicationPermissionMessage>,
+    /// `<AllowedIncomingShareRequestTypes>`, decoded from the tuple field the
+    /// schema policy names. Populated only by the CF-container decode path,
+    /// and emitted only by the evidenced branch of the writer that owns the
+    /// span this element sits in.
+    allowed_incoming_share_request_types: Vec<ConfigurationAllowedIncomingShareRequestType>,
     compatibility_mode: Option<String>,
     /// Set only by the CF-container decode path
     /// (`extract_configuration_source_xml`'s own raw config-body text),
@@ -9319,6 +9324,21 @@ struct ConfigurationMobileApplicationFunctionality {
 struct ConfigurationMobileApplicationPermissionMessage {
     permission: &'static str,
     description: Vec<(String, String)>,
+}
+
+/// One `<v8:Value xsi:type="app:AllowedIncomingShareRequestType">` of
+/// `<AllowedIncomingShareRequestTypes>`. Each member names the incoming
+/// content by exactly one of the three identifiers; the other two are
+/// written empty.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationAllowedIncomingShareRequestType {
+    mime: String,
+    uti: String,
+    ext: String,
+    /// `<app:processingVariant xsi:type="xs:decimal">`, printed verbatim from
+    /// the stored decimal the way every other `xs:decimal` of this exporter is.
+    processing_variant: String,
+    is_custom: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -34801,7 +34821,12 @@ fn format_configuration_source_xml(
             &properties.used_mobile_application_functionalities,
             &properties.used_mobile_application_permission_messages,
         );
-        insert.push_str(policy.standalone_through_default_style_segment());
+        insert.push_str(policy.standalone_and_mobile_urls_segment());
+        push_allowed_incoming_share_request_types_xml(
+            &mut insert,
+            &properties.allowed_incoming_share_request_types,
+        );
+        insert.push_str(policy.main_window_through_default_style_segment());
         push_optional_simple_property_xml(
             &mut insert,
             "DefaultLanguage",
@@ -34984,6 +35009,45 @@ fn push_optional_localized_property_xml(xml: &mut String, name: &str, values: &[
     xml.push_str("\t\t\t</");
     xml.push_str(name);
     xml.push_str(">\r\n");
+}
+
+/// `<AllowedIncomingShareRequestTypes>`: self-closed for the empty list, and
+/// one `<v8:Value xsi:type="app:AllowedIncomingShareRequestType">` per
+/// declared member otherwise, in record order.
+fn push_allowed_incoming_share_request_types_xml(
+    xml: &mut String,
+    types: &[ConfigurationAllowedIncomingShareRequestType],
+) {
+    if types.is_empty() {
+        xml.push_str("\t\t\t<AllowedIncomingShareRequestTypes/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<AllowedIncomingShareRequestTypes>\r\n");
+    for entry in types {
+        xml.push_str("\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n");
+        for (name, value) in [
+            ("mime", entry.mime.as_str()),
+            ("uti", entry.uti.as_str()),
+            ("ext", entry.ext.as_str()),
+        ] {
+            if value.is_empty() {
+                xml.push_str(&format!("\t\t\t\t\t<app:{name}/>\r\n"));
+            } else {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<app:{name}>{}</app:{name}>\r\n",
+                    escape_xml_element_text(value)
+                ));
+            }
+        }
+        xml.push_str(&format!(
+            "\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">{}</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>{}</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n",
+            escape_xml_element_text(&entry.processing_variant),
+            xml_bool(entry.is_custom),
+        ));
+    }
+    xml.push_str("\t\t\t</AllowedIncomingShareRequestTypes>\r\n");
 }
 
 fn push_used_mobile_application_functionalities_xml(

@@ -73010,6 +73010,95 @@ fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_
 }
 
 #[test]
+fn configuration_allowed_incoming_share_request_types_ride_their_own_slot() {
+    // Real bytes, «1С:ERP. Управление холдингом 3.2.12.6»: the only
+    // configuration of the stand whose `<AllowedIncomingShareRequestTypes>`
+    // is not self-closed declares four members in the Properties tuple field
+    // the schema policy names, and the platform prints them in that order --
+    // `ext`, then `uti`, then two `mime`s. The other seven hold `{0}` there
+    // and print the element self-closed.
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    let slot = policy.allowed_incoming_share_request_types_tuple_field();
+    let type_uuid = "f251d17e-94e0-4f9b-974e-d642cf9cb6e4";
+    let member = |mime: &str, uti: &str, ext: &str| {
+        format!("{{\"#\",{type_uuid},{{0,\"{mime}\",\"{uti}\",\"{ext}\",0,0}}}}")
+    };
+    let raw = format!(
+        "{{4,{},{},{},{}}}",
+        member("", "", "txt"),
+        member("", "public.plain-text", ""),
+        member("application/txt", "", ""),
+        member("text/plain", "", ""),
+    );
+    let (uuid, text) = flat_configuration_properties_text(68, 61, &[(slot, &raw)]);
+    let parsed = parse_configuration_allowed_incoming_share_request_types(&text, &uuid).unwrap();
+    assert_eq!(parsed.len(), 4);
+    let mut xml = String::new();
+    push_allowed_incoming_share_request_types_xml(&mut xml, &parsed);
+    assert_eq!(
+        xml,
+        "\t\t\t<AllowedIncomingShareRequestTypes>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime/>\r\n\
+\t\t\t\t\t<app:uti/>\r\n\
+\t\t\t\t\t<app:ext>txt</app:ext>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime/>\r\n\
+\t\t\t\t\t<app:uti>public.plain-text</app:uti>\r\n\
+\t\t\t\t\t<app:ext/>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime>application/txt</app:mime>\r\n\
+\t\t\t\t\t<app:uti/>\r\n\
+\t\t\t\t\t<app:ext/>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime>text/plain</app:mime>\r\n\
+\t\t\t\t\t<app:uti/>\r\n\
+\t\t\t\t\t<app:ext/>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t</AllowedIncomingShareRequestTypes>\r\n"
+    );
+
+    // The empty list every other configuration of the stand carries keeps the
+    // self-closed element the evidenced segment used to print verbatim.
+    let (uuid, text) = flat_configuration_properties_text(68, 61, &[(slot, "{0}")]);
+    let parsed = parse_configuration_allowed_incoming_share_request_types(&text, &uuid).unwrap();
+    assert!(parsed.is_empty());
+    let mut xml = String::new();
+    push_allowed_incoming_share_request_types_xml(&mut xml, &parsed);
+    assert_eq!(xml, "\t\t\t<AllowedIncomingShareRequestTypes/>\r\n");
+
+    // The declared count rules, and every member shape this reader has not
+    // been shown fails closed instead of being read as if it were the
+    // evidenced one.
+    for malformed in [
+        format!("{{2,{}}}", member("", "", "txt")),
+        format!("{{1,{},{}}}", member("", "", "txt"), member("", "", "doc")),
+        format!("{{1,{{\"#\",00000000-0000-0000-0000-000000000000,{{0,\"\",\"\",\"txt\",0,0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{1,\"\",\"\",\"txt\",0,0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",x,0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",0,2}}}}}}"),
+    ] {
+        let (uuid, text) = flat_configuration_properties_text(68, 61, &[(slot, &malformed)]);
+        assert!(
+            parse_configuration_allowed_incoming_share_request_types(&text, &uuid).is_none(),
+            "accepted {malformed}"
+        );
+    }
+}
+
+#[test]
 fn business_process_standard_attribute_slot_admits_the_absent_envelope() {
     // Census, ERP УХ 3.2.12.6: of its 20 business processes exactly one --
     // `СогласованиеПродажи` -- stores the bare `{0}` in the standard-attribute
