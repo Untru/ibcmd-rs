@@ -1574,6 +1574,73 @@ fn is_offset_inside_sequence_dimension_list(text: &str, offset: usize) -> bool {
     is_offset_inside_any_list_marker(text, offset, &["{437488c0-35e2-11d6-a3c7-0050bae0a776,"])
 }
 
+/// Which of a chart of accounts' two flag collections to walk.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ChartOfAccountsFlagFamily {
+    Accounting,
+    ExtDimensionAccounting,
+}
+
+/// The uuids a chart of accounts declares in one of its flag collections, in
+/// the order its own record lists them.
+///
+/// That order is the order the platform writes the flags in, both in the
+/// chart's metadata XML and in every `<AccountingFlags>` block of its
+/// `Ext/Predefined.xml`: on all four charts of accounts of the stand the two
+/// agree element for element, and the same holds for a seed whose declaration
+/// order was permuted and re-imported (`accflag-seed1`/`seedtree2`).
+pub(super) fn chart_of_accounts_declared_flag_uuids(
+    text: &str,
+    owner_uuid: &str,
+    family: ChartOfAccountsFlagFamily,
+) -> Vec<String> {
+    nested_headers_with_offsets_from_text(text, owner_uuid, |marker_start| {
+        let inside = match family {
+            ChartOfAccountsFlagFamily::Accounting => {
+                is_offset_inside_chart_of_accounts_accounting_flag_list(text, marker_start)
+            }
+            ChartOfAccountsFlagFamily::ExtDimensionAccounting => {
+                is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(
+                    text,
+                    marker_start,
+                )
+            }
+        };
+        inside && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    })
+    .into_iter()
+    .map(|(header, _)| header.uuid)
+    .collect()
+}
+
+/// The chart of characteristic types a chart of accounts declares as its own
+/// `<ExtDimensionTypes>`.
+///
+/// Field 19 is the same carrier `parse_chart_of_accounts_properties` reads for
+/// the metadata XML, and all four charts of the stand export that property
+/// byte for byte. The predefined-data writer needs it because a predefined
+/// item uuid is unique only inside its owner: `uh` stores
+/// `23114858-dd43-4912-aa6c-cf52cfa4b660` under both
+/// `ВидыСубконтоХозрасчетные` and `ВидыСубконтоМеждународные`, and
+/// `Хозрасчетный` names the first of the two -- the one it declares here.
+pub(super) fn chart_of_accounts_ext_dimension_types_reference(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 10
+        || root.first()?.trim() != "1"
+        || root.get(2)?.trim() != "7"
+    {
+        return None;
+    }
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    if fields.len() != 57 || fields.first()?.trim() != "32" {
+        return None;
+    }
+    parse_chart_direct_object_reference(fields.get(19)?, "ChartOfCharacteristicTypes", object_refs)
+}
+
 pub(super) const RECALCULATION_DIMENSION_LIST_MARKER: &str = "3c456b74-4ea5-4b22-a957-e9fad9133b54";
 
 fn is_offset_inside_recalculation_dimension_list(text: &str, offset: usize) -> bool {
