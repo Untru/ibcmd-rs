@@ -36401,7 +36401,7 @@ fn push_task_addressing_attribute_xml(xml: &mut String, attribute: &TaskAddressi
             "\t\t\t\t\t",
         ));
     }
-    push_metadata_child_properties_xml(xml, "\t\t\t\t\t", &properties);
+    push_metadata_child_properties_xml(xml, "\t\t\t\t\t", &properties, &child.value_types);
     xml.push_str(&format!(
         "\t\t\t\t\t<Indexing>{indexing}</Indexing>\r\n\
 \t\t\t\t\t<AddressingDimension>{}</AddressingDimension>\r\n\
@@ -37356,6 +37356,7 @@ fn push_metadata_child_object_xml_with_tail_order(
             xml,
             "\t\t\t\t\t",
             properties,
+            &child.value_types,
             indexing_before_use,
         );
     }
@@ -37433,6 +37434,7 @@ fn push_nested_metadata_child_object_xml(
             xml,
             &format!("{tab}\t\t"),
             properties,
+            &child.value_types,
             indexing_before_use,
         );
     }
@@ -37462,14 +37464,16 @@ fn push_metadata_child_properties_xml(
     xml: &mut String,
     indent: &str,
     properties: &MetadataChildProperties,
+    value_types: &[ConstantValueType],
 ) {
-    push_metadata_child_properties_xml_with_tail_order(xml, indent, properties, false);
+    push_metadata_child_properties_xml_with_tail_order(xml, indent, properties, value_types, false);
 }
 
 fn push_metadata_child_properties_xml_with_tail_order(
     xml: &mut String,
     indent: &str,
     properties: &MetadataChildProperties,
+    value_types: &[ConstantValueType],
     indexing_before_use: bool,
 ) {
     xml.push_str(&format!(
@@ -37505,7 +37509,7 @@ fn push_metadata_child_properties_xml_with_tail_order(
     {
         xml.push_str(&format!(
             "{indent}{}\r\n",
-            format_metadata_child_fill_value_xml(fill_value)
+            format_metadata_child_fill_value_xml(fill_value, value_types)
         ));
     }
     xml.push_str(&format!(
@@ -37972,7 +37976,32 @@ fn push_metadata_line_number_standard_attribute_xml(
     ));
 }
 
-fn format_metadata_child_fill_value_xml(value: &MetadataChildFillValue) -> String {
+/// `<FillValue>` of a metadata child.
+///
+/// The empty-string value is the one shape whose spelling is not decided by the
+/// stored value alone: `{"S",""}` is what the platform leaves behind when an
+/// attribute's declared type stops admitting a string, and it then writes the
+/// nil element instead of the empty string. Evidence, ERP УХ 3.2.12.6:
+/// `InformationRegisters/КлассыКонтрагентов` stores `{"S",""}` on
+/// `ПроцентАванса` and `СрокОтсрочки`, whose type pattern is
+/// `{"Pattern",{"N",3,0,1}}`, and the platform writes
+/// `<FillValue xsi:nil="true"/>` for both;
+/// `DataProcessors/ФормированиеЗаказовПоставщикуПоПлану` stores the very same
+/// `{"S",""}` on `Артикул`, whose declared type is `DefinedType.Артикул`
+/// (a string), and the platform writes `<FillValue xsi:type="xs:string"/>`.
+///
+/// Census over all 4 594 metadata files of ERP УХ that carry a `FillValue`:
+/// every one of the 9 486 `<FillValue xsi:type="xs:string"/>` elements belongs
+/// to a declared type that admits a string, with no counter-example.
+fn format_metadata_child_fill_value_xml(
+    value: &MetadataChildFillValue,
+    value_types: &[ConstantValueType],
+) -> String {
+    if matches!(value, MetadataChildFillValue::String(value) if value.is_empty())
+        && metadata_types_exclude_string(value_types)
+    {
+        return "<FillValue xsi:nil=\"true\"/>".to_string();
+    }
     match value {
         MetadataChildFillValue::Nil => "<FillValue xsi:nil=\"true\"/>".to_string(),
         MetadataChildFillValue::Boolean(value) => {
@@ -38007,6 +38036,28 @@ fn format_metadata_child_fill_value_xml(value: &MetadataChildFillValue) -> Strin
             "<FillValue xsi:type=\"v8:TypeDescription\"/>".to_string()
         }
     }
+}
+
+/// Whether the declared leaves provably exclude the `String` type.
+///
+/// Only leaves this writer can decide on its own count: a primitive, or a
+/// reference to a named type. A `ReferenceTypeSet` -- `cfg:DefinedType.X`,
+/// `cfg:Characteristic.X`, `cfg:AnyIBRef` and the bare family sets -- names a
+/// set whose members live in another metadata object, and this writer does not
+/// read that object, so such a leaf leaves the whole list undecided and the
+/// stored spelling stands. `DefinedType.Артикул` is a string and
+/// `DefinedType.ДенежнаяСуммаЛюбогоЗнака` is a number, and nothing in the
+/// attribute's own bytes tells them apart -- both carry the bare
+/// `{"Pattern",{"#",<uuid>}}`.
+fn metadata_types_exclude_string(value_types: &[ConstantValueType]) -> bool {
+    !value_types.is_empty()
+        && value_types.iter().all(|value_type| match value_type {
+            ConstantValueType::Boolean
+            | ConstantValueType::Number { .. }
+            | ConstantValueType::DateTime { .. }
+            | ConstantValueType::Reference { .. } => true,
+            ConstantValueType::String { .. } | ConstantValueType::ReferenceTypeSet { .. } => false,
+        })
 }
 
 fn format_common_command_source_xml_native(
