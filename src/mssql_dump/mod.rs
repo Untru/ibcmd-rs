@@ -8128,10 +8128,10 @@ struct ExactCalculationRegisterOwnerProperties {
 }
 
 struct CalculationRegisterFormPair {
-    /// `None` when the register names no default list form: `uh`
-    /// `CalculationRegisters/Начисления` and `.../Удержания` own no form at all
-    /// and the platform writes `<DefaultListForm/>` for both, where БСП demo
-    /// `_ДемоОсновныеНачисления` names one.
+    /// `None` when the register names no default list form: the two ERP УХ
+    /// 3.2.12.6 calculation registers own no form at all and the platform
+    /// writes `<DefaultListForm/>` for both, where the single БСП demo
+    /// calculation register names one.
     default_list_form: Option<String>,
 }
 
@@ -8143,11 +8143,11 @@ struct CalculationRegisterPeriodProperties {
 
 struct CalculationRegisterScheduleProperties {
     /// The three schedule references are `None` when the register names no
-    /// schedule: `uh` `CalculationRegisters/Удержания` holds a nil uuid in all
-    /// three slots and the platform writes `<Schedule/>`, `<ScheduleValue/>`
-    /// and `<ScheduleDate/>` while still naming its
-    /// `<ChartOfCalculationTypes>`. `Начисления` and БСП demo
-    /// `_ДемоОсновныеНачисления` name all four.
+    /// schedule: one of the two ERP УХ 3.2.12.6 calculation registers holds a
+    /// nil uuid in all three slots and the platform writes `<Schedule/>`,
+    /// `<ScheduleValue/>` and `<ScheduleDate/>` while still naming its
+    /// `<ChartOfCalculationTypes>`. The other ERP УХ register and the single
+    /// БСП demo one name all four.
     schedule: Option<String>,
     schedule_value: Option<String>,
     schedule_date: Option<String>,
@@ -15118,10 +15118,9 @@ fn parse_register_properties_from_text(
     // A calculation register serialises its own attributes first (family
     // `1b304502-…`), then resources, then dimensions, while the platform
     // writes `<Resource>`, `<Attribute>`, `<Dimension>` -- the same order an
-    // information register uses. ERP УХ 3.2.12.6
-    // `CalculationRegisters/Начисления` 6/25/4 and `.../Удержания` 1/9/2 both
-    // show it; БСП demo `_ДемоОсновныеНачисления` declares no attribute at all
-    // and so is unaffected either way.
+    // information register uses. Both ERP УХ 3.2.12.6 calculation registers
+    // show it (6/25/4 and 1/9/2 children); the single БСП demo calculation
+    // register declares no attribute at all and so is unaffected either way.
     if kind == "InformationRegister" || kind == "CalculationRegister" {
         child_objects.sort_by_key(|child| match child.tag {
             "Resource" => 0,
@@ -15896,13 +15895,13 @@ fn parse_calculation_register_fixed_period(
         return Some(None);
     }
     // `<ActionPeriod>` and `<BasePeriod>` ride slots 17 and 18 and were pinned
-    // to `1`/`true`, which refused the whole period block of `uh`
-    // `CalculationRegisters/Удержания`: it holds `0` in slot 17 and the
-    // platform writes `<ActionPeriod>false</ActionPeriod>` there against
-    // `<ActionPeriod>true` for `Начисления` and БСП demo
-    // `_ДемоОсновныеНачисления`. Slot 18 is `1` on all three and slot 16 is
-    // `2`/`Month` on all three; both stay checked constants so an unobserved
-    // code refuses rather than being invented.
+    // to `1`/`true`, which refused the whole period block of one of the two ERP
+    // УХ 3.2.12.6 calculation registers: it holds `0` in slot 17 and the
+    // platform writes `<ActionPeriod>false</ActionPeriod>` there, against
+    // `<ActionPeriod>true` for the other ERP УХ register and the single БСП
+    // demo one. Slot 18 is `1` on all three and slot 16 is `2`/`Month` on all
+    // three; both stay checked constants so an unobserved code refuses rather
+    // than being invented.
     let (Some("2"), Some(action_period), Some("1")) = (
         fields.get(16).map(|field| field.trim()),
         fields
@@ -22197,6 +22196,34 @@ fn parse_chart_of_calculation_types_properties_from_text(
     // when the rest of its record still does not read: the relaxation may add
     // a complete file, never take one away.
     let owns_children = !collections[0].is_empty() || !collections[1].is_empty();
+    if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
+        eprintln!(
+            "STRICTROOT ChartOfCalculationTypes {} coll={:?} children={} full={}",
+            header.name,
+            collections.iter().map(Vec::len).collect::<Vec<_>>(),
+            parse_chart_of_calculation_types_child_objects(
+                &collections,
+                text,
+                &header.uuid,
+                &header.name,
+                type_index,
+                object_refs,
+                form_refs,
+            )
+            .map(|children| children.len() as i64)
+            .unwrap_or(-1),
+            parse_chart_of_calculation_types_properties(
+                text,
+                header,
+                &fields,
+                &collections,
+                type_index,
+                object_refs,
+                form_refs,
+            )
+            .is_some(),
+        );
+    }
     parse_chart_of_calculation_types_properties(
         text,
         header,
@@ -22738,6 +22765,40 @@ fn parse_chart_of_accounts_child_collection(
                 return None;
             }
             let common = split_information_register_braced_fields(wrapper.get(1)?)?;
+            if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
+                let probe_common = common.clone();
+                let attr = parse_strict_common_metadata_attribute(
+                    probe_common,
+                    "ChartOfAccounts",
+                    owner_name,
+                    type_index,
+                    object_refs,
+                    form_refs,
+                    true,
+                );
+                eprintln!(
+                    "STRICTROOT COAchild {owner_name} {tag} attr_ok={} hdr={} types={} props={} idx={:?} fts={:?} dh={:?}",
+                    attr.is_some(),
+                    common
+                        .get(1)
+                        .map(|field| field.chars().take(60).collect::<String>())
+                        .unwrap_or_default(),
+                    common.len(),
+                    parse_information_register_common_child_properties(
+                        &common,
+                        "ChartOfAccounts",
+                        owner_name,
+                        type_index,
+                        object_refs,
+                        form_refs,
+                        false,
+                    )
+                    .is_some(),
+                    wrapper.get(2).map(|field| field.trim()),
+                    wrapper.get(3).map(|field| field.trim()),
+                    wrapper.get(4).map(|field| field.trim()),
+                );
+            }
             let mut child = parse_strict_common_metadata_attribute(
                 common,
                 "ChartOfAccounts",
@@ -25619,12 +25680,11 @@ fn parse_chart_of_calculation_types_attribute(
 ///
 /// The two collections are the root's first two: `054aa8cf-…` holds the
 /// tabular sections and `0dc22ad2-…` the direct attributes. Both were required
-/// empty, which sent `ChartsOfCalculationTypes/Начисления` (7 sections, 95
-/// attributes) and `.../Удержания` (3 and 33) to the property-less
-/// default-list-form writer; БСП demo `_ДемоОсновныеНачисления` declares
-/// neither and is unaffected. The record stores sections before attributes and
-/// the platform writes every `<Attribute>` first, then every
-/// `<TabularSection>`.
+/// empty, which sent the two ERP УХ 3.2.12.6 charts of calculation types (7
+/// sections with 95 attributes, and 3 with 33) to the property-less
+/// default-list-form writer; the single БСП demo chart declares neither and is
+/// unaffected. The record stores sections before attributes and the platform
+/// writes every `<Attribute>` first, then every `<TabularSection>`.
 #[allow(clippy::too_many_arguments)]
 fn parse_chart_of_calculation_types_child_objects(
     collections: &[Vec<&str>],
@@ -25637,6 +25697,47 @@ fn parse_chart_of_calculation_types_child_objects(
 ) -> Option<Vec<MetadataChildObject>> {
     let mut child_uuids = BTreeSet::new();
     let mut root_names = BTreeSet::new();
+    if std::env::var("IBCMD_STRICT_ROOT_PROBE").is_ok() {
+        let attrs = collections
+            .get(1)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter(|value| {
+                        parse_chart_of_calculation_types_attribute(
+                            value,
+                            owner_name,
+                            false,
+                            type_index,
+                            object_refs,
+                            form_refs,
+                        )
+                        .is_some()
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        let generic = parse_attribute_tabular_section_child_objects(
+            "ChartOfCalculationTypes",
+            owner_name,
+            text,
+            owner_uuid,
+            None,
+            type_index,
+            object_refs,
+            object_refs,
+            form_refs,
+        );
+        eprintln!(
+            "STRICTROOT COTchild {owner_name} attrs_ok={attrs}/{} generic_ts={} generic_total={}",
+            collections.get(1).map(Vec::len).unwrap_or(0),
+            generic
+                .iter()
+                .filter(|child| child.tag == "TabularSection")
+                .count(),
+            generic.len(),
+        );
+    }
     let mut child_objects = collections
         .get(1)?
         .iter()

@@ -12404,18 +12404,21 @@ fn extracts_empty_attribute_additional_columns_container() {
     let xml = format_form_attributes_xml(&attributes);
     assert!(xml.contains(r#"<AdditionalColumns table="ГрафикНачислений"/>"#));
 
+    // The same binding carries columns: 34 `<AdditionalColumns table="…">`
+    // whose table names an attribute carry them across the eight stand
+    // corpora, against 14 written self-closed. Refusing the non-empty form
+    // dropped the group -- and with it the whole `<Columns>` block -- silently.
     let nonempty_attribute_group = r#"{0,{1,{1}},1,{5,2,0,"Код",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"#;
-    assert!(
-        parse_form_attribute_additional_columns_group(
-            nonempty_attribute_group,
-            &attributes,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &FormChildItemIndexes::default(),
-        )
-        .is_none(),
-        "attribute-level AdditionalColumns is only valid as an empty container"
-    );
+    let parsed = parse_form_attribute_additional_columns_group(
+        nonempty_attribute_group,
+        &attributes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &FormChildItemIndexes::default(),
+    )
+    .expect("attribute-level AdditionalColumns carries columns");
+    assert_eq!(parsed.table, "ГрафикНачислений");
+    assert_eq!(parsed.columns.len(), 1);
 }
 
 #[test]
@@ -64532,9 +64535,13 @@ fn calculation_period_alternative_scalars_remain_accepted_omissions() {
         .replace("\t\t\t<Periodicity>Month</Periodicity>\r\n", "")
         .replace("\t\t\t<ActionPeriod>true</ActionPeriod>\r\n", "")
         .replace("\t\t\t<BasePeriod>true</BasePeriod>\r\n", "");
+    // Slot 17 is `<ActionPeriod>` and separates both values on the corpus, so
+    // `0` is a reading and no longer an omission; every other scalar there,
+    // and every alternative on the two slots that stay checked constants,
+    // still refuses the block whole.
     let alternatives = [
         (16, vec!["0", "1", "3", "-1", "value", "{0}"]),
-        (17, vec!["0", "2", "-1", "value", "{0}"]),
+        (17, vec!["2", "-1", "value", "{0}"]),
         (18, vec!["0", "2", "-1", "value", "{0}"]),
     ];
 
@@ -64601,9 +64608,18 @@ fn calculation_period_alternative_scalars_remain_accepted_omissions() {
         }
     }
 
+    // `0` in slot 17 is `<ActionPeriod>false</ActionPeriod>`, the second value
+    // the corpus separates, and the block stays whole around it.
     let mut false_action = CalculationRegisterPresentationsFixture::exact();
     false_action.fields[17] = "0".to_string();
-    assert_eq!(false_action.xml().unwrap(), fixed_without_period);
+    let false_action_xml = false_action.xml().unwrap();
+    assert_eq!(
+        false_action_xml,
+        fixed.replace(
+            "\t\t\t<ActionPeriod>true</ActionPeriod>\r\n",
+            "\t\t\t<ActionPeriod>false</ActionPeriod>\r\n",
+        )
+    );
 }
 
 #[test]
@@ -65040,9 +65056,17 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     let unknown_uuid = "22222222-2222-4222-8222-222222222222";
     let mut cases = Vec::new();
 
+    // A nil default-list-form uuid is no longer an omission: it is the register
+    // naming no form, and the platform writes `<DefaultListForm/>` and
+    // `<AuxiliaryListForm/>` for it. Both ERP УХ 3.2.12.6 calculation registers
+    // hold it; the single БСП demo one names a form.
     let mut zero = CalculationRegisterPresentationsFixture::exact();
     zero.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
-    cases.push(("zero F23", zero, calculation_form_refs_for_test()));
+    let zero_xml = zero
+        .xml_with_form_refs(&calculation_form_refs_for_test())
+        .expect("nil default list form must stay readable");
+    assert!(zero_xml.contains("\t\t\t<DefaultListForm/>\r\n"));
+    assert!(zero_xml.contains("\t\t\t<AuxiliaryListForm/>\r\n"));
 
     let mut malformed = CalculationRegisterPresentationsFixture::exact();
     malformed.fields[23] = "0".to_string();
@@ -65155,7 +65179,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
         assert!(!xml.contains("<AuxiliaryListForm"), "{label}");
 
         let mut baseline = fixture.clone();
-        baseline.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+        baseline.fields[23] = "0".to_string();
         let baseline_xml = baseline.xml_with_form_refs(&form_refs).unwrap();
         assert_eq!(xml, baseline_xml, "resolver consumed {label}");
     }
@@ -65645,7 +65669,12 @@ fn calculation_schedule_resolver_alternatives_omit_the_whole_tuple() {
 #[test]
 fn calculation_schedule_chart_only_and_partial_values_remain_accepted_omissions() {
     let refs = calculation_schedule_object_refs_for_test();
-    for enabled in [0b0001u8, 0b0010, 0b0100, 0b1000, 0b0011, 0b1100, 0b1110] {
+    // `0b1000` -- the chart named and all three schedule slots nil -- is the
+    // register that names no schedule at all, which the platform writes as the
+    // three empty elements next to its `<ChartOfCalculationTypes>`; it is
+    // checked below instead of being an omission. Every partial tuple still
+    // refuses the block whole.
+    for enabled in [0b0001u8, 0b0010, 0b0100, 0b0011, 0b1100, 0b1110] {
         let mut fixture = CalculationRegisterPresentationsFixture::exact().with_schedule();
         let values = [
             CALCULATION_SCHEDULE_TEST_UUID,
@@ -65663,6 +65692,17 @@ fn calculation_schedule_chart_only_and_partial_values_remain_accepted_omissions(
         let xml = fixture.xml_with_object_refs(&refs).unwrap();
         assert_calculation_schedule_omitted(&xml, &format!("partial mask {enabled:04b}"));
     }
+
+    let mut chart_only = CalculationRegisterPresentationsFixture::exact().with_schedule();
+    for offset in 0..3 {
+        chart_only.fields[19 + offset] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+    }
+    chart_only.fields[22] = CALCULATION_PRESENTATIONS_TYPE_UUID.to_string();
+    let chart_only_xml = chart_only.xml_with_object_refs(&refs).unwrap();
+    for property in ["<Schedule/>", "<ScheduleValue/>", "<ScheduleDate/>"] {
+        assert!(chart_only_xml.contains(property), "chart-only {property}");
+    }
+    assert!(chart_only_xml.contains("<ChartOfCalculationTypes>"));
 }
 
 #[test]
