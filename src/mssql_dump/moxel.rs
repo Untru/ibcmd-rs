@@ -841,6 +841,7 @@ pub(super) struct MoxelGanttChart {
     vertical_scroll_enable: bool,
     outbound_color: String,
     links_color: String,
+    show_points_text: &'static str,
     text_placement: &'static str,
 }
 
@@ -6041,7 +6042,27 @@ fn parse_moxel_gantt_chart(text: &str) -> Option<MoxelGanttChart> {
         return None;
     }
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 33 || fields.first()?.trim() != "19" {
+    // The record's own version. 19 carries two trailing members 18 does not,
+    // and nothing else about the record moves: over the eleven `GanttChart`
+    // records of the stand (both templates of ERP УХ 3.2.12.6, 1С:УТ
+    // 11.5.27.75, БСП demo/base 3.1.12.297 and Документооборот КОРП
+    // 3.0.21.3, plus `Documents/ЗаказНаПроизводство/Templates/
+    // ПФ_MXL_ДиаграммаГрафикаПроизводства`), members 0..=30 line up slot for
+    // slot in both versions -- the same `keepScaleVariant`, the same
+    // `noneVariantChars`/`noneVariantMeasure` literals, the same
+    // `backIntervals` record, the same `linksColor`/`linksLine`.
+    //
+    // `Reports/ДлительностьОтложенногоОбновления/Templates/ДиаграммаГанта` of
+    // ERP УХ 3.2.12.6 is the one version-18 record, and it publishes
+    // `<d3p1:textPlacement>Auto</d3p1:textPlacement>` -- what the ten
+    // version-19 records publish when their member 31 stores `"0"`. Demanding
+    // 33 members refused its whole drawing.
+    let member_count = match fields.first()?.trim() {
+        "18" => 31usize,
+        "19" => 33usize,
+        _ => return None,
+    };
+    if fields.len() != member_count {
         return None;
     }
     // `field[1]` is `{0,{11},{74,...}}`: strip the leading `0,` marker and
@@ -6109,21 +6130,40 @@ fn parse_moxel_gantt_chart(text: &str) -> Option<MoxelGanttChart> {
     if links_line.width != 1 {
         return None;
     }
-    // `showPointsText` (`Show`), `showData` (`Auto`) and
-    // `intervalTextRepresentation` (`Auto`): literals, unvaried between the
-    // two records -- see `push_moxel_gantt_chart_xml`.
+    // `showData` (`Auto`) and `intervalTextRepresentation` (`Auto`):
+    // literals, unvaried over all eleven records -- see
+    // `push_moxel_gantt_chart_xml`.
     if compact_moxel_chart_token(fields.get(27)?) != "{0,0,0}"
-        || fields.get(28)?.trim() != "1"
         || fields.get(29)?.trim() != "0"
         || fields.get(30)?.trim() != "1"
-        || fields.get(32)?.trim() != "0"
     {
         return None;
     }
-    let text_placement = match fields.get(31)?.trim() {
+    // `showPointsText` is a real two-state field, not the literal `1` this
+    // reader asserted: ten of the eleven records store `"1"` and publish
+    // `<d3p1:showPointsText>Show</d3p1:showPointsText>`, and ERP УХ
+    // 3.2.12.6's `Documents/ЗаказНаПроизводство/Templates/
+    // ПФ_MXL_ДиаграммаГрафикаПроизводства` stores `"0"` and publishes
+    // `Auto`. It was the only gate that record failed, and failing it cost
+    // the whole drawing.
+    let show_points_text = match fields.get(28)?.trim() {
+        "1" => "Show",
         "0" => "Auto",
-        "1" => "Cut",
         _ => return None,
+    };
+    // Members 31 and 32 exist only in version 19. `textPlacement` reads
+    // `Auto` where the record does not carry the member at all.
+    let text_placement = if member_count > 31 {
+        if fields.get(32)?.trim() != "0" {
+            return None;
+        }
+        match fields.get(31)?.trim() {
+            "0" => "Auto",
+            "1" => "Cut",
+            _ => return None,
+        }
+    } else {
+        "Auto"
     };
 
     Some(MoxelGanttChart {
@@ -6145,6 +6185,7 @@ fn parse_moxel_gantt_chart(text: &str) -> Option<MoxelGanttChart> {
         vertical_scroll_enable,
         outbound_color,
         links_color,
+        show_points_text,
         text_placement,
     })
 }
@@ -9157,7 +9198,19 @@ pub(super) fn parse_moxel_style_ref_slot(
             "-23" => Some(Some("style:ToolTipBackColor".to_string())),
             "-24" => Some(Some("style:ToolTipTextColor".to_string())),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),
-            "-15" => Some(Some("style:ButtonTextColor".to_string())),
+            // `-15` is `FieldSelectedTextColor`, not `ButtonTextColor`, which
+            // `-21` above already accounts for. Two ERP УХ 3.2.12.6 documents
+            // pair it unambiguously: `Catalogs/ИнвестиционныеПрограммы/
+            // Templates/МакетИтоговогоОтчетаИПР` carries `-1`, `-3`, `-13`,
+            // `-15`, a Windows colour and `-22`, and publishes `BorderColor`
+            // six times, `FieldAlternativeBackColor` six times and
+            // `FieldSelectedTextColor` twice -- no `ButtonTextColor` at all;
+            // `DataProcessors/АнализЗаполненияПоказателей/Templates/
+            // ШаблонПротоколаТестирования` carries `-10`, `-13`, `-15` and a
+            // configuration style item and publishes `FieldBackColor`,
+            // `FieldAlternativeBackColor`, `ДосьеРамкаСтрокиЦвет` and one
+            // `FieldSelectedTextColor`.
+            "-15" => Some(Some("style:FieldSelectedTextColor".to_string())),
             "-22" => Some(Some("style:BorderColor".to_string())),
             "-25" => Some(Some("style:ReportHeaderBackColor".to_string())),
             "-26" => Some(Some("style:ReportGroup1BackColor".to_string())),
@@ -9171,6 +9224,15 @@ pub(super) fn parse_moxel_style_ref_slot(
             "-42" => Some(Some("style:NavigationColor".to_string())),
             "-43" => Some(Some("style:AuxiliaryNavigationColor".to_string())),
             "-44" => Some(Some("style:ActivityColor".to_string())),
+            // `-46` is `AccentColor`, paired in three ERP УХ 3.2.12.6
+            // documents. `Reports/РегламентированныйОтчетПрибыль/Templates/
+            // СхемаВыгрузки510` carries `-1`, `-3`, two RGB slots, `-16`,
+            // `-24`, `-23` and `-46`, and publishes `AccentColor` seven
+            // times, `SpecialTextColor` three, `ToolTipBackColor` once and
+            // `ToolTipTextColor` once -- every other slot accounts for its
+            // own name. `Reports/РегламентированныйОтчетНДПИ/Templates/
+            // СхемаВыгрузки507` and `.../СхемаВыгрузки508` pair the same way.
+            "-46" => Some(Some("style:AccentColor".to_string())),
             _ => None,
         },
         "3" if payload.len() == 2 && payload.first()?.trim() == "0" => {
@@ -9328,8 +9390,22 @@ pub(super) fn moxel_embedded_style_ref_for_uuid(
 fn parse_moxel_windows_color(value: &str) -> Option<String> {
     match value.parse::<u32>().ok()? {
         2 => Some("windows:ActiveTitleBar".to_string()),
+        // Code 3 is `InactiveTitleBar`, paired in two ERP УХ 3.2.12.6
+        // documents. `DataProcessors/МатрицаПравДоступаВидыОтчетов/Templates/
+        // Макет` carries kind-1 slots `2`, `3` and `4` and publishes
+        // `ActiveTitleBar` four times, `InactiveTitleBar` once and `MenuBar`
+        // once -- `2` and `4` account for their own names, so `3` is the
+        // remaining one. `Documents/НастраиваемыйОтчет/Templates/
+        // МакетКонтрольныеСоотношения` carries `3` as its only kind-1 slot
+        // and publishes `InactiveTitleBar` eight times and no other Windows
+        // colour.
+        3 => Some("windows:InactiveTitleBar".to_string()),
         4 => Some("windows:MenuBar".to_string()),
         11 => Some("windows:InactiveBorder".to_string()),
+        // Likewise `DataProcessors/АналитическийБланкСводнаяТаблица/
+        // Templates/МакетШаблонаСводнойТаблицы` carries `15` as its only
+        // kind-1 slot and publishes `ButtonFace` as its only Windows colour.
+        15 => Some("windows:ButtonFace".to_string()),
         16 => Some("windows:ButtonShadow".to_string()),
         _ => None,
     }
@@ -9396,8 +9472,29 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         67 => "LightCyan",
         68 => "LightGoldenRod",
         69 => "LightGoldenRodYellow",
+        // `70`/`71` are separated by ten templates, not by one: ERP УХ
+        // 3.2.12.6's `DataProcessors/ДиспетчированиеГрафикаПроизводства/
+        // Templates/ДиагностикаГрафика` and `Reports/
+        // ДиагностикаЭтапаПроизводства/Templates/ДиагностикаЭтапа` carry both
+        // codes and publish `LightGray` once and `LightGreen` once, while
+        // `71` is already corroborated as `LightGray` by the eight other
+        // templates of the stand that publish `LightGray` and are byte-exact
+        // -- so `70` is the remaining name. (Note that the two do not sit in
+        // ASCII order here; the enumeration's own order is not this table's
+        // evidence.)
+        70 => "LightGreen",
         71 => "LightGray",
         72 => "LightPink",
+        // `73`/`75` are paired by position, not by count: `Reports/
+        // СхемаМаршрутнойКарты/Templates/Макет` cites its palette slots 2..11
+        // in one format record each, in order, and the published `<format>`
+        // pool spells `HoneyDew`, `AntiqueWhite`, `PaleGoldenrod`,
+        // `LightCyan`, `MediumGreen`, `#EBD0EB`, `Gainsboro`, `LightSkyBlue`,
+        // `LightSalmon`, `LightYellow` in the same order -- so the slot
+        // holding code `75` is `LightSkyBlue` and the one holding `73` is
+        // `LightSalmon`.
+        73 => "LightSalmon",
+        75 => "LightSkyBlue",
         79 => "LightYellow",
         84 => "Maroon",
         86 => "MediumBlue",
@@ -9413,6 +9510,10 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         122 => "SaddleBrown",
         128 => "Silver",
         130 => "SlateBlue",
+        // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
+        // `131` as its only kind-2 slot and publishes `SlateGray` five times
+        // as its only web colour.
+        131 => "SlateGray",
         134 => "SteelBlue",
         140 => "Violet",
         141 => "VioletRed",
@@ -12399,7 +12500,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
         );
     }
     push_moxel_chart_literal(xml, "plotAreaPlacement", "UseCoordinates");
-    if chart.elements_is_init {
+    if chart.areas_are_placed {
         push_moxel_chart_literal(
             xml,
             "titleAreaPlacement",
@@ -12563,7 +12664,7 @@ fn push_moxel_gantt_chart_xml(xml: &mut String, gantt: &MoxelGanttChart) {
     xml.push_str("\t\t\t</d3p1:backIntervals>\r\n");
     push_moxel_chart_literal_indented(xml, "linksColor", &gantt.links_color, 3);
     push_moxel_chart_line_xml(xml, "linksLine", &MoxelChartLine { width: 1 }, 3, "Solid");
-    push_moxel_chart_literal_indented(xml, "showPointsText", "Show", 3);
+    push_moxel_chart_literal_indented(xml, "showPointsText", gantt.show_points_text, 3);
     push_moxel_chart_literal_indented(xml, "showData", "Auto", 3);
     push_moxel_chart_literal_indented(xml, "textPlacement", gantt.text_placement, 3);
     push_moxel_chart_literal_indented(xml, "intervalTextRepresentation", "Auto", 3);
