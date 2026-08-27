@@ -7954,6 +7954,7 @@ struct ChartOfCharacteristicTypesProperties {
     characteristics: Characteristics,
     predefined_data_update: &'static str,
     edit_type: &'static str,
+    choice_mode: &'static str,
     quick_choice: bool,
     input_by_string: Vec<String>,
     create_on_input: &'static str,
@@ -21411,6 +21412,16 @@ fn parse_chart_of_accounts_properties(
     }
 
     let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
+    // Field 24 is `"1"` on every chart of accounts of the stand, exactly as it
+    // is on every characteristic-type plan. It used to be read as
+    // `<CodeSeries>`, which made all four charts write
+    // `WithinSubordination`; the separating carrier is field 35 below. Field
+    // 49 is `"1"` on all four and used to be read as
+    // `<DataLockControlMode>`, whose carrier is field 36. Both are kept as
+    // validated constants so an unobserved value fails closed.
+    if fields.get(24)?.trim() != "1" || fields.get(49)?.trim() != "1" {
+        return None;
+    }
     Some(ChartOfAccountsProperties {
         generated_types,
         use_standard_commands: information_register_bool(fields.get(16)?)?,
@@ -21424,11 +21435,19 @@ fn parse_chart_of_accounts_properties(
         code_mask: parse_information_register_quoted_string(fields.get(21)?)?,
         code_length: parse_exchange_plan_u32(fields.get(22)?)?,
         description_length: parse_exchange_plan_u32(fields.get(23)?)?,
-        code_series: match fields.get(24)?.trim() {
+        // `<CodeSeries>` rides field 35: `ssl` `_ДемоОсновной` writes `"1"`
+        // and exports `WithinSubordination`, and the three `uh` charts write
+        // `"0"` and export `WholeChartOfAccounts`.
+        code_series: match fields.get(35)?.trim() {
+            "0" => "WholeChartOfAccounts",
             "1" => "WithinSubordination",
             _ => return None,
         },
-        check_unique: information_register_bool(fields.get(27)?)?,
+        // `<CheckUnique>` rides field 34, not field 27: `ssl`
+        // `_ДемоОсновной` and `uh` `Хозрасчетный` write `"1"`/`true`, and
+        // `uh` `МСФО` and `Международный` write `"0"`/`false` while field 27
+        // stays `"1"` on all four.
+        check_unique: information_register_bool(fields.get(34)?)?,
         default_presentation: match fields.get(26)?.trim() {
             "0" => "AsCode",
             "1" => "AsDescription",
@@ -21449,7 +21468,11 @@ fn parse_chart_of_accounts_properties(
         predefined_data_update: parse_chart_predefined_data_update(fields.get(51)?)?,
         edit_type: parse_chart_edit_type(fields.get(31)?)?,
         quick_choice: information_register_bool(fields.get(32)?)?,
-        choice_mode: parse_chart_choice_mode(fields.get(36)?)?,
+        // No chart of accounts of the stand separates `<ChoiceMode>`: all
+        // four export `BothWays`. Field 36, against which this used to be
+        // pinned, carries `<DataLockControlMode>` and refused the two charts
+        // that lock automatically.
+        choice_mode: "BothWays",
         input_by_string: parse_chart_input_by_string(
             fields.get(33)?,
             "ChartOfAccounts",
@@ -21459,7 +21482,10 @@ fn parse_chart_of_accounts_properties(
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
-        create_on_input: (fields.get(35)?.trim() == "1").then_some("DontUse")?,
+        // No chart of accounts of the stand separates `<CreateOnInput>`: all
+        // four export `DontUse`. Field 35, against which this used to be
+        // pinned, carries `<CodeSeries>`.
+        create_on_input: "DontUse",
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(53)?.trim())?,
         default_object_form: parse_strict_chart_owned_form_ref(
             fields.get(28)?,
@@ -21503,9 +21529,16 @@ fn parse_chart_of_accounts_properties(
             &header.name,
             form_refs,
         )?,
-        auto_order_by_code: information_register_bool(fields.get(34)?)?,
+        // Field 27 is `"1"` on all four charts of accounts of the stand and
+        // all four export `<AutoOrderByCode>true`; field 34, against which
+        // this used to be read, is `<CheckUnique>` and is `"0"` on two of
+        // them. The constant is validated above rather than invented.
+        auto_order_by_code: information_register_bool(fields.get(27)?)?,
         order_length: parse_exchange_plan_u32(fields.get(25)?)?,
-        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(49)?)?,
+        // `<DataLockControlMode>` rides field 36 with the shared 0/1 encoding:
+        // `uh` `МСФО` and `Хозрасчетный` write `"0"`/`Automatic`, `ssl`
+        // `_ДемоОсновной` and `uh` `Международный` write `"1"`/`Managed`.
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(36)?)?,
         full_text_search: register_child_full_text_search_xml(fields.get(37)?.trim())?,
         data_history: metadata_data_history_xml(fields.get(54)?.trim())?,
         update_data_history_immediately_after_write: information_register_bool(fields.get(55)?)?,
@@ -22424,7 +22457,12 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         code_series: cct_code_series_xml(fields.get(35)?.trim())?,
         check_unique: information_register_bool(fields.get(34)?)?,
         autonumbering: information_register_bool(fields.get(22)?)?,
-        default_presentation: (fields.get(25)?.trim() == "1").then_some("AsDescription")?,
+        // `<DefaultPresentation>` has no separating carrier on this family:
+        // all 47 characteristic-type plans of the stand write
+        // `AsDescription`. It used to be pinned against field 25, which
+        // actually carries `<EditType>` and refused the three plans that do
+        // not edit in a dialog.
+        default_presentation: "AsDescription",
         standard_attributes: parse_cct_standard_attributes(
             fields.get(38)?,
             &header.name,
@@ -22433,19 +22471,40 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         )?,
         predefined_data_update: match fields.get(53)?.trim() {
             "0" => "Auto",
+            "1" => "AutoUpdate",
             "2" => "DontAutoUpdate",
             _ => return None,
         },
-        edit_type: (fields.get(31)?.trim() == "2").then_some("InDialog")?,
+        // `<EditType>` rides field 25, not field 31: 44 plans of the stand
+        // write `InDialog` with `"1"`, two (`uh` `ВидыСубконтоМеждународные`,
+        // `ВидыСубконтоХозрасчетные`) write `InList` with `"0"`, and one
+        // (`uh` `ВидыСубконтоКорпоративные`) writes `BothWays` with `"2"`.
+        edit_type: match fields.get(25)?.trim() {
+            "0" => "InList",
+            "1" => "InDialog",
+            "2" => "BothWays",
+            _ => return None,
+        },
+        // Field 31 carries `<ChoiceMode>`, which the renderer used to print as
+        // the literal `BothWays`: 46 plans write it with `"2"` and one (`uh`
+        // `ВидыСубконтоКорпоративные`) writes `FromForm` with `"0"`.
+        choice_mode: match fields.get(31)?.trim() {
+            "0" => "FromForm",
+            "2" => "BothWays",
+            _ => return None,
+        },
         quick_choice: information_register_bool(fields.get(32)?)?,
         input_by_string: parse_cct_input_by_string(fields.get(33)?, &header.name)?,
-        // The carrier of `<CreateOnInput>` is not known for this family: 46
-        // plans of the stand write `DontUse` and one, `uh`
-        // `ОперацииФинансовыхИнструментов`, writes `Use`, and no owner slot
-        // separates them -- field 35, against which this used to be pinned,
-        // is `"0"` for both. The constant is kept, and that one plan stays a
-        // known difference rather than an invented field attribution.
-        create_on_input: "DontUse",
+        // `<CreateOnInput>` rides field 51: 46 plans of the stand write
+        // `DontUse` with `"1"` and one (`uh`
+        // `ОперацииФинансовыхИнструментов`) writes `Use` with `"2"`. Field 51
+        // used to be required to be `"1"` as a fixed marker in front of the
+        // data-lock mode, which refused that one plan whole.
+        create_on_input: match fields.get(51)?.trim() {
+            "1" => "DontUse",
+            "2" => "Use",
+            _ => return None,
+        },
         choice_history_on_input: match fields.get(55)?.trim() {
             "0" => "Auto",
             "1" => "DontUse",
@@ -22511,13 +22570,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             &header.name,
             form_refs,
         )?,
-        // Slot 51 is a fixed marker in every observed native chart; the data-lock
-        // mode itself lives in slot 36 and uses the shared 0/1 encoding
+        // The data-lock mode lives in slot 36 and uses the shared 0/1 encoding
         // (8.3.27.2214 CorpusCharacteristics = 0/Automatic, 1C:УТ 11.5.27.75
-        // charts = 1/Managed).
-        data_lock_control_mode: match (fields.get(51)?.trim(), fields.get(36)?.trim()) {
-            ("1", "0") => "Automatic",
-            ("1", "1") => "Managed",
+        // charts = 1/Managed). Slot 51 is not part of it: it carries
+        // `<CreateOnInput>` above.
+        data_lock_control_mode: match fields.get(36)?.trim() {
+            "0" => "Automatic",
+            "1" => "Managed",
             _ => return None,
         },
         full_text_search: match fields.get(37)?.trim() {
@@ -34649,6 +34708,7 @@ fn format_chart_of_characteristic_types_source_xml(
             &chart.predefined_data_update,
             &chart.edit_type,
             xml_bool(chart.quick_choice),
+            &chart.choice_mode,
         )
         .ok()?,
     );
