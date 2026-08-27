@@ -63,12 +63,13 @@ mod characteristics {
 
     use super::{
         BUSINESS_PROCESS_STANDARD_ATTRIBUTES, CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES,
-        DOCUMENT_CHARACTERISTIC_TYPE_UUID, DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES,
-        information_register_bool, information_register_uuid_is_zero,
-        information_register_uuid_matches, parse_information_register_design_time_ref,
-        parse_information_register_design_time_ref_ids, parse_information_register_non_zero_uuid,
-        parse_information_register_quoted_string, parse_information_register_usize,
-        resolve_exchange_plan_index_reference, split_information_register_braced_fields,
+        CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES, DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES, information_register_bool,
+        information_register_uuid_is_zero, information_register_uuid_matches,
+        parse_information_register_design_time_ref, parse_information_register_design_time_ref_ids,
+        parse_information_register_non_zero_uuid, parse_information_register_quoted_string,
+        parse_information_register_usize, resolve_exchange_plan_index_reference,
+        split_information_register_braced_fields,
     };
     pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
     use crate::metadata_owner_graph::{
@@ -166,6 +167,15 @@ mod characteristics {
     /// payload items are typed with the platform's own Characteristic type
     /// uuid, then checking the declared item count against the number of
     /// `<xr:Characteristic>` elements the platform writes for the same object.
+    ///
+    /// `ChartOfAccounts` (48) and `ChartOfCalculationTypes` (54) were read the
+    /// same way, and both slots used to be mistaken for a list of physical
+    /// index descriptors: the items are typed with
+    /// `DOCUMENT_CHARACTERISTIC_TYPE_UUID`, and the declared count matches the
+    /// `<xr:Characteristic>` count of the same object on every one of the
+    /// seven chart roots of the stand: three declare 1, 3 and 2 items and the
+    /// platform writes exactly that many elements for them, and the other four
+    /// declare none and export `<Characteristics/>`.
     pub(super) const fn characteristics_slot(family: CharacteristicsOwnerFamily) -> usize {
         match family {
             CharacteristicsOwnerFamily::Catalog => 52,
@@ -173,6 +183,8 @@ mod characteristics {
             CharacteristicsOwnerFamily::ChartOfCharacteristicTypes => 50,
             CharacteristicsOwnerFamily::BusinessProcess => 41,
             CharacteristicsOwnerFamily::Task => 44,
+            CharacteristicsOwnerFamily::ChartOfAccounts => 48,
+            CharacteristicsOwnerFamily::ChartOfCalculationTypes => 54,
         }
     }
 
@@ -728,6 +740,15 @@ mod characteristics {
             "Document" => Some(DOCUMENT_STANDARD_ATTRIBUTES.as_slice()),
             "BusinessProcess" => Some(BUSINESS_PROCESS_STANDARD_ATTRIBUTES.as_slice()),
             "Task" => Some(TASK_STANDARD_ATTRIBUTES.as_slice()),
+            // The same table the family's own root reads to write
+            // `<xr:StandardAttribute name=…>`. Both occurrences in the whole
+            // stand are `uh` `Начисления` and `Удержания`, whose own
+            // `Characteristics` read their values out of the chart's tabular
+            // section `ДополнительныеРеквизиты` with marker `-6`, and the
+            // platform spells both `…TabularSection.…StandardAttribute.Ref`.
+            "ChartOfCalculationTypes" => {
+                Some(CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES.as_slice())
+            }
             _ => None,
         }
     }
@@ -1086,6 +1107,21 @@ const CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS:
         ("-12", "LineNumber"),
     ],
 )];
+/// The standard attributes a `ChartOfCalculationTypes` declares, keyed by the
+/// marker its own root and any `Characteristics` reference name them by.
+///
+/// One table, read by the family's root (to write `<StandardAttributes>`) and
+/// by the characteristics decoder (to spell a marker against a source of this
+/// family), so the two spellings stay one fact.
+const CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES: [(&str, &str); 7] = [
+    ("-11", "PredefinedDataName"),
+    ("-8", "Predefined"),
+    ("-6", "Ref"),
+    ("-5", "DeletionMark"),
+    ("-4", "ActionPeriodIsBasic"),
+    ("-3", "Description"),
+    ("-2", "Code"),
+];
 const CHART_OF_CALCULATION_TYPES_RESERVED_COLLECTION_UUIDS: [&str; 3] = [
     "054aa8cf-faa6-4634-aef4-1087ca0d88fc",
     "0dc22ad2-476a-4794-afae-cfa7ed251752",
@@ -7893,6 +7929,7 @@ struct ChartOfAccountsProperties {
     check_unique: bool,
     default_presentation: &'static str,
     standard_attributes: Vec<RegisterStandardAttribute>,
+    characteristics: Characteristics,
     standard_tabular_sections: Vec<MetadataStandardTabularSection>,
     predefined_data_update: &'static str,
     edit_type: &'static str,
@@ -7955,6 +7992,7 @@ struct ChartOfCalculationTypesProperties {
     base_calculation_types: String,
     action_period_use: bool,
     standard_attributes: Vec<RegisterStandardAttribute>,
+    characteristics: Characteristics,
     standard_tabular_sections: Vec<MetadataStandardTabularSection>,
     predefined_data_update: &'static str,
     include_help_in_contents: bool,
@@ -11043,7 +11081,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                 // of that wrote every owned command twice -- the same seam the
                 // filter criterion already closes above.
                 nested_commands = Vec::new();
-                format_chart_of_accounts_source_xml(header, &chart, source_version).into_bytes()
+                format_chart_of_accounts_source_xml(header, &chart, source_version)?.into_bytes()
             }
             StrictMetadataRoot::Unsupported => {
                 let properties = parse_default_list_form_metadata_properties_from_text(
@@ -11070,7 +11108,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         ) {
             StrictMetadataRoot::Parsed(chart) => {
                 strict_chart_root_formatted = true;
-                format_chart_of_calculation_types_source_xml(header, &chart, source_version)
+                format_chart_of_calculation_types_source_xml(header, &chart, source_version)?
                     .into_bytes()
             }
             StrictMetadataRoot::Unsupported => {
@@ -21814,17 +21852,26 @@ fn parse_chart_of_accounts_properties(
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
         || !cct_pair_is(fields.get(18)?, "0", "0")
-        // Field 48 is the physical index list, not `<BasedOn>`: `uh` `МСФО`
-        // declares one descriptor there (`{"S","ПланСчетов_МСФО"}` inside it)
-        // and the platform still exports `<BasedOn/>`. `<BasedOn>` rides
-        // field 18, checked above with the same `{0,0}` empty form every
-        // other family writes. Only the declared shape is validated here;
-        // the descriptors themselves are not exported.
-        || !chart_physical_index_list_shape_is_known(fields.get(48)?)
         || !cct_data_lock_fields_are_empty(fields.get(50)?)
     {
         return None;
     }
+    // Field 48 is `<Characteristics>`, not `<BasedOn>` and not a list of
+    // physical index descriptors: its items carry the platform's own
+    // Characteristic type uuid, and `uh` `МСФО` declares exactly the one item
+    // whose `{"S","ПланСчетов_МСФО"}` member the platform writes as
+    // `<xr:TypesFilterValue xsi:type="xs:string">ПланСчетов_МСФО`. The other
+    // three charts of the stand declare none and export `<Characteristics/>`.
+    // `<BasedOn>` rides field 18, checked above with the same `{0,0}` empty
+    // form every other family writes.
+    let characteristics = decode_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::ChartOfAccounts,
+        fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        &mut None,
+    )?;
 
     let mut all_uuids = BTreeSet::from([header.uuid.to_ascii_lowercase()]);
     let generated_types = parse_chart_generated_types(
@@ -21933,23 +21980,6 @@ fn parse_chart_of_accounts_properties(
     )?;
 
     let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
-    let probe_ext_dimension_types = parse_chart_direct_object_reference(
-        fields.get(19)?,
-        "ChartOfCharacteristicTypes",
-        object_refs,
-    );
-    let probe_standard_attributes = parse_chart_standard_attributes(
-        fields.get(38)?,
-        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-        Some(("-6", "ChartOfAccounts")),
-        &header.name,
-        type_index,
-        object_refs,
-    );
-    let probe_standard_tabular_sections = parse_chart_standard_tabular_sections(
-        fields.get(39)?,
-        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
-    );
     // Field 24 is `"1"` on every chart of accounts of the stand, exactly as it
     // is on every characteristic-type plan. It used to be read as
     // `<CodeSeries>`, which made all four charts write
@@ -21999,6 +22029,7 @@ fn parse_chart_of_accounts_properties(
             type_index,
             object_refs,
         )?,
+        characteristics,
         standard_tabular_sections: parse_chart_standard_tabular_sections(
             fields.get(39)?,
             CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
@@ -22201,19 +22232,26 @@ fn parse_chart_of_calculation_types_properties(
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
         || !cct_pair_is(fields.get(36)?, "0", "0")
-        // Field 54 is the physical index list, not `<BasedOn>`, exactly as
-        // field 48 is on a chart of accounts: both ERP УХ 3.2.12.6 charts of
-        // calculation types declare descriptors there (3 and 2, of the same
-        // `fe839d42-…` family the chart of accounts writes) and the platform
-        // still exports `<BasedOn/>`. `<BasedOn>` rides field 36, checked
-        // above with the same `{0,0}` empty form. Only the declared shape is
-        // validated here; the descriptors are not exported. The БСП demo chart
-        // declares none and passed either way.
-        || !chart_physical_index_list_shape_is_known(fields.get(54)?)
         || !cct_data_lock_fields_are_empty(fields.get(56)?)
     {
         return None;
     }
+    // Field 54 is `<Characteristics>`, exactly as field 48 is on a chart of
+    // accounts. The `fe839d42-…` type the items carry is the platform's
+    // Characteristic type, not an index-descriptor family: both ERP УХ
+    // 3.2.12.6 charts of calculation types declare 3 and 2 items there and the
+    // platform writes exactly 3 and 2 `<xr:Characteristic>` elements for them,
+    // while the БСП demo chart declares none and exports `<Characteristics/>`.
+    // `<BasedOn>` rides field 36, checked above with the same `{0,0}` empty
+    // form.
+    let characteristics = decode_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::ChartOfCalculationTypes,
+        fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        &mut None,
+    )?;
 
     let mut all_uuids = BTreeSet::from([header.uuid.to_ascii_lowercase()]);
     let generated_types = parse_chart_generated_types(
@@ -22400,20 +22438,13 @@ fn parse_chart_of_calculation_types_properties(
         action_period_use: information_register_bool(fields.get(29)?)?,
         standard_attributes: parse_chart_standard_attributes(
             fields.get(43)?,
-            &[
-                ("-11", "PredefinedDataName"),
-                ("-8", "Predefined"),
-                ("-6", "Ref"),
-                ("-5", "DeletionMark"),
-                ("-4", "ActionPeriodIsBasic"),
-                ("-3", "Description"),
-                ("-2", "Code"),
-            ],
+            &CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES,
             None,
             &header.name,
             type_index,
             object_refs,
         )?,
+        characteristics,
         standard_tabular_sections: parse_chart_standard_tabular_sections(
             fields.get(44)?,
             &[
@@ -22808,6 +22839,27 @@ fn parse_chart_standard_attributes(
         return None;
     }
 
+    // The attribute-property bag comes in the same two shapes every other
+    // family already accepts: 24 properties, or 25 with the type-reduction
+    // property (`INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID`).
+    // Requiring the 24-property shape here made every chart that writes the
+    // 25-property one opaque. Census of the stand's seven chart roots, by the
+    // bags their standard-attribute (`ChartOfAccounts` field 38,
+    // `ChartOfCalculationTypes` field 43) and standard-tabular-section
+    // (fields 39 and 44) slots carry:
+    //
+    // | charts | bag |
+    // |---|---|
+    // | both БСП demo charts, one ERP УХ chart of accounts | 24 properties |
+    // | the other two ERP УХ charts of accounts | 25 properties |
+    // | both ERP УХ charts of calculation types | 25 properties |
+    //
+    // All seven export `<xr:TypeReductionMode>TransformValues` for every
+    // standard attribute, and every one of the 60 type-reduction values the
+    // four 25-property charts declare is `0` — the value
+    // `parse_register_standard_attribute` demands below. As everywhere else,
+    // the shapes may not be mixed inside one row.
+    let mut bag_shape = None;
     definitions
         .iter()
         .copied()
@@ -22824,9 +22876,10 @@ fn parse_chart_standard_attributes(
                 return None;
             }
             let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
-            if bag.has_type_reduction_mode {
+            if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
                 return None;
             }
+            bag_shape = Some(bag.has_type_reduction_mode);
             let raw_fill =
                 bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
             let fill_value = if parent.is_some_and(|(marker, _)| marker == expected_marker) {
@@ -23390,23 +23443,6 @@ fn cct_characteristics_preconditions(fields: &[&str]) -> bool {
         && fields
             .get(36)
             .is_some_and(|value| owner_graph::CctPhysicalSchema::binary_flag(value.trim()))
-}
-
-/// The `{0,{N,<descriptor>…}}` physical index list a chart owner declares.
-///
-/// It is not `<BasedOn>` and is never exported; only its declared shape is
-/// validated so a malformed record still fails closed.
-fn chart_physical_index_list_shape_is_known(value: &str) -> bool {
-    split_information_register_braced_fields(value).is_some_and(|fields| {
-        fields.len() == 2
-            && fields[0].trim() == "0"
-            && split_information_register_braced_fields(fields[1]).is_some_and(|nested| {
-                nested.first().is_some_and(|count| {
-                    parse_information_register_usize(count)
-                        .is_some_and(|count| count.checked_add(1) == Some(nested.len()))
-                })
-            })
-    })
 }
 
 fn cct_data_lock_fields_are_empty(value: &str) -> bool {
@@ -35336,7 +35372,7 @@ fn format_chart_of_accounts_source_xml(
     header: &MetadataHeader,
     chart: &ChartOfAccountsProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     let mut xml = format_full_metadata_source_xml("ChartOfAccounts", header, source_version);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(
@@ -35370,7 +35406,7 @@ fn format_chart_of_accounts_source_xml(
         chart.default_presentation,
     ));
     push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
-    properties.push_str("\t\t\t<Characteristics/>\r\n");
+    properties.push_str(&render_metadata_characteristics_xml(&chart.characteristics).ok()?);
     push_chart_standard_tabular_sections_xml(&mut properties, &chart.standard_tabular_sections);
     properties.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
@@ -35470,14 +35506,14 @@ fn format_chart_of_accounts_source_xml(
         push_metadata_child_command_xml(&mut children, command);
     }
     insert_metadata_child_objects_xml(&mut xml, "ChartOfAccounts", &children);
-    xml
+    Some(xml)
 }
 
 fn format_chart_of_calculation_types_source_xml(
     header: &MetadataHeader,
     chart: &ChartOfCalculationTypesProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     let mut xml =
         format_full_metadata_source_xml("ChartOfCalculationTypes", header, source_version);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
@@ -35542,7 +35578,7 @@ fn format_chart_of_calculation_types_source_xml(
         xml_bool(chart.action_period_use),
     ));
     push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
-    properties.push_str("\t\t\t<Characteristics/>\r\n");
+    properties.push_str(&render_metadata_characteristics_xml(&chart.characteristics).ok()?);
     push_chart_standard_tabular_sections_xml(&mut properties, &chart.standard_tabular_sections);
     properties.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
@@ -35603,7 +35639,7 @@ fn format_chart_of_calculation_types_source_xml(
         ));
     }
     insert_metadata_child_objects_xml(&mut xml, "ChartOfCalculationTypes", &children);
-    xml
+    Some(xml)
 }
 
 fn push_chart_owned_forms_xml(

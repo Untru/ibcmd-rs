@@ -557,6 +557,8 @@ pub(crate) enum CharacteristicsOwnerFamily {
     ChartOfCharacteristicTypes,
     BusinessProcess,
     Task,
+    ChartOfAccounts,
+    ChartOfCalculationTypes,
 }
 
 impl CharacteristicsOwnerFamily {
@@ -567,6 +569,8 @@ impl CharacteristicsOwnerFamily {
             Self::ChartOfCharacteristicTypes => "ChartOfCharacteristicTypes",
             Self::BusinessProcess => "BusinessProcess",
             Self::Task => "Task",
+            Self::ChartOfAccounts => "ChartOfAccounts",
+            Self::ChartOfCalculationTypes => "ChartOfCalculationTypes",
         }
     }
 }
