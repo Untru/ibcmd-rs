@@ -26100,13 +26100,20 @@ fn parse_document_properties_from_text(
             return None;
         }
     };
+    // `DataLockFields` names standard attributes exactly the way `Catalog`'s
+    // own lock list does -- through the family's full standard-attribute
+    // marker table, not through a narrower list. Census over the eight stand
+    // configurations: four `uh` documents put a standard attribute in the
+    // list (`Date` three times, `Number` once) and every other Document in
+    // the corpus names only its own attributes, so both values are observed.
+    // The empty table refused all four documents outright.
     let data_lock_fields = match parse_document_field_references(
         fields,
         47,
         &header.name,
         object_refs,
         &attribute_references,
-        &[],
+        &DOCUMENT_STANDARD_ATTRIBUTES,
     ) {
         Ok(references) => references,
         Err(diagnostic) => {
@@ -26198,9 +26205,15 @@ fn parse_document_properties_from_text(
                 "1" => "Variable",
                 _ => return None,
             },
+            // Census over the 1 237 documents of the stand that name a
+            // numbering periodicity: `Year` 886 (`1`), `Nonperiodical` 350
+            // (`0`) and `Day` 1 (`4`, `uh`'s
+            // `Documents/РеестрСведенийНеобходимыхДляНазначенияИВыплатыПособий`).
+            // Codes the corpus never writes stay refused.
             number_periodicity: match fields.get(13)?.trim() {
                 "0" => "Nonperiodical",
                 "1" => "Year",
+                "4" => "Day",
                 _ => return None,
             },
             check_unique: information_register_bool(fields.get(14)?)?,
