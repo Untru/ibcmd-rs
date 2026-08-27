@@ -1038,13 +1038,22 @@ impl FormPageSchema {
         1
     }
 
+    /// A page's picture value is the ordinary picture value, all three of its
+    /// kinds included.
+    ///
+    /// The payload kind used to be excluded here alone, which is a bound on the
+    /// value's own shape stated outside the schema that owns that shape: the
+    /// three kinds are told apart by their declared member counts and their
+    /// own members, and the page reads the value at the same option slot
+    /// whatever the kind is. ERP УХ 3.2.12.6
+    /// `DataProcessors/ОбщиеОбъектыРеглОтчетности/Forms/ФормаСозданияОтчета`
+    /// page `ГруппаРанееСозданные` carries `{4,3,{0},"",31,15,1,{<payload>},
+    /// 0,""}` and the platform writes `<Picture><xr:Abs>Picture.png</xr:Abs>
+    /// <xr:LoadTransparent>true</xr:LoadTransparent>
+    /// <xr:TransparentPixel x="31" y="15"/></Picture>` for it, together with
+    /// the `Picture.png` file beside the form; the exclusion dropped both.
     pub(crate) fn picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
-        let picture = FormPictureValueSchema::from_raw_layout(value)?;
-        matches!(
-            picture.kind(),
-            FormPictureValueKind::Empty | FormPictureValueKind::Reference
-        )
-        .then_some(picture)
+        FormPictureValueSchema::from_raw_layout(value)
     }
 }
 
@@ -5558,7 +5567,7 @@ impl FormRootPropertyBagSchema {
     }
 }
 
-/// `Customizable` sits alone in root field 14 of the `50` layout.
+/// `Customizable` sits alone in root field 14, in both root revisions.
 ///
 /// UT 11.5.27.75 native tree, 5 075 attributable roots: field 14 reads `0` for
 /// all 359 roots whose native document carries `<Customizable>false</...>` and
@@ -5566,6 +5575,21 @@ impl FormRootPropertyBagSchema {
 /// Field 11 is the root's `Group` marker (`1` for the 39 roots that carry a
 /// horizontal `Group`, `0` for the other 5 036), so pairing it into the
 /// `Customizable` test only suppressed the 12 roots that have both.
+///
+/// The `49` revision keeps the field where `50` does. Census of the dumped root
+/// layouts of all eight stand corpora, joined to the direct children of each
+/// form's own `<Form>` element: 22 637 roots, 1 652 of them under `49`, and
+/// field 14 reads `0` on all 1 406 roots that carry
+/// `<Customizable>false</Customizable>` - 1 359 under `50` and 47 under `49` -
+/// and `1` on all 21 231 that omit it, with no third code and no root
+/// disagreeing. Admitting only `50` left the `49` roots to the older pair test
+/// (fields 11 and 14 both `0`), which the four `49` roots that carry a
+/// horizontal `Group` fail: ERP УХ
+/// `DataProcessors/{ОбщиеОбъектыРеглОтчетности/Forms/ДлительнаяОперацияПри
+/// ПолученииМЧБ, ОнлайнСервисыРегламентированнойОтчетности/Forms/
+/// ИдетОбновлениеИнформацииМеханизмаОнлайнСервисов, ЕдиныйНалоговыйСчет
+/// ЛичныйКабинет/Forms/ФормаДлительнаяОперация}` and
+/// `Catalogs/БланкиОтчетов/Forms/СопоставлениеАналитике`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormRootCustomizableSchema {
     slot: usize,
@@ -5578,7 +5602,7 @@ impl FormRootCustomizableSchema {
         root_discriminator: Option<&str>,
         field_count: usize,
     ) -> Option<Self> {
-        (root_discriminator == Some("50") && field_count > Self::SLOT)
+        (matches!(root_discriminator, Some("49" | "50")) && field_count > Self::SLOT)
             .then_some(Self { slot: Self::SLOT })
     }
 
@@ -6453,6 +6477,7 @@ pub(crate) enum FormTooltipRepresentationXmlOrder {
     FieldPropertiesBeforeCommandSet,
     ButtonGroupHeader,
     AfterTitle,
+    CommandBarHeader,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -6579,11 +6604,23 @@ pub(crate) fn form_tooltip_representation_xml_order(
         FormTooltipRepresentationItemKind::ButtonGroup => {
             Some(FormTooltipRepresentationXmlOrder::ButtonGroupHeader)
         }
-        // All 3 native command bars that carry the property write it directly
-        // behind their title block and ahead of `HorizontalLocation` (2) and
-        // `ExtendedTooltip` (3) -- the same site `Popup`/`Pages` use.
+        // A command bar writes the property directly behind its title block and
+        // ahead of its own geometry run, which is one site earlier than
+        // `AfterTitle`: that site sits behind `Width`, `Height`,
+        // `HorizontalStretch`, `VerticalStretch` and the two group alignments.
+        //
+        // Census over the native `Form.xml` of all eight stand corpora, every
+        // `<CommandBar>` element (9 613 of them, 17 carrying the property):
+        // `<ToolTipRepresentation>` trails `Title` (17), `ToolTip` (2) and
+        // `Visible` (1), and leads `HorizontalStretch` (2),
+        // `HorizontalLocation` (6), `ChildItems` (16) and `ExtendedTooltip`
+        // (17). No pair is counted in both directions, and the property never
+        // shares a command bar with `Width`, `Height`, `VerticalStretch`,
+        // `GroupHorizontalAlign` or `GroupVerticalAlign`, so the move past them
+        // is unconstrained. The earlier placement came from a census of three
+        // command bars, none of which carried `HorizontalStretch`.
         FormTooltipRepresentationItemKind::CommandBar => {
-            Some(FormTooltipRepresentationXmlOrder::AfterTitle)
+            Some(FormTooltipRepresentationXmlOrder::CommandBarHeader)
         }
         FormTooltipRepresentationItemKind::ColumnGroup => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
