@@ -14,6 +14,7 @@ const MAX_INDENT: usize = 64;
 const MAX_VALUE_BYTES: usize = 32 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const XML_SCHEMA_STRING_TYPE: &str = "xs:string";
+const XML_SCHEMA_DATE_TIME_TYPE: &str = "xs:dateTime";
 const XML_SCHEMA_DECIMAL_TYPE: &str = "xs:decimal";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -231,6 +232,9 @@ fn preflight(
             FormChoiceParameterValue::String(text) => {
                 validate_value("string", text)?;
             }
+            FormChoiceParameterValue::DateTime(text) => {
+                validate_value("date-time", text)?;
+            }
             FormChoiceParameterValue::DesignTimeRef(reference) => {
                 validate_value("design-time reference", reference)?;
             }
@@ -379,6 +383,14 @@ fn emit_value(
         )),
         FormChoiceParameterValue::String(text) => {
             push_escaped(sink, XML_SCHEMA_STRING_TYPE, EscapeMode::Attribute)?;
+            sink.push("\">")?;
+            push_escaped(sink, text, EscapeMode::Text)?;
+            sink.push("</")?;
+            sink.push(&policy.scalar_value)?;
+            sink.push(">\r\n")
+        }
+        FormChoiceParameterValue::DateTime(text) => {
+            push_escaped(sink, XML_SCHEMA_DATE_TIME_TYPE, EscapeMode::Attribute)?;
             sink.push("\">")?;
             push_escaped(sink, text, EscapeMode::Text)?;
             sink.push("</")?;

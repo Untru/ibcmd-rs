@@ -161,6 +161,9 @@ pub enum FormChoiceParameterValue {
     Undefined,
     Boolean(bool),
     String(String),
+    /// A `{"D",<14 digits>}` member, kept in the ISO spelling the platform
+    /// writes: `YYYY-MM-DDThh:mm:ss`.
+    DateTime(String),
     DesignTimeRef(String),
     FixedArray(Vec<FormChoiceParameterArrayItem>),
 }
@@ -1999,6 +2002,18 @@ where
         {
             FormChoiceParameterValue::String(exact_1c_string(value)?)
         }
+        // A `{"D",<14 digits>}` member in the same mode-1 nil-identified
+        // envelope. The shape had no reader, and the refusal took the whole
+        // `<ChoiceParameters>` block of its item with it. It occurs once in
+        // Документооборот КОРП 3.0.21.3 and twice in ERP УХ 3.2.12.6, and in
+        // no other stand corpus; the platform writes
+        // `<Value xsi:type="xs:dateTime">2024-05-07T00:00:00</Value>` for the
+        // Документооборот one, which is `20240507000000` spelled out.
+        [kind, value]
+            if kind.trim() == r#""D""# && payload[1].trim() == "1" && nil_ids(&payload) =>
+        {
+            FormChoiceParameterValue::DateTime(format_1c_choice_parameter_date_time(value.trim())?)
+        }
         // A design-time reference identifies its value by a *pair*. The nil
         // value id is not an absent id: it is the empty reference of the type,
         // which the resolver names. Requiring both halves non-nil rejected the
@@ -2019,6 +2034,23 @@ where
         _ => return None,
     };
     Some((presentation, value))
+}
+
+/// The 14-digit `YYYYMMDDhhmmss` stamp a `{"D",…}` member carries, in the
+/// `YYYY-MM-DDThh:mm:ss` spelling the platform writes.
+fn format_1c_choice_parameter_date_time(value: &str) -> Option<String> {
+    if value.len() != 14 || !value.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}T{}:{}:{}",
+        &value[0..4],
+        &value[4..6],
+        &value[6..8],
+        &value[8..10],
+        &value[10..12],
+        &value[12..14]
+    ))
 }
 
 fn parse_choice_parameter_array<F>(
