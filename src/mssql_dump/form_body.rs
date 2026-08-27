@@ -545,6 +545,10 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     );
     collect_form_item_rooted_chain_roots(&mut child_item_indexes, &attributes, context.object_refs);
     child_item_indexes.owner_scoped_bindings.form_main_attribute = main_attribute_extension;
+    child_item_indexes
+        .owner_scoped_bindings
+        .attribute_ids_without_declared_owner =
+        form_attribute_ids_without_declared_owner(&attributes, context.metadata_field_declarations);
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
@@ -8675,6 +8679,54 @@ fn table_emits_auto_max_width_false(
     effective_auto_max_width == Some(false)
 }
 
+/// The attributes whose single declared type is a catalogue the configuration
+/// declares no owner for.
+///
+/// `Owner` is a standard attribute a catalogue has only while its `<Owners>`
+/// declares at least one member, and a terminal that names one on a catalogue
+/// without owners is a name the platform cannot construct: it writes the
+/// terminal physically instead, as `<attribute id>/<marker>`.
+///
+/// Evidence over the five stand corpora that carry the element at all: every
+/// one of the 46 native `<xr:DataPath>` values naming `.Owner` sits on an
+/// attribute whose catalogue declares owners — 36 declare one, two declare two,
+/// two declare three, one declares four, and five sit on a multi-typed
+/// attribute this reading does not claim — and all three that the platform
+/// writes physically as `1/-5` sit on a catalogue whose `<Owners/>` is empty:
+/// ERP УХ 3.2.12.6 `Catalogs/ВидыДвиженийМСФО/Forms/ФормаЭлемента` once and
+/// `Catalogs/УдалитьКонтрольныеСоотношения/Forms/ФормаЭлемента` twice. No
+/// overlap in either direction.
+///
+/// An index that carries no entry for the table answers nothing, and the
+/// attribute is left exactly as it was.
+fn form_attribute_ids_without_declared_owner(
+    attributes: &[FormAttribute],
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> BTreeSet<String> {
+    let Some(declarations) = declarations else {
+        return BTreeSet::new();
+    };
+    attributes
+        .iter()
+        .filter(|attribute| {
+            let [ConstantValueType::Reference { reference }] = attribute.value_types.as_slice()
+            else {
+                return false;
+            };
+            let Some(owner) = form_generated_owner_type_from_type_reference(reference) else {
+                return false;
+            };
+            if owner.family() != GeneratedMetadataOwnerFamily::Catalog {
+                return false;
+            }
+            declarations
+                .table(&owner.owner_reference())
+                .is_some_and(|table| !table.declares("Owner"))
+        })
+        .map(|attribute| attribute.id.clone())
+        .collect()
+}
+
 pub(super) fn form_attribute_metadata_owners_by_id(
     attributes: &[FormAttribute],
 ) -> BTreeMap<String, FormAttributeMetadataOwner> {
@@ -9025,6 +9077,13 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// resolvable-field universe. A data path onto one of them carries the
     /// platform's `~` marker, the same marker `<UseAlways>` already writes.
     unresolvable_columns: BTreeSet<FormAttributeColumnKey>,
+    /// Attribute ids whose single declared type is a catalogue the
+    /// configuration declares no `<Owners>` member for. Such a catalogue has no
+    /// `Owner` standard attribute, so a terminal that names one is a name the
+    /// platform cannot construct — and what it cannot name it writes
+    /// physically. Read from the very declaration index the root command set
+    /// reads `Parent` and `IsFolder` from.
+    attribute_ids_without_declared_owner: BTreeSet<String>,
 }
 
 /// The attribute-namespace root a chain rooted at a form item continues from.
@@ -13418,6 +13477,7 @@ fn parse_form_child_item_with_metadata_owners(
                         options,
                         attribute_names_by_id,
                         attribute_metadata_owners_by_id,
+                        &owner_scoped_bindings.attribute_ids_without_declared_owner,
                         table_name_by_id,
                         table_column_names_by_id,
                         type_link_data_path_by_table_column,
@@ -15356,12 +15416,21 @@ pub(super) fn parse_form_input_field_choice_parameter_links(
 /// the link is refused and the caller keeps the whole collection opaque. The
 /// four `cfg:ChartOfCharacteristicTypesObject`/`-2` terminals are the only ones
 /// the corpus puts through that door, and the table now names them.
+///
+/// A catalogue that declares no owner is the one further refusal: it has no
+/// `Owner` standard attribute for `-5` to name, and the platform writes the
+/// terminal physically instead. See
+/// `form_attribute_ids_without_declared_owner` for the census.
 fn form_choice_parameter_link_standard_terminal_member(
     attribute_id: &str,
     standard: FormChoiceParameterLinkStandardTerminal,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    attribute_ids_without_declared_owner: &BTreeSet<String>,
 ) -> Option<&'static str> {
     let marker = standard.marker_text();
+    if marker == "-5" && attribute_ids_without_declared_owner.contains(attribute_id) {
+        return None;
+    }
     attribute_metadata_owners_by_id
         .get(attribute_id)
         .and_then(|owner| owner.exact_single_type_reference.as_deref())
@@ -15429,6 +15498,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     duplicate: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    attribute_ids_without_declared_owner: &BTreeSet<String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
@@ -15457,6 +15527,7 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         attribute_id,
                         *standard,
                         attribute_metadata_owners_by_id,
+                        attribute_ids_without_declared_owner,
                     )
                     .and_then(|member| {
                         attribute_names_by_id
@@ -15627,6 +15698,7 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     options: &[&str],
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    attribute_ids_without_declared_owner: &BTreeSet<String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
@@ -15679,6 +15751,7 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
         duplicate,
         attribute_names_by_id,
         attribute_metadata_owners_by_id,
+        attribute_ids_without_declared_owner,
         table_name_by_id,
         table_column_names_by_id,
         type_link_data_path_by_table_column,
