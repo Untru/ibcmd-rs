@@ -875,9 +875,12 @@ pub(super) struct MoxelChart {
     max_series: usize,
     base_val: usize,
     is_outline: bool,
-    animation: &'static str,
+    /// `post[20]`: `"0"` when the chart's areas carry stored placements,
+    /// `"2"` when they do not. See `parse_moxel_chart`.
+    areas_are_placed: bool,
     rebuild_time: usize,
     legend_scroll_enable: bool,
+    is_randomized_new_values: bool,
     gauge_bands: Vec<MoxelChartGaugeBand>,
     gauge_thickness: usize,
     gauge_bush_thickness: usize,
@@ -952,7 +955,12 @@ pub(super) struct MoxelChartGaugeBand {
 }
 
 pub(super) struct MoxelChartDataItem {
+    /// The XSD type the stored value names for itself.
+    value_type: &'static str,
     value: String,
+    /// A `<valData>` whose stored value is the empty string is published
+    /// self-closed; every other one carries its text.
+    value_is_empty: bool,
     tooltip: String,
 }
 
@@ -5544,12 +5552,46 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // left unexplained in this region once title/border/font/transparent
     // above are accounted for.
     let legend_scroll_enable = parse_moxel_chart_bool(tail.get(65)?)?;
-    let animation = match tail.get(81)?.trim() {
-        "1" => "Auto",
-        "0" => "DontUse",
-        _ => return None,
-    };
-    // `elementsIsInit` is `post[20]`: `"0"` for `true`, `"2"` for `false`.
+    // `isRandomizedNewValues` is a real two-state field, not the literal `1`
+    // this reader asserted: of the 58 chart records the stand carries, 57
+    // store `"1"` and publish `true`, and `DataProcessors/
+    // ДокументооборотСКонтролирующимиОрганами/Templates/
+    // ДиагностикаОтчетности_Подсказки` stores `"0"` and publishes `false`.
+    let is_randomized_new_values = parse_moxel_chart_bool(tail.get(99)?)?;
+    // `elementsIsInit` is `tail[81]`, read as the plain boolean it is.
+    //
+    // Both slots this reader used before are disproven by a single record.
+    // `tail[84]` (read as "not `"0"`") is a geometry cache, and 1С:УТ
+    // 11.5.27.75's own charts disprove it: all twelve `Chart` records of
+    // `DataProcessors/ПроверкаКонтрагента/Templates/ФинансовыйАнализ` and
+    // `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ` store `"0"`
+    // there and every one publishes `<d3p1:elementsIsInit>true</...>`.
+    // `post[20]` (read as `"0"` -> `true`, `"2"` -> `false`) separated the
+    // twenty records observed at that time, but ERP УХ 3.2.12.6's
+    // `DataProcessors/ДокументооборотСКонтролирующимиОрганами/Templates/
+    // ДиагностикаОтчетности_Подсказки` stores `"0"` there and publishes
+    // `false`.
+    //
+    // Over the complete corpus of MXL chart records the stand carries -- all
+    // 58 of them, from the 23 templates of ERP УХ 3.2.12.6, 1С:УТ
+    // 11.5.27.75, БСП demo/base 3.1.12.297 and Документооборот КОРП
+    // 3.0.21.3 whose native `Template.xml` publishes `elementsIsInit` at all
+    // -- `tail[81]` reads `"1"` in each of the 52 records that publish
+    // `true` and `"0"` in each of the six that publish `false`, with no
+    // exception. `post[20]` is what carries `animation` instead (see
+    // `areas_are_placed` below): the six `false` records are the five
+    // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` copies plus
+    // `ДиагностикаОтчетности_Подсказки`, and only the first five publish
+    // `DontUse`.
+    //
+    // The old `tail[89]` cross-check (`"0"` exactly when `isShowLegend &&
+    // elementsIsInit`) is gone with it: `ДиагностикаОтчетности_Подсказки`
+    // stores `"0"` there with `isShowLegend == true` and `elementsIsInit ==
+    // false`, and the slot's own values across the corpus (`0`, `1`,
+    // `4.61e-1`, `4.72e-1`) are those of the design-time geometry cache
+    // documented on `validate_moxel_chart_v74_front`, not of a flag.
+    //
+    // Historical note on the slot this replaces:
     //
     // The slot this reader used before -- `tail[84]`, read as "not `"0"`" --
     // is a geometry cache, not the flag, and 1С:УТ 11.5.27.75's own charts
@@ -5578,39 +5620,8 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
     // whether the elements were initialized; nothing in the published XML
     // depends on it either way (see `validate_moxel_chart_v74_front`).
     //
-    // `tail[89]` stays the independent cross-check it was: `"0"` exactly
-    // when `isShowLegend && elementsIsInit`, which holds on all twenty
-    // records under this reading.
-    let elements_is_init = match tail.get(post_start.checked_add(20)?)?.trim() {
-        "0" => true,
-        "2" => false,
-        _ => return None,
-    };
-    if (tail.get(89)?.trim() == "0") != (is_show_legend && elements_is_init) {
-        return None;
-    }
-    // A series/point's own `color`/`marker` raw slots are a cache the
-    // platform ignores -- publishing `auto`/`Auto` instead -- whenever the
-    // record as a whole has never gone through the design pipeline.
-    // Evidence: `ДлительностьОтложенногоОбновления/...`
-    // (`elementsIsInit == false`) is the only observation of this: its
-    // mandatory `realExSeriesData` stores a real cached colour (`#B49EB4`)
-    // and marker (`Rect`) at the same raw slots the pre-existing corpus's
-    // `elementsIsInit == true` records use for genuine values, yet
-    // publishes `<d3p1:color>auto</d3p1:color>`/
-    // `<d3p1:marker>Auto</d3p1:marker>`. `АнализЖурналаРегистрации/...`
-    // (`elementsIsInit == true`, same `chartType`, same `strIsChanged ==
-    // false`) publishes its own real cached colour/marker unchanged,
-    // ruling out `chartType` or `strIsChanged` as the gate.
-    if !elements_is_init {
-        for series in real_series
-            .iter_mut()
-            .chain(std::iter::once(&mut real_extra_series))
-        {
-            series.color = "auto".to_string();
-            series.marker = "Auto";
-        }
-    }
+    // (end of the historical note)
+    let elements_is_init = parse_moxel_chart_bool(tail.get(81)?)?;
     validate_moxel_chart_v74_front(tail)?;
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
@@ -5675,12 +5686,76 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         "0" => false,
         _ => return None,
     };
+    // `post[20]` names the state of the chart's areas. Two published
+    // differences ride it and the corpus does not separate them: `animation`
+    // (`Auto` at `"0"`, `DontUse` at `"2"`) and whether `legendPlacement`
+    // and `titleAreaPlacement` are published at all. Over all 58 chart
+    // records of the stand the two move together exactly -- the five
+    // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` copies store `"2"`,
+    // publish `DontUse` and publish neither placement; the other 53 store
+    // `"0"`, publish `Auto` and publish both (`plotAreaPlacement` between
+    // them is published either way). `tail[65]` (`legendScrollEnable`)
+    // partitions the same 5/53 and is read from its own slot as its own
+    // value; nothing in the corpus tells the three apart, so this reader
+    // does not pretend to, and any other spelling of `post[20]` refuses the
+    // record rather than being interpreted.
+    let areas_are_placed = match post.get(20)?.trim() {
+        "0" => true,
+        "2" => false,
+        _ => return None,
+    };
+    // A series' and a point's published `color`, and a series' published
+    // `marker`, are resolved values the record carries in its own
+    // per-scale-item legend list -- not the design-time cache that sits in
+    // the series/point record itself.
+    //
+    // The list starts right after the fifteen axis-tail literals
+    // (`axes_position + 20`) and runs `point_count` one-member colour
+    // records followed by `series_count + 1` ten-member records whose first
+    // two members are the colour and the marker code; fifteen fixed slots
+    // then separate it from `elementsChart`. The member counts are the
+    // corpus's own: all 176 series entries carry ten members and all 52
+    // point entries carry one.
+    //
+    // Evidence: pairing every list entry of all 58 chart records of the
+    // stand against the `<d3p1:realSeriesData>`/`<d3p1:realExSeriesData>`/
+    // `<d3p1:realPointData>` block that carries its `<d3p1:id>` gives 228
+    // pairings and no mismatch. It is also the only reading that fits
+    // `ДиагностикаОтчетности_Подсказки`, where 79 of 81 series and points
+    // publish their real colour and exactly two -- ids 10792 and 10793 --
+    // publish `auto`/`Auto`: those two store a real cached colour
+    // (`{3,0,{7051715}}`, `{3,0,{13222065}}`) and marker code `1` in their
+    // own record, and `{3,4,{0}}` with marker code `4` in the list. The
+    // previous rule (reset every series to `auto` when `elementsIsInit` is
+    // clear) was measured on `ДлительностьОтложенногоОбновления/...` alone
+    // and would spell all 76 of this record's series `auto`.
+    let legend_start = axes_position.checked_add(20)?;
+    for (index, series) in real_series
+        .iter_mut()
+        .chain(std::iter::once(&mut real_extra_series))
+        .enumerate()
+    {
+        let entry = post.get(legend_start.checked_add(point_count)?.checked_add(index)?)?;
+        let fields = split_1c_braced_fields(entry, 0)?;
+        if fields.len() != 10 {
+            return None;
+        }
+        series.color = parse_moxel_chart_color(fields.first()?)?;
+        series.marker = moxel_chart_marker(fields.get(1)?)?;
+    }
+    for (index, point) in real_points.iter_mut().enumerate() {
+        let entry = post.get(legend_start.checked_add(index)?)?;
+        let fields = split_1c_braced_fields(entry, 0)?;
+        if fields.len() != 1 {
+            return None;
+        }
+        point.color = parse_moxel_chart_color(fields.first()?)?;
+    }
     validate_moxel_chart_v74_post(
         post,
         series_count,
         has_extended_scales,
         is_title_init,
-        elements_is_init,
         axes_position,
         rectangle_start,
     )?;
@@ -5730,9 +5805,10 @@ fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
         max_series,
         base_val,
         is_outline,
-        animation,
+        areas_are_placed,
         rebuild_time,
         legend_scroll_enable,
+        is_randomized_new_values,
         gauge_bands,
         gauge_thickness,
         gauge_bush_thickness,
@@ -6278,6 +6354,13 @@ fn moxel_chart_marker(text: &str) -> Option<&'static str> {
         "1" => Some("Rect"),
         "2" => Some("Circle"),
         "3" => Some("Rhomb"),
+        // Code 4 is `Auto`. Evidence: the six legend-list entries of the
+        // stand that publish `<d3p1:marker>Auto</d3p1:marker>` -- the extra
+        // series of the five `ДлительностьОтложенногоОбновления/
+        // ДиаграммаГанта` copies and of `МакетФакторныйАнализВодопад`,
+        // plus series 10792 and 10793 of `ДиагностикаОтчетности_Подсказки`
+        // -- all spell it, and no entry that publishes a named marker does.
+        "4" => Some("Auto"),
         _ => None,
     }
 }
@@ -6324,16 +6407,36 @@ fn parse_moxel_chart_data_item(
     tooltip: &str,
 ) -> Option<MoxelChartDataItem> {
     let typed = split_1c_braced_fields(value, 0)?;
-    if typed.len() != 2
-        || parse_1c_string(typed.first()?)? != "N"
-        || compact_moxel_chart_token(value_info) != "{\"U\"}"
-    {
+    if typed.len() != 2 || compact_moxel_chart_token(value_info) != "{\"U\"}" {
         return None;
     }
-    Some(MoxelChartDataItem {
-        value: normalize_moxel_chart_decimal(typed.get(1)?)?,
-        tooltip: parse_1c_string(tooltip)?,
-    })
+    // The stored value names its own type, and `"N"` was not the only one it
+    // ever names. Over the 422 data items of the stand's 58 chart records,
+    // the 47 `{"N",…}` publish `xsi:type="xs:decimal"` with their number and
+    // the 375 `{"S",…}` publish `xsi:type="xs:string"`, self-closed on
+    // exactly the 235 whose stored string is empty and carrying the text on
+    // the other 140 -- no exception. `DataProcessors/
+    // ДокументооборотСКонтролирующимиОрганами/Templates/
+    // ДиагностикаОтчетности_Подсказки` is the string case: demanding `"N"`
+    // refused all 375 of its items and, by construction, the whole chart.
+    match parse_1c_string(typed.first()?)?.as_str() {
+        "N" => Some(MoxelChartDataItem {
+            value_type: "xs:decimal",
+            value: normalize_moxel_chart_decimal(typed.get(1)?)?,
+            value_is_empty: false,
+            tooltip: parse_1c_string(tooltip)?,
+        }),
+        "S" => {
+            let text = parse_1c_string(typed.get(1)?)?;
+            Some(MoxelChartDataItem {
+                value_type: "xs:string",
+                value_is_empty: text.is_empty(),
+                value: text,
+                tooltip: parse_1c_string(tooltip)?,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_moxel_chart_axis(text: &str) -> Option<MoxelChartAxis> {
@@ -6475,7 +6578,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (96, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
         (97, "\"\""),
         (98, "0"),
-        (99, "1"),
     ];
     if !expected.iter().all(|(index, value)| {
         tail.get(*index)
@@ -6559,18 +6661,27 @@ fn validate_moxel_chart_v74_post_prefix(
 }
 
 /// The scale-item id-list pair right after `post[22]`: `post[23]` is their
-/// shared count `N`, followed by `N` records `{0,K,0}` (`K` = `1..=N`) naming
-/// each scale item, then `N` records `{0,0}` and one trailing `"0"`.
+/// shared count `N`, followed by `N` records `{0,<id>,0}` naming each scale
+/// item, then `N` records `{0,0}` and one trailing `"0"`.
 ///
 /// Evidence: a hand-built seed's empty chart (`series_count == 0`) reads `N
 /// == 1`; adding one real series (`series_count == 1`, matching the
 /// pre-existing 13-record corpus) inserts exactly one `{0,2,0}`/`{0,0}` pair
 /// here and nothing else changes at this position, so `N = 1 +
-/// series_count`. This reader does not attempt to name what `K` refers to:
+/// series_count`. This reader does not attempt to name what the id refers to:
 /// no observation ties it to anything the native XML publishes (the whole
 /// list sits between `multiStageLinkColor` and `valuesAxis`, both of which
 /// are unaffected by it), so it is read as a positional record, not
 /// interpreted.
+///
+/// The id is required in form only. Demanding the *value* `k + 1` was a
+/// literal fitted to records whose scale items happen to have been created in
+/// one unbroken run: ERP УХ 3.2.12.6's `DataProcessors/
+/// ДокументооборотСКонтролирующимиОрганами/Templates/
+/// ДиагностикаОтчетности_Подсказки` stores `{0,1,0}` and then
+/// `{0,10719,0}`...`{0,10793,0}` -- the ids of its own 75 series, which the
+/// record also spells one by one in its `realSeriesData` run and in
+/// `seriesCurId`.
 fn validate_moxel_chart_v74_scale_id_list(post: &[&str], series_count: usize) -> Option<()> {
     let n = post.get(23)?.trim().parse::<usize>().ok()?;
     // The list's own length bounds `N`: it spends `2*N + 2` slots of `post`.
@@ -6578,8 +6689,12 @@ fn validate_moxel_chart_v74_scale_id_list(post: &[&str], series_count: usize) ->
         return None;
     }
     for k in 0..n {
-        let expected = format!("{{0,{},0}}", k.checked_add(1)?);
-        if compact_moxel_chart_token(post.get(24usize.checked_add(k)?)?) != expected {
+        let record = split_1c_braced_fields(post.get(24usize.checked_add(k)?)?, 0)?;
+        if record.len() != 3
+            || record.first()?.trim() != "0"
+            || record.get(1)?.trim().parse::<usize>().is_err()
+            || record.get(2)?.trim() != "0"
+        {
             return None;
         }
     }
@@ -6635,39 +6750,19 @@ fn validate_moxel_chart_v74_post_axes_tail(post: &[&str], axes_position: usize) 
 /// The five-token window immediately before `elementsChart`
 /// (`rectangle_start - 5 .. rectangle_start`).
 ///
-/// `elementsIsInit == false` (`ДлительностьОтложенногоОбновления/...`, the
-/// only observation) resets it to a fixed `1,1,1,0,0` -- one more member of
-/// the `elementsIsInit`-gated cache cluster documented on
-/// `validate_moxel_chart_v74_front`.
+/// More of the design-time cache cluster documented on
+/// `validate_moxel_chart_v74_front`: no observation ties any of these five
+/// slots' content to anything the native XML publishes, so only existence is
+/// required.
 ///
-/// `elementsIsInit == true` does *not*, on its own, guarantee the
-/// pre-existing corpus's `"1","1","1",X,"8"` literal either (`X` `"6"` on
-/// every `isShowLegend == false` corpus record, `"5"` on the seed pair that
-/// isolated `isShowLegend`): `АнализЖурналаРегистрации/...`
-/// (`elementsIsInit == true`, a record whose design layout was actually
-/// touched -- non-default `elementsChart`/`elementsLegend`/`elementsTitle`
-/// rectangles) stores real, otherwise-uninterpreted cache values across all
-/// five slots instead, unlike the pre-existing corpus's untouched-layout
-/// records. Only existence is required in that case; no observation ties
-/// any of these five slots' *content* to XML once a record's layout has
-/// actually been designed.
-fn validate_moxel_chart_v74_rectangle_check(
-    post: &[&str],
-    elements_is_init: bool,
-    rectangle_start: usize,
-) -> Option<()> {
-    if !elements_is_init {
-        let expected = [(5usize, "1"), (4, "1"), (3, "1"), (2, "0"), (1, "0")];
-        return expected
-            .iter()
-            .all(|(back_from, value)| {
-                rectangle_start
-                    .checked_sub(*back_from)
-                    .and_then(|index| post.get(index))
-                    .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
-            })
-            .then_some(());
-    }
+/// The `elementsIsInit == false` branch this used to carry -- a fixed
+/// `1,1,1,0,0` -- was fitted to `ДлительностьОтложенногоОбновления/
+/// ДиаграммаГанта` alone. `ДиагностикаОтчетности_Подсказки` publishes
+/// `elementsIsInit false` too and stores `0,0,1,5,1` here, while
+/// `АнализЖурналаРегистрации/...` publishes `true` and stores
+/// `0,0.944…,1,5,1`; the window tracks how far the layout was ever computed,
+/// not the flag.
+fn validate_moxel_chart_v74_rectangle_check(post: &[&str], rectangle_start: usize) -> Option<()> {
     (1..=5usize)
         .all(|back_from| {
             rectangle_start
@@ -6678,20 +6773,18 @@ fn validate_moxel_chart_v74_rectangle_check(
         .then_some(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn validate_moxel_chart_v74_post(
     post: &[&str],
     series_count: usize,
     has_extended_scales: bool,
     is_title_init: bool,
-    elements_is_init: bool,
     axes_position: usize,
     rectangle_start: usize,
 ) -> Option<()> {
     validate_moxel_chart_v74_post_prefix(post, has_extended_scales, is_title_init)?;
     validate_moxel_chart_v74_scale_id_list(post, series_count)?;
     validate_moxel_chart_v74_post_axes_tail(post, axes_position)?;
-    validate_moxel_chart_v74_rectangle_check(post, elements_is_init, rectangle_start)
+    validate_moxel_chart_v74_rectangle_check(post, rectangle_start)
 }
 
 fn parse_moxel_chart_bool(text: &str) -> Option<bool> {
@@ -6900,9 +6993,9 @@ pub(super) fn parse_moxel_leading_default_format_record(text: &str) -> Option<(u
     }
 }
 
-/// A cell's declared value type, as carried by the document's own type table.
+/// One descriptor of a cell's declared value type.
 #[derive(Clone, PartialEq, Eq)]
-pub(super) enum MoxelValueType {
+pub(super) enum MoxelValueTypeItem {
     Boolean,
     String {
         length: usize,
@@ -6921,9 +7014,18 @@ pub(super) enum MoxelValueType {
     ConfigRef(String),
     /// A type the configuration does not name: published by identity.
     TypeId(String),
-    /// A `Pattern` that carries no descriptor at all, published as the empty
-    /// `<valueType/>`.
-    Empty,
+}
+
+/// A cell's declared value type, as carried by the document's own type table.
+///
+/// A `Pattern` declares its own descriptor count: it carries as many
+/// descriptors as it has members past the `"Pattern"` head. Zero descriptors
+/// is the empty `<valueType/>`; one is the common shape; more than one is the
+/// composite type published as a run of `<v8:Type>` followed by the
+/// qualifiers.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct MoxelValueType {
+    pub(super) items: Vec<MoxelValueTypeItem>,
 }
 
 /// Decodes the document's value-type table.
@@ -6979,26 +7081,43 @@ pub(super) fn parse_moxel_value_type(
     if unquote_moxel_string(fields.first()?)? != "Pattern" {
         return None;
     }
-    // A `Pattern` with no descriptor is the empty type, not a broken entry.
+    // A `Pattern` declares its own descriptor count by its member count. No
+    // descriptor is the empty type, not a broken entry:
     // `Documents/ЛистКассовойКниги/Templates/ПФ_MXL_ЛистКассовойКниги` is the
     // only document in the corpus whose table carries this shape - a table of
     // exactly one entry - and it is the document that publishes `<valueType/>`,
     // once for each of the ten formats that name the entry. Refusing it took
     // the whole table down with it and dropped all ten lines.
-    if fields.len() == 1 {
-        return Some(MoxelValueType::Empty);
+    //
+    // More than one descriptor is the composite type. `DataProcessors/
+    // РегламентированнаяОтчетностьСоотношенияПоказателей/Templates/Макет` of
+    // ERP УХ 3.2.12.6 is the only spreadsheet on the stand that carries one:
+    // `{"Pattern",{"S",100,1},{"N",15,2,0}}`, published as
+    // `<v8:Type>xs:string</v8:Type><v8:Type>xs:decimal</v8:Type>` -- the two
+    // descriptors in their stored order -- followed by `NumberQualifiers` and
+    // then `StringQualifiers`. An arity of exactly one was written by hand;
+    // reading the declared count instead costs nothing on the 15 058 tables
+    // that carry a single descriptor and stops this one from taking its whole
+    // table (and with it every `<valueType>` of the document) down.
+    let mut items = Vec::with_capacity(fields.len().saturating_sub(1));
+    for descriptor in fields.get(1..)? {
+        items.push(parse_moxel_value_type_item(descriptor, generated_types)?);
     }
-    if fields.len() != 2 {
-        return None;
-    }
-    let payload = split_1c_braced_fields(fields.get(1)?, 0)?;
+    Some(MoxelValueType { items })
+}
+
+fn parse_moxel_value_type_item(
+    text: &str,
+    generated_types: &BTreeMap<String, String>,
+) -> Option<MoxelValueTypeItem> {
+    let payload = split_1c_braced_fields(text, 0)?;
     match unquote_moxel_string(payload.first()?)?.as_str() {
-        "B" if payload.len() == 1 => Some(MoxelValueType::Boolean),
-        "S" if payload.len() == 1 => Some(MoxelValueType::String {
+        "B" if payload.len() == 1 => Some(MoxelValueTypeItem::Boolean),
+        "S" if payload.len() == 1 => Some(MoxelValueTypeItem::String {
             length: 0,
             allowed_length: "Variable",
         }),
-        "S" if payload.len() == 3 => Some(MoxelValueType::String {
+        "S" if payload.len() == 3 => Some(MoxelValueTypeItem::String {
             length: payload.get(1)?.trim().parse().ok()?,
             allowed_length: match payload.get(2)?.trim() {
                 "0" => "Fixed",
@@ -7006,12 +7125,12 @@ pub(super) fn parse_moxel_value_type(
                 _ => return None,
             },
         }),
-        "N" if payload.len() == 1 => Some(MoxelValueType::Number {
+        "N" if payload.len() == 1 => Some(MoxelValueTypeItem::Number {
             digits: 0,
             fraction_digits: 0,
             allowed_sign: "Any",
         }),
-        "N" if payload.len() == 4 => Some(MoxelValueType::Number {
+        "N" if payload.len() == 4 => Some(MoxelValueTypeItem::Number {
             digits: payload.get(1)?.trim().parse().ok()?,
             fraction_digits: payload.get(2)?.trim().parse().ok()?,
             allowed_sign: match payload.get(3)?.trim() {
@@ -7020,7 +7139,7 @@ pub(super) fn parse_moxel_value_type(
                 _ => return None,
             },
         }),
-        "D" if payload.len() == 1 => Some(MoxelValueType::Date {
+        "D" if payload.len() == 1 => Some(MoxelValueTypeItem::Date {
             fractions: "DateTime",
         }),
         // The qualified date descriptor names its own fraction: `"D"` is the
@@ -7038,15 +7157,15 @@ pub(super) fn parse_moxel_value_type(
         // takes it down by design), so all four documents that carry the
         // fraction lost every `<valueType>` they publish.
         "D" if payload.len() == 2 => match unquote_moxel_string(payload.get(1)?)?.as_str() {
-            "D" => Some(MoxelValueType::Date { fractions: "Date" }),
-            "T" => Some(MoxelValueType::Date { fractions: "Time" }),
+            "D" => Some(MoxelValueTypeItem::Date { fractions: "Date" }),
+            "T" => Some(MoxelValueTypeItem::Date { fractions: "Time" }),
             _ => None,
         },
         "#" if payload.len() == 2 => {
             let uuid = parse_uuid_field(payload.get(1)?.trim())?;
             Some(match moxel_config_type_ref(&uuid, generated_types) {
-                Some(reference) => MoxelValueType::ConfigRef(reference),
-                None => MoxelValueType::TypeId(uuid),
+                Some(reference) => MoxelValueTypeItem::ConfigRef(reference),
+                None => MoxelValueTypeItem::TypeId(uuid),
             })
         }
         _ => None,
@@ -11629,52 +11748,83 @@ fn push_moxel_format_body_xml(
     xml.push_str("\t</format>\r\n");
 }
 
+/// Writes a declared value type.
+///
+/// The descriptors' own `<v8:Type>` lines come first, in the order the record
+/// stores them, and the qualifier blocks follow. Qualifier order is fixed by
+/// the schema, not by the record: over all 161 290 `.xml` files of the eight
+/// native trees, every one of the 803 published blocks carrying two or more
+/// qualifiers spells them as a subsequence of `NumberQualifiers`,
+/// `StringQualifiers`, `DateQualifiers` (482 `N+S+D`, 147 `N+D`, 101 `N+S`,
+/// 73 `S+D`) with no other permutation, and blocks whose `<v8:Type>` run
+/// starts with `xs:string` sit on both sides of that split -- so the two
+/// orders are independent.
 pub(super) fn push_moxel_value_type_xml(xml: &mut String, value_type: &MoxelValueType) {
-    if matches!(value_type, MoxelValueType::Empty) {
+    if value_type.items.is_empty() {
         xml.push_str("\t\t<valueType/>\r\n");
         return;
     }
     xml.push_str("\t\t<valueType>\r\n");
-    match value_type {
-        MoxelValueType::Boolean => xml.push_str("\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n"),
-        MoxelValueType::String {
-            length,
-            allowed_length,
-        } => xml.push_str(&format!(
-            "\t\t\t<v8:Type>xs:string</v8:Type>\r\n\
-             \t\t\t<v8:StringQualifiers>\r\n\
-             \t\t\t\t<v8:Length>{length}</v8:Length>\r\n\
-             \t\t\t\t<v8:AllowedLength>{allowed_length}</v8:AllowedLength>\r\n\
-             \t\t\t</v8:StringQualifiers>\r\n"
-        )),
-        MoxelValueType::Number {
+    for item in &value_type.items {
+        match item {
+            MoxelValueTypeItem::Boolean => xml.push_str("\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n"),
+            MoxelValueTypeItem::String { .. } => {
+                xml.push_str("\t\t\t<v8:Type>xs:string</v8:Type>\r\n")
+            }
+            MoxelValueTypeItem::Number { .. } => {
+                xml.push_str("\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n")
+            }
+            MoxelValueTypeItem::Date { .. } => {
+                xml.push_str("\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n")
+            }
+            MoxelValueTypeItem::ConfigRef(reference) => xml.push_str(&format!(
+                "\t\t\t<v8:Type xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">\
+                 d4p1:{}</v8:Type>\r\n",
+                escape_xml_element_text(reference)
+            )),
+            MoxelValueTypeItem::TypeId(uuid) => {
+                xml.push_str(&format!("\t\t\t<v8:TypeId>{uuid}</v8:TypeId>\r\n"))
+            }
+        }
+    }
+    for item in &value_type.items {
+        if let MoxelValueTypeItem::Number {
             digits,
             fraction_digits,
             allowed_sign,
-        } => xml.push_str(&format!(
-            "\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
-             \t\t\t<v8:NumberQualifiers>\r\n\
-             \t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
-             \t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
-             \t\t\t\t<v8:AllowedSign>{allowed_sign}</v8:AllowedSign>\r\n\
-             \t\t\t</v8:NumberQualifiers>\r\n"
-        )),
-        MoxelValueType::Date { fractions } => xml.push_str(&format!(
-            "\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
-             \t\t\t<v8:DateQualifiers>\r\n\
-             \t\t\t\t<v8:DateFractions>{fractions}</v8:DateFractions>\r\n\
-             \t\t\t</v8:DateQualifiers>\r\n"
-        )),
-        MoxelValueType::ConfigRef(reference) => xml.push_str(&format!(
-            "\t\t\t<v8:Type xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">\
-             d4p1:{}</v8:Type>\r\n",
-            escape_xml_element_text(reference)
-        )),
-        MoxelValueType::TypeId(uuid) => {
-            xml.push_str(&format!("\t\t\t<v8:TypeId>{uuid}</v8:TypeId>\r\n"))
+        } = item
+        {
+            xml.push_str(&format!(
+                "\t\t\t<v8:NumberQualifiers>\r\n\
+                 \t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
+                 \t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
+                 \t\t\t\t<v8:AllowedSign>{allowed_sign}</v8:AllowedSign>\r\n\
+                 \t\t\t</v8:NumberQualifiers>\r\n"
+            ));
         }
-        // Handled above, before the opening tag is written.
-        MoxelValueType::Empty => unreachable!(),
+    }
+    for item in &value_type.items {
+        if let MoxelValueTypeItem::String {
+            length,
+            allowed_length,
+        } = item
+        {
+            xml.push_str(&format!(
+                "\t\t\t<v8:StringQualifiers>\r\n\
+                 \t\t\t\t<v8:Length>{length}</v8:Length>\r\n\
+                 \t\t\t\t<v8:AllowedLength>{allowed_length}</v8:AllowedLength>\r\n\
+                 \t\t\t</v8:StringQualifiers>\r\n"
+            ));
+        }
+    }
+    for item in &value_type.items {
+        if let MoxelValueTypeItem::Date { fractions } = item {
+            xml.push_str(&format!(
+                "\t\t\t<v8:DateQualifiers>\r\n\
+                 \t\t\t\t<v8:DateFractions>{fractions}</v8:DateFractions>\r\n\
+                 \t\t\t</v8:DateQualifiers>\r\n"
+            ));
+        }
     }
     xml.push_str("\t\t</valueType>\r\n");
 }
@@ -12114,7 +12264,15 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
             "Auto"
         },
     );
-    push_moxel_chart_literal(xml, "animation", chart.animation);
+    push_moxel_chart_literal(
+        xml,
+        "animation",
+        if chart.areas_are_placed {
+            "Auto"
+        } else {
+            "DontUse"
+        },
+    );
     push_moxel_chart_text(xml, "rebuildTime", chart.rebuild_time);
     push_moxel_chart_bool(xml, "isTransposed", false);
     push_moxel_chart_bool(xml, "autoTransposition", false);
@@ -12151,7 +12309,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_border_xml(xml, "border", 0, "WithoutBorder");
     push_moxel_chart_empty(xml, "dataSourceDescription");
     push_moxel_chart_bool(xml, "isDataSourceMode", false);
-    push_moxel_chart_bool(xml, "isRandomizedNewValues", true);
+    push_moxel_chart_bool(xml, "isRandomizedNewValues", chart.is_randomized_new_values);
     push_moxel_chart_data_items_xml(xml, &chart.real_data_items);
     push_moxel_chart_text(xml, "splineStrain", chart.spline_strain);
     push_moxel_chart_literal(xml, "translucencePercent", &chart.translucence_percent);
@@ -12217,19 +12375,19 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
         xml.push_str("\t\t\t\t<d3p1:gridLinesShowMode>Show</d3p1:gridLinesShowMode>\r\n");
         xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
     }
-    // `legendPlacement`/`titleAreaPlacement` are themselves gated on
-    // `elementsIsInit`, not unconditionally written: the pre-existing corpus
-    // and `АнализЖурналаРегистрации/...` (`elementsIsInit == true`) both
-    // publish them, `ДлительностьОтложенногоОбновления/...`
-    // (`elementsIsInit == false`) publishes neither -- `plotAreaPlacement`
-    // between them is unaffected either way. Evidence: same correlation as
-    // `titleIsInit`/`legendIsInit`/`chartIsInit` above -- every observation
-    // ties `legendPlacement`'s own content to `isShowLegend` (`None`/`false`
-    // on the corpus, `UseCoordinates`/`true` on the target record and the
-    // seed pair that isolated it), and `titleAreaPlacement`'s to
-    // `isShowTitle` (`None`/`false` on the corpus,
-    // `UseCoordinates`/`true` on `АнализЖурналаРегистрации/...`).
-    if chart.elements_is_init {
+    // `legendPlacement`/`titleAreaPlacement` are gated on `areas_are_placed`
+    // (`post[20]`), not written unconditionally: the five
+    // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` copies publish
+    // neither and every other chart record of the stand publishes both --
+    // `plotAreaPlacement` between them is unaffected either way. Their own
+    // content is tied to `isShowLegend`/`isShowTitle` respectively, with no
+    // exception over the 53 records that publish them.
+    //
+    // `elementsIsInit` used to be this gate, on the same five records; it is
+    // not, because `ДиагностикаОтчетности_Подсказки` publishes
+    // `elementsIsInit false` and both placements. See `areas_are_placed` in
+    // `parse_moxel_chart` for what the corpus does and does not separate.
+    if chart.areas_are_placed {
         push_moxel_chart_literal(
             xml,
             "legendPlacement",
@@ -12723,10 +12881,18 @@ fn push_moxel_chart_data_items_xml(xml: &mut String, items: &[MoxelChartDataItem
     xml.push_str("\t\t\t<d3p1:realDataItems>\r\n");
     for item in items {
         xml.push_str("\t\t\t\t<d3p1:item>\r\n");
-        xml.push_str(&format!(
-            "\t\t\t\t\t<d3p1:valData xsi:type=\"xs:decimal\">{}</d3p1:valData>\r\n",
-            escape_xml_element_text(&item.value)
-        ));
+        if item.value_is_empty {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<d3p1:valData xsi:type=\"{}\"/>\r\n",
+                item.value_type
+            ));
+        } else {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<d3p1:valData xsi:type=\"{}\">{}</d3p1:valData>\r\n",
+                item.value_type,
+                escape_xml_element_text(&item.value)
+            ));
+        }
         xml.push_str("\t\t\t\t\t<d3p1:valInfo xsi:nil=\"true\"/>\r\n");
         if item.tooltip.is_empty() {
             xml.push_str("\t\t\t\t\t<d3p1:toolTip/>\r\n");
