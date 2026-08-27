@@ -29,6 +29,19 @@ pub(super) struct MoxelSpreadsheet {
     /// differ by exactly the presence of `<templateMode>`; every standalone
     /// body stores 1.
     pub(super) template_mode: bool,
+    /// The step direction the fifteenth top-level field states, when it states
+    /// one this reader can name.
+    ///
+    /// The scalar sits between the template-mode flag and the row count, and
+    /// the row block behind it has the same layout whatever it says. `2` is
+    /// what 17 048 of the stand's 17 050 spreadsheet templates carry and none
+    /// of them publishes a `<stepDirection>`; `3` is carried by exactly two --
+    /// ERP УХ 3.2.12.6's `DataProcessors/
+    /// ДокументооборотСКонтролирующимиОрганами/Templates/ПечатьСертификат`
+    /// and `…/ПечатьСертификатПриказФСБ50` -- and those two are also the only
+    /// files in any of the eight stand corpora that publish one, as
+    /// `<stepDirection>WithoutMove</stepDirection>`.
+    pub(super) step_direction: Option<&'static str>,
     pub(super) column_sets: Vec<MoxelColumnSet>,
     pub(super) column_formats: Vec<MoxelFormat>,
     pub(super) extra_formats: BTreeMap<usize, MoxelFormat>,
@@ -2141,6 +2154,9 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
             .and_then(|field| parse_moxel_language_settings(field)),
         template_mode: !moxel_body_has_fixed_prefix(&fields)
             || fields.get(13).map(|field| field.trim()) != Some("0"),
+        step_direction: moxel_body_has_fixed_prefix(&fields)
+            .then(|| moxel_step_direction_xml(fields.get(14).map(|field| field.trim())))
+            .flatten(),
         leading_default_format,
         source_format_map,
         height,
@@ -2683,6 +2699,18 @@ const MOXEL_HEADER_FOOTER_TAGS: [&str; 6] = [
 /// layout that puts row data there, so a repacked body must keep the element
 /// the writer used to emit unconditionally rather than read a row scalar as
 /// the template-mode flag.
+/// The `<stepDirection>` a body's fifteenth top-level field states.
+///
+/// `None` covers both the code that publishes nothing (`2`) and any code this
+/// reader cannot name; see [`MoxelSpreadsheet::step_direction`] for the
+/// perepis behind the two the stand separates.
+fn moxel_step_direction_xml(field: Option<&str>) -> Option<&'static str> {
+    match field? {
+        "3" => Some("WithoutMove"),
+        _ => None,
+    }
+}
+
 pub(super) fn moxel_body_has_fixed_prefix(fields: &[&str]) -> bool {
     fields
         .get(MOXEL_HEADER_FOOTER_BLOCK_START..MOXEL_HEADER_FOOTER_BLOCK_START + 6)
@@ -2901,10 +2929,24 @@ pub(super) fn parse_moxel_row_column_set_ids(
         return Some(BTreeMap::new());
     }
     let count = fields.get(index)?.trim().parse::<usize>().ok()?;
-    if count > 4096 || index + count >= fields.len() {
+    // The declared count's only bound is the body's own length: the row
+    // records have to fit behind it. The flat 4 096 this used to carry sat
+    // below real documents -- ERP УХ 3.2.12.6's
+    // `Reports/РегламентированныйОтчетЕФС1СЗПГос/Templates/СпискиВыбора2026Кв2`
+    // declares 6 203 row/column-set pairs over six additional sets, and with
+    // the table refused every one of its 6 203 rows lost the `<columnsID>`
+    // the platform publishes for it.
+    if count
+        .checked_add(index)
+        .is_none_or(|last| last >= fields.len())
+    {
         return None;
     }
-    if index + count * 2 < fields.len() {
+    if count
+        .checked_mul(2)
+        .and_then(|span| span.checked_add(index))
+        .is_some_and(|last| last < fields.len())
+    {
         let mut row_column_ids = BTreeMap::new();
         let mut pair_mode = true;
         for pair_index in 0..count {
@@ -3037,9 +3079,26 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
         moxel_body_has_fixed_prefix(fields).then_some(MOXEL_HEADER_FOOTER_BLOCK_START + 6);
     let mut best_rows = Vec::new();
     for index in 3..fields.len().saturating_sub(3) {
-        if fields.get(index + 1).map(|field| field.trim()) != Some("2")
-            || (Some(index) != anchored_row_block
-                && fields.get(index).map(|field| field.trim()) != Some("1"))
+        let is_anchor = Some(index) == anchored_row_block;
+        // The marker is the row block's own record version. `2` is what the
+        // 683 1С:УТ 11.5.27.75 bodies carry, but it is not the only version
+        // the platform writes: ERP УХ 3.2.12.6's
+        // `DataProcessors/ДокументооборотСКонтролирующимиОрганами/Templates/
+        // ПечатьСертификат` and `…/ПечатьСертификатПриказФСБ50` and
+        // `DataProcessors/ФормированиеРасписанияРабочихЦентров/Templates/
+        // Легенда` carry `3` with the identical record layout behind it. A
+        // version this reader cannot name is still refused; what is relaxed
+        // is only the *structurally* anchored position, where the fixed
+        // header/footer prefix -- not the marker -- is what identifies the
+        // block. Every other position in this scan stays a heuristic guess
+        // and keeps the single marker it was proven on.
+        let marker_is_row_block = match fields.get(index + 1).map(|field| field.trim()) {
+            Some("2") => true,
+            Some("3") => is_anchor,
+            _ => false,
+        };
+        if !marker_is_row_block
+            || (!is_anchor && fields.get(index).map(|field| field.trim()) != Some("1"))
         {
             continue;
         }
@@ -3058,7 +3117,7 @@ pub(super) fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
         // than corruption; every other position in this scan is a heuristic
         // guess whose "best length wins" comparison must not be inflated by
         // manufactured gap rows.
-        let allow_forward_gap = Some(index) == anchored_row_block;
+        let allow_forward_gap = is_anchor;
         let mut rows: Vec<MoxelRow> = Vec::new();
         let mut cursor = index + 3;
         let mut expected_row_index = 0usize;
@@ -3436,6 +3495,7 @@ pub(super) enum MoxelCellValue {
     DateTime(String),
     Reference(usize),
     Structure(Vec<(String, MoxelCellValue)>),
+    Array(Vec<MoxelCellValue>),
 }
 
 pub(super) fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
@@ -3483,8 +3543,15 @@ fn parse_moxel_hash_payload_value(payload: &str) -> Option<MoxelCellValue> {
     if entries.len() != count.checked_add(1)? {
         return None;
     }
-    let mut properties = Vec::with_capacity(count);
-    for entry in &entries[1..] {
+    parse_moxel_structure_entries(&entries[1..])
+        .or_else(|| parse_moxel_array_entries(&entries[1..]))
+}
+
+/// The `{count,{key,value}...}` payload of a `Structure`, when every entry has
+/// that shape.
+fn parse_moxel_structure_entries(entries: &[&str]) -> Option<MoxelCellValue> {
+    let mut properties = Vec::with_capacity(entries.len());
+    for entry in entries {
         let pair = split_1c_braced_fields(entry, 0)?;
         if pair.len() != 2 {
             return None;
@@ -3497,6 +3564,28 @@ fn parse_moxel_hash_payload_value(payload: &str) -> Option<MoxelCellValue> {
         properties.push((key, value));
     }
     Some(MoxelCellValue::Structure(properties))
+}
+
+/// The `{count,<value>...}` payload of an `Array`, whose entries are values in
+/// their own right rather than the `{key,value}` pairs a `Structure` carries.
+///
+/// The two shapes cannot be confused: a `Structure` entry's first member is
+/// itself a value group, which no value tag (`"S"`, `"#"`, …) parses as, and
+/// an `Array` entry is a whole value, which is never a bare two-member pair of
+/// values. The structure reading is tried first for exactly that reason.
+///
+/// `DataProcessors/ФормированиеРасписанияРабочихЦентров/Templates/Легенда` of
+/// ERP УХ 3.2.12.6 stores `{"#",51e7a0d2-530b-11d4-b98a-008048da3034,{1,{"#",
+/// 4238019d-…,{11,…}}}}` in row 4's detail value and the platform publishes
+/// `<d xsi:type="v8:Array">` with one `<v8:Value xsi:type="v8:Structure">`
+/// child. With the value refused the whole row failed, and the anchored row
+/// stream truncated there: the document published four of its eight rows.
+fn parse_moxel_array_entries(entries: &[&str]) -> Option<MoxelCellValue> {
+    let mut values = Vec::with_capacity(entries.len());
+    for entry in entries {
+        values.push(parse_moxel_cell_value(entry)?);
+    }
+    Some(MoxelCellValue::Array(values))
 }
 
 /// The base64 payload of an embedded control blob.
@@ -10603,6 +10692,11 @@ fn render_moxel_spreadsheet_xml(
     if spreadsheet.template_mode {
         xml.push_str("\t<templateMode>true</templateMode>\r\n");
     }
+    if let Some(step_direction) = spreadsheet.step_direction {
+        xml.push_str(&format!(
+            "\t<stepDirection>{step_direction}</stepDirection>\r\n"
+        ));
+    }
     // The leading default-format record names format content, not a slot: the
     // published index is the pool position that carries the record's own bytes.
     // An empty default format is never materialized, so a document whose pool
@@ -13948,6 +14042,13 @@ fn push_moxel_typed_value_xml(
             }
             xml.push_str(&format!("{indent}</{element}>\r\n"));
         }
+        MoxelCellValue::Array(values) => {
+            xml.push_str(&format!("{indent}<{element} xsi:type=\"v8:Array\">\r\n"));
+            for value in values {
+                push_moxel_typed_value_xml(xml, "v8:Value", value, depth + 1);
+            }
+            xml.push_str(&format!("{indent}</{element}>\r\n"));
+        }
     }
 }
 
@@ -14588,6 +14689,7 @@ mod moxel_exact_parity_tests {
         let spreadsheet = MoxelSpreadsheet {
             language_settings: None,
             template_mode: true,
+            step_direction: None,
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),
