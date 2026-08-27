@@ -4171,6 +4171,7 @@ fn parse_form_attribute_with_dcs_type_index(
     });
     let design_time_settings = fields.get(14).and_then(|field| {
         parse_form_chart_settings_xml(field, &value_types, object_refs, 3)
+            .or_else(|| parse_form_gantt_chart_settings_xml(field, &value_types, object_refs, 3))
             .or_else(|| parse_form_flowchart_settings_xml(field, &value_types, object_refs, 3))
             .or_else(|| parse_form_planner_settings_xml(field, &value_types, object_refs, 3))
     });
@@ -33579,11 +33580,524 @@ pub(super) fn parse_and_render_form_chart_settings_for_test(text: &str) -> Optio
     parse_form_chart_settings_xml(text, &value_types, &object_refs, 3)
 }
 
+/// The `<Settings>` block a form attribute of Gantt-chart type carries.
+///
+/// The record is `{0,1,"GanttChart",{"#",<gantt type uuid>,{<rev>,
+/// {0,{11},{74,…}},…}}}`: the wrapper's member 1 is the very `{0,{11},{74,…}}`
+/// triple a `Chart`-typed attribute stores, and the platform publishes it as
+/// the `<d4p1:chart>` element that opens the block -- member for member the
+/// same elements `format_form_chart_settings_body_xml` writes, one indent level
+/// further in. The wrapper's remaining members are the Gantt chart's own.
+///
+/// Corpus: the whole population the eight stand corpora have -- 19
+/// Gantt-chart-typed form attributes, one in Документооборот КОРП 3.0.21.3 and
+/// 18 in ERP УХ 3.2.12.6. All 19 publish the same 27 elements in the same
+/// order, with none ever omitted, so every element below is written
+/// unconditionally and each value is read from the slot the corpus separates it
+/// by. A member the 19 agree on is validated as the literal they agree on and
+/// says so; a member no observation tells apart from its neighbours is not
+/// claimed, and a record that disagrees with a literal is refused rather than
+/// approximated.
+fn parse_form_gantt_chart_settings_xml(
+    field: &str,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let is_gantt = matches!(
+        value_types,
+        [ConstantValueType::Reference { reference }] if reference == FORM_GANTT_CHART_TYPE_REFERENCE
+    );
+    if !is_gantt {
+        return None;
+    }
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 4
+        || outer.first()?.trim() != "0"
+        || outer.get(1)?.trim() != "1"
+        || outer.get(2)?.trim() != r#""GanttChart""#
+    {
+        return None;
+    }
+    let holder = split_1c_braced_fields(outer.get(3)?.trim(), 0)?;
+    if holder.len() != 3
+        || holder.first()?.trim() != r##""#""##
+        || !holder
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(GANTT_CHART_TYPE_UUID)
+    {
+        return None;
+    }
+    let wrapper = split_1c_braced_fields(holder.get(2)?.trim(), 0)?;
+    format_form_gantt_chart_settings_xml(&wrapper, object_refs, indent)
+}
+
+/// Test-only entry point, the Gantt chart's counterpart to
+/// `parse_and_render_form_chart_settings_for_test`.
+#[cfg(test)]
+pub(super) fn parse_and_render_form_gantt_chart_settings_for_test(text: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_GANTT_CHART_TYPE_REFERENCE.to_string(),
+    }];
+    let object_refs = BTreeMap::new();
+    parse_form_gantt_chart_settings_xml(text, &value_types, &object_refs, 3)
+}
+
+/// The `{0,{3,0,1,0,<value>,<contentCacheItem>,<autoText>,0}}` record the
+/// Gantt chart stores for its points and its series alike.
+///
+/// The two differ in exactly two places, and in nothing else across the 19
+/// records: the points' value record carries a picture and a font behind its
+/// header (published as `<d4p1:font kind="AutoFont"/>` then `<d4p1:picture/>`,
+/// in that order, not the stored one) where the series' carries neither, and
+/// the points' cache item holds four colours (`mainColor`, `secondColor`,
+/// `backColor`, `textColor`) where the series' holds three (`mainColor`,
+/// `secondColor`, `hatchBetweenIntervalsColor`).
+///
+/// `baseData` is member 10 of the header: it takes six distinct values over the
+/// 19 points records and six over the 19 series records, and each equals the
+/// number the platform publishes in `<d4p1:baseData>` for that record.
+/// `autoText` is member 6 of the record: `1` on the 18 points records the
+/// platform writes `true` for and `0` on the one it writes `false` for
+/// (ERP УХ `DataProcessors/ДиспетчированиеПроизводстваПооперационное/Forms/
+/// ДиспетчированиеПроизводства`), and `1` on all 19 series records.
+/// `testMode` and `useValuesReverseBehavior` are `false` on all 38 records and
+/// their slots are validated rather than read: nothing in the corpus separates
+/// them from the members beside them.
+fn form_gantt_chart_series_like_xml(
+    name: &str,
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let is_points = name == "points";
+    let tab = "\t".repeat(indent);
+    let inner = "\t".repeat(indent + 1);
+    let leaf = "\t".repeat(indent + 2);
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    // Points lead `1`, series lead `0`, on all 19 records of each.
+    if outer.len() != 2 || outer.first()?.trim() != if is_points { "1" } else { "0" } {
+        return None;
+    }
+    let record = split_1c_braced_fields(outer.get(1)?.trim(), 0)?;
+    if record.len() != 8
+        || record.first()?.trim() != "3"
+        || record.get(1)?.trim() != "0"
+        || record.get(2)?.trim() != "1"
+        || record.get(3)?.trim() != "0"
+        || record.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    let value = split_1c_braced_fields(record.get(4)?.trim(), 0)?;
+    let expected_value_members = if is_points { 4 } else { 2 };
+    if value.len() != expected_value_members
+        || value.first()?.trim() != if is_points { "2" } else { "3" }
+    {
+        return None;
+    }
+    if is_points
+        && (form_chart_compact(value.get(2)?) != r#"{4,0,{0},"",-1,-1,1,0,""}"#
+            || form_chart_compact(value.get(3)?) != "{7,3,0,1,100}")
+    {
+        return None;
+    }
+    let header = split_1c_braced_fields(value.get(1)?.trim(), 0)?;
+    if header.len() != 11
+        || header.first()?.trim() != "8"
+        || header.get(1)?.trim() != "0"
+        || header.get(2)?.trim() != "0"
+        || header.get(3)?.trim() != "0"
+        || header.get(4)?.trim() != "0"
+        || header.get(5)?.trim() != "0"
+        || form_chart_compact(header.get(6)?) != r#"{"U"}"#
+        || form_chart_compact(header.get(7)?) != "{1,0}"
+        || form_chart_compact(header.get(8)?) != r#"{"U"}"#
+        || header.get(9)?.trim() != "0"
+    {
+        return None;
+    }
+    let base_data = form_chart_integer(header.get(10)?)?;
+    let cache = split_1c_braced_fields(record.get(5)?.trim(), 0)?;
+    if cache.len() != 3 || cache.first()?.trim() != "0" || cache.get(1)?.trim() != "1" {
+        return None;
+    }
+    let colors = split_1c_braced_fields(cache.get(2)?.trim(), 0)?;
+    let expected_colors = if is_points { 4 } else { 3 };
+    if colors.len() != expected_colors || colors.first()?.trim() != "0" {
+        return None;
+    }
+    let main = split_1c_braced_fields(colors.get(1)?.trim(), 0)?;
+    if main.len() != 3 || main.first()?.trim() != "0" {
+        return None;
+    }
+    let auto_text = form_chart_bool(record.get(6)?)?;
+    let mut xml = format!("{tab}<d4p1:{name}>\r\n");
+    xml.push_str(&format!(
+        "{inner}<d4p1:testMode>false</d4p1:testMode>\r\n{inner}<d4p1:value>\r\n"
+    ));
+    for element in [
+        "itemKey",
+        "key",
+        "parentKey",
+        "leftKey",
+        "rightKey",
+        "extKey",
+    ] {
+        xml.push_str(&format!("{leaf}<d4p1:{element}>0</d4p1:{element}>\r\n"));
+    }
+    xml.push_str(&format!(
+        "{leaf}<d4p1:title/>\r\n{leaf}<d4p1:cacheKey>0</d4p1:cacheKey>\r\n\
+{leaf}<d4p1:baseData>{base_data}</d4p1:baseData>\r\n"
+    ));
+    if is_points {
+        xml.push_str(&format!(
+            "{leaf}<d4p1:font kind=\"AutoFont\"/>\r\n{leaf}<d4p1:picture/>\r\n"
+        ));
+    }
+    xml.push_str(&format!(
+        "{inner}</d4p1:value>\r\n{inner}<d4p1:contentCacheItem>\r\n"
+    ));
+    for (element, source) in [("mainColor", main.get(1)?), ("secondColor", main.get(2)?)] {
+        let color = form_chart_color(source, object_refs)?;
+        xml.push_str(&format!(
+            "{leaf}<d4p1:{element}>{color}</d4p1:{element}>\r\n"
+        ));
+    }
+    let tail_elements: &[&str] = if is_points {
+        &["backColor", "textColor"]
+    } else {
+        &["hatchBetweenIntervalsColor"]
+    };
+    for (offset, element) in tail_elements.iter().enumerate() {
+        let color = form_chart_color(colors.get(2 + offset)?, object_refs)?;
+        xml.push_str(&format!(
+            "{leaf}<d4p1:{element}>{color}</d4p1:{element}>\r\n"
+        ));
+    }
+    xml.push_str(&format!(
+        "{inner}</d4p1:contentCacheItem>\r\n\
+{inner}<d4p1:autoText>{auto_text}</d4p1:autoText>\r\n\
+{inner}<d4p1:useValuesReverseBehavior>false</d4p1:useValuesReverseBehavior>\r\n\
+{tab}</d4p1:{name}>\r\n"
+    ));
+    Some(xml)
+}
+
+/// The `Minute`/`Hour`/`Day`/`Month` ladder the Gantt chart's
+/// `fixedVariantMeasure`, `noneVariantMeasure` and `timeScale.level.measure`
+/// share. The form corpus observes two of the four codes -- `30`/`Day` on all
+/// 19 `noneVariantMeasure` slots and on 18 of the 19 first levels, `50`/`Month`
+/// on all 19 `fixedVariantMeasure` slots and on the one two-level record's
+/// first level -- and agrees on both with the same ladder the
+/// spreadsheet-document Gantt chart reads. The two codes the form corpus does
+/// not observe are carried over from that reader rather than re-derived, and
+/// the rungs it never observed either (`Second`, `Week`, `Quarter`, `Year`)
+/// stay unguessed.
+fn form_gantt_time_measure(code: &str) -> Option<&'static str> {
+    match code.trim() {
+        "10" => Some("Minute"),
+        "20" => Some("Hour"),
+        "30" => Some("Day"),
+        "50" => Some("Month"),
+        _ => None,
+    }
+}
+
+/// `<d4p1:timeScale>`: `{3,<placement>,<level count>,<level>…,<transparent>,
+/// <backColor>,<textColor>,<currentLevel>}`.
+///
+/// Member 2 is the declared number of level records that follow, and it is read
+/// as one rather than pinned: 18 of the 19 records declare `1` and
+/// Документооборот КОРП 3.0.21.3 declares `2` and publishes two `<d4p1:level>`
+/// elements, a `Month` level ahead of a `Day` one. The record's own length is
+/// `7 + count` on all 19, so the count is checked against the arity it
+/// declares.
+///
+/// `backColor` and `textColor` are real reads: 17 records store
+/// `style:FieldBackColor`/`style:FormTextColor`, and ERP УХ
+/// `Reports/МониторБюджетныхПроцессов/Forms/ФормаОтчета` stores `#FFFFFF` and
+/// `#333333` and publishes both. `placement`, `transparent` and `currentLevel`
+/// hold one value each over the whole corpus and are validated rather than
+/// read.
+///
+/// The level record is `{8,<measure>,<interval>,<show>,<line>,<scaleColor>,
+/// <dayFormatRule>,<format>,<labels>,<backColor>,<textColor>,
+/// <showPereodicalLabels>}`. Only `measure` varies over the 20 levels the 19
+/// records carry; every other member holds the same value on all 20 and is
+/// validated as that literal, so a level that differs is refused rather than
+/// published at a guess.
+fn form_gantt_chart_time_scale_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = "\t".repeat(indent + 1);
+    let leaf = "\t".repeat(indent + 2);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let level_count: usize = fields.get(2)?.trim().parse().ok()?;
+    if fields.len() != 7 + level_count
+        || level_count == 0
+        || fields.first()?.trim() != "3"
+        || fields.get(1)?.trim() != "0"
+        || fields.get(3 + level_count)?.trim() != "0"
+        || fields.get(6 + level_count)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut xml =
+        format!("{tab}<d4p1:timeScale>\r\n{inner}<d4p1:placement>Top</d4p1:placement>\r\n");
+    for offset in 0..level_count {
+        let level = split_1c_braced_fields(fields.get(3 + offset)?.trim(), 0)?;
+        if level.len() != 12
+            || level.first()?.trim() != "8"
+            || level.get(2)?.trim() != "1"
+            || form_chart_compact(level.get(5)?) != "{3,0,{12632256}}"
+            || level.get(6)?.trim() != "3"
+            || form_chart_compact(level.get(7)?) != "{1,0}"
+            || form_chart_compact(level.get(8)?) != "{0,{1,0,0}}"
+            || form_chart_compact(level.get(9)?) != "{3,4,{0}}"
+            || form_chart_compact(level.get(10)?) != "{3,4,{0}}"
+            || level.get(11)?.trim() != "1"
+        {
+            return None;
+        }
+        let measure = form_gantt_time_measure(level.get(1)?)?;
+        xml.push_str(&format!(
+            "{inner}<d4p1:level>\r\n\
+{leaf}<d4p1:measure>{measure}</d4p1:measure>\r\n\
+{leaf}<d4p1:interval>1</d4p1:interval>\r\n\
+{leaf}<d4p1:show>true</d4p1:show>\r\n"
+        ));
+        xml.push_str(&form_chart_line_xml("line", level.get(4)?, indent + 2)?);
+        xml.push_str(&format!(
+            "{leaf}<d4p1:scaleColor>#C0C0C0</d4p1:scaleColor>\r\n\
+{leaf}<d4p1:dayFormatRule>MonthDayWeekDay</d4p1:dayFormatRule>\r\n\
+{leaf}<d4p1:format/>\r\n\
+{leaf}<d4p1:labels>\r\n{leaf}\t<d4p1:ticks>0</d4p1:ticks>\r\n{leaf}</d4p1:labels>\r\n\
+{leaf}<d4p1:backColor>auto</d4p1:backColor>\r\n\
+{leaf}<d4p1:textColor>auto</d4p1:textColor>\r\n\
+{leaf}<d4p1:showPereodicalLabels>true</d4p1:showPereodicalLabels>\r\n\
+{inner}</d4p1:level>\r\n"
+        ));
+    }
+    let back_color = form_chart_color(fields.get(4 + level_count)?, object_refs)?;
+    let text_color = form_chart_color(fields.get(5 + level_count)?, object_refs)?;
+    xml.push_str(&format!(
+        "{inner}<d4p1:transparent>false</d4p1:transparent>\r\n\
+{inner}<d4p1:backColor>{back_color}</d4p1:backColor>\r\n\
+{inner}<d4p1:textColor>{text_color}</d4p1:textColor>\r\n\
+{inner}<d4p1:currentLevel>0</d4p1:currentLevel>\r\n\
+{tab}</d4p1:timeScale>\r\n"
+    ));
+    Some(xml)
+}
+
+/// `fullIntervalBegin`/`fullIntervalEnd`/`visualBegin`: a bare 14-digit
+/// `YYYYMMDDHHMMSS` numeric string that matches the ISO `YYYY-MM-DDTHH:MM:SS`
+/// the platform publishes once the five separators are inserted back. The 19
+/// records spell six distinct values in each of the three slots, and every one
+/// of the 57 pairs agrees.
+fn form_gantt_chart_date(text: &str) -> Option<String> {
+    let digits = text.trim();
+    if digits.len() != 14 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}T{}:{}:{}",
+        &digits[0..4],
+        &digits[4..6],
+        &digits[6..8],
+        &digits[8..10],
+        &digits[10..12],
+        &digits[12..14]
+    ))
+}
+
+#[allow(clippy::too_many_lines)]
+fn format_form_gantt_chart_settings_xml(
+    wrapper: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let child = indent + 1;
+    let child_tab = "\t".repeat(child);
+    // The wrapper's own revision. `19` carries two trailing members `18` does
+    // not: ERP УХ `Reports/ИсполнениеСтадийМеропритияДиаграммаГанта/Forms/
+    // ФормаОтчета` is the corpus's one revision-`18` record, and it publishes
+    // `<d4p1:textPlacement>Auto</d4p1:textPlacement>` -- what the eighteen
+    // revision-`19` records publish when their member 31 stores `0`. Members
+    // 0..=30 line up slot for slot in both revisions.
+    let member_count = match wrapper.first()?.trim() {
+        "18" => 31usize,
+        "19" => 33,
+        _ => return None,
+    };
+    if wrapper.len() != member_count {
+        return None;
+    }
+    let chart_triple = split_1c_braced_fields(wrapper.get(1)?.trim(), 0)?;
+    if chart_triple.len() != 3
+        || chart_triple.first()?.trim() != "0"
+        || form_chart_compact(chart_triple.get(1)?) != "{11}"
+    {
+        return None;
+    }
+    let data = split_1c_braced_fields(chart_triple.get(2)?.trim(), 0)?;
+    // Members 4, 5 and 24 hold `0`, member 30 holds `1`, and members 27 and 32
+    // hold their own fixed tuples on all 19 records; nothing in the corpus ties
+    // any of them to published content.
+    if wrapper.get(4)?.trim() != "0"
+        || wrapper.get(5)?.trim() != "0"
+        || form_chart_compact(wrapper.get(21)?) != "{1,0}"
+        || form_chart_compact(wrapper.get(23)?) != "{3,{0,{1,0,0},0},{0,0}}"
+        || wrapper.get(24)?.trim() != "0"
+        || form_chart_compact(wrapper.get(27)?) != "{0,0,0}"
+        || wrapper.get(30)?.trim() != "1"
+    {
+        return None;
+    }
+    let mut xml = format!(
+        "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d4p1:GanttChart\">\r\n\
+{child_tab}<d4p1:chart>\r\n"
+    );
+    xml.push_str(&format_form_chart_settings_body_xml(
+        &data,
+        object_refs,
+        child + 1,
+    )?);
+    xml.push_str(&format!("{child_tab}</d4p1:chart>\r\n"));
+    macro_rules! scalar {
+        ($name:expr, $value:expr) => {
+            xml.push_str(&format!(
+                "{child_tab}<d4p1:{}>{}</d4p1:{}>\r\n",
+                $name, $value, $name
+            ))
+        };
+    }
+    xml.push_str(&form_gantt_chart_series_like_xml(
+        "points",
+        wrapper.get(2)?,
+        object_refs,
+        child,
+    )?);
+    xml.push_str(&form_gantt_chart_series_like_xml(
+        "series",
+        wrapper.get(3)?,
+        object_refs,
+        child,
+    )?);
+    scalar!("drawEmpty", form_chart_bool(wrapper.get(6)?)?);
+    xml.push_str(&form_gantt_chart_time_scale_xml(
+        wrapper.get(7)?,
+        object_refs,
+        child,
+    )?);
+    // `2` on the 18 records the platform writes `AllData` for, `3` on the one
+    // it writes `Auto` for (ERP УХ `DataProcessors/ДиспетчированиеПроизводства
+    // Пооперационное/Forms/ДиспетчированиеПроизводства`).
+    scalar!(
+        "keepScaleVariant",
+        form_chart_code(wrapper.get(8)?, &[("2", "AllData"), ("3", "Auto")])?
+    );
+    scalar!(
+        "fixedVariantMeasure",
+        form_gantt_time_measure(wrapper.get(9)?)?
+    );
+    scalar!(
+        "fixedVariantInterval",
+        form_chart_integer(wrapper.get(10)?)?
+    );
+    scalar!("autoFullInterval", form_chart_bool(wrapper.get(11)?)?);
+    scalar!(
+        "fullIntervalBegin",
+        form_gantt_chart_date(wrapper.get(12)?)?
+    );
+    scalar!("fullIntervalEnd", form_gantt_chart_date(wrapper.get(13)?)?);
+    scalar!("visualBegin", form_gantt_chart_date(wrapper.get(14)?)?);
+    // `3` on the 18 records the platform writes `Gradient` for, `0` on the one
+    // it writes `Flat` for (ERP УХ `Reports/ДиаграммаПооперационногоРасписания/
+    // Forms/РасшифровкаПараллельнойЗагрузки`).
+    scalar!(
+        "intervalDrawType",
+        form_chart_code(wrapper.get(15)?, &[("0", "Flat"), ("3", "Gradient")])?
+    );
+    scalar!("noneVariantChars", form_chart_integer(wrapper.get(16)?)?);
+    scalar!(
+        "noneVariantMeasure",
+        form_gantt_time_measure(wrapper.get(17)?)?
+    );
+    scalar!(
+        "verticalStretch",
+        form_chart_code(wrapper.get(18)?, &[("0", "None")])?
+    );
+    scalar!("verticalScrollEnable", form_chart_bool(wrapper.get(19)?)?);
+    // `0` on the 18 records the platform writes `None` for, `1` on the one it
+    // writes `Right` for (ERP УХ `Reports/ДиаграммаПооперационногоРасписания2_2/
+    // Forms/РасшифровкаПараллельнойЗагрузки`).
+    scalar!(
+        "showValueText",
+        form_chart_code(wrapper.get(20)?, &[("0", "None"), ("1", "Right")])?
+    );
+    xml.push_str(&format!("{child_tab}<d4p1:extTitle/>\r\n"));
+    scalar!(
+        "outboundColor",
+        form_chart_color(wrapper.get(22)?, object_refs)?
+    );
+    xml.push_str(&format!(
+        "{child_tab}<d4p1:backIntervals>\r\n\
+{child_tab}\t<d4p1:collection>\r\n\
+{child_tab}\t\t<d4p1:ticks>0</d4p1:ticks>\r\n\
+{child_tab}\t</d4p1:collection>\r\n\
+{child_tab}\t<d4p1:ticks>0</d4p1:ticks>\r\n\
+{child_tab}</d4p1:backIntervals>\r\n"
+    ));
+    scalar!(
+        "linksColor",
+        form_chart_color(wrapper.get(25)?, object_refs)?
+    );
+    xml.push_str(&form_chart_line_xml("linksLine", wrapper.get(26)?, child)?);
+    // `0` on the 17 records the platform writes `Auto` for, `1` on the two it
+    // writes `Show` for.
+    scalar!(
+        "showPointsText",
+        form_chart_code(wrapper.get(28)?, &[("0", "Auto"), ("1", "Show")])?
+    );
+    scalar!(
+        "showData",
+        form_chart_code(wrapper.get(29)?, &[("0", "Auto")])?
+    );
+    // Members 31 and 32 exist only in revision 19; `textPlacement` reads `Auto`
+    // where the record carries no member at all. `0` on the 17 revision-`19`
+    // records the platform writes `Auto` for, `1` on the one it writes `Cut`
+    // for (ERP УХ `DataProcessors/ДиспетчированиеПроизводства/Forms/
+    // ДиспетчированиеПроизводства`).
+    let text_placement = if member_count > 31 {
+        if wrapper.get(32)?.trim() != "0" {
+            return None;
+        }
+        form_chart_code(wrapper.get(31)?, &[("0", "Auto"), ("1", "Cut")])?
+    } else {
+        "Auto"
+    };
+    scalar!("textPlacement", text_placement);
+    // `Auto` on all 19; the slot the spreadsheet-document Gantt chart reads it
+    // from is member 27's tuple, which holds one value over the whole corpus.
+    scalar!("intervalTextRepresentation", "Auto");
+    xml.push_str(&format!("{tab}</Settings>\r\n"));
+    Some(xml)
+}
+
 const FORM_CHART_TYPE_REFERENCE: &str = "d5p1:Chart";
 /// The type reference a Gantt-chart-typed form attribute declares.
 use super::GANTT_CHART_TYPE_REFERENCE as FORM_GANTT_CHART_TYPE_REFERENCE;
+use super::GANTT_CHART_TYPE_UUID;
 const FORM_CHART_VALUE_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
 const FORM_CHART_BORDER_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
+const FORM_CHART_NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const FORM_CHART_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
 /// The one series record a chart with no series still carries, and the first
 /// slot of the tail behind it.
@@ -33774,7 +34288,25 @@ fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String>
     ))
 }
 
-/// `{3,0,{0},<style>,<width>,0,<border uuid>}`.
+/// `{3,0,{0},<style>,<width>,<unread>,<border uuid>}`.
+///
+/// Member 5 and the uuid in member 6 are both wider than the two literals this
+/// reader was fitted to, and neither changes what the platform publishes.
+///
+/// Member 5: over the 19 Gantt-chart-typed form attributes of the stand the
+/// `border` member reads `{3,0,{0},1,1,0,<border uuid>}` on 17 and
+/// `{3,0,{0},1,1,3,<border uuid>}` on two -- ERP УХ
+/// `DataProcessors/ДиспетчированиеПроизводства/Forms/ДиспетчированиеПроизводства`
+/// and `Reports/МониторБюджетныхПроцессов/Forms/ФормаОтчета` -- and all 19
+/// publish `width="1"` with `Single`. Pinning the member to `0` refused the
+/// whole `<Settings>` block of those two.
+///
+/// Member 6: the same 19 records spell the nil uuid there on the 15 whose
+/// `chBorder` reads `{3,0,{0},1,1,0,00000000-0000-0000-0000-000000000000}`, and
+/// all 15 publish `width="1"` with `Single` -- the same pair the border-uuid
+/// records with the same style and width publish (all 19 `labelsBorder`
+/// members, 17 `border` members). The uuid names the record's own type, not any
+/// published property, and only these two values occur.
 fn form_chart_border_xml(name: &str, field: &str, indent: usize) -> Option<String> {
     let tab = "\t".repeat(indent);
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -33782,11 +34314,12 @@ fn form_chart_border_xml(name: &str, field: &str, indent: usize) -> Option<Strin
         || fields.first()?.trim() != "3"
         || fields.get(1)?.trim() != "0"
         || form_chart_compact(fields.get(2)?) != "{0}"
-        || fields.get(5)?.trim() != "0"
-        || !fields
+        || !matches!(fields.get(5)?.trim(), "0" | "3")
+        || !(fields
             .get(6)?
             .trim()
             .eq_ignore_ascii_case(FORM_CHART_BORDER_UUID)
+            || fields.get(6)?.trim() == FORM_CHART_NIL_UUID)
     {
         return None;
     }
@@ -33995,14 +34528,36 @@ fn form_chart_series_xml(
 /// apart -- `transparentLabelsBkg` even reads `0` on both while the platform
 /// writes `true` -- so each is guarded on the slots that would have to move
 /// for the literal to be wrong, and the record is refused when they do.
-#[allow(clippy::too_many_lines)]
 fn format_form_chart_settings_xml(
     data: &[&str],
     object_refs: &BTreeMap<String, String>,
     indent: usize,
 ) -> Option<String> {
     let tab = "\t".repeat(indent);
-    let child = indent + 1;
+    let mut xml = format!(
+        "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d4p1:Chart\">\r\n"
+    );
+    xml.push_str(&format_form_chart_settings_body_xml(
+        data,
+        object_refs,
+        indent + 1,
+    )?);
+    xml.push_str(&format!("{tab}</Settings>\r\n"));
+    Some(xml)
+}
+
+/// The chart's own elements, without the element that encloses them: a
+/// `Chart`-typed attribute nests them directly in its `<Settings>`, a
+/// `GanttChart`-typed one nests the same block in a `<d4p1:chart>` element one
+/// level further in. Same slots, same order, same values -- the enclosing
+/// element and its indent are all that differ, which is what
+/// `format_form_gantt_chart_settings_xml` reuses.
+#[allow(clippy::too_many_lines)]
+fn format_form_chart_settings_body_xml(
+    data: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    child: usize,
+) -> Option<String> {
     let child_tab = "\t".repeat(child);
     // `realSeriesCount` real `realSeriesData` records precede the one
     // `realExSeriesData` placeholder every record carries (empty or not) --
@@ -34094,9 +34649,7 @@ fn format_form_chart_settings_xml(
             return None;
         }
     }
-    let mut xml = format!(
-        "{tab}<Settings xmlns:d4p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d4p1:Chart\">\r\n"
-    );
+    let mut xml = String::new();
     macro_rules! scalar {
         ($name:expr, $value:expr) => {
             xml.push_str(&format!(
@@ -34319,7 +34872,14 @@ fn format_form_chart_settings_xml(
     scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
     scalar!("isTransposed", "false");
     scalar!("autoTransposition", "false");
-    scalar!("legendScrollEnable", "false");
+    // `legendScrollEnable` is `t[65]`, the same slot the spreadsheet-document
+    // chart reads it from, not the flat `false` this writer asserted. Over all
+    // 42 chart-family form attributes of the eight stand corpora the slot is a
+    // total function of the published element: all 23 `Chart`-typed attributes
+    // read `0` and publish `false`, and of the 19 `GanttChart`-typed ones 4
+    // read `0` and publish `false` while 15 read `1` and publish `true`. The
+    // constant was fitted to a corpus that happened to hold one value.
+    scalar!("legendScrollEnable", form_chart_bool(t.get(65)?)?);
     color!("surfaceColor", 66);
     scalar!(
         "radarScaleType",
@@ -34699,6 +35259,5 @@ fn format_form_chart_settings_xml(
             );
         }
     }
-    xml.push_str(&format!("{tab}</Settings>\r\n"));
     Some(xml)
 }
