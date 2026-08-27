@@ -294,7 +294,18 @@ mod tests {
         let xml = crate::mssql_dump::extract_moxel_spreadsheet_xml(&first, &BTreeMap::new())
             .expect("evidenced MOXCEL body must remain exportable");
         assert!(xml.contains("<v8:content>Hello</v8:content>"));
-        assert!(xml.contains("<parameter>Name</parameter>"));
+        // The parameter's content round-trips, but not the element it is
+        // spelled with: this compiler stores the cell on format slot 0, and a
+        // cell whose format states no `fillType` `Parameter` publishes its
+        // container as the text list -- the rule
+        // `restore_moxel_text_of_cells_whose_format_states_no_parameter`
+        // reads off the eight native corpora, where every one of the 94 332
+        // published `<parameter>` cells names a `fillType`-`Parameter` format
+        // and no cell on slot 0 publishes one at all. The assertion this
+        // replaces read the container's empty leading language instead, which
+        // is what a one-item text list stores too, and spelled three native
+        // ERP УХ cells as parameters against the platform's own `<tl>`.
+        assert!(xml.contains("<v8:content>Name</v8:content>"), "{xml}");
     }
 
     #[test]
