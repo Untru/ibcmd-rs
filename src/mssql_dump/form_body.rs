@@ -13574,6 +13574,7 @@ fn parse_form_child_item_with_metadata_owners(
                     &fields,
                     direct_discriminator,
                     field_schema_and_options.as_ref(),
+                    special_field_layout.as_ref(),
                 ),
             );
             if tag == "InputField" {
@@ -20162,7 +20163,18 @@ fn parse_form_schema_backed_child_item_events(
     fields: &[&str],
     direct_discriminator: Option<&str>,
     field_schema_and_options: Option<&(FormFieldSchema, Vec<&str>)>,
+    special_field_layout: Option<&(FormSpecialFieldSchema, Vec<&str>)>,
 ) -> Vec<FormBodyEvent> {
+    if let Some((special_schema, options)) = special_field_layout
+        && let Some(schema) =
+            FormChildItemEventCollectionSchema::from_special_field_schema(*special_schema)
+        && let Some(record) = options
+            .get(schema.collection_slot())
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    {
+        return parse_form_schema_backed_event_record(schema, &record);
+    }
+
     if let Some((field_schema, options)) = field_schema_and_options
         && let Some(schema) =
             FormChildItemEventCollectionSchema::from_field_schema(*field_schema, tag)

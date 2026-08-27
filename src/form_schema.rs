@@ -3459,6 +3459,7 @@ pub(crate) enum FormChildItemEventCollectionOwner {
     CalendarField,
     GraphicalSchemaField,
     PlannerField,
+    ChartField,
     Pages,
 }
 
@@ -3492,6 +3493,8 @@ const FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID: &str = "1490ede6-6f33-4c6d-b971
 const FORM_CALENDAR_SELECTION_EVENT_UUID: &str = "2feb1ee9-b750-4352-bb4c-67ba1c608dc6";
 const FORM_CALENDAR_ON_ACTIVATE_DATE_EVENT_UUID: &str = "3793cac5-9f9a-4b7c-adda-386e5cccf794";
 const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
+const FORM_CHART_SELECTION_EVENT_UUID: &str = "515cd17b-dd4c-4181-bbbf-8676467acf49";
+const FORM_CHART_DETAIL_PROCESSING_EVENT_UUID: &str = "650da4af-3233-4ce0-a1ae-23f87a226eee";
 const FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID: &str = "526c501f-ed3f-4db4-8731-fd0324707501";
 // The planner's own eight events. Each identifier is named by the whole
 // native population of the construct: the five `PlannerField` items of
@@ -3530,6 +3533,32 @@ impl FormChildItemEventCollectionSchema {
         Some(Self {
             owner,
             collection_slot,
+        })
+    }
+
+    /// The chart field's own event collection, at option slot 5 of its
+    /// 11-member tuple.
+    ///
+    /// The chart is not one of the kinds `FormFieldSchema` serves -- it is read
+    /// through [`FormSpecialFieldSchema`] instead -- so its collection had no
+    /// route to this reader at all and every event on every chart of every
+    /// corpus went unwritten.
+    ///
+    /// Evidence: the 24 `ChartField` items of the eight stand corpora carry an
+    /// event collection on exactly three, and those three are exactly the ones
+    /// the platform writes `<Events>` on. Документооборот КОРП 3.0.21.3
+    /// `DataProcessors/ОчисткаУстаревшихВерсийФайлов/Forms/Форма` `Диаграмма`
+    /// names one identifier and is written
+    /// `<Event name="Selection">ДиаграммаВыбор</Event>`; ERP УХ 3.2.12.6
+    /// `DataProcessors/ПланированиеГрафикаПроизводства2_2/Forms/
+    /// ПланированиеГрафикаЗаказа` carries two charts, each naming the same
+    /// identifier beside a second, and both are written `Selection` followed
+    /// by `DetailProcessing`. The other 21 hold `{0,1,0}` in the slot and
+    /// carry no element.
+    pub(crate) fn from_special_field_schema(schema: FormSpecialFieldSchema) -> Option<Self> {
+        (schema.xml_tag() == "ChartField").then_some(Self {
+            owner: FormChildItemEventCollectionOwner::ChartField,
+            collection_slot: 5,
         })
     }
 
@@ -3649,6 +3678,10 @@ impl FormChildItemEventCollectionSchema {
                 ),
                 (FORM_PLANNER_SELECTION_EVENT_UUID, "Selection"),
                 (FORM_PLANNER_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
+            ],
+            FormChildItemEventCollectionOwner::ChartField => &[
+                (FORM_CHART_SELECTION_EVENT_UUID, "Selection"),
+                (FORM_CHART_DETAIL_PROCESSING_EVENT_UUID, "DetailProcessing"),
             ],
             FormChildItemEventCollectionOwner::Pages => &[(
                 FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID,
