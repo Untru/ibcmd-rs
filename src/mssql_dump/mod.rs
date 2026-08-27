@@ -9022,6 +9022,14 @@ struct ConstantProperties {
     min_value: Option<String>,
     max_value: Option<String>,
     fill_checking: &'static str,
+    /// Slot 14 of the constant's own code-27 detail record -- the same
+    /// `{5006,…}` collection every other family reads there. The writer used
+    /// to print `<ChoiceParameterLinks/>` as a literal, which is wrong for
+    /// every constant that states a link: `uh`
+    /// `Constants/ВидЦеныПлановойСтоимостиМатериаловРабот` stores
+    /// `{5006,1,"Отбор.ВалютаЦены",1,{0,63bc19ed-…},1}` and the platform
+    /// publishes the link.
+    choice_parameter_links: Vec<MetadataChoiceParameterLink>,
     choice_parameters: Vec<ChoiceParameter>,
     choice_history_on_input: &'static str,
     data_lock_control_mode: &'static str,
@@ -21351,7 +21359,11 @@ fn parse_data_processor_wrapped_child_properties(
             object_refs,
         ),
         link_by_type_empty: metadata_child_collection_is_empty(fields.get(16).copied()),
-        link_by_type: None,
+        link_by_type: parse_metadata_child_link_by_type(
+            fields.get(16).copied(),
+            object_refs,
+            owner_prefix,
+        ),
         choice_history_on_input: fields
             .get(23)
             .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
@@ -30335,6 +30347,13 @@ fn parse_constant_properties_from_text(
     };
     let choice_parameters =
         parse_constant_choice_parameters(constant_detail_fields.get(16).copied(), object_refs);
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let choice_parameter_links = parse_metadata_child_choice_parameter_links(
+        constant_detail_fields.get(14).copied(),
+        object_refs,
+        &format!("Constant.{}.", header.name),
+    )
+    .unwrap_or_default();
     let choice_history_on_input = match constant_detail_fields.get(22).map(|field| field.trim()) {
         Some("1") => "DontUse",
         _ => "Auto",
@@ -30350,7 +30369,6 @@ fn parse_constant_properties_from_text(
         Some("1") => "Use",
         _ => return None,
     };
-    let header = parse_metadata_header_from_text(text, uuid)?;
     let mut generated_types = Vec::new();
     push_generated_type_entry(
         &mut generated_types,
@@ -30392,6 +30410,7 @@ fn parse_constant_properties_from_text(
         min_value,
         max_value,
         fill_checking,
+        choice_parameter_links,
         choice_parameters,
         choice_history_on_input,
         data_lock_control_mode,
@@ -30523,6 +30542,48 @@ fn parse_metadata_choice_parameter_value(
     }
 }
 
+/// The `LinkByType` a flat metadata-child record states, when it states one.
+///
+/// The record is the same `{3,<segment-count>,<segment>...,<link-item>}` the
+/// catalog and document decoders already read (`parse_catalog_link_by_type`,
+/// `parse_document_link_by_type`); what differs is only where the segments'
+/// references come from, so they are resolved through the same
+/// `classify_resolved_data_path_reference`/`render_resolved_data_path` pair
+/// the sibling `ChoiceParameterLinks` slot of this very record uses. The
+/// empty record (`{3,0,0}`) is not this function's business: it is the
+/// `<LinkByType/>` that `metadata_child_collection_is_empty` already names.
+fn parse_metadata_child_link_by_type(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+    owner_prefix: &str,
+) -> Option<MetadataChildLinkByType> {
+    let fields = split_1c_braced_fields(field?.trim(), 0)?;
+    if fields.first()?.trim() != "3" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count == 0 || count.checked_add(3) != Some(fields.len()) {
+        return None;
+    }
+    let link_item = fields.last()?.trim().parse::<u32>().ok()?;
+    if link_item > 3 {
+        return None;
+    }
+    let mut segments = Vec::with_capacity(count);
+    for segment in fields.get(2..count.checked_add(2)?)? {
+        let uuid = uuid_like_values(segment.trim()).into_iter().next_back()?;
+        segments.push(classify_resolved_data_path_reference(
+            object_refs.get(&uuid),
+            &uuid,
+            owner_prefix,
+        ));
+    }
+    Some(MetadataChildLinkByType {
+        data_path: render_resolved_data_path(segments)?,
+        link_item,
+    })
+}
+
 fn parse_metadata_child_choice_parameter_links(
     field: Option<&str>,
     object_refs: &BTreeMap<String, String>,
@@ -30571,6 +30632,21 @@ fn parse_metadata_child_choice_parameter_links(
             let trimmed = field.trim();
             if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
                 break;
+            }
+            // A one-member `{0}` segment names no metadata child at all, and
+            // the platform writes the atom back as the data path itself --
+            // the same reading `parse_information_register_data_path` already
+            // gives this segment. `uh`
+            // `DataProcessors/КорректировкиЗначенийПоказателей` stores
+            // `{5006,1,"Отбор.Владелец",1,{0},0}` on its
+            // `ПодразделениеОрганизации` attribute and the platform publishes
+            // `<xr:DataPath xsi:type="xs:string">0</xr:DataPath>`.
+            if split_1c_braced_fields(trimmed, 0)
+                .is_some_and(|segment| segment.len() == 1 && segment[0].trim() == "0")
+            {
+                segments.push(ResolvedDataPathSegment::Foreign("0".to_string()));
+                index += 1;
+                continue;
             }
             let Some(uuid) = uuid_like_values(trimmed).into_iter().next_back() else {
                 break;
@@ -39457,7 +39533,7 @@ fn format_constant_source_xml(
 \t\t\t{}\r\n\
 \t\t\t<FillChecking>{}</FillChecking>\r\n\
 \t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
-\t\t\t<ChoiceParameterLinks/>\r\n\
+{}\
 \t\t\t{}\r\n\
 \t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<ChoiceForm/>\r\n\
@@ -39473,6 +39549,15 @@ fn format_constant_source_xml(
         format_constant_bound_xml("MaxValue", constant.max_value.as_deref()),
         constant.fill_checking,
         constant.choice_folders_and_items,
+        {
+            let mut links = String::new();
+            push_metadata_child_choice_parameter_links_xml(
+                &mut links,
+                "\t\t\t",
+                &Some(constant.choice_parameter_links.clone()),
+            );
+            links
+        },
         format_choice_parameters_xml(&constant.choice_parameters),
         constant.quick_choice,
         constant.choice_history_on_input,
