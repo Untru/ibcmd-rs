@@ -4400,6 +4400,207 @@ fn push_predefined_ext_dimension_types_xml(
     Ok(())
 }
 
+#[cfg(test)]
+mod chart_of_accounts_predefined_tests {
+    use super::*;
+
+    const ITEM_TYPE: &str = "ae135932-4f94-44df-92c1-c91f15a92848";
+    const EXT_DIMENSION_TYPE: &str = "acf6192e-81ca-46ef-93a6-5a6968b78663";
+    const FLAG_ONE: &str = "11111111-1111-4111-8111-111111111111";
+    const FLAG_TWO: &str = "22222222-2222-4222-8222-222222222222";
+    const FLAG_THREE: &str = "33333333-3333-4333-8333-333333333333";
+    const ACCOUNT: &str = "44444444-4444-4444-8444-444444444444";
+
+    /// A rowset shaped like the stand's: seven fixed columns, `column_ids`
+    /// worth of accounting flags, and the order column. The account row
+    /// declares `declared_values` values, so a caller can stop it short of the
+    /// schema exactly as the platform's own records do.
+    ///
+    /// Written with `%`-placeholders rather than `format!`: the layout is
+    /// almost all braces.
+    fn account_rowset(column_ids: &[(&str, &str)], declared_values: usize) -> (String, String) {
+        let mut schema = String::new();
+        schema.push_str(&(column_ids.len() + 8).to_string());
+        schema.push_str(
+            ",\r\n{0,\"\",{\"Pattern\",{\"#\",%I}},\"\",0},\
+\r\n{1,\"\",{\"Pattern\",{\"S\"}},\"\",0},\
+\r\n{2,\"\",{\"Pattern\",{\"S\",5,1}},\"\",0},\
+\r\n{3,\"\",{\"Pattern\",{\"S\",120,1}},\"\",0},\
+\r\n{4,\"\",{\"Pattern\",{\"N\"}},\"\",0},\
+\r\n{5,\"\",{\"Pattern\",{\"B\"}},\"\",0},\
+\r\n{6,\"\",{\"Pattern\"},\"\",0},\r\n",
+        );
+        for (id, uuid) in column_ids {
+            schema.push_str(
+                &"{%D,\"%U\",{\"Pattern\",{\"B\"}},\"\",0},\r\n"
+                    .replace("%D", id)
+                    .replace("%U", uuid),
+            );
+        }
+        schema.push_str("{10000,\"\",{\"Pattern\",{\"S\",5,1}},\"\",0}\r\n");
+        let schema = format!("{{{schema}}}").replace("%I", ITEM_TYPE);
+
+        // Values 0..6 are the fixed columns, value 7 is the order column and
+        // the flag values follow it -- the same permutation `uh` writes.
+        let mut mappings = String::new();
+        for index in 0..7 {
+            mappings.push_str(&format!("{index},{index},"));
+        }
+        for (offset, (id, _)) in column_ids.iter().enumerate() {
+            mappings.push_str(&format!("{},{id},", offset + 8));
+        }
+        mappings.push_str("7,10000,");
+
+        // Seven values: reference, name, code, description, account type, off
+        // balance, and an ext dimension rowset with no rows.
+        let head = "{\"#\",%I,{1,%U}},{\"S\",\"%N\"},{\"S\",\"%C\"},{\"S\",\"%N\"},\
+{\"N\",0},{\"B\",0},\
+{\"#\",%E,{9,{2,{0,\"\",{\"Pattern\",{\"#\",%I}},\"\",0},\
+{1,\"\",{\"Pattern\",{\"B\"}},\"\",0}},{2,2,0,0,1,1,{1,0},1,-1},{0,0}}}";
+        let head = |uuid: &str, name: &str, code: &str| {
+            head.replace("%I", ITEM_TYPE)
+                .replace("%E", EXT_DIMENSION_TYPE)
+                .replace("%U", uuid)
+                .replace("%N", name)
+                .replace("%C", code)
+        };
+
+        let mut account = format!("{{2,1,{declared_values},{}", head(ACCOUNT, "Счет", "01"));
+        account.push_str(",{\"S\",\"01\"}");
+        for _ in 8..declared_values {
+            account.push_str(",{\"B\",1}");
+        }
+        account.push_str(",0}");
+        let root = format!(
+            "{{2,0,7,{},1,{{1,1,{account}}}}}",
+            head("00000000-0000-0000-0000-000000000000", "Счета", "")
+        );
+        let rowset = format!("{{2,{},{mappings}{{1,1,{root}}}}}", column_ids.len() + 8);
+        (schema, rowset)
+    }
+
+    fn names(declared: &[(&str, &str)]) -> ChartOfAccountsPredefinedNames {
+        ChartOfAccountsPredefinedNames {
+            ext_dimension_types_owner: "ChartOfCharacteristicTypes.Субконто".to_string(),
+            accounting_flags: declared
+                .iter()
+                .map(|(uuid, name)| {
+                    (
+                        (*uuid).to_string(),
+                        format!("ChartOfAccounts.План.AccountingFlag.{name}"),
+                    )
+                })
+                .collect(),
+            ext_dimension_accounting_flags: Vec::new(),
+        }
+    }
+
+    fn emit(
+        column_ids: &[(&str, &str)],
+        declared_values: usize,
+        declared: &[(&str, &str)],
+    ) -> Result<String> {
+        let (schema, rowset) = account_rowset(column_ids, declared_values);
+        let items = parse_account_predefined_rowset(&schema, &rowset)
+            .expect("the account rowset must read");
+        format_predefined_data_xml(
+            predefined_data_source_model("ChartOfAccounts").unwrap(),
+            &items,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Some(&names(declared)),
+        )
+    }
+
+    #[test]
+    fn row_shorter_than_its_schema_writes_false_for_the_columns_it_omits() {
+        // Nine values cover offsets 0..8: the seven fixed columns, the order
+        // column and the first flag. The second flag's column exists and the
+        // row stops before it. `accflag-seed1` is this shape, and the platform
+        // writes `false` for exactly that flag.
+        let xml = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_TWO)],
+            9,
+            &[(FLAG_ONE, "Первый"), (FLAG_TWO, "Второй")],
+        )
+        .unwrap();
+
+        assert!(
+            xml.contains(
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Первый\">true</Flag>\r\n"
+            ),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Второй\">false</Flag>\r\n"
+            ),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn declared_flag_without_a_stored_column_is_written_false_in_place() {
+        // `uh` `МСФО` declares four accounting flags and stores two;
+        // `Международный` declares four and stores three. Both export all
+        // four, the unstored ones `false`, each at its declaration position.
+        let xml = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_THREE)],
+            10,
+            &[
+                (FLAG_ONE, "Первый"),
+                (FLAG_TWO, "Второй"),
+                (FLAG_THREE, "Третий"),
+            ],
+        )
+        .unwrap();
+
+        let flags = xml
+            .lines()
+            .filter(|line| line.contains("<Flag "))
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            flags,
+            [
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Первый\">true</Flag>",
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Второй\">false</Flag>",
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Третий\">true</Flag>",
+            ],
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn stored_flag_the_owner_no_longer_declares_refuses_the_file() {
+        let error = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_TWO)],
+            10,
+            &[(FLAG_ONE, "Первый")],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("is not declared by its owner"), "{error}");
+    }
+
+    #[test]
+    fn stored_flags_out_of_declaration_order_refuse_the_file() {
+        let error = emit(
+            &[("7", FLAG_TWO), ("8", FLAG_ONE)],
+            10,
+            &[(FLAG_ONE, "Первый"), (FLAG_TWO, "Второй")],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("out of its owner's declaration order"),
+            "{error}"
+        );
+    }
+}
+
 fn push_predefined_calculation_type_refs_xml(
     xml: &mut String,
     element_name: &str,
