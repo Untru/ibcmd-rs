@@ -14347,6 +14347,45 @@ fn form_choice_parameter_link_standard_terminal_member(
         })
 }
 
+/// Resolve every reference of a choice-parameter-link collection.
+///
+/// A link the configuration cannot name is not a malformed link. The platform
+/// writes its `<xr:DataPath>` physically -- the owner id on its own for a
+/// reference with no terminal, `<owner>/0:<uuid>` for one with a metadata
+/// terminal -- and the collection is written in full around it. Answering
+/// nothing for such a link made the whole collection unresolved, and an
+/// unresolved mirrored collection is a hard refusal of the whole form.
+///
+/// The two spellings and the mixed case are one block of one form. ERP УХ
+/// 3.2.12.6 `Documents/ВерсияСоглашенияАккредитив/Forms/ФормаДокумента` has a
+/// five-member collection whose members read, in order,
+/// `{"ВыборПараметровУчетаФИУХ",1,{24}}`,
+/// `{"Организация",2,{22},{0,c6df5da6-5f12-4138-9714-83d4d70f8716}}`,
+/// `{"Стоимость",2,{22},{0,99ddd49c-39d8-42b0-a54c-520c7d05692b}}`,
+/// `{"ДатаНачала",2,{1},{0,4160df69-b5de-495c-a2a9-c18d712ac0bc}}` and
+/// `{"СрокДействия",2,{1},{0,9a17447a-3b1a-49e7-809f-b7f5fdb1f111}}`, and the
+/// platform writes `ВыборПараметровУчетаФИУХ`,
+/// `22/0:c6df5da6-5f12-4138-9714-83d4d70f8716`,
+/// `22/0:99ddd49c-39d8-42b0-a54c-520c7d05692b`, `Объект.ДатаНачалаДействия` and
+/// `Объект.ДатаОкончанияДействия`. Same owner `22`, same physical shape, two
+/// spellings: the two that name a member of the attribute's own type resolve,
+/// the two whose uuid belongs to `Catalogs/ДоговорыКонтрагентов` do not. Another
+/// block of the same form pairs `{"Отбор.Владелец",2,{1},{-5}}` -> `Объект.Ref`
+/// with `{"Отбор.Банк",1,{42}}` -> `42`, and the form declares attributes
+/// `1..40` and `43` -- there is no attribute `42`.
+///
+/// Corpus of the physical uuid spelling: 43 `<xr:DataPath>` values of the form
+/// `<owner>/0:<uuid>` over ten ERP УХ forms, and none in the other seven stand
+/// corpora. Of the uuids they name, `c6df5da6`, `54915f85`, `f0678f5e` and
+/// `99ddd49c` are attributes of `Catalogs/ДоговорыКонтрагентов` reached from an
+/// owner that is not that catalog, and `a9ee8d4d`, `498857e1` and `dfa4634d`
+/// occur nowhere in the configuration at all -- a foreign owner and an absent
+/// reference are written the same way, so the fallback is the answer to every
+/// outcome that is not a resolution.
+///
+/// A standard-marker terminal and a table-current-data reference keep the old
+/// refusal: neither has ever been observed unresolved, and neither physical
+/// spelling is evidenced.
 pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     primary: &str,
     duplicate: Option<&str>,
@@ -14364,9 +14403,17 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                 attribute_id,
                 terminal,
             } => match terminal {
-                FormChoiceParameterLinkTerminal::Absent => {
-                    attribute_names_by_id.get(attribute_id).cloned()
-                }
+                // A reference this configuration cannot name is written by the
+                // platform physically, not dropped: the owner id alone when the
+                // reference carries no terminal, and `<owner>/0:<uuid>` when it
+                // carries a metadata terminal. The doc comment above states the
+                // corpus.
+                FormChoiceParameterLinkTerminal::Absent => Some(
+                    attribute_names_by_id
+                        .get(attribute_id)
+                        .cloned()
+                        .unwrap_or_else(|| attribute_id.to_string()),
+                ),
                 FormChoiceParameterLinkTerminal::Standard(standard) => {
                     let member = form_choice_parameter_link_standard_terminal_member(
                         attribute_id,
@@ -14389,7 +14436,9 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         FormMetadataDataPathResolution::NotMetadata
                         | FormMetadataDataPathResolution::ReferenceAbsent
                         | FormMetadataDataPathResolution::Invalid
-                        | FormMetadataDataPathResolution::ForeignOwner => None,
+                        | FormMetadataDataPathResolution::ForeignOwner => {
+                            Some(format!("{attribute_id}/0:{uuid}"))
+                        }
                     }
                 }
             },
