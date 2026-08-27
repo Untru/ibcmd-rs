@@ -31672,9 +31672,22 @@ fn format_form_chart_settings_xml(
     // `series_count=1` and, directly against native UT XML with no seed, at
     // `series_count=4`.
     let point_count = 0usize; // not yet observed nonzero on a form chart
-    let expected_tail_fields =
-        FORM_CHART_TAIL_FIELDS_BASE + 3 * series_count + point_count * (1 + 4 * series_count);
-    if data.first()?.trim() != "74" || data.len() != tail_start + expected_tail_fields {
+    // Version 73 is version 74 minus six trailing zeros -- the same relation
+    // `moxel.rs`'s spreadsheet-document chart records, and the same one
+    // `uh` `Reports/МатрицаРисков/Forms/ФормаОтчета` shows here: its tail is
+    // 191 members where the 74s carry 197, and `t[0..=190]` are slot for
+    // slot the 74 layout, down to the five-member show-mode tuple at
+    // `t[183]`, the literal `60` at `t[187]` and the axis record at
+    // `t[189]`. The six members version 74 adds are read by nobody -- the
+    // highest fixed offset any read names is `183` -- so the version only
+    // changes the declared length.
+    let tail_base = match data.first()?.trim() {
+        "73" => FORM_CHART_TAIL_FIELDS_BASE - 6,
+        "74" => FORM_CHART_TAIL_FIELDS_BASE,
+        _ => return None,
+    };
+    let expected_tail_fields = tail_base + 3 * series_count + point_count * (1 + 4 * series_count);
+    if data.len() != tail_start + expected_tail_fields {
         return None;
     }
     let real_series = data.get(5..real_series_end)?;
