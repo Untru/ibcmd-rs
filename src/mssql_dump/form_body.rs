@@ -1428,6 +1428,8 @@ pub(super) struct FormChildItem {
     pub(super) height: Option<String>,
     pub(super) show_current_date: Option<bool>,
     pub(super) show_months_panel: Option<bool>,
+    pub(super) calendar_selection_mode: Option<&'static str>,
+    pub(super) calendar_enable_drag: Option<bool>,
     pub(super) width_in_months: Option<String>,
     pub(super) height_in_months: Option<String>,
     pub(super) auto_max_width: Option<bool>,
@@ -11811,6 +11813,35 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        // Option 5 of the same tuple is the calendar's `<SelectionMode>`, and
+        // option 13 its `<EnableDrag>`.  Over the 35 native `CalendarField`
+        // items of the eight stand corpora option 5 reads `1` on exactly the 2
+        // that carry `<SelectionMode>Multiple</SelectionMode>`, `2` on the one
+        // that carries `<SelectionMode>Interval</SelectionMode>` and `0` on
+        // the other 32, which carry no element; option 13 reads `1` on exactly
+        // the one that carries `<EnableDrag>true</EnableDrag>` and `0` on the
+        // other 34.  No third selection code occurs anywhere, so a code this
+        // table does not name writes nothing rather than guessing a spelling.
+        calendar_selection_mode: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(5))
+                .and_then(|field| match field.trim() {
+                    "1" => Some("Multiple"),
+                    "2" => Some("Interval"),
+                    _ => None,
+                })
+        } else {
+            None
+        },
+        calendar_enable_drag: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(13))
+                .and_then(|field| (field.trim() == "1").then_some(true))
+        } else {
+            None
+        },
         width_in_months: if tag == "CalendarField" {
             document_field_options
                 .as_deref()
@@ -13575,12 +13606,57 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             width: Some((1, "50")),
             height: Some((2, "10")),
             max_width: None,
-            max_height: None,
+            // The height cap sits immediately behind the auto flag that bounds
+            // it, exactly as it does on every sibling kind.  Over the 186
+            // native `FormattedDocumentField` items of the eight stand corpora
+            // slot 15 reads `10` on exactly the 3 that carry
+            // `<MaxHeight>10</MaxHeight>` -- all three in Документооборот КОРП
+            // 3.0.21.3 -- and `0` on the other 183, which carry no element.
+            // No field in any tree carries `<MaxWidth>`, so slot 12 stays
+            // unclaimed.
+            max_height: Some(15),
             auto_max_width: Some(11),
             auto_max_height: Some(14),
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             font: Some(9),
+        },
+    ),
+    (
+        // The calendar field's own 24-member tuple, which no geometry row
+        // claimed, so its two extent caps and its stretch pair never reached
+        // the XML.  The caps sit where every sibling kind keeps them -- the
+        // auto flag immediately ahead of the cap it bounds -- and the stretch
+        // pair sits in slots 3 and 4, where the picture and spreadsheet fields
+        // keep theirs.
+        //
+        // Evidence: the 35 native `CalendarField` items of the eight stand
+        // corpora, where this row is a total function of the platform's
+        // answer.  `Документооборот КОРП` 3.0.21.3 alone exercises every
+        // coordinate: slot 3 reads `0` on exactly its 3 items that carry
+        // `<HorizontalStretch>false</HorizontalStretch>`, slot 4 on exactly
+        // the 5 that carry `<VerticalStretch>false</VerticalStretch>`, slot 19
+        // on exactly the 2 that carry `<AutoMaxWidth>false</AutoMaxWidth>`,
+        // slot 22 on exactly the 3 that carry
+        // `<AutoMaxHeight>false</AutoMaxHeight>`, and slot 23 reads `17` on
+        // exactly the 2 that carry `<MaxHeight>17</MaxHeight>` and `0` on the
+        // other 9.  `БСП` base and demo (4 items each) read the unwritten
+        // state in all five slots, matching their empty native spelling.  No
+        // calendar in any tree carries `<MaxWidth>`, so slot 20 is left
+        // unclaimed rather than guessed from the sibling shape.
+        "CalendarField",
+        FormDocumentFieldGeometry {
+            discriminator: "6",
+            len: 24,
+            width: None,
+            height: None,
+            max_width: None,
+            max_height: Some(23),
+            auto_max_width: Some(19),
+            auto_max_height: Some(22),
+            horizontal_stretch: Some(3),
+            vertical_stretch: Some(4),
+            font: None,
         },
     ),
     (
@@ -25845,39 +25921,6 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "GraphicalSchemaField" && item.read_only == Some(true) {
         xml.push_str(&format!("{tab}\t<Edit>false</Edit>\r\n"));
     }
-    // A calendar field writes its border behind the title block and ahead of
-    // the calendar run: on the one native calendar that carries one,
-    // `DataPath` and `TitleLocation` lead it and `ShowMonthsPanel`,
-    // `ContextMenu`, `ExtendedTooltip` and `Events` trail it.
-    if item.tag == "CalendarField" {
-        xml.push_str(&format_form_control_border_xml(item, indent + 1));
-    }
-    if item.tag == "CalendarField" {
-        if let Some(show_current_date) = item.show_current_date {
-            xml.push_str(&format!(
-                "{tab}\t<ShowCurrentDate>{}</ShowCurrentDate>\r\n",
-                xml_bool(show_current_date)
-            ));
-        }
-        if let Some(show_months_panel) = item.show_months_panel {
-            xml.push_str(&format!(
-                "{tab}\t<ShowMonthsPanel>{}</ShowMonthsPanel>\r\n",
-                xml_bool(show_months_panel)
-            ));
-        }
-        if let Some(width_in_months) = &item.width_in_months {
-            xml.push_str(&format!(
-                "{tab}\t<WidthInMonths>{}</WidthInMonths>\r\n",
-                escape_xml_text(width_in_months)
-            ));
-        }
-        if let Some(height_in_months) = &item.height_in_months {
-            xml.push_str(&format!(
-                "{tab}\t<HeightInMonths>{}</HeightInMonths>\r\n",
-                escape_xml_text(height_in_months)
-            ));
-        }
-    }
     if item.tag == "LabelDecoration"
         && let Some(skip_on_input) = item.skip_on_input
     {
@@ -26136,6 +26179,58 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
             if vertical_stretch { "true" } else { "false" }
         ));
+    }
+    // A calendar field closes its run with the selection pair, its border and
+    // the months block, in that order.  Census over the 35 native
+    // `CalendarField` items of the eight stand corpora, no pair counted both
+    // ways: `SelectionMode` trails `AutoMaxHeight` (3), `MaxHeight` (2), the
+    // stretch pair (2 each), `AutoMaxWidth` (1), `Height` (3), `Title` (3),
+    // `TitleLocation` (3), `DataPath` (3) and `GroupHorizontalAlign` (1), and
+    // leads `EnableDrag` (1), `Border` (3), `WidthInMonths` (1),
+    // `HeightInMonths` (1), `ContextMenu` (3), `ExtendedTooltip` (3) and
+    // `Events` (3); `EnableDrag` leads `Border` (1) and the three closers;
+    // `Border` leads `ShowMonthsPanel` (2), `WidthInMonths` (1) and
+    // `HeightInMonths` (1).  The border and months block used to be written
+    // directly behind the width, ahead of everything the shared geometry run
+    // emits after it -- harmless only while the calendar's own caps and
+    // stretch flags were unread.
+    if item.tag == "CalendarField" {
+        if let Some(selection_mode) = item.calendar_selection_mode {
+            xml.push_str(&format!(
+                "{tab}\t<SelectionMode>{selection_mode}</SelectionMode>\r\n"
+            ));
+        }
+        if let Some(enable_drag) = item.calendar_enable_drag {
+            xml.push_str(&format!(
+                "{tab}\t<EnableDrag>{}</EnableDrag>\r\n",
+                xml_bool(enable_drag)
+            ));
+        }
+        xml.push_str(&format_form_control_border_xml(item, indent + 1));
+        if let Some(show_current_date) = item.show_current_date {
+            xml.push_str(&format!(
+                "{tab}\t<ShowCurrentDate>{}</ShowCurrentDate>\r\n",
+                xml_bool(show_current_date)
+            ));
+        }
+        if let Some(show_months_panel) = item.show_months_panel {
+            xml.push_str(&format!(
+                "{tab}\t<ShowMonthsPanel>{}</ShowMonthsPanel>\r\n",
+                xml_bool(show_months_panel)
+            ));
+        }
+        if let Some(width_in_months) = &item.width_in_months {
+            xml.push_str(&format!(
+                "{tab}\t<WidthInMonths>{}</WidthInMonths>\r\n",
+                escape_xml_text(width_in_months)
+            ));
+        }
+        if let Some(height_in_months) = &item.height_in_months {
+            xml.push_str(&format!(
+                "{tab}\t<HeightInMonths>{}</HeightInMonths>\r\n",
+                escape_xml_text(height_in_months)
+            ));
+        }
     }
     xml.push_str(&format_form_spreadsheet_document_properties_xml(
         item,
