@@ -26955,6 +26955,8 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,90,0}", "Z"),
         ("{0,96,0}", "Num 0"),
         ("{0,105,16}", "Alt+Num 9"),
+        ("{0,107,0}", "Num +"),
+        ("{0,109,0}", "Num -"),
         ("{0,110,0}", "Num ."),
         ("{0,111,0}", "Num /"),
         ("{0,112,0}", "F1"),
@@ -26991,6 +26993,14 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         // native `Cmd+Num /` and `Cmd+Shift+Num /`.
         ("{0,111,8}", "Cmd+Num /"),
         ("{0,111,12}", "Cmd+Shift+Num /"),
+        // Real bytes: ERP УХ 3.2.12.6's
+        // `Reports/ДеревоСебестоимостиПродукции/Forms/ФормаОтчета` and
+        // `Reports/СтруктураЗаказаНаПроизводствоДинамическая/Forms/
+        // ФормаОтчета` carry `{0,107,12}` and `{0,109,12}` on their
+        // expand-all and collapse-all commands; the platform writes
+        // `Cmd+Shift+Num +` and `Cmd+Shift+Num -`.
+        ("{0,107,12}", "Cmd+Shift+Num +"),
+        ("{0,109,12}", "Cmd+Shift+Num -"),
         ("{0,112,0}", "F1"),
         ("{0,83,4}", "Shift+S"),
         ("{0,83,8}", "Cmd+S"),
@@ -27019,9 +27029,11 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         "{0,58,0}",
         "{0,91,0}",
         "{0,95,0}",
-        // `VK_MULTIPLY` and `VK_SEPARATOR` occur in none of the eight trees,
-        // so neither is read; their neighbours `VK_ADD` and `VK_SUBTRACT` are,
-        // and are asserted above.
+        // VK_MULTIPLY=106 and VK_SEPARATOR=108 are the two members of the
+        // 106..=109 numpad run that occur nowhere in the eight stand trees:
+        // they stay unread rather than guessed from their neighbours, which
+        // is the fail-closed half of this matrix. VK_ADD=107 and
+        // VK_SUBTRACT=109 do occur and are pinned above.
         "{0,106,0}",
         "{0,108,0}",
         "{0,124,0}",
