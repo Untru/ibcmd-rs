@@ -8886,14 +8886,37 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
             );
         }
     }
+    // A `UserSettingsGroup` whose declared item id names no item of this form
+    // is written by the platform physically, `<id>:<form item type uuid>`, the
+    // same way an unresolved choice-parameter link is written. Corpus of the
+    // eight stand configurations: 4 845 `<UserSettingsGroup>` elements, of
+    // which 4 839 spell an item name and 6 spell `1:02023637-7868-4a5f-8576-
+    // 835a76e0c9ba` -- the ERP УХ 3.2.12.6 list forms
+    // `Documents/ЗаявкаНаРасход/Forms/ФормаВыбора`,
+    // `Documents/ОперативныйПлан/Forms/ФормаВыбора`,
+    // `Documents/ПланируемыйДоход/Forms/ФормаВыбора`,
+    // `Documents/Резервирование/Forms/ФормаВыбора`,
+    // `InformationRegisters/НастройкаЗаменыНоменклатуры/Forms/ФормаСписка` and
+    // `InformationRegisters/НастройкаЗаменыНоменклатурыЗакупок/Forms/
+    // ФормаСписка`, each of which declares id `1` for a *form attribute*
+    // (`Список`) and has no child item with that id at all. No other physical
+    // spelling occurs anywhere in the eight corpora.
+    //
+    // Zero stays what it is everywhere else in this format -- the absent
+    // reference -- and keeps writing no element.
     indexes.user_settings_group_by_table_id = indexes
         .user_settings_group_id_by_table_id
         .iter()
         .filter_map(|(table_id, group_id)| {
-            indexes
-                .item_name_by_id
-                .get(group_id)
-                .map(|name| (table_id.clone(), name.clone()))
+            if let Some(name) = indexes.item_name_by_id.get(group_id) {
+                return Some((table_id.clone(), name.clone()));
+            }
+            (group_id.trim() != "0").then(|| {
+                (
+                    table_id.clone(),
+                    format!("{group_id}:{FORM_ITEM_TYPE_UUID}"),
+                )
+            })
         })
         .collect();
     indexes
