@@ -31405,6 +31405,12 @@ fn parse_common_command_shortcut_value_with_style(
         110 => "Num .".to_string(),
         111 => "Num /".to_string(),
         112..=123 => format!("F{}", key_code - 111),
+        // VK_ESCAPE. The one unmapped key code any of the three probed
+        // configurations spells: Документооборот КОРП 3.0.21.3 carries it once
+        // with no modifier, on the very command the platform writes
+        // `<Shortcut>Esc</Shortcut>` for -- the only `Esc` in the eight native
+        // stand trees -- and УТ 11.5.27.75 spells no unmapped code at all.
+        27 => "Esc".to_string(),
         _ => return None,
     };
     let mut parts = Vec::with_capacity(4);

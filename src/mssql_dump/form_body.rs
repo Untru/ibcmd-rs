@@ -1492,6 +1492,7 @@ pub(super) struct FormChildItem {
     pub(super) html_document_output: Option<&'static str>,
     pub(super) pages_read_only: Option<bool>,
     pub(super) search_string_addition_properties: Option<FormSearchStringAdditionProperties>,
+    pub(super) list_addition_tooltip_representation: Option<&'static str>,
     pub(super) incomplete_choice_mode: Option<&'static str>,
     pub(super) choice_button_representation: Option<&'static str>,
     pub(super) choice_button_picture_ref: Option<String>,
@@ -12357,6 +12358,12 @@ fn parse_form_child_item_with_metadata_owners(
         search_string_addition_properties: search_string_addition
             .as_ref()
             .map(|(schema, options)| schema.properties(&fields, options)),
+        list_addition_tooltip_representation: (wrapper == "5"
+            && fields.len() == 24
+            && matches!(tag, "ViewStatusAddition" | "SearchControlAddition"))
+        .then(|| fields.get(11))
+        .flatten()
+        .and_then(|field| decode_form_tooltip_representation(field.trim())),
         incomplete_choice_mode: field_schema_and_options
             .as_ref()
             .and_then(|(schema, options)| {
@@ -17905,8 +17912,24 @@ pub(super) fn parse_form_child_item_tooltip(
         fields.get(5).map(|field| field.trim()),
     )
     .map(|schema| schema.tooltip_slot());
+    // The three list additions keep their tooltip in slot 8 of their own
+    // 24-member wrapper-`5` record, directly behind the title block in slot 7.
+    // The slot had no reader, so the one addition of Документооборот КОРП
+    // 3.0.21.3 that carries a `<ToolTip>` lost it. Over that configuration's
+    // 2 185 `SearchStringAddition` records slot 8 is the empty container
+    // `{1,0}` on 2 184 and a populated one on exactly the one the platform
+    // writes the element for; no `ViewStatusAddition` or
+    // `SearchControlAddition` in any of the eight native trees carries one.
     let indexes: &[usize] = match wrapper {
         "22" => &[8],
+        "5" if fields.len() == 24
+            && matches!(
+                tag,
+                "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition"
+            ) =>
+        {
+            &[8]
+        }
         "35" | "37" | "48" => &[10 + top_level_offset],
         _ => &[],
     };
@@ -25327,8 +25350,21 @@ pub(super) fn format_form_child_item_xml(
     // `AdditionSource` (6), `Title` (2), `Width` (2), `AutoMaxWidth` (3),
     // `MaxWidth` (1), `HorizontalStretch` (5), `ContextMenu` (6) and
     // `ExtendedTooltip` (6).
-    if let Some(properties) = item.search_string_addition_properties.as_ref()
-        && let Some(value) = properties.tooltip_representation
+    // Its two siblings open with the same element read out of the same
+    // top-level slot of the same 24-member wrapper-`5` record.  They were
+    // never read, because the reader that answers the search string's own
+    // properties is gated on that item's eleven-member option bag, and theirs
+    // holds sixteen members -- a gate on the option bag, not on where this
+    // element lives.  Over the 2 011 `ViewStatusAddition` items of
+    // Документооборот КОРП 3.0.21.3 slot 11 reads `1` on exactly the one whose
+    // document says `<ToolTipRepresentation>None</...>` and `0` on the other
+    // 2 010; over all 4 548 of УТ 11.5.27.75 it reads `0` and none of them
+    // carries the element.
+    if let Some(value) = item
+        .search_string_addition_properties
+        .as_ref()
+        .and_then(|properties| properties.tooltip_representation)
+        .or(item.list_addition_tooltip_representation)
     {
         xml.push_str(&format!(
             "{tab}\t<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",

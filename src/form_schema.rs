@@ -3696,8 +3696,18 @@ impl FormFieldSchema {
                 "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
             )
             .then_some(20 + top_level_offset),
-            auto_cell_height_slot: matches!(item_tag, "InputField" | "LabelField" | "PictureField")
-                .then_some(28 + top_level_offset),
+            // `CheckBoxField` reads the flag out of the very same
+            // offset-corrected slot and was simply not listed.  Over the 2 760
+            // `CheckBoxField` records of Документооборот КОРП 3.0.21.3 slot
+            // `28 + offset` reads `1` on exactly the one item the platform
+            // writes `<AutoCellHeight>true</AutoCellHeight>` on and `0` on
+            // every other one; over all 6 295 of УТ 11.5.27.75 it reads `0`
+            // throughout and no check box there carries the element.
+            auto_cell_height_slot: matches!(
+                item_tag,
+                "InputField" | "LabelField" | "PictureField" | "CheckBoxField"
+            )
+            .then_some(28 + top_level_offset),
             // Slot `22 + top_level_offset` carries `CellHyperlink` for every
             // field kind that can sit in a table cell, not only the two the
             // decoder used to admit: on the 1 181 nested `PictureField` items
