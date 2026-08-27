@@ -3581,7 +3581,20 @@ impl FormFieldSchema {
         let (discriminator, options_len, options_kind, text, back, border) = match item_tag {
             "LabelField" => ("1", 20, "11", Some(8), Some(9), Some(13)),
             "InputField" => ("2", 66, "36", Some(37), Some(38), Some(39)),
-            "CheckBoxField" => ("3", 13, "11", None, None, None),
+            // The check box keeps its `BackColor` in option member 3. Census of
+            // the dumped layouts of all eight stand corpora, joined to the
+            // platform's own element for the same item id: 21 302 check boxes
+            // carry the 13-member `11` tuple, its members 2, 3 and 6 are the
+            // three colour-shaped slots, and member 3 holds the "unset" shape
+            // `{3,4,{0}}` on all 21 296 that carry no `<BackColor>` and a real
+            // colour on all 6 that do -- `style:ToolTipBackColor` on four
+            // fields of ERP УХ
+            // `InformationRegisters/НастройкиПравДоступаПользователейБланки/
+            // Forms/ФормаСписка` and two of
+            // `Catalogs/БланкиОтчетов/Forms/МастерСозданияНовыхСтрок` -- with no
+            // counter-example on any corpus. Members 2 and 6 read the unset
+            // shape on every check box of every corpus, so neither is claimed.
+            "CheckBoxField" => ("3", 13, "11", None, Some(3), None),
             // Option slot 10 holds the text colour on all 2 212 native
             // `PictureField` items: unset on the 2 195 without a `<TextColor>`,
             // readable on all 17 that carry one.

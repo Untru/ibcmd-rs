@@ -13856,9 +13856,15 @@ pub(super) fn form_control_system_color_name(code: i32) -> Option<&'static str> 
 /// Window-palette entries of colour space `1`, from the native form dumps.
 fn form_control_window_color_name(code: i32) -> Option<&'static str> {
     match code {
-        4 => Some("win:MenuBar"),       // 4
+        4 => Some("win:MenuBar"),       // 12
         17 => Some("win:DisabledText"), // 2
-        18 => Some("win:ButtonText"),   // 5
+        18 => Some("win:ButtonText"),   // 10
+        // Read off the platform's own element the same way the other three
+        // were: ERP УХ `Catalogs/ДокументыРеализацииПолномочийНалоговыхОрганов/
+        // Forms/ФормаЭлемента` holds `{3,1,{21}}` on the one label decoration
+        // whose native document writes `<TextColor>win:ButtonDarkShadow</...>`.
+        // Without it the whole colour declined and the element went unwritten.
+        21 => Some("win:ButtonDarkShadow"), // 1
         _ => None,
     }
 }
@@ -13871,22 +13877,38 @@ fn form_control_window_color_name(code: i32) -> Option<&'static str> {
 /// gives 27, while the native dump writes `DarkOrange` for it. On the remaining
 /// eight indexes both cover the two agree exactly, so the shared table stays
 /// the fallback and this one carries the form evidence in front of it.
+///
+/// Five more indexes come from a join of the dumped layouts of all eight stand
+/// corpora to the platform's own elements: for every item record that holds
+/// exactly one space-`2` colour tuple and whose native element writes exactly
+/// one `web:` value, the code and the name are forced on each other. That
+/// pairing produces 32 distinct codes with no ambiguity at all -- not one code
+/// maps to two names -- and it reproduces every one of the 27 codes the two
+/// existing tables already answer, index for index, including the `31`
+/// override. The five it adds are the ones neither table carried:
+/// `14`/`91`/`106`/`122`/`132`. An unmapped code declines the whole colour, so
+/// each of them cost the element outright.
 fn form_control_web_color_name(code: i32) -> Option<&'static str> {
     match code {
-        1 => Some("web:AliceBlue"),       // 1
+        1 => Some("web:AliceBlue"),       // 6
         6 => Some("web:Beige"),           // 7
-        30 => Some("web:DarkOliveGreen"), // 1
-        31 => Some("web:DarkOrange"),     // 1
+        14 => Some("web:CadetBlue"),      // 1
+        30 => Some("web:DarkOliveGreen"), // 3
+        31 => Some("web:DarkOrange"),     // 2
         41 => Some("web:DeepSkyBlue"),    // 1
-        42 => Some("web:DimGray"),        // 10
+        42 => Some("web:DimGray"),        // 22
         43 => Some("web:DodgerBlue"),     // 1
         57 => Some("web:IndianRed"),      // 1
-        70 => Some("web:LightGreen"),     // 3
+        70 => Some("web:LightGreen"),     // 15
         75 => Some("web:LightSkyBlue"),   // 1
-        100 => Some("web:NavajoWhite"),   // 1
-        109 => Some("web:PaleGreen"),     // 1
-        115 => Some("web:Pink"),          // 1
-        143 => Some("web:White"),         // 1
+        91 => Some("web:MediumSeaGreen"), // 6
+        100 => Some("web:NavajoWhite"),   // 2
+        106 => Some("web:OrangeRed"),     // 2
+        109 => Some("web:PaleGreen"),     // 5
+        115 => Some("web:Pink"),          // 4
+        122 => Some("web:SaddleBrown"),   // 20
+        132 => Some("web:Snow"),          // 2
+        143 => Some("web:White"),         // 12
         _ => style_web_color_name(code),
     }
 }
@@ -20486,6 +20508,17 @@ fn resolve_form_document_register_records_data_path(
         [] => Some(path),
         [terminal] => {
             let member = match terminal.as_slice() {
+                // A record set is a collection, and the collection's own row
+                // count is the same member marker every other collection in
+                // this grammar numbers it with -- the one
+                // `walk_form_bound_chain_members` already answers as
+                // `RowsCount`. Both bindings of this shape in the corpus (ERP
+                // УХ `Documents/ОперацияМеждународный/Forms/ФормаДокумента`,
+                // pages 702 and 918) name an accounting register's record set
+                // and are written `Объект.RegisterRecords.<register>.RowsCount`.
+                [marker] if marker.trim() == FORM_ROWS_COUNT_MEMBER_MARKER => {
+                    "RowsCount".to_string()
+                }
                 [marker] => form_register_record_set_standard_attribute_name(
                     register_family,
                     marker.trim(),
@@ -22345,13 +22378,55 @@ pub(super) fn parse_form_title_data_path(
         return None;
     }
     let binding = options.get(binding_slot)?.trim();
+    // A bound title reaches its column from *outside* the table, so the
+    // aggregate marker `101000000` in its last segment means the column total,
+    // which the platform spells with a `Total` prefix -- the same rule
+    // `parse_form_child_item_data_path` states as "an item that sits inside the
+    // table it addresses reads the row's own column; one that sits outside
+    // reads the column total". A `Page` or a `UsualGroup` is never inside the
+    // table its title binds to, and the slot was read with `aggregate` hard-set
+    // to `false`, so every such title lost the prefix.
+    //
+    // Census over the dumped layouts of all eight stand corpora: 11 title
+    // bindings carry the marker -- all on ERP УХ pages, in the six
+    // `Documents/{РаспределениеВозвратныхОтходов, РаспределениеПроизводственныхЗатрат,
+    // РаспределениеПрочихЗатрат/*}` forms -- and every one of the 11 native
+    // documents writes `.Total<Column>`. Not one aggregate-marked title is
+    // written without the prefix, so there is no reading the flag has to keep.
     if let Some(path) = resolve_form_bound_chain_member_path(
         binding,
         attribute_names_by_id,
         owner_scoped_bindings,
         object_refs,
-        false,
+        true,
     ) {
+        return Some(path);
+    }
+    // Two routes the general bound-slot reader (`parse_form_child_item_data_path`)
+    // already runs behind the chain walker, in the very order it runs them. The
+    // title read only the walker, so a binding of either shape resolved to
+    // nothing at all.
+    //
+    // The dynamic list's own `{2,{attr},{-1|-2}}` goes first for the reason it
+    // goes first there: its `Order`/`Filter` are named by the source, not by
+    // the attribute's declared type, so the strict field model at the end of
+    // this function must not get to answer them.
+    //
+    // Census of the title bindings of every dumped layout of all eight stand
+    // corpora, by chain shape: `{4,{attr},{-m},{register uuid},{100000000}}`
+    // occurs twice, both on ERP УХ `Documents/ОперацияМеждународный/Forms/
+    // ФормаДокумента`, both in a `differing` file at cc01031, and both native
+    // documents write the path this route spells.
+    if let Some(path) =
+        resolve_form_dynamic_list_member_data_path(binding, attribute_metadata_owners_by_id)
+            .or_else(|| {
+                resolve_form_document_register_records_data_path(
+                    binding,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                )
+            })
+    {
         return Some(path);
     }
     // A chain rooted at a form item is read by the one route every other bound
@@ -28630,9 +28705,15 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(output)
         ));
     }
+    // A `CheckBoxField` closes with `BackColor` at this same site: all 6 native
+    // check boxes of the whole stand that carry the element write it behind
+    // `DataPath` (6), `CheckBoxType` (6), `DefaultItem` (4), `TitleBackColor`
+    // (4), `TitleLocation` (2), `ToolTip` (1), `ToolTipRepresentation` (1) and
+    // `Visible` (1) and immediately ahead of `ContextMenu` (6) and
+    // `ExtendedTooltip` (6); nothing else shares a check box with it.
     if matches!(
         item.tag,
-        "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField"
+        "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField" | "CheckBoxField"
     ) {
         if let Some(back_color) = &item.back_color {
             xml.push_str(&format!(
@@ -28706,18 +28787,6 @@ pub(super) fn format_form_child_item_xml(
     // `MaxWidth` (7) leads `HorizontalStretch` (1).  No pair is observed in
     // both directions, and all of them precede `ContextMenu` and
     // `ExtendedTooltip` on every occurrence.
-    // A table addition writes its `<ToolTip>` behind the title block, not up
-    // with the field kinds. Both additions of the whole stand that carry one
-    // write it behind `AdditionSource` (2), `Title` (1) and
-    // `ToolTipRepresentation` (1) and ahead of `ContextMenu` (2) and
-    // `ExtendedTooltip` (2); nothing else shares an addition with it.
-    if item.tag.ends_with("Addition") {
-        xml.push_str(&format_form_localized_section(
-            "ToolTip",
-            &item.tooltip,
-            indent + 1,
-        ));
-    }
     if let Some(properties) = item.search_string_addition_properties.as_ref() {
         if let Some(value) = properties.group_horizontal_align {
             xml.push_str(&format!(
