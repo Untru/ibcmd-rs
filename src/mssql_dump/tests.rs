@@ -20871,7 +20871,7 @@ fn formats_table_search_additions_as_direct_sections() {
         footer_picture_load_transparent: false,
         footer_picture_transparent_pixel: None,
         picture_transparent_pixel: None,
-        html_document_output: None,
+        document_field_output: None,
         graphical_scheme_edit: None,
         excluded_commands: Vec::new(),
         button_check: None,
@@ -21135,7 +21135,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_load_transparent: false,
                 footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
-                html_document_output: None,
+                document_field_output: None,
                 graphical_scheme_edit: None,
                 excluded_commands: Vec::new(),
                 button_check: None,
@@ -21400,7 +21400,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_picture_load_transparent: false,
                 footer_picture_transparent_pixel: None,
                 picture_transparent_pixel: None,
-                html_document_output: None,
+                document_field_output: None,
                 graphical_scheme_edit: None,
                 excluded_commands: Vec::new(),
                 button_check: None,
@@ -26958,6 +26958,8 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,90,0}", "Z"),
         ("{0,96,0}", "Num 0"),
         ("{0,105,16}", "Alt+Num 9"),
+        ("{0,107,0}", "Num +"),
+        ("{0,109,0}", "Num -"),
         ("{0,110,0}", "Num ."),
         ("{0,111,0}", "Num /"),
         ("{0,112,0}", "F1"),
@@ -26968,6 +26970,13 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,83,12}", "Ctrl+Shift+S"),
         ("{0,70,24}", "Ctrl+Alt+F"),
         ("{0,70,28}", "Ctrl+Alt+Shift+F"),
+        // Real bytes: ERP УХ 3.2.12.6
+        // `Reports/ДеревоСебестоимостиПродукции/Forms/ФормаОтчета` and
+        // `Reports/СтруктураЗаказаНаПроизводствоДинамическая/Forms/ФормаОтчета`
+        // carry `{0,107,12}` and `{0,109,12}` on their expand-all and
+        // collapse-all commands (`VK_ADD` and `VK_SUBTRACT`).
+        ("{0,107,12}", "Ctrl+Shift+Num +"),
+        ("{0,109,12}", "Ctrl+Shift+Num -"),
     ] {
         assert_eq!(
             parse_common_command_shortcut_value_with_style(raw, ShortcutModifierStyle::Windows)
@@ -26987,6 +26996,14 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         // native `Cmd+Num /` and `Cmd+Shift+Num /`.
         ("{0,111,8}", "Cmd+Num /"),
         ("{0,111,12}", "Cmd+Shift+Num /"),
+        // Real bytes: ERP УХ 3.2.12.6's
+        // `Reports/ДеревоСебестоимостиПродукции/Forms/ФормаОтчета` and
+        // `Reports/СтруктураЗаказаНаПроизводствоДинамическая/Forms/
+        // ФормаОтчета` carry `{0,107,12}` and `{0,109,12}` on their
+        // expand-all and collapse-all commands; the platform writes
+        // `Cmd+Shift+Num +` and `Cmd+Shift+Num -`.
+        ("{0,107,12}", "Cmd+Shift+Num +"),
+        ("{0,109,12}", "Cmd+Shift+Num -"),
         ("{0,112,0}", "F1"),
         ("{0,83,4}", "Shift+S"),
         ("{0,83,8}", "Cmd+S"),
@@ -26994,6 +27011,10 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,83,12}", "Cmd+Shift+S"),
         ("{0,70,24}", "Cmd+Option+F"),
         ("{0,70,28}", "Cmd+Option+Shift+F"),
+        // The same two records, in the spelling the platform itself wrote
+        // them: `Cmd+Shift+Num +` and `Cmd+Shift+Num -`.
+        ("{0,107,12}", "Cmd+Shift+Num +"),
+        ("{0,109,12}", "Cmd+Shift+Num -"),
     ] {
         assert_eq!(
             parse_common_command_shortcut_value_with_style(raw, ShortcutModifierStyle::Macos)
@@ -27011,8 +27032,13 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         "{0,58,0}",
         "{0,91,0}",
         "{0,95,0}",
+        // VK_MULTIPLY=106 and VK_SEPARATOR=108 are the two members of the
+        // 106..=109 numpad run that occur nowhere in the eight stand trees:
+        // they stay unread rather than guessed from their neighbours, which
+        // is the fail-closed half of this matrix. VK_ADD=107 and
+        // VK_SUBTRACT=109 do occur and are pinned above.
         "{0,106,0}",
-        "{0,109,0}",
+        "{0,108,0}",
         "{0,124,0}",
         "{0,70,1}",
         "{0,70,32}",

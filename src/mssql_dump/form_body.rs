@@ -488,12 +488,27 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     // The form's own main attribute travels with it for the same reason: the
     // bar's buttons name form standard commands exactly as any other button
     // does, and the fact belongs to the form, not to the item tree.
+    // The list's unresolvable columns travel with it for the same reason the
+    // column and type-link indexes do: a command-bar button addresses a table
+    // item's current data exactly as any other item does, and the `~` marker
+    // such a path carries is a fact of the list, not of where the button sits.
+    // Evidence: Документооборот КОРП 3.0.21.3
+    // `Catalogs/ДокументыПредприятия/Forms/
+    // ФормаВыбораВходящегоДокументаЭДОДляСозданияСвязи`, whose form-level
+    // `<AutoCommandBar>` holds Button `ДеревоЭД` with `{2,{1,02023637-…},{27}}`
+    // against table item 1 (`Список`); field-map id 27 is `Ссылка`, which the
+    // manual query of that list does not select, and the platform writes
+    // `~Items.Список.CurrentData.Ссылка`.
     let auto_command_bar_command_facts = FormOwnerScopedBindingIndexes {
         metadata_command_facts: context
             .metadata_command_facts
             .map(Arc::clone)
             .unwrap_or_default(),
         form_main_attribute: main_attribute_extension.clone(),
+        unresolvable_table_columns: child_item_indexes
+            .owner_scoped_bindings
+            .unresolvable_table_columns
+            .clone(),
         ..Default::default()
     };
     let mut auto_command_bar = extract_form_auto_command_bar(
@@ -1579,7 +1594,7 @@ pub(super) struct FormChildItem {
     pub(super) table_title_height: Option<String>,
     pub(super) table_footer_height: Option<String>,
     pub(super) table_output: Option<&'static str>,
-    pub(super) html_document_output: Option<&'static str>,
+    pub(super) document_field_output: Option<&'static str>,
     /// A graphical scheme field's own `<Edit>` flag, read off its option
     /// tuple rather than derived from `<ReadOnly>`.
     pub(super) graphical_scheme_edit: Option<bool>,
@@ -6232,12 +6247,22 @@ pub(super) fn form_dynamic_list_std_attribute_pairs(
         ("ЭтоГруппа", "IsFolder"),
         ("Владелец", "Owner"),
     ];
-    const DOCUMENT: [(&str, &str); 5] = [
+    const DOCUMENT: [(&str, &str); 6] = [
         ("Ссылка", "Ref"),
         ("ПометкаУдаления", "DeletionMark"),
         ("Дата", "Date"),
         ("Номер", "Number"),
         ("Проведен", "Posted"),
+        // `PointInTime` is a standard attribute of a document like the five
+        // above it, and a list bound to a document resolves a path onto it.
+        // Evidence: across all eight stand trees no path ending `.PointInTime`
+        // or `.МоментВремени` carries the platform's `~` marker -- 0 of 4 --
+        // and ERP УХ 3.2.12.6
+        // `Documents/НаработкаОбъектовЭксплуатации/Forms/ФормаСпискаДокументов`
+        // writes `<DataPath>Список.PointInTime</DataPath>` bare. Leaving it out
+        // of the universe marked it unresolvable and wrote a `~` the platform
+        // never writes.
+        ("МоментВремени", "PointInTime"),
     ];
     const ENUM: [(&str, &str); 2] = [("Ссылка", "Ref"), ("Порядок", "Order")];
     const CHART_OF_CHARACTERISTIC_TYPES: [(&str, &str); 10] = [
@@ -6252,7 +6277,7 @@ pub(super) fn form_dynamic_list_std_attribute_pairs(
         ("Родитель", "Parent"),
         ("ЭтоГруппа", "IsFolder"),
     ];
-    const CHART_OF_ACCOUNTS: [(&str, &str); 10] = [
+    const CHART_OF_ACCOUNTS: [(&str, &str); 11] = [
         ("Ссылка", "Ref"),
         ("ПометкаУдаления", "DeletionMark"),
         ("Предопределенный", "Predefined"),
@@ -6263,6 +6288,13 @@ pub(super) fn form_dynamic_list_std_attribute_pairs(
         ("Родитель", "Parent"),
         ("Порядок", "Order"),
         ("Забалансовый", "OffBalance"),
+        // The account kind, a standard attribute of the chart like the ten
+        // above it. Same evidence shape: no path ending `.Type` or `.Вид`
+        // carries `~` anywhere in the eight trees -- 0 of 78 -- and ERP УХ
+        // 3.2.12.6
+        // `ChartsOfAccounts/Международный/Forms/ФормаВыбораСПодборомСчетов`
+        // writes `<DataPath>Список.Type</DataPath>` bare.
+        ("Вид", "Type"),
     ];
     const CHART_OF_CALCULATION_TYPES: [(&str, &str); 8] = [
         ("Ссылка", "Ref"),
@@ -9147,6 +9179,12 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// physically. Read from the very declaration index the root command set
     /// reads `Parent` and `IsFolder` from.
     attribute_ids_without_declared_owner: BTreeSet<String>,
+    /// The same fact keyed the way a *form item* addresses it: the table item
+    /// id paired with the column id its terminals carry. A data path written
+    /// `Items.<table>.CurrentData.<column>` is spelled from the item side and
+    /// never names the attribute, so the marker it carries has to be looked up
+    /// from the item side too.
+    unresolvable_table_columns: BTreeSet<(String, String)>,
 }
 
 /// The attribute-namespace root a chain rooted at a form item continues from.
@@ -9730,6 +9768,23 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
             })
         })
         .collect();
+    // The list's unresolvable columns, re-keyed by the table item that shows
+    // them: a data path spelled `Items.<table>.CurrentData.<column>` names the
+    // item, never the attribute, so its `~` marker has to be looked up from the
+    // item side.
+    let unresolvable_table_columns = indexes
+        .bound_attribute_id_by_table_id
+        .iter()
+        .flat_map(|(table_id, attribute_id)| {
+            indexes
+                .owner_scoped_bindings
+                .unresolvable_columns
+                .iter()
+                .filter(move |key| key.attribute_id == *attribute_id)
+                .map(move |key| (table_id.clone(), key.column_id.clone()))
+        })
+        .collect();
+    indexes.owner_scoped_bindings.unresolvable_table_columns = unresolvable_table_columns;
     indexes
 }
 
@@ -10760,6 +10815,21 @@ fn parse_form_child_item_with_metadata_owners(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            // The two field kinds the list used to leave out. The shift is not
+            // a property of the kind: `form_input_field_top_level_offset`
+            // detects it by whether slot 6 holds a name string, and
+            // `form_child_item_tag` already applies it to every wrapper-`37`
+            // field -- these two included -- to find their discriminator at
+            // all. Leaving them out here read every slot of such a record one
+            // member off. Evidence: ERP УХ 3.2.12.6
+            // `Documents/ВерсияДокументацииЗакупочныхПроцедур/Forms/
+            // ФормаРедактированияТекстаЗакупочнойПроцедуры`,
+            // FormattedDocumentField `ФорматированныйДокумент`, whose record
+            // carries the conditional `UserVisible` tuple in slot 5, its
+            // discriminator `17` in slot 6 and `0` in slot 8, and the platform
+            // writes `<TitleLocation>None</TitleLocation>`.
+            | "FormattedDocumentField"
+            | "PDFDocumentField"
     )
     .then(|| {
         form_input_field_layout_is_extended(&fields)
@@ -12539,9 +12609,26 @@ fn parse_form_child_item_with_metadata_owners(
         // written, `1` on exactly the items that say `Enable` and `2` on
         // exactly those that say `Disable`, with no code mapping to two
         // answers.  The slot had no reader, so none of them was ever written.
-        html_document_output: field_schema_and_options
+        // The graphical scheme spells the same property in slot 3 of its own
+        // kind-`3` tuple -- one member ahead of where the HTML field keeps it,
+        // because the graphical scheme's colour is inserted behind it and not
+        // in front. Evidence: of the 22 `GraphicalSchemaField` items of the
+        // five stand corpora exactly one reads anything but `0` here -- ERP УХ
+        // 3.2.12.6 `DataProcessors/СтруктураВладения/Forms/Форма`
+        // `РезультатГраф`, which reads `1` -- and it is the one item the
+        // platform writes `<Output>Enable</Output>` on, in the same place of
+        // the scalar run the HTML field writes its own.
+        document_field_output: field_schema_and_options
             .as_ref()
-            .and_then(|(schema, options)| schema.html_document_output(options)),
+            .and_then(|(schema, options)| schema.document_field_output(options))
+            .or_else(|| {
+                (tag == "GraphicalSchemaField")
+                    .then(|| {
+                        let (_, options) = form_document_field_geometry_options(tag, &fields)?;
+                        crate::form_schema::form_output_code(options.get(3).copied())
+                    })
+                    .flatten()
+            }),
         graphical_scheme_edit: parse_form_document_field_flag(tag, fields, |layout| layout.edit),
         excluded_commands: parse_form_excluded_commands(tag, fields),
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
@@ -13646,6 +13733,7 @@ fn parse_form_child_item_with_metadata_owners(
                     &fields,
                     direct_discriminator,
                     field_schema_and_options.as_ref(),
+                    special_field_layout.as_ref(),
                 ),
             );
             if tag == "InputField" {
@@ -17018,9 +17106,19 @@ fn parse_form_font_mask_tuple_xml(
                 ));
             }
             attributes.push(("kind", "Absolute".to_string()));
-            if (mask >> FORM_FONT_MASK_SCALE_BIT) & 1 == 1 {
-                attributes.push(("scale", fields.get(18)?.trim().to_string()));
-            }
+            // The absolute kind spells `scale` unconditionally: it is not one
+            // of the members the mask makes optional, and the fixed 19-slot
+            // layout always carries it. All 1 460 `kind="Absolute"` fonts of
+            // the eight native stand trees write the attribute, with no
+            // exception. Gating it on the mask bit the other kinds use dropped
+            // it from the two records that spell the whole tuple with an empty
+            // mask -- ERP УХ 3.2.12.6
+            // `Reports/РегламентированноеУведомлениеОрганизацияВнутреннегоКонтроля`
+            // `Форма2021_1` and `Форма2022_1`, LabelDecoration
+            // `НаименованиеЭтапа`, whose tuple is
+            // `{7,0,0,110,0,0,0,400,0,0,0,1,3,2,1,34,"Arial",1,100}` and whose
+            // element the platform writes with `scale="100"` like every other.
+            attributes.push(("scale", fields.get(18)?.trim().to_string()));
             let rendered = attributes
                 .iter()
                 .map(|(name, value)| format!(" {name}=\"{}\"", escape_xml_text(value)))
@@ -19244,6 +19342,30 @@ fn form_property_bag_canonical_revision(lead: &str, len: usize) -> Option<(&'sta
     match lead {
         "32" if len == 62 => Some(("36", 4)),
         "28" if len == 28 => Some(("29", 1)),
+        // The spreadsheet-document field's own bag, one member short of its
+        // canonical `13`/32 under the same `len - lead` of 19. The shape alone
+        // does not prove a tail truncation -- the `28`/28 group bag has the
+        // same invariant and is not one -- so this revision is confirmed by
+        // value on a platform record: ERP УХ 3.2.12.6
+        // `Reports/ГрафическийОтчетСвязейОтчетов/Forms/ФормаРасшифровокУправляемая`,
+        // `SpreadSheetDocumentField` `ПолеРасшифровки`, whose bag reads
+        // `{12,50,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{1,2988b2a5-…,
+        // "ПолеРасшифровкиОбработкаРасшифровки",…},0,1,0,0,1,0,0,0,0,1,1,1}`.
+        // Every coordinate the canonical layout names lands on its own value
+        // there: the event collection at 18 is the well-formed
+        // `DetailProcessing` record the platform writes, the border colour at
+        // 15 is the unset `{3,4,{0}}` of an item with no `<BorderColor>`, the
+        // extent pair at 1/2 holds the `50`/`10` of an item with no extent,
+        // and the scroll pair at 28/29 holds `1`/`1` -- which is exactly the
+        // `<VerticalScrollBar>true</VerticalScrollBar>` and
+        // `<HorizontalScrollBar>true</HorizontalScrollBar>` the platform
+        // writes on it.
+        //
+        // The dropped member is the bag's last, `DrawingSelectionShowMode`,
+        // whose unwritten default is the code the truncation stands for, so the
+        // placeholder the padding leaves reads as the absence the platform
+        // spells.
+        "12" if len == 31 => Some(("13", 1)),
         _ => None,
     }
 }
@@ -20298,7 +20420,18 @@ fn parse_form_schema_backed_child_item_events(
     fields: &[&str],
     direct_discriminator: Option<&str>,
     field_schema_and_options: Option<&(FormFieldSchema, Vec<&str>)>,
+    special_field_layout: Option<&(FormSpecialFieldSchema, Vec<&str>)>,
 ) -> Vec<FormBodyEvent> {
+    if let Some((special_schema, options)) = special_field_layout
+        && let Some(schema) =
+            FormChildItemEventCollectionSchema::from_special_field_schema(*special_schema)
+        && let Some(record) = options
+            .get(schema.collection_slot())
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    {
+        return parse_form_schema_backed_event_record(schema, &record);
+    }
+
     if let Some((field_schema, options)) = field_schema_and_options
         && let Some(schema) =
             FormChildItemEventCollectionSchema::from_field_schema(*field_schema, tag)
@@ -21142,6 +21275,7 @@ fn resolve_form_owner_scoped_button_data_path(
             table_column_names_by_id,
             type_link_data_path_by_table_column,
             &no_global_binding_paths,
+            owner_scoped_bindings,
         )
         // A button addresses its data in the same chain grammar every other
         // item uses, so a slot the button-only route cannot spell is read as
@@ -21928,6 +22062,21 @@ fn walk_form_bound_chain_members(
                     target.push_str(index);
                     target.push(']');
                 }
+                // An index does not reach a new member: it picks one element of
+                // the collection the previous segment reached, and what that
+                // element declares is what the collection declares. Letting the
+                // type fall on the floor here left the member behind the index
+                // with nothing to be read against, and the whole slot went
+                // unspelled. Evidence: ERP УХ 3.2.12.6
+                // `Reports/АнализСубконто/Forms/ФормаОтчета`,
+                // `Reports/КарточкаСубконто/Forms/ФормаОтчета` and
+                // `Reports/ОборотыМеждуСубконто/Forms/ФормаОтчета` carry
+                // `{4,{1},{0,3ba406b5-…},{0,e67e2953-…},{0}}` -- the report's
+                // own `СписокВидовСубконто`, a value list, an index, and the
+                // value list's member `0` -- and the platform writes
+                // `Отчет.СписокВидовСубконто[0].Value`.
+                reached_type = previous_type;
+                reached_metadata_reference = previous_metadata_reference;
             }
             [column_id, uuid]
                 if uuid
@@ -22115,7 +22264,23 @@ fn resolve_form_item_rooted_chain_data_path(
         object_refs,
         false,
     )
-    .map(|(path, _)| path)
+    .map(|(path, _)| {
+        // Only the member standing directly on the list row can carry the
+        // marker: a member past it is declared by the type the previous member
+        // reached, not by the list, so the list's universe says nothing about
+        // it.
+        let marker = members
+            .first()
+            .map(Vec::as_slice)
+            .and_then(|segment| match segment {
+                [column_id] => parse_form_chain_numeric_id(column_id),
+                _ => None,
+            })
+            .map_or("", |column_id| {
+                form_table_column_unresolvable_marker(item_id, column_id, owner_scoped_bindings)
+            });
+        format!("{marker}{path}")
+    })
 }
 
 /// The settings-composer members a chain reads past a table item's
@@ -25058,6 +25223,7 @@ pub(super) fn collect_form_table_column_names_for_table(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_button_data_path(
     field: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
@@ -25065,6 +25231,7 @@ pub(super) fn parse_form_button_data_path(
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     match fields.as_slice() {
@@ -25091,11 +25258,16 @@ pub(super) fn parse_form_button_data_path(
             if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID {
                 return None;
             }
+            let marker = form_table_column_unresolvable_marker(
+                owner.first()?.trim(),
+                terminal.first()?.trim(),
+                owner_scoped_bindings,
+            );
             if let Some(data_path) = type_link_data_path_by_table_column.get(&(
                 owner.first()?.trim().to_string(),
                 terminal.first()?.trim().to_string(),
             )) {
-                return Some(data_path.clone());
+                return Some(format!("{marker}{data_path}"));
             }
             resolve_form_item_current_data_path(
                 owner.first()?.trim(),
@@ -25104,8 +25276,41 @@ pub(super) fn parse_form_button_data_path(
                 table_column_names_by_id,
                 data_path_by_binding_key,
             )
+            .map(|data_path| format!("{marker}{data_path}"))
         }
         _ => None,
+    }
+}
+
+/// The `~` marker a data path onto a table item's column carries when the
+/// column is outside the bound dynamic list's own resolvable-field universe.
+///
+/// The fact is the one `<UseAlways>` is measured against and the one the
+/// attribute-scoped route already writes: a field the list cannot resolve
+/// against its data source is spelled with the platform's `~` in front of the
+/// whole path. Which route reached the column does not change that -- only the
+/// namespace the column id is keyed in, and a table item's terminal is
+/// numbered in the namespace of the attribute the table is bound to.
+///
+/// Evidence: Документооборот КОРП 3.0.21.3
+/// `Catalogs/Файлы/Forms/РедактируемыеФайлы`, Button
+/// `ОбщаяКоманда_ДополнительныеСведения` carries `{2,{6,02023637-…},{36}}`
+/// against table item 6 (`Список`), bound to a manual-query dynamic list whose
+/// `<MainTable>` is `InformationRegister.ФайлыВРабочемКаталогеКомпьютера`;
+/// column 36 is `Ссылка`, which that main table does not hold, and the platform
+/// writes `~Items.Список.CurrentData.Ссылка`.
+fn form_table_column_unresolvable_marker(
+    table_id: &str,
+    column_id: &str,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> &'static str {
+    if owner_scoped_bindings
+        .unresolvable_table_columns
+        .contains(&(table_id.to_string(), column_id.to_string()))
+    {
+        "~"
+    } else {
+        ""
     }
 }
 
@@ -25187,10 +25392,11 @@ fn resolve_form_item_scoped_current_data_path(
         return None;
     }
     let column_id = terminal.first()?.trim();
+    let marker = form_table_column_unresolvable_marker(table_id, column_id, owner_scoped_bindings);
     if let Some(data_path) =
         type_link_data_path_by_table_column.get(&(table_id.to_string(), column_id.to_string()))
     {
-        return Some(data_path.clone());
+        return Some(format!("{marker}{data_path}"));
     }
     let no_global_binding_paths = BTreeMap::new();
     resolve_form_item_current_data_path(
@@ -25200,6 +25406,7 @@ fn resolve_form_item_scoped_current_data_path(
         table_column_names_by_id,
         &no_global_binding_paths,
     )
+    .map(|data_path| format!("{marker}{data_path}"))
 }
 
 fn resolve_form_item_current_data_path(
@@ -29965,9 +30172,11 @@ pub(super) fn format_form_child_item_xml(
     // `Title` (1) and the geometry run -- `Width`, `Height`, `MaxHeight`,
     // `HorizontalStretch` (1 each) -- and leads `BorderColor` (1),
     // `ContextMenu` (7), `ExtendedTooltip` (7) and `Events` (2), with no pair
-    // counted both ways.
-    if item.tag == "HTMLDocumentField"
-        && let Some(output) = item.html_document_output
+    // counted both ways. The one `GraphicalSchemaField` of the stand that
+    // carries the element writes it in the same place -- behind `DataPath` and
+    // `TitleLocation`, ahead of `ContextMenu`, `ExtendedTooltip` and `Events`.
+    if matches!(item.tag, "HTMLDocumentField" | "GraphicalSchemaField")
+        && let Some(output) = item.document_field_output
     {
         xml.push_str(&format!(
             "{tab}\t<Output>{}</Output>\r\n",
