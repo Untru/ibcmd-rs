@@ -21850,7 +21850,16 @@ fn attribute_tabular_section_child_object_tag(
         }
         return Some(("Attribute", None));
     }
-    if is_offset_inside_metadata_object_code(text, marker_start, 8)
+    // A data processor's own children are code-27 records, and the two
+    // branches above are what read them. A code-8 record inside one is
+    // something else entirely: `uh` `DataProcessors/ЗакрытиеПериодаМСФО`
+    // stores its command `ЗакрытиеПериодаМСФО` as `{8,{4,0,{0},"",-1,-1,1,0,
+    // ""},…,{2,{1,0,303b322e-…},"ЗакрытиеПериодаМСФО",…},0,0}` behind the
+    // tabular sections, and this branch published that command's header as an
+    // attribute of the last tabular section -- an attribute the platform
+    // writes nowhere, carrying the object's own name and an empty `<Type/>`.
+    if owner_kind != "DataProcessor"
+        && is_offset_inside_metadata_object_code(text, marker_start, 8)
         && let Some(tabular_section) = preceding_metadata_header_for_code(text, marker_start, 11)
     {
         return Some(("Attribute", Some(tabular_section)));
