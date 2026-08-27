@@ -23708,20 +23708,31 @@ fn format_form_body_xml_with_dcs_profiles(
             escape_xml_text(command_bar_location)
         ));
     }
-    // `ScalingMode` follows `Customizable` (3) and `CommandBarLocation` (6) and
-    // precedes `CommandSet` (3), `ConversationsRepresentation` (1), `ShowTitle`
-    // (1), `ShowCloseButton` (1) and `UseForFoldersAndItems` (1) in the native
-    // tree, with no counter-example.
-    if let Some(value) = properties.scaling_mode {
-        xml.push_str(&format!(
-            "\t<ScalingMode>{}</ScalingMode>\r\n",
-            escape_xml_text(value)
-        ));
-    }
     if let Some(vertical_scroll) = properties.vertical_scroll {
         xml.push_str(&format!(
             "\t<VerticalScroll>{}</VerticalScroll>\r\n",
             escape_xml_text(vertical_scroll)
+        ));
+    }
+    // `ScalingMode` trails `VerticalScroll`, not the other way round. Every
+    // native `Form.xml` of the eight stand corpora that carries `ScalingMode`
+    // at the root -- 75 documents -- was read for the order of its root
+    // children: `VerticalScroll` leads it on all 17 documents that carry both
+    // and follows it on none, alongside `AutoTitle` (50), `Title` (43),
+    // `WindowOpeningMode` (30), `CommandBarLocation` (25), `Customizable` (12),
+    // `AutoSaveDataInSettings` (7), `AutoURL` (7), `Width` (7), `Group` (3),
+    // `ChildItemsWidth` (2), `SaveWindowSettings` (2), `SaveDataInSettings` (1),
+    // `SettingsStorage` (1) and `Height` (1). It still leads
+    // `UseForFoldersAndItems` (11), `CommandSet` (10),
+    // `ConversationsRepresentation` (2), `ShowTitle` (2), `ShowCloseButton` (2),
+    // the report run (1 each), the document trio (1 each) and every collection
+    // section, with no pair observed in both directions. The previous placement
+    // ahead of `VerticalScroll` came from a census that had never seen the two
+    // together.
+    if let Some(value) = properties.scaling_mode {
+        xml.push_str(&format!(
+            "\t<ScalingMode>{}</ScalingMode>\r\n",
+            escape_xml_text(value)
         ));
     }
     if let Some(conversations_representation) = properties.conversations_representation {
