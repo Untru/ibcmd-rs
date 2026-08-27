@@ -3673,10 +3673,28 @@ pub(super) fn form_item_picture_owner_at(
             continue;
         };
         let revision_fields = normalize_form_item_record_revision(&split_fields);
-        let fields = revision_fields.as_deref().unwrap_or(&split_fields);
-        let Some(wrapper) = fields.first().map(|field| field.trim()) else {
+        let raw_fields = revision_fields.as_deref().unwrap_or(&split_fields);
+        let Some(wrapper) = raw_fields.first().map(|field| field.trim()) else {
             continue;
         };
+        // The conditional `UserVisible` prefix shifts every member of the
+        // record by one, and the asset scan has to see the same canonical
+        // record the item reader sees -- otherwise the picture slot it samples
+        // is the member in front of the picture. ERP УХ 3.2.12.6
+        // `DataProcessors/ВыгрузкаЗагрузкаДанныхXML/Forms/Форма` table
+        // `ДеревоМетаданных` is a prefixed wrapper-`55` record whose
+        // `<RowsPicture>` element the item reader writes correctly from the
+        // shifted slot, while the file beside it -- `RowsPicture.png` -- went
+        // unwritten because this scan sampled the unshifted one.
+        let prefixed_fields =
+            form_child_item_conditional_prefix_slot(wrapper, raw_fields).map(|prefix_slot| {
+                raw_fields
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, field)| (index != prefix_slot).then_some(*field))
+                    .collect::<Vec<_>>()
+            });
+        let fields = prefixed_fields.as_deref().unwrap_or(raw_fields);
         if form_child_item_id(fields).is_none() {
             continue;
         }
