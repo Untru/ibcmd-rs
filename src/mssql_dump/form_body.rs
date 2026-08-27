@@ -4519,6 +4519,7 @@ pub(super) fn apply_form_attribute_additional_columns(
     else {
         return;
     };
+    let mut section_keys: BTreeMap<String, Vec<Option<String>>> = BTreeMap::new();
     for field in fields.iter().skip(start_index + 1).take(group_count) {
         let Some(group) = parse_form_attribute_additional_columns_group(
             field,
@@ -4533,6 +4534,10 @@ pub(super) fn apply_form_attribute_additional_columns(
             .iter_mut()
             .find(|attribute| attribute.id == group.attribute_id)
         {
+            section_keys
+                .entry(group.attribute_id.clone())
+                .or_default()
+                .push(group.tabular_section_uuid.clone());
             attribute
                 .additional_columns
                 .push(FormAttributeAdditionalColumns {
@@ -4541,12 +4546,59 @@ pub(super) fn apply_form_attribute_additional_columns(
                 });
         }
     }
+    order_form_attribute_additional_columns(attributes, &section_keys);
+}
+
+/// The platform does not write an attribute's `<AdditionalColumns>` groups in
+/// the order the record lists them: it writes them ordered by the uuid of the
+/// tabular section each group names.
+///
+/// Census over all eight stand corpora of every `<Columns>` block holding more
+/// than one group whose tables are tabular sections of the attribute's own
+/// metadata object — 342 blocks, of which 330 belong to files that already
+/// match byte for byte: the platform's order is ascending by tabular-section
+/// uuid in every one, with no counter-example. Two rival readings were
+/// refuted by the same census: the owner's declaration order (forward or
+/// reversed) is contradicted by 93 already-matching blocks, and "self-closed
+/// groups first" by 45.
+///
+/// The record order agrees with that key almost everywhere, which is why only
+/// `uh` `Catalogs/ПакетыДанных/Forms/ФормаЭлемента` moved: it lists
+/// `ПоказателиОтчета`, `ИзмеренияИсточников`, `ИсточникиДанных` and the
+/// platform writes the last two first. Groups bound to anything but a tabular
+/// section of the attribute's own object carry no such key and are left in
+/// record order, so an attribute that mixes the two is not reordered at all.
+fn order_form_attribute_additional_columns(
+    attributes: &mut [FormAttribute],
+    section_keys: &BTreeMap<String, Vec<Option<String>>>,
+) {
+    for attribute in attributes.iter_mut() {
+        let Some(keys) = section_keys.get(&attribute.id) else {
+            continue;
+        };
+        if keys.len() != attribute.additional_columns.len() || keys.iter().any(|key| key.is_none())
+        {
+            continue;
+        }
+        let mut ordered = keys
+            .iter()
+            .map(|key| key.clone().unwrap_or_default())
+            .zip(std::mem::take(&mut attribute.additional_columns))
+            .collect::<Vec<_>>();
+        ordered.sort_by(|left, right| left.0.cmp(&right.0));
+        attribute.additional_columns = ordered.into_iter().map(|(_, group)| group).collect();
+    }
 }
 
 pub(super) struct ParsedFormAttributeAdditionalColumnsGroup {
     pub(super) attribute_id: String,
     pub(super) table: String,
     pub(super) columns: Vec<FormAttributeColumn>,
+    /// The uuid of the tabular section this group's table names, when the
+    /// table is a tabular section of the attribute's own metadata object.
+    /// It is the key the platform orders the groups by; see
+    /// `order_form_attribute_additional_columns`.
+    pub(super) tabular_section_uuid: Option<String>,
 }
 
 pub(super) fn parse_form_attribute_additional_columns_group(
@@ -4576,6 +4628,7 @@ pub(super) fn parse_form_attribute_additional_columns_group(
         .take(schema.column_count())
         .map(|field| parse_form_attribute_column(field, type_index, object_refs))
         .collect::<Option<Vec<_>>>()?;
+    let mut tabular_section_uuid = None;
     let (table, nested_binding_start) = match schema.binding_kind() {
         FormAttributeAdditionalColumnsBindingKind::Attribute => (attribute.name.clone(), 2),
         FormAttributeAdditionalColumnsBindingKind::Numeric => {
@@ -4599,21 +4652,72 @@ pub(super) fn parse_form_attribute_additional_columns_group(
         // non-negative and nothing else read the slot.
         FormAttributeAdditionalColumnsBindingKind::StandardMember => {
             let reference = form_attribute_exact_single_type_reference(attribute)?;
-            let (_, section_name, _) = form_standard_tabular_section_for_type_reference(
-                reference,
-                binding.first()?.trim(),
-            )?;
-            (format!("{}.{section_name}", attribute.name), 3)
+            let marker = binding.first()?.trim();
+            if let Some((_, section_name, _)) =
+                form_standard_tabular_section_for_type_reference(reference, marker)
+            {
+                (format!("{}.{section_name}", attribute.name), 3)
+            } else {
+                // The marker names no standard tabular section but a standard
+                // *collection* of the attribute's own family, and the segment
+                // after it names the member of that collection the columns
+                // belong to. The one collection the corpus shows here is a
+                // document object's `RegisterRecords`, whose member is a
+                // register named by uuid — the same three segments
+                // `resolve_form_document_register_records_data_path` already
+                // reads for a bound slot. Evidence: ERP УХ 3.2.12.6
+                // `Documents/ОперацияБух`, `ОперацияМСФО` and
+                // `ОперацияМеждународный`, whose form bodies carry
+                // `{3,{1},{-8},{0,<register uuid>}}` against the `Объект`
+                // attribute and whose platform XML writes
+                // `<AdditionalColumns table="Объект.RegisterRecords.<register>">`.
+                // Nothing read the segment, so both groups of each form were
+                // dropped and every item bound to one of their columns spelled
+                // its own name instead of the column's.
+                let collection =
+                    form_object_standard_property_name(reference, marker.parse::<i64>().ok()?)?;
+                if collection != "RegisterRecords" {
+                    return None;
+                }
+                let member = split_1c_braced_fields(target.get(3)?.trim(), 0)?;
+                let [prefix, register_uuid] = member.as_slice() else {
+                    return None;
+                };
+                if prefix.trim() != "0" {
+                    return None;
+                }
+                let register_uuid = parse_non_zero_uuid(register_uuid.trim())?;
+                let register_reference = object_refs.get(&register_uuid)?;
+                let (register_family, register_name) = register_reference.split_once('.')?;
+                if register_name.contains('.')
+                    || !form_register_family_holds_document_records(register_family)
+                {
+                    return None;
+                }
+                (
+                    format!("{}.{collection}.{register_name}", attribute.name),
+                    4,
+                )
+            }
         }
         FormAttributeAdditionalColumnsBindingKind::MetadataReference => {
+            let type_id = binding.get(1)?.trim();
             let table = resolve_form_attribute_additional_columns_metadata_table_path(
                 &attribute_id,
-                binding.get(1)?.trim(),
+                type_id,
                 target.get(2)?.trim(),
                 attributes,
                 object_refs,
                 child_item_indexes,
             )?;
+            tabular_section_uuid = parse_non_zero_uuid(type_id).filter(|uuid| {
+                object_refs.get(uuid).is_some_and(|reference| {
+                    matches!(
+                        reference.split('.').collect::<Vec<_>>().as_slice(),
+                        [_, _, "TabularSection", section] if !section.is_empty()
+                    )
+                })
+            });
             (table, 3)
         }
     };
@@ -4622,10 +4726,17 @@ pub(super) fn parse_form_attribute_additional_columns_group(
         table,
         target.get(nested_binding_start..)?,
     )?;
+    // Only a group whose table is still the whole tabular section keeps the
+    // ordering key: a nested segment addresses a column inside it, and the
+    // census that established the key covers no such group.
+    if nested_binding_start < target.len() {
+        tabular_section_uuid = None;
+    }
     Some(ParsedFormAttributeAdditionalColumnsGroup {
         attribute_id,
         table,
         columns,
+        tabular_section_uuid,
     })
 }
 

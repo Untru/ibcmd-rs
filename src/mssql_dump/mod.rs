@@ -8423,6 +8423,14 @@ enum MetadataChildFillValue {
     DesignTimeRef(String),
     String(String),
     TypeDescription,
+    /// A design-time value of a platform-defined type: the QName the platform
+    /// writes in `xsi:type` and the member spelling, both read from the one
+    /// table `form_choice_list_design_time_platform_value` already answers a
+    /// form's choice list from.
+    PlatformValue {
+        type_name: &'static str,
+        member: &'static str,
+    },
 }
 
 struct RegisterStandardAttribute {
@@ -22024,8 +22032,10 @@ fn parse_chart_of_accounts_properties(
         standard_attributes: parse_chart_standard_attributes(
             fields.get(38)?,
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-            Some(("-6", "ChartOfAccounts")),
-            &header.name,
+            ChartStandardAttributeVocabulary::ChartOfAccountsRoot {
+                owner_name: &header.name,
+                metadata_object_refs,
+            },
             type_index,
             object_refs,
         )?,
@@ -22439,8 +22449,7 @@ fn parse_chart_of_calculation_types_properties(
         standard_attributes: parse_chart_standard_attributes(
             fields.get(43)?,
             &CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES,
-            None,
-            &header.name,
+            ChartStandardAttributeVocabulary::NilOnly,
             type_index,
             object_refs,
         )?,
@@ -22818,11 +22827,28 @@ fn parse_chart_of_accounts_child_collection(
         .collect()
 }
 
+/// Which non-nil `<xr:FillValue>` members a chart's standard attributes are
+/// evidenced to carry, and whether the row may carry a resolvable
+/// `<xr:Mask>`/`<xr:ChoiceParameters>`.
+///
+/// A call site with no evidence keeps the historical contract: nil fill value,
+/// empty mask and empty choice parameters, refusing anything else.
+#[derive(Clone, Copy)]
+enum ChartStandardAttributeVocabulary<'a> {
+    NilOnly,
+    /// The root of a chart of accounts. `Parent` fills with its own owner's
+    /// `EmptyRef` and `Type` with a member of the platform's `ent:AccountType`;
+    /// `Code` carries a mask and `Parent` a choice parameter.
+    ChartOfAccountsRoot {
+        owner_name: &'a str,
+        metadata_object_refs: &'a BTreeMap<String, String>,
+    },
+}
+
 fn parse_chart_standard_attributes(
     value: &str,
     definitions: &[(&str, &'static str)],
-    parent: Option<(&str, &str)>,
-    owner_name: &str,
+    vocabulary: ChartStandardAttributeVocabulary<'_>,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
@@ -22882,19 +22908,84 @@ fn parse_chart_standard_attributes(
             bag_shape = Some(bag.has_type_reduction_mode);
             let raw_fill =
                 bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-            let fill_value = if parent.is_some_and(|(marker, _)| marker == expected_marker) {
-                let (_, owner_kind) = parent?;
-                let reference =
-                    parse_information_register_design_time_ref(raw_fill, type_index, object_refs)?;
-                (reference == format!("{owner_kind}.{owner_name}.EmptyRef"))
-                    .then_some(MetadataChildFillValue::DesignTimeRef(reference))?
-            } else {
-                information_register_standard_attribute_nil_is_valid(raw_fill)
-                    .then_some(MetadataChildFillValue::Nil)?
+            let fill_value = parse_chart_standard_attribute_fill_value(
+                raw_fill,
+                expected_marker,
+                vocabulary,
+                type_index,
+                object_refs,
+            )?;
+            let scope = match vocabulary {
+                ChartStandardAttributeVocabulary::NilOnly => None,
+                ChartStandardAttributeVocabulary::ChartOfAccountsRoot {
+                    metadata_object_refs,
+                    ..
+                } => Some(StandardAttributeChoiceParameterScope {
+                    type_index,
+                    object_refs: metadata_object_refs,
+                }),
             };
-            parse_register_standard_attribute(name, &bag, fill_value)
+            let (attribute, comment, choice_parameter_links) =
+                parse_register_standard_attribute_with_comment_and_choice_parameter_links(
+                    name, &bag, fill_value, "0", scope,
+                )?;
+            (comment.is_empty()
+                && information_register_standard_attribute_choice_parameter_links_is_empty(
+                    choice_parameter_links,
+                ))
+            .then_some(attribute)
         })
         .collect()
+}
+
+/// The platform type a chart of accounts fills its `Type` standard attribute
+/// with. Which member each ordinal spells is not decided here: it comes from
+/// the one table a form's choice list is already read against.
+const CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID: &str = "872f7198-7083-4e3e-b57e-a2a9802c769e";
+
+/// The `<xr:FillValue>` of one standard attribute of a chart root.
+///
+/// Nil is admissible everywhere. Beyond it, only the members the vocabulary
+/// declares are read, and every other shape refuses the attribute.
+fn parse_chart_standard_attribute_fill_value(
+    value: &str,
+    marker: &str,
+    vocabulary: ChartStandardAttributeVocabulary<'_>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChildFillValue> {
+    if information_register_standard_attribute_nil_is_valid(value) {
+        return Some(MetadataChildFillValue::Nil);
+    }
+    let ChartStandardAttributeVocabulary::ChartOfAccountsRoot { owner_name, .. } = vocabulary
+    else {
+        return None;
+    };
+    match marker {
+        // `Parent` fills with its own chart's empty reference; a reference to
+        // any other owner is not this attribute's value and refuses.
+        "-6" => {
+            let reference =
+                parse_information_register_design_time_ref(value, type_index, object_refs)?;
+            (reference == format!("ChartOfAccounts.{owner_name}.EmptyRef"))
+                .then_some(MetadataChildFillValue::DesignTimeRef(reference))
+        }
+        // `Type` fills with a member of the platform's account-type
+        // enumeration, written `<xr:FillValue xsi:type="ent:AccountType">`.
+        "-10" => {
+            let ordinal = parse_information_register_standard_attribute_direct_enum(
+                value,
+                CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID,
+            )?;
+            let (type_name, member) =
+                crate::form_schema::form_choice_list_design_time_platform_value(
+                    CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID,
+                    ordinal,
+                )?;
+            Some(MetadataChildFillValue::PlatformValue { type_name, member })
+        }
+        _ => None,
+    }
 }
 
 /// The `ChartOfAccounts` standard-attribute table, as one slice, so a caller
@@ -22971,8 +23062,7 @@ fn parse_chart_standard_tabular_sections(
                 standard_attributes: parse_chart_standard_attributes(
                     detail.get(5)?,
                     attributes,
-                    None,
-                    "",
+                    ChartStandardAttributeVocabulary::NilOnly,
                     &BTreeMap::new(),
                     &BTreeMap::new(),
                 )?,
@@ -37651,6 +37741,11 @@ fn format_register_standard_attribute_fill_value_xml(value: &MetadataChildFillVa
         MetadataChildFillValue::TypeDescription => {
             "<xr:FillValue xsi:type=\"v8:TypeDescription\"/>".to_string()
         }
+        MetadataChildFillValue::PlatformValue { type_name, member } => format!(
+            "<xr:FillValue xsi:type=\"{}\">{}</xr:FillValue>",
+            escape_xml_text(type_name),
+            escape_xml_element_text(member)
+        ),
     }
 }
 
@@ -38662,6 +38757,11 @@ fn format_metadata_child_fill_value_xml(
         MetadataChildFillValue::TypeDescription => {
             "<FillValue xsi:type=\"v8:TypeDescription\"/>".to_string()
         }
+        MetadataChildFillValue::PlatformValue { type_name, member } => format!(
+            "<FillValue xsi:type=\"{}\">{}</FillValue>",
+            escape_xml_text(type_name),
+            escape_xml_element_text(member)
+        ),
     }
 }
 
