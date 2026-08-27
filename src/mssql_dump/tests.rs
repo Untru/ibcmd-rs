@@ -11849,7 +11849,7 @@ fn reads_the_final_select_of_a_dynamic_list_query() {
             "Пусто".to_string(),
         ])
     );
-    assert!(!selection.has_star);
+    assert!(selection.stars.is_empty());
     assert_eq!(selection.extension, None);
     assert_eq!(
         selection.sources,
@@ -11871,7 +11871,7 @@ fn reads_a_dynamic_list_query_star_and_extension() {
     )
     .unwrap();
 
-    assert!(selection.has_star);
+    assert_eq!(selection.stars, vec![Some("Т".to_string())]);
     assert_eq!(
         selection.extension,
         Some(BTreeSet::from(["А".to_string(), "Б".to_string()]))

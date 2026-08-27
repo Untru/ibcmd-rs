@@ -5338,8 +5338,9 @@ pub(super) fn form_dynamic_list_field_name_is_resolvable(
 /// * In every mode: the `dataPath` of each `CalculatedField` the list's
 ///   `ServerState` declares.
 ///
-/// A query whose final selection carries a `*` resolves every stored name, and
-/// an unparseable input is a refusal — both map to `None`.
+/// A `*` selection item is read where the query itself says what it stands
+/// for -- see [`form_dynamic_list_star_source_fields`]; where it does not, and
+/// on an unparseable input, the universe is a refusal (`None`).
 pub(super) fn form_dynamic_list_use_always_universe(
     settings: Option<&FormDynamicListSettings>,
     settings_fields: &[&str],
@@ -5357,10 +5358,15 @@ pub(super) fn form_dynamic_list_use_always_universe(
             if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
                 universe = selection.extension.clone().unwrap_or_default();
             } else {
-                if selection.has_star {
-                    return None;
-                }
                 universe = selection.aliases.clone();
+                for star in &selection.stars {
+                    universe.extend(form_dynamic_list_star_source_fields(
+                        star.as_deref(),
+                        &selection,
+                        object_refs,
+                        declarations,
+                    )?);
+                }
                 if let Some(main_table) = settings.main_table.as_deref() {
                     universe.extend(form_dynamic_list_main_table_auto_fields(
                         main_table,
@@ -5427,6 +5433,76 @@ pub(super) fn form_dynamic_list_use_always_universe(
         ));
     }
     Some(universe)
+}
+
+/// The result column names one `*` item of a manual query's final selection
+/// stands for: the fields of the FROM source it is qualified with.
+///
+/// `<alias>.*` names the source declared under that alias, so its result
+/// columns are that table's own fields -- the standard attributes the table
+/// declares (in the Russian spelling a query result carries, the same rule
+/// [`form_dynamic_list_main_table_auto_fields`] states) plus its declared
+/// top-level children. Everything else about a star is a refusal, and a
+/// refusal here refuses the whole universe, exactly as the unconditional
+/// refusal this replaces did: a bare `*`, a tabular-section star
+/// (`<alias>.<section>.*`), a star on a parenthesized expression, an alias no
+/// FROM source of that select declares, a source that is a subquery or a
+/// temporary table, a virtual table (whose columns are not the base table's),
+/// a table the object-reference index does not carry, and a family whose
+/// standard attributes this reader cannot name.
+///
+/// Evidence, ERP УХ 3.2.12.6: 71 `<UseAlways>` blocks over 35 regulated-report
+/// forms whose list reads `ВЫБРАТЬ РегистрСведений.*, &ПустаяКартинкаСтрок КАК
+/// ПустаяКартинка ИЗ РегистрСведений.<X> КАК РегистрСведений`. The platform
+/// marks exactly the remembered names that register does not declare, and
+/// writes the rest plain — `Reports/РегламентированныйОтчетАлкоПриложение25/
+/// Forms/ФормаОтчета2021Кв1` marks `ИндексСтраницы` (the register spells the
+/// field `ИДДокИндСтраницы`) and, on its `Раздел3Возвраты` list, every
+/// `П00002…` name the field map kept from a `Раздел2Поступления` source, while
+/// its `Раздел2Поступления` list writes `П000020000301`…`П000020000313`,
+/// `Активно`, `Документ` and `ИндексСтроки` plain because that register
+/// declares them.
+///
+/// The whole stand carries 192 dynamic lists whose final selection has a star.
+/// The platform marks a field on 71 of them, every one of the readable shape
+/// above; the other 121 — 56 ERP УХ, 48 UT, 8 Документооборот, 2 БСП demo, 2
+/// БСП base tabular-section stars, one bare `*` and four whose star qualifier
+/// names no source — are written plain, which is what a refused universe
+/// already writes.
+fn form_dynamic_list_star_source_fields(
+    qualifier: Option<&str>,
+    selection: &FormDynamicListQuerySelection,
+    object_refs: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> Option<BTreeSet<String>> {
+    let alias = qualifier?;
+    let table = selection
+        .sources
+        .iter()
+        .find_map(|(reference, source_alias)| {
+            (source_alias.as_deref() == Some(alias))
+                .then(|| reference.clone())
+                .flatten()
+        })?;
+    // `Kind.Name` only: a virtual table's columns are not the base table's.
+    if table.matches('.').count() != 1 {
+        return None;
+    }
+    if !object_refs.values().any(|reference| reference == &table) {
+        return None;
+    }
+    let (kind, _) = table.split_once('.')?;
+    let pairs = form_dynamic_list_std_attribute_pairs(kind)?;
+    let mut fields = BTreeSet::new();
+    for (ru, _) in form_dynamic_list_declared_std_attribute_pairs(pairs, &table, declarations) {
+        fields.insert((*ru).to_string());
+    }
+    fields.extend(form_dynamic_list_main_table_children(
+        &table,
+        object_refs,
+        FORM_DYNAMIC_LIST_MAIN_TABLE_CHILD_KINDS,
+    ));
+    Some(fields)
 }
 
 /// Whether the query names metadata the configuration does not declare.
@@ -5821,8 +5897,12 @@ fn form_dynamic_list_main_table_auto_fields(
 pub(super) struct FormDynamicListQuerySelection {
     /// Result column names of the top-level selection list.
     pub(super) aliases: BTreeSet<String>,
-    /// A `*` selection item makes every stored name resolvable.
-    pub(super) has_star: bool,
+    /// One entry per `*` item of the selection list, holding the qualifier the
+    /// item spells it under: `Some(alias)` for `<alias>.*`, `None` for a bare
+    /// `*` and for a qualifier this reader cannot name with a single
+    /// identifier -- a tabular-section star (`<alias>.<section>.*`) or a star
+    /// on a parenthesized expression.
+    pub(super) stars: Vec<Option<String>>,
     /// Names the `{ВЫБРАТЬ ...}` extension after the selection list declares,
     /// when the query carries one.
     pub(super) extension: Option<BTreeSet<String>>,
@@ -6290,7 +6370,11 @@ pub(super) fn parse_form_dynamic_list_query_selection(
     };
     for item in split_1c_query_items(&selection_tokens) {
         match form_query_selection_item_alias(&item) {
-            Some(alias) if alias == "*" => selection.has_star = true,
+            Some(alias) if alias == "*" => {
+                let qualifier = (item.len() == 3 && item[1] == "." && is_1c_query_ident(&item[0]))
+                    .then(|| item[0].clone());
+                selection.stars.push(qualifier);
+            }
             Some(alias) => {
                 selection.aliases.insert(alias.clone());
                 let expression =
