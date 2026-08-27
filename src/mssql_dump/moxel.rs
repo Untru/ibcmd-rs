@@ -979,6 +979,22 @@ pub(super) struct MoxelPicture {
     /// The record's seventh member, which decides whether the published element
     /// carries `t="false"` at all.
     pub(super) transparency: usize,
+    /// The record's fifth and sixth members: the coordinates of the pixel whose
+    /// colour the picture is drawn transparent in, or `None` for the `-1,-1`
+    /// pair that names no pixel.
+    ///
+    /// Evidence: pairing every stored picture record of the ERP УХ 3.2.12.6
+    /// templates whose storage this wave extracted with the `<picture>` element
+    /// that publishes it splits 375 records three ways with no exception --
+    /// 365 store `0` with `-1,-1` and publish `t="false"`; nine store `1` with
+    /// a real coordinate pair and publish `tx="…" ty="…"` and no `t`
+    /// (`Documents/ЗаявлениеВФССОВозмещенииРасходовНаПогребение/Templates/
+    /// ЗаявлениеВФССПогребение_2012` carries two of them, `185,70` and
+    /// `84,48`); and 1С:УТ 11.5.27.75's `DataProcessors/ПроверкаКонтрагента/
+    /// Templates/ФакторыРиска` stores `1` with `-1,-1` and publishes neither
+    /// attribute. So the flag decides `t` and the coordinate pair decides
+    /// `tx`/`ty`, independently.
+    pub(super) transparent_pixel: Option<(i64, i64)>,
 }
 
 #[derive(Clone, Default)]
@@ -5048,6 +5064,17 @@ pub(super) fn parse_moxel_picture(
             .get(MOXEL_PICTURE_TRANSPARENCY_FIELD)
             .and_then(|field| field.trim().parse::<usize>().ok())
             .unwrap_or(0),
+        // See `MoxelPicture::transparent_pixel`. The walk above already
+        // required both members to parse as integers.
+        transparent_pixel: fields
+            .get(4)
+            .and_then(|field| field.trim().parse::<i64>().ok())
+            .zip(
+                fields
+                    .get(5)
+                    .and_then(|field| field.trim().parse::<i64>().ok()),
+            )
+            .filter(|(x, y)| *x >= 0 && *y >= 0),
     })
 }
 
@@ -11780,9 +11807,15 @@ pub(super) fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
     // writes none, and that one is the only record whose seventh member is not
     // 0.
     let transparency = if picture.transparency == 0 {
-        " t=\"false\""
+        " t=\"false\"".to_owned()
     } else {
-        ""
+        String::new()
+    };
+    // The transparent pixel's own coordinates, published beside (never with)
+    // the flag -- see `MoxelPicture::transparent_pixel`.
+    let transparency = match picture.transparent_pixel {
+        Some((x, y)) => format!("{transparency} tx=\"{x}\" ty=\"{y}\""),
+        None => transparency,
     };
     if let Some(payload) = &picture.payload {
         xml.push_str(&format!(
