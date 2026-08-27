@@ -2244,7 +2244,27 @@ fn parse_moxel_column_sets_with_source_format_order(
         else {
             continue;
         };
-        if additional_count > 64 || index + 3 + additional_count >= fields.len() {
+        // The declared count's only bound is the body's own length: the
+        // additional sets have to fit behind it. The flat 64 this used to
+        // carry sat below real documents and cost them their whole column
+        // table -- ERP УХ 3.2.12.6 declares 66 additional sets in
+        // `Reports/РегламентированныйОтчетАкцизыПриложение7/Templates/
+        // ФормаОтчета2005Кв1_Раздел2`, 74 in
+        // `Reports/РегламентированныйОтчетСтатистикаФорма30/Templates/
+        // ФормаОтчета2019Кв1_Раздел6`, 74 in
+        // `Reports/ОценкаРискаНалоговойПроверки/Templates/ПечатнаяФорма`, 76
+        // in `.../ФормаОтчета2019Кв1_Раздел3` and 119 in
+        // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета`. With
+        // the table refused each of the five fell back to a synthetic default
+        // set, whose `<size>` is the sheet's column count rather than the
+        // set's own declared one.
+        let Some(last) = index
+            .checked_add(3)
+            .and_then(|start| start.checked_add(additional_count))
+        else {
+            continue;
+        };
+        if last >= fields.len() {
             continue;
         }
 
@@ -6965,9 +6985,25 @@ pub(super) fn parse_moxel_value_type(
         "D" if payload.len() == 1 => Some(MoxelValueType::Date {
             fractions: "DateTime",
         }),
-        "D" if payload.len() == 2 && unquote_moxel_string(payload.get(1)?)? == "D" => {
-            Some(MoxelValueType::Date { fractions: "Date" })
-        }
+        // The qualified date descriptor names its own fraction: `"D"` is the
+        // date half, `"T"` the time half.
+        //
+        // Evidence: `Reports/РегламентированноеУведомлениеРегистрацияККТ/
+        // Templates/Раздел4_2023` of ERP УХ 3.2.12.6 stores exactly five
+        // `Pattern` entries -- `{"S",1,1}`, `{"S",8,1}`, `{"D","D"}`,
+        // `{"D","T"}`, `{"S",10,1}` -- and publishes exactly five distinct
+        // `<valueType>` blocks, one per entry, among them
+        // `<v8:DateFractions>Date</v8:DateFractions>` and
+        // `<v8:DateFractions>Time</v8:DateFractions>`. `Раздел1_2023_2` of the
+        // same report pairs the same way over its own five entries.
+        // Refusing `"T"` emptied the whole table (one unreadable descriptor
+        // takes it down by design), so all four documents that carry the
+        // fraction lost every `<valueType>` they publish.
+        "D" if payload.len() == 2 => match unquote_moxel_string(payload.get(1)?)?.as_str() {
+            "D" => Some(MoxelValueType::Date { fractions: "Date" }),
+            "T" => Some(MoxelValueType::Date { fractions: "Time" }),
+            _ => None,
+        },
         "#" if payload.len() == 2 => {
             let uuid = parse_uuid_field(payload.get(1)?.trim())?;
             Some(match moxel_config_type_ref(&uuid, generated_types) {
