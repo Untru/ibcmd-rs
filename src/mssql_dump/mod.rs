@@ -15031,18 +15031,31 @@ fn parse_register_properties_from_text(
             } else {
                 let value_types =
                     parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
-                let properties = parse_metadata_child_properties(
+                let properties = parse_accounting_register_common_child_properties(
                     kind,
-                    &owner_name,
                     text,
                     marker_start,
                     &header.uuid,
-                    &value_types,
+                    &owner_name,
                     type_index,
                     object_refs,
-                    object_refs,
                     form_refs,
-                );
+                    source_version == InfobaseConfigSourceVersion::V2_21,
+                )
+                .or_else(|| {
+                    parse_metadata_child_properties(
+                        kind,
+                        &owner_name,
+                        text,
+                        marker_start,
+                        &header.uuid,
+                        &value_types,
+                        type_index,
+                        object_refs,
+                        object_refs,
+                        form_refs,
+                    )
+                });
                 let properties = properties.map(|properties| {
                     parse_register_child_extra_properties(
                         kind,
@@ -15069,7 +15082,14 @@ fn parse_register_properties_from_text(
             })
         })
         .collect::<Vec<_>>();
-    if kind == "InformationRegister" {
+    // A calculation register serialises its own attributes first (family
+    // `1b304502-…`), then resources, then dimensions, while the platform
+    // writes `<Resource>`, `<Attribute>`, `<Dimension>` -- the same order an
+    // information register uses. ERP УХ 3.2.12.6
+    // `CalculationRegisters/Начисления` 6/25/4 and `.../Удержания` 1/9/2 both
+    // show it; БСП demo `_ДемоОсновныеНачисления` declares no attribute at all
+    // and so is unaffected either way.
+    if kind == "InformationRegister" || kind == "CalculationRegister" {
         child_objects.sort_by_key(|child| match child.tag {
             "Resource" => 0,
             "Attribute" => 1,
@@ -18081,6 +18101,7 @@ fn parse_accumulation_calculation_register_child_tag_from_fields(
     let tag = match (owner_kind, fields.first()?.trim(), fields.len()) {
         ("AccumulationRegister", "5", 3) | ("CalculationRegister", "4", 3) => "Resource",
         ("AccumulationRegister", "8", 6) | ("CalculationRegister", "5", 7) => "Dimension",
+        ("CalculationRegister", "3", 7) => "Attribute",
         _ => return None,
     };
     let common_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
@@ -18170,6 +18191,49 @@ fn parse_accumulation_calculation_register_child_payload_from_fields(
                 use_in_totals: None,
             },
         ),
+        // A calculation register's own attribute: `{3, <common body>,
+        // <schedule dimension uuid>, <indexing>, <full-text search>, 0,
+        // {1, <zero uuid>}}`. Measured with `cf extract` on ERP УХ 3.2.12.6,
+        // both `CalculationRegisters/*`: 25 + 9 = 34 attributes, every one of
+        // them this seven-field shape, and the family list marker
+        // `1b304502-…` contains exactly those 34 headers and nothing else
+        // (see `is_offset_inside_calculation_register_attribute_list`).
+        // `register_child_object_tag` recognised none of them -- code 3 sits
+        // in none of its containment arms -- so every calculation register was
+        // written with its `<Attribute>` children missing entirely.
+        //
+        // Both values observed for each member this arm reads: the schedule
+        // uuid is nil in 27 and names an `InformationRegister.…Dimension.…` in
+        // 7, matching the 7 non-empty `<ScheduleLink>` of the native XML
+        // against 27 `<ScheduleLink/>`; `<Indexing>` is `0` in 32 and `1` in
+        // the two `Начисления` attributes native writes `<Indexing>Index`;
+        // `<FullTextSearch>` is `1` in 33 and `0` in the one native writes
+        // `<FullTextSearch>DontUse`. The fifth member is `0` and the sixth
+        // `{1,<zero uuid>}` in all 34 -- both stay proven constants, refusing
+        // an unseen value rather than dropping it.
+        ("CalculationRegister", "3", 7) => {
+            let schedule_link = parse_calculation_register_dimension_reference(
+                fields.get(2)?,
+                calculation_schedule,
+                object_refs,
+            )?;
+            if fields.get(5)?.trim() != "0"
+                || !information_register_new_child_tail_is_valid(fields.get(6)?)
+            {
+                return None;
+            }
+            (
+                "Attribute",
+                RegisterMetadataChildProperties {
+                    deny_incomplete_values: None,
+                    base_dimension: None,
+                    schedule_link: Some(schedule_link),
+                    indexing: Some(metadata_attribute_indexing_xml(fields.get(3)?.trim())?),
+                    full_text_search: register_child_full_text_search_xml(fields.get(4)?.trim())?,
+                    use_in_totals: None,
+                },
+            )
+        }
         ("CalculationRegister", "5", 7) => {
             let schedule_link = parse_calculation_register_dimension_reference(
                 fields.get(4)?,
@@ -20611,6 +20675,84 @@ fn catalog_direct_attribute_wrapper_code(root_code: &str) -> Option<u32> {
         "57" => Some(6),
         _ => None,
     }
+}
+
+/// Reads an accounting register child's common `{27,…}` body with the same
+/// twenty-three-member map the information/accumulation/calculation registers
+/// already use.
+///
+/// The body an `AccountingRegister` child carries *is* that body: `cf extract`
+/// on all five ERP УХ 3.2.12.6 accounting registers yields 78 children, every
+/// one of them a 23-member code-27 record whose header sits at index 1. The
+/// hand-written reader below it read only twelve of those members and printed
+/// the rest as literals — `<EditFormat/>`, `<ChoiceParameters/>`,
+/// `<ChoiceParameterLinks/>`, `<QuickChoice>Auto`, `<CreateOnInput>Auto`,
+/// `<ChoiceForm/>`, `<LinkByType/>`, `<ChoiceHistoryOnInput>Auto`,
+/// `<ChoiceFoldersAndItems>Items` — so any register whose child deviated from
+/// those constants was written wrong.
+///
+/// Perepis over those 78 children, both values observed for every slot this
+/// change starts reading that the corpus separates at all:
+///
+/// * slot 18 `EditFormat`: empty in 75, `{2,"ru","ЧДЦ=2","en","NFD=2"}` in the
+///   three `МеждународныйБезКорреспонденции` resources whose native XML writes
+///   `<EditFormat>` — the same three that carry it in slot 3 `Format`. The two
+///   slots are byte-identical in every accounting observation, so the naming is
+///   *not* taken from this family: it is the map proven on the 4 074
+///   information registers, where slot 3 and slot 18 do separate.
+/// * slot 16 `ChoiceParameters`: `{0,0}` in 73, a one-item
+///   `{0,1,"Отбор.Статус",{"#",…}}` in the five `НаправлениеДеятельности`
+///   dimensions whose native XML writes a non-empty `<ChoiceParameters>`.
+/// * slot 13 `FillChecking`: `0` in 74, `1` in the four `Международный`
+///   children native writes `<FillChecking>ShowError`.
+/// * slot 5 `MarkNegatives`: `0` in 69, `1` in the nine
+///   `КорректировкиНалоговойБазы` children native writes
+///   `<MarkNegatives>true`.
+///
+/// The remaining slots (`ChoiceFoldersAndItems` 10, `ChoiceForm` 11,
+/// `QuickChoice` 12, `ChoiceParameterLinks` 14, `LinkByType` 15,
+/// `ExtendedEdit` 17, `CreateOnInput` 21, `ChoiceHistoryOnInput` 22) carry one
+/// value each across all 94 accounting-register children of the stand, so this
+/// family cannot separate them on its own; they are read through the same
+/// proven information-register map rather than reprinted as literals, and an
+/// unknown code now refuses the body instead of being silently flattened to the
+/// literal. `FillFromFillingValue`/`FillValue` stay unwritten: native emits
+/// neither for this family.
+fn parse_accounting_register_common_child_properties(
+    owner_kind: &str,
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> Option<MetadataChildProperties> {
+    if owner_kind != "AccountingRegister" {
+        return None;
+    }
+    for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
+        if metadata_header_field_index(&fields, child_uuid) != Some(1) {
+            continue;
+        }
+        let Some(mut properties) = parse_information_register_common_child_properties(
+            &fields,
+            owner_kind,
+            owner_name,
+            type_index,
+            object_refs,
+            form_refs,
+            preserve_raw_data_paths,
+        ) else {
+            continue;
+        };
+        // Native writes neither member for an accounting register child.
+        properties.emit_fill_from_filling_value = false;
+        properties.emit_fill_value = false;
+        return Some(properties);
+    }
+    None
 }
 
 fn parse_accounting_register_child_properties_from_fields(
