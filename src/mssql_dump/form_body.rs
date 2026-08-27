@@ -1594,7 +1594,7 @@ pub(super) struct FormChildItem {
     pub(super) table_title_height: Option<String>,
     pub(super) table_footer_height: Option<String>,
     pub(super) table_output: Option<&'static str>,
-    pub(super) html_document_output: Option<&'static str>,
+    pub(super) document_field_output: Option<&'static str>,
     /// A graphical scheme field's own `<Edit>` flag, read off its option
     /// tuple rather than derived from `<ReadOnly>`.
     pub(super) graphical_scheme_edit: Option<bool>,
@@ -12461,9 +12461,26 @@ fn parse_form_child_item_with_metadata_owners(
         // written, `1` on exactly the items that say `Enable` and `2` on
         // exactly those that say `Disable`, with no code mapping to two
         // answers.  The slot had no reader, so none of them was ever written.
-        html_document_output: field_schema_and_options
+        // The graphical scheme spells the same property in slot 3 of its own
+        // kind-`3` tuple -- one member ahead of where the HTML field keeps it,
+        // because the graphical scheme's colour is inserted behind it and not
+        // in front. Evidence: of the 22 `GraphicalSchemaField` items of the
+        // five stand corpora exactly one reads anything but `0` here -- ERP УХ
+        // 3.2.12.6 `DataProcessors/СтруктураВладения/Forms/Форма`
+        // `РезультатГраф`, which reads `1` -- and it is the one item the
+        // platform writes `<Output>Enable</Output>` on, in the same place of
+        // the scalar run the HTML field writes its own.
+        document_field_output: field_schema_and_options
             .as_ref()
-            .and_then(|(schema, options)| schema.html_document_output(options)),
+            .and_then(|(schema, options)| schema.document_field_output(options))
+            .or_else(|| {
+                (tag == "GraphicalSchemaField")
+                    .then(|| {
+                        let (_, options) = form_document_field_geometry_options(tag, &fields)?;
+                        crate::form_schema::form_output_code(options.get(3).copied())
+                    })
+                    .flatten()
+            }),
         graphical_scheme_edit: parse_form_document_field_flag(tag, fields, |layout| layout.edit),
         excluded_commands: parse_form_excluded_commands(tag, fields),
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
@@ -29866,9 +29883,11 @@ pub(super) fn format_form_child_item_xml(
     // `Title` (1) and the geometry run -- `Width`, `Height`, `MaxHeight`,
     // `HorizontalStretch` (1 each) -- and leads `BorderColor` (1),
     // `ContextMenu` (7), `ExtendedTooltip` (7) and `Events` (2), with no pair
-    // counted both ways.
-    if item.tag == "HTMLDocumentField"
-        && let Some(output) = item.html_document_output
+    // counted both ways. The one `GraphicalSchemaField` of the stand that
+    // carries the element writes it in the same place -- behind `DataPath` and
+    // `TitleLocation`, ahead of `ContextMenu`, `ExtendedTooltip` and `Events`.
+    if matches!(item.tag, "HTMLDocumentField" | "GraphicalSchemaField")
+        && let Some(output) = item.document_field_output
     {
         xml.push_str(&format!(
             "{tab}\t<Output>{}</Output>\r\n",

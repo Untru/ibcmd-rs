@@ -3686,7 +3686,7 @@ impl FormFieldSchema {
     /// 13-member tuple.  The member has no meaning in any other field kind's
     /// tuple, which is why the schema gates it on the kind rather than reading
     /// the same index everywhere.
-    pub(crate) fn html_document_output(self, options: &[&str]) -> Option<&'static str> {
+    pub(crate) fn document_field_output(self, options: &[&str]) -> Option<&'static str> {
         self.html_document_options
             .then(|| form_output_code(options.get(4).copied()))
             .flatten()
