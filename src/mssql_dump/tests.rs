@@ -2815,12 +2815,13 @@ fn business_process_and_cct_reject_a_misordered_marker_at_each_native_role() {
 
 #[test]
 fn cct_command_and_bp_template_stay_typed_and_redacted() {
-    // The chart of characteristic types still refuses an owned command
-    // outright. The business process no longer refuses an owned template --
-    // it reads them (`parse_business_process_child_templates`) -- so a payload
-    // that is not a child uuid is an invariant refusal there rather than an
-    // unsupported one. What has to hold for both is what this test is for: the
-    // refusal is typed, and it carries no native payload.
+    // Neither family refuses its collection outright any more: the business
+    // process reads owned templates (`parse_business_process_child_templates`)
+    // and the chart of characteristic types reads owned commands through the
+    // shared owner-graph reader. A payload that is not a child of the declared
+    // kind is therefore a typed owned-child refusal in both. What has to hold
+    // for both is what this test is for: the refusal is typed, and it carries
+    // no native payload.
     let cases = [
         (
             &EXPECTED_OWNER_GRAPH_LAYOUTS[2],
@@ -2830,7 +2831,7 @@ fn cct_command_and_bp_template_stay_typed_and_redacted() {
         (
             &EXPECTED_OWNER_GRAPH_LAYOUTS[3],
             owner_graph::OwnerCollectionRole::Command,
-            Some("owned_command"),
+            None,
         ),
     ];
     let secret = "native-payload-must-stay-redacted";
@@ -44108,9 +44109,13 @@ fn parses_information_register_variable_collections_without_partial_results() {
     )
     .unwrap();
     assert_eq!(links.len(), 2);
+    // A path whose every segment is the owner's own collapses to its last
+    // segment, exactly as the catalog/characteristic-type reader has always
+    // written a nested own path: all 11 628 dotted data paths of the stand's
+    // object roots are a single segment.
     assert_eq!(
         links[0].data_path,
-        "InformationRegister.Rates.StandardAttribute.Period/InformationRegister.Rates.Dimension.Target"
+        "InformationRegister.Rates.Dimension.Target"
     );
     assert_eq!(links[0].value_change, "Clear");
     assert_eq!(
@@ -61408,10 +61413,13 @@ fn catalog_nonempty_paths_and_typed_values_resolve_fail_closed() {
         "{{5006,1,\"Nested\",3,{{0,{tabular_uuid}}},{{0,{nested_uuid}}},{{0,{nested_uuid}}},0}}"
     );
     assert!(parse_catalog_choice_parameter_links(&path3, "Products", true, &object_refs).is_none());
+    // A reference that leaves the owner is written back as the raw `0:<uuid>`
+    // the record carries: that is what the platform writes for every one of
+    // the 61 such links on the stand.
     let foreign = format!("{{5006,1,\"Foreign\",1,{{0,{foreign_uuid}}},0}}");
-    assert!(
-        parse_catalog_choice_parameter_links(&foreign, "Products", false, &object_refs).is_none()
-    );
+    let foreign_links =
+        parse_catalog_choice_parameter_links(&foreign, "Products", false, &object_refs).unwrap();
+    assert_eq!(foreign_links[0].data_path, format!("0:{foreign_uuid}"));
     let wrong_count = format!("{{5006,2,\"Direct\",1,{{0,{direct_uuid}}},0}}");
     assert!(
         parse_catalog_choice_parameter_links(&wrong_count, "Products", false, &object_refs)
@@ -61426,7 +61434,9 @@ fn catalog_nonempty_paths_and_typed_values_resolve_fail_closed() {
     assert_eq!(link.data_path, "Catalog.Products.Attribute.Owner");
     assert_eq!(link.link_item, 3);
     let foreign_link = format!("{{3,1,{{0,{foreign_uuid}}},0}}");
-    assert!(parse_catalog_link_by_type(&foreign_link, "Products", &object_refs).is_none());
+    let (_, foreign_link) =
+        parse_catalog_link_by_type(&foreign_link, "Products", &object_refs).unwrap();
+    assert_eq!(foreign_link.unwrap().data_path, format!("0:{foreign_uuid}"));
 
     let values = parse_information_register_choice_parameters(
         r#"{0,2,"Amount",{"N",-12.50},"Moment",{"D",20240203040506}}"#,
@@ -71618,17 +71628,20 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
     assert_eq!(parsed[0].data_path, format!("{SECTION}.Attribute.Свойство"));
     assert_eq!(parsed[0].value_change, "Clear");
 
-    // A path that leaves the owner is refused, and so is a bare standard
-    // attribute code, which only the catalog table names.
-    assert!(
-        parse_owner_choice_parameter_links(
-            &links,
-            "ChartOfCharacteristicTypes",
-            "СтатьиДоходов",
-            true,
-            &object_refs,
-        )
-        .is_none()
+    // A path that leaves the owner is written back raw, the way the platform
+    // writes it; a bare standard attribute code is still refused, because only
+    // the catalog table names one.
+    let foreign = parse_owner_choice_parameter_links(
+        &links,
+        "ChartOfCharacteristicTypes",
+        "СтатьиДоходов",
+        true,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        foreign[0].data_path,
+        format!("0:{SECTION_UUID}/0:{ATTRIBUTE_UUID}")
     );
     assert!(
         parse_owner_choice_parameter_links(
@@ -72014,17 +72027,20 @@ fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_p
     assert_eq!(parsed[0].data_path, format!("{SECTION}.Attribute.Свойство"));
     assert_eq!(parsed[0].value_change, "Clear");
 
-    // A path that leaves the owner is still refused, and a bare standard
-    // attribute code stays unnamed outside the catalog table.
-    assert!(
-        parse_owner_choice_parameter_links(
-            &links,
-            "BusinessProcess",
-            "Согласование",
-            true,
-            &object_refs,
-        )
-        .is_none()
+    // A path that leaves the owner is written back raw, exactly as the
+    // platform writes it, and a bare standard attribute code stays unnamed
+    // outside the catalog table.
+    let foreign = parse_owner_choice_parameter_links(
+        &links,
+        "BusinessProcess",
+        "Согласование",
+        true,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        foreign[0].data_path,
+        format!("0:{SECTION_UUID}/0:{ATTRIBUTE_UUID}")
     );
     assert!(
         parse_owner_choice_parameter_links(

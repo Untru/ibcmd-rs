@@ -7890,6 +7890,8 @@ struct ChartOfAccountsProperties {
     explanation: Vec<(String, String)>,
     child_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
+    child_templates: Vec<String>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 struct ChartOfCalculationTypesProperties {
@@ -7982,6 +7984,7 @@ struct ChartOfCharacteristicTypesProperties {
     child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 struct DocumentJournalProperties {
@@ -8461,8 +8464,10 @@ struct ReportProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
     default_form: Option<String>,
+    auxiliary_form: Option<String>,
     main_data_composition_schema: Option<String>,
     default_settings_form: Option<String>,
+    auxiliary_settings_form: Option<String>,
     default_variant_form: Option<String>,
     variants_storage: Option<String>,
     settings_storage: Option<String>,
@@ -10982,6 +10987,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             type_index,
             object_refs,
             form_refs,
+            template_refs,
         ) {
             StrictMetadataRoot::Parsed(chart) => {
                 strict_chart_root_formatted = true;
@@ -13122,24 +13128,6 @@ fn owner_graph_owned_child_diagnostic(
     diagnostic
 }
 
-fn owner_graph_unsupported_collection_item_diagnostic(
-    family: owner_graph::OwnerGraphFamily,
-    role: owner_graph::OwnerCollectionRole,
-    item_index: usize,
-    reference: owner_graph::OwnerGraphReference,
-) -> MetadataSourceExtractionDiagnostic {
-    let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
-        MetadataSourceFailureClass::Unsupported,
-        family.as_str(),
-        "owner_graph_owned_child",
-        "unsupported_collection_item",
-    );
-    diagnostic.collection_role = Some(role.as_str().to_owned());
-    diagnostic.collection_index = Some(item_index);
-    diagnostic.offending_reference = Some(reference.as_str().to_owned());
-    diagnostic
-}
-
 fn owner_graph_field_diagnostic(
     family: owner_graph::OwnerGraphFamily,
     role: owner_graph::OwnerCollectionRole,
@@ -14714,6 +14702,9 @@ fn parse_information_register_owner_properties(
     header: &MetadataHeader,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<InformationRegisterOwnerProperties> {
+    let periodicity = information_register_periodicity_xml(
+        fields.get(INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY)?,
+    )?;
     Some(InformationRegisterOwnerProperties {
         default_record_form: parse_information_register_owned_form_ref(
             fields.get(2)?,
@@ -14725,14 +14716,20 @@ fn parse_information_register_owner_properties(
             &header.name,
             form_refs,
         )?,
-        periodicity: information_register_periodicity_xml(
-            fields.get(INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY)?,
-        )?,
+        periodicity,
         write_mode: information_register_write_mode_xml(fields.get(5)?)?,
         edit_type: information_register_edit_type_xml(fields.get(6)?)?,
         use_standard_commands: information_register_bool(fields.get(7)?)?,
         include_help_in_contents: information_register_bool(fields.get(8)?)?,
-        main_filter_on_period: information_register_bool(fields.get(9)?)?,
+        // A non-periodical register exports `<MainFilterOnPeriod>false` even
+        // when the stored flag is set: there is no period to filter on.
+        // Perepis of 4 074 information registers of the stand -- the flag and
+        // the exported value agree on 4 073, and the one that disagrees (`uh`
+        // `КатегорииЗакупокТоварныхКатегорий`, flag `1`) is `Nonperiodical`
+        // and exports `false`; all 3 576 other non-periodical registers carry
+        // flag `0`.
+        main_filter_on_period: information_register_bool(fields.get(9)?)?
+            && periodicity != "Nonperiodical",
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(10)?)?,
         full_text_search: information_register_full_text_search(fields.get(11)?)?,
         standard_attributes: parse_information_register_standard_attributes(fields.get(12)?)?,
@@ -15172,6 +15169,14 @@ fn register_standard_attributes(
     if kind == "AccountingRegister" {
         let account_data_path =
             format!("AccountingRegister.{owner_name}.StandardAttribute.Account");
+        if accounting_attributes.present.contains("PeriodAdjustment") {
+            attributes.push(register_standard_attribute(
+                "PeriodAdjustment",
+                "DontCheck",
+                accounting_overrides,
+                None,
+            ));
+        }
         attributes.push(register_standard_attribute(
             "Account",
             "DontCheck",
@@ -15385,6 +15390,12 @@ fn parse_accounting_register_standard_attribute_collection(
 
 fn accounting_register_standard_attribute_name(marker_fields: &[&str]) -> Option<&'static str> {
     match marker_fields {
+        // `-30` is `PeriodAdjustment`, the standard attribute a register with a
+        // period-adjustment length owns. Two accounting registers of the stand
+        // declare it (`uh` `КорректировкиНалоговойБазы` and `Хозрасчетный`,
+        // both with `<PeriodAdjustmentLength>1`), and both declare it first;
+        // the other five declare neither the marker nor the element.
+        ["-30"] => Some("PeriodAdjustment"),
         ["-10"] => Some("Account"),
         ["-9"] => Some("RecordType"),
         ["-5"] => Some("Active"),
@@ -15439,7 +15450,13 @@ fn parse_register_period_adjustment_length(kind: &str, fields: &[&str], uuid: &s
         return None;
     }
     let header_index = metadata_header_field_index(fields, uuid)?;
-    parse_1c_u32_field(fields.get(header_index + 6).copied())
+    // `<PeriodAdjustmentLength>` is the last owner field, not the sixth after
+    // the header. Both readings agree on the five accounting registers of the
+    // stand that write `0`; the two that write `1` (`uh`
+    // `КорректировкиНалоговойБазы` and `Хозрасчетный`, the same two whose
+    // standard attributes declare `-30`) hold it only at the tail, and the
+    // sixth field after the header is `0` on all seven.
+    parse_1c_u32_field(fields.get(header_index + 14).copied())
 }
 
 fn parse_register_data_lock_control_mode(
@@ -16381,6 +16398,16 @@ fn register_generated_type_category(type_prefix: &str, suffix: &str) -> &'static
 
 fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Option<&'static str> {
     if !metadata_kind_uses_register_resources(kind) {
+        return None;
+    }
+    // A command written in the short shape wraps its payload in `{8, …}`, and
+    // the `code 8` arm below reads that as a `Resource`. The collection an
+    // offset sits in is what names it -- `COMMAND_COLLECTION_LIST_MARKERS`
+    // carries that measurement -- so a command collection is never a register
+    // child collection. Four ERP УХ 3.2.12.6 information registers wrote such
+    // a command twice: once as a header-only `<Resource>` it does not own and
+    // never as the `<Command>` it is.
+    if is_offset_inside_command_collection(text, marker_start) {
         return None;
     }
     if kind == "InformationRegister"
@@ -19165,6 +19192,66 @@ fn parse_information_register_link_by_type(
     }))
 }
 
+/// One resolved data-path segment, tagged by whether it names something the
+/// exporting object itself owns.
+///
+/// The distinction is what the platform writes: a link into a *foreign*
+/// object's child is emitted as the raw `0:<uuid>` the record carries, never
+/// as a resolved reference. Perepis of all eight stand corpora, object roots
+/// only: 11 628 dotted data paths, every one of them naming a child of the
+/// object being exported and written as a single segment; 61 raw paths, every
+/// one of them naming a foreign object's child (18 of them two segments joined
+/// by `/`); 15 bare `0`; and one dotted path naming a whole foreign object
+/// (`uh` `Constant.ВидЦеныПлановойСтоимостиМатериаловРабот` links to
+/// `Constant.ВалютаПлановойСебестоимостиПродукции`), which is a top-level
+/// reference and not a child.
+enum ResolvedDataPathSegment {
+    Own(String),
+    Foreign(String),
+}
+
+/// Renders resolved segments the way the platform writes them: an all-own path
+/// collapses to its last segment, anything else keeps every segment raw and
+/// joins them with `/`.
+fn render_resolved_data_path(segments: Vec<ResolvedDataPathSegment>) -> Option<String> {
+    if segments
+        .iter()
+        .all(|segment| matches!(segment, ResolvedDataPathSegment::Own(_)))
+    {
+        return match segments.into_iter().next_back()? {
+            ResolvedDataPathSegment::Own(path) => Some(path),
+            ResolvedDataPathSegment::Foreign(path) => Some(path),
+        };
+    }
+    Some(
+        segments
+            .into_iter()
+            .map(|segment| match segment {
+                ResolvedDataPathSegment::Own(path) | ResolvedDataPathSegment::Foreign(path) => path,
+            })
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
+/// Classifies a resolved reference against the object that owns the record.
+fn classify_resolved_data_path_reference(
+    resolved: Option<&String>,
+    uuid: &str,
+    owner_prefix: &str,
+) -> ResolvedDataPathSegment {
+    match resolved {
+        // A whole foreign metadata object still resolves by name: it is not a
+        // child of anything, so there is no owner to disagree with.
+        Some(reference)
+            if reference.starts_with(owner_prefix) || reference.matches('.').count() == 1 =>
+        {
+            ResolvedDataPathSegment::Own(reference.clone())
+        }
+        _ => ResolvedDataPathSegment::Foreign(format!("0:{uuid}")),
+    }
+}
+
 fn parse_information_register_data_path(
     fields: &[&str],
     owner_kind: &str,
@@ -19172,31 +19259,35 @@ fn parse_information_register_data_path(
     object_refs: &BTreeMap<String, String>,
     preserve_raw_data_paths: bool,
 ) -> Option<String> {
-    fields
+    let owner_prefix = format!("{owner_kind}.{owner_name}.");
+    let segments = fields
         .iter()
         .map(|field| {
             let segment = split_1c_braced_fields(field, 0)?;
             match (segment.first()?.trim(), segment.len()) {
-                ("0", 1) => Some("0".to_string()),
+                ("0", 1) => Some(ResolvedDataPathSegment::Foreign("0".to_string())),
                 ("0", 2) => {
                     let uuid = parse_uuid_field(segment.get(1)?.trim())?;
                     if preserve_raw_data_paths {
-                        Some(format!("0:{uuid}"))
+                        Some(ResolvedDataPathSegment::Foreign(format!("0:{uuid}")))
                     } else {
-                        Some(
-                            object_refs
-                                .get(&uuid)
-                                .cloned()
-                                .unwrap_or_else(|| format!("0:{uuid}")),
-                        )
+                        Some(classify_resolved_data_path_reference(
+                            object_refs.get(&uuid),
+                            &uuid,
+                            &owner_prefix,
+                        ))
                     }
                 }
-                ("-2", 1) if owner_kind == "InformationRegister" => Some(format!(
-                    "InformationRegister.{owner_name}.StandardAttribute.Period"
-                )),
-                ("-3", 1) if owner_kind == "InformationRegister" => Some(format!(
-                    "InformationRegister.{owner_name}.StandardAttribute.Recorder"
-                )),
+                ("-2", 1) if owner_kind == "InformationRegister" => {
+                    Some(ResolvedDataPathSegment::Own(format!(
+                        "InformationRegister.{owner_name}.StandardAttribute.Period"
+                    )))
+                }
+                ("-3", 1) if owner_kind == "InformationRegister" => {
+                    Some(ResolvedDataPathSegment::Own(format!(
+                        "InformationRegister.{owner_name}.StandardAttribute.Recorder"
+                    )))
+                }
                 // An accumulation register's own standard attributes are named
                 // by the very same negative markers, through the table this
                 // file already keeps for them
@@ -19211,14 +19302,16 @@ fn parse_information_register_data_path(
                 // (`-5`) and two `StandardAttribute.Period` (`-2`).
                 (marker, 1) if owner_kind == "AccumulationRegister" => {
                     accumulation_register_record_set_standard_attribute_name(marker).map(|name| {
-                        format!("AccumulationRegister.{owner_name}.StandardAttribute.{name}")
+                        ResolvedDataPathSegment::Own(format!(
+                            "AccumulationRegister.{owner_name}.StandardAttribute.{name}"
+                        ))
                     })
                 }
                 _ => None,
             }
         })
-        .collect::<Option<Vec<_>>>()
-        .map(|segments| segments.join("/"))
+        .collect::<Option<Vec<_>>>()?;
+    render_resolved_data_path(segments)
 }
 
 fn parse_information_register_choice_parameters(
@@ -20376,19 +20469,27 @@ fn resolve_owner_data_path(
 ) -> Option<String> {
     let owner_prefix = format!("{owner_kind}.{owner_name}.");
     let mut resolved = Vec::with_capacity(fields.len());
+    let mut own_chain = Vec::<String>::with_capacity(fields.len());
     for field in fields {
-        let path = resolve_owner_data_path_segment(field, owner_kind, owner_name, object_refs)?;
-        if !path.starts_with(&owner_prefix) {
-            return None;
+        let segment = resolve_owner_data_path_segment(
+            field,
+            owner_kind,
+            owner_name,
+            object_refs,
+            &owner_prefix,
+        )?;
+        if let ResolvedDataPathSegment::Own(path) = &segment {
+            // Inside the owner the chain is still a real parent/child chain.
+            if let Some(parent) = own_chain.last()
+                && !path.starts_with(&format!("{parent}."))
+            {
+                return None;
+            }
+            own_chain.push(path.clone());
         }
-        if let Some(parent) = resolved.last()
-            && !path.starts_with(&format!("{parent}."))
-        {
-            return None;
-        }
-        resolved.push(path);
+        resolved.push(segment);
     }
-    resolved.pop()
+    render_resolved_data_path(resolved)
 }
 
 /// The negative codes name standard attributes, and the table that maps them is
@@ -20412,18 +20513,27 @@ fn resolve_owner_data_path_segment(
     owner_kind: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
+    owner_prefix: &str,
+) -> Option<ResolvedDataPathSegment> {
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     match fields.as_slice() {
+        // The bare `0` segment is written back verbatim; 15 links of the stand
+        // carry it and two carry it twice (`uh`
+        // `Documents/ПризнаниеРасходовПоАмортизацииНСБУ` writes `0/0`).
+        [code] if code.trim() == "0" => Some(ResolvedDataPathSegment::Foreign("0".to_string())),
         [code] => {
             let standard_attribute = owner_data_path_standard_attribute(owner_kind, code.trim())?;
-            Some(format!(
+            Some(ResolvedDataPathSegment::Own(format!(
                 "{owner_kind}.{owner_name}.StandardAttribute.{standard_attribute}"
-            ))
+            )))
         }
         [kind, uuid] if kind.trim() == "0" => {
             let uuid = parse_uuid_field(uuid.trim())?;
-            object_refs.get(&uuid).cloned()
+            Some(classify_resolved_data_path_reference(
+                object_refs.get(&uuid),
+                &uuid,
+                owner_prefix,
+            ))
         }
         _ => None,
     }
@@ -21252,6 +21362,7 @@ fn parse_chart_of_accounts_properties_from_text(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> StrictMetadataRoot<ChartOfAccountsProperties> {
     let Some(root) = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))
     else {
@@ -21293,13 +21404,22 @@ fn parse_chart_of_accounts_properties_from_text(
     else {
         return StrictMetadataRoot::Invalid;
     };
-    if collections[..3]
-        .iter()
-        .any(|collection| !collection.is_empty())
-    {
+    // Collection 0 is the owner's own command collection -- the same
+    // `0df30176-…` marker `COMMAND_COLLECTION_LIST_MARKERS` already measures
+    // as "ChartOfAccounts" -- and collection 1 holds its templates. Both were
+    // required empty, which sent every chart of accounts that owns a command
+    // or a template to the default-list-form fallback, a file without
+    // `<InternalInfo>` and without almost every property. Collection 2 stays
+    // required-empty: it is empty on all four charts of the stand and no
+    // observation names it.
+    if !collections[2].is_empty() {
         return StrictMetadataRoot::Unsupported;
     }
 
+    // An owner the previous gate rejected outright keeps that gate's outcome
+    // when the rest of its record still does not read: the relaxation may add
+    // a complete file, never take one away.
+    let owns_commands_or_templates = !collections[0].is_empty() || !collections[1].is_empty();
     parse_chart_of_accounts_properties(
         text,
         header,
@@ -21308,11 +21428,17 @@ fn parse_chart_of_accounts_properties_from_text(
         type_index,
         object_refs,
         form_refs,
+        template_refs,
     )
     .map(StrictMetadataRoot::Parsed)
-    .unwrap_or(StrictMetadataRoot::Invalid)
+    .unwrap_or(if owns_commands_or_templates {
+        StrictMetadataRoot::Unsupported
+    } else {
+        StrictMetadataRoot::Invalid
+    })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_chart_of_accounts_properties(
     text: &str,
     header: &MetadataHeader,
@@ -21321,6 +21447,7 @@ fn parse_chart_of_accounts_properties(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<ChartOfAccountsProperties> {
     let parsed_header = parse_wrapped_register_owner_header(fields.get(15)?)?;
     let header_occurrences = fields
@@ -21331,7 +21458,13 @@ fn parse_chart_of_accounts_properties(
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
         || !cct_pair_is(fields.get(18)?, "0", "0")
-        || !cct_based_on_is_empty(fields.get(48)?)
+        // Field 48 is the physical index list, not `<BasedOn>`: `uh` `МСФО`
+        // declares one descriptor there (`{"S","ПланСчетов_МСФО"}` inside it)
+        // and the platform still exports `<BasedOn/>`. `<BasedOn>` rides
+        // field 18, checked above with the same `{0,0}` empty form every
+        // other family writes. Only the declared shape is validated here;
+        // the descriptors themselves are not exported.
+        || !chart_physical_index_list_shape_is_known(fields.get(48)?)
         || !cct_data_lock_fields_are_empty(fields.get(50)?)
     {
         return None;
@@ -21410,6 +21543,27 @@ fn parse_chart_of_accounts_properties(
     {
         return None;
     }
+
+    let template_uuids = parse_task_form_uuids(collections.get(1)?)?;
+    if template_uuids
+        .iter()
+        .any(|uuid| !all_uuids.insert(uuid.to_ascii_lowercase()))
+    {
+        return None;
+    }
+    let child_templates =
+        parse_chart_of_accounts_child_templates(&header.name, &template_uuids, template_refs)?;
+    let command_identity_slots =
+        parse_owner_graph_command_identity_slots_indexed(collections.first()?).ok()?;
+    let child_commands = parse_strict_owned_commands(
+        "ChartOfAccounts",
+        text,
+        &header.uuid,
+        &command_identity_slots,
+        type_index,
+        object_refs,
+        &mut all_uuids,
+    )?;
 
     let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
     // Field 24 is `"1"` on every chart of accounts of the stand, exactly as it
@@ -21556,6 +21710,8 @@ fn parse_chart_of_accounts_properties(
         explanation: parse_information_register_owner_localized_value(fields.get(47)?)?,
         child_objects,
         child_forms,
+        child_templates,
+        child_commands,
     })
 }
 
@@ -22006,6 +22162,69 @@ fn parse_strict_chart_child_forms(
         .then_some(forms)
 }
 
+fn parse_chart_of_accounts_child_templates(
+    owner_name: &str,
+    template_uuids: &[String],
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let references = template_refs
+        .iter()
+        .map(|(uuid, template_ref)| owner_graph::OwnedTemplateReference {
+            uuid,
+            kind: template_ref.kind,
+            relative_path: &template_ref.relative_path,
+            canonical_reference: template_source_reference_name(template_ref),
+        })
+        .collect::<Vec<_>>();
+    owner_graph::resolve_owned_template_names(
+        "ChartOfAccounts",
+        "ChartsOfAccounts",
+        owner_name,
+        OWNER_GRAPH_TEMPLATE_FOLDER,
+        OWNER_GRAPH_TEMPLATE_KIND,
+        template_uuids,
+        &references,
+    )
+}
+
+/// Owned commands of a strict-root owner, checked against the identities its
+/// command collection declares.
+///
+/// The owner-graph families run the same check through
+/// `parse_owner_graph_commands`; this is the fail-closed equivalent for an
+/// owner whose root is read by the strict reader and which therefore has no
+/// owner-graph diagnostic channel.
+fn parse_strict_owned_commands(
+    owner_kind: &str,
+    text: &str,
+    owner_uuid: &str,
+    slots: &[OwnerGraphCommandIdentitySlot],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    all_uuids: &mut BTreeSet<String>,
+) -> Option<Vec<MetadataChildCommand>> {
+    let commands =
+        nested_child_commands_from_text(owner_kind, text, owner_uuid, type_index, object_refs);
+    if commands.len() != slots.len() {
+        return None;
+    }
+    for (command, slot) in commands.iter().zip(slots) {
+        if command.properties.is_none()
+            || !command
+                .header
+                .uuid
+                .eq_ignore_ascii_case(&slot.identity_uuid)
+            || command.header.name != slot.header.name
+            || command.header.synonyms != slot.header.synonyms
+            || command.header.comment != slot.header.comment
+            || !all_uuids.insert(command.header.uuid.to_ascii_lowercase())
+        {
+            return None;
+        }
+    }
+    Some(commands)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parse_chart_of_accounts_child_collection(
     values: &[&str],
@@ -22252,17 +22471,30 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         owner_graph_diagnostic,
     )?;
 
-    // Commands still have no proven CCT payload parser. Templates are handled
-    // below through the shared owner/path/kind validator.
-    if !command_collection.items.is_empty() {
-        *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
-            owner_graph::OwnerCollectionRole::Command,
-            0,
-            owner_graph::OwnerGraphReference::OwnedCommand,
-        ));
-        return None;
-    }
+    // Owned commands are read through the same shared reader every other
+    // owner-graph family uses. `95b5e1d4-abfa-4a16-818d-a5b07b7d3f73` is
+    // already the measured characteristic-type command collection in
+    // `COMMAND_COLLECTION_LIST_MARKERS`; only this parser still refused a
+    // non-empty one, which cost `uh` `ВидыБюджетов` its whole file over two
+    // ordinary navigation-panel commands.
+    let command_identity_slots =
+        parse_owner_graph_command_identity_slots_indexed(&command_collection.items)
+            .map_err(|failure| {
+                *owner_graph_diagnostic = Some(owner_graph_command_failure_diagnostic(
+                    owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+                    failure,
+                ));
+            })
+            .ok()?;
+    let child_commands = parse_owner_graph_commands(
+        &command_identity_slots,
+        text,
+        &header.uuid,
+        type_index,
+        object_refs,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph_diagnostic,
+    )?;
 
     let mut generated_ids = owner_graph.identities.generated_identities();
     let mut identities = owner_graph.identities.clone();
@@ -22393,6 +22625,23 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
         owner_graph::OwnerCollectionRole::Template,
         template_uuids,
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_child_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Command,
+        command_identity_slots
+            .iter()
+            .map(|slot| slot.identity_uuid.clone()),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_command_values(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        command_identity_slots
+            .iter()
+            .map(|slot| slot.value_uuid.clone()),
         owner_graph_diagnostic,
     )?;
 
@@ -22601,6 +22850,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         child_metadata_objects,
         child_forms,
         child_templates,
+        child_commands,
         characteristics,
     })
 }
@@ -22635,6 +22885,23 @@ fn cct_characteristics_preconditions(fields: &[&str]) -> bool {
         && fields
             .get(36)
             .is_some_and(|value| owner_graph::CctPhysicalSchema::binary_flag(value.trim()))
+}
+
+/// The `{0,{N,<descriptor>…}}` physical index list a chart owner declares.
+///
+/// It is not `<BasedOn>` and is never exported; only its declared shape is
+/// validated so a malformed record still fails closed.
+fn chart_physical_index_list_shape_is_known(value: &str) -> bool {
+    split_information_register_braced_fields(value).is_some_and(|fields| {
+        fields.len() == 2
+            && fields[0].trim() == "0"
+            && split_information_register_braced_fields(fields[1]).is_some_and(|nested| {
+                nested.first().is_some_and(|count| {
+                    parse_information_register_usize(count)
+                        .is_some_and(|count| count.checked_add(1) == Some(nested.len()))
+                })
+            })
+    })
 }
 
 fn cct_based_on_is_empty(value: &str) -> bool {
@@ -24674,11 +24941,18 @@ fn parse_report_properties_from_text(
         generated_types,
         use_standard_commands: parse_1c_bool_field(fields.get(7).copied()).unwrap_or(true),
         default_form: parse_catalog_form_ref(fields.get(4).copied(), form_refs),
+        // `<AuxiliaryForm>` rides field 14 and `<AuxiliarySettingsForm>` field
+        // 17; both used to be printed as the empty element. Perepis of the
+        // 1 833 reports of the stand: 1 832 hold the nil UUID in both slots and
+        // export both elements empty, and the one that does not (`uh`
+        // `Reports/ДеревоПоказателей`) exports each as the form its slot names.
+        auxiliary_form: parse_catalog_form_ref(fields.get(14).copied(), form_refs),
         main_data_composition_schema: parse_metadata_template_ref(
             fields.get(5).copied(),
             template_refs,
         ),
         default_settings_form: parse_catalog_form_ref(fields.get(6).copied(), form_refs),
+        auxiliary_settings_form: parse_catalog_form_ref(fields.get(17).copied(), form_refs),
         default_variant_form: parse_catalog_form_ref(fields.get(10).copied(), form_refs),
         variants_storage: parse_metadata_object_ref(fields.get(8).copied(), object_refs),
         settings_storage: parse_metadata_object_ref(fields.get(9).copied(), object_refs),
@@ -29123,9 +29397,13 @@ fn catalog_code_series_xml(value: u32) -> Option<&'static str> {
     }
 }
 
+/// Code `0` is `FromForm`, the same name every other family writes for it --
+/// `FromList` is not a value of the enumeration at all. Perepis of the 3 760
+/// enumerations of the stand: `BothWays` 3 736 (`2`), `QuickChoice` 23 (`1`)
+/// and `FromForm` 1 (`0`, `uh` `Enums/УдалитьОбъектыФинансовогоУчета`).
 fn enum_choice_mode_xml(value: u32) -> &'static str {
     match value {
-        0 => "FromList",
+        0 => "FromForm",
         1 => "QuickChoice",
         2 => "BothWays",
         _ => "BothWays",
@@ -32416,6 +32694,15 @@ const STYLE_FONT_MEMBER_WEIGHT: u32 = 4;
 const STYLE_FONT_MEMBER_ITALIC: u32 = 8;
 const STYLE_FONT_MEMBER_UNDERLINE: u32 = 16;
 const STYLE_FONT_MEMBER_STRIKEOUT: u32 = 32;
+/// Bit 512 does not select a member slot -- the scale keeps its fixed place at
+/// the end of the tuple either way -- it selects whether the platform writes
+/// the `scale` attribute at all. Perepis of the 306 referenced style fonts of
+/// the stand: the six that carry the bit (mask 574) write `scale`, five of
+/// them `90` and one (`uh` `StyleItems/ОбычнаяГруппаШрифтБЗК`) `100`; the 300
+/// that do not carry it write no `scale`, and 276 of those hold `100` in that
+/// slot. Comparing the value against `100` therefore agrees on every font but
+/// that one.
+const STYLE_FONT_MEMBER_SCALE: u32 = 512;
 const STYLE_FONT_DEFAULT_WEIGHT: i32 = 400;
 const STYLE_FONT_BOLD_WEIGHT: i32 = 700;
 const STYLE_FONT_DEFAULT_SCALE: &str = "100";
@@ -32446,6 +32733,7 @@ fn parse_style_font_value_xml(value: &str) -> String {
     let mut attrs = Vec::<(&str, String)>::new();
     let kind_xml;
     let scale;
+    let emit_scale;
     if kind == "0" {
         // The absolute layout is a complete fixed record rather than a packed
         // member list: the platform writes all of its slots (mask 575 on all
@@ -32482,6 +32770,7 @@ fn parse_style_font_value_xml(value: &str) -> String {
             .map(|field| field.trim())
             .unwrap_or(STYLE_FONT_DEFAULT_SCALE)
             .to_string();
+        emit_scale = true;
     } else {
         if kind == "1" {
             kind_xml = "WindowsFont";
@@ -32533,9 +32822,10 @@ fn parse_style_font_value_xml(value: &str) -> String {
             .map(|field| field.trim())
             .unwrap_or(STYLE_FONT_DEFAULT_SCALE)
             .to_string();
+        emit_scale = mask & STYLE_FONT_MEMBER_SCALE != 0;
     }
     attrs.push(("kind", kind_xml.to_string()));
-    if scale != STYLE_FONT_DEFAULT_SCALE || kind == "0" {
+    if emit_scale {
         attrs.push(("scale", scale));
     }
 
@@ -34460,6 +34750,15 @@ fn format_chart_of_accounts_source_xml(
             escape_xml_element_text(form)
         ));
     }
+    for template in &chart.child_templates {
+        children.push_str(&format!(
+            "\t\t\t<Template>{}</Template>\r\n",
+            escape_xml_element_text(template)
+        ));
+    }
+    for command in &chart.child_commands {
+        push_metadata_child_command_xml(&mut children, command);
+    }
     insert_metadata_child_objects_xml(&mut xml, "ChartOfAccounts", &children);
     xml
 }
@@ -34811,6 +35110,22 @@ fn format_chart_of_characteristic_types_source_xml(
     }
     let children =
         ibcmd_xml::append_cct_template_children(children, &chart.child_templates).ok()?;
+    // Owned commands close the collection, after the templates that already
+    // ride behind forms.
+    let children = if chart.child_commands.is_empty() {
+        children
+    } else {
+        let mut opened = match children.strip_suffix("\t\t</ChildObjects>\r\n") {
+            Some(body) => body.to_string(),
+            None if children == "\t\t<ChildObjects/>\r\n" => String::from("\t\t<ChildObjects>\r\n"),
+            None => return None,
+        };
+        for command in &chart.child_commands {
+            push_metadata_child_command_xml(&mut opened, command);
+        }
+        opened.push_str("\t\t</ChildObjects>\r\n");
+        opened
+    };
     if let Some(index) = xml.find("\t</ChartOfCharacteristicTypes>\r\n") {
         xml.insert_str(index, &children);
     }
@@ -35146,7 +35461,12 @@ fn format_report_source_xml(
         "DefaultForm",
         report.default_form.as_deref(),
     );
-    xml.push_str("\t\t\t<AuxiliaryForm/>\r\n");
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryForm",
+        report.auxiliary_form.as_deref(),
+    );
     push_optional_text_element(
         &mut xml,
         "\t\t\t",
@@ -35159,7 +35479,12 @@ fn format_report_source_xml(
         "DefaultSettingsForm",
         report.default_settings_form.as_deref(),
     );
-    xml.push_str("\t\t\t<AuxiliarySettingsForm/>\r\n");
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliarySettingsForm",
+        report.auxiliary_settings_form.as_deref(),
+    );
     push_optional_text_element(
         &mut xml,
         "\t\t\t",
