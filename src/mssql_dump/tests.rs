@@ -77142,4 +77142,3 @@ xsi:type=\"dcsset:SettingsParameterValue\">\r\n\
     // nothing declares.
     assert_eq!(transliterate("xs:string", &BTreeMap::new()), None);
 }
-

@@ -697,15 +697,21 @@ pub(crate) struct AdditionalIndexesOwner {
 
 #[derive(Clone)]
 pub(crate) enum SourceAssetKind {
-    AccumulationRegisterAggregates { register_name: String },
-    AdditionalIndexes { owner: AdditionalIndexesOwner },
+    AccumulationRegisterAggregates {
+        register_name: String,
+    },
+    AdditionalIndexes {
+        owner: AdditionalIndexesOwner,
+    },
     CommandInterface,
     ClientApplicationInterface,
     ExchangePlanContent,
     BusinessProcessFlowchart,
     DataCompositionSchema,
     ExtPicture,
-    Form { owner_reference: Option<String> },
+    Form {
+        owner_reference: Option<String>,
+    },
     Help,
     HomePageWorkArea,
     InflatedBase64OrBinary,

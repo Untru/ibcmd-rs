@@ -1628,10 +1628,7 @@ pub(super) fn chart_of_accounts_ext_dimension_types_reference(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
-    if root.len() != 10
-        || root.first()?.trim() != "1"
-        || root.get(2)?.trim() != "7"
-    {
+    if root.len() != 10 || root.first()?.trim() != "1" || root.get(2)?.trim() != "7" {
         return None;
     }
     let fields = split_information_register_braced_fields(root.get(1)?)?;
