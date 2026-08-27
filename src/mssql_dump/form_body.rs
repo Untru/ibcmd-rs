@@ -10066,7 +10066,6 @@ fn collect_form_child_item_indexes_from_field_traced(
                 if let Some(binding_key) = parse_form_bound_data_binding_key(binding)
                     && let Some(data_path) = parse_form_bound_data_path_with_metadata_owner(
                         binding,
-                        &name,
                         attribute_names_by_id,
                         attribute_metadata_owners_by_id,
                         &indexes.table_name_by_id,
@@ -20319,7 +20318,6 @@ pub(super) fn parse_form_child_item_data_path(
                 let data_path = if owner_scoped_metadata {
                     parse_form_bound_data_path_with_metadata_owner(
                         field,
-                        name,
                         attribute_names_by_id,
                         attribute_metadata_owners_by_id,
                         table_name_by_id,
@@ -22227,7 +22225,6 @@ fn resolve_form_attribute_column_data_path(
 
 fn parse_form_bound_data_path_with_metadata_owner(
     field: &str,
-    name: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
