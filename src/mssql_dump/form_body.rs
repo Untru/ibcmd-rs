@@ -6189,12 +6189,22 @@ pub(super) fn form_dynamic_list_std_attribute_pairs(
         ("ЭтоГруппа", "IsFolder"),
         ("Владелец", "Owner"),
     ];
-    const DOCUMENT: [(&str, &str); 5] = [
+    const DOCUMENT: [(&str, &str); 6] = [
         ("Ссылка", "Ref"),
         ("ПометкаУдаления", "DeletionMark"),
         ("Дата", "Date"),
         ("Номер", "Number"),
         ("Проведен", "Posted"),
+        // `PointInTime` is a standard attribute of a document like the five
+        // above it, and a list bound to a document resolves a path onto it.
+        // Evidence: across all eight stand trees no path ending `.PointInTime`
+        // or `.МоментВремени` carries the platform's `~` marker -- 0 of 4 --
+        // and ERP УХ 3.2.12.6
+        // `Documents/НаработкаОбъектовЭксплуатации/Forms/ФормаСпискаДокументов`
+        // writes `<DataPath>Список.PointInTime</DataPath>` bare. Leaving it out
+        // of the universe marked it unresolvable and wrote a `~` the platform
+        // never writes.
+        ("МоментВремени", "PointInTime"),
     ];
     const ENUM: [(&str, &str); 2] = [("Ссылка", "Ref"), ("Порядок", "Order")];
     const CHART_OF_CHARACTERISTIC_TYPES: [(&str, &str); 10] = [
@@ -6209,7 +6219,7 @@ pub(super) fn form_dynamic_list_std_attribute_pairs(
         ("Родитель", "Parent"),
         ("ЭтоГруппа", "IsFolder"),
     ];
-    const CHART_OF_ACCOUNTS: [(&str, &str); 10] = [
+    const CHART_OF_ACCOUNTS: [(&str, &str); 11] = [
         ("Ссылка", "Ref"),
         ("ПометкаУдаления", "DeletionMark"),
         ("Предопределенный", "Predefined"),
@@ -6220,6 +6230,13 @@ pub(super) fn form_dynamic_list_std_attribute_pairs(
         ("Родитель", "Parent"),
         ("Порядок", "Order"),
         ("Забалансовый", "OffBalance"),
+        // The account kind, a standard attribute of the chart like the ten
+        // above it. Same evidence shape: no path ending `.Type` or `.Вид`
+        // carries `~` anywhere in the eight trees -- 0 of 78 -- and ERP УХ
+        // 3.2.12.6
+        // `ChartsOfAccounts/Международный/Forms/ФормаВыбораСПодборомСчетов`
+        // writes `<DataPath>Список.Type</DataPath>` bare.
+        ("Вид", "Type"),
     ];
     const CHART_OF_CALCULATION_TYPES: [(&str, &str); 8] = [
         ("Ссылка", "Ref"),
