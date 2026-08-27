@@ -1684,6 +1684,14 @@ struct DataCompositionXmlWriter<'a> {
     /// sit below those calls can see it without re-threading a parameter
     /// through every caller.
     mode: DataCompositionDocumentMode,
+    /// 1-based depth, inside the document being read, of the element a
+    /// namespace declaration minted right now would land on.
+    ///
+    /// A start tag is written before its frame is pushed, so the element is
+    /// one deeper than the stack; character data is written after, so the
+    /// element is the top of the stack. Set by the two write calls, read by
+    /// the QName resolvers below them.
+    declaring_depth: usize,
 }
 
 impl<'a> DataCompositionXmlWriter<'a> {
@@ -1701,6 +1709,7 @@ impl<'a> DataCompositionXmlWriter<'a> {
             element_stack: Vec::new(),
             object_refs,
             mode,
+            declaring_depth: 0,
         }
     }
 
@@ -1911,6 +1920,9 @@ impl<'a> DataCompositionXmlWriter<'a> {
         empty: bool,
         mode: &DataCompositionDocumentMode,
     ) -> Option<DcsWrittenStart> {
+        // The frame is pushed only after the start tag is written, so the
+        // element this tag opens sits one below the stack's own depth.
+        self.declaring_depth = self.element_stack.len().checked_add(1)?;
         let is_settings_root = matches!(mode, DataCompositionDocumentMode::Settings)
             && namespace == Some(DCS_SETTINGS_NS)
             && local == b"Settings";
@@ -2165,6 +2177,9 @@ impl<'a> DataCompositionXmlWriter<'a> {
         event: &quick_xml::events::BytesText<'_>,
         mode: &DataCompositionDocumentMode,
     ) -> Option<()> {
+        // Character data is written while its own element is still open, so
+        // the element that would carry a declaration is the stack's top.
+        self.declaring_depth = self.element_stack.len();
         let text = std::str::from_utf8(event.as_ref()).ok()?;
         let is_qname_text = self.element_stack.last().is_some_and(|frame| {
             (frame.namespace.as_deref() == Some(DATA_CORE_NS)
@@ -2773,13 +2788,42 @@ impl<'a> DataCompositionXmlWriter<'a> {
     /// (current-config 10 764, web colours 2 688, style 757, enterprise 634,
     /// chart 210, windows colours 107, `8.2/data/types` 35).
     fn settings_text_scope_prefix(&self) -> Option<String> {
-        Some(format!(
-            "d{}p1",
-            DCS_SETTINGS_FRAGMENT_ROOT_DEPTH.checked_add(self.element_stack.len())? - 1
-        ))
+        Some(format!("d{}p1", self.spliced_declaring_depth()?))
+    }
+
+    /// The depth [`settings_text_scope_prefix`] numbers by, in the document
+    /// a rendered `Settings` fragment is spliced into: the fragment's own
+    /// root sits at [`DCS_SETTINGS_FRAGMENT_ROOT_DEPTH`], and the declaring
+    /// element is `declaring_depth - 1` elements below it.
+    ///
+    /// `None` for every other mode: only a mode whose fragment lands at a
+    /// depth the splice itself fixes can say what that depth is.
+    fn spliced_declaring_depth(&self) -> Option<usize> {
+        (self.mode == DataCompositionDocumentMode::Settings)
+            .then(|| {
+                DCS_SETTINGS_FRAGMENT_ROOT_DEPTH
+                    .checked_add(self.declaring_depth)?
+                    .checked_sub(1)
+            })
+            .flatten()
     }
 
     fn scope_prefix(&self, base: usize) -> String {
+        // The `base` tables the callers carry are 1-based depths written out
+        // by hand, one per shape, plus a `nestedSchema` term that adds the
+        // two elements each nesting level inserts. Where this writer owns
+        // the splice it reads the depth off its own stack instead: over the
+        // `Templates/*/Ext/Template.xml` trees of ERP УХ 3.2.12.6, 1С:УТ
+        // 11.5.27.75, БСП demo/base 3.1.12.297, Документооборот КОРП
+        // 3.0.21.3, MDM_Management, Web_Service and WMS5, all 15 195
+        // published `dNpM` declarations carry `N` equal to the 1-based depth
+        // of the element declaring them, with no exception -- and the tables
+        // are short of one shape: `dcsset:conditionalAppearance/dcsset:item/
+        // dcsset:filter/dcsset:item/dcsset:right` is depth eight, which
+        // `enterprise_prefix` spelled `d5p1`.
+        if let Some(depth) = self.spliced_declaring_depth() {
+            return format!("d{depth}p1");
+        }
         let nested_schema_depth = self
             .element_stack
             .iter()
