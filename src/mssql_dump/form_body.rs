@@ -488,12 +488,27 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     // The form's own main attribute travels with it for the same reason: the
     // bar's buttons name form standard commands exactly as any other button
     // does, and the fact belongs to the form, not to the item tree.
+    // The list's unresolvable columns travel with it for the same reason the
+    // column and type-link indexes do: a command-bar button addresses a table
+    // item's current data exactly as any other item does, and the `~` marker
+    // such a path carries is a fact of the list, not of where the button sits.
+    // Evidence: Документооборот КОРП 3.0.21.3
+    // `Catalogs/ДокументыПредприятия/Forms/
+    // ФормаВыбораВходящегоДокументаЭДОДляСозданияСвязи`, whose form-level
+    // `<AutoCommandBar>` holds Button `ДеревоЭД` with `{2,{1,02023637-…},{27}}`
+    // against table item 1 (`Список`); field-map id 27 is `Ссылка`, which the
+    // manual query of that list does not select, and the platform writes
+    // `~Items.Список.CurrentData.Ссылка`.
     let auto_command_bar_command_facts = FormOwnerScopedBindingIndexes {
         metadata_command_facts: context
             .metadata_command_facts
             .map(Arc::clone)
             .unwrap_or_default(),
         form_main_attribute: main_attribute_extension.clone(),
+        unresolvable_table_columns: child_item_indexes
+            .owner_scoped_bindings
+            .unresolvable_table_columns
+            .clone(),
         ..Default::default()
     };
     let mut auto_command_bar = extract_form_auto_command_bar(
@@ -9089,6 +9104,12 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// physically. Read from the very declaration index the root command set
     /// reads `Parent` and `IsFolder` from.
     attribute_ids_without_declared_owner: BTreeSet<String>,
+    /// The same fact keyed the way a *form item* addresses it: the table item
+    /// id paired with the column id its terminals carry. A data path written
+    /// `Items.<table>.CurrentData.<column>` is spelled from the item side and
+    /// never names the attribute, so the marker it carries has to be looked up
+    /// from the item side too.
+    unresolvable_table_columns: BTreeSet<(String, String)>,
 }
 
 /// The attribute-namespace root a chain rooted at a form item continues from.
@@ -9672,6 +9693,23 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
             })
         })
         .collect();
+    // The list's unresolvable columns, re-keyed by the table item that shows
+    // them: a data path spelled `Items.<table>.CurrentData.<column>` names the
+    // item, never the attribute, so its `~` marker has to be looked up from the
+    // item side.
+    let unresolvable_table_columns = indexes
+        .bound_attribute_id_by_table_id
+        .iter()
+        .flat_map(|(table_id, attribute_id)| {
+            indexes
+                .owner_scoped_bindings
+                .unresolvable_columns
+                .iter()
+                .filter(move |key| key.attribute_id == *attribute_id)
+                .map(move |key| (table_id.clone(), key.column_id.clone()))
+        })
+        .collect();
+    indexes.owner_scoped_bindings.unresolvable_table_columns = unresolvable_table_columns;
     indexes
 }
 
@@ -20936,6 +20974,7 @@ fn resolve_form_owner_scoped_button_data_path(
             table_column_names_by_id,
             type_link_data_path_by_table_column,
             &no_global_binding_paths,
+            owner_scoped_bindings,
         )
         // A button addresses its data in the same chain grammar every other
         // item uses, so a slot the button-only route cannot spell is read as
@@ -21909,7 +21948,23 @@ fn resolve_form_item_rooted_chain_data_path(
         object_refs,
         false,
     )
-    .map(|(path, _)| path)
+    .map(|(path, _)| {
+        // Only the member standing directly on the list row can carry the
+        // marker: a member past it is declared by the type the previous member
+        // reached, not by the list, so the list's universe says nothing about
+        // it.
+        let marker = members
+            .first()
+            .map(Vec::as_slice)
+            .and_then(|segment| match segment {
+                [column_id] => parse_form_chain_numeric_id(column_id),
+                _ => None,
+            })
+            .map_or("", |column_id| {
+                form_table_column_unresolvable_marker(item_id, column_id, owner_scoped_bindings)
+            });
+        format!("{marker}{path}")
+    })
 }
 
 /// The settings-composer members a chain reads past a table item's
@@ -24852,6 +24907,7 @@ pub(super) fn collect_form_table_column_names_for_table(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_button_data_path(
     field: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
@@ -24859,6 +24915,7 @@ pub(super) fn parse_form_button_data_path(
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     match fields.as_slice() {
@@ -24885,11 +24942,16 @@ pub(super) fn parse_form_button_data_path(
             if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID {
                 return None;
             }
+            let marker = form_table_column_unresolvable_marker(
+                owner.first()?.trim(),
+                terminal.first()?.trim(),
+                owner_scoped_bindings,
+            );
             if let Some(data_path) = type_link_data_path_by_table_column.get(&(
                 owner.first()?.trim().to_string(),
                 terminal.first()?.trim().to_string(),
             )) {
-                return Some(data_path.clone());
+                return Some(format!("{marker}{data_path}"));
             }
             resolve_form_item_current_data_path(
                 owner.first()?.trim(),
@@ -24898,8 +24960,41 @@ pub(super) fn parse_form_button_data_path(
                 table_column_names_by_id,
                 data_path_by_binding_key,
             )
+            .map(|data_path| format!("{marker}{data_path}"))
         }
         _ => None,
+    }
+}
+
+/// The `~` marker a data path onto a table item's column carries when the
+/// column is outside the bound dynamic list's own resolvable-field universe.
+///
+/// The fact is the one `<UseAlways>` is measured against and the one the
+/// attribute-scoped route already writes: a field the list cannot resolve
+/// against its data source is spelled with the platform's `~` in front of the
+/// whole path. Which route reached the column does not change that -- only the
+/// namespace the column id is keyed in, and a table item's terminal is
+/// numbered in the namespace of the attribute the table is bound to.
+///
+/// Evidence: Документооборот КОРП 3.0.21.3
+/// `Catalogs/Файлы/Forms/РедактируемыеФайлы`, Button
+/// `ОбщаяКоманда_ДополнительныеСведения` carries `{2,{6,02023637-…},{36}}`
+/// against table item 6 (`Список`), bound to a manual-query dynamic list whose
+/// `<MainTable>` is `InformationRegister.ФайлыВРабочемКаталогеКомпьютера`;
+/// column 36 is `Ссылка`, which that main table does not hold, and the platform
+/// writes `~Items.Список.CurrentData.Ссылка`.
+fn form_table_column_unresolvable_marker(
+    table_id: &str,
+    column_id: &str,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> &'static str {
+    if owner_scoped_bindings
+        .unresolvable_table_columns
+        .contains(&(table_id.to_string(), column_id.to_string()))
+    {
+        "~"
+    } else {
+        ""
     }
 }
 
@@ -24981,10 +25076,11 @@ fn resolve_form_item_scoped_current_data_path(
         return None;
     }
     let column_id = terminal.first()?.trim();
+    let marker = form_table_column_unresolvable_marker(table_id, column_id, owner_scoped_bindings);
     if let Some(data_path) =
         type_link_data_path_by_table_column.get(&(table_id.to_string(), column_id.to_string()))
     {
-        return Some(data_path.clone());
+        return Some(format!("{marker}{data_path}"));
     }
     let no_global_binding_paths = BTreeMap::new();
     resolve_form_item_current_data_path(
@@ -24994,6 +25090,7 @@ fn resolve_form_item_scoped_current_data_path(
         table_column_names_by_id,
         &no_global_binding_paths,
     )
+    .map(|data_path| format!("{marker}{data_path}"))
 }
 
 fn resolve_form_item_current_data_path(
