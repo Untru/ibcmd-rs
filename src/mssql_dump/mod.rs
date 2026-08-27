@@ -22759,9 +22759,26 @@ fn parse_chart_of_accounts_child_collection(
                 return None;
             }
             let wrapper = split_information_register_braced_fields(item.first()?)?;
-            let expected_code = if tag == "Attribute" { "2" } else { "6" };
-            let expected_len = if tag == "Attribute" { 5 } else { 3 };
-            if wrapper.len() != expected_len || wrapper.first()?.trim() != expected_code {
+            // An attribute is written in two wrapper forms and a flag in one.
+            // `{2, <body>, <indexing>, <full-text search>, <data history>}` is
+            // the short attribute form; `{3, …, 0, {1,<zero uuid>}}` is the
+            // same five members plus the trailing pair every family writes.
+            // `cf extract` on the four charts of accounts of the stand: the
+            // short form on 16 attributes of one ERP УХ chart and 3 of the БСП
+            // demo chart, the long form on all 12 attributes of the other two
+            // ERP УХ charts. Only the short form was read, so those two charts
+            // never got past their attribute collection and fell back to the
+            // property-less default-list-form writer.
+            let expected = match (tag, wrapper.first()?.trim(), wrapper.len()) {
+                ("Attribute", "2", 5) => true,
+                ("Attribute", "3", 7) => {
+                    wrapper.get(5)?.trim() == "0"
+                        && information_register_new_child_tail_is_valid(wrapper.get(6)?)
+                }
+                (_, "6", 3) if tag != "Attribute" => true,
+                _ => false,
+            };
+            if !expected {
                 return None;
             }
             let common = split_information_register_braced_fields(wrapper.get(1)?)?;
