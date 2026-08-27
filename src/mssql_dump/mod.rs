@@ -11016,6 +11016,12 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         ) {
             StrictMetadataRoot::Parsed(chart) => {
                 strict_chart_root_formatted = true;
+                // The strict decoder writes `<ChildObjects>` itself, from the
+                // chart's own declared form, template and command collections.
+                // Leaving the generic text-scanning command pass armed on top
+                // of that wrote every owned command twice -- the same seam the
+                // filter criterion already closes above.
+                nested_commands = Vec::new();
                 format_chart_of_accounts_source_xml(header, &chart, source_version).into_bytes()
             }
             StrictMetadataRoot::Unsupported => {
