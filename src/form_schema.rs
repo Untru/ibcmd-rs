@@ -7214,10 +7214,15 @@ impl FormTableHorizontalScrollBar {
     }
 }
 
+/// The row-picture slot of a `Table`, read as the chain it is.
+///
+/// The slot is `{K,s1,…,sK}`: it declares how many members the picture is
+/// reached by and then spells that many. `{0}` states there is no picture, and
+/// every other count states a walk of that length from the table's own row.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTableRowPictureDataPath<'a> {
     Empty,
-    Payload(&'a str),
+    Payload(&'a [&'a str]),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -7621,14 +7626,25 @@ impl FormTableSchema {
         Self::ROW_PICTURE_DATA_PATH_SLOT
     }
 
+    /// Reads the declared member count instead of admitting only a walk of one.
+    ///
+    /// The slot spells its own length, and a two-member walk is the same
+    /// grammar as a one-member walk: Документооборот КОРП 3.0.21.3
+    /// `Documents/ВыгрузкаВССТУ/Forms/ФормаДокумента` holds
+    /// `{2,{0,c1204302-…},{-7}}` against a Table bound to `Объект.Обращения`,
+    /// and the platform writes
+    /// `<RowPictureDataPath>Объект.Обращения.Обращение.DeletionMark</RowPictureDataPath>`.
+    /// The arity bound refused that slot whole and the element went unwritten.
     pub(crate) fn row_picture_data_path<'a>(
         self,
-        value: &[&'a str],
+        value: &'a [&'a str],
     ) -> Option<FormTableRowPictureDataPath<'a>> {
         match value {
             [marker] if marker.trim() == "0" => Some(FormTableRowPictureDataPath::Empty),
-            [marker, payload] if marker.trim() == "1" => {
-                Some(FormTableRowPictureDataPath::Payload(payload.trim()))
+            [marker, segments @ ..]
+                if marker.trim().parse::<usize>() == Ok(segments.len()) && !segments.is_empty() =>
+            {
+                Some(FormTableRowPictureDataPath::Payload(segments))
             }
             _ => None,
         }

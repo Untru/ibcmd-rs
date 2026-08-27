@@ -981,10 +981,13 @@ pub(super) struct FormAttributeSaveFieldBinding {
     /// with. Empty for the one-component entry, which names the member and
     /// stops there.
     pub(super) members: Vec<String>,
-    /// The entry written out physically -- what the platform writes for a
-    /// reference the configuration cannot name. See
-    /// [`form_attribute_save_entry_physical_spelling`].
-    pub(super) physical: String,
+    /// The entry's own segments spelled physically -- each segment's members
+    /// joined by `:`, the segments joined by `/`, exactly as
+    /// [`form_physical_chain_spelling`] spells any other bound chain. The owner
+    /// the entry belongs to is not in these bytes and is prepended by the
+    /// caller, which is what makes the whole spelling the same
+    /// `<owner>/<members>` a choice-parameter link falls back to.
+    pub(super) physical_members: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4458,49 +4461,11 @@ fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSav
                     key,
                     metadata_uuid,
                     members,
-                    physical: form_attribute_save_entry_physical_spelling(&entry),
+                    physical_members: form_physical_chain_spelling(&entry[1..]),
                 },
             ))
         })
         .collect()
-}
-
-/// A saved-field entry written out physically.
-///
-/// The platform does not drop a reference it cannot name -- it writes it out as
-/// the bytes spell it, the members of a tuple joined by a colon and the tuples
-/// joined by a slash. The entry is `{N,c1,…,cN}`, so the declared component
-/// count opens the spelling and every component follows it.
-///
-/// Evidence: the 35 `1/0:<uuid>` saved fields the stand's native trees carry --
-/// 4 in Документооборот КОРП 3.0.21.3
-/// `DataProcessors/ПечатьЭтикетокИЦенниковБПО/Forms/Форма` and 31 over ten ERP
-/// УХ 3.2.12.6 forms -- every one of them against an entry that reads
-/// `{1,{0,<uuid>}}`. `DataProcessors/ИмпортОбъектовИзExcel/Forms/Форма` puts
-/// both outcomes in one block: its `Объект` attribute declares seven entries of
-/// that identical shape, six of whose uuids are attributes of
-/// `DataProcessor.ИмпортОбъектовИзExcel` and are written `Объект.<name>`, while
-/// `3db98de4-94bb-4d5d-96fc-5fe2132ec47d` is named nowhere in the configuration
-/// and is written `1/0:3db98de4-94bb-4d5d-96fc-5fe2132ec47d`. The shape is the
-/// same either way, so nothing but the resolution decides the spelling.
-///
-/// The same law already answers an unnameable choice-parameter link and a
-/// style-item colour that names an element the configuration has deleted.
-fn form_attribute_save_entry_physical_spelling(entry: &[&str]) -> String {
-    entry
-        .iter()
-        .map(
-            |component| match split_1c_braced_fields(component.trim(), 0) {
-                Some(members) => members
-                    .iter()
-                    .map(|member| member.trim())
-                    .collect::<Vec<_>>()
-                    .join(":"),
-                None => component.trim().to_string(),
-            },
-        )
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 pub(super) fn parse_form_attribute_save_field_bindings(
@@ -4568,20 +4533,38 @@ pub(super) fn apply_form_attribute_save_field_bindings(
                 };
                 // A saved field whose metadata reference this configuration
                 // cannot name is not a malformed entry: the platform writes it
-                // out physically and keeps the block around it. Answering
-                // nothing dropped the entry, and an attribute whose every entry
-                // was such a reference lost its whole `<Save>` block --
+                // out physically -- the owner the entry belongs to, then the
+                // entry's own segments, in the same
+                // `<owner>/<member>:<member>` spelling an unnameable
+                // choice-parameter link and an unnameable `<TypeLink>` are
+                // written in. Answering nothing dropped the entry, and an
+                // attribute whose every entry was such a reference lost its
+                // whole `<Save>` block --
                 // `DataProcessors/ПечатьЭтикетокИЦенниковБПО/Forms/Форма` of
-                // Документооборот КОРП 3.0.21.3 is exactly that. Only a
-                // metadata terminal falls back: that is the terminal the
-                // corpus writes physically, and no other terminal was ever
-                // observed unresolved. See
-                // [`form_attribute_save_entry_physical_spelling`].
+                // Документооборот КОРП 3.0.21.3 is exactly that.
+                //
+                // Corpus: 35 such fields over the eight stand trees, 4 in that
+                // Документооборот form and 31 across ten ERP УХ 3.2.12.6
+                // forms, every one of them `1/0:<uuid>` against an entry
+                // `{1,{0,<uuid>}}` on an attribute whose id is `1`.
+                // `DataProcessors/ИмпортОбъектовИзExcel/Forms/Форма` of ERP УХ
+                // holds both outcomes in one block: seven entries of that one
+                // shape, six of whose uuids are attributes of
+                // `DataProcessor.ИмпортОбъектовИзExcel` and are written
+                // `Объект.<name>`, and `3db98de4-…`, which the configuration
+                // names nowhere and which is written `1/0:3db98de4-…`. The
+                // bytes are identical either way, so only the resolution
+                // decides the spelling.
+                //
+                // Only a metadata terminal falls back: that is the terminal
+                // the corpus writes physically, and no other terminal has ever
+                // been observed unresolved here.
                 let data_path = data_path.or_else(|| {
+                    let members = binding.physical_members.as_deref()?;
                     binding
                         .metadata_uuid
                         .is_some()
-                        .then(|| binding.physical.clone())
+                        .then(|| format!("{}/{members}", attribute.id))
                 });
                 if let Some(data_path) = data_path
                     && seen.insert(data_path.clone())
@@ -9247,10 +9230,6 @@ pub(super) fn collect_form_item_rooted_chain_roots(
     attributes: &[FormAttribute],
     object_refs: &BTreeMap<String, String>,
 ) {
-    let attribute_names_by_id = attributes
-        .iter()
-        .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
-        .collect::<BTreeMap<_, _>>();
     let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
     // Cloned out of the index before the loop borrows it: the walk below writes
     // back into the same index.
@@ -9276,14 +9255,15 @@ pub(super) fn collect_form_item_rooted_chain_roots(
             continue;
         };
         let attribute_id = attribute_id.trim();
-        let Some(name) = attribute_names_by_id.get(attribute_id) else {
+        let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id) else {
             continue;
         };
         if let Some((_, attribute_path)) = walk_form_bound_chain_members(
             members,
             attribute_id,
-            name.clone(),
-            name.clone(),
+            attribute.exact_single_type_reference.as_deref(),
+            attribute.name.clone(),
+            attribute.name.clone(),
             &indexes.owner_scoped_bindings,
             object_refs,
             false,
@@ -11575,7 +11555,6 @@ fn parse_form_child_item_with_metadata_owners(
                             data_path_resolution
                                 .as_ref()
                                 .map(|resolved| resolved.data_path.as_str()),
-                            attribute_names_by_id,
                             table_name_by_id,
                             table_column_names_by_id,
                             attribute_metadata_owners_by_id,
@@ -13398,7 +13377,7 @@ fn parse_form_child_item_with_metadata_owners(
         ),
         type_link: parse_form_input_field_type_link(
             audited_input_field_options,
-            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             type_link_data_path_by_table_column,
             table_name_by_id,
             table_column_names_by_id,
@@ -13496,7 +13475,6 @@ fn parse_form_child_item_with_metadata_owners(
             tag,
             wrapper,
             &fields,
-            attribute_names_by_id,
             attribute_metadata_owners_by_id,
             table_name_by_id,
             table_column_names_by_id,
@@ -15897,7 +15875,7 @@ pub(super) fn form_predefined_item_reference(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn parse_form_input_field_type_link(
     options: Option<&[&str]>,
-    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     data_path_by_table_column: &BTreeMap<(String, String), String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
@@ -15968,7 +15946,7 @@ pub(super) fn parse_form_input_field_type_link(
     );
     let data_path = resolve_form_type_link_chain(
         &chain,
-        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
         data_path_by_table_column,
         table_name_by_id,
         table_column_names_by_id,
@@ -16033,7 +16011,7 @@ fn form_physical_chain_spelling(segments: &[&str]) -> Option<String> {
 #[allow(clippy::too_many_arguments)]
 fn resolve_form_type_link_chain(
     chain: &str,
-    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     data_path_by_table_column: &BTreeMap<(String, String), String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
@@ -16059,7 +16037,7 @@ fn resolve_form_type_link_chain(
     .or_else(|| {
         resolve_form_bound_chain_member_path(
             chain,
-            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             owner_scoped_bindings,
             object_refs,
             false,
@@ -20114,7 +20092,7 @@ pub(super) fn parse_form_child_item_data_path(
             .or_else(|| {
                 resolve_form_bound_chain_member_path(
                     field,
-                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
                     owner_scoped_bindings,
                     object_refs,
                     aggregate,
@@ -20588,55 +20566,23 @@ fn resolve_form_owner_scoped_button_data_path(
         .or_else(|| {
             resolve_form_bound_chain_member_path(
                 field,
-                attribute_names_by_id,
+                attribute_metadata_owners_by_id,
                 owner_scoped_bindings,
                 object_refs,
                 false,
             )
-        })
-        // A negative marker on the root attribute names one of the standard
-        // attributes that attribute's own type declares, read from the same
-        // per-owner tables the field routes use. Evidence: UT 11.5.27.75
-        // `ExchangePlans/ОбменССайтом/Forms/ФормаУзла`, Button
-        // `ФормаПланОбменаОбменССайтомВыполнитьОбменДанными` carries
-        // `{2,{1},{-6}}` against the `Объект` attribute of type
-        // `cfg:ExchangePlanObject.ОбменССайтом`, and the platform writes
-        // `<DataPath>Объект.Ref</DataPath>`.
-        .or_else(|| {
-            resolve_form_root_attribute_standard_attribute_path(
-                field,
-                attribute_metadata_owners_by_id,
-            )
-        }),
+        }), // A negative marker on the root attribute names one of the standard
+            // attributes that attribute's own type declares. It used to be read
+            // here by a route of its own that admitted the two-segment chain
+            // `{2,{<attribute>},{<marker>}}` and nothing longer; the chain walker
+            // above reads the very same declaration in the very same position, so
+            // the route is gone and the fact has one reader. Evidence:
+            // UT 11.5.27.75 `ExchangePlans/ОбменССайтом/Forms/ФормаУзла`, Button
+            // `ФормаПланОбменаОбменССайтомВыполнитьОбменДанными` carries
+            // `{2,{1},{-6}}` against the `Объект` attribute of type
+            // `cfg:ExchangePlanObject.ОбменССайтом`, and the platform writes
+            // `<DataPath>Объект.Ref</DataPath>`.
     )
-}
-
-/// `{2,{<attribute>},{<marker>}}` where the marker is a standard attribute of
-/// the attribute's own exact type.
-fn resolve_form_root_attribute_standard_attribute_path(
-    field: &str,
-    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
-) -> Option<String> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let [kind, owner, terminal] = fields.as_slice() else {
-        return None;
-    };
-    if kind.trim() != "2" {
-        return None;
-    }
-    let owner = split_1c_braced_fields(owner.trim(), 0)?;
-    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-    let ([attribute_id], [marker]) = (owner.as_slice(), terminal.as_slice()) else {
-        return None;
-    };
-    let marker = marker.trim();
-    if !marker.starts_with('-') {
-        return None;
-    }
-    let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
-    let reference = attribute.exact_single_type_reference.as_deref()?;
-    let name = form_standard_attribute_name_for_type_reference(reference, marker)?;
-    Some(format!("{}.{name}", attribute.name))
 }
 
 /// Resolves a multi-segment binding against a dynamic-list attribute.
@@ -21326,7 +21272,7 @@ fn form_tabular_section_standard_attribute_name(
 /// the platform.
 pub(super) fn resolve_form_bound_chain_member_path(
     field: &str,
-    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
     aggregate: bool,
@@ -21337,12 +21283,16 @@ pub(super) fn resolve_form_bound_chain_member_path(
         return None;
     };
     let attribute_id = attribute_id.trim();
-    let name = attribute_names_by_id.get(attribute_id)?;
+    // The root attribute's name and its declared type are one fact about one
+    // attribute, so both are read from the one table that already holds them
+    // rather than from a name-only copy beside it.
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id)?;
     walk_form_bound_chain_members(
         members,
         attribute_id,
-        name.clone(),
-        name.clone(),
+        attribute.exact_single_type_reference.as_deref(),
+        attribute.name.clone(),
+        attribute.name.clone(),
         owner_scoped_bindings,
         object_refs,
         aggregate,
@@ -21363,6 +21313,7 @@ pub(super) fn resolve_form_bound_chain_member_path(
 fn walk_form_bound_chain_members(
     members: &[Vec<&str>],
     attribute_id: &str,
+    root_type: Option<&str>,
     mut path: String,
     mut key: String,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
@@ -21376,7 +21327,7 @@ fn walk_form_bound_chain_members(
     // reference's own role decides which standard attributes the next
     // dereferencing marker may address.
     let mut reached_metadata_reference: Option<&str> = None;
-    for segment in members {
+    for (index, segment) in members.iter().enumerate() {
         let previous_type = reached_type.take();
         let previous_metadata_reference = reached_metadata_reference.take();
         match segment.as_slice() {
@@ -21418,14 +21369,21 @@ fn walk_form_bound_chain_members(
                 }
             }
             [marker] if marker.trim().starts_with('-') => {
-                let name = match previous_type {
-                    Some(reference) => {
+                let name = match (previous_type, previous_metadata_reference) {
+                    (Some(reference), _) => {
                         form_standard_attribute_name_for_type_reference(reference, marker.trim())?
                     }
-                    None => form_tabular_section_standard_attribute_name(
-                        previous_metadata_reference?,
-                        marker.trim(),
-                    )?,
+                    (None, Some(reference)) => {
+                        form_tabular_section_standard_attribute_name(reference, marker.trim())?
+                    }
+                    // The first member stands on the root attribute's own
+                    // value, so the attribute's declared type names the marker
+                    // -- the same fact the two-segment button route read
+                    // through a table of its own until this walker reached it.
+                    (None, None) if index == 0 => {
+                        form_standard_attribute_name_for_type_reference(root_type?, marker.trim())?
+                    }
+                    (None, None) => return None,
                 };
                 for target in [&mut path, &mut key] {
                     target.push('.');
@@ -21561,6 +21519,10 @@ fn resolve_form_item_rooted_chain_data_path(
     walk_form_bound_chain_members(
         &members,
         &root.attribute_id,
+        // A chain rooted at a form item does not stand on the attribute's own
+        // value but on one row of what the table shows, so the attribute's
+        // declared type does not name this chain's first member.
+        None,
         format!("Items.{table_name}.CurrentData"),
         root.attribute_path.clone(),
         owner_scoped_bindings,
@@ -22422,8 +22384,23 @@ const CATALOG_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
 /// platform writes `Owner` on every one, and writes no other standard attribute
 /// under that prefix. The same marker is `Owner` under `cfg:CatalogObject` too,
 /// and this is the only role a catalog reference was observed to carry it in.
-const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] =
-    &[("-2", "Code"), ("-3", "Description"), ("-5", "Owner")];
+///
+/// `-7` joined the table the same way. Evidence: Документооборот КОРП 3.0.21.3
+/// `Documents/ВыгрузкаВССТУ/Forms/ФормаДокумента`, whose CheckBoxField
+/// `ОбращенияОбращениеПометкаУдаления` carries
+/// `{4,{1},{0,9849b475-…},{0,c1204302-…},{-7}}` -- the tabular section
+/// `Обращения` of the document, then its column `Обращение`, declared
+/// `cfg:CatalogRef.ДокументыПредприятия` -- and the platform writes
+/// `Объект.Обращения.Обращение.DeletionMark`, the same path its Table writes as
+/// `<RowPictureDataPath>`. `.DeletionMark` is written 18 times over the eight
+/// native trees and this is the only one of them a chain reaches through a
+/// declared type; there is no counter-example anywhere.
+const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-2", "Code"),
+    ("-3", "Description"),
+    ("-5", "Owner"),
+    ("-7", "DeletionMark"),
+];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),
@@ -22634,7 +22611,6 @@ pub(super) fn parse_form_title_data_path(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
-    attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
@@ -22681,7 +22657,7 @@ pub(super) fn parse_form_title_data_path(
     // written without the prefix, so there is no reading the flag has to keep.
     if let Some(path) = resolve_form_bound_chain_member_path(
         binding,
-        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
         owner_scoped_bindings,
         object_refs,
         true,
@@ -22866,14 +22842,13 @@ pub(super) fn form_dynamic_list_default_picture_is_out_of_table(main_table: Opti
 #[allow(clippy::too_many_arguments)]
 fn resolve_form_table_row_picture_member(
     binding: &str,
-    segment: &str,
-    attribute_names_by_id: &BTreeMap<String, String>,
+    segments: &[&str],
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let extended = form_bound_chain_with_extra_segment(binding, segment)?;
+    let extended = form_bound_chain_with_extra_segments(binding, segments)?;
     resolve_form_settings_composer_chain_data_path(
         &extended,
         attribute_metadata_owners_by_id,
@@ -22883,7 +22858,7 @@ fn resolve_form_table_row_picture_member(
     .or_else(|| {
         resolve_form_bound_chain_member_path(
             &extended,
-            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             owner_scoped_bindings,
             object_refs,
             false,
@@ -22935,7 +22910,6 @@ pub(super) fn parse_form_table_row_picture_data_path(
     schema: FormTableSchema,
     fields: &[&str],
     data_path: Option<&str>,
-    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
@@ -22945,11 +22919,24 @@ pub(super) fn parse_form_table_row_picture_data_path(
     let table_name = data_path?;
     let encoded =
         split_1c_braced_fields(fields.get(schema.row_picture_data_path_slot())?.trim(), 0)?;
-    let payload = match schema.row_picture_data_path(&encoded)? {
+    let segments = match schema.row_picture_data_path(&encoded)? {
         FormTableRowPictureDataPath::Empty => return None,
-        FormTableRowPictureDataPath::Payload(payload) => payload,
+        FormTableRowPictureDataPath::Payload(segments) => segments,
     };
-    let payload = split_1c_braced_fields(payload, 0)?;
+    // A walk of more than one member states nothing the one-member shapes below
+    // state: it is a chain, and the chain walker spells it against the table's
+    // own binding exactly as it spells the data-path slot of the same table.
+    let [payload] = segments else {
+        return resolve_form_table_row_picture_member(
+            fields.get(schema.data_path_slot())?.trim(),
+            segments,
+            attribute_metadata_owners_by_id,
+            table_name_by_id,
+            owner_scoped_bindings,
+            object_refs,
+        );
+    };
+    let payload = split_1c_braced_fields(payload.trim(), 0)?;
     let column_name = match payload.as_slice() {
         [column_id, uuid]
             if uuid
@@ -22959,8 +22946,7 @@ pub(super) fn parse_form_table_row_picture_data_path(
             let binding = fields.get(schema.data_path_slot())?.trim();
             return resolve_form_table_row_picture_member(
                 binding,
-                &format!("{{{},{}}}", column_id.trim(), uuid.trim()),
-                attribute_names_by_id,
+                &[&format!("{{{},{}}}", column_id.trim(), uuid.trim())],
                 attribute_metadata_owners_by_id,
                 table_name_by_id,
                 owner_scoped_bindings,
@@ -22987,8 +22973,7 @@ pub(super) fn parse_form_table_row_picture_data_path(
                 // slot reads the chain with -- one segment longer.
                 return resolve_form_table_row_picture_member(
                     binding,
-                    &format!("{{{}}}", column_id.trim()),
-                    attribute_names_by_id,
+                    &[&format!("{{{}}}", column_id.trim())],
                     attribute_metadata_owners_by_id,
                     table_name_by_id,
                     owner_scoped_bindings,
@@ -23005,8 +22990,7 @@ pub(super) fn parse_form_table_row_picture_data_path(
                 // walker can reach -- `Check` of a value list, for one.
                 return resolve_form_table_row_picture_member(
                     binding,
-                    &format!("{{{}}}", column_id.trim()),
-                    attribute_names_by_id,
+                    &[&format!("{{{}}}", column_id.trim())],
                     attribute_metadata_owners_by_id,
                     table_name_by_id,
                     owner_scoped_bindings,
@@ -23042,22 +23026,23 @@ pub(super) fn parse_form_table_row_picture_data_path(
     Some(format!("{table_name}.{column_name}"))
 }
 
-/// A bound chain `{K,s1,…,sK}` with one more segment appended, so that a slot
+/// A bound chain `{K,s1,…,sK}` with further segments appended, so that a slot
 /// which names a member of what another slot's chain reached can be spelled by
 /// the one chain walker rather than by a parallel resolver.
-pub(super) fn form_bound_chain_with_extra_segment(chain: &str, segment: &str) -> Option<String> {
+pub(super) fn form_bound_chain_with_extra_segments(
+    chain: &str,
+    segments: &[&str],
+) -> Option<String> {
     let members = split_1c_braced_fields(chain.trim(), 0)?;
     let count = members.first()?.trim().parse::<usize>().ok()?;
-    if members.len() != count + 1 {
+    if members.len() != count + 1 || segments.is_empty() {
         return None;
     }
-    let mut out = format!("{{{}", count + 1);
-    for member in &members[1..] {
+    let mut out = format!("{{{}", count + segments.len());
+    for member in members[1..].iter().chain(segments.iter()) {
         out.push(',');
         out.push_str(member.trim());
     }
-    out.push(',');
-    out.push_str(segment);
     out.push('}');
     Some(out)
 }

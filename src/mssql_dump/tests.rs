@@ -11287,13 +11287,13 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
                 key: "0|11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
                 metadata_uuid: Some("11a93e3a-3c5b-4242-913c-02474a383344".to_string()),
                 members: Vec::new(),
-                physical: "1/0:11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
+                physical_members: Some("0:11a93e3a-3c5b-4242-913c-02474a383344".to_string()),
             },
             FormAttributeSaveFieldBinding {
                 key: "0|ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string(),
                 metadata_uuid: Some("ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string()),
                 members: Vec::new(),
-                physical: "1/0:ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string(),
+                physical_members: Some("0:ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string()),
             }
         ])
     );
@@ -69000,7 +69000,7 @@ fn walks_a_bound_chain_through_index_and_additional_column_segments() {
     ];
     let attributes = vec![attribute];
     let indexes = chain_walk_indexes(&attributes);
-    let names = BTreeMap::from([("1".to_string(), "СвУпПред".to_string())]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
 
     let binding = format!(
         "{{7,{{1}},{{{index}}},{{2}},{{{index}}},{{2,5bdad865-f2c5-434b-8041-ba4aad3b6687}},{{{index}}},{{5,5bdad865-f2c5-434b-8041-ba4aad3b6687}}}}"
@@ -69049,7 +69049,7 @@ fn writes_the_aggregate_marker_only_for_items_outside_their_table() {
     let column_uuid = "41c36a6f-5b3d-42d6-9606-a177fa4551df";
     let attributes = vec![data_path_form_attribute("1", "Объект", None)];
     let indexes = chain_walk_indexes(&attributes);
-    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
     let object_refs = BTreeMap::from([
         (
             table_uuid.to_string(),
@@ -69254,7 +69254,7 @@ fn dereferences_a_declared_column_through_its_own_type_family() {
         attribute.columns = vec![chain_walk_column("1", "Ссылка", Some(reference))];
         let attributes = vec![attribute];
         let indexes = chain_walk_indexes(&attributes);
-        let names = BTreeMap::from([("5".to_string(), "Заказы".to_string())]);
+        let names = form_attribute_metadata_owners_by_id(&attributes);
         assert_eq!(
             resolve_form_bound_chain_member_path(
                 &format!("{{3,{{5}},{{1}},{{{marker}}}}}"),
@@ -69275,7 +69275,7 @@ fn dereferences_a_declared_column_through_its_own_type_family() {
     attribute.columns = vec![chain_walk_column("1", "Ссылка", None)];
     let attributes = vec![attribute];
     let indexes = chain_walk_indexes(&attributes);
-    let names = BTreeMap::from([("5".to_string(), "Заказы".to_string())]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
     assert_eq!(
         resolve_form_bound_chain_member_path(
             "{3,{5},{1},{-2}}",
@@ -69304,7 +69304,7 @@ fn dereferences_a_tabular_section_through_its_own_standard_attributes() {
     let table_uuid = "b5bacd25-7506-4f4a-8f26-d62040de083f";
     let attributes = vec![data_path_form_attribute("1", "Объект", None)];
     let indexes = chain_walk_indexes(&attributes);
-    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
     let mut object_refs = BTreeMap::from([(
         table_uuid.to_string(),
         "Document.ОтгрузкаТоваровКлиенту.TabularSection.Товары".to_string(),
@@ -69375,10 +69375,7 @@ fn reads_the_row_count_marker_as_a_chain_terminal() {
         data_path_form_attribute("2", "СкидкиНаценки", None),
     ];
     let indexes = chain_walk_indexes(&attributes);
-    let names = BTreeMap::from([
-        ("1".to_string(), "Объект".to_string()),
-        ("2".to_string(), "СкидкиНаценки".to_string()),
-    ]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
     let object_refs = BTreeMap::from([(
         table_uuid.to_string(),
         "Document.ЗаявкаНаОбеспечение.TabularSection.Товары".to_string(),
@@ -69424,7 +69421,7 @@ fn walks_a_chain_segment_through_a_common_attribute_reference() {
     let constant_uuid = "f5417147-4d2a-4e49-911b-2bb5eccb8441";
     let attributes = vec![data_path_form_attribute("1", "Объект", None)];
     let indexes = chain_walk_indexes(&attributes);
-    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
     let object_refs = BTreeMap::from([
         (
             common_attribute_uuid.to_string(),
@@ -69525,7 +69522,7 @@ fn dereferences_a_metadata_field_through_its_declared_type() {
     let bank_uuid = "9e7b0920-3d4f-481a-9dce-a789a4e9ef73";
     let invoice_uuid = "f9c452ce-e7db-4048-9486-d5a5d219135d";
     let attributes = vec![data_path_form_attribute("1", "Объект", None)];
-    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
     let object_refs = BTreeMap::from([
         (
             bank_uuid.to_string(),
@@ -69604,6 +69601,132 @@ fn dereferences_a_metadata_field_through_its_declared_type() {
     }
 }
 
+/// The first member of a chain stands on the root attribute's own value, so
+/// the attribute's declared type names a marker there -- at any chain length,
+/// not only on the two-segment chain a route of its own used to admit.
+///
+/// Evidence: Документооборот КОРП 3.0.21.3
+/// `Catalogs/СообщенияОбсуждений/Forms/ФормаЭлемента`, InputField
+/// `РодительТекстСообщения`, which carries `{3,{1},{-4},{0,7e0d1815-…}}`
+/// against the `Объект` attribute of exact type
+/// `cfg:CatalogObject.СообщенияОбсуждений`: `-4` is that object's `Parent` and
+/// `7e0d1815-…` is `Catalog.СообщенияОбсуждений.Attribute.ТекстСообщения`. The
+/// platform writes `<DataPath>Объект.Parent.ТекстСообщения</DataPath>`; the
+/// walker used to refuse the marker outright and a looser route answered
+/// `Объект.ТекстСообщения`.
+#[test]
+fn dereferences_the_root_attribute_through_its_own_standard_attributes() {
+    let text_uuid = "7e0d1815-9f65-441c-8357-67df2bbf35ab";
+    let mut attribute = data_path_form_attribute("1", "Объект", None);
+    attribute.value_types = vec![ConstantValueType::Reference {
+        reference: "cfg:CatalogObject.СообщенияОбсуждений".to_string(),
+    }];
+    let attributes = vec![attribute];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
+    let object_refs = BTreeMap::from([(
+        text_uuid.to_string(),
+        "Catalog.СообщенияОбсуждений.Attribute.ТекстСообщения".to_string(),
+    )]);
+
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{3,{{1}},{{-4}},{{0,{text_uuid}}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("Объект.Parent.ТекстСообщения")
+    );
+
+    // The two-segment chain the removed route used to answer reads the same
+    // declaration through the same walker.
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            "{2,{1},{-4}}",
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("Объект.Parent")
+    );
+
+    // A marker the declared type's table does not list keeps the refusal, and
+    // so does a marker that is not in the first member position -- what stands
+    // there is not the attribute's own value any more.
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            "{2,{1},{-11}}",
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        ),
+        None
+    );
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{3,{{1}},{{0,{text_uuid}}},{{-4}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        ),
+        None
+    );
+}
+
+/// `-7` under a declared catalog reference is `DeletionMark`.
+///
+/// Evidence: Документооборот КОРП 3.0.21.3
+/// `Documents/ВыгрузкаВССТУ/Forms/ФормаДокумента`, CheckBoxField
+/// `ОбращенияОбращениеПометкаУдаления`, which carries
+/// `{4,{1},{0,9849b475-…},{0,c1204302-…},{-7}}` -- the document's tabular
+/// section `Обращения`, then its column `Обращение`, declared
+/// `cfg:CatalogRef.ДокументыПредприятия`. The platform writes
+/// `<DataPath>Объект.Обращения.Обращение.DeletionMark</DataPath>`, and the same
+/// path again as that Table's `<RowPictureDataPath>`.
+#[test]
+fn dereferences_a_deletion_mark_through_a_declared_catalog_reference() {
+    let section_uuid = "9849b475-39b0-4de5-9290-6c8647847aa0";
+    let column_uuid = "c1204302-1db6-41c7-a458-5f01cbba490f";
+    let attributes = vec![data_path_form_attribute("1", "Объект", None)];
+    let names = form_attribute_metadata_owners_by_id(&attributes);
+    let object_refs = BTreeMap::from([
+        (
+            section_uuid.to_string(),
+            "Document.ВыгрузкаВССТУ.TabularSection.Обращения".to_string(),
+        ),
+        (
+            column_uuid.to_string(),
+            "Document.ВыгрузкаВССТУ.TabularSection.Обращения.Attribute.Обращение".to_string(),
+        ),
+    ]);
+    let indexes = chain_walk_indexes_with_metadata_field_types(
+        &attributes,
+        BTreeMap::from([(
+            column_uuid.to_string(),
+            "cfg:CatalogRef.ДокументыПредприятия".to_string(),
+        )]),
+    );
+
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            &format!("{{4,{{1}},{{0,{section_uuid}}},{{0,{column_uuid}}},{{-7}}}}"),
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &object_refs,
+            false,
+        )
+        .as_deref(),
+        Some("Объект.Обращения.Обращение.DeletionMark")
+    );
+}
+
 /// The chain keeps walking past a dereferenced field: the owner a marker reaches
 /// is itself a value whose own members the following segments name.
 ///
@@ -69623,7 +69746,7 @@ fn dereferences_the_owner_of_a_field_reached_through_its_declared_type() {
     let certificate_uuid = "1d4e714f-5d56-4139-86fd-4e09eca1f6d8";
     let currency_uuid = "66664988-b912-4c0e-9868-4d67bbf9c65f";
     let attributes = vec![data_path_form_attribute("1", "Объект", None)];
-    let names = BTreeMap::from([("1".to_string(), "Объект".to_string())]);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
     let object_refs = BTreeMap::from([
         (
             section_uuid.to_string(),
@@ -73287,26 +73410,36 @@ fn pages_event_container_admits_disagreeing_representation_members() {
     }
 }
 
-/// A slot that names one further member of what another slot's chain reached is
-/// spelled by appending its segment to that chain and re-counting the header,
+/// A slot that names further members of what another slot's chain reached is
+/// spelled by appending its segments to that chain and re-counting the header,
 /// so both slots go through the one chain walker.
 #[test]
-fn bound_chain_takes_one_more_segment_and_recounts() {
+fn bound_chain_takes_more_segments_and_recounts() {
     assert_eq!(
-        form_bound_chain_with_extra_segment(
+        form_bound_chain_with_extra_segments(
             "{2,{1},{0,385ab3ce-dd41-4c25-b89b-974bb478f380}}",
-            "{6,5bdad865-f2c5-434b-8041-ba4aad3b6687}",
+            &["{6,5bdad865-f2c5-434b-8041-ba4aad3b6687}"],
         )
         .as_deref(),
         Some(
             "{3,{1},{0,385ab3ce-dd41-4c25-b89b-974bb478f380},{6,5bdad865-f2c5-434b-8041-ba4aad3b6687}}"
         )
     );
+    assert_eq!(
+        form_bound_chain_with_extra_segments(
+            "{2,{1},{0,9849b475-39b0-4de5-9290-6c8647847aa0}}",
+            &["{0,c1204302-1db6-41c7-a458-5f01cbba490f}", "{-7}"],
+        )
+        .as_deref(),
+        Some(
+            "{4,{1},{0,9849b475-39b0-4de5-9290-6c8647847aa0},{0,c1204302-1db6-41c7-a458-5f01cbba490f},{-7}}"
+        )
+    );
     // A header that does not count its own segments is not a chain.
     assert_eq!(
-        form_bound_chain_with_extra_segment(
+        form_bound_chain_with_extra_segments(
             "{3,{1},{0,385ab3ce-dd41-4c25-b89b-974bb478f380}}",
-            "{4}"
+            &["{4}"]
         ),
         None
     );
