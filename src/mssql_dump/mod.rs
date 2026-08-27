@@ -25443,38 +25443,7 @@ fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str,
     ) {
         return Some(("Begin", "DontUse", "Directly"));
     }
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3 {
-        return None;
-    }
-    Some((
-        match fields.first()?.trim() {
-            "1" => "Begin",
-            "2" => "AnyPart",
-            _ => return None,
-        },
-        // The middle slot is FullTextSearchOnInputByString, not a constant.
-        // 1C:Trade Management 11.5.27.75 writes `{1,1,0}` for
-        // Catalog.ВидыОповещенийКлиентам, whose native export reads
-        // `<FullTextSearchOnInputByString>Use</FullTextSearchOnInputByString>`;
-        // every other catalog writes 2 and exports `DontUse`.
-        match fields.get(1)?.trim() {
-            "1" => "Use",
-            "2" => "DontUse",
-            _ => return None,
-        },
-        // The third slot is ChoiceDataGetModeOnInputByString, not a constant
-        // either. `do` `Catalogs/АдресатыПочтовыхСообщений` writes `{1,2,1}`
-        // and the platform exports
-        // `<ChoiceDataGetModeOnInputByString>Background</...>`; it is the one
-        // object of the stand that does, against 584 that write `Directly`
-        // with a `0` there. Pinning the slot lost that object whole.
-        match fields.get(2)?.trim() {
-            "0" => "Directly",
-            "1" => "Background",
-            _ => return None,
-        },
-    ))
+    parse_owner_input_modes(value)
 }
 
 const CATALOG_STANDARD_ATTRIBUTES: [(&str, &str); 9] = [
@@ -28261,13 +28230,38 @@ fn parse_task_internal_uuid_slots(
     })
 }
 
+/// The three input-by-string modes every owner family stores in one envelope.
+///
+/// The slots are not constants. `SearchStringModeOnInputByString` is `1`/Begin
+/// or `2`/AnyPart; `FullTextSearchOnInputByString` is `1`/Use or `2`/DontUse;
+/// `ChoiceDataGetModeOnInputByString` is `0`/Directly or `1`/Background --
+/// the same three tables `Catalog` already reads, established there by census
+/// over the stand. Documents were pinned to the single `{1,2,0}` triple:
+/// 363 of the corpus write exactly that and `uh`'s
+/// `Documents/УправлениеПериодомСценария` writes `{2,1,0}` against a native
+/// `AnyPart`/`Use`/`Directly`, so the pin refused it whole.
 fn parse_owner_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
     let fields = split_information_register_braced_fields(value)?;
-    (fields.len() == 3
-        && fields.first()?.trim() == "1"
-        && fields.get(1)?.trim() == "2"
-        && fields.get(2)?.trim() == "0")
-        .then_some(("Begin", "DontUse", "Directly"))
+    if fields.len() != 3 {
+        return None;
+    }
+    Some((
+        match fields.first()?.trim() {
+            "1" => "Begin",
+            "2" => "AnyPart",
+            _ => return None,
+        },
+        match fields.get(1)?.trim() {
+            "1" => "Use",
+            "2" => "DontUse",
+            _ => return None,
+        },
+        match fields.get(2)?.trim() {
+            "0" => "Directly",
+            "1" => "Background",
+            _ => return None,
+        },
+    ))
 }
 
 struct TaskRootCollection<'a> {
