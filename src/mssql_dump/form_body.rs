@@ -18517,9 +18517,23 @@ fn parse_form_schema_backed_event_record(
             return Vec::new();
         };
         let handler = handler.trim();
+        // An entry whose handler member is the empty string is an event the
+        // item declares and binds to nothing, and the platform writes no
+        // `<Event>` element for it. It is not a malformed entry: the record
+        // still declares it, still carries its identifier and still repeats it
+        // in the metadata trailer below, so the collection is read as far as it
+        // states and only the unbound entry goes unwritten.
+        //
+        // The all-or-nothing refusal below cost the whole `<Events>` block of
+        // every item that has one. ERP УХ 3.2.12.6
+        // `Catalogs/ПоказателиОтчетов/Forms/ФормаВыбора`
+        // `SpreadSheetDocumentField` `ТабДокВыборПоказателя` declares two
+        // entries -- `22287505` bound to `ТабДокВыборПоказателяВыбор` and
+        // `2988b2a5` bound to `""` -- with a well-formed 13-member record whose
+        // trailer names both identifiers, and the platform writes exactly one
+        // element, `<Event name="Selection">ТабДокВыборПоказателяВыбор</Event>`.
         if consumed != handler_field.len()
-            || handler.is_empty()
-            || !is_probable_form_event_handler(handler)
+            || (!handler.is_empty() && !is_probable_form_event_handler(handler))
         {
             return Vec::new();
         }
@@ -18530,6 +18544,9 @@ fn parse_form_schema_backed_event_record(
             || fields[metadata_start + 2].trim() != "1"
         {
             return Vec::new();
+        }
+        if handler.is_empty() {
+            continue;
         }
         events.push(FormBodyEvent {
             name: name.to_string(),
