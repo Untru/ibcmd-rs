@@ -149,6 +149,11 @@ pub(super) struct FormParseContext<'a> {
     /// `MetadataCommandReference::use_standard_commands`. `None` (the default)
     /// behaves as an empty index: every target resolves as before.
     metadata_command_refs: Option<&'a BTreeMap<String, MetadataCommandReference>>,
+    /// The same table, shared so the per-form index the child-item readers
+    /// carry can hold it: a button that names a target's standard command has
+    /// to read the target's own declaration exactly as the command-interface
+    /// reader already does.
+    metadata_command_facts: Option<&'a Arc<BTreeMap<String, MetadataCommandReference>>>,
     /// What the configuration's tables declare about the existence of their own
     /// standard attributes, and which tables each common attribute is a field
     /// of. A dynamic list's resolvable-field universe is built from these:
@@ -209,6 +214,7 @@ impl<'a> FormParseContext<'a> {
             form_owner_reference,
             form_reference_index: None,
             metadata_command_refs: None,
+            metadata_command_facts: None,
             metadata_field_declarations: None,
             dcs_source_profile: ProfileId::parse("provider:mssql-legacy")
                 .expect("static MSSQL provider profile is valid"),
@@ -230,6 +236,14 @@ impl<'a> FormParseContext<'a> {
         metadata_command_refs: &'a BTreeMap<String, MetadataCommandReference>,
     ) -> Self {
         self.metadata_command_refs = Some(metadata_command_refs);
+        self
+    }
+
+    pub(super) fn with_metadata_command_facts(
+        mut self,
+        metadata_command_facts: &'a Arc<BTreeMap<String, MetadataCommandReference>>,
+    ) -> Self {
+        self.metadata_command_facts = Some(metadata_command_facts);
         self
     }
 
@@ -346,12 +360,6 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     }
 
     let started = Instant::now();
-    let events = extract_form_body_events(&form_fields);
-    if let Some(timings) = timings.as_deref_mut() {
-        timings.source_asset_form_events_cpu_ms += elapsed_ms(started);
-    }
-
-    let started = Instant::now();
     let mut attributes = extract_form_body_attributes_with_dcs_type_index(
         &body.trailing,
         context.type_index,
@@ -369,6 +377,15 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     }
     let attributes_section =
         extract_form_body_attributes_section(&body.trailing, context.object_refs);
+
+    let started = Instant::now();
+    let events = extract_form_body_events(
+        &form_fields,
+        form_root_write_extension(&attributes).as_deref(),
+    );
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_events_cpu_ms += elapsed_ms(started);
+    }
 
     let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
@@ -482,6 +499,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &mut child_item_indexes,
         &attributes,
         Arc::clone(context.field_type_refs),
+        context.metadata_command_facts.map(Arc::clone),
     );
     collect_form_item_rooted_chain_roots(&mut child_item_indexes, &attributes, context.object_refs);
     apply_form_attribute_save_field_bindings(
@@ -3109,15 +3127,103 @@ pub(super) fn parse_form_context_menu_autofill(field: &str) -> Option<bool> {
     }
 }
 
-pub(super) fn extract_form_body_events(fields: &[&str]) -> Vec<FormBodyEvent> {
+/// The family of the form's main attribute, which is what brings the form its
+/// write-cycle extension: `DocumentObject`, `CatalogObject`, `ConstantsSet`,
+/// `ReportObject`, `SettingsComposer` and so on. `None` when the form declares
+/// no main attribute at all, or declares one whose type is not exactly one
+/// reference -- the two states in which no extension is declared.
+pub(super) fn form_root_write_extension(attributes: &[FormAttribute]) -> Option<String> {
+    let main = attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute)?;
+    let [ConstantValueType::Reference { reference }] = main.value_types.as_slice() else {
+        return None;
+    };
+    let reference = reference
+        .split_once(':')
+        .map_or(reference.as_str(), |(_, tail)| tail);
+    Some(
+        reference
+            .split_once('.')
+            .map_or(reference, |(family, _)| family)
+            .to_string(),
+    )
+}
+
+/// Whether the extension the form's main attribute brings owns the event this
+/// identifier names.
+///
+/// An event identifier belongs to one form extension, and the platform writes
+/// the identifier itself -- never a name -- when the form does not carry that
+/// extension: the same "what it cannot name it writes physically" the
+/// choice-parameter link and the `<TypeLink>` chain already follow.
+///
+/// Evidence, joining every root event record the export reads against the
+/// native `<Form><Events>` of the same document over ERP УХ 3.2.12.6, БСП демо
+/// 3.1.12.297 and Документооборот КОРП 3.0.21.3 (13 316 write-cycle records):
+///
+///   * a form that declares **no main attribute** names none of them -- 26
+///     records, every one written as the raw identifier, against 0 named;
+///   * a form whose main attribute is a **`DataProcessorObject`** names none of
+///     them either -- 16 raw, 0 named. A data processor is not written, so the
+///     write extension is not there to name;
+///   * every other family names them and never leaves one raw: `CatalogObject`
+///     5 904, `DocumentObject` 9 238, `InformationRegisterRecordManager` 1 764,
+///     `TaskObject` 218, `BusinessProcessObject` 372, `ConstantsSet` 184,
+///     `ChartOfCharacteristicTypesObject` 162, `ReportObject` 106,
+///     `ExchangePlanObject` 96, `InformationRegisterRecordSet` 78,
+///     `ChartOfCalculationTypesObject` 26, `ChartOfAccountsObject` 20,
+///     `AccountingRegisterRecordSet` 12 and `SettingsComposer` 6;
+///   * with the single exception of `9cc34712-…` (`BeforeWrite`) and
+///     `bf0ac0e1-…` (`BeforeWriteAtServer`), which a `DocumentObject` form
+///     never names -- 4 raw records each, 0 named -- because a document form
+///     carries its own pair, `8a5894c9-…` and `8f42e083-…`, and the latter is
+///     never seen on any other family (1 288 named, all `DocumentObject`).
+///     ERP УХ `Documents/Лот/Forms/ФормаДокумента` carries both pairs against
+///     the one handler `ПередЗаписью` and the platform names one and writes
+///     the other out.
+///
+/// Only the states the platform was observed to decline in decline here: a
+/// family this join has not seen carrying an identifier keeps naming it.
+fn form_root_event_extension_owns(identifier: &str, write_extension: Option<&str>) -> bool {
+    let Some(name) = form_event_name_from_identifier(identifier) else {
+        return true;
+    };
+    if !matches!(
+        name,
+        "AfterWrite"
+            | "AfterWriteAtServer"
+            | "BeforeWrite"
+            | "BeforeWriteAtServer"
+            | "OnReadAtServer"
+            | "OnWriteAtServer"
+            | "OnUpdateUserSettingSetAtServer"
+    ) {
+        return true;
+    }
+    match write_extension {
+        None | Some("DataProcessorObject") => false,
+        Some("DocumentObject") => !matches!(
+            identifier,
+            "9cc34712-da5f-4faa-a653-343d2085fbe8" | "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"
+        ),
+        Some(_) => true,
+    }
+}
+
+pub(super) fn extract_form_body_events(
+    fields: &[&str],
+    write_extension: Option<&str>,
+) -> Vec<FormBodyEvent> {
     let mut events = Vec::new();
     let mut seen = BTreeSet::new();
-    collect_form_body_events(fields, &mut events, &mut seen);
+    collect_form_body_events(fields, write_extension, &mut events, &mut seen);
     events
 }
 
 pub(super) fn collect_form_body_events(
     fields: &[&str],
+    write_extension: Option<&str>,
     events: &mut Vec<FormBodyEvent>,
     seen: &mut BTreeSet<(String, String)>,
 ) {
@@ -3132,12 +3238,12 @@ pub(super) fn collect_form_body_events(
         if is_form_child_item_fields(&nested) {
             continue;
         }
-        for event in parse_form_body_event_fields(&nested) {
+        for event in parse_form_body_event_fields(&nested, write_extension) {
             if seen.insert((event.name.clone(), event.handler.clone())) {
                 events.push(event);
             }
         }
-        collect_form_body_events(&nested, events, seen);
+        collect_form_body_events(&nested, write_extension, events, seen);
     }
 }
 
@@ -3164,10 +3270,13 @@ pub(super) fn is_form_child_item_fields(fields: &[&str]) -> bool {
     form_child_item_tag(wrapper, fields).is_some()
 }
 
-pub(super) fn parse_form_body_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
+pub(super) fn parse_form_body_event_fields(
+    fields: &[&str],
+    write_extension: Option<&str>,
+) -> Vec<FormBodyEvent> {
     let mut events = Vec::new();
     for window in fields.windows(2) {
-        if let Some(event) = parse_form_body_event_pair(window[0], window[1]) {
+        if let Some(event) = parse_form_body_event_pair(window[0], window[1], write_extension) {
             events.push(event);
         }
     }
@@ -3177,8 +3286,9 @@ pub(super) fn parse_form_body_event_fields(fields: &[&str]) -> Vec<FormBodyEvent
 pub(super) fn parse_form_body_event_pair(
     event_field: &str,
     handler_field: &str,
+    write_extension: Option<&str>,
 ) -> Option<FormBodyEvent> {
-    let event = parse_form_event_identifier(event_field)?;
+    let event = parse_form_root_event_identifier(event_field, write_extension)?;
     let (handler, _) = parse_1c_quoted_string_with_len(handler_field.trim())?;
     let handler = handler.trim();
     if handler.is_empty() || !is_probable_form_event_handler(handler) {
@@ -3199,6 +3309,29 @@ pub(super) fn parse_form_event_identifier(field: &str) -> Option<String> {
     form_event_name_from_identifier(identifier)
         .map(ToOwned::to_owned)
         .or_else(|| is_uuid_text(identifier).then(|| identifier.to_string()))
+}
+
+/// The same identifier read at the form root, where the extension the main
+/// attribute brings decides whether the name may be spelled at all.
+pub(super) fn parse_form_root_event_identifier(
+    field: &str,
+    write_extension: Option<&str>,
+) -> Option<String> {
+    let field = field.trim();
+    let identifier = parse_1c_quoted_string_with_len(field)
+        .map(|(value, _)| value)
+        .unwrap_or_else(|| field.to_string());
+    let identifier = identifier.trim();
+    // The gate decides whether the *name* may be spelled, and the platform's
+    // other spelling is the identifier itself. An identifier that is not a
+    // uuid has no other spelling and no observation of the platform dropping
+    // it, so it keeps its name.
+    if !is_uuid_text(identifier) || form_root_event_extension_owns(identifier, write_extension) {
+        if let Some(name) = form_event_name_from_identifier(identifier) {
+            return Some(name.to_owned());
+        }
+    }
+    is_uuid_text(identifier).then(|| identifier.to_string())
 }
 
 pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
@@ -8565,6 +8698,12 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// that field's declared type exactly as a declared column does, and the
     /// standard attributes a following marker may address follow from it.
     metadata_field_types: Arc<BTreeMap<String, String>>,
+    /// What each metadata object declares about its own standard commands,
+    /// keyed by the object's uuid. Configuration-wide and shared for the same
+    /// reason `metadata_field_types` is: a button names a target's standard
+    /// command only when the target declares it has one, and that declaration
+    /// belongs to the target, not to this form.
+    metadata_command_facts: Arc<BTreeMap<String, MetadataCommandReference>>,
     /// Additional columns reachable through a *form item* rather than through
     /// the attribute, keyed by the table item id and the column id.
     table_additional_columns: BTreeMap<(String, String), Option<String>>,
@@ -8690,6 +8829,7 @@ pub(super) fn collect_form_chain_walk_member_indexes(
     indexes: &mut FormChildItemIndexes,
     attributes: &[FormAttribute],
     metadata_field_types: Arc<BTreeMap<String, String>>,
+    metadata_command_facts: Option<Arc<BTreeMap<String, MetadataCommandReference>>>,
 ) {
     // A table's own additional columns, keyed by the table item the binding
     // names. The column id is only unambiguous across the whole attribute, so a
@@ -8724,6 +8864,9 @@ pub(super) fn collect_form_chain_walk_member_indexes(
     let owner_scoped_bindings = &mut indexes.owner_scoped_bindings;
     owner_scoped_bindings.table_additional_columns = table_additional_columns;
     owner_scoped_bindings.metadata_field_types = metadata_field_types;
+    if let Some(metadata_command_facts) = metadata_command_facts {
+        owner_scoped_bindings.metadata_command_facts = metadata_command_facts;
+    }
     for attribute in attributes {
         for column in &attribute.columns {
             let key = FormAttributeColumnKey {
@@ -10601,6 +10744,7 @@ fn parse_form_child_item_with_metadata_owners(
                 commands,
                 object_refs,
                 standard_command_owner_name_by_id,
+                &owner_scoped_bindings.metadata_command_facts,
             )
         })
     } else {
@@ -10951,11 +11095,32 @@ fn parse_form_child_item_with_metadata_owners(
         },
         change_row_set: table_schema.and_then(|schema| schema.change_row_set(&fields)),
         change_row_order: table_schema.and_then(|schema| schema.change_row_order(&fields)),
-        command_set_excluded_commands: table_schema
-            .map(|schema| parse_form_table_command_set_excluded_commands_for_table(schema, &fields))
-            .unwrap_or_else(|| {
-                parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
-            }),
+        command_set_excluded_commands: {
+            // A dynamic list whose row set the form declares unchangeable has
+            // no commands that change it, so the platform names none of them.
+            let names_row_set_commands =
+                !(table_schema.and_then(|schema| schema.change_row_set(&fields)) == Some(false)
+                    && data_path_resolution.as_ref().is_some_and(|resolved| {
+                        attribute_names_by_id.iter().any(|(id, name)| {
+                            *name == resolved.data_path
+                                && owner_scoped_bindings
+                                    .dynamic_list_attribute_ids
+                                    .contains(id)
+                        })
+                    }));
+            let commands = table_schema
+                .map(|schema| {
+                    parse_form_table_command_set_excluded_commands_for_table(
+                        schema,
+                        &fields,
+                        names_row_set_commands,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
+                });
+            commands
+        },
         table_behavior_on_horizontal_compression: table_schema
             .and_then(|schema| schema.behavior_on_horizontal_compression(&fields)),
         table_current_row_use: table_schema.and_then(|schema| schema.current_row_use(&fields)),
@@ -12822,7 +12987,10 @@ fn parse_form_child_item_with_metadata_owners(
         ),
         extended_tooltip: parse_form_child_item_extended_tooltip(&fields, object_refs),
         events: {
-            let mut events = parse_form_child_item_event_fields(&fields);
+            // A table with no data path brings no data extension, so it
+            // cannot name the row-editing events it carries.
+            let names_events = tag != "Table" || data_path_resolution.is_some();
+            let mut events = parse_form_child_item_event_fields(&fields, names_events);
             append_unique_form_body_events(
                 &mut events,
                 parse_form_schema_backed_child_item_events(
@@ -17429,9 +17597,29 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
     commands
 }
 
+/// The commands a dynamic list has only while its row set is changeable.
+///
+/// Census over the eight stand corpora of every `Table` that carries a
+/// `<CommandSet>` and is bound to a `cfg:DynamicList` attribute: 358 declare
+/// `<ChangeRowSet>false</ChangeRowSet>` and not one of them names any of these
+/// six, while 1 581 that declare nothing name them freely. The declaration
+/// belongs to the dynamic list and not to the grammar: a table over a value
+/// table or value tree declares the very same `false` 1 469 times and names
+/// them anyway, so the binding is read alongside the flag rather than the flag
+/// alone.
+const FORM_TABLE_ROW_SET_EXCLUDED_COMMANDS: [&str; 6] = [
+    "Copy",
+    "Create",
+    "CreateFolder",
+    "Delete",
+    "MoveItem",
+    "SetDeletionMark",
+];
+
 fn parse_form_table_command_set_excluded_commands_for_table(
     schema: FormTableSchema,
     fields: &[&str],
+    names_row_set_commands: bool,
 ) -> Vec<&'static str> {
     let pair_count_slot = schema.counted_property_bag_pair_count_slot();
     let Some(pair_count) = fields
@@ -17475,14 +17663,18 @@ fn parse_form_table_command_set_excluded_commands_for_table(
     if !form_table_child_owner_section_starts_at(fields, command_slot + 1) {
         return Vec::new();
     }
-    map_form_table_excluded_commands(schema, &uuids)
+    let mut commands = map_form_table_excluded_commands(schema, &uuids);
+    if !names_row_set_commands {
+        commands.retain(|command| !FORM_TABLE_ROW_SET_EXCLUDED_COMMANDS.contains(command));
+    }
+    commands
 }
 
 #[cfg(test)]
 pub(super) fn parse_form_table_command_set_excluded_commands_for_table_test(
     fields: &[&str],
 ) -> Vec<&'static str> {
-    parse_form_table_command_set_excluded_commands_for_table(FormTableSchema, fields)
+    parse_form_table_command_set_excluded_commands_for_table(FormTableSchema, fields, true)
 }
 
 fn parse_form_field_command_set_excluded_commands(
@@ -18201,7 +18393,7 @@ fn parse_form_extended_tooltip_option_events(fields: &[&str]) -> Option<Vec<Form
     if count == 0 {
         return Some(Vec::new());
     }
-    let events = parse_form_child_item_event_record(fields);
+    let events = parse_form_child_item_event_record(fields, true);
     (events.len() == count).then_some(events)
 }
 
@@ -18421,7 +18613,7 @@ pub(super) fn parse_form_html_document_field_option_events(
     else {
         return Vec::new();
     };
-    let mut events = parse_form_child_item_event_record(&event_fields);
+    let mut events = parse_form_child_item_event_record(&event_fields, true);
     for event in &mut events {
         event.name = match event.name.as_str() {
             "Click" => "OnClick".to_string(),
@@ -18930,7 +19122,10 @@ fn parse_form_schema_backed_event_record(
     events
 }
 
-pub(super) fn parse_form_child_item_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
+pub(super) fn parse_form_child_item_event_fields(
+    fields: &[&str],
+    names_events: bool,
+) -> Vec<FormBodyEvent> {
     let mut events = Vec::new();
     for field in fields {
         let field = field.trim();
@@ -18940,17 +19135,23 @@ pub(super) fn parse_form_child_item_event_fields(fields: &[&str]) -> Vec<FormBod
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
-        append_unique_form_body_events(&mut events, parse_form_child_item_event_record(&nested));
+        append_unique_form_body_events(
+            &mut events,
+            parse_form_child_item_event_record(&nested, names_events),
+        );
     }
     for window in fields.windows(2) {
-        if let Some(event) = parse_form_child_item_event_pair(window[0], window[1]) {
+        if let Some(event) = parse_form_child_item_event_pair(window[0], window[1], names_events) {
             append_unique_form_body_events(&mut events, vec![event]);
         }
     }
     events
 }
 
-pub(super) fn parse_form_child_item_event_record(fields: &[&str]) -> Vec<FormBodyEvent> {
+pub(super) fn parse_form_child_item_event_record(
+    fields: &[&str],
+    names_events: bool,
+) -> Vec<FormBodyEvent> {
     let Some(count) = fields
         .first()
         .and_then(|value| value.trim().parse::<usize>().ok())
@@ -18968,7 +19169,7 @@ pub(super) fn parse_form_child_item_event_record(fields: &[&str]) -> Vec<FormBod
             .get(event_index)
             .zip(fields.get(handler_index))
             .and_then(|(event_field, handler_field)| {
-                parse_form_child_item_event_pair(event_field, handler_field)
+                parse_form_child_item_event_pair(event_field, handler_field, names_events)
             })
         {
             events.push(event);
@@ -19002,6 +19203,7 @@ pub(super) fn collect_form_nested_child_item_event_records(
     fields: &[&str],
     events: &mut Vec<FormBodyEvent>,
 ) {
+    const NAMES_EVENTS: bool = true;
     for field in fields {
         let field = field.trim();
         if !field.starts_with('{') {
@@ -19010,7 +19212,10 @@ pub(super) fn collect_form_nested_child_item_event_records(
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
-        append_unique_form_body_events(events, parse_form_child_item_event_record(&nested));
+        append_unique_form_body_events(
+            events,
+            parse_form_child_item_event_record(&nested, NAMES_EVENTS),
+        );
         collect_form_nested_child_item_event_records(&nested, events);
     }
 }
@@ -19018,8 +19223,9 @@ pub(super) fn collect_form_nested_child_item_event_records(
 pub(super) fn parse_form_child_item_event_pair(
     event_field: &str,
     handler_field: &str,
+    names_events: bool,
 ) -> Option<FormBodyEvent> {
-    let event = parse_form_child_item_event_identifier(event_field)?;
+    let event = parse_form_child_item_event_identifier(event_field, names_events)?;
     let (handler, _) = parse_1c_quoted_string_with_len(handler_field.trim())?;
     let handler = handler.trim();
     if handler.is_empty() || !is_probable_form_event_handler(handler) {
@@ -19031,12 +19237,40 @@ pub(super) fn parse_form_child_item_event_pair(
     })
 }
 
-pub(super) fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
+/// The event identifiers of a form item, read against whether the item is in
+/// a position to name them at all.
+///
+/// A table's row-editing events belong to the extension its *data* brings, so a
+/// table that declares no data path cannot name one and the platform writes the
+/// identifier itself. Census of every `<Events>` block in the eight stand
+/// corpora: 12 731 `Table` elements declare a `<DataPath>` and not one of them
+/// carries a raw identifier; the five that declare none -- ERP УХ 3.2.12.6
+/// `Documents/УстановкаСоответствийМеждуВидамиБюджетов` (`СтатьиБюджетаПриемник`,
+/// five events), `Documents/ОтзывАккредитации` (`ОбщиеТребования`,
+/// `НоменклатураПоставщика`), `Documents/КонсолидационныеПоправки`
+/// (`ИзменениеЧистыхАктивов`, `Элиминация`) -- write all ten of their events as
+/// raw identifiers and name none. The same names the platform declines there
+/// (`OnStartEdit`, `BeforeEditEnd`, `BeforeRowChange`, `BeforeAddRow`,
+/// `BeforeDeleteRow`, `AfterDeleteRow`, `OnEditEnd`) it spells freely on the
+/// tables that do declare a data path, so it is the data path and not the name
+/// that decides.
+///
+/// Every other item kind names its events with no data path at all --
+/// `LabelDecoration` 13 801 times, `Pages` 654, `PictureDecoration` 641,
+/// `ExtendedTooltip` 256 -- so the rule belongs to the table and is stated by
+/// the caller rather than guessed here.
+pub(super) fn parse_form_child_item_event_identifier(
+    field: &str,
+    names_events: bool,
+) -> Option<String> {
     let field = field.trim();
     let identifier = parse_1c_quoted_string_with_len(field)
         .map(|(value, _)| value)
         .unwrap_or_else(|| field.to_string());
     let identifier = identifier.trim();
+    if !names_events && is_uuid_text(identifier) {
+        return Some(identifier.to_string());
+    }
     match identifier {
         "ActivationProcessing" => Some("ActivationProcessing".to_string()),
         "AdditionalDetailProcessing" => Some("AdditionalDetailProcessing".to_string()),
@@ -22245,11 +22479,54 @@ pub(super) fn parse_form_attribute_data_path(
         .or_else(|| Some(name.to_string()))
 }
 
+/// Whether the target a `{kind, uuid}` command record names declares the
+/// standard command the reader is about to spell for it.
+///
+/// Two declarations of the target decide it, both already read for the
+/// command-interface reader and both stated once, on the target:
+///
+///   * `<UseStandardCommands>false</UseStandardCommands>` -- the object has no
+///     standard commands at all. Over the eight stand corpora every one of the
+///     6 468 `<Command>`/`<CommandName>` values naming a
+///     `<kind>.<name>.StandardCommand.X` names a target that declares `true`,
+///     and not one names a target that declares `false`; ERP УХ 3.2.12.6 keeps
+///     `Catalog.Номенклатура` as `0:fc59acc3-…` in
+///     `Documents/ВосстановлениеВНАИзРасходов/Forms/ФормаДокумента` and
+///     `InformationRegister.Удалить_ОсновныеШаблоныТрансляцииПлановСчетов` as
+///     `0:99941ca4-…` in `Catalogs/ШаблоныТрансляций/Forms/ФормаСписка`.
+///   * an empty `<BasedOn/>` -- there is nothing to create the object on the
+///     basis of, so it has no `CreateBasedOn`. All 5 123 named
+///     `.StandardCommand.CreateBasedOn` values of the stand name a target whose
+///     `<BasedOn>` declares at least one member, and the 22 buttons of ERP УХ
+///     that name one of the five documents whose `<BasedOn/>` is empty are all
+///     written `2:<uuid>`.
+///
+/// A target the index cannot name, or a kind whose `<BasedOn>` slot this
+/// package cannot read, declares nothing here and the name is spelled exactly
+/// as before.
+fn form_command_target_declares_standard_command(
+    uuid: &str,
+    command_name: &str,
+    metadata_command_facts: &BTreeMap<String, MetadataCommandReference>,
+) -> bool {
+    let Some(facts) = metadata_command_facts.get(uuid) else {
+        return true;
+    };
+    if !facts.use_standard_commands {
+        return false;
+    }
+    if command_name.ends_with(".StandardCommand.CreateBasedOn") {
+        return facts.based_on_declared != Some(0);
+    }
+    true
+}
+
 pub(super) fn parse_form_button_command_name(
     field: &str,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
+    metadata_command_facts: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let kind = fields.first()?.trim();
@@ -22261,8 +22538,15 @@ pub(super) fn parse_form_button_command_name(
         if let Some(command_name) = form_standard_command_name(&uuid) {
             return Some(command_name);
         }
-        if let Some(command_name) = object_refs.get(&uuid) {
-            return Some(form_object_reference_command_name(command_name));
+        if let Some(reference) = object_refs.get(&uuid) {
+            let command_name = form_object_reference_command_name(reference);
+            if form_command_target_declares_standard_command(
+                &uuid,
+                &command_name,
+                metadata_command_facts,
+            ) {
+                return Some(command_name);
+            }
         }
         return Some(form_command_record_sentinel(kind, &uuid));
     }
@@ -22312,6 +22596,11 @@ pub(super) fn parse_form_button_command_name(
             kind,
             reference,
             FormCommandRecordReader::Button,
+        )
+        && form_command_target_declares_standard_command(
+            &uuid,
+            &command_name,
+            metadata_command_facts,
         )
     {
         return Some(command_name);

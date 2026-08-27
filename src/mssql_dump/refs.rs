@@ -18,12 +18,14 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
         };
         let use_standard_commands =
             metadata_use_standard_commands(kind, &row.text, header).unwrap_or(true);
+        let based_on_declared = metadata_based_on_declared(kind, &row.text, header);
         index.insert(
             row.file_name.clone(),
             MetadataCommandReference {
                 kind: kind.to_string(),
                 name: header.name.clone(),
                 use_standard_commands,
+                based_on_declared,
             },
         );
     }
@@ -91,6 +93,25 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
     let mut diagnostic = None;
     let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
     information_register_bool(graph.owner_fields.get(slot)?)
+}
+
+/// How many members the target's own `<BasedOn>` list declares, read at the
+/// slot the kind's own properties parser reads it from -- offset 22 of the
+/// normalized owner fields for `Document`, offset 32 for `Catalog`, the two
+/// families this decoder answers for and the only two the stand's
+/// `CreateBasedOn` targets belong to. `None` for every other kind and whenever
+/// the slot is not the counted reference collection every one of these
+/// properties shares: an unread declaration withholds nothing and the caller
+/// keeps naming the command exactly as before.
+fn metadata_based_on_declared(kind: &str, text: &str, header: &MetadataHeader) -> Option<usize> {
+    let (family, slot) = match kind {
+        "Catalog" => (owner_graph::OwnerGraphFamily::Catalog, 32),
+        "Document" => (owner_graph::OwnerGraphFamily::Document, 22),
+        _ => return None,
+    };
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
+    metadata_reference_collection_len(graph.owner_fields.get(slot)?)
 }
 
 /// What a metadata table declares about the existence of its own standard
