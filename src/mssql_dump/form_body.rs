@@ -18139,7 +18139,36 @@ fn form_child_item_conditional_prefix_slot(wrapper: &str, raw_fields: &[&str]) -
     // differently-sized wrapper-`12` case) rather than by a hardcoded total
     // field count, since a leaf `LabelField` here has no reason to share a
     // length with any evidenced group/table shape.
-    (wrapper == "35"
+    //
+    // The three table additions (`SearchStringAddition`, `ViewStatusAddition`,
+    // `SearchControlAddition`, wrapper `5`) carry the very same prefix tuple at
+    // the very same slot 5, and no reader of theirs knew it: every slot the
+    // addition reader addresses -- the `0`/`1`/`2` kind discriminator at 5, the
+    // name at 6, `Enabled` at 10, the option bag at 13, `AdditionSource` at 19,
+    // `GroupHorizontalAlign` at 21 -- sat one member further out, so
+    // `form_child_item_tag` read the tuple itself as the kind code, answered
+    // `None`, and the item was dropped whole, subtree and all.
+    //
+    // The prefixed record is the plain one with one member inserted at slot 5,
+    // member for member: ERP УХ's
+    // `AccountingRegisters/КорректировкиНалоговойБазы/Forms/ФормаСписка`
+    // (24 members, slot 4 `0`) and
+    // `Catalogs/ВариантыФинансирования/Forms/ФормаЭлемента` (25, slot 4 `1`)
+    // hold the same members in the same order on either side of the insert,
+    // down to the `{3,1}`/`{74,1}` `AdditionSource` reference at 19/20 and the
+    // trailing `3,3,0`. Removing the member here therefore hands every existing
+    // slot reader the layout it already knows.
+    //
+    // Census over the dumped layouts of all eight stand corpora: the prefixed
+    // shape occurs 140 times, in 19 ERP УХ forms and nowhere else -- not one of
+    // the other seven configurations writes it at all -- and every one of those
+    // 19 files is `differing` at cc01031, so no byte-exact form can change.
+    // Collision pre-flight over the same layouts: every braced block whose
+    // leading member is `5`, whose slot 4 is `1` and whose slot 5 parses as the
+    // `UserVisible`-common tuple is an addition record -- 136 of them in ERP УХ,
+    // none anywhere else, all 25 members long, all carrying the `{id, form-uuid}`
+    // identity at slot 1 and a `0`/`1`/`2` kind code behind the prefix.
+    (matches!(wrapper, "35" | "5")
         && raw_fields.get(4).map(|value| value.trim()) == Some("1")
         && raw_fields
             .get(5)
