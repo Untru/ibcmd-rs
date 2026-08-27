@@ -64,12 +64,12 @@ mod characteristics {
     use super::{
         BUSINESS_PROCESS_STANDARD_ATTRIBUTES, CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES,
         CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES, DOCUMENT_CHARACTERISTIC_TYPE_UUID,
-        DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES, information_register_bool,
-        information_register_uuid_is_zero, information_register_uuid_matches,
-        parse_information_register_design_time_ref, parse_information_register_design_time_ref_ids,
-        parse_information_register_non_zero_uuid, parse_information_register_quoted_string,
-        parse_information_register_usize, resolve_exchange_plan_index_reference,
-        split_information_register_braced_fields,
+        DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES, dangling_value_design_time_ref,
+        information_register_bool, information_register_uuid_is_zero,
+        information_register_uuid_matches, parse_information_register_design_time_ref,
+        parse_information_register_design_time_ref_ids, parse_information_register_non_zero_uuid,
+        parse_information_register_quoted_string, parse_information_register_usize,
+        resolve_exchange_plan_index_reference, split_information_register_braced_fields,
     };
     pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
     use crate::metadata_owner_graph::{
@@ -827,6 +827,17 @@ mod characteristics {
                     })?;
                 let path =
                     parse_information_register_design_time_ref(value, type_index, object_refs)
+                        .or_else(|| {
+                            // The owner is named but the value it points at is
+                            // named by nothing: the platform still prints the
+                            // stored pair. See `dangling_value_design_time_ref`.
+                            dangling_value_design_time_ref(
+                                &owner_uuid,
+                                &value_uuid,
+                                type_index,
+                                object_refs,
+                            )
+                        })
                         .ok_or_else(|| {
                             unsupported_filter(
                                 family,
@@ -19450,11 +19461,58 @@ fn parse_information_register_design_time_ref(
     }
 }
 
+/// A design-time reference whose owner IS named by an index but whose value
+/// uuid is named by none. The general resolver refuses it -- it only prints a
+/// raw pair when the owner itself is unknown -- yet the platform prints the
+/// stored pair verbatim in that case too.
+///
+/// Evidence, ERP УХ 3.2.12.6 `Catalogs/КлассификаторЕдиницИзмерения`: the
+/// characteristic's `<xr:TypesFilterValue>` stores an owner uuid that is the
+/// `Ref` type id of `Catalogs/НаборыДополнительныхРеквизитовИСведений` (so the
+/// type index names it) and a value uuid that occurs nowhere else in the whole
+/// reference tree; the platform writes `<owner uuid>.<value uuid>` for it, and
+/// refusing cost the object its whole file.
+///
+/// The "value is dangling" test is the same one the document fill-value reader
+/// already uses: the uuid must be absent from the object references (bare and
+/// owner-qualified) and from the type index. A value any index knows is a
+/// resolution failure, not a dangling reference, and still refuses.
+fn dangling_value_design_time_ref(
+    owner_uuid: &str,
+    value_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if information_register_uuid_is_zero(owner_uuid)
+        || information_register_uuid_is_zero(value_uuid)
+    {
+        return None;
+    }
+    if information_register_design_time_owner_reference(owner_uuid, type_index, object_refs)
+        .is_none()
+    {
+        return None;
+    }
+    if object_refs.contains_key(value_uuid)
+        || type_index.contains_key(value_uuid)
+        || object_refs.keys().any(|key| {
+            metadata_owner_value_reference_key_parts(key)
+                .is_some_and(|(_, candidate)| candidate == value_uuid)
+        })
+    {
+        return None;
+    }
+    Some(format!("{owner_uuid}.{value_uuid}"))
+}
+
 /// A design-time reference whose owner is unknown to every index of the
 /// configuration is written by the platform as the raw `owner.value` pair,
 /// the same way the form choice-list reader already reproduces it. The rule
 /// is deliberately narrow: an owner that any index knows is never
 /// downgraded to a raw pair, so an incomplete resolution still refuses.
+///
+/// The mirror case -- a named owner whose VALUE uuid no index knows -- is
+/// `dangling_value_design_time_ref`, and each caller opts into it separately.
 fn information_register_dangling_design_time_ref(
     owner_uuid: &str,
     value_uuid: &str,

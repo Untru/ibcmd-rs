@@ -68063,6 +68063,88 @@ fn characteristics_standard_attribute_marker_follows_the_source_family() {
 }
 
 #[test]
+fn characteristics_filter_value_prints_the_stored_pair_when_only_the_value_dangles() {
+    // Real bytes, ERP УХ 3.2.12.6 `Catalogs/КлассификаторЕдиницИзмерения`: the
+    // characteristic's `<xr:TypesFilterValue>` stores a design-time reference
+    // whose owner uuid is the `Ref` type id of another catalog -- so the type
+    // index names it -- and whose value uuid occurs nowhere else in the whole
+    // reference tree. The platform writes `<owner uuid>.<value uuid>`
+    // verbatim; the reader used to refuse, costing the catalog its file.
+    let owner_uuid = "7a576bbd-3683-4c69-8259-b03d2c59db04";
+    let dangling_uuid = "a63118e9-972c-4c4d-99fa-7338a4fc913a";
+    let known_uuid = "b0f9d9f2-9a6c-4a9b-b7b5-2d4f0c3d1e77";
+    let type_index = BTreeMap::from([(owner_uuid.to_owned(), "cfg:CatalogRef.Наборы".to_owned())]);
+    let filter = |value_uuid: &str| {
+        format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{value_uuid}}}}}")
+    };
+    let decode_with = |raw: &str, metadata_refs: &BTreeMap<String, String>| {
+        decode_characteristics_with_owner_code(
+            CharacteristicsOwnerFamily::Catalog,
+            None,
+            raw,
+            &type_index,
+            metadata_refs,
+            &references(),
+        )
+    };
+    let model = decode_with(
+        &collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            &filter(dangling_uuid),
+        )),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let expected = format!("{owner_uuid}.{dangling_uuid}");
+    assert!(matches!(
+        model.items()[0].types().types_filter_value(),
+        CharacteristicFilterValue::DesignTimeRef(Some(reference))
+            if reference.path() == expected
+    ));
+
+    // A value any index names is a resolution, not a dangling reference: it is
+    // resolved, never downgraded to the raw pair.
+    let known = BTreeMap::from([(known_uuid.to_owned(), "Catalog.Наборы.Значение".to_owned())]);
+    let model = decode_with(
+        &collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            &filter(known_uuid),
+        )),
+        &known,
+    )
+    .unwrap();
+    assert!(matches!(
+        model.items()[0].types().types_filter_value(),
+        CharacteristicFilterValue::DesignTimeRef(Some(reference))
+            if reference.path() == "Catalog.Наборы.Значение"
+    ));
+
+    // And a value the TYPE index names is not dangling either -- that is an
+    // incomplete resolution, which still refuses.
+    let mut colliding_type_index = type_index.clone();
+    colliding_type_index.insert(dangling_uuid.to_owned(), "cfg:CatalogRef.Прочее".to_owned());
+    let diagnostic = decode_characteristics_with_owner_code(
+        CharacteristicsOwnerFamily::Catalog,
+        None,
+        &collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            &filter(dangling_uuid),
+        )),
+        &colliding_type_index,
+        &BTreeMap::new(),
+        &references(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        diagnostic.reason,
+        CharacteristicsReason::UnsupportedFilterUnion
+    );
+}
+
+#[test]
 fn characteristics_filter_value_union_covers_undefined_and_boolean_members() {
     // Real bytes: `{"U"}` is the union member the platform spells
     // `<xr:TypesFilterValue xsi:nil="true"/>` (8 occurrences across ДО КОРП
