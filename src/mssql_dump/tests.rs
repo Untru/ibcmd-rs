@@ -14124,8 +14124,18 @@ fn extracts_input_field_input_hint_from_extended_options_bag36() {
     );
 }
 
+/// A prefixed `InputField` keeps an `<InputHint>` that repeats its own
+/// `<Title>`.
+///
+/// The writer used to drop it, on the unstated assumption that the shifted
+/// option bag had answered the title twice. The assumption is measurable and
+/// false: the guard fires nowhere in БСП demo and nowhere in УТ 11.5.27.75,
+/// and exactly three times in Документооборот КОРП 3.0.21.3 -- the three
+/// filter fields of `Catalogs/ДокументыПредприятия/Forms/ФормаСпискаСПапками`,
+/// each of which the platform writes an `<InputHint>` for, spelled exactly
+/// like its title.
 #[test]
-fn suppresses_input_hint_when_it_duplicates_title() {
+fn keeps_input_hint_when_it_duplicates_title() {
     let field = r#"{37,{43,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",0},0}},2,"СписокКонтрагент",1,0,{1,1,{"ru","Контрагент"}},{1,0},{2,{7},{2}},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},2,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Контрагент"}},2,0,1,0,0,15,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0}}"#;
     let attribute_names_by_id = BTreeMap::from([("7".to_string(), "Список".to_string())]);
     let table_column_names_by_id = BTreeMap::from([(
@@ -14147,10 +14157,13 @@ fn suppresses_input_hint_when_it_duplicates_title() {
     )
     .unwrap();
 
-    assert_eq!(item.input_hint, Vec::<(String, String)>::new());
+    assert_eq!(
+        item.input_hint,
+        vec![("ru".to_string(), "Контрагент".to_string())]
+    );
 
     let xml = format_form_child_items_xml(&[item], 1);
-    assert!(!xml.contains("<InputHint>"));
+    assert!(xml.contains("<InputHint>"));
 }
 
 #[test]
@@ -20939,6 +20952,16 @@ fn formats_table_search_additions_as_direct_sections() {
         table_output: None,
         pages_read_only: None,
         search_string_addition_properties: None,
+        list_addition_tooltip_representation: None,
+        multiple_value_picture_data_path: None,
+        multiple_values_hyperlink: None,
+        multiple_values_font_xml: None,
+        multiple_values_back_color: None,
+        calendar_selection_mode: None,
+        calendar_enable_drag: None,
+        auto_capitalization_on_text_input: None,
+        on_screen_keyboard_return_key_text: None,
+        autofill_hint: None,
         incomplete_choice_mode: None,
         choice_button_representation: None,
         choice_button_picture_ref: None,
@@ -21192,6 +21215,16 @@ fn formats_table_search_additions_as_direct_sections() {
                 table_output: None,
                 pages_read_only: None,
                 search_string_addition_properties: None,
+                list_addition_tooltip_representation: None,
+                multiple_value_picture_data_path: None,
+                multiple_values_hyperlink: None,
+                multiple_values_font_xml: None,
+                multiple_values_back_color: None,
+                calendar_selection_mode: None,
+                calendar_enable_drag: None,
+                auto_capitalization_on_text_input: None,
+                on_screen_keyboard_return_key_text: None,
+                autofill_hint: None,
                 incomplete_choice_mode: None,
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
@@ -21446,6 +21479,16 @@ fn formats_table_search_additions_as_direct_sections() {
                 table_output: None,
                 pages_read_only: None,
                 search_string_addition_properties: None,
+                list_addition_tooltip_representation: None,
+                multiple_value_picture_data_path: None,
+                multiple_values_hyperlink: None,
+                multiple_values_font_xml: None,
+                multiple_values_back_color: None,
+                calendar_selection_mode: None,
+                calendar_enable_drag: None,
+                auto_capitalization_on_text_input: None,
+                on_screen_keyboard_return_key_text: None,
+                autofill_hint: None,
                 incomplete_choice_mode: None,
                 choice_button_representation: None,
                 choice_button_picture_ref: None,
@@ -22974,11 +23017,15 @@ fn picture_decoration_carries_the_scale_ignoring_sizes_and_the_unselected_captio
         ("0", Some("RealSize")),
         ("1", Some("Stretch")),
         ("2", Some("Proportionally")),
+        // Code 3 is `Tile`.  It occurs nowhere in УТ 11.5.27.75, which is why
+        // it used to be unmapped; Документооборот КОРП 3.0.21.3 spells it on
+        // exactly the 8 of its 1 602 native `PictureDecoration` items the
+        // platform writes `<PictureSize>Tile</PictureSize>` for.
+        ("3", Some("Tile")),
         ("4", Some("AutoSize")),
         ("5", Some("RealSizeIgnoreScale")),
         ("6", Some("AutoSizeIgnoreScale")),
         ("7", Some("ByFontSize")),
-        ("3", None),
     ] {
         let item = parse(&field.replace(
             OPT_HEAD,
@@ -25652,16 +25699,18 @@ fn extracts_live_picture_field_values_picture_and_file_drag_mode() {
     let proportional_xml = format_form_child_items_xml(&[proportional_item], 1);
     assert!(proportional_xml.contains("<PictureSize>Proportionally</PictureSize>"));
 
-    // Every code the native tree spells out on either picture owner, and the one
-    // code that never occurs and therefore stays a refusal rather than a guess.
+    // Every code the native trees spell out on either picture owner.  Code 3
+    // is `Tile`: it occurs nowhere in УТ 11.5.27.75, which is why it used to
+    // stay a refusal, and Документооборот КОРП 3.0.21.3 spells it on exactly
+    // the 8 items the platform writes `Tile` for.
     for (code, spelling) in [
         ("1", Some("Stretch")),
         ("2", Some("Proportionally")),
+        ("3", Some("Tile")),
         ("4", Some("AutoSize")),
         ("5", Some("RealSizeIgnoreScale")),
         ("6", Some("AutoSizeIgnoreScale")),
         ("7", Some("ByFontSize")),
-        ("3", None),
     ] {
         let item = reparse(&format!(r#"}},"",-1,-1,0,0,""}},{code},0,0,{{1,0}}"#));
         assert_eq!(item.picture_size, spelling, "code {code}");
@@ -70920,12 +70969,16 @@ fn a_table_writes_its_caps_stretch_and_fonts_inside_its_own_run() {
         "got {xml}"
     );
     assert!(at("<EnableStartDrag>") < at("<DataPath>"), "got {xml}");
-    // Title, TitleTextColor, TitleFont, Font, CommandSet.
-    assert!(at("<DataPath>") < at("<Title>"), "got {xml}");
+    // Font, Title, TitleTextColor, TitleFont, CommandSet.  The UT 11.5.27.75
+    // census that first placed the table's own `Font` saw only 2 occurrences
+    // and neither shared a table with `Title` or `TitleFont`; over all eight
+    // native stand trees `Font` precedes `Title` (8) and `TitleFont` (3), and
+    // never follows either.
+    assert!(at("<DataPath>") < at("<Font "), "got {xml}");
+    assert!(at("<Font ") < at("<Title>"), "got {xml}");
     assert!(at("<Title>") < at("<TitleTextColor>"), "got {xml}");
     assert!(at("<TitleTextColor>") < at("<TitleFont "), "got {xml}");
-    assert!(at("<TitleFont ") < at("<Font "), "got {xml}");
-    assert!(at("<Font ") < at("<CommandSet>"), "got {xml}");
+    assert!(at("<TitleFont ") < at("<CommandSet>"), "got {xml}");
     for name in [
         "<MaxWidth>",
         "<MaxHeight>",

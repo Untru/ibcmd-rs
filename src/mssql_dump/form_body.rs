@@ -25384,7 +25384,14 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
     if item.tag.ends_with("Addition") {
-        if item.addition_source_item.is_some() || item.item_type.is_some() {
+        // The block is written for the source it names, and the platform never
+        // writes one that names none: over all eight native stand trees every
+        // single `<AdditionSource>` -- 33 647 in ERP УХ, 13 947 in УТ, 6 258 in
+        // Документооборот, 2 545 and 2 080 in the two БСП, 33 in MDM and 9 in
+        // WMS -- carries an `<Item>`, and not one carries a bare `<Type>`.
+        // Writing the type alone put a block the platform leaves out on an
+        // addition whose slot 19 names no owner.
+        if item.addition_source_item.is_some() {
             xml.push_str(&format!("{tab}\t<AdditionSource>\r\n"));
             if let Some(source_item) = &item.addition_source_item {
                 xml.push_str(&format!(
