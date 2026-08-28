@@ -23159,9 +23159,29 @@ fn form_settings_composer_member(
 ) -> Option<(&'static str, Option<FormSettingsComposerType>)> {
     use FormSettingsComposerType::*;
     let table: &[(&str, &str, Option<FormSettingsComposerType>)] = match owner {
+        // `2` is the composer's third property, and it carries the same
+        // settings object `0` does -- so the members past it are read against
+        // the `Settings` table, not a second one.
+        //
+        // Evidence: ERP УХ 3.2.12.6
+        // `DataProcessors/НастраиваемыеПечатныеФормыЗарплатаКадры/Forms/
+        // ФормаПользовательскогоПоля`, Table
+        // `КомпоновщикНастроекКДФиксированныеНастройкиВыборДоступныеПоляВыбора`,
+        // whose binding `{4,{6},{2},{2},{0}}` stands on the form's
+        // `dcsset:SettingsComposer` attribute; the platform writes
+        // `КомпоновщикНастроекКД.FixedSettings.Selection.SelectionAvailableFields`.
+        // The two codes past `2` are read by the rows already here -- `Settings`
+        // `2` is `Selection` on the 30 slots that carry it and `Selection` `0`
+        // is `SelectionAvailableFields` -- so the observation fixes the third
+        // code and confirms the table it hands on to, with no freedom left. The
+        // name is the one the composer's own property walk already spells for
+        // index `1` of the same type in `form_value_type_property_name`; the
+        // two numberings differ, which is why the code is read here and not
+        // borrowed from there.
         SettingsComposer => &[
             ("0", "Settings", Some(Settings)),
             ("1", "UserSettings", Some(UserSettings)),
+            ("2", "FixedSettings", Some(Settings)),
         ],
         // `5` and `6` join the five UT 11.5.27.75 pinned from ERP УХ 3.2.12.6,
         // where two forms bind an item straight onto the member and the
@@ -23433,32 +23453,66 @@ fn resolve_form_settings_composer_chain(
 /// `СписокМаркетплейсOzon.Filter`. Both are the only paths of their shape in
 /// the configuration; every other negative code on a dynamic list stays
 /// unresolved rather than guessed.
+///
+/// What follows `Order` or `Filter` is read against the very member tables the
+/// settings composer's own chains are read against: the list's filter *is* a
+/// data-composition filter collection, and the codes past it are the
+/// collection's, not the list's. Evidence: ERP УХ 3.2.12.6
+/// `InformationRegisters/СтруктураОперативногоПланирования/Forms/
+/// ФормаСпискаДляПанелиАдминистрирования` and its `Удалить…` twin, InputField
+/// `ВидБюджетаШапки`, which carries
+/// `{4,{1},{-2},{0,e67e2953-…},{10005}}` -- the list's `Filter`, the index
+/// binding every collection numbers its rows with, and `10005`, which the
+/// composer's own `Filter` table names `RightValue` on the six slots that
+/// carry it elsewhere. The platform writes
+/// `Список.Filter[0].RightValue`, and the two are the only chains longer than
+/// two segments any dynamic-list negative code carries on the whole stand.
 fn resolve_form_dynamic_list_member_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
 ) -> Option<String> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let [kind, owner, terminal] = fields.as_slice() else {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let (root, members) = segments.split_first()?;
+    let [attribute_id] = root.as_slice() else {
         return None;
     };
-    if kind.trim() != "2" {
-        return None;
-    }
-    let owner = split_1c_braced_fields(owner.trim(), 0)?;
-    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-    let ([attribute_id], [marker]) = (owner.as_slice(), terminal.as_slice()) else {
+    let (terminal, rest) = members.split_first()?;
+    let [marker] = terminal.as_slice() else {
         return None;
     };
     let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
     if !attribute.has_dynamic_list_settings {
         return None;
     }
-    let name = match marker.trim() {
-        "-1" => "Order",
-        "-2" => "Filter",
+    let (name, collection) = match marker.trim() {
+        "-1" => ("Order", FormSettingsComposerType::Order),
+        "-2" => ("Filter", FormSettingsComposerType::Filter),
         _ => return None,
     };
-    Some(format!("{}.{name}", attribute.name))
+    let mut path = format!("{}.{name}", attribute.name);
+    let mut owner = Some(collection);
+    for segment in rest {
+        match segment.as_slice() {
+            [index, uuid]
+                if uuid
+                    .trim()
+                    .eq_ignore_ascii_case(FORM_VALUE_TABLE_INDEX_BINDING_UUID) =>
+            {
+                let index = parse_form_chain_numeric_id(index)?;
+                path.push('[');
+                path.push_str(index);
+                path.push(']');
+            }
+            [member_id] => {
+                let (member, next) = form_settings_composer_member(owner?, member_id.trim())?;
+                path.push('.');
+                path.push_str(member);
+                owner = next;
+            }
+            _ => return None,
+        }
+    }
+    Some(path)
 }
 
 fn form_type_reference_is_standard_period(reference: &str) -> bool {
