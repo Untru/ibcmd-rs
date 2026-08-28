@@ -1278,6 +1278,43 @@ impl FormPageSchema {
         1
     }
 
+    /// The page's picture rides option member 1 in *both* revisions of its
+    /// bag, so the short one no longer has to refuse it.
+    ///
+    /// Census of the dumped layouts of all eight stand corpora joined to the
+    /// platform's own `<Page>` for the same item id -- all 25 101 pages: the
+    /// 122 that carry the short `17`/18 bag hold a reference value in member 1
+    /// on exactly the 2 whose page publishes a `<Picture>` and something else
+    /// on the other 120, and the 24 979 that carry the canonical `18`/20 bag
+    /// hold one on exactly 405 of the 408 that publish one, the remaining
+    /// three being the embedded-payload and standard-picture kinds the same
+    /// member already carries. No page publishes a picture whose member 1 is
+    /// the empty value, and no page with a value in member 1 publishes none.
+    pub(crate) fn picture_revision(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        (Self::from_raw_layout(
+            wrapper,
+            field_count,
+            item_tag,
+            direct_discriminator,
+            options,
+        )
+        .is_some()
+            || Self::is_short_revision(
+                wrapper,
+                field_count,
+                item_tag,
+                direct_discriminator,
+                options,
+            ))
+        .then_some(Self)
+    }
+
     /// A page's picture value is the ordinary picture value, all three of its
     /// kinds included.
     ///

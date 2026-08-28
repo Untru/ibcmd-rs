@@ -11893,10 +11893,15 @@ fn parse_form_child_item_with_metadata_owners(
         .and_then(|(schema, options)| {
             parse_form_input_field_choice_button_picture(*schema, options, object_refs)
         });
-    let page_picture = page_schema.and_then(|schema| {
-        show_title_options
-            .as_deref()
-            .and_then(|options| parse_form_page_picture(schema, options, object_refs))
+    let page_picture = show_title_options.as_deref().and_then(|options| {
+        let schema = FormPageSchema::picture_revision(
+            wrapper,
+            fields.len(),
+            tag,
+            direct_discriminator,
+            options,
+        )?;
+        parse_form_page_picture(schema, options, object_refs)
     });
     let rows_picture =
         table_schema.and_then(|schema| parse_form_table_rows_picture(schema, &fields, object_refs));
