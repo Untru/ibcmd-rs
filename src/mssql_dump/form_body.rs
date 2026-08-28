@@ -21217,6 +21217,11 @@ pub(super) fn parse_form_child_item_data_path(
                 };
                 FormOwnerScopedDataPath::from_option(data_path)
             })
+            .or_else(|| {
+                FormOwnerScopedDataPath::from_option(
+                    resolve_form_absent_metadata_physical_data_path(field, object_refs),
+                )
+            })
     };
     let parse_direct_slot = |field: &str, aggregate: bool| {
         parse_bound_slot(field, aggregate).or_else(|| {
@@ -21435,6 +21440,64 @@ pub(super) fn parse_form_child_item_data_path(
         multiple_value_present: multiple_value_paths.2,
     };
     paths
+}
+
+/// The physical spelling of a bound chain that names metadata the configuration
+/// does not declare.
+///
+/// This is the law the choice-parameter-link reader already states, on the
+/// item's own bound slot: the platform does not drop a reference it cannot
+/// name -- it writes it physically, `<root id>` followed by one `/<marker>:<uuid>`
+/// per segment. The whole path goes physical, not just the segment that fails:
+/// a resolvable prefix is not spelled by name and then abandoned.
+///
+/// Evidence, equality of sets over the eight stand corpora: exactly two
+/// `<DataPath>` values anywhere in the eight native trees have this shape, both
+/// on ERP УХ 3.2.12.6. `DataProcessors/ПереносБюджетированияЕРП/Forms/Форма`
+/// CheckBoxField `СоздатьВидыОтчетов` carries `{2,{1},{0,12ce4095-…}}` and is
+/// written `1/0:12ce4095-280d-4333-85f2-fe333aa354e5`; that uuid is named by no
+/// declaration anywhere in the configuration, and no object declares an
+/// attribute of that name either. `DataProcessors/
+/// ГенерацияЗаявокНаРазмещениеСвободныхОстатковДС/Forms/Форма` InputField
+/// `РеквизитыЗаявокНаРазмещениеСредствВидОперацииБюджетирование` carries
+/// `{3,{1},{0,3608dd75-…},{0,a4d1f9e8-…}}` and is written
+/// `1/0:3608dd75-bdcf-44eb-a280-bace3d3ec7d0/0:a4d1f9e8-2c67-4f1e-a2c3-80d5de109340`;
+/// there the *first* uuid is a declared tabular section and only the terminal
+/// is undeclared, and the platform still writes both segments physically.
+///
+/// Both slots used to fall through to the item's own name joined to its parent
+/// path -- a guess, and the wrong one on both.
+fn resolve_form_absent_metadata_physical_data_path(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let (root, members) = segments.split_first()?;
+    let [root_id] = root.as_slice() else {
+        return None;
+    };
+    let root_id = parse_form_chain_numeric_id(root_id)?;
+    if members.is_empty() {
+        return None;
+    }
+    let mut path = root_id.to_string();
+    let mut absent = false;
+    for member in members {
+        let [marker, uuid] = member.as_slice() else {
+            return None;
+        };
+        let marker = marker.trim();
+        marker.parse::<i64>().ok()?;
+        let uuid = parse_non_zero_uuid(uuid.trim())?;
+        if !object_refs.contains_key(&uuid) {
+            absent = true;
+        }
+        path.push('/');
+        path.push_str(marker);
+        path.push(':');
+        path.push_str(&uuid);
+    }
+    absent.then_some(path)
 }
 
 /// The id a one-segment bound chain `{1,{<id>}}` names, and nothing else.
@@ -24116,6 +24179,34 @@ pub(super) fn parse_form_title_data_path(
     // each; the chain walker above answers nothing for them, because it has no
     // type to resolve `-3` against.
     resolve_form_strict_field_model_data_path(binding, attribute_metadata_owners_by_id, object_refs)
+        // A one-segment binding `{1,{N}}` whose `N` names no form attribute is
+        // a reference this configuration cannot name, and the platform does not
+        // drop such a reference -- it writes it physically, the bare id, exactly
+        // as a `UserSettingsGroup` whose declared item id names no item is
+        // written `1:02023637-…` and an unresolvable choice-parameter link is
+        // written with its owner id alone.
+        //
+        // Evidence, equality of sets over the title bindings of all 17 798
+        // forms of the eight stand corpora that carry one: on every form the
+        // set of `{1,{N}}` bindings the routes above answer nothing for is
+        // exactly the set of digit-only `<TitleDataPath>` values the platform
+        // writes -- 3 values on one form (ERP УХ
+        // `Catalogs/ОбъектыЭксплуатации/Forms/ФормаЭлемента`, ids 102, 104 and
+        // 105, and that form declares attributes 1..90 only) and both sets
+        // empty on the other 17 797. There is no form where the platform writes
+        // a physical id the routes above do name, and none where they fail and
+        // the platform writes nothing.
+        .or_else(|| {
+            let segments = parse_form_bound_chain_segments(binding)?;
+            let [root] = segments.as_slice() else {
+                return None;
+            };
+            let [id] = root.as_slice() else {
+                return None;
+            };
+            let id = parse_form_chain_numeric_id(id)?;
+            (!attribute_metadata_owners_by_id.contains_key(id)).then(|| id.to_string())
+        })
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
