@@ -5575,6 +5575,44 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
         &whole[start..]
     }
 
+    /// The two halves of [`Self::standalone_through_default_style_segment`]
+    /// that stay verbatim once `AllowedIncomingShareRequestTypes` is emitted
+    /// from its own decoded coordinate. Cut out of the same sha-bound
+    /// constant at its own element boundary, so no second copy of the
+    /// evidence exists to drift from it.
+    ///
+    /// `StandaloneConfigurationRestrictionRoles` and `MobileApplicationURLs`.
+    pub fn standalone_and_mobile_urls_segment(&self) -> &'static str {
+        let whole = self.standalone_through_default_style_segment();
+        let end = whole
+            .find("\t\t\t<AllowedIncomingShareRequestTypes/>")
+            .expect("the evidenced default block always carries AllowedIncomingShareRequestTypes");
+        &whole[..end]
+    }
+
+    /// `MainClientApplicationWindowMode` through `DefaultStyle`.
+    pub fn main_window_through_default_style_segment(&self) -> &'static str {
+        let whole = self.standalone_through_default_style_segment();
+        let start = whole
+            .find("\t\t\t<MainClientApplicationWindowMode>")
+            .expect("the evidenced default block always carries MainClientApplicationWindowMode");
+        &whole[start..]
+    }
+
+    /// Tuple field of `<AllowedIncomingShareRequestTypes>`.
+    ///
+    /// Read off the platform by elimination: of the eight configurations of
+    /// the stand exactly one -- «1С:ERP. Управление холдингом 3.2.12.6» --
+    /// prints a non-empty `<AllowedIncomingShareRequestTypes>`, and exactly
+    /// one field of its Properties tuple that no reader decodes differs from
+    /// the all-default reference: field 59, which holds a counted list of
+    /// four members whose `mime`/`uti`/`ext` strings are, in order, the four
+    /// `<v8:Value>` elements that configuration prints. The other seven hold
+    /// the empty list `{0}` there and print the element self-closed.
+    pub fn allowed_incoming_share_request_types_tuple_field(&self) -> usize {
+        59
+    }
+
     /// `DataLockControlMode` and `ObjectAutonumerationMode`. Inserted
     /// immediately after the writer's own (already-correct)
     /// `BriefInformation`/`DetailedInformation`/`Copyright`/
@@ -5746,13 +5784,13 @@ impl ConfigurationPropertiesEvidencedDefaultBlockPolicy {
     /// assumed -- only by requiring byte identity with the evidenced
     /// all-default reference. Everything not listed here is either decoded
     /// from its own coordinate (fields
-    /// 1..8, 10, 13, 14, 15, 16, 22..26, 28..33, 36, 38, 39, 41, 43, 53) or
+    /// 1..8, 10, 13, 14, 15, 16, 22..26, 28..33, 36, 38, 39, 41, 43, 53, 59) or
     /// carries no `<Properties>` output at all (fields 12, 40 and 51 -- see
     /// [`Self::tuple_fields_without_properties_output`]).
     pub fn unproven_tuple_fields(&self) -> &'static [usize] {
         &[
             0, 9, 11, 17, 18, 19, 20, 21, 27, 34, 35, 37, 42, 44, 45, 46, 47, 48, 49, 50, 52, 54,
-            55, 56, 57, 58, 59, 60,
+            55, 56, 57, 58, 60,
         ]
     }
 

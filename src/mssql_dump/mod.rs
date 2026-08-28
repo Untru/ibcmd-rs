@@ -64,12 +64,12 @@ mod characteristics {
     use super::{
         BUSINESS_PROCESS_STANDARD_ATTRIBUTES, CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES,
         CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES, DOCUMENT_CHARACTERISTIC_TYPE_UUID,
-        DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES, information_register_bool,
-        information_register_uuid_is_zero, information_register_uuid_matches,
-        parse_information_register_design_time_ref, parse_information_register_design_time_ref_ids,
-        parse_information_register_non_zero_uuid, parse_information_register_quoted_string,
-        parse_information_register_usize, resolve_exchange_plan_index_reference,
-        split_information_register_braced_fields,
+        DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES, dangling_value_design_time_ref,
+        information_register_bool, information_register_uuid_is_zero,
+        information_register_uuid_matches, parse_information_register_design_time_ref,
+        parse_information_register_design_time_ref_ids, parse_information_register_non_zero_uuid,
+        parse_information_register_quoted_string, parse_information_register_usize,
+        resolve_exchange_plan_index_reference, split_information_register_braced_fields,
     };
     pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
     use crate::metadata_owner_graph::{
@@ -827,6 +827,17 @@ mod characteristics {
                     })?;
                 let path =
                     parse_information_register_design_time_ref(value, type_index, object_refs)
+                        .or_else(|| {
+                            // The owner is named but the value it points at is
+                            // named by nothing: the platform still prints the
+                            // stored pair. See `dangling_value_design_time_ref`.
+                            dangling_value_design_time_ref(
+                                &owner_uuid,
+                                &value_uuid,
+                                type_index,
+                                object_refs,
+                            )
+                        })
                         .ok_or_else(|| {
                             unsupported_filter(
                                 family,
@@ -8549,7 +8560,19 @@ enum MetadataChildFillValue {
 struct RegisterStandardAttribute {
     name: &'static str,
     fill_checking: &'static str,
+    /// `<xr:MultiLine>`. The writer used to print `false` and the reader
+    /// refused `true`, losing the whole owner. The record declares the value
+    /// per standard attribute; census over the eight corpora of the stand
+    /// (62 387 `<xr:StandardAttribute>` elements) finds `false` 62 386 times
+    /// and `true` once -- `Description` of `uh`
+    /// `Catalogs/ПредметыКомментирования`, the file the refusal was costing.
+    multi_line: bool,
     fill_from_filling_value: bool,
+    /// `<xr:ChoiceForm>`. Same story: the reader admitted only the empty
+    /// reference. The same census finds the element empty 62 386 times and
+    /// naming one of the owner's own forms once -- the `Parent` standard
+    /// attribute of `uh` `Catalogs/ГруппыСотрудников`.
+    choice_form: MetadataChoiceForm,
     tooltip: Vec<(String, String)>,
     format: Vec<(String, String)>,
     edit_format: Vec<(String, String)>,
@@ -8779,7 +8802,10 @@ struct BusinessProcessProperties {
     number_length: u32,
     number_allowed_length: &'static str,
     check_unique: bool,
-    standard_attributes: Vec<MetadataStandardAttribute>,
+    /// `None` when the record's standard-attribute slot is the bare `{0}`:
+    /// the platform then writes no `<StandardAttributes>` element at all,
+    /// exactly as the Catalog root already does for the same slot value.
+    standard_attributes: Option<Vec<MetadataStandardAttribute>>,
     autonumbering: bool,
     based_on: Vec<String>,
     number_periodicity: &'static str,
@@ -9292,6 +9318,11 @@ struct ConfigurationProperties {
     used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
     used_mobile_application_permission_messages:
         Vec<ConfigurationMobileApplicationPermissionMessage>,
+    /// `<AllowedIncomingShareRequestTypes>`, decoded from the tuple field the
+    /// schema policy names. Populated only by the CF-container decode path,
+    /// and emitted only by the evidenced branch of the writer that owns the
+    /// span this element sits in.
+    allowed_incoming_share_request_types: Vec<ConfigurationAllowedIncomingShareRequestType>,
     compatibility_mode: Option<String>,
     /// Set only by the CF-container decode path
     /// (`extract_configuration_source_xml`'s own raw config-body text),
@@ -9330,6 +9361,21 @@ struct ConfigurationMobileApplicationFunctionality {
 struct ConfigurationMobileApplicationPermissionMessage {
     permission: &'static str,
     description: Vec<(String, String)>,
+}
+
+/// One `<v8:Value xsi:type="app:AllowedIncomingShareRequestType">` of
+/// `<AllowedIncomingShareRequestTypes>`. Each member names the incoming
+/// content by exactly one of the three identifiers; the other two are
+/// written empty.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationAllowedIncomingShareRequestType {
+    mime: String,
+    uti: String,
+    ext: String,
+    /// `<app:processingVariant xsi:type="xs:decimal">`, printed verbatim from
+    /// the stored decimal the way every other `xs:decimal` of this exporter is.
+    processing_variant: String,
+    is_custom: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14513,24 +14559,35 @@ fn information_register_standard_attribute_nested_values_are(
     })
 }
 
-fn information_register_standard_attribute_choice_form_is_valid(value: &str) -> bool {
-    let Some(fields) = split_information_register_braced_fields(value) else {
-        return false;
-    };
+/// `<xr:ChoiceForm>` of a standard attribute. The slot is a metadata-object
+/// reference wrapper; the zero uuid is the empty reference the platform
+/// self-closes, and a named form is resolved through the same form index the
+/// owner's own forms are named by.
+///
+/// A named form is admitted only for the families that pass a resolution
+/// scope -- the same boundary `Mask` and `ChoiceParameters` already draw here.
+/// A scopeless family keeps the historical refusal rather than inventing a
+/// name it has no index for.
+fn parse_register_standard_attribute_choice_form(
+    value: &str,
+    form_refs: Option<&BTreeMap<String, FormSourceReference>>,
+) -> Option<MetadataChoiceForm> {
+    let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3
-        || fields.first().map(|field| field.trim()) != Some(r##""#""##)
-        || !fields.get(1).is_some_and(|field| {
-            information_register_uuid_matches(field, METADATA_OBJECT_REF_TYPE_UUID)
-        })
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(fields.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
     {
-        return false;
+        return None;
     }
-    split_information_register_braced_fields(fields[2]).is_some_and(|nested| {
-        nested.len() == 2
-            && nested[0].trim() == "1"
-            && parse_information_register_uuid(nested[1])
-                .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
-    })
+    let nested = split_information_register_braced_fields(fields[2])?;
+    if nested.len() != 2 || nested[0].trim() != "1" {
+        return None;
+    }
+    let uuid = parse_information_register_uuid(nested[1])?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(MetadataChoiceForm::Empty);
+    }
+    information_register_form_reference(&uuid, form_refs?).map(MetadataChoiceForm::Reference)
 }
 
 fn parse_information_register_standard_attribute_fill_value(
@@ -14618,6 +14675,7 @@ fn parse_register_standard_attribute_with_comment<'a>(
             fill_value,
             expected_type_reduction_mode,
             None,
+            None,
         )?;
     information_register_standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
         .then_some((attribute, comment))
@@ -14629,6 +14687,7 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
     fill_value: MetadataChildFillValue,
     expected_type_reduction_mode: &str,
     choice_parameter_scope: Option<StandardAttributeChoiceParameterScope<'_>>,
+    choice_form_refs: Option<&BTreeMap<String, FormSourceReference>>,
 ) -> Option<(RegisterStandardAttribute, String, &'a str)> {
     let link_by_type =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
@@ -14672,15 +14731,16 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
     let choice_parameters =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID)?;
 
+    let multi_line = parse_information_register_standard_attribute_bool(multi_line)?;
+    let choice_form = parse_register_standard_attribute_choice_form(choice_form, choice_form_refs)?;
     if !information_register_standard_attribute_nested_values_are(
         link_by_type,
         INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID,
         &["3", "0", "0"],
-    ) || parse_information_register_standard_attribute_bool(multi_line)?
-        || parse_information_register_standard_attribute_nested_enum(
-            create_on_input,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
-        )? != "0"
+    ) || parse_information_register_standard_attribute_nested_enum(
+        create_on_input,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
+    )? != "0"
         || (bag.has_type_reduction_mode
             && parse_information_register_standard_attribute_nested_enum(
                 type_reduction_mode?,
@@ -14688,7 +14748,6 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             )? != expected_type_reduction_mode)
         || !information_register_standard_attribute_nil_is_valid(max_value)
         || parse_information_register_standard_attribute_bool(extended_edit)?
-        || !information_register_standard_attribute_choice_form_is_valid(choice_form)
         || parse_information_register_standard_attribute_nested_enum(
             quick_choice,
             INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
@@ -14744,9 +14803,11 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
         RegisterStandardAttribute {
             name,
             fill_checking,
+            multi_line,
             fill_from_filling_value: parse_information_register_standard_attribute_bool(
                 fill_from_filling_value,
             )?,
+            choice_form,
             tooltip: parse_information_register_standard_attribute_localized(tooltip)?,
             format: parse_information_register_standard_attribute_localized(format)?,
             edit_format: parse_information_register_standard_attribute_localized(edit_format)?,
@@ -15595,7 +15656,12 @@ fn register_standard_attribute(
     RegisterStandardAttribute {
         name,
         fill_checking,
+        // This family's standard-attribute set is synthesized from the name
+        // table, not read from a property bag, so both properties keep the
+        // value this writer has always printed for it.
+        multi_line: false,
         fill_from_filling_value: false,
+        choice_form: MetadataChoiceForm::Empty,
         tooltip: override_values
             .map(|values| values.tooltip.clone())
             .unwrap_or_default(),
@@ -19452,11 +19518,58 @@ fn parse_information_register_design_time_ref(
     }
 }
 
+/// A design-time reference whose owner IS named by an index but whose value
+/// uuid is named by none. The general resolver refuses it -- it only prints a
+/// raw pair when the owner itself is unknown -- yet the platform prints the
+/// stored pair verbatim in that case too.
+///
+/// Evidence, ERP УХ 3.2.12.6 `Catalogs/КлассификаторЕдиницИзмерения`: the
+/// characteristic's `<xr:TypesFilterValue>` stores an owner uuid that is the
+/// `Ref` type id of `Catalogs/НаборыДополнительныхРеквизитовИСведений` (so the
+/// type index names it) and a value uuid that occurs nowhere else in the whole
+/// reference tree; the platform writes `<owner uuid>.<value uuid>` for it, and
+/// refusing cost the object its whole file.
+///
+/// The "value is dangling" test is the same one the document fill-value reader
+/// already uses: the uuid must be absent from the object references (bare and
+/// owner-qualified) and from the type index. A value any index knows is a
+/// resolution failure, not a dangling reference, and still refuses.
+fn dangling_value_design_time_ref(
+    owner_uuid: &str,
+    value_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if information_register_uuid_is_zero(owner_uuid)
+        || information_register_uuid_is_zero(value_uuid)
+    {
+        return None;
+    }
+    if information_register_design_time_owner_reference(owner_uuid, type_index, object_refs)
+        .is_none()
+    {
+        return None;
+    }
+    if object_refs.contains_key(value_uuid)
+        || type_index.contains_key(value_uuid)
+        || object_refs.keys().any(|key| {
+            metadata_owner_value_reference_key_parts(key)
+                .is_some_and(|(_, candidate)| candidate == value_uuid)
+        })
+    {
+        return None;
+    }
+    Some(format!("{owner_uuid}.{value_uuid}"))
+}
+
 /// A design-time reference whose owner is unknown to every index of the
 /// configuration is written by the platform as the raw `owner.value` pair,
 /// the same way the form choice-list reader already reproduces it. The rule
 /// is deliberately narrow: an owner that any index knows is never
 /// downgraded to a raw pair, so an incomplete resolution still refuses.
+///
+/// The mirror case -- a named owner whose VALUE uuid no index knows -- is
+/// `dangling_value_design_time_ref`, and each caller opts into it separately.
 fn information_register_dangling_design_time_ref(
     owner_uuid: &str,
     value_uuid: &str,
@@ -23142,7 +23255,7 @@ fn parse_chart_standard_attributes(
             };
             let (attribute, comment, choice_parameter_links) =
                 parse_register_standard_attribute_with_comment_and_choice_parameter_links(
-                    name, &bag, fill_value, "0", scope,
+                    name, &bag, fill_value, "0", scope, None,
                 )?;
             (comment.is_empty()
                 && information_register_standard_attribute_choice_parameter_links_is_empty(
@@ -24917,6 +25030,7 @@ fn parse_strict_catalog_properties_from_text(
             type_index,
             metadata_object_refs,
             object_refs,
+            form_refs,
         )?,
         characteristics,
         predefined_data_update: match fields.get(55)?.trim() {
@@ -25570,6 +25684,7 @@ fn parse_catalog_standard_attributes(
     type_index: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<Option<Vec<MetadataStandardAttribute>>> {
     let outer = split_information_register_braced_fields(value)?;
     if outer.len() == 1 && outer.first()?.trim() == "0" {
@@ -25631,6 +25746,7 @@ fn parse_catalog_standard_attributes(
                         type_index,
                         object_refs: metadata_object_refs,
                     }),
+                    Some(form_refs),
                 )?;
             let choice_parameter_links = parse_catalog_standard_attribute_choice_parameter_links(
                 choice_parameter_links,
@@ -27793,12 +27909,25 @@ const BUSINESS_PROCESS_STANDARD_ATTRIBUTES: [(&str, &str); 7] = [
     ("-2", "Number"),
 ];
 
+/// The standard-attribute slot of a BusinessProcess root, read with the same
+/// two-member envelope the Catalog root already uses: `{0}` is "this object
+/// overrides nothing", and the platform then writes no `<StandardAttributes>`
+/// element at all.
+///
+/// Evidence, ERP УХ 3.2.12.6: of its 20 business processes exactly one --
+/// `СогласованиеПродажи` -- stores `{0}` here, and it is the only one of the
+/// 20 whose reference XML carries no root-level `<StandardAttributes>`. The
+/// other 19 store the `{1,{...}}` envelope, print the element, and already
+/// match byte for byte through this reader.
 fn parse_business_process_standard_attributes(
     value: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<MetadataStandardAttribute>> {
+) -> Option<Option<Vec<MetadataStandardAttribute>>> {
     let outer = split_information_register_braced_fields(value)?;
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(None);
+    }
     if outer.len() != 2 || outer.first()?.trim() != "1" {
         return None;
     }
@@ -27848,7 +27977,8 @@ fn parse_business_process_standard_attributes(
                 choice_parameter_links: Vec::new(),
             })
         })
-        .collect()
+        .collect::<Option<Vec<_>>>()
+        .map(Some)
 }
 
 fn parse_business_process_tabular_sections_indexed(
@@ -34739,7 +34869,12 @@ fn format_configuration_source_xml(
             &properties.used_mobile_application_functionalities,
             &properties.used_mobile_application_permission_messages,
         );
-        insert.push_str(policy.standalone_through_default_style_segment());
+        insert.push_str(policy.standalone_and_mobile_urls_segment());
+        push_allowed_incoming_share_request_types_xml(
+            &mut insert,
+            &properties.allowed_incoming_share_request_types,
+        );
+        insert.push_str(policy.main_window_through_default_style_segment());
         push_optional_simple_property_xml(
             &mut insert,
             "DefaultLanguage",
@@ -34922,6 +35057,45 @@ fn push_optional_localized_property_xml(xml: &mut String, name: &str, values: &[
     xml.push_str("\t\t\t</");
     xml.push_str(name);
     xml.push_str(">\r\n");
+}
+
+/// `<AllowedIncomingShareRequestTypes>`: self-closed for the empty list, and
+/// one `<v8:Value xsi:type="app:AllowedIncomingShareRequestType">` per
+/// declared member otherwise, in record order.
+fn push_allowed_incoming_share_request_types_xml(
+    xml: &mut String,
+    types: &[ConfigurationAllowedIncomingShareRequestType],
+) {
+    if types.is_empty() {
+        xml.push_str("\t\t\t<AllowedIncomingShareRequestTypes/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<AllowedIncomingShareRequestTypes>\r\n");
+    for entry in types {
+        xml.push_str("\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n");
+        for (name, value) in [
+            ("mime", entry.mime.as_str()),
+            ("uti", entry.uti.as_str()),
+            ("ext", entry.ext.as_str()),
+        ] {
+            if value.is_empty() {
+                xml.push_str(&format!("\t\t\t\t\t<app:{name}/>\r\n"));
+            } else {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<app:{name}>{}</app:{name}>\r\n",
+                    escape_xml_element_text(value)
+                ));
+            }
+        }
+        xml.push_str(&format!(
+            "\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">{}</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>{}</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n",
+            escape_xml_element_text(&entry.processing_variant),
+            xml_bool(entry.is_custom),
+        ));
+    }
+    xml.push_str("\t\t\t</AllowedIncomingShareRequestTypes>\r\n");
 }
 
 fn push_used_mobile_application_functionalities_xml(
@@ -36991,10 +37165,9 @@ fn format_business_process_source_xml(
             business_process.number_allowed_length,
             xml_bool(business_process.check_unique),
         ));
-        push_metadata_standard_attributes_xml(
-            &mut properties,
-            &business_process.standard_attributes,
-        );
+        if let Some(standard_attributes) = &business_process.standard_attributes {
+            push_metadata_standard_attributes_xml(&mut properties, standard_attributes);
+        }
         properties.push_str(
             &render_metadata_characteristics_xml(&business_process.characteristics).ok()?,
         );
@@ -37294,6 +37467,26 @@ fn push_task_based_on_xml(xml: &mut String, references: &[String]) {
     xml.push_str("\t\t\t</BasedOn>\r\n");
 }
 
+/// `<xr:ChoiceForm>` of a standard attribute: self-closed for the empty
+/// reference, spelled out for a named form.
+fn push_xr_standard_attribute_choice_form_xml(
+    xml: &mut String,
+    indent: &str,
+    choice_form: &MetadataChoiceForm,
+) {
+    match choice_form {
+        MetadataChoiceForm::Empty => {
+            xml.push_str(&format!("{indent}<xr:ChoiceForm/>\r\n"));
+        }
+        MetadataChoiceForm::Reference(reference) => {
+            xml.push_str(&format!(
+                "{indent}<xr:ChoiceForm>{}</xr:ChoiceForm>\r\n",
+                escape_xml_element_text(reference)
+            ));
+        }
+    }
+}
+
 fn push_metadata_standard_attributes_xml(
     xml: &mut String,
     attributes: &[MetadataStandardAttribute],
@@ -37319,21 +37512,22 @@ fn push_metadata_standard_attributes_xml(
         }
         xml.push_str(&format!(
             "\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
-\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:MultiLine>{}</xr:MultiLine>\r\n\
 \t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
 \t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
 \t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
 \t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
             attribute.fill_checking,
+            xml_bool(attribute.multi_line),
             xml_bool(attribute.fill_from_filling_value),
             parsed_attribute.type_reduction_mode,
         ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
         xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Format", &attribute.format);
+        push_xr_standard_attribute_choice_form_xml(xml, "\t\t\t\t\t", &attribute.choice_form);
         xml.push_str(&format!(
-            "\t\t\t\t\t<xr:ChoiceForm/>\r\n\
-\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+            "\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
 \t\t\t\t\t<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
             attribute.choice_history_on_input,
         ));
@@ -37996,12 +38190,13 @@ fn push_register_standard_attributes_xml_with_indent(
         }
         xml.push_str(&format!(
             "{property_indent}<xr:FillChecking>{}</xr:FillChecking>\r\n\
-{property_indent}<xr:MultiLine>false</xr:MultiLine>\r\n\
+{property_indent}<xr:MultiLine>{}</xr:MultiLine>\r\n\
 {property_indent}<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
 {property_indent}<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
 {property_indent}<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
 {property_indent}<xr:MaxValue xsi:nil=\"true\"/>\r\n",
             attribute.fill_checking,
+            xml_bool(attribute.multi_line),
             xml_bool(attribute.fill_from_filling_value),
         ));
         push_xr_localized_property_xml(xml, &property_indent, "ToolTip", &attribute.tooltip);
@@ -38009,9 +38204,9 @@ fn push_register_standard_attributes_xml_with_indent(
             "{property_indent}<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n"
         ));
         push_xr_localized_property_xml(xml, &property_indent, "Format", &attribute.format);
+        push_xr_standard_attribute_choice_form_xml(xml, &property_indent, &attribute.choice_form);
         xml.push_str(&format!(
-            "{property_indent}<xr:ChoiceForm/>\r\n\
-{property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+            "{property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
 {property_indent}<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
             attribute.choice_history_on_input,
         ));

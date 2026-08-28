@@ -356,11 +356,11 @@ mod tests {
         // Vendor/Version/UpdateCatalogAddress, the four settings storages,
         // ConfigurationExtensionCompatibilityMode, the two ordinary-form
         // booleans, the three default report forms, UsePurposes, the three
-        // enum bytes, DefaultRoles, CompatibilityMode and the mobile
-        // functionalities.
+        // enum bytes, DefaultRoles, CompatibilityMode, the mobile
+        // functionalities and AllowedIncomingShareRequestTypes.
         let decoded = [
             1usize, 2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16, 22, 23, 24, 25, 26, 28, 29, 30, 31,
-            32, 33, 36, 38, 39, 41, 43, 53,
+            32, 33, 36, 38, 39, 41, 43, 53, 59,
         ];
         let mut seen = vec![0usize; 61];
         for index in decoded

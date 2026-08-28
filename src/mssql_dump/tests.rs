@@ -42470,7 +42470,6 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
                 "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,1}}}}"
             ),
         ),
-        (2, "{\"B\",1}".to_string()),
         (
             4,
             information_register_standard_attribute_nested_enum_for_test(
@@ -42528,6 +42527,41 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
             "immutable property {index} was accepted"
         );
     }
+
+    // Property 2 is `MultiLine`, and it is not immutable either: census over
+    // the 62 387 `<xr:StandardAttribute>` elements of the eight reference
+    // trees of the stand finds `<xr:MultiLine>false</xr:MultiLine>` 62 386
+    // times and `true` once -- the `Description` standard attribute of `uh`
+    // `Catalogs/ПредметыКомментирования`, whose whole file the refusal was
+    // costing. Both stored values are read; a value outside the closed pair
+    // still refuses the attribute.
+    for (stored, expected) in [("0", Some(false)), ("1", Some(true))] {
+        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        values[2] = format!("{{\"B\",{stored}}}");
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert_eq!(
+            parse_information_register_standard_attribute("Active", &bag)
+                .map(|attribute| attribute.multi_line),
+            expected
+        );
+    }
+    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    values[2] = "{\"B\",2}".to_string();
+    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+
+    // Property 10 is `ChoiceForm`. The empty reference is read as the
+    // self-closed element; a named form is refused by this scopeless family,
+    // which has no form index to name it with.
+    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    values[10] = format!(
+        "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,7d3a4bd6-0c30-4d5a-bd51-9f6a5e0f2a11}}}}"
+    );
+    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
 
     // Property 12 is `ChoiceHistoryOnInput`, and it is not immutable: the
     // stand writes `DontUse` for it on the `Date` standard attribute of `do`
@@ -68029,6 +68063,88 @@ fn characteristics_standard_attribute_marker_follows_the_source_family() {
 }
 
 #[test]
+fn characteristics_filter_value_prints_the_stored_pair_when_only_the_value_dangles() {
+    // Real bytes, ERP УХ 3.2.12.6 `Catalogs/КлассификаторЕдиницИзмерения`: the
+    // characteristic's `<xr:TypesFilterValue>` stores a design-time reference
+    // whose owner uuid is the `Ref` type id of another catalog -- so the type
+    // index names it -- and whose value uuid occurs nowhere else in the whole
+    // reference tree. The platform writes `<owner uuid>.<value uuid>`
+    // verbatim; the reader used to refuse, costing the catalog its file.
+    let owner_uuid = "7a576bbd-3683-4c69-8259-b03d2c59db04";
+    let dangling_uuid = "a63118e9-972c-4c4d-99fa-7338a4fc913a";
+    let known_uuid = "b0f9d9f2-9a6c-4a9b-b7b5-2d4f0c3d1e77";
+    let type_index = BTreeMap::from([(owner_uuid.to_owned(), "cfg:CatalogRef.Наборы".to_owned())]);
+    let filter = |value_uuid: &str| {
+        format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{value_uuid}}}}}")
+    };
+    let decode_with = |raw: &str, metadata_refs: &BTreeMap<String, String>| {
+        decode_characteristics_with_owner_code(
+            CharacteristicsOwnerFamily::Catalog,
+            None,
+            raw,
+            &type_index,
+            metadata_refs,
+            &references(),
+        )
+    };
+    let model = decode_with(
+        &collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            &filter(dangling_uuid),
+        )),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let expected = format!("{owner_uuid}.{dangling_uuid}");
+    assert!(matches!(
+        model.items()[0].types().types_filter_value(),
+        CharacteristicFilterValue::DesignTimeRef(Some(reference))
+            if reference.path() == expected
+    ));
+
+    // A value any index names is a resolution, not a dangling reference: it is
+    // resolved, never downgraded to the raw pair.
+    let known = BTreeMap::from([(known_uuid.to_owned(), "Catalog.Наборы.Значение".to_owned())]);
+    let model = decode_with(
+        &collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            &filter(known_uuid),
+        )),
+        &known,
+    )
+    .unwrap();
+    assert!(matches!(
+        model.items()[0].types().types_filter_value(),
+        CharacteristicFilterValue::DesignTimeRef(Some(reference))
+            if reference.path() == "Catalog.Наборы.Значение"
+    ));
+
+    // And a value the TYPE index names is not dangling either -- that is an
+    // incomplete resolution, which still refuses.
+    let mut colliding_type_index = type_index.clone();
+    colliding_type_index.insert(dangling_uuid.to_owned(), "cfg:CatalogRef.Прочее".to_owned());
+    let diagnostic = decode_characteristics_with_owner_code(
+        CharacteristicsOwnerFamily::Catalog,
+        None,
+        &collection(&item(
+            "4",
+            DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+            &filter(dangling_uuid),
+        )),
+        &colliding_type_index,
+        &BTreeMap::new(),
+        &references(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        diagnostic.reason,
+        CharacteristicsReason::UnsupportedFilterUnion
+    );
+}
+
+#[test]
 fn characteristics_filter_value_union_covers_undefined_and_boolean_members() {
     // Real bytes: `{"U"}` is the union member the platform spells
     // `<xr:TypesFilterValue xsi:nil="true"/>` (8 occurrences across ДО КОРП
@@ -72947,6 +73063,120 @@ fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_
     owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = "2".to_owned();
     let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
     assert_eq!(parse_business_process_data_lock_control_mode(&fields), None);
+}
+
+#[test]
+fn configuration_allowed_incoming_share_request_types_ride_their_own_slot() {
+    // Real bytes, «1С:ERP. Управление холдингом 3.2.12.6»: the only
+    // configuration of the stand whose `<AllowedIncomingShareRequestTypes>`
+    // is not self-closed declares four members in the Properties tuple field
+    // the schema policy names, and the platform prints them in that order --
+    // `ext`, then `uti`, then two `mime`s. The other seven hold `{0}` there
+    // and print the element self-closed.
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    let slot = policy.allowed_incoming_share_request_types_tuple_field();
+    let type_uuid = "f251d17e-94e0-4f9b-974e-d642cf9cb6e4";
+    let member = |mime: &str, uti: &str, ext: &str| {
+        format!("{{\"#\",{type_uuid},{{0,\"{mime}\",\"{uti}\",\"{ext}\",0,0}}}}")
+    };
+    let raw = format!(
+        "{{4,{},{},{},{}}}",
+        member("", "", "txt"),
+        member("", "public.plain-text", ""),
+        member("application/txt", "", ""),
+        member("text/plain", "", ""),
+    );
+    let (uuid, text) = flat_configuration_properties_text(68, 61, &[(slot, &raw)]);
+    let parsed = parse_configuration_allowed_incoming_share_request_types(&text, &uuid).unwrap();
+    assert_eq!(parsed.len(), 4);
+    let mut xml = String::new();
+    push_allowed_incoming_share_request_types_xml(&mut xml, &parsed);
+    assert_eq!(
+        xml,
+        "\t\t\t<AllowedIncomingShareRequestTypes>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime/>\r\n\
+\t\t\t\t\t<app:uti/>\r\n\
+\t\t\t\t\t<app:ext>txt</app:ext>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime/>\r\n\
+\t\t\t\t\t<app:uti>public.plain-text</app:uti>\r\n\
+\t\t\t\t\t<app:ext/>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime>application/txt</app:mime>\r\n\
+\t\t\t\t\t<app:uti/>\r\n\
+\t\t\t\t\t<app:ext/>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:AllowedIncomingShareRequestType\">\r\n\
+\t\t\t\t\t<app:mime>text/plain</app:mime>\r\n\
+\t\t\t\t\t<app:uti/>\r\n\
+\t\t\t\t\t<app:ext/>\r\n\
+\t\t\t\t\t<app:processingVariant xsi:type=\"xs:decimal\">0</app:processingVariant>\r\n\
+\t\t\t\t\t<app:isCustom>false</app:isCustom>\r\n\
+\t\t\t\t</v8:Value>\r\n\
+\t\t\t</AllowedIncomingShareRequestTypes>\r\n"
+    );
+
+    // The empty list every other configuration of the stand carries keeps the
+    // self-closed element the evidenced segment used to print verbatim.
+    let (uuid, text) = flat_configuration_properties_text(68, 61, &[(slot, "{0}")]);
+    let parsed = parse_configuration_allowed_incoming_share_request_types(&text, &uuid).unwrap();
+    assert!(parsed.is_empty());
+    let mut xml = String::new();
+    push_allowed_incoming_share_request_types_xml(&mut xml, &parsed);
+    assert_eq!(xml, "\t\t\t<AllowedIncomingShareRequestTypes/>\r\n");
+
+    // The declared count rules, and every member shape this reader has not
+    // been shown fails closed instead of being read as if it were the
+    // evidenced one.
+    for malformed in [
+        format!("{{2,{}}}", member("", "", "txt")),
+        format!("{{1,{},{}}}", member("", "", "txt"), member("", "", "doc")),
+        format!("{{1,{{\"#\",00000000-0000-0000-0000-000000000000,{{0,\"\",\"\",\"txt\",0,0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{1,\"\",\"\",\"txt\",0,0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",x,0}}}}}}"),
+        format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",0,2}}}}}}"),
+    ] {
+        let (uuid, text) = flat_configuration_properties_text(68, 61, &[(slot, &malformed)]);
+        assert!(
+            parse_configuration_allowed_incoming_share_request_types(&text, &uuid).is_none(),
+            "accepted {malformed}"
+        );
+    }
+}
+
+#[test]
+fn business_process_standard_attribute_slot_admits_the_absent_envelope() {
+    // Census, ERP УХ 3.2.12.6: of its 20 business processes exactly one --
+    // `СогласованиеПродажи` -- stores the bare `{0}` in the standard-attribute
+    // slot, and it is the only one of the 20 whose reference XML carries no
+    // root-level `<StandardAttributes>` element. The other 19 store the
+    // `{1,{...}}` envelope and print the element. `{0}` therefore means
+    // "this object overrides nothing", exactly as it already does on the
+    // Catalog root -- it is not a shape this reader may refuse.
+    assert!(matches!(
+        parse_business_process_standard_attributes("{0}", &BTreeMap::new(), &BTreeMap::new()),
+        Some(None)
+    ));
+    // The envelope itself is still verified: a present collection whose
+    // declared arity is not this family's is refused, not silently emptied.
+    assert!(
+        parse_business_process_standard_attributes("{1,{1,0}}", &BTreeMap::new(), &BTreeMap::new())
+            .is_none()
+    );
+    assert!(
+        parse_business_process_standard_attributes("{2}", &BTreeMap::new(), &BTreeMap::new())
+            .is_none()
+    );
 }
 
 #[test]

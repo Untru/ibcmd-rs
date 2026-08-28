@@ -2732,6 +2732,16 @@ pub(super) fn extract_configuration_source_xml(
         .unwrap_or_default();
     properties.used_mobile_application_functionalities = functionalities;
     properties.used_mobile_application_permission_messages = permission_messages;
+    if properties
+        .configuration_properties_evidenced_default_block
+        .is_some()
+    {
+        // The same gate the writer uses for this span. Inside it, fail closed
+        // on a list this reader cannot decode rather than print the evidenced
+        // empty element over a record that declares members.
+        properties.allowed_incoming_share_request_types =
+            parse_configuration_allowed_incoming_share_request_types(text, uuid)?;
+    }
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
         let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
         for (slot, target) in [
@@ -2901,6 +2911,7 @@ pub(super) fn parse_configuration_properties_from_text(
         default_report_settings_form: None,
         used_mobile_application_functionalities: Vec::new(),
         used_mobile_application_permission_messages: Vec::new(),
+        allowed_incoming_share_request_types: Vec::new(),
         // See the evidence above `configuration_extension_compatibility_mode`:
         // on the genuine `{68,` shape `CompatibilityMode` mirrors that same
         // field 26 read (proven on three corpora -- ERP УХ's
@@ -3262,6 +3273,72 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
         return None;
     }
     Some((functionalities, permission_messages))
+}
+
+/// Platform serialization id of `app:AllowedIncomingShareRequestType`, the
+/// only member type the list holds. It is a platform type id, not an identity
+/// of any object of the information base being decoded.
+const CONFIGURATION_ALLOWED_INCOMING_SHARE_REQUEST_TYPE_UUID: &str =
+    "f251d17e-94e0-4f9b-974e-d642cf9cb6e4";
+
+/// `<AllowedIncomingShareRequestTypes>`, read from the tuple field the schema
+/// policy names: a declared count followed by that many typed members, each
+/// `{"#",<type uuid>,{0,<mime>,<uti>,<ext>,<processing variant>,<is custom>}}`.
+///
+/// Evidence, «1С:ERP. Управление холдингом 3.2.12.6» -- the one configuration
+/// of the stand whose element is not self-closed: the field declares 4 members
+/// spelling, in order, `ext="txt"`, `uti="public.plain-text"`,
+/// `mime="application/txt"` and `mime="text/plain"`, which is exactly the
+/// order and content of the four `<v8:Value>` elements the platform writes.
+/// The other seven configurations hold the empty list `{0}` and print
+/// `<AllowedIncomingShareRequestTypes/>`.
+///
+/// The member payload's leading `0` is a shape discriminator; no corpus shows
+/// another value, so anything else fails closed rather than being read as if
+/// it meant the same layout.
+pub(super) fn parse_configuration_allowed_incoming_share_request_types(
+    text: &str,
+    uuid: &str,
+) -> Option<Vec<ConfigurationAllowedIncomingShareRequestType>> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    let raw = fields
+        .get(policy.allowed_incoming_share_request_types_tuple_field())?
+        .trim();
+    let members = split_1c_braced_fields(raw, 0)?;
+    let count = members.first()?.trim().parse::<usize>().ok()?;
+    if members.len() != count.checked_add(1)? {
+        return None;
+    }
+    let mut types = Vec::with_capacity(count);
+    for member in members.iter().skip(1) {
+        let typed = split_1c_braced_fields(member.trim(), 0)?;
+        if typed.len() != 3
+            || typed.first()?.trim() != r##""#""##
+            || !typed
+                .get(1)?
+                .trim()
+                .eq_ignore_ascii_case(CONFIGURATION_ALLOWED_INCOMING_SHARE_REQUEST_TYPE_UUID)
+        {
+            return None;
+        }
+        let payload = split_1c_braced_fields(typed.get(2)?.trim(), 0)?;
+        if payload.len() != 6 || payload.first()?.trim() != "0" {
+            return None;
+        }
+        let processing_variant = payload.get(4)?.trim();
+        if !information_register_decimal_is_valid(processing_variant) {
+            return None;
+        }
+        types.push(ConfigurationAllowedIncomingShareRequestType {
+            mime: parse_1c_quoted_string(payload.get(1)?.trim())?,
+            uti: parse_1c_quoted_string(payload.get(2)?.trim())?,
+            ext: parse_1c_quoted_string(payload.get(3)?.trim())?,
+            processing_variant: processing_variant.to_string(),
+            is_custom: information_register_bool(payload.get(5)?)?,
+        });
+    }
+    Some(types)
 }
 
 /// `<count>, {<permission id>, <localized description>} …`, the tail of a
