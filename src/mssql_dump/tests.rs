@@ -9904,6 +9904,7 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
             spreadsheet_document_settings: None,
             type_description_settings: None,
             unresolvable_field_item_ids: BTreeSet::new(),
+            field_item_twins: BTreeMap::new(),
         }]);
 
     assert!(xml.contains(r#"<Settings xsi:type="DynamicList">"#));
@@ -10665,6 +10666,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }]);
 
     assert!(xml.contains("<dcsset:filter>"), "{xml}");
@@ -11072,6 +11074,7 @@ fn formats_explicit_false_dynamic_data_read() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }]);
 
     assert!(xml.contains("<DynamicDataRead>false</DynamicDataRead>"));
@@ -11325,6 +11328,7 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     let data_path_by_binding_key = BTreeMap::from([
         (
@@ -11403,6 +11407,7 @@ fn unnameable_form_attribute_saved_field_is_written_physically() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     apply_form_attribute_save_field_bindings(
         &mut attributes,
@@ -12374,6 +12379,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
             spreadsheet_document_settings: None,
             type_description_settings: None,
             unresolvable_field_item_ids: BTreeSet::new(),
+            field_item_twins: BTreeMap::new(),
         }
     }
 
@@ -12933,6 +12939,7 @@ fn extracts_form_child_items_from_layout_pairs() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     let object_refs = BTreeMap::from([(
         external_command_uuid.to_string(),
@@ -14725,6 +14732,7 @@ fn extracts_wrapper55_table_user_settings_group() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     let group_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let table_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -16123,6 +16131,7 @@ fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     };
     let mut table_column_names_by_id = BTreeMap::new();
     extend_form_attribute_special_columns(&mut table_column_names_by_id, &attribute);
@@ -16282,6 +16291,7 @@ fn resolves_document_form_paths_from_the_typed_metadata_owner() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     };
     let owner = form_attribute_metadata_owner(&attribute);
     let owners = BTreeMap::from([("1".to_string(), owner)]);
@@ -16427,6 +16437,7 @@ fn typed_form_metadata_paths_cover_members_and_fail_closed() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     });
     assert_eq!(
         resolve_form_owner_scoped_standard_attribute_data_path(&chart_owner, "-8").as_deref(),
@@ -16511,6 +16522,7 @@ fn indexes_direct_table_columns_from_their_structural_table_parent() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
 
     let indexes = collect_form_child_item_indexes_with_object_refs(
@@ -16637,6 +16649,7 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     let object_refs = BTreeMap::from([(
         table_uuid.to_string(),
@@ -16810,6 +16823,7 @@ fn extracts_nested_table_additional_columns_group() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     let mut indexes = FormChildItemIndexes::default();
     indexes.insert_owner_scoped_table_path_for_test(
@@ -16867,6 +16881,7 @@ fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_u
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     let mut indexes = FormChildItemIndexes::default();
     indexes.insert_owner_scoped_table_path_for_test(
@@ -16914,6 +16929,7 @@ fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }];
     let mut indexes = FormChildItemIndexes::default();
     indexes.insert_owner_scoped_table_path_for_test(
@@ -17015,6 +17031,7 @@ fn resolves_additional_columns_binding_per_owner_and_rejects_collisions() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     };
     let attributes = vec![attribute("1", "ОбъектА"), attribute("2", "ОбъектБ")];
     let binding_key = "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca";
@@ -24587,6 +24604,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     };
     let attribute_names = BTreeMap::from([("1".to_string(), "Object".to_string())]);
     let attribute_owners =
@@ -25282,6 +25300,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
             spreadsheet_document_settings: None,
             type_description_settings: None,
             unresolvable_field_item_ids: BTreeSet::new(),
+            field_item_twins: BTreeMap::new(),
         },
         FormAttribute {
             design_time_settings: None,
@@ -25308,6 +25327,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
             spreadsheet_document_settings: None,
             type_description_settings: None,
             unresolvable_field_item_ids: BTreeSet::new(),
+            field_item_twins: BTreeMap::new(),
         },
     ];
     extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
@@ -25780,7 +25800,7 @@ fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_paylo
 \t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
 \t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
 \t\t\t\t<Presentation/>\r\n\
-\t\t\t\t<Value xsi:type=\"xs:string\">a&lt;&amp;&gt;&quot;'</Value>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:string\">a&lt;&amp;&gt;\"'</Value>\r\n\
 \t\t\t</xr:Value>\r\n\
 \t\t</xr:Item>\r\n\
 \t</ChoiceList>\r\n"
@@ -68749,6 +68769,7 @@ fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>)
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
     }
 }
 

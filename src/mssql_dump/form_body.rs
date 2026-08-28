@@ -1011,6 +1011,10 @@ pub(super) struct FormAttribute {
     /// list's resolvable-field universe. The platform marks a path onto one of
     /// them with a leading `~`, exactly as it does in `<UseAlways>`.
     pub(super) unresolvable_field_item_ids: BTreeSet<String>,
+    /// The localized twin the field map remembers beside a field's own name,
+    /// for the ids that carry one and spell it differently. A marked path names
+    /// both, exactly as `<UseAlways>` already writes them.
+    pub(super) field_item_twins: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4257,6 +4261,25 @@ fn parse_form_attribute_with_dcs_type_index(
             )
         })
         .unwrap_or_default();
+    // The twin is remembered per field-map id, independently of whether the
+    // field resolves: which of the two names gets written is the marker's
+    // business, not the map's.
+    let field_item_twins = fields
+        .get(14)
+        .and_then(|field| {
+            let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
+            let field_name_by_item_id =
+                parse_form_dynamic_list_field_name_by_item_id(&settings_fields);
+            Some(
+                parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields)
+                    .into_iter()
+                    .filter(|(item_id, secondary)| {
+                        field_name_by_item_id.get(item_id) != Some(secondary)
+                    })
+                    .collect::<BTreeMap<String, String>>(),
+            )
+        })
+        .unwrap_or_default();
     Some(FormAttribute {
         id: id.to_string(),
         name,
@@ -4279,6 +4302,7 @@ fn parse_form_attribute_with_dcs_type_index(
         design_time_settings,
         type_description_settings,
         unresolvable_field_item_ids,
+        field_item_twins,
     })
 }
 
@@ -9356,6 +9380,9 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// resolvable-field universe. A data path onto one of them carries the
     /// platform's `~` marker, the same marker `<UseAlways>` already writes.
     unresolvable_columns: BTreeSet<FormAttributeColumnKey>,
+    /// The localized twin the field map remembers beside a column's own name.
+    /// A marked path names both, the same pair `<UseAlways>` writes.
+    column_twins: BTreeMap<FormAttributeColumnKey, String>,
     /// Attribute ids whose single declared type is a catalogue the
     /// configuration declares no `<Owners>` member for. Such a catalogue has no
     /// `Owner` standard attribute, so a terminal that names one is a name the
@@ -9445,6 +9472,15 @@ fn collect_form_attribute_data_path_columns(
                     attribute_id: attribute.id.clone(),
                     column_id: item_id.clone(),
                 });
+        }
+        for (item_id, twin) in &attribute.field_item_twins {
+            owner_scoped_bindings.column_twins.insert(
+                FormAttributeColumnKey {
+                    attribute_id: attribute.id.clone(),
+                    column_id: item_id.clone(),
+                },
+                twin.clone(),
+            );
         }
         // `DefaultPicture` is a platform column, not a field-map entry, so the
         // remembered-field pass above never reaches it; a list whose default
@@ -21020,6 +21056,21 @@ pub(super) fn parse_form_child_item_data_path(
                     attribute_metadata_owners_by_id,
                 )
             })
+            // A record-set member the register splits between the two sides of
+            // an entry is named by the terminal's marker as much as by its
+            // uuid, and the chain walker below reads only the uuid -- so it
+            // answers `НаборЗаписей.Подразделение` where the platform writes
+            // `НаборЗаписей.ПодразделениеDr`. This pass answers that one shape
+            // and nothing else, leaving every shape the walker already spells
+            // right to the walker.
+            .or_else(|| {
+                resolve_form_register_record_set_member_data_path(
+                    field,
+                    true,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                )
+            })
             .or_else(|| {
                 resolve_form_bound_chain_member_path(
                     field,
@@ -21046,6 +21097,18 @@ pub(super) fn parse_form_child_item_data_path(
             .or_else(|| {
                 resolve_form_document_register_records_data_path(
                     field,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                )
+            })
+            // A form attribute may stand on a register's record set outright,
+            // and then the very same terminals name the very same members --
+            // read before the metadata route, which sees only the member's own
+            // uuid and so drops the correspondence side the marker states.
+            .or_else(|| {
+                resolve_form_register_record_set_member_data_path(
+                    field,
+                    false,
                     attribute_metadata_owners_by_id,
                     object_refs,
                 )
@@ -21753,8 +21816,159 @@ fn form_register_record_set_standard_attribute_name(
         "AccountingRegister" => ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES
             .iter()
             .find_map(|(candidate, name)| (*candidate == marker).then_some(*name)),
+        "InformationRegister" => INFORMATION_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES
+            .iter()
+            .find_map(|(candidate, name)| (*candidate == marker).then_some(*name)),
         _ => None,
     }
+}
+
+/// The standard attributes an information register's *record set* spells for
+/// the markers a form binding names them by.
+///
+/// Measured over the whole stand by pairing every terminal that reaches an
+/// information register's record set — through a form attribute typed
+/// `cfg:InformationRegisterRecordSet.*` and through a document object's
+/// `RegisterRecords` collection alike — against the `<DataPath>` the platform
+/// writes for the item that carries it. `-2` is `Period` on all 32 ERP УХ
+/// 3.2.12.6 slots that carry it; `-4` is `LineNumber` on both that carry it
+/// (`DataProcessors/ОтражениеДокументовВРеглУчете/Forms/
+/// ПроводкиРегламентированногоУчета`, LabelField
+/// `ЖурналУчетаСчетовФактурНомерСтроки`, and
+/// `Documents/РегистраторВерсииПланаДокумента/Forms/ФормаДокумента`,
+/// LabelField `ДвиженияАналитикиБюджетовНомерСтроки` over
+/// `InformationRegister.АналитикиБюджетов`); `-3` is `Recorder` on the one
+/// that carries it, `ДвиженияАналитикиБюджетовРегистратор` of that same form.
+/// No marker is spelled two ways.
+///
+/// The numbering is the family's own and cannot be borrowed across families:
+/// `-2` is `Period` here and `Recorder` on a calculation register. `Active` is
+/// a member the family has but no corpus binding names, so it has no evidenced
+/// marker here and the slot stays unresolved rather than being guessed.
+const INFORMATION_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES: [(&str, &str); 3] =
+    [("-4", "LineNumber"), ("-3", "Recorder"), ("-2", "Period")];
+
+/// The register family and metadata reference a `cfg:<Family>RecordSet.<Name>`
+/// form-attribute type names.
+///
+/// A *record manager* is deliberately not accepted: it holds one record and has
+/// no `LineNumber`, and its markers are already read by the generated-owner
+/// route, so widening this would replace a reader that is right with one whose
+/// table was never measured against it.
+fn form_register_record_set_owner(value_type: &str) -> Option<(&'static str, String)> {
+    let reference = value_type.strip_prefix("cfg:").unwrap_or(value_type);
+    let (owner_type, name) = reference.split_once('.')?;
+    if name.is_empty() {
+        return None;
+    }
+    let family = owner_type.strip_suffix("RecordSet")?;
+    let family = FORM_REGISTER_RECORD_SET_FAMILIES
+        .iter()
+        .find(|candidate| **candidate == family)?;
+    Some((family, format!("{family}.{name}")))
+}
+
+const FORM_REGISTER_RECORD_SET_FAMILIES: [&str; 4] = [
+    "AccountingRegister",
+    "AccumulationRegister",
+    "CalculationRegister",
+    "InformationRegister",
+];
+
+/// A member of a register record set that a *form attribute* holds directly.
+///
+/// This is the same record set — and the same terminal grammar — that
+/// [`resolve_form_document_register_records_data_path`] reaches through a
+/// document object's `RegisterRecords` collection; only the route to it
+/// differs. A form attribute typed `cfg:<Family>RecordSet.<Name>` stands on
+/// the record set itself, so the binding is the two-segment chain
+/// `{2,{attribute},{terminal}}` and the terminal names the member exactly as
+/// it does under `RegisterRecords`.
+///
+/// Without this reader the standard attributes fell through to the item's own
+/// name — `НаборЗаписей.СчетДт` where the platform writes
+/// `НаборЗаписей.AccountDr` — or, worse, to a binding-key index that answered
+/// with another attribute's name entirely, and the correspondence suffix was
+/// dropped from every dimension and resource the register splits between the
+/// two sides of an entry.
+///
+/// Evidence, measured over the eight stand corpora by pairing every such slot
+/// against the `<DataPath>` the platform writes for the item that carries it:
+/// on ERP УХ 3.2.12.6 the 313 accounting, 419 information and 6 accumulation
+/// record-set slots agree with this reader on the shapes it answers, with no
+/// marker spelled two ways and no counter-example. The additional-column
+/// terminal `{id,5bdad865-…}` is deliberately not answered here — the
+/// declared-column reader already spells all 34 of those correctly — and a
+/// terminal this reader cannot name leaves the slot to the routes behind it.
+///
+/// `correspondence_only` selects the one shape that has to be read *ahead* of
+/// the generic chain walker rather than behind it. The walker reaches a member
+/// named by its own metadata uuid and spells it by that name, which is the
+/// right answer everywhere except on an accounting register that splits the
+/// member between the two sides of an entry: there the terminal's marker is the
+/// side, and the walker, which does not read it, drops the `Dr`/`Cr` the
+/// platform writes. Running the whole reader first would put it ahead of routes
+/// that are right today for shapes where it agrees with them anyway, so only
+/// the suffixed shape goes first — the pass answers nothing else.
+fn resolve_form_register_record_set_member_data_path(
+    field: &str,
+    correspondence_only: bool,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let [root, terminal] = segments.as_slice() else {
+        return None;
+    };
+    let [attribute_id] = root.as_slice() else {
+        return None;
+    };
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
+    let (family, register_reference) =
+        form_register_record_set_owner(attribute.exact_single_type_reference.as_deref()?)?;
+    let member = match terminal.as_slice() {
+        [marker] => {
+            if correspondence_only {
+                return None;
+            }
+            form_register_record_set_standard_attribute_name(family, marker.trim())?.to_string()
+        }
+        [index, uuid] => {
+            // The declared-column reader owns this terminal and spells it right
+            // already; answering it here would only move the same fact.
+            if uuid
+                .trim()
+                .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID)
+            {
+                return None;
+            }
+            if let Some(name) =
+                form_register_record_set_ext_dimension_name(family, index.trim(), uuid.trim())
+            {
+                if correspondence_only {
+                    return None;
+                }
+                name
+            } else {
+                let suffix = form_register_record_set_member_suffix(family, index.trim())?;
+                if correspondence_only && suffix.is_empty() {
+                    return None;
+                }
+                let uuid = parse_non_zero_uuid(uuid.trim())?;
+                let reference = object_refs.get(&uuid)?;
+                let (owner_reference, relative_path) = form_metadata_data_path_route(reference)?;
+                // The member has to belong to the very register the attribute
+                // stands on; a field of some other register named by the same
+                // uuid would spell a path this record set has no column for.
+                if owner_reference != register_reference {
+                    return None;
+                }
+                format!("{relative_path}{suffix}")
+            }
+        }
+        _ => return None,
+    };
+    Some(format!("{}.{member}", attribute.name))
 }
 
 /// The standard attributes an accounting register's *record set* spells for the
@@ -21775,15 +21989,30 @@ fn form_register_record_set_standard_attribute_name(
 /// `Международный` and `МеждународныйБезКорреспонденции`), `-6` AccountDr (3)
 /// and `-7` AccountCr (3). No marker is spelled two ways anywhere.
 ///
-/// `Recorder`, `RecordType`, the non-correspondence `Account` and
-/// `PeriodAdjustment` are members the family has but no corpus binding names,
-/// so they have no evidenced marker here and the slot stays unresolved rather
-/// than borrowing the accumulation register's numbering.
-const ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
+/// `-3` Recorder, `-10` Account and `-30` PeriodAdjustment joined the table
+/// when the record-set route through a *form attribute* started reaching them —
+/// the same terminals, one route further out. Same evidence shape, measured
+/// over the eight stand corpora: `-3` is `Recorder` on all 3 slots that carry
+/// it, `-30` is `PeriodAdjustment` on the 1 that does
+/// (`DataProcessors/ОтражениеДокументовВРеглУчете/Forms/
+/// ПроводкиРегламентированногоУчета`, LabelField `УточнениеПериода`), and `-10`
+/// is `Account` on both — `Catalogs/ТиповыеОперацииМеждународныйУчет/Forms/
+/// ФормаЭлемента` and `DataProcessors/ОтражениеДокументовВМеждународномУчете/
+/// Forms/ПроводкиМеждународногоУчета`, each on a register declared without
+/// correspondence, which is exactly the register whose single `Account` the
+/// `-6`/`-7` pair does not describe. No marker is spelled two ways anywhere.
+///
+/// `RecordType` is a member the family has but no corpus binding names, so it
+/// has no evidenced marker here and the slot stays unresolved rather than
+/// borrowing the accumulation register's numbering.
+const ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES: [(&str, &str); 8] = [
+    ("-30", "PeriodAdjustment"),
+    ("-10", "Account"),
     ("-7", "AccountCr"),
     ("-6", "AccountDr"),
     ("-5", "Active"),
     ("-4", "LineNumber"),
+    ("-3", "Recorder"),
     ("-2", "Period"),
 ];
 
@@ -21801,8 +22030,17 @@ const ACCOUNTING_REGISTER_RECORD_SET_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
 /// `ExtDimensionCr1..3` for the `f77758c9…` one, index `0` spelling `1`.
 ///
 /// A register whose chart of accounts is addressed without correspondence
-/// names its ext dimensions through neither family in any corpus form, so no
-/// third family is invented here.
+/// carries a third family of its own, `91162600-…`, and the platform writes it
+/// `ExtDimension1..3` — no side, because there is no side. It was unobserved
+/// while the only route into a record set went through a document object's
+/// `RegisterRecords`; the form-attribute route reaches it, and the six
+/// terminals it carries are all on registers declared without correspondence:
+/// `AccountingRegisters/МеждународныйБезКорреспонденции` on ERP УХ 3.2.12.6,
+/// through `Catalogs/ТиповыеОперацииМеждународныйУчет/Forms/ФормаЭлемента` and
+/// `DataProcessors/ОтражениеДокументовВМеждународномУчете/Forms/
+/// ПроводкиМеждународногоУчета`, index `0` spelling `1` exactly as the two
+/// correspondence families do. No terminal of any register spells a family
+/// that disagrees with how its chart of accounts is addressed.
 fn form_register_record_set_ext_dimension_name(
     family: &str,
     index: &str,
@@ -21814,6 +22052,7 @@ fn form_register_record_set_ext_dimension_name(
     let stem = match uuid {
         ACCOUNTING_REGISTER_EXT_DIMENSION_DR_FAMILY => "ExtDimensionDr",
         ACCOUNTING_REGISTER_EXT_DIMENSION_CR_FAMILY => "ExtDimensionCr",
+        ACCOUNTING_REGISTER_EXT_DIMENSION_PLAIN_FAMILY => "ExtDimension",
         _ => return None,
     };
     let index = index.parse::<usize>().ok()?;
@@ -21822,6 +22061,7 @@ fn form_register_record_set_ext_dimension_name(
 
 const ACCOUNTING_REGISTER_EXT_DIMENSION_DR_FAMILY: &str = "1ab44b24-3315-40a9-b495-f1f1227ac205";
 const ACCOUNTING_REGISTER_EXT_DIMENSION_CR_FAMILY: &str = "f77758c9-9fcd-490f-9bbd-1e446541f536";
+const ACCOUNTING_REGISTER_EXT_DIMENSION_PLAIN_FAMILY: &str = "91162600-3161-4326-89a0-4a7cecd5092a";
 
 /// The suffix a record-set member's own name takes when the register splits it
 /// between the two sides of a correspondence entry.
@@ -23076,12 +23316,26 @@ fn resolve_form_attribute_column_data_path(
     // LabelField `РегистрационныйНомерЕРУЗ` carries `{2,{1},{16}}` and is
     // written `~Список.РегистрационныйНомерЕРУЗ`, while the same field name
     // under a list that does resolve it is written without the marker.
-    let marker = if owner_scoped_bindings.unresolvable_columns.contains(&key) {
-        "~"
-    } else {
-        ""
-    };
-    FormOwnerScopedDataPath::Resolved(format!("{marker}{}.{}", attribute.name, column_name))
+    if !owner_scoped_bindings.unresolvable_columns.contains(&key) {
+        return FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, column_name));
+    }
+    // A marked field the map remembers a localized twin for is written under
+    // both names, each carrying its own marker -- the same doubled spelling
+    // `<UseAlways>` writes for the same pair, from the same field-map record.
+    // Evidence: ERP УХ 3.2.12.6, the only three `<DataPath>` values in the
+    // eight stand corpora that carry two names --
+    // `Catalogs/КатегорииЗакупок/Forms/ФормаВыбора` and `.../ФормаСписка`,
+    // `~Список.Code~Список.Код`, and `Catalogs/КодыВидовРасхода/Forms/
+    // ФормаВыбора`, `~Список.Description~Список.Наименование` -- against the
+    // nine `<Field>` values that carry two names, every one of them the same
+    // shape read through the use-always route.
+    match owner_scoped_bindings.column_twins.get(&key) {
+        Some(twin) if twin != column_name => FormOwnerScopedDataPath::Resolved(format!(
+            "~{0}.{1}~{0}.{twin}",
+            attribute.name, column_name
+        )),
+        _ => FormOwnerScopedDataPath::Resolved(format!("~{}.{}", attribute.name, column_name)),
+    }
 }
 
 fn parse_form_bound_data_path_with_metadata_owner(
@@ -23417,7 +23671,18 @@ const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
 /// reading of last resort in
 /// `form_choice_parameter_link_standard_terminal_member` — which this table now
 /// takes precedence over for this family — has no case in the corpus.
-const CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-8", "Description")];
+/// `-7` is `Code`, the family's own numbering again — it is `DeletionMark`
+/// under a catalog reference, which is why the marker cannot be read
+/// family-blind. Evidence: ERP УХ 3.2.12.6
+/// `ChartsOfAccounts/Международный/Forms/ФормаВыбораСПодборомСчетов`,
+/// InputField `ИспользованныеСчетаСчетКод` carries `{3,{2},{1},{-7}}`, whose
+/// column `Счет` is declared `cfg:ChartOfAccountsRef.Международный`, and the
+/// platform writes `<DataPath>ИспользованныеСчета.Счет.Code</DataPath>` — the
+/// sibling item `{-8}` in the same table writing `…Счет.Description` through
+/// the row already here. It is the only `-7` any chart-of-accounts reference
+/// carries in the eight stand corpora.
+const CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] =
+    &[("-7", "Code"), ("-8", "Description")];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),
@@ -23446,12 +23711,23 @@ const CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] 
     ("-9", "Description"),
     ("-11", "ValueType"),
 ];
+/// `-13` is `ThisNode`, the standard attribute an exchange plan carries beside
+/// the five already listed. Evidence: ERP УХ 3.2.12.6
+/// `ExchangePlans/ОбновлениеЧерезКопию/Forms/ФормаУзла`, CheckBoxField
+/// `ЭтотУзел` carries `{2,{1},{-13}}` against attribute `Объект` of exact type
+/// `cfg:ExchangePlanObject.ОбновлениеЧерезКопию`, and the platform writes
+/// `<DataPath>Объект.ThisNode</DataPath>`. It is the only `-13` any exchange
+/// plan object carries in the eight stand corpora, and the name matches the
+/// `ЭтотУзел`/`ThisNode` pairing the dynamic-list universe already reads for
+/// the same family. Without it the slot fell back to the item's own name and
+/// wrote the Russian spelling the platform never writes here.
 const EXCHANGE_PLAN_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Code"),
     ("-3", "Description"),
     ("-6", "Ref"),
     ("-9", "SentNo"),
     ("-10", "ReceivedNo"),
+    ("-13", "ThisNode"),
     ("-14", "ExchangeDate"),
 ];
 const INFORMATION_REGISTER_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Period")];
@@ -23919,6 +24195,22 @@ fn resolve_form_table_row_picture_member(
             object_refs,
         )
     })
+    // The same record set reached the other way: a table bound straight to a
+    // record-set form attribute names its row picture inside that set, and the
+    // extended chain is again the data-path slot's own grammar one segment
+    // longer. Evidence: ERP УХ 3.2.12.6
+    // `DataProcessors/ОтражениеДокументовВМеждународномУчете/Forms/
+    // ПроводкиМеждународногоУчета`, Table `МеждународныйСКорреспонденцией`
+    // carries `{-5}` and the platform writes
+    // `<RowPictureDataPath>МеждународныйСКорреспонденцией.Active</RowPictureDataPath>`.
+    .or_else(|| {
+        resolve_form_register_record_set_member_data_path(
+            &extended,
+            false,
+            attribute_metadata_owners_by_id,
+            object_refs,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -23980,6 +24272,24 @@ pub(super) fn parse_form_table_row_picture_data_path(
                 ""
             };
             return Some(format!("{prefix}{table_name}.DefaultPicture"));
+        }
+        // A negative terminal is not a declared column id at all -- it is the
+        // standard-member marker the chain grammar spells everywhere else, and
+        // the member walker reads it against whatever the table's own binding
+        // reached, exactly as it reads a positive one whose id the row-picture
+        // index does not carry. Condemning it left the property unwritten on
+        // the four ERP УХ 3.2.12.6 tables that carry it (`Documents/ОперацияБух`
+        // and `Documents/ОперацияМеждународный`, `{-5}` against a register
+        // record set, written `….Active`).
+        [column_id] if column_id.trim().parse::<i64>().is_ok_and(|value| value < 0) => {
+            return resolve_form_table_row_picture_member(
+                fields.get(schema.data_path_slot())?.trim(),
+                &[&format!("{{{}}}", column_id.trim())],
+                attribute_metadata_owners_by_id,
+                table_name_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            );
         }
         [column_id] if column_id.trim().parse::<u64>().is_ok() => {
             let binding = fields.get(schema.data_path_slot())?.trim();
@@ -31963,9 +32273,14 @@ pub(super) fn format_form_choice_list_xml(
                     }
                     xml.push_str(&tab);
                     xml.push_str(FORM_CHOICE_LIST_VALUE_INDENT);
+                    // `append_xml_escaped` escapes the wire shape's *text* and
+                    // never its opening tag, so this is element-text position
+                    // and takes the element-text escaper: the platform writes
+                    // the quote raw there, and writes `&quot;` nowhere in any
+                    // of the eight stand corpora.
                     item.value
                         .wire_shape()
-                        .append_xml_escaped(&mut xml, escape_xml_text);
+                        .append_xml_escaped(&mut xml, escape_xml_character_data);
                     xml.push_str(FORM_XML_LINE_ENDING);
                     xml.push_str(&format!("{tab}\t\t</xr:Value>\r\n"));
                 }
