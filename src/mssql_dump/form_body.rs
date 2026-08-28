@@ -11499,6 +11499,7 @@ fn parse_form_child_item_with_metadata_owners(
             | "CheckBoxField"
             | "RadioButtonField"
             | "TextDocumentField"
+            | "SpreadSheetDocumentField"
     ) {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,

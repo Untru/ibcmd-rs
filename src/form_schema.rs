@@ -5415,7 +5415,19 @@ impl FormChildItemUserVisibleSchema {
                 "37",
                 60,
                 "PictureField" | "LabelField" | "InputField" | "CheckBoxField" | "RadioButtonField"
-                | "TextDocumentField",
+                | "TextDocumentField"
+                // The spreadsheet field wraps the same envelope in the same
+                // slots and was simply never named. Census of the dumped
+                // layouts of all eight stand corpora joined to the platform's
+                // own `<SpreadSheetDocumentField>` for the same item id -- all
+                // 152 records with a shifted head: the marker is `1` on every
+                // one, and the prefix tuple is the platform's own default
+                // `{0,{0,{"B",1},0}}` on the 151 that publish no
+                // `<UserVisible>` and `{0,{0,{"B",0},0}}` on the one that
+                // publishes `<xr:Common>false</xr:Common>` (ERP УХ
+                // `Reports/РеестрДокументовПодтверждающихНалоговуюЛьготуПоНДС/
+                // Forms/ФормаОтчета`, field `Результат`).
+                | "SpreadSheetDocumentField",
                 1,
                 Some("1"),
             ) => user_visible,
