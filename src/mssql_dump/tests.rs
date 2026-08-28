@@ -11649,6 +11649,113 @@ fn extracts_form_attribute_use_always_predefined_from_object_property_code() {
 }
 
 #[test]
+fn constants_set_use_always_is_a_delta_against_what_each_constant_declares() {
+    // Слот 8 набора констант хранит не сам набор, а отличия от объявленного:
+    // объявленную всегда используемой константу запись выключает, необъявленную
+    // включает, а константа типа `ValueStorage` не пишется никогда.
+    let record = concat!(
+        r##"{9,{1},0,"НаборКонстант",{1,0},{"Pattern",{"#",dcfc3784-a14f-4786-ac7b-c82db5ba275f}},"##,
+        r##"{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,3,"##,
+        "{1,{0,11111111-1111-1111-1111-111111111111}},",
+        "{1,{0,22222222-2222-2222-2222-222222222222}},",
+        "{1,{0,44444444-4444-4444-4444-444444444444}}",
+        "},{0,0},1,1,0,0,{0,0},{0,0}}"
+    );
+    let object_refs = BTreeMap::from([
+        (
+            "11111111-1111-1111-1111-111111111111".to_string(),
+            "Constant.Альфа".to_string(),
+        ),
+        (
+            "22222222-2222-2222-2222-222222222222".to_string(),
+            "Constant.Бета".to_string(),
+        ),
+        (
+            "33333333-3333-3333-3333-333333333333".to_string(),
+            "Constant.Гамма".to_string(),
+        ),
+        (
+            "44444444-4444-4444-4444-444444444444".to_string(),
+            "Constant.Дельта".to_string(),
+        ),
+    ]);
+    let declarations = MetadataFieldDeclarationIndex::default()
+        .with_constant(
+            "11111111-1111-1111-1111-111111111111",
+            MetadataConstantDeclaration {
+                always_used: true,
+                value_storage: false,
+            },
+        )
+        .with_constant(
+            "22222222-2222-2222-2222-222222222222",
+            MetadataConstantDeclaration::default(),
+        )
+        .with_constant(
+            "33333333-3333-3333-3333-333333333333",
+            MetadataConstantDeclaration {
+                always_used: true,
+                value_storage: false,
+            },
+        )
+        .with_constant(
+            "44444444-4444-4444-4444-444444444444",
+            MetadataConstantDeclaration {
+                always_used: false,
+                value_storage: true,
+            },
+        );
+
+    let attribute = parse_form_attribute_with_declarations(
+        record,
+        &BTreeMap::new(),
+        &object_refs,
+        &declarations,
+    )
+    .unwrap();
+
+    assert_eq!(
+        attribute.use_always,
+        vec![
+            "НаборКонстант.Бета".to_string(),
+            "НаборКонстант.Гамма".to_string(),
+        ]
+    );
+
+    // Без объявлений индекс отказывается отвечать, и запись пишется дословно.
+    let undeclared = parse_form_attribute(record, &BTreeMap::new(), &object_refs).unwrap();
+    assert_eq!(
+        undeclared.use_always,
+        vec![
+            "НаборКонстант.Альфа".to_string(),
+            "НаборКонстант.Бета".to_string(),
+            "НаборКонстант.Дельта".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn settings_composer_use_always_path_walks_the_member_tables() {
+    let record = concat!(
+        r##"{9,{1},0,"Компоновщик",{1,0},{"Pattern",{"#",cab0d12b-3c88-4993-8edc-8c3827cadc7d}},"##,
+        r##"{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},"##,
+        "{0,3,{3,{0},{1},{10002}},{3,{0},{4},{10005}},{2,{0},{6}}},",
+        "{0,0},0,1,0,0,{0,0},{0,0}}"
+    );
+
+    let attribute = parse_form_attribute(record, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+
+    assert_eq!(
+        attribute.use_always,
+        vec![
+            "Компоновщик.Settings.ConditionalAppearance.UseArea".to_string(),
+            "Компоновщик.Settings.Filter.LeftValue".to_string(),
+            "Компоновщик.Settings.UserFields".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn extracts_form_attribute_save_fields_from_standard_period_property_indexes() {
     let attribute = parse_form_attribute(
             r##"{9,{6},0,"Период",{1,0},{"Pattern",{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,4,{0},{1,{0}},{1,{1}},{1,{2}}},0,1,0,0,{0,0},{0,0}}"##,

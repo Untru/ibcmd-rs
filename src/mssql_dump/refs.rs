@@ -191,11 +191,50 @@ impl MetadataCommonAttributeContent {
     }
 }
 
+/// What one constant declares about its own place in a form's constants set.
+///
+/// `always_used` is the constant record's own slot 11, the one flag of the
+/// owner record no exported property carries: `uh` `ВсегдаКонтролироватьБаланс`
+/// `РучныхОпераций` and `ПодставлятьЗначенияПоУмолчаниюВместоПустых` are both
+/// booleans whose `Constants/<name>.xml` agree in every element but the name,
+/// and the two disagree here.
+///
+/// A form's `<UseAlways>` record does not hold the set of always-used fields --
+/// it holds the fields whose flag *differs* from this declaration. Evidence:
+/// ERP УХ 3.2.12.6, every one of the 84 `cfg:ConstantsSet` attributes on the
+/// configuration joined against the platform's own `<UseAlways>`. 345 of the
+/// 353 constants those records name are written exactly where the record names
+/// them; the eight that are not are exactly the eight whose slot 11 is `1` or
+/// whose declared type is `v8:ValueStorage`, and both behave as the delta
+/// reading predicts on every one of the 84 forms:
+///
+///   * `ВсегдаКонтролироватьБалансРучныхОпераций` and `ПутьККаталогуИмпорта`
+///     (slot 11 `1`) are written in the 69 forms whose record leaves them out
+///     and in none of the 15 whose record names them;
+///   * `СрокОплатыПокупателей` and `СрокОплатыПоставщикам` (slot 11 `1`) the
+///     same way, 77 against 7;
+///   * `ДополнительныеЯзыкиВыводаОтчета`, `НастройкиКолонтитуловПоУмолчанию`,
+///     `ПараметрыАдминистрированияИБ` and `СтатусОбновленияКонфигурации` are
+///     never written at all, and those four are `v8:ValueStorage`.
+///
+/// `value_storage` is that second rule. Over the whole stand -- 3 378
+/// constants, 225 of them `v8:ValueStorage` -- the platform writes 768
+/// `ConstantsSet` use-always fields and not one names a `ValueStorage`
+/// constant.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(super) struct MetadataConstantDeclaration {
+    pub(super) always_used: bool,
+    pub(super) value_storage: bool,
+}
+
 /// The declarations a dynamic list's resolvable-field universe is built from.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct MetadataFieldDeclarationIndex {
     tables: BTreeMap<String, MetadataTableStandardAttributes>,
     common_attributes: BTreeMap<String, MetadataCommonAttributeContent>,
+    /// Every constant the configuration declares, by its own uuid -- the id a
+    /// form's use-always record spells.
+    constants: BTreeMap<String, MetadataConstantDeclaration>,
     /// Every `Kind.Name` the configuration declares, folded to lower case: the
     /// query language names metadata case-insensitively, so a query naming
     /// `Перечисление.СтатусызаданийТорговымПредставителям` names the declared
@@ -210,6 +249,23 @@ impl MetadataFieldDeclarationIndex {
 
     pub(super) fn common_attribute(&self, name: &str) -> Option<&MetadataCommonAttributeContent> {
         self.common_attributes.get(name)
+    }
+
+    /// What the constant with this uuid declares, or `None` when this index
+    /// carries no constant declarations at all -- a refusal to answer, not a
+    /// denial, so a context built without them keeps writing exactly the
+    /// record.
+    pub(super) fn constant(&self, uuid: &str) -> Option<&MetadataConstantDeclaration> {
+        self.constants.get(uuid)
+    }
+
+    /// The constants this configuration declares always used, by uuid. Empty
+    /// when the index carries no constant declarations.
+    pub(super) fn always_used_constants(&self) -> impl Iterator<Item = &str> {
+        self.constants
+            .iter()
+            .filter(|(_, declared)| declared.always_used)
+            .map(|(uuid, _)| uuid.as_str())
     }
 
     /// Whether the configuration declares a metadata table by this
@@ -229,6 +285,16 @@ impl MetadataFieldDeclarationIndex {
         declared: MetadataTableStandardAttributes,
     ) -> Self {
         self.tables.insert(reference.to_string(), declared);
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_constant(
+        mut self,
+        uuid: &str,
+        declared: MetadataConstantDeclaration,
+    ) -> Self {
+        self.constants.insert(uuid.to_string(), declared);
         self
     }
 
@@ -307,6 +373,11 @@ pub(super) fn build_metadata_field_declaration_index_from_texts(
                     index.common_attributes.insert(header.name.clone(), content);
                 }
             }
+            "Constant" => {
+                if let Some(declared) = constant_declared_use_always(&row.text, &header.uuid) {
+                    index.constants.insert(header.uuid.clone(), declared);
+                }
+            }
             _ => {}
         }
     }
@@ -359,6 +430,50 @@ fn information_register_declared_standard_attributes(
         periodical: Some(periodicity != "Nonperiodical"),
         ..MetadataTableStandardAttributes::default()
     })
+}
+
+/// The platform's own `v8:ValueStorage`, the type id
+/// `metadata_builtin_type_reference` names.
+const VALUE_STORAGE_TYPE_UUID: &str = "e199ca70-93cf-46ce-a54b-6edc88c3a296";
+
+/// The constant's own always-used flag and value type, off the same `{16,…}`
+/// owner record `parse_constant_properties_from_text` reads every exported
+/// constant property from -- slot 11 there, between the default form of slot 10
+/// and the data history of slot 12.
+fn constant_declared_use_always(text: &str, uuid: &str) -> Option<MetadataConstantDeclaration> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let owner_start = text[..marker_start].rfind("{16,")?;
+    let owner_fields = split_1c_braced_fields(text, owner_start)?;
+    let always_used = match owner_fields.get(11)?.trim() {
+        "0" => false,
+        "1" => true,
+        // A flag this reader cannot name is a refusal: the constant is left out
+        // of the index and its use-always record is written exactly as stored.
+        _ => return None,
+    };
+    let detail_fields = split_1c_braced_fields(owner_fields.get(1)?, 0)?;
+    let value_storage = constant_declared_pattern_type_uuid(detail_fields.get(1).copied())
+        .is_some_and(|type_uuid| type_uuid == VALUE_STORAGE_TYPE_UUID);
+    Some(MetadataConstantDeclaration {
+        always_used,
+        value_storage,
+    })
+}
+
+/// The single platform type id a constant's `{"Pattern",{"#",<uuid>}}` names,
+/// when it names exactly one.
+fn constant_declared_pattern_type_uuid(detail: Option<&str>) -> Option<String> {
+    let fields = split_1c_braced_fields(detail?.trim(), 0)?;
+    let pattern = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    if pattern.first().map(|value| value.trim()) != Some(r#""Pattern""#) || pattern.len() != 2 {
+        return None;
+    }
+    let entry = split_1c_braced_fields(pattern.get(1)?.trim(), 0)?;
+    if entry.first().map(|value| value.trim()) != Some("\"#\"") || entry.len() != 2 {
+        return None;
+    }
+    parse_uuid_field(entry.get(1)?.trim())
 }
 
 /// `<AutoUse>` and `<Content>` off the same record
