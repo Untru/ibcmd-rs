@@ -6810,6 +6810,9 @@ const FORM_GANTT_CHART_SHORT_OPTION_BAG: [&str; 12] = [
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormSpecialFieldSchema {
     kind: FormSpecialFieldKind,
+    /// The optional conditional-appearance head shifts every shared field
+    /// coordinate by one member, including the two group-alignment slots.
+    top_level_offset: usize,
     /// The `GanttChartField` whose option bag declares revision `2`. Its
     /// properties are not published from it -- see `from_raw_layout`.
     gantt_short_option_revision: bool,
@@ -6913,6 +6916,7 @@ impl FormSpecialFieldSchema {
         }
         Some(Self {
             kind,
+            top_level_offset,
             gantt_short_option_revision,
             trailing_members,
         })
@@ -7089,6 +7093,20 @@ impl FormSpecialFieldSchema {
         (self.kind == FormSpecialFieldKind::GanttChart)
             .then(|| self.gantt_stretch(options, 4))
             .flatten()
+    }
+
+    /// Slot 53 belongs to the shared wrapper-`37` field layout, not to any
+    /// kind-specific option tuple. Census of all 215 special fields in the
+    /// eight native stand trees (`148` progress bars, `27` track bars, `23`
+    /// charts and `17` Gantt charts) makes the ordinary three-code table a
+    /// total function of the platform answer: raw `3` on the 214 items with no
+    /// element and raw `1` on exactly the mobile chart written
+    /// `<GroupHorizontalAlign>Center</GroupHorizontalAlign>`, with no mismatch.
+    pub(crate) fn group_horizontal_align(
+        self,
+        fields: &[&str],
+    ) -> Option<FormFieldGroupHorizontalAlign> {
+        FormFieldGroupHorizontalAlign::from_raw_value(fields.get(53 + self.top_level_offset)?)
     }
 
     /// Slot 54 is the shared alignment slot of the 59-field field layout, so it

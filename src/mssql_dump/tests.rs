@@ -74674,6 +74674,13 @@ fn accepts_the_declared_shifted_chart_field_layout() {
     )
     .expect("conditional-appearance prefix shifts the whole declared record");
     assert_eq!(schema.xml_tag(), "ChartField");
+
+    let mut fields = vec!["3"; 60];
+    fields[54] = "1";
+    assert_eq!(
+        schema.group_horizontal_align(&fields),
+        Some(crate::form_schema::FormFieldGroupHorizontalAlign::Center)
+    );
 }
 
 /// The stored category alone is ambiguous for accounting registers. The
@@ -74685,6 +74692,7 @@ fn reconciles_an_ambiguous_main_table_category_with_its_query_source() {
         reconcile_form_main_table_with_query_source(
             Some("AccountingRegister.МСФО"),
             Some("AccountingRegister.МСФО.RecordsWithExtDimensions".to_string()),
+            Some("3"),
             Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.МСФО.Остатки КАК Остатки"),
         ),
         Some("AccountingRegister.МСФО.Balance".to_string())
@@ -74695,6 +74703,7 @@ fn reconciles_an_ambiguous_main_table_category_with_its_query_source() {
         reconcile_form_main_table_with_query_source(
             Some("AccumulationRegister.СтоимостьВНАМСФО"),
             categorized.clone(),
+            Some("3"),
             Some(concat!(
                 "ВЫБРАТЬ Остатки.Сумма ИЗ РегистрНакопления.СтоимостьВНАМСФО.Остатки КАК Остатки ",
                 "ОБЪЕДИНИТЬ ВСЕ ВЫБРАТЬ Обороты.Сумма ИЗ ",
@@ -74709,12 +74718,23 @@ fn reconciles_an_ambiguous_main_table_category_with_its_query_source() {
         reconcile_form_main_table_with_query_source(
             Some("InformationRegister.РезультатыОбмена"),
             bare.clone(),
+            Some("1"),
             Some(concat!(
                 "ВЫБРАТЬ Данные.Период ИЗ РегистрСведений.РезультатыОбмена КАК Данные ",
                 "ЛЕВОЕ СОЕДИНЕНИЕ РегистрСведений.РезультатыОбмена.СрезПоследних КАК Последние"
             )),
         ),
         bare
+    );
+
+    assert_eq!(
+        reconcile_form_main_table_with_query_source(
+            Some("AccountingRegister.МСФО"),
+            Some("AccountingRegister.МСФО".to_string()),
+            None,
+            Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.МСФО.Остатки КАК Остатки"),
+        ),
+        Some("AccountingRegister.МСФО.Balance".to_string())
     );
 }
 

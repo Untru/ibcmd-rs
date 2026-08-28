@@ -5431,6 +5431,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
     main_table = reconcile_form_main_table_with_query_source(
         main_table_base.as_deref(),
         main_table,
+        main_table_category.as_deref(),
         query_text.as_deref(),
     );
     fields.extend(parse_form_dynamic_list_field_map_items(&settings_fields));
@@ -8643,12 +8644,22 @@ pub(super) fn normalize_form_main_table_category(
 pub(super) fn reconcile_form_main_table_with_query_source(
     base_main_table: Option<&str>,
     categorized_main_table: Option<String>,
+    category: Option<&str>,
     query_text: Option<&str>,
 ) -> Option<String> {
     let (Some(base), Some(query)) = (base_main_table, query_text) else {
         return categorized_main_table;
     };
-    if categorized_main_table.as_deref() == Some(base) {
+    // A stored category `1` explicitly selects the bare table.  It must win
+    // over other sources mentioned by the query: ERP UH
+    // `InformationRegisters/РезультатыОбменаДаннымиСГИСНР/Forms/ФормаСписка`
+    // stores that category and writes the bare register even though its query
+    // also joins `SliceLast`.  With no stored category, however, the unique
+    // virtual source is the only discriminator available: the dynamic list in
+    // `DataProcessors/ПодборВНА/Forms/Форма` has none and the platform writes
+    // `AccountingRegister.МСФО.Balance`.  Treating both bare-looking results
+    // alike fixes either form only by breaking the other.
+    if category.is_some() && categorized_main_table.as_deref() == Some(base) {
         return categorized_main_table;
     }
     let Some(selection) = parse_form_dynamic_list_query_selection(query) else {
@@ -12517,6 +12528,10 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         group_horizontal_align: if let Some((schema, _)) = field_schema_and_options.as_ref() {
+            schema
+                .group_horizontal_align(&fields)
+                .map(FormFieldGroupHorizontalAlign::xml_value)
+        } else if let Some((schema, _)) = special_field_layout.as_ref() {
             schema
                 .group_horizontal_align(&fields)
                 .map(FormFieldGroupHorizontalAlign::xml_value)
@@ -30373,7 +30388,12 @@ pub(super) fn format_form_child_item_xml(
     // (`LabelField` 17/19/3, `InputField` 13/1/13, `CheckBoxField` -/2/2), with
     // no pair observed in both directions.  The group pair used to split the
     // plain pair.
-    if FormFieldSchema::supports_item_tag(&item.tag) {
+    if FormFieldSchema::supports_item_tag(&item.tag)
+        || matches!(
+            item.tag,
+            "ProgressBarField" | "TrackBarField" | "ChartField" | "GanttChartField"
+        )
+    {
         if let Some(horizontal_align) = item
             .horizontal_align
             .and_then(FormChildItemAlignment::horizontal_align)
