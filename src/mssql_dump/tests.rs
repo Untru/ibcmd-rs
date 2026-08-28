@@ -72411,10 +72411,19 @@ fn the_smaller_owners_write_their_moved_properties_in_the_native_order() {
         });
     let xml = format_form_child_items_xml(&[spreadsheet], 1);
     let at = owner_order_at(&xml);
-    assert!(at("<Edit>") < at("<Protection>"), "got {xml}");
+    // `Edit` closes this run rather than opening it. The assertion used to
+    // read `Edit` < `Protection`, which was the position a census that had
+    // seen no field carrying both had to guess at. Reading the direct children
+    // of all 2 709 native `<SpreadSheetDocumentField>` elements of the eight
+    // stand corpora settles it: `Protection` stands ahead of `Edit` on both
+    // fields that carry the two together, `SelectionShowMode` ahead of it on
+    // both that carry that pair and `Output` ahead of it on the one that
+    // carries that pair, with no ordered pair of the element observed in both
+    // directions anywhere in the corpus.
     assert!(at("<Protection>") < at("<SelectionShowMode>"), "got {xml}");
     assert!(at("<SelectionShowMode>") < at("<Output>"), "got {xml}");
-    assert!(at("<Output>") < at("<EnableStartDrag>"), "got {xml}");
+    assert!(at("<Output>") < at("<Edit>"), "got {xml}");
+    assert!(at("<Edit>") < at("<EnableStartDrag>"), "got {xml}");
     assert_eq!(xml.matches("<Protection>").count(), 1, "got {xml}");
 
     let mut text = base.clone();
