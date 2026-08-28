@@ -26932,6 +26932,26 @@ pub(super) fn parse_form_object_reference(
     object_refs.get(&uuid).cloned()
 }
 
+/// The `<CommandGroup>` a command-interface item names, or `None` when the
+/// item declares no group at all.
+///
+/// The record itself tells the two states apart, so the reader does not have
+/// to guess from the name it failed to build. Census of every command-group
+/// slot the eight stand corpora carry -- 15 697 of them -- finds exactly two
+/// shapes: `{0}` on 13 545 items, which declare no group and get no element,
+/// and `{0,<uuid>}` on 2 152, which do. Nothing else occurs anywhere.
+///
+/// Of the 2 152 that name a group, 2 150 resolve through the standard-group
+/// table or the object index. The two that do not are ERP УХ 3.2.12.6
+/// `Catalogs/Организации/Forms/ФормаСписка`, whose two `<Item>`s both declare
+/// `0395d4d7-261d-4ec5-8dd0-27035b3a6284` -- a uuid that names nothing
+/// anywhere in that configuration -- and the platform writes it out literally,
+/// `<CommandGroup>0395d4d7-261d-4ec5-8dd0-27035b3a6284</CommandGroup>`. That
+/// is the same sentinel the object-level reader of the same fact already
+/// keeps: `command_interface_group_name` in the standalone
+/// `Ext/CommandInterface.xml` reader falls back to the bare uuid for exactly
+/// this state, and the form's own reader was dropping the element instead. The
+/// two readers now spell the same thing.
 pub(super) fn parse_form_command_group_reference(
     field: &str,
     object_refs: &BTreeMap<String, String>,
@@ -26941,9 +26961,12 @@ pub(super) fn parse_form_command_group_reference(
         return None;
     }
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
-    form_standard_command_group_name(&uuid)
-        .map(ToOwned::to_owned)
-        .or_else(|| object_refs.get(&uuid).cloned())
+    Some(
+        form_standard_command_group_name(&uuid)
+            .map(ToOwned::to_owned)
+            .or_else(|| object_refs.get(&uuid).cloned())
+            .unwrap_or(uuid),
+    )
 }
 
 pub(super) fn form_standard_command_group_name(uuid: &str) -> Option<&'static str> {

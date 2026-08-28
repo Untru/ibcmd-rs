@@ -22740,8 +22740,22 @@ fn extracts_real_world_form_command_interface_command_bar_variants() {
     );
 }
 
+/// The command-group slot has two states and the record spells both: `{0}` is
+/// "no group" and `{0,<uuid>}` is "this group". A uuid nothing names does not
+/// turn the second state into the first -- the platform writes the uuid out
+/// literally, exactly as the object-level `command_interface_group_name`
+/// reader of the same fact has always done.
+///
+/// The assertion this replaces required `None` for an unresolvable uuid. It
+/// was a hand-written fixture, not a platform document, and the corpus decides
+/// against it: of the 15 697 command-group slots the eight stand corpora
+/// carry, 13 545 read `{0}` and are written without a `<CommandGroup>`, and
+/// 2 152 read `{0,<uuid>}` -- 2 150 of them naming something and the remaining
+/// two both `0395d4d7-261d-4ec5-8dd0-27035b3a6284` in ERP УХ 3.2.12.6
+/// `Catalogs/Организации/Forms/ФормаСписка`, where the platform writes
+/// `<CommandGroup>0395d4d7-261d-4ec5-8dd0-27035b3a6284</CommandGroup>`.
 #[test]
-fn resolves_custom_form_command_group_only_from_object_refs() {
+fn resolves_custom_form_command_group_and_keeps_an_unnamed_uuid_raw() {
     let group_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let group_reference = "CommandGroup.RenamedOrganizer";
     let object_refs = BTreeMap::from([(group_uuid.to_string(), group_reference.to_string())]);
@@ -22754,7 +22768,12 @@ fn resolves_custom_form_command_group_only_from_object_refs() {
         parse_form_command_group_reference(
             "{0,c59e11f3-6bcb-404a-9d76-1416c12be354}",
             &BTreeMap::new(),
-        ),
+        )
+        .as_deref(),
+        Some("c59e11f3-6bcb-404a-9d76-1416c12be354")
+    );
+    assert_eq!(
+        parse_form_command_group_reference("{0}", &BTreeMap::new()),
         None
     );
 }
