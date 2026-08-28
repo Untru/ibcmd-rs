@@ -27033,14 +27033,6 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
     if properties.show_headers == Some(true) {
         xml.push_str(&format!("{tab}<ShowHeaders>true</ShowHeaders>\r\n"));
     }
-    if properties.show_cell_names == Some(true) {
-        xml.push_str(&format!("{tab}<ShowCellNames>true</ShowCellNames>\r\n"));
-    }
-    if properties.show_row_and_column_names == Some(true) {
-        xml.push_str(&format!(
-            "{tab}<ShowRowAndColumnNames>true</ShowRowAndColumnNames>\r\n"
-        ));
-    }
     if let Some(value) = properties.vertical_scroll_bar {
         xml.push_str(&format!(
             "{tab}<VerticalScrollBar>{}</VerticalScrollBar>\r\n",
@@ -27053,14 +27045,10 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
             xml_bool(value)
         ));
     }
-    if properties.edit == Some(true) {
-        xml.push_str(&format!("{tab}<Edit>true</Edit>\r\n"));
-    }
     // `Protection` leads `SelectionShowMode` (8) and `Output` (1) and trails
     // `HorizontalScrollBar` (21), `VerticalScrollBar` (9), `CommandSet` (4)
-    // and `ShowGrid` (1) on the 26 native fields that carry it; it never
-    // shares a field with `Edit`, so it stays behind it.  It used to trail
-    // `Output`.
+    // and `ShowGrid` (1) on the 26 native fields that carry it.  It used to
+    // trail `Output`.
     if properties.protection == Some(true) {
         xml.push_str(&format!("{tab}<Protection>true</Protection>\r\n"));
     }
@@ -27075,6 +27063,24 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
             "{tab}<Output>{}</Output>\r\n",
             escape_xml_text(value)
         ));
+    }
+    // `Edit` trails the three elements the platform is observed to write ahead
+    // of it and leads the five it is observed to write behind it.  Every
+    // `<SpreadSheetDocumentField>` of the eight stand corpora was read for the
+    // order of its direct children (2 709 fields, 75 of them carrying
+    // `<Edit>`), and not one of the element's ordered pairs occurs in both
+    // directions anywhere: ahead of it stand `Protection` (2),
+    // `SelectionShowMode` (2) and `Output` (1) -- alongside `DataPath` (75),
+    // `TitleLocation` (72), the scroll pair (57 each), `ShowHeaders` (37),
+    // `CommandSet` (35), `ShowGrid` (35), `Width` (25), `Height` (19),
+    // `Title` (15), `DefaultItem` (9) and `Visible` (2) -- and behind it
+    // `ShowGroups` (2), `EnableStartDrag` (8), `EnableDrag` (3),
+    // `ShowCellNames` (1), `ShowRowAndColumnNames` (1), `BorderColor` (1),
+    // `ViewScalingMode` (16), `ContextMenu` (75), `ExtendedTooltip` (75) and
+    // `Events` (34).  The census that put it ahead of `Protection` had seen no
+    // field carrying both.
+    if properties.edit == Some(true) {
+        xml.push_str(&format!("{tab}<Edit>true</Edit>\r\n"));
     }
     // `ShowGroups` leads the drag pair, it does not trail it: on the three of
     // the four native fields that carry it together with the pair,
@@ -27093,17 +27099,23 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
     if properties.enable_drag == Some(false) {
         xml.push_str(&format!("{tab}<EnableDrag>false</EnableDrag>\r\n"));
     }
-    // `ViewScalingMode` closes the spreadsheet field's own scalar run: on all
-    // 40 native fields that carry it, it trails `TitleLocation` (40),
-    // `DataPath` (40), `HorizontalScrollBar` (33), `Width` (32),
-    // `HorizontalStretch` (29), `Height` (25), `MaxHeight` (23), `MaxWidth`
-    // (12), `VerticalScrollBar` (11) and `Protection` (11) and leads only
-    // `ExtendedTooltip` (40), `ContextMenu` (40) and `Events` (15); it never
-    // shares a field with `SelectionShowMode`, `Output` or the drag pair.
-    if let Some(value) = properties.view_scaling_mode {
+    // The name-display pair trails the drag pair rather than opening the run
+    // with the grid pair.  Of the 2 709 native `<SpreadSheetDocumentField>`
+    // elements of the eight corpora, 6 carry `ShowCellNames` and 10
+    // `ShowRowAndColumnNames`, and the platform writes `ShowGrid` (6/8),
+    // `ShowHeaders` (6/9), `Title` (5/6), `Visible` (5/6), `Edit` (1/1),
+    // `EnableStartDrag` (1/1), `CommandSet` (1/1), `Protection` (0/1) and
+    // `ShowGroups` (0/1) ahead of them, `ShowCellNames` ahead of
+    // `ShowRowAndColumnNames` (6) and both ahead of `ViewScalingMode` (0/2),
+    // `ContextMenu`, `ExtendedTooltip` and `Events`.  No pair is observed in
+    // both directions.  Written beside the grid pair, they landed ahead of
+    // `Edit` and `EnableStartDrag` instead.
+    if properties.show_cell_names == Some(true) {
+        xml.push_str(&format!("{tab}<ShowCellNames>true</ShowCellNames>\r\n"));
+    }
+    if properties.show_row_and_column_names == Some(true) {
         xml.push_str(&format!(
-            "{tab}<ViewScalingMode>{}</ViewScalingMode>\r\n",
-            escape_xml_text(value)
+            "{tab}<ShowRowAndColumnNames>true</ShowRowAndColumnNames>\r\n"
         ));
     }
     // `DrawingSelectionShowMode` closes the same run: the one native field
@@ -30222,6 +30234,32 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(border_color)
             ));
         }
+    }
+    // `ViewScalingMode` closes the spreadsheet field outright -- behind its own
+    // `BorderColor`, not ahead of it.  All 2 709 native
+    // `<SpreadSheetDocumentField>` elements of the eight corpora were read for
+    // the order of their direct children: 1 941 carry the element, and every
+    // ordered pair it takes part in is one-directional.  `BorderColor` stands
+    // ahead of it on all 7 fields that carry both, as do `DataPath` (1 941),
+    // `TitleLocation` (1 939), `Output` (1 430), the scroll pair (1 219 and
+    // 1 175), `Width` (126), `Height` (107), `HorizontalStretch` (61),
+    // `MaxHeight` (46), `Protection` (25), `MaxWidth` (24), `Edit` (16),
+    // `ShowHeaders` (15), `ToolTipRepresentation` (13), `EnableStartDrag` (7),
+    // `DefaultItem` (6), `EnableDrag` (5), `AutoMaxWidth` (5), `ReadOnly` (5),
+    // `ShowGrid` (5), `SelectionShowMode` (3), `AutoMaxHeight` (3), `Title`
+    // (3), `ShowGroups` (3), `Visible` (3), `ShowRowAndColumnNames` (2) and
+    // `CommandSet` (2); behind it stand only `ContextMenu` (1 941),
+    // `ExtendedTooltip` (1 941) and `Events` (1 871).  The census that closed
+    // the scalar run with it had seen no field carrying it beside a colour.
+    if let Some(value) = item
+        .spreadsheet_document_properties
+        .as_ref()
+        .and_then(|properties| properties.view_scaling_mode)
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ViewScalingMode>{}</ViewScalingMode>\r\n",
+            escape_xml_text(value)
+        ));
     }
     // A `LabelDecoration` writes `Border` behind both colours: native puts
     // `BackColor` before it 12 times and `BorderColor` 4 times (and `BackColor`
