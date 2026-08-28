@@ -6115,12 +6115,29 @@ impl FormRootGroupingSchema {
     }
 
     /// The width lives in the fixed root header, not in the trailer, so it is
-    /// read from the root field array directly.
+    /// read from the root field array directly, in both root revisions.
+    ///
+    /// Census of the dumped root layouts of all eight stand corpora, joined to
+    /// the direct children of each form's own `<Form>` element: 22 637 roots,
+    /// 1 652 of them under discriminator `49` and 20 985 under `50`, and field
+    /// 12 is a total function of the platform's root-level `<ChildItemsWidth>`
+    /// under both. Under `49` it reads `0` on all 1 645 roots that carry no
+    /// element and `1`/`2`/`3`/`5` on the 1/2/3/1 that carry
+    /// `Equal`/`LeftWide`/`LeftWidest`/`LeftNarrowest`; under `50` it reads `0`
+    /// on all 20 929 that carry none and `1`/`2`/`3`/`4` on the 22/24/5/5 that
+    /// carry `Equal`/`LeftWide`/`LeftWidest`/`LeftNarrow`. No root disagrees in
+    /// either direction, and no code outside the shared width table occurs.
+    ///
+    /// The slot also sits between two neighbours that were already read the
+    /// same way under either discriminator -- field 11 (`Group`) and field 13
+    /// (`AutoFillCheck`, whose own census records the identical `49`/`50`
+    /// split) -- so admitting only `50` was a gate on the discriminator, not on
+    /// anything the record says. It cost the element on seven ERP УХ forms.
     pub(crate) fn child_items_width(
         root_discriminator: Option<&str>,
         fields: &[&str],
     ) -> Option<&'static str> {
-        if root_discriminator != Some("50") {
+        if !matches!(root_discriminator, Some("49") | Some("50")) {
             return None;
         }
         form_children_width_xml(fields.get(Self::CHILD_ITEMS_WIDTH_SLOT)?)
