@@ -636,6 +636,23 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
             );
         }
     }
+    // A button names a table's standard command only while the table has it --
+    // the third reader of the very fact the table's own `<CommandSet>` and the
+    // root set already read, asked once the item tree (and therefore every
+    // table's finished command set) exists.
+    {
+        let mut ownership = BTreeMap::new();
+        collect_form_table_command_ownership(
+            &child_items,
+            &attributes,
+            &child_item_indexes.bound_attribute_id_by_table_id,
+            &mut ownership,
+        );
+        withhold_form_button_commands_the_table_lacks(&mut child_items, &ownership);
+        if let Some(command_bar) = auto_command_bar.as_mut() {
+            withhold_form_button_commands_the_table_lacks(&mut command_bar.child_items, &ownership);
+        }
+    }
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_child_items_cpu_ms +=
             child_item_indexes_cpu_ms + elapsed_ms(started);
@@ -1667,6 +1684,12 @@ pub(super) struct FormChildItem {
     pub(super) multiple_values_back_color: Option<String>,
     pub(super) title_data_path: Option<String>,
     pub(super) command_name: Option<String>,
+    /// The `{kind, uuid}` record a `<Button>`'s command slot declares, kept
+    /// beside the name it was resolved to. The readers that decide *after* the
+    /// item tree is built -- a command belongs to its owner only while the
+    /// owner has it -- need the record to spell the raw sentinel the platform
+    /// writes there, and the name alone does not carry the uuid back.
+    pub(super) command_record: Option<String>,
     pub(super) command_source: Option<String>,
     pub(super) child_items: Vec<FormChildItem>,
 }
@@ -11556,6 +11579,13 @@ fn parse_form_child_item_with_metadata_owners(
     } else {
         None
     };
+    let command_record = if tag == "Button" {
+        fields
+            .get(8 + button_top_level_offset)
+            .map(|field| field.trim().to_string())
+    } else {
+        None
+    };
     let (title, title_formatted) = parse_form_child_item_title(
         tag,
         wrapper,
@@ -14065,6 +14095,7 @@ fn parse_form_child_item_with_metadata_owners(
             object_refs,
         ),
         command_name,
+        command_record,
         command_source: if tag == "CommandBar" {
             parse_form_command_bar_source_with_items(&fields, item_name_by_id)
         } else if tag == "ButtonGroup" {
@@ -24694,6 +24725,14 @@ fn form_command_target_declares_standard_command(
     if command_name.ends_with(".StandardCommand.CreateBasedOn") {
         return facts.based_on_declared != Some(0);
     }
+    if facts.kind == "Catalog" && command_name.ends_with(".StandardCommand.OpenByValue") {
+        return facts.owners_declared != Some(0);
+    }
+    if facts.kind == "InformationRegister"
+        && command_name.ends_with(".StandardCommand.OpenByRecorder")
+    {
+        return facts.recorder_subordinate != Some(false);
+    }
     true
 }
 
@@ -25381,17 +25420,34 @@ const FORM_LIST_MAIN_TABLE_ROW_COMMANDS: [&str; 12] = [
 ];
 
 /// The four names the *root* command set additionally never carries over a
-/// main-table-less list, and which the table's own set does carry.
+/// main-table-less list.
 ///
 /// They are held apart from the twelve above rather than merged into them
-/// because the corpus separates them: the same census that finds 0/84 for the
-/// twelve finds `FindByCurrentValue` on 24 of the 84 tables and
-/// `HierarchicalList`, `List` and `Tree` on 5 each (`DataProcessors/
-/// РегистрацияИзмененийДляОбменаДанными/Forms/ВыборОбъектовОтбором`, table
-/// `Отбор`, in all five corpora that have forms). The root reader's own
-/// population is 30 root sets, too small to have met any of the four, so its
-/// sixteen-name list is kept exactly as measured there and is not widened onto
-/// a reader whose corpus contradicts it.
+/// because the corpus separates them at a table: of the tables shown over a
+/// dynamic list that declares no `<MainTable>`, 24 do name
+/// `FindByCurrentValue`, so that name is the list's whatever the list stands
+/// on.
+///
+/// The other three are not, and the observation that used to say they were is
+/// a different table. Re-joining the same census by the *table's own*
+/// `<DataPath>` rather than by the root attribute of its binding chain: of the
+/// 79 tables whose data path names a main-table-less dynamic list outright,
+/// **not one** writes `HierarchicalList`, `List` or `Tree`, while 24 of them
+/// write `FindByCurrentValue`. The five that do write the three -- one per
+/// corpus, all of them `DataProcessors/РегистрацияИзмененийДляОбменаДанными/
+/// Forms/ВыборОбъектовОтбором`, table `Отбор` -- carry
+/// `<DataPath>СписокДанных.SettingsComposer.Settings.Filter</DataPath>`: the
+/// table is shown over a filter collection of the list's settings composer,
+/// not over the list, and the binding index resolves it to `СписокДанных` only
+/// because that is the chain's root. The three names are therefore withheld at
+/// a table exactly as at the root, and only where the table's own data path
+/// says the table is the list.
+///
+/// The population that carries the three uuids in that state is one table --
+/// ERP УХ 3.2.12.6 `DataProcessors/ПодборНоменклатурыПоПлануПоставкиПоДоговору/
+/// Forms/ФормаПодбораПоПлануПоставкиПоДоговору`, table `ДоговорыКонтрагенты`
+/// over the main-table-less list `ДоговораИКонтрагенты` -- and the platform
+/// names none of the three there.
 const FORM_ROOT_LIST_MAIN_TABLE_ONLY_COMMANDS: [&str; 4] =
     ["FindByCurrentValue", "HierarchicalList", "List", "Tree"];
 
@@ -25431,8 +25487,90 @@ fn form_table_list_declares_standard_command(
     form_list_owner_declares_standard_command(command, main_table, declarations)
 }
 
+/// The three names that spell a *hierarchy view mode* of a table.
+///
+/// They are the table's own view switches, not the list's row commands, and a
+/// flat collection has no hierarchy to switch to.
+///
+/// Evidence, the 6 515 native `<Table>` `<CommandSet>` blocks of the eight
+/// stand corpora, each table joined to the form attribute the root segment of
+/// its own `<DataPath>` names: 694 of the 947 tables rooted at a
+/// `v8:ValueTree` write at least one of the three, and **not one** of the
+/// 2 197 rooted at a `v8:ValueTable` and **not one** of the 270 rooted at a
+/// `v8:ValueListType` writes any of them. Counted name by name over the whole
+/// stand, `HierarchicalList` is written 684 times on a value tree, `List` 693
+/// and `Tree` 672, against 0/0/0 on the two flat collections.
+///
+/// The level and move commands are not of this kind and are not listed here:
+/// `LevelUp`, `LevelDown`, `MoveItem` and `CreateFolder` are written 161, 161,
+/// 154 and 144 times respectively and every single one of them on a table over
+/// a `cfg:DynamicList` -- never on a value tree either -- so they belong to
+/// the list rules below and not to the collection's own shape.
+const FORM_TABLE_HIERARCHY_VIEW_COMMANDS: [&str; 3] = ["HierarchicalList", "List", "Tree"];
+
+/// Whether the table itself -- rather than the list behind it -- has the
+/// standard command this name spells.
+///
+/// Two of the table's own declared properties answer for three names, and both
+/// are properties the writer already emits for the same element, so the reader
+/// asks the element about itself instead of guessing from its data.
+///
+/// `Choose`: census over the eight stand corpora of every table whose
+/// excluded-command list declares `8969c93a-...`, joined to the
+/// `<ExcludedCommand>` elements the platform writes for the same table -- 186
+/// tables. All 179 the platform names `Choose` declare
+/// `<ChoiceMode>true</ChoiceMode>`, and all 7 it leaves unnamed declare no
+/// `<ChoiceMode>` at all. The split is total in both directions and holds
+/// across every attribute kind a table is shown over -- 84 of the 179 are over
+/// a `v8:ValueTable`, 72 over a `cfg:DynamicList`, 14 over a `v8:ValueTree`
+/// and 9 over a `v8:ValueListType` -- so it is the table's declaration and not
+/// its data that decides. The seven are ERP УХ 3.2.12.6
+/// `CommonForms/ФормаНастройкиФормулРасчета` (both its operand tables),
+/// `Catalogs/Лоты/Forms/ЛотыДоступныеПоставщику`,
+/// `Documents/Лот/Forms/ЛотыДоступныеПоставщику`,
+/// `Documents/ЭкземплярПроцесса/Forms/ФормаПроцессов`,
+/// `Documents/ТрансформационнаяКорректировка/Forms/ФормаСписка` and
+/// `DataProcessors/ВзысканиеДебиторскойЗадолженности/Forms/Форма`.
+///
+/// `SelectAll` and `ShowMultipleSelection`: the same census on their own
+/// uuids. Of the 1 462 tables that declare `51c99108-...`, 1 461 are named
+/// `SelectAll` and every one of the 1 461 declares no `<SelectionMode>`; the
+/// single unnamed one declares `<SelectionMode>SingleRow</SelectionMode>`. Of
+/// the 948 that declare `e7216412-...`, 946 are named `ShowMultipleSelection`
+/// and none of the 946 declares a `<SelectionMode>`; both unnamed ones declare
+/// `SingleRow`. A table that admits one row at a time has neither a
+/// multiple-selection switch nor a select-all command, and the three unnamed
+/// records are on the two ERP УХ forms
+/// `DataProcessors/ВзысканиеДебиторскойЗадолженности/Forms/Форма` and
+/// `DataProcessors/АналитическийБланк/Forms/ФормаМастераМакетаРаскрытия`.
+fn form_table_declares_own_standard_command(
+    command: &str,
+    choice_mode: Option<bool>,
+    selection_mode: Option<&str>,
+) -> bool {
+    match command {
+        "Choose" => choice_mode == Some(true),
+        "SelectAll" | "ShowMultipleSelection" => selection_mode != Some("SingleRow"),
+        _ => true,
+    }
+}
+
+/// Whether a form attribute declares exactly one of the two flat value
+/// collections a table can be shown over.
+///
+/// A value table and a value list are rows without a hierarchy; a value tree
+/// is the same collection with one. The declaration is read as the whole
+/// declared type rather than as membership, because a table shown over a union
+/// of types is not one of these collections.
+fn form_attribute_is_flat_value_collection(attribute: &FormAttribute) -> bool {
+    let [ConstantValueType::Reference { reference }] = attribute.value_types.as_slice() else {
+        return false;
+    };
+    matches!(reference.as_str(), "v8:ValueTable" | "v8:ValueListType")
+}
+
 /// Drop from every `<Table>`'s own `<CommandSet>` the standard commands the
-/// list behind that table does not have.
+/// table and the list behind it do not have.
 fn retain_form_table_list_owned_commands(
     items: &mut [FormChildItem],
     attributes: &[FormAttribute],
@@ -25440,20 +25578,42 @@ fn retain_form_table_list_owned_commands(
     declarations: Option<&MetadataFieldDeclarationIndex>,
 ) {
     for item in items.iter_mut() {
-        if item.tag == "Table"
-            && !item.command_set_excluded_commands.is_empty()
-            && let Some(settings) = bound_attribute_id_by_table_id
-                .get(&item.id)
-                .and_then(|attribute_id| {
-                    attributes
-                        .iter()
-                        .find(|attribute| &attribute.id == attribute_id)
-                })
-                .and_then(|attribute| attribute.settings.as_ref())
-        {
+        if item.tag == "Table" && !item.command_set_excluded_commands.is_empty() {
+            let choice_mode = item.table_choice_mode;
+            let selection_mode = item.table_selection_mode;
             item.command_set_excluded_commands.retain(|command| {
-                form_table_list_declares_standard_command(command, settings, declarations)
+                form_table_declares_own_standard_command(command, choice_mode, selection_mode)
             });
+            if let Some(attribute) =
+                bound_attribute_id_by_table_id
+                    .get(&item.id)
+                    .and_then(|attribute_id| {
+                        attributes
+                            .iter()
+                            .find(|attribute| &attribute.id == attribute_id)
+                    })
+            {
+                if let Some(settings) = attribute.settings.as_ref() {
+                    item.command_set_excluded_commands.retain(|command| {
+                        form_table_list_declares_standard_command(command, settings, declarations)
+                    });
+                    // The three hierarchy view modes the root set already
+                    // withholds over a list with no main table, withheld here
+                    // only where the table's own data path says the table is
+                    // that list -- see FORM_ROOT_LIST_MAIN_TABLE_ONLY_COMMANDS.
+                    if settings.main_table.is_none()
+                        && item.data_path.as_deref() == Some(attribute.name.as_str())
+                    {
+                        item.command_set_excluded_commands.retain(|command| {
+                            !FORM_TABLE_HIERARCHY_VIEW_COMMANDS.contains(command)
+                        });
+                    }
+                }
+                if form_attribute_is_flat_value_collection(attribute) {
+                    item.command_set_excluded_commands
+                        .retain(|command| !FORM_TABLE_HIERARCHY_VIEW_COMMANDS.contains(command));
+                }
+            }
         }
         retain_form_table_list_owned_commands(
             &mut item.child_items,
@@ -25461,6 +25621,144 @@ fn retain_form_table_list_owned_commands(
             bound_attribute_id_by_table_id,
             declarations,
         );
+    }
+}
+
+/// What one `<Table>` of the built item tree answers about the standard
+/// commands it owns.
+///
+/// Collected from the finished tree rather than from the item record, because
+/// two of the three answers are the very sets the table's own `<CommandSet>`
+/// reader has just produced.
+struct FormTableCommandOwnership {
+    /// The names the table's own `<CommandSet>` excludes, as finally written.
+    excluded_commands: Vec<&'static str>,
+    /// The table shows a dynamic list whose row set the form declares
+    /// unchangeable.
+    row_set_unchangeable: bool,
+    /// The table shows a dynamic list that declares no `<MainTable>`.
+    list_without_main_table: bool,
+}
+
+/// Index every `<Table>` of the tree by its item id, which is exactly the
+/// `kind` a button's command record carries when the command is that table's.
+fn collect_form_table_command_ownership(
+    items: &[FormChildItem],
+    attributes: &[FormAttribute],
+    bound_attribute_id_by_table_id: &BTreeMap<String, String>,
+    ownership: &mut BTreeMap<String, FormTableCommandOwnership>,
+) {
+    for item in items {
+        if item.tag == "Table" {
+            let settings = bound_attribute_id_by_table_id
+                .get(&item.id)
+                .and_then(|attribute_id| {
+                    attributes
+                        .iter()
+                        .find(|attribute| &attribute.id == attribute_id)
+                })
+                .and_then(|attribute| attribute.settings.as_ref());
+            ownership.insert(
+                item.id.clone(),
+                FormTableCommandOwnership {
+                    excluded_commands: item.command_set_excluded_commands.clone(),
+                    row_set_unchangeable: settings.is_some() && item.change_row_set == Some(false),
+                    list_without_main_table: settings
+                        .is_some_and(|settings| settings.main_table.is_none()),
+                },
+            );
+        }
+        collect_form_table_command_ownership(
+            &item.child_items,
+            attributes,
+            bound_attribute_id_by_table_id,
+            ownership,
+        );
+    }
+}
+
+/// Whether the table a button's command record names still owns the standard
+/// command the reader spelled for it.
+///
+/// Three facts about the table, all of them already read for the table's own
+/// `<CommandSet>`, and all three the same statement: a command belongs to the
+/// item only while the item has it, and what the platform cannot name it keeps
+/// as the raw `kind:uuid` sentinel.
+///
+/// * **The row set is unchangeable.** Census over the eight stand corpora of
+///   every native `Form.Item.<table>.StandardCommand.<name>` whose owner is a
+///   `<Table>` -- 14 057 of them: `Copy` is written 539 times, `Create` 442,
+///   `CreateFolder` 71, `Delete` 1 584, `MoveItem` 10 and `SetDeletionMark`
+///   259, and of those 2 905 records exactly four sit on a table that declares
+///   `<ChangeRowSet>false</ChangeRowSet>` -- all four on a table shown over a
+///   value table rather than over a dynamic list, which is the same pairing
+///   `parse_form_table_command_set_excluded_commands_for_table` already reads
+///   for the table's own set. Over a dynamic list the split is 0 against
+///   1 218, with no counter-example on any corpus.
+///
+/// * **The list has no main table.** The same census split by the
+///   `<MainTable>` of the list each table is shown over: of the 4 994 records
+///   whose owner is a table over a `cfg:DynamicList`, 420 sit on a list that
+///   declares no `<MainTable>`, and **not one** of the 420 names any of the
+///   twelve row commands `FORM_LIST_MAIN_TABLE_ROW_COMMANDS` holds, while the
+///   4 574 over a list that does declare one name them 10..442 times each.
+///
+/// * **The table's own `<CommandSet>` excludes the command.** Of all 14 057
+///   records, **not one** names a command that the same table's
+///   `<ExcludedCommand>` list carries. A command excluded from the set is not
+///   on the table, so no button of that table can name it.
+///
+/// Evidenced from the other side by ERP УХ 3.2.12.6, which writes the raw
+/// sentinel at exactly these positions: `1:0f8d6d98-…`, `1:0ae4bea5-…` and
+/// `1:a2f737a8-…` in `Catalogs/СчетаБД/Forms/ФормаВыбора` and
+/// `3:8d772f97-…` in `InformationRegisters/Заместители/Forms/ФормаСписка`
+/// (unchangeable row set); `610:0f8d6d98-…`, `610:d82ca05c-…` and
+/// `610:0ae4bea5-…` in `Reports/УправлениеЛимитами/Forms/ФормаОтчета` (a list
+/// with no main table); `20:c0519548-…`, `20:44ad3ec9-…` and
+/// `20:49602716-…` in `Reports/ПлатежныйКалендарьУХ/Forms/ФормаОтчета`
+/// (`Find`, `CancelSearch` and `OutputList`, all three excluded by that
+/// table's own `<CommandSet>`).
+fn form_table_owns_button_standard_command(
+    command: &str,
+    ownership: &FormTableCommandOwnership,
+) -> bool {
+    if ownership.excluded_commands.contains(&command) {
+        return false;
+    }
+    if ownership.row_set_unchangeable && FORM_TABLE_ROW_SET_EXCLUDED_COMMANDS.contains(&command) {
+        return false;
+    }
+    if ownership.list_without_main_table && FORM_LIST_MAIN_TABLE_ROW_COMMANDS.contains(&command) {
+        return false;
+    }
+    true
+}
+
+/// Put back the raw sentinel on every `<Button>` that names a standard command
+/// its owner table does not have.
+fn withhold_form_button_commands_the_table_lacks(
+    items: &mut [FormChildItem],
+    ownership: &BTreeMap<String, FormTableCommandOwnership>,
+) {
+    for item in items.iter_mut() {
+        if item.tag == "Button"
+            && let Some(name) = item.command_name.as_deref()
+            && let Some(suffix) = name.strip_prefix("Form.Item.")
+            && let Some((_owner, command)) = suffix.rsplit_once(".StandardCommand.")
+            && let Some(record) = item.command_record.as_deref()
+            && let Some(fields) = split_1c_braced_fields(record, 0)
+            && let (Some(kind), Some(uuid)) = (
+                fields.first().map(|field| field.trim()),
+                fields
+                    .get(1)
+                    .and_then(|field| parse_non_zero_uuid(field.trim())),
+            )
+            && let Some(table) = ownership.get(kind)
+            && !form_table_owns_button_standard_command(command, table)
+        {
+            item.command_name = Some(form_command_record_sentinel(kind, &uuid));
+        }
+        withhold_form_button_commands_the_table_lacks(&mut item.child_items, ownership);
     }
 }
 
@@ -26600,12 +26898,27 @@ fn form_command_interface_command_named(
             if !form_command_interface_target_use_standard_commands(&uuid, context) {
                 return Some(format!("{kind}:{uuid}"));
             }
-            form_object_family_standard_command_name(
+            // The same declaration slots 1, 2 and 3 already read: a target
+            // that cannot have what the command opens by has no such command,
+            // and the platform keeps the raw sentinel.
+            if let Some(name) = form_object_family_standard_command_name(
                 kind,
                 reference,
                 FormCommandRecordReader::CommandInterfaceItem,
-            )
-            .or_else(|| resolve_information_register_open_by_value_command(kind, target, context))
+            ) {
+                return Some(
+                    if form_command_target_declares_standard_command(
+                        &uuid,
+                        &name,
+                        context.metadata_command_refs,
+                    ) {
+                        name
+                    } else {
+                        format!("{kind}:{uuid}")
+                    },
+                );
+            }
+            resolve_information_register_open_by_value_command(kind, target, context)
         }
         // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
         // theirs with the object commands handled above. The gate belongs here
@@ -26683,9 +26996,16 @@ pub(super) fn parse_form_command_interface_command(
     // seven; in each case the refusal dropped the whole `<Item>`, and where the
     // refused item was the container's only one it dropped the container.
     //
-    // The six uuids that *do* name something stay refused here: their targets
-    // exist, so their case is a rule about the target, not about the name being
-    // unconstructible, and they are open.
+    // The two uuids that *do* name something stay refused here. Both are in
+    // ERP УХ 3.2.12.6 `Catalogs/Сценарии/Forms/ФормаЭлемента` --
+    // `5:f18047cf-…` (`InformationRegister.ПараметрыУчетаВНАМСФО`) and
+    // `8:50635584-…` (`InformationRegister.ПротоколыОбъектов`) -- and the
+    // platform writes the sentinel for them too. Dropping this condition would
+    // reproduce both, but it would also spell a sentinel for every record this
+    // reader merely fails to name -- a register whose open-by-value dimension
+    // is ambiguous, say -- where the platform does write a name. Those are two
+    // different states and nothing measured here separates them, so the two
+    // records stay unwritten rather than joined by fabricated ones.
     named.or_else(|| {
         let uuid = target.and_then(parse_non_zero_uuid)?;
         (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
@@ -26839,6 +27159,26 @@ pub(super) fn parse_form_object_reference(
     object_refs.get(&uuid).cloned()
 }
 
+/// The `<CommandGroup>` a command-interface item names, or `None` when the
+/// item declares no group at all.
+///
+/// The record itself tells the two states apart, so the reader does not have
+/// to guess from the name it failed to build. Census of every command-group
+/// slot the eight stand corpora carry -- 15 697 of them -- finds exactly two
+/// shapes: `{0}` on 13 545 items, which declare no group and get no element,
+/// and `{0,<uuid>}` on 2 152, which do. Nothing else occurs anywhere.
+///
+/// Of the 2 152 that name a group, 2 150 resolve through the standard-group
+/// table or the object index. The two that do not are ERP УХ 3.2.12.6
+/// `Catalogs/Организации/Forms/ФормаСписка`, whose two `<Item>`s both declare
+/// `0395d4d7-261d-4ec5-8dd0-27035b3a6284` -- a uuid that names nothing
+/// anywhere in that configuration -- and the platform writes it out literally,
+/// `<CommandGroup>0395d4d7-261d-4ec5-8dd0-27035b3a6284</CommandGroup>`. That
+/// is the same sentinel the object-level reader of the same fact already
+/// keeps: `command_interface_group_name` in the standalone
+/// `Ext/CommandInterface.xml` reader falls back to the bare uuid for exactly
+/// this state, and the form's own reader was dropping the element instead. The
+/// two readers now spell the same thing.
 pub(super) fn parse_form_command_group_reference(
     field: &str,
     object_refs: &BTreeMap<String, String>,
@@ -26848,9 +27188,12 @@ pub(super) fn parse_form_command_group_reference(
         return None;
     }
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
-    form_standard_command_group_name(&uuid)
-        .map(ToOwned::to_owned)
-        .or_else(|| object_refs.get(&uuid).cloned())
+    Some(
+        form_standard_command_group_name(&uuid)
+            .map(ToOwned::to_owned)
+            .or_else(|| object_refs.get(&uuid).cloned())
+            .unwrap_or(uuid),
+    )
 }
 
 pub(super) fn form_standard_command_group_name(uuid: &str) -> Option<&'static str> {

@@ -19,6 +19,8 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
         let use_standard_commands =
             metadata_use_standard_commands(kind, &row.text, header).unwrap_or(true);
         let based_on_declared = metadata_based_on_declared(kind, &row.text, header);
+        let owners_declared = metadata_owners_declared(kind, &row.text, header);
+        let recorder_subordinate = metadata_recorder_subordinate(kind, &row.text, header);
         index.insert(
             row.file_name.clone(),
             MetadataCommandReference {
@@ -26,6 +28,8 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
                 name: header.name.clone(),
                 use_standard_commands,
                 based_on_declared,
+                owners_declared,
+                recorder_subordinate,
             },
         );
     }
@@ -112,6 +116,39 @@ fn metadata_based_on_declared(kind: &str, text: &str, header: &MetadataHeader) -
     let mut diagnostic = None;
     let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
     metadata_reference_collection_len(graph.owner_fields.get(slot)?)
+}
+
+/// How many owners the target's own `<Owners>` list declares, off the very slot
+/// `catalog_declared_standard_attributes` already reads for the `Owner`
+/// standard attribute of the same catalog. `None` for every other kind and
+/// whenever the slot is not the counted reference collection every one of these
+/// properties shares: an unread declaration withholds nothing.
+fn metadata_owners_declared(kind: &str, text: &str, header: &MetadataHeader) -> Option<usize> {
+    if kind != "Catalog" {
+        return None;
+    }
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        text,
+        header,
+        &mut diagnostic,
+    )?;
+    metadata_reference_collection_len(graph.owner_fields.get(CATALOG_OWNER_FIELD_OWNERS)?)
+}
+
+/// Whether an information register declares
+/// `<WriteMode>RecorderSubordinate</WriteMode>`, off logical field 5 -- the
+/// same slot `parse_information_register_owner_properties` reads for the
+/// register's own `InformationRegisters/<name>.xml`. `None` for every other
+/// kind and whenever the slot does not decode to one of the two declared write
+/// modes.
+fn metadata_recorder_subordinate(kind: &str, text: &str, header: &MetadataHeader) -> Option<bool> {
+    if kind != "InformationRegister" {
+        return None;
+    }
+    let fields = parse_information_register_owner_fields(text, header)?;
+    Some(information_register_write_mode_xml(fields.logical.get(5)?)? == "RecorderSubordinate")
 }
 
 /// What a metadata table declares about the existence of its own standard

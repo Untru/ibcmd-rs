@@ -5477,6 +5477,34 @@ struct MetadataCommandReference {
     /// `ОбоснованиеТребованийКЗакупочнойПроцедуре` and `ЗаявкаНаРасход` -- are
     /// carried by 22 buttons the platform writes as `2:<uuid>`.
     based_on_declared: Option<usize>,
+    /// How many owners the target's own `<Owners>` list declares, or `None`
+    /// when this reader cannot name the slot for the target's kind. A catalog
+    /// that declares none has nothing to be opened by, so it has no
+    /// `OpenByValue` standard command and the platform keeps the raw
+    /// `code:uuid` sentinel -- the same shape as `based_on_declared`.
+    ///
+    /// Evidence: over the eight stand corpora every one of the 112
+    /// `<Command>`/`<CommandName>` values naming a
+    /// `Catalog.X.StandardCommand.OpenByValue` names a catalog whose
+    /// `<Owners>` declares at least one owner, and ERP УХ 3.2.12.6 keeps
+    /// `Catalog.СхемаДоступностиРеквизитов` -- whose `<Owners/>` is empty --
+    /// as `4:bdd23491-0b0b-49b7-bda4-8a0b0870f4fd` in
+    /// `Catalogs/ЭтапыУниверсальныхПроцессов/Forms/ФормаЭлемента`.
+    owners_declared: Option<usize>,
+    /// Whether the target information register declares
+    /// `<WriteMode>RecorderSubordinate</WriteMode>`, or `None` for every other
+    /// kind. A register written independently has no recorder, so it has no
+    /// `OpenByRecorder` standard command.
+    ///
+    /// Evidence: over the eight stand corpora all ten
+    /// `<Command>`/`<CommandName>` values naming an
+    /// `InformationRegister.X.StandardCommand.OpenByRecorder` name a register
+    /// that declares `RecorderSubordinate`, and none names an `Independent`
+    /// one; ERP УХ 3.2.12.6 keeps
+    /// `InformationRegister.НастройкаРаспределенияПоНаправлениямДеятельности`
+    /// (`Independent`) as `2:7f22e01e-6dbf-4a58-a96b-b455c935ab6b` in
+    /// `Catalogs/Организации/Forms/ФормаЭлемента`.
+    recorder_subordinate: Option<bool>,
     /// Whether the target metadata object itself declares
     /// `<UseStandardCommands>true</UseStandardCommands>`. Both command-interface
     /// readers (this object's own `Ext/CommandInterface.xml` and a form's
