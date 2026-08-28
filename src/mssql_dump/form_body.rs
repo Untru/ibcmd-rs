@@ -6225,7 +6225,9 @@ pub(super) fn form_dynamic_list_use_always_universe(
             universe = BTreeSet::new();
         } else {
             let selection = parse_form_dynamic_list_query_selection(query_text)?;
-            if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
+            if form_dynamic_list_query_source_is_undeclared(&selection, declarations) {
+                universe = BTreeSet::new();
+            } else if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
                 universe = selection.extension.clone().unwrap_or_default();
             } else {
                 universe = selection.aliases.clone();
@@ -6403,9 +6405,49 @@ fn form_dynamic_list_star_source_fields(
 /// like counter-examples name it in a different case, which the query language
 /// resolves and this reader does too.
 ///
-/// Only the `ЗНАЧЕНИЕ(...)` literal is read here. A `FROM` source naming
-/// undeclared metadata is the same failure in principle and has no observation
-/// on the stand, so it is left alone rather than guessed at.
+/// Only the `ЗНАЧЕНИЕ(...)` literal is read here; the `FROM` source is read by
+/// [`form_dynamic_list_query_source_is_undeclared`], which needs the parsed
+/// selection this one runs ahead of.
+/// Whether the final select reads from a table the configuration does not
+/// declare.
+///
+/// The same failure the `ЗНАЧЕНИЕ(...)` rule above states, read off the source
+/// clause: a query whose `FROM` names no declared table does not compile, and a
+/// list whose query does not compile resolves no field at all.
+///
+/// A virtual table is tested by the base table it belongs to -- the third
+/// segment names the virtual table, not a metadata record, and the declaration
+/// index carries none.
+///
+/// Evidence, equality of sets over the 4 054 manual-query dynamic lists of the
+/// eight stand corpora: exactly one names an undeclared table in its source
+/// clause -- ERP УХ 3.2.12.6
+/// `InformationRegisters/УдалитьПараметрыЛимитированияЦФО/Forms/ФормаВыбораЦФО`,
+/// which reads `РегистрСведений.ПараметрыЛимитированияЦФО` while the
+/// configuration declares only the `Удалить…` register -- and the platform
+/// marks both fields that list remembers, `~Список.ЦФО` and
+/// `~Список.ВалютаЛимитирования`, which the export wrote plain. The other 4 053
+/// name only declared tables and are untouched. The list's `DefaultPicture` is
+/// not a remembered field and keeps the rule of its own that leaves it plain
+/// here, exactly as the platform writes it.
+fn form_dynamic_list_query_source_is_undeclared(
+    selection: &FormDynamicListQuerySelection,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> bool {
+    let Some(declarations) = declarations else {
+        return false;
+    };
+    selection.sources.iter().any(|(reference, _)| {
+        reference.as_deref().is_some_and(|reference| {
+            let mut segments = reference.split('.');
+            let (Some(kind), Some(name)) = (segments.next(), segments.next()) else {
+                return false;
+            };
+            declarations.declares_table(&format!("{kind}.{name}")) == Some(false)
+        })
+    })
+}
+
 fn form_dynamic_list_query_names_undeclared_metadata(
     query_text: &str,
     declarations: Option<&MetadataFieldDeclarationIndex>,
@@ -21426,6 +21468,14 @@ pub(super) fn parse_form_child_item_data_path(
                         )
                     })
                     .or_else(|| {
+                        resolve_form_item_rooted_record_set_standard_attribute_path(
+                            field,
+                            table_name_by_id,
+                            attribute_metadata_owners_by_id,
+                            owner_scoped_bindings,
+                        )
+                    })
+                    .or_else(|| {
                         resolve_form_dynamic_list_member_data_path(
                             field,
                             attribute_metadata_owners_by_id,
@@ -21456,6 +21506,11 @@ pub(super) fn parse_form_child_item_data_path(
                     )
                 };
                 FormOwnerScopedDataPath::from_option(data_path)
+            })
+            .or_else(|| {
+                FormOwnerScopedDataPath::from_option(
+                    resolve_form_absent_metadata_physical_data_path(field, object_refs),
+                )
             })
     };
     let parse_direct_slot = |field: &str, aggregate: bool| {
@@ -21526,6 +21581,25 @@ pub(super) fn parse_form_child_item_data_path(
         .flatten()
         .unwrap_or(0);
     let input_slots = [11 + input_field_offset, 12 + input_field_offset];
+    // The second bound slot is the *footer's* binding, not a second spelling of
+    // the item's own. Reading it for the primary path when the first slot holds
+    // the empty binding `{0}` puts a `<DataPath>` on an item the platform's own
+    // bytes say shows no data -- the same statement the two-empty-slots rule
+    // below already reads.
+    //
+    // Evidence: over every field item of the eight stand corpora exactly one
+    // has an empty first slot and a bound second one -- ERP УХ 3.2.12.6
+    // `Documents/КорректировкаПланов/Forms/ФормаДокумента`, InputField
+    // `ТребуетсяПеренесеноРезерв` -- and the platform writes no `<DataPath>`
+    // for it and the `<FooterDataPath>Объект.Требуется.TotalПеренесено</…>`
+    // that second slot actually spells. Restricting the primary to the first
+    // slot keeps the footer, which returning early would throw away.
+    let primary_slots: &[usize] =
+        if fields.get(input_slots[0]).map(|field| field.trim()) == Some("{0}") {
+            &input_slots[..1]
+        } else {
+            &input_slots
+        };
     // Both bound slots spelling the empty binding `{0}` is the platform's own
     // statement that the item shows no data, and it then writes no `DataPath`
     // at all -- 280 such items across UT 11.5.27.75, every one of them without
@@ -21616,7 +21690,7 @@ pub(super) fn parse_form_child_item_data_path(
         | "FormattedDocumentField"
         | "ProgressBarField"
         | "TrackBarField"
-        | "ChartField" => resolve_slots(&input_slots, &parse_bound).or_else(|| {
+        | "ChartField" => resolve_slots(primary_slots, &parse_bound).or_else(|| {
             FormChildItemDataPathResolution::from_option(
                 parent_data_path.map(|parent| {
                     let name = normalize_form_data_path_child_name(parent, name);
@@ -21643,9 +21717,9 @@ pub(super) fn parse_form_child_item_data_path(
         // of the eight stand corpora hold a one-segment chain there naming the
         // form attribute the platform writes in `<DataPath>`, and none of them
         // falls back to a parent path.
-        | "GanttChartField" => resolve_slots(&input_slots, &parse_bound),
-        "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
-        "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        | "GanttChartField" => resolve_slots(primary_slots, &parse_bound),
+        "LabelField" => resolve_slots(primary_slots, &parse_direct_bound),
+        "TextDocumentField" => resolve_slots(primary_slots, &parse_bound),
         "Button" => button_data_path_slot
             .and_then(|slot| fields.get(slot))
             .map(|field| {
@@ -21675,6 +21749,64 @@ pub(super) fn parse_form_child_item_data_path(
         multiple_value_present: multiple_value_paths.2,
     };
     paths
+}
+
+/// The physical spelling of a bound chain that names metadata the configuration
+/// does not declare.
+///
+/// This is the law the choice-parameter-link reader already states, on the
+/// item's own bound slot: the platform does not drop a reference it cannot
+/// name -- it writes it physically, `<root id>` followed by one `/<marker>:<uuid>`
+/// per segment. The whole path goes physical, not just the segment that fails:
+/// a resolvable prefix is not spelled by name and then abandoned.
+///
+/// Evidence, equality of sets over the eight stand corpora: exactly two
+/// `<DataPath>` values anywhere in the eight native trees have this shape, both
+/// on ERP УХ 3.2.12.6. `DataProcessors/ПереносБюджетированияЕРП/Forms/Форма`
+/// CheckBoxField `СоздатьВидыОтчетов` carries `{2,{1},{0,12ce4095-…}}` and is
+/// written `1/0:12ce4095-280d-4333-85f2-fe333aa354e5`; that uuid is named by no
+/// declaration anywhere in the configuration, and no object declares an
+/// attribute of that name either. `DataProcessors/
+/// ГенерацияЗаявокНаРазмещениеСвободныхОстатковДС/Forms/Форма` InputField
+/// `РеквизитыЗаявокНаРазмещениеСредствВидОперацииБюджетирование` carries
+/// `{3,{1},{0,3608dd75-…},{0,a4d1f9e8-…}}` and is written
+/// `1/0:3608dd75-bdcf-44eb-a280-bace3d3ec7d0/0:a4d1f9e8-2c67-4f1e-a2c3-80d5de109340`;
+/// there the *first* uuid is a declared tabular section and only the terminal
+/// is undeclared, and the platform still writes both segments physically.
+///
+/// Both slots used to fall through to the item's own name joined to its parent
+/// path -- a guess, and the wrong one on both.
+fn resolve_form_absent_metadata_physical_data_path(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let (root, members) = segments.split_first()?;
+    let [root_id] = root.as_slice() else {
+        return None;
+    };
+    let root_id = parse_form_chain_numeric_id(root_id)?;
+    if members.is_empty() {
+        return None;
+    }
+    let mut path = root_id.to_string();
+    let mut absent = false;
+    for member in members {
+        let [marker, uuid] = member.as_slice() else {
+            return None;
+        };
+        let marker = marker.trim();
+        marker.parse::<i64>().ok()?;
+        let uuid = parse_non_zero_uuid(uuid.trim())?;
+        if !object_refs.contains_key(&uuid) {
+            absent = true;
+        }
+        path.push('/');
+        path.push_str(marker);
+        path.push(':');
+        path.push_str(&uuid);
+    }
+    absent.then_some(path)
 }
 
 /// The id a one-segment bound chain `{1,{<id>}}` names, and nothing else.
@@ -21809,41 +21941,107 @@ fn resolve_form_owner_scoped_button_data_path(
 ) -> FormOwnerScopedDataPath {
     let no_global_binding_paths = BTreeMap::new();
     FormOwnerScopedDataPath::from_option(
-        parse_form_button_data_path(
-            field,
-            attribute_names_by_id,
-            table_name_by_id,
-            table_column_names_by_id,
-            type_link_data_path_by_table_column,
-            &no_global_binding_paths,
-            owner_scoped_bindings,
-        )
-        // A button addresses its data in the same chain grammar every other
-        // item uses, so a slot the button-only route cannot spell is read as
-        // the chain it is rather than dropped. Evidence: UT 11.5.27.75
-        // `Catalogs/СделкиСКлиентами/Forms/ФормаЭлемента`, Button `Кнопка`
-        // carries `{2,{1},{0,2a0c92dc-…}}` against the `Объект` attribute and
-        // the platform writes `<DataPath>Объект.ВидСделки</DataPath>`.
-        .or_else(|| {
-            resolve_form_bound_chain_member_path(
-                field,
-                attribute_metadata_owners_by_id,
-                owner_scoped_bindings,
-                object_refs,
-                false,
-            )
-        }), // A negative marker on the root attribute names one of the standard
-            // attributes that attribute's own type declares. It used to be read
-            // here by a route of its own that admitted the two-segment chain
-            // `{2,{<attribute>},{<marker>}}` and nothing longer; the chain walker
-            // above reads the very same declaration in the very same position, so
-            // the route is gone and the fact has one reader. Evidence:
-            // UT 11.5.27.75 `ExchangePlans/ОбменССайтом/Forms/ФормаУзла`, Button
-            // `ФормаПланОбменаОбменССайтомВыполнитьОбменДанными` carries
-            // `{2,{1},{-6}}` against the `Объект` attribute of type
-            // `cfg:ExchangePlanObject.ОбменССайтом`, and the platform writes
-            // `<DataPath>Объект.Ref</DataPath>`.
+        // The standard member a negative marker names is the one the root
+        // attribute's own declared type names, exactly as every other bound
+        // slot reads it. The button route behind this one answers `-5` and `-8`
+        // with a flat `Ref` whatever the type is, which is right for the two
+        // families that carry the marker most often and wrong for the two that
+        // do not.
+        //
+        // Census over every `{2,{attribute},{-n}}` bound slot of the eight stand
+        // corpora, paired against the `<DataPath>` the platform writes for the
+        // item that carries it: no `(family, marker)` pair is spelled two ways,
+        // and buttons and non-buttons agree on every pair they share. The 727
+        // such slots on `Button` items are `CatalogObject`/`-8` -> `Ref` (292),
+        // `DocumentObject`/`-5` -> `Ref` (351), `BusinessProcessObject`/`-5` ->
+        // `Ref` (64), `ExchangePlanObject`/`-6` -> `Ref` (6), `TaskObject`/`-5`
+        // -> `Ref` (5), `ChartOfAccountsObject`/`-2` -> `Ref` (2),
+        // `CatalogObject`/`-4` -> `Parent` (1), `CatalogObject`/`-5` -> `Owner`
+        // (1, ERP УХ `Catalogs/БланкиОтчетов/Forms/ФормаМакета`) and
+        // `DocumentObject`/`-8` -> `RegisterRecords` (5, ERP УХ
+        // `Documents/Лот/Forms/ФормаДокумента`). The family tables answer all
+        // but the last, and `-8` on a document object is the collection the
+        // use-always route already reads it as; the two families whose table
+        // does not name the marker keep the flat `Ref` behind this route.
+        resolve_form_button_standard_terminal_data_path(field, attribute_metadata_owners_by_id)
+            .or_else(|| {
+                parse_form_button_data_path(
+                    field,
+                    attribute_names_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    type_link_data_path_by_table_column,
+                    &no_global_binding_paths,
+                    owner_scoped_bindings,
+                )
+            })
+            // A button addresses its data in the same chain grammar every other
+            // item uses, so a slot the button-only route cannot spell is read as
+            // the chain it is rather than dropped. Evidence: UT 11.5.27.75
+            // `Catalogs/СделкиСКлиентами/Forms/ФормаЭлемента`, Button `Кнопка`
+            // carries `{2,{1},{0,2a0c92dc-…}}` against the `Объект` attribute and
+            // the platform writes `<DataPath>Объект.ВидСделки</DataPath>`.
+            .or_else(|| {
+                resolve_form_bound_chain_member_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                    false,
+                )
+            })
+            // A button may also address one field of a list by that field's own
+            // map id, which is the same `{2,{attribute},{column}}` slot every
+            // field item carries and which the route above cannot answer,
+            // because a field-map id is not a declared column.
+            //
+            // Evidence: two buttons on the whole stand carry that shape --
+            // `ИспользованиеСчетаМеждународногоУчета` and
+            // `СоответствующиеСчетаРеглУчета` of ERP УХ 3.2.12.6
+            // `ChartsOfAccounts/Международный/Forms/ФормаСписка`, both
+            // `{2,{1},{15}}` against the `Список` dynamic list, both written
+            // `Список.Ссылка`. Both were written with no `<DataPath>` at all.
+            .or_else(|| {
+                match resolve_form_attribute_column_data_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                    owner_scoped_bindings,
+                ) {
+                    FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+                    FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+                }
+            }),
     )
+}
+
+/// The standard member a button's two-segment bound slot `{2,{attribute},{-n}}`
+/// names, read against the root attribute's own declared type.
+///
+/// Two readings, both already stated elsewhere in this file for the very same
+/// `(type, marker)` pair: the family's standard-attribute table, and the
+/// object's own collection property, which is what `-8` names on a document.
+/// A marker neither reading names is left to the routes behind this one.
+fn resolve_form_button_standard_terminal_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+) -> Option<String> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let [root, terminal] = segments.as_slice() else {
+        return None;
+    };
+    let ([attribute_id], [marker]) = (root.as_slice(), terminal.as_slice()) else {
+        return None;
+    };
+    let marker = marker.trim();
+    let code = marker.parse::<i64>().ok()?;
+    if code >= 0 {
+        return None;
+    }
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
+    let reference = attribute.exact_single_type_reference.as_deref()?;
+    let member = form_standard_attribute_name_for_type_reference(reference, marker)
+        .or_else(|| form_object_standard_property_name(reference, code))?;
+    Some(format!("{}.{member}", attribute.name))
 }
 
 /// Resolves a multi-segment binding against a dynamic-list attribute.
@@ -23001,6 +23199,63 @@ fn resolve_form_item_rooted_chain_data_path(
     })
 }
 
+/// The standard attribute a marker names on one row of a table bound to a
+/// register record set.
+///
+/// A record set is a collection of records, so what the table shows in a row is
+/// one record, and the members a marker addresses on it are the set's own --
+/// the very table `resolve_form_register_record_set_member_data_path` reads
+/// when the same marker follows the attribute itself. Only the route differs:
+/// the platform spells the row `Items.<table>.CurrentData`, exactly as it
+/// spells every other chain rooted at a form item.
+///
+/// The same fact is already read one slot over: the choice-parameter-link
+/// route records `Items.<table>.CurrentData.<standard attribute>` for a table
+/// whose bound attribute declares a type with a standard-attribute table, and
+/// the platform writes `Items.НаборЗаписей.CurrentData.Period` for the `-2` of
+/// an `InformationRegisterRecordSet` there.
+///
+/// Evidence for this route: over every `{2,{<item>,02023637-…},{-n}}` bound
+/// slot of the eight stand corpora -- one slot in all -- ERP УХ 3.2.12.6
+/// `AccumulationRegisters/ПланыПроизводства/Forms/ФормаРедактированияПолуфабриката`,
+/// InputField `Период` on table `СписокКорректировок`, whose attribute is
+/// declared `cfg:AccumulationRegisterRecordSet.ПланыПроизводства`; `-2` is
+/// `Period` on that family's record set by the same table the attribute-rooted
+/// route reads (98 slots across the stand spell `-2` -> `Period` on a record
+/// set, and no marker is spelled two ways), and the platform writes
+/// `Items.СписокКорректировок.CurrentData.Period`. The slot was written with no
+/// `<DataPath>` at all.
+fn resolve_form_item_rooted_record_set_standard_attribute_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> Option<String> {
+    let (item_id, members) = parse_form_item_rooted_chain(field)?;
+    let [terminal] = members.as_slice() else {
+        return None;
+    };
+    let [marker] = terminal.as_slice() else {
+        return None;
+    };
+    let marker = marker.trim();
+    if marker.parse::<i64>().ok()? >= 0 {
+        return None;
+    }
+    let table_name = table_name_by_id.get(item_id)?;
+    let root = owner_scoped_bindings.table_root.get(item_id)?;
+    let attribute = attribute_metadata_owners_by_id.get(&root.attribute_id)?;
+    // The table has to stand on the record set itself, not on a member of it:
+    // a row of some other collection is not a record.
+    if root.attribute_path != attribute.name {
+        return None;
+    }
+    let (family, _) =
+        form_register_record_set_owner(attribute.exact_single_type_reference.as_deref()?)?;
+    let member = form_register_record_set_standard_attribute_name(family, marker)?;
+    Some(format!("Items.{table_name}.CurrentData.{member}"))
+}
+
 /// The settings-composer members a chain reads past a table item's
 /// `CurrentData`.
 ///
@@ -23144,15 +23399,31 @@ fn form_settings_composer_member(
 ) -> Option<(&'static str, Option<FormSettingsComposerType>)> {
     use FormSettingsComposerType::*;
     let table: &[(&str, &str, Option<FormSettingsComposerType>)] = match owner {
-        // `2` is `FixedSettings`, the composer's third top-level member, read
-        // off the platform by the seed `seeds/ada-composer2`: an attribute
-        // whose single `<UseAlways>` entry is `B7.FixedSettings` is stored
-        // `{1,{2}}`. It carries no next type -- the seed names the member
-        // alone, and nothing has been observed walking past it.
+        // `2` is `FixedSettings`, the composer's third top-level member.
+        //
+        // Имя прочитано семенем `seeds/ada-composer2`: атрибут, чья
+        // единственная запись `<UseAlways>` — `B7.FixedSettings`, хранится
+        // `{1,{2}}`. Семя называет член, но не проходит сквозь него.
+        //
+        // Сквозной проход прочитан отдельно, на байтах ЕРП УХ 3.2.12.6:
+        // `DataProcessors/НастраиваемыеПечатныеФормыЗарплатаКадры/Forms/
+        // ФормаПользовательскогоПоля`, таблица
+        // `КомпоновщикНастроекКДФиксированныеНастройкиВыборДоступныеПоляВыбора`,
+        // привязка `{4,{6},{2},{2},{0}}` на реквизите `dcsset:SettingsComposer`;
+        // платформа пишет
+        // `КомпоновщикНастроекКД.FixedSettings.Selection.SelectionAvailableFields`.
+        // Два кода за `2` читаются уже стоящими строками (`Settings` `2` —
+        // `Selection` на 30 несущих его слотах, `Selection` `0` —
+        // `SelectionAvailableFields`), поэтому наблюдение закрепляет третий код
+        // и подтверждает таблицу, на которую он передаёт, не оставляя свободы.
+        //
+        // Два свидетельства сошлись при слиянии двух веток: семя дало имя,
+        // корпус — переход. `None` первой ветки было отсутствием наблюдения,
+        // а не наблюдением отсутствия.
         SettingsComposer => &[
             ("0", "Settings", Some(Settings)),
             ("1", "UserSettings", Some(UserSettings)),
-            ("2", "FixedSettings", None),
+            ("2", "FixedSettings", Some(Settings)),
         ],
         // `5` and `6` join the five UT 11.5.27.75 pinned from ERP УХ 3.2.12.6,
         // where two forms bind an item straight onto the member and the
@@ -23460,32 +23731,66 @@ fn resolve_form_settings_composer_chain(
 /// `СписокМаркетплейсOzon.Filter`. Both are the only paths of their shape in
 /// the configuration; every other negative code on a dynamic list stays
 /// unresolved rather than guessed.
+///
+/// What follows `Order` or `Filter` is read against the very member tables the
+/// settings composer's own chains are read against: the list's filter *is* a
+/// data-composition filter collection, and the codes past it are the
+/// collection's, not the list's. Evidence: ERP УХ 3.2.12.6
+/// `InformationRegisters/СтруктураОперативногоПланирования/Forms/
+/// ФормаСпискаДляПанелиАдминистрирования` and its `Удалить…` twin, InputField
+/// `ВидБюджетаШапки`, which carries
+/// `{4,{1},{-2},{0,e67e2953-…},{10005}}` -- the list's `Filter`, the index
+/// binding every collection numbers its rows with, and `10005`, which the
+/// composer's own `Filter` table names `RightValue` on the six slots that
+/// carry it elsewhere. The platform writes
+/// `Список.Filter[0].RightValue`, and the two are the only chains longer than
+/// two segments any dynamic-list negative code carries on the whole stand.
 fn resolve_form_dynamic_list_member_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
 ) -> Option<String> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let [kind, owner, terminal] = fields.as_slice() else {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let (root, members) = segments.split_first()?;
+    let [attribute_id] = root.as_slice() else {
         return None;
     };
-    if kind.trim() != "2" {
-        return None;
-    }
-    let owner = split_1c_braced_fields(owner.trim(), 0)?;
-    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
-    let ([attribute_id], [marker]) = (owner.as_slice(), terminal.as_slice()) else {
+    let (terminal, rest) = members.split_first()?;
+    let [marker] = terminal.as_slice() else {
         return None;
     };
     let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
     if !attribute.has_dynamic_list_settings {
         return None;
     }
-    let name = match marker.trim() {
-        "-1" => "Order",
-        "-2" => "Filter",
+    let (name, collection) = match marker.trim() {
+        "-1" => ("Order", FormSettingsComposerType::Order),
+        "-2" => ("Filter", FormSettingsComposerType::Filter),
         _ => return None,
     };
-    Some(format!("{}.{name}", attribute.name))
+    let mut path = format!("{}.{name}", attribute.name);
+    let mut owner = Some(collection);
+    for segment in rest {
+        match segment.as_slice() {
+            [index, uuid]
+                if uuid
+                    .trim()
+                    .eq_ignore_ascii_case(FORM_VALUE_TABLE_INDEX_BINDING_UUID) =>
+            {
+                let index = parse_form_chain_numeric_id(index)?;
+                path.push('[');
+                path.push_str(index);
+                path.push(']');
+            }
+            [member_id] => {
+                let (member, next) = form_settings_composer_member(owner?, member_id.trim())?;
+                path.push('.');
+                path.push_str(member);
+                owner = next;
+            }
+            _ => return None,
+        }
+    }
+    Some(path)
 }
 
 fn form_type_reference_is_standard_period(reference: &str) -> bool {
@@ -23593,6 +23898,28 @@ fn resolve_form_attribute_column_data_path(
             .value_list_attribute_ids
             .contains(attribute_id)
     {
+        // On a dynamic list that is not a refusal to answer but a statement
+        // that the slot names no field of the list at all -- a field map
+        // numbers its entries from one -- and the platform writes no
+        // `<DataPath>`. Leaving the slot merely unknown handed it to the
+        // binding-key index, which answers with a name inferred from what other
+        // items called the same key.
+        //
+        // Evidence: over every `{2,{attribute},{0}}` bound slot of the eight
+        // stand corpora, 914 stand on a `v8:ValueListType` attribute, 18 on a
+        // `v8:StandardPeriod`, 30 on a `dcsset:SettingsComposer` and 2 on a
+        // dynamic list. Every one of the first three groups is written exactly
+        // as the export already writes it; the two on a dynamic list -- ERP УХ
+        // 3.2.12.6 `InformationRegisters/ИменаФайловИКаталогов/Forms/
+        // ФормаСпискаУправляемая`, InputField `СписокОтборовЗначение` -- are
+        // written with no `<DataPath>`, and the export invented
+        // `ВидыСубконто.СписокОтборовЗначение` for them.
+        if owner_scoped_bindings
+            .dynamic_list_attribute_ids
+            .contains(attribute_id)
+        {
+            return FormOwnerScopedDataPath::Ambiguous;
+        }
         return FormOwnerScopedDataPath::Unknown;
     }
     let key = FormAttributeColumnKey {
@@ -23780,6 +24107,28 @@ fn resolve_form_owner_scoped_metadata_uuid_data_path_status(
         return FormMetadataDataPathResolution::ReferenceAbsent;
     };
     let Some((owner_base, relative_path)) = form_metadata_data_path_route(reference) else {
+        // A constants set holds every constant of the configuration as a member
+        // of its own, and the reference the terminal names is the bare
+        // `Constant.<name>` — no owner, no member path for the metadata route to
+        // split. The field route already reads exactly this pair and spells
+        // `<attribute>.<constant>`; a choice-parameter link that names the same
+        // constant through the same attribute is the same fact one route
+        // further out, and the platform writes the same string.
+        //
+        // Evidence: ERP УХ 3.2.12.6
+        // `DataProcessors/ПанельАдминистрированияУХ/Forms/ИнвестиционныеПроекты`,
+        // whose `НаборКонстант` attribute is declared `cfg:ConstantsSet` and
+        // whose ten `<xr:Link>` blocks name `Constant.ИтоговыйВидОтчетаБДДС`,
+        // `…БДР` and `…Ресурсы`: the platform writes
+        // `НаборКонстант.ИтоговыйВидОтчетаБДДС` and the two siblings, the same
+        // three strings the form's own `<DataPath>` elements already carry for
+        // those very constants. A census of every physical `<xr:DataPath>`
+        // spelling over the eight stand trees — 63 values on 16 forms, all of
+        // them ERP УХ — finds none whose owner attribute is declared
+        // `cfg:ConstantsSet`, so no correct physical spelling is displaced.
+        if let Some(data_path) = resolve_form_constants_set_data_path(attribute, reference) {
+            return FormMetadataDataPathResolution::Resolved(data_path);
+        }
         return FormMetadataDataPathResolution::Invalid;
     };
     if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
@@ -23986,6 +24335,27 @@ const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
 /// carries in the eight stand corpora.
 const CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] =
     &[("-7", "Code"), ("-8", "Description")];
+/// The standard attributes a chart of calculation types spells for the markers
+/// a form binding names them by.
+///
+/// The three rows are the three markers the eight stand corpora put through a
+/// bound slot on a `cfg:ChartOfCalculationTypesObject.*` attribute, each paired
+/// against the `<DataPath>` the platform writes for the item that carries it:
+/// `-2` is `Code` on all 3, `-3` is `Description` on all 3 and `-4` is
+/// `ActionPeriodIsBasic` on the 1 that carries it -- ERP УХ 3.2.12.6
+/// `ChartsOfCalculationTypes/Начисления/Forms/ФормаВидаРасчета`, CheckBoxField
+/// `ПериодДействияБазовый`, which was written with the item's own Russian name
+/// because no route could name the marker. All three agree with
+/// `CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES`, the table the family's own
+/// root writes `<StandardAttributes>` from; the four further markers that table
+/// declares are left out because no bound slot in the corpora carries them, and
+/// the family's three standard *tabular sections* (`-10`, `-20`, `-30`) are not
+/// standard attributes and keep the route that already names them.
+const CHART_OF_CALCULATION_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-4", "ActionPeriodIsBasic"),
+    ("-3", "Description"),
+    ("-2", "Code"),
+];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),
@@ -24254,14 +24624,30 @@ pub(super) fn parse_form_title_data_path(
     // options bag's own shape -- kind and length -- and not the item's raw
     // field count, which varies from 30 to 42 across the 427 title-bound items
     // the configuration spells out without changing where the binding sits.
-    let (options_kind, options_len, binding_slot) = match tag {
-        "Page" => ("18", 20, 4),
-        "UsualGroup" => ("29", 29, 5),
-        _ => return None,
-    };
     let options = fields
         .get(20)
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    // A `Page` carries its options in one of two bags, and both put the bound
+    // title in the same member. Reading only the wider one left the narrower
+    // bag's title unwritten.
+    //
+    // Evidence: over the 1 313 bound titles of the eight stand corpora, every
+    // `Page` bag is `{18,…}` of 20 members (1 308) except one, `{17,…}` of 18 --
+    // ERP УХ 3.2.12.6 `Documents/КорректировкаНачальныхОстатков/Forms/
+    // ФормаДокумента` -- and every `UsualGroup` bag is `{29,…}` of 29. That one
+    // bag holds exactly one bound chain, at member 4:
+    // `{3,{1},{0,e31622fc-…},{100000000}}`, whose uuid is the document's
+    // tabular section `ВзаиморасчетыСКонтрагентами` and whose last segment is
+    // the rows-count marker; the walker already spells it
+    // `Объект.ВзаиморасчетыСКонтрагентами.RowsCount`, which is what the
+    // platform writes, character for character. No other member of the bag is
+    // a chain, so the slot is fixed by the answer.
+    let (options_kind, options_len, binding_slot) = match (tag, options.len()) {
+        ("Page", 20) => ("18", 20, 4),
+        ("Page", 18) => ("17", 18, 4),
+        ("UsualGroup", 29) => ("29", 29, 5),
+        _ => return None,
+    };
     if options.len() != options_len
         || options.first().map(|field| field.trim()) != Some(options_kind)
     {
@@ -24346,6 +24732,34 @@ pub(super) fn parse_form_title_data_path(
     // each; the chain walker above answers nothing for them, because it has no
     // type to resolve `-3` against.
     resolve_form_strict_field_model_data_path(binding, attribute_metadata_owners_by_id, object_refs)
+        // A one-segment binding `{1,{N}}` whose `N` names no form attribute is
+        // a reference this configuration cannot name, and the platform does not
+        // drop such a reference -- it writes it physically, the bare id, exactly
+        // as a `UserSettingsGroup` whose declared item id names no item is
+        // written `1:02023637-…` and an unresolvable choice-parameter link is
+        // written with its owner id alone.
+        //
+        // Evidence, equality of sets over the title bindings of all 17 798
+        // forms of the eight stand corpora that carry one: on every form the
+        // set of `{1,{N}}` bindings the routes above answer nothing for is
+        // exactly the set of digit-only `<TitleDataPath>` values the platform
+        // writes -- 3 values on one form (ERP УХ
+        // `Catalogs/ОбъектыЭксплуатации/Forms/ФормаЭлемента`, ids 102, 104 and
+        // 105, and that form declares attributes 1..90 only) and both sets
+        // empty on the other 17 797. There is no form where the platform writes
+        // a physical id the routes above do name, and none where they fail and
+        // the platform writes nothing.
+        .or_else(|| {
+            let segments = parse_form_bound_chain_segments(binding)?;
+            let [root] = segments.as_slice() else {
+                return None;
+            };
+            let [id] = root.as_slice() else {
+                return None;
+            };
+            let id = parse_form_chain_numeric_id(id)?;
+            (!attribute_metadata_owners_by_id.contains_key(id)).then(|| id.to_string())
+        })
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
@@ -24679,7 +25093,29 @@ pub(super) fn parse_form_table_row_picture_data_path(
         [kind, uuid] if matches!(kind.trim(), "0" | "4") => {
             let uuid = parse_non_zero_uuid(uuid.trim())?;
             let reference = object_refs.get(&uuid)?;
-            form_metadata_attribute_suffix(reference)?
+            // A member named by its own metadata reference carries the name the
+            // configuration declares for it, and the platform writes that name.
+            // The alias table renames *standard* members, which a chain never
+            // names by uuid -- `form_metadata_attribute_suffix` accepts only a
+            // `…Attribute.<Name>` reference, and a standard attribute has no
+            // such reference -- so running the declared name through it can only
+            // rename a declaration after the platform has already spelled it.
+            //
+            // Evidence: over all 8 527 `<RowPictureDataPath>` values of the
+            // eight native stand trees, not one whose head is `Объект`/`Запись`
+            // and whose path is three segments long ends in an English standard
+            // name, and exactly one ends in a Russian standard spelling -- ERP
+            // УХ 3.2.12.6 `Catalogs/СправочникиБД/Forms/ФормаЭлемента`, written
+            // `Объект.НаборыРеквизитовИСведений.Предопределенный`, where
+            // `Предопределенный` (uuid f6743b85-…) is a declared attribute of
+            // that tabular section and not the catalogue's standard
+            // `Predefined`. The chain walker already spells a uuid-named member
+            // by its declared name with no alias step; this route was the one
+            // place that disagreed.
+            return Some(format!(
+                "{table_name}.{}",
+                form_metadata_attribute_suffix(reference)?
+            ));
         }
         _ => return None,
     };
