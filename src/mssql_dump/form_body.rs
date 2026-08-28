@@ -23955,6 +23955,22 @@ fn resolve_form_table_row_picture_member(
             object_refs,
         )
     })
+    // The same record set reached the other way: a table bound straight to a
+    // record-set form attribute names its row picture inside that set, and the
+    // extended chain is again the data-path slot's own grammar one segment
+    // longer. Evidence: ERP УХ 3.2.12.6
+    // `DataProcessors/ОтражениеДокументовВМеждународномУчете/Forms/
+    // ПроводкиМеждународногоУчета`, Table `МеждународныйСКорреспонденцией`
+    // carries `{-5}` and the platform writes
+    // `<RowPictureDataPath>МеждународныйСКорреспонденцией.Active</RowPictureDataPath>`.
+    .or_else(|| {
+        resolve_form_register_record_set_member_data_path(
+            &extended,
+            false,
+            attribute_metadata_owners_by_id,
+            object_refs,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
