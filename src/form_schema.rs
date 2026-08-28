@@ -5997,9 +5997,25 @@ impl FormContainerReadOnlySchema {
             options.len(),
             options.first().map(|field| field.trim()),
         ) {
-            ("ColumnGroup", Some("2"), 12, Some("2")) | ("Page", Some("4"), 20, Some("18")) => {
-                Some(Self)
-            }
+            ("ColumnGroup", Some("2"), 12, Some("2"))
+            | ("Page", Some("4"), 20, Some("18"))
+            // The flag is a top-level slot, not an option member, so the
+            // page's short `17`/18 bag has no bearing on it. Census of the
+            // dumped layouts of all eight stand corpora joined to the
+            // platform's own `<Page>` for the same item id -- all 25 101
+            // pages: slot 11 is `1` on exactly the 54 that carry
+            // `<ReadOnly>true</ReadOnly>` (53 canonical-bag, one short-bag)
+            // and `0` on the other 25 047, with no third code and no
+            // counter-example on either revision.
+            | ("Page", Some("4"), 18, Some("17"))
+            // A `ButtonGroup` keeps the same flag in the same slot: over all
+            // 32 968 button groups of the eight corpora slot 11 is `1` on
+            // exactly the one whose document carries
+            // `<ReadOnly>true</ReadOnly>` -- ERP УХ
+            // `Documents/ПротоколВыбораПобедителей/Forms/ФормаДокумента`,
+            // group `ПредложенияПобедителейГруппаОценить` -- and `0` on the
+            // other 32 967. The kind had no arm here at all.
+            | ("ButtonGroup", Some("6"), 4, Some("2")) => Some(Self),
             // A `Popup` keeps the same flag in the same slot: over all 3 911
             // native popups of UT 11.5.27.75 slot 11 reads `1` on exactly the
             // one whose document carries `<ReadOnly>true</ReadOnly>` and `0` on

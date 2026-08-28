@@ -29925,6 +29925,10 @@ pub(super) fn format_form_child_item_xml(
                 // writes it ahead of `EnableContentChange` and `Title`, i.e. at
                 // the same early site the field kinds use.
                 | "Popup"
+                // The one native button group that carries the flag opens its
+                // element with it: nothing precedes it, and it leads `Title`,
+                // `ToolTip`, `ExtendedTooltip` and `ChildItems`.
+                | "ButtonGroup"
         );
     if read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
