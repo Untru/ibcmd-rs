@@ -23498,6 +23498,28 @@ fn resolve_form_owner_scoped_metadata_uuid_data_path_status(
         return FormMetadataDataPathResolution::ReferenceAbsent;
     };
     let Some((owner_base, relative_path)) = form_metadata_data_path_route(reference) else {
+        // A constants set holds every constant of the configuration as a member
+        // of its own, and the reference the terminal names is the bare
+        // `Constant.<name>` — no owner, no member path for the metadata route to
+        // split. The field route already reads exactly this pair and spells
+        // `<attribute>.<constant>`; a choice-parameter link that names the same
+        // constant through the same attribute is the same fact one route
+        // further out, and the platform writes the same string.
+        //
+        // Evidence: ERP УХ 3.2.12.6
+        // `DataProcessors/ПанельАдминистрированияУХ/Forms/ИнвестиционныеПроекты`,
+        // whose `НаборКонстант` attribute is declared `cfg:ConstantsSet` and
+        // whose ten `<xr:Link>` blocks name `Constant.ИтоговыйВидОтчетаБДДС`,
+        // `…БДР` and `…Ресурсы`: the platform writes
+        // `НаборКонстант.ИтоговыйВидОтчетаБДДС` and the two siblings, the same
+        // three strings the form's own `<DataPath>` elements already carry for
+        // those very constants. A census of every physical `<xr:DataPath>`
+        // spelling over the eight stand trees — 63 values on 16 forms, all of
+        // them ERP УХ — finds none whose owner attribute is declared
+        // `cfg:ConstantsSet`, so no correct physical spelling is displaced.
+        if let Some(data_path) = resolve_form_constants_set_data_path(attribute, reference) {
+            return FormMetadataDataPathResolution::Resolved(data_path);
+        }
         return FormMetadataDataPathResolution::Invalid;
     };
     if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
