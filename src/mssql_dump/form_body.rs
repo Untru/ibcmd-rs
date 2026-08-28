@@ -31055,16 +31055,14 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(edit_text_update)
         ));
     }
-    if let Some(reference) = &item.choice_button_picture_ref {
-        xml.push_str(&format_form_picture_element(
-            "ChoiceButtonPicture",
-            Some(reference),
-            None,
-            item.choice_button_picture_load_transparent,
-            item.choice_button_picture_transparent_pixel,
-            indent + 1,
-        ));
-    }
+    // The value range opens ahead of `ChoiceButtonPicture`, not behind it.
+    // Census over the native `Form.xml` of all eight stand corpora, every
+    // `<InputField>` (132 108 of them): 660 carry a `<MinValue>` and 562 a
+    // `<ChoiceButtonPicture>`; the one field that carries both writes
+    // `MinValue` first, and no field writes the picture first.  `MaxValue` and
+    // `ChoiceButtonPicture` never share a field anywhere in the stand, so
+    // nothing constrains that pair and the range stays whole: `MinValue` leads
+    // `MaxValue` on all 231 fields that carry both.
     if let Some(value) = &item.input_min_value {
         xml.push_str(&format!(
             "{tab}\t<MinValue xsi:type=\"{}\">{}</MinValue>\r\n",
@@ -31077,6 +31075,16 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<MaxValue xsi:type=\"{}\">{}</MaxValue>\r\n",
             value.xsi_type,
             escape_xml_text(&value.text)
+        ));
+    }
+    if let Some(reference) = &item.choice_button_picture_ref {
+        xml.push_str(&format_form_picture_element(
+            "ChoiceButtonPicture",
+            Some(reference),
+            None,
+            item.choice_button_picture_load_transparent,
+            item.choice_button_picture_transparent_pixel,
+            indent + 1,
         ));
     }
     // `ChoiceForm` closes the input field's own run and opens the choice
