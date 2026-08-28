@@ -5788,10 +5788,12 @@ fn form_constants_set_use_always<'a>(
 /// second one against the composer's own top-level table, so every one of
 /// those six entries was dropped and the block never written.
 ///
-/// The composer's own head keeps the top-level table: only there does `1` name
-/// `FixedSettings`, a member no chain walk has ever reached. A path that steps
-/// past a head other than `Settings`, or past a member the table gives no
-/// collection for, refuses -- the entry is dropped, exactly as before.
+/// A head other than `Settings` is a member of the composer itself and is read
+/// off the composer's own value-type table. That table and the chain table
+/// agree on every id -- both now say `1` is `UserSettings` and `2` is
+/// `FixedSettings`, as the seed `seeds/ada-composer2` reads them off the
+/// platform one at a time. A path that steps past a member the table gives no
+/// collection for refuses -- the entry is dropped, exactly as before.
 fn form_settings_composer_use_always_path(components: &[Vec<&str>]) -> Option<String> {
     let head = components.first()?.first()?.trim();
     let mut owner = match head {
@@ -22997,9 +22999,15 @@ fn form_settings_composer_member(
 ) -> Option<(&'static str, Option<FormSettingsComposerType>)> {
     use FormSettingsComposerType::*;
     let table: &[(&str, &str, Option<FormSettingsComposerType>)] = match owner {
+        // `2` is `FixedSettings`, the composer's third top-level member, read
+        // off the platform by the seed `seeds/ada-composer2`: an attribute
+        // whose single `<UseAlways>` entry is `B7.FixedSettings` is stored
+        // `{1,{2}}`. It carries no next type -- the seed names the member
+        // alone, and nothing has been observed walking past it.
         SettingsComposer => &[
             ("0", "Settings", Some(Settings)),
             ("1", "UserSettings", Some(UserSettings)),
+            ("2", "FixedSettings", None),
         ],
         // `5` and `6` join the five UT 11.5.27.75 pinned from ERP УХ 3.2.12.6,
         // where two forms bind an item straight onto the member and the
