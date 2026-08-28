@@ -24314,14 +24314,30 @@ pub(super) fn parse_form_title_data_path(
     // options bag's own shape -- kind and length -- and not the item's raw
     // field count, which varies from 30 to 42 across the 427 title-bound items
     // the configuration spells out without changing where the binding sits.
-    let (options_kind, options_len, binding_slot) = match tag {
-        "Page" => ("18", 20, 4),
-        "UsualGroup" => ("29", 29, 5),
-        _ => return None,
-    };
     let options = fields
         .get(20)
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    // A `Page` carries its options in one of two bags, and both put the bound
+    // title in the same member. Reading only the wider one left the narrower
+    // bag's title unwritten.
+    //
+    // Evidence: over the 1 313 bound titles of the eight stand corpora, every
+    // `Page` bag is `{18,…}` of 20 members (1 308) except one, `{17,…}` of 18 --
+    // ERP УХ 3.2.12.6 `Documents/КорректировкаНачальныхОстатков/Forms/
+    // ФормаДокумента` -- and every `UsualGroup` bag is `{29,…}` of 29. That one
+    // bag holds exactly one bound chain, at member 4:
+    // `{3,{1},{0,e31622fc-…},{100000000}}`, whose uuid is the document's
+    // tabular section `ВзаиморасчетыСКонтрагентами` and whose last segment is
+    // the rows-count marker; the walker already spells it
+    // `Объект.ВзаиморасчетыСКонтрагентами.RowsCount`, which is what the
+    // platform writes, character for character. No other member of the bag is
+    // a chain, so the slot is fixed by the answer.
+    let (options_kind, options_len, binding_slot) = match (tag, options.len()) {
+        ("Page", 20) => ("18", 20, 4),
+        ("Page", 18) => ("17", 18, 4),
+        ("UsualGroup", 29) => ("29", 29, 5),
+        _ => return None,
+    };
     if options.len() != options_len
         || options.first().map(|field| field.trim()) != Some(options_kind)
     {
