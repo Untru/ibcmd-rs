@@ -33386,11 +33386,7 @@ fn format_form_extended_tooltip_title_xml(
         xml_bool(title.formatted)
     );
     for (lang, content) in &title.values {
-        xml.push_str(&format!(
-            "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
-            escape_xml_element_text(lang),
-            escape_xml_element_text(content)
-        ));
+        push_form_localized_item(&mut xml, &tab, lang, content);
     }
     xml.push_str(&format!("{tab}</Title>\r\n"));
     xml
@@ -34328,6 +34324,34 @@ pub(super) fn format_form_parameters_xml(parameters: &[FormParameter]) -> String
     xml
 }
 
+/// One `<v8:item>` of a form's localized string.
+///
+/// An empty language code is written self-closed, exactly as the metadata-root
+/// and spreadsheet writers already spell it. Census of all eight native corpora:
+/// `<v8:lang></v8:lang>` does not occur once, while `<v8:lang/>` occurs in four
+/// files - `uh` `ChartsOfAccounts/МСФО.xml`, two `uh` `Ext/Template.xml`, all
+/// three already byte-exact through the writers that self-close it, and `uh`
+/// `DataProcessors/анлУправлениеПоставляемымиПанелями1САналитика/Forms/Форма`,
+/// whose two form-command titles are the only occurrences this writer owns.
+/// `<v8:content/>` and `<v8:content></v8:content>` occur nowhere in the stand,
+/// so the empty content stays outside this rule.
+fn push_form_localized_item(xml: &mut String, tab: &str, lang: &str, content: &str) {
+    xml.push_str(&format!("{tab}\t<v8:item>\r\n"));
+    if lang.is_empty() {
+        xml.push_str(&format!("{tab}\t\t<v8:lang/>\r\n"));
+    } else {
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(lang)
+        ));
+    }
+    xml.push_str(&format!(
+        "{tab}\t\t<v8:content>{}</v8:content>\r\n",
+        escape_xml_element_text(content)
+    ));
+    xml.push_str(&format!("{tab}\t</v8:item>\r\n"));
+}
+
 pub(super) fn format_form_localized_section(
     name: &str,
     values: &[(String, String)],
@@ -34339,11 +34363,7 @@ pub(super) fn format_form_localized_section(
     let tab = "\t".repeat(indent);
     let mut xml = format!("{tab}<{}>\r\n", name);
     for (lang, content) in values {
-        xml.push_str(&format!(
-            "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
-            escape_xml_element_text(lang),
-            escape_xml_element_text(content)
-        ));
+        push_form_localized_item(&mut xml, &tab, lang, content);
     }
     xml.push_str(&format!("{tab}</{}>\r\n", name));
     xml
@@ -34368,11 +34388,7 @@ pub(super) fn format_form_title_section(item: &FormChildItem, indent: usize) -> 
         xml_bool(item.title_formatted.unwrap_or(false))
     );
     for (lang, content) in &item.title {
-        xml.push_str(&format!(
-            "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
-            escape_xml_element_text(lang),
-            escape_xml_element_text(content)
-        ));
+        push_form_localized_item(&mut xml, &tab, lang, content);
     }
     xml.push_str(&format!("{tab}</Title>\r\n"));
     xml
