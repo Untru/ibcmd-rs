@@ -25420,17 +25420,34 @@ const FORM_LIST_MAIN_TABLE_ROW_COMMANDS: [&str; 12] = [
 ];
 
 /// The four names the *root* command set additionally never carries over a
-/// main-table-less list, and which the table's own set does carry.
+/// main-table-less list.
 ///
 /// They are held apart from the twelve above rather than merged into them
-/// because the corpus separates them: the same census that finds 0/84 for the
-/// twelve finds `FindByCurrentValue` on 24 of the 84 tables and
-/// `HierarchicalList`, `List` and `Tree` on 5 each (`DataProcessors/
-/// РегистрацияИзмененийДляОбменаДанными/Forms/ВыборОбъектовОтбором`, table
-/// `Отбор`, in all five corpora that have forms). The root reader's own
-/// population is 30 root sets, too small to have met any of the four, so its
-/// sixteen-name list is kept exactly as measured there and is not widened onto
-/// a reader whose corpus contradicts it.
+/// because the corpus separates them at a table: of the tables shown over a
+/// dynamic list that declares no `<MainTable>`, 24 do name
+/// `FindByCurrentValue`, so that name is the list's whatever the list stands
+/// on.
+///
+/// The other three are not, and the observation that used to say they were is
+/// a different table. Re-joining the same census by the *table's own*
+/// `<DataPath>` rather than by the root attribute of its binding chain: of the
+/// 79 tables whose data path names a main-table-less dynamic list outright,
+/// **not one** writes `HierarchicalList`, `List` or `Tree`, while 24 of them
+/// write `FindByCurrentValue`. The five that do write the three -- one per
+/// corpus, all of them `DataProcessors/РегистрацияИзмененийДляОбменаДанными/
+/// Forms/ВыборОбъектовОтбором`, table `Отбор` -- carry
+/// `<DataPath>СписокДанных.SettingsComposer.Settings.Filter</DataPath>`: the
+/// table is shown over a filter collection of the list's settings composer,
+/// not over the list, and the binding index resolves it to `СписокДанных` only
+/// because that is the chain's root. The three names are therefore withheld at
+/// a table exactly as at the root, and only where the table's own data path
+/// says the table is the list.
+///
+/// The population that carries the three uuids in that state is one table --
+/// ERP УХ 3.2.12.6 `DataProcessors/ПодборНоменклатурыПоПлануПоставкиПоДоговору/
+/// Forms/ФормаПодбораПоПлануПоставкиПоДоговору`, table `ДоговорыКонтрагенты`
+/// over the main-table-less list `ДоговораИКонтрагенты` -- and the platform
+/// names none of the three there.
 const FORM_ROOT_LIST_MAIN_TABLE_ONLY_COMMANDS: [&str; 4] =
     ["FindByCurrentValue", "HierarchicalList", "List", "Tree"];
 
@@ -25580,6 +25597,17 @@ fn retain_form_table_list_owned_commands(
                     item.command_set_excluded_commands.retain(|command| {
                         form_table_list_declares_standard_command(command, settings, declarations)
                     });
+                    // The three hierarchy view modes the root set already
+                    // withholds over a list with no main table, withheld here
+                    // only where the table's own data path says the table is
+                    // that list -- see FORM_ROOT_LIST_MAIN_TABLE_ONLY_COMMANDS.
+                    if settings.main_table.is_none()
+                        && item.data_path.as_deref() == Some(attribute.name.as_str())
+                    {
+                        item.command_set_excluded_commands.retain(|command| {
+                            !FORM_TABLE_HIERARCHY_VIEW_COMMANDS.contains(command)
+                        });
+                    }
                 }
                 if form_attribute_is_flat_value_collection(attribute) {
                     item.command_set_excluded_commands
