@@ -4184,6 +4184,7 @@ fn parse_form_attribute_with_dcs_type_index(
             .and_then(|uuid| type_index.get(uuid))
             .map(String::as_str),
         exact_single_type_uuid.as_deref(),
+        declarations,
     );
     if let Some(dynamic_list_use_always) = fields.get(14).map(|field| {
         parse_form_attribute_use_always(&name, field, settings.as_ref(), object_refs, declarations)
@@ -5570,6 +5571,7 @@ pub(super) fn parse_form_attribute_direct_use_always(
     object_refs: &BTreeMap<String, String>,
     value_type: Option<&str>,
     value_type_uuid: Option<&str>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
 ) -> Vec<String> {
     let Some(fields) = field.and_then(|value| split_1c_braced_fields(value.trim(), 0)) else {
         return Vec::new();
@@ -5583,6 +5585,18 @@ pub(super) fn parse_form_attribute_direct_use_always(
     else {
         return Vec::new();
     };
+    if value_type_uuid == Some(CONSTANTS_SET_TYPE_UUID) {
+        if let Some(constants) = declarations.and_then(|declarations| {
+            form_constants_set_use_always(
+                attribute_name,
+                fields.iter().skip(2).take(count).copied(),
+                object_refs,
+                declarations,
+            )
+        }) {
+            return constants;
+        }
+    }
     let mut parsed = Vec::new();
     let mut seen = BTreeSet::<String>::new();
     for entry in fields.iter().skip(2).take(count) {
@@ -5625,6 +5639,63 @@ pub(super) fn parse_form_attribute_direct_use_always(
         }
     }
     parsed
+}
+
+/// The `<UseAlways>` of a `cfg:ConstantsSet` attribute, read as a delta against
+/// what each constant declares rather than as the set itself.
+///
+/// A constant whose own record declares it always used is written when the
+/// form's record leaves it out and left out when the record names it; every
+/// other constant is written exactly where the record names it. A constant
+/// whose declared type is `v8:ValueStorage` is never written at all. See
+/// [`MetadataConstantDeclaration`] for the join both readings are measured
+/// against.
+///
+/// `None` when the record holds anything but one-component constant references
+/// -- the shape the delta is measured on -- or when the declaration index
+/// carries no constants, in which case the caller writes the record verbatim as
+/// before.
+fn form_constants_set_use_always<'a>(
+    attribute_name: &str,
+    entries: impl Iterator<Item = &'a str>,
+    object_refs: &BTreeMap<String, String>,
+    declarations: &MetadataFieldDeclarationIndex,
+) -> Option<Vec<String>> {
+    let mut recorded = BTreeSet::<String>::new();
+    for entry in entries {
+        let entry_fields = split_1c_braced_fields(entry.trim(), 0)?;
+        if entry_fields.len() != 2 || entry_fields.first()?.trim() != "1" {
+            return None;
+        }
+        let component = split_1c_braced_fields(entry_fields.get(1)?.trim(), 0)?;
+        if component.len() != 2 || component.first()?.trim() != "0" {
+            return None;
+        }
+        recorded.insert(parse_uuid_field(component.get(1)?.trim())?);
+    }
+    let mut effective = recorded.clone();
+    let mut declared_any = false;
+    for uuid in declarations.always_used_constants() {
+        declared_any = true;
+        if !effective.remove(uuid) {
+            effective.insert(uuid.to_string());
+        }
+    }
+    if !declared_any && recorded.is_empty() {
+        return None;
+    }
+    let mut named = Vec::new();
+    for uuid in effective {
+        let declared = declarations.constant(&uuid)?;
+        if declared.value_storage {
+            continue;
+        }
+        let reference = object_refs.get(&uuid)?;
+        let name = reference.rsplit_once('.')?.1;
+        named.push(format!("{attribute_name}.{name}"));
+    }
+    named.sort();
+    Some(named)
 }
 
 /// One step of a use-always path: either a metadata object the configuration
