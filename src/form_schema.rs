@@ -2339,6 +2339,7 @@ pub(crate) enum FormControlBorderStyle {
     WithoutBorder,
     Single,
     Embossed,
+    Indented,
     Underline,
     Overline,
     Double,
@@ -2353,11 +2354,22 @@ impl FormControlBorderStyle {
     /// `Underline` (10), `7` `Overline` (3) and `200` `Double` (4) -- and no
     /// code maps to two spellings.  `Embossed` and `Double` used to be missing,
     /// which dropped seven borders outright.
+    ///
+    /// `3` is `Indented`, and the eight stand corpora spell it exactly twice:
+    /// the `LabelDecoration` items `Режим` (id 341) and `СуммаЯчеек` (id 344)
+    /// of ERP УХ 3.2.12.6
+    /// `Catalogs/УдалитьПанелиОтчетов/Forms/ФормаЭлемента_Управляемая`, whose
+    /// border tuples read `{3,0,{0},3,1,0,<border uuid>}` and which the
+    /// platform writes `<Border width="1">` with `Indented` on. They are also
+    /// the only two `<v8ui:style xsi:type="v8ui:ControlBorderType">Indented</>`
+    /// elements in the eight native trees. The code had no arm, so both
+    /// borders went unwritten.
     pub(crate) fn from_raw_code(value: &str) -> Option<Self> {
         match value.trim() {
             "0" => Some(Self::WithoutBorder),
             "1" => Some(Self::Single),
             "2" => Some(Self::Embossed),
+            "3" => Some(Self::Indented),
             "4" => Some(Self::Underline),
             "7" => Some(Self::Overline),
             "200" => Some(Self::Double),
@@ -2370,6 +2382,7 @@ impl FormControlBorderStyle {
             Self::WithoutBorder => "0",
             Self::Single => "1",
             Self::Embossed => "2",
+            Self::Indented => "3",
             Self::Underline => "4",
             Self::Overline => "7",
             Self::Double => "200",
@@ -2381,6 +2394,7 @@ impl FormControlBorderStyle {
             "WithoutBorder" => Some(Self::WithoutBorder),
             "Single" => Some(Self::Single),
             "Embossed" => Some(Self::Embossed),
+            "Indented" => Some(Self::Indented),
             "Underline" => Some(Self::Underline),
             "Overline" => Some(Self::Overline),
             "Double" => Some(Self::Double),
@@ -2393,6 +2407,7 @@ impl FormControlBorderStyle {
             Self::WithoutBorder => "WithoutBorder",
             Self::Single => "Single",
             Self::Embossed => "Embossed",
+            Self::Indented => "Indented",
             Self::Underline => "Underline",
             Self::Overline => "Overline",
             Self::Double => "Double",
@@ -3179,6 +3194,15 @@ impl FormFieldTitleLocationSchema {
             "ProgressBarField" => "9",
             "TrackBarField" => "10",
             "ChartField" => "11",
+            // The Gantt chart reads its title location in the same slot every
+            // other field kind does. Over the whole population the eight stand
+            // corpora have -- 20 items -- slot 7 reads `0` on the 19 the
+            // platform writes `<TitleLocation>None</TitleLocation>` on, and `1`
+            // on the one that carries a `<Title>` and no `<TitleLocation>` at
+            // all (Документооборот КОРП 3.0.21.3 `Catalogs/ПроектныеЗадачи/
+            // Forms/ФормаПланаПроекта`), which is the code this table already
+            // writes nothing for.
+            "GanttChartField" => "12",
             "GraphicalSchemaField" => "14",
             "HTMLDocumentField" => "15",
             "FormattedDocumentField" => "17",
@@ -3469,6 +3493,7 @@ pub(crate) enum FormChildItemEventCollectionOwner {
     GraphicalSchemaField,
     PlannerField,
     ChartField,
+    GanttChartField,
     Pages,
 }
 
@@ -3504,6 +3529,22 @@ const FORM_CALENDAR_ON_ACTIVATE_DATE_EVENT_UUID: &str = "3793cac5-9f9a-4b7c-adda
 const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
 const FORM_CHART_SELECTION_EVENT_UUID: &str = "515cd17b-dd4c-4181-bbbf-8676467acf49";
 const FORM_CHART_DETAIL_PROCESSING_EVENT_UUID: &str = "650da4af-3233-4ce0-a1ae-23f87a226eee";
+// The Gantt chart's own three identifiers, named by the whole population the
+// construct has in the eight stand corpora: the 15 collections the 20 items
+// carry name these three and nothing else, and every `<Event name>` the
+// platform prints on those items is matched by exactly one of them, with no
+// identifier left unnamed and no name used twice. `8724b8d4` carries the
+// `…ОбработкаРасшифровки` handler on all 13 items that hold it and the platform
+// prints `DetailProcessing`; `3aab5acd` carries `ДиаграммаГантаВыбор` on
+// Документооборот КОРП 3.0.21.3 `Catalogs/ПроектныеЗадачи/Forms/
+// ФормаПланаПроекта` and the platform prints `Selection`; `fe4544e7` carries
+// `…ПриОкончанииРедактированияИнтервала` on that item and on ERP УХ
+// `DataProcessors/ДиаграммаГантаОперации/Forms/Форма`, and the platform prints
+// `OnIntervalEditEnd` on both.
+const FORM_GANTT_CHART_SELECTION_EVENT_UUID: &str = "3aab5acd-9e00-4d33-8242-3cdb677bb0f3";
+const FORM_GANTT_CHART_DETAIL_PROCESSING_EVENT_UUID: &str = "8724b8d4-140d-4357-8ac9-46e29ba7b168";
+const FORM_GANTT_CHART_ON_INTERVAL_EDIT_END_EVENT_UUID: &str =
+    "fe4544e7-5b1a-441c-8ab9-198137e6d3c7";
 const FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID: &str = "526c501f-ed3f-4db4-8731-fd0324707501";
 // The planner's own eight events. Each identifier is named by the whole
 // native population of the construct: the five `PlannerField` items of
@@ -3565,8 +3606,22 @@ impl FormChildItemEventCollectionSchema {
     /// by `DetailProcessing`. The other 21 hold `{0,1,0}` in the slot and
     /// carry no element.
     pub(crate) fn from_special_field_schema(schema: FormSpecialFieldSchema) -> Option<Self> {
-        (schema.xml_tag() == "ChartField").then_some(Self {
-            owner: FormChildItemEventCollectionOwner::ChartField,
+        let owner = match schema.xml_tag() {
+            "ChartField" => FormChildItemEventCollectionOwner::ChartField,
+            // The Gantt chart keeps its collection in the same option member
+            // the chart does. Census of the whole population the eight stand
+            // corpora have -- 20 items: option member 5 holds the empty
+            // collection `{0,1,0}` on exactly the 5 the platform writes no
+            // `<Events>` on and a well-formed record on the other 15, and each
+            // of those records names exactly the identifiers the platform
+            // prints for that item, in the order it prints them.
+            "GanttChartField" if !schema.gantt_short_option_revision() => {
+                FormChildItemEventCollectionOwner::GanttChartField
+            }
+            _ => return None,
+        };
+        Some(Self {
+            owner,
             collection_slot: 5,
         })
     }
@@ -3691,6 +3746,17 @@ impl FormChildItemEventCollectionSchema {
             FormChildItemEventCollectionOwner::ChartField => &[
                 (FORM_CHART_SELECTION_EVENT_UUID, "Selection"),
                 (FORM_CHART_DETAIL_PROCESSING_EVENT_UUID, "DetailProcessing"),
+            ],
+            FormChildItemEventCollectionOwner::GanttChartField => &[
+                (FORM_GANTT_CHART_SELECTION_EVENT_UUID, "Selection"),
+                (
+                    FORM_GANTT_CHART_DETAIL_PROCESSING_EVENT_UUID,
+                    "DetailProcessing",
+                ),
+                (
+                    FORM_GANTT_CHART_ON_INTERVAL_EDIT_END_EVENT_UUID,
+                    "OnIntervalEditEnd",
+                ),
             ],
             FormChildItemEventCollectionOwner::Pages => &[(
                 FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID,
@@ -6421,36 +6487,136 @@ pub(crate) enum FormSpecialFieldKind {
     ProgressBar,
     TrackBar,
     Chart,
+    GanttChart,
 }
+
+/// The literal `2`-revision option bag the one short-revision `GanttChartField`
+/// of the stand carries. See [`FormSpecialFieldSchema::from_raw_layout`].
+const FORM_GANTT_CHART_SHORT_OPTION_BAG: [&str; 12] = [
+    "2", "50", "10", "1", "1", "{0,1,0}", "1", "0", "0", "1", "0", "0",
+];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormSpecialFieldSchema {
     kind: FormSpecialFieldKind,
+    /// The `GanttChartField` whose option bag declares revision `2`. Its
+    /// properties are not published from it -- see `from_raw_layout`.
+    gantt_short_option_revision: bool,
+    /// How many members the record carries past the shared 59-member field
+    /// layout, as the record's own slot 58 declares. `1` on a
+    /// `GanttChartField` that owns a nested `Table`, `0` everywhere else.
+    trailing_members: usize,
 }
 
 impl FormSpecialFieldSchema {
     pub(crate) const OPTIONS_SLOT: usize = 39;
+    /// The slot that declares whether a trailing member follows the shared
+    /// 59-member field layout, at the record's own top-level offset.
+    pub(crate) const NESTED_ITEM_COUNT_SLOT: usize = 58;
 
+    /// `wrapper`, `field_count` and `discriminator` are the record's own; the
+    /// last three are read at the record's `top_level_offset`, which the caller
+    /// detects off the name slot.
+    ///
+    /// The three original kinds keep the unshifted layout they were measured
+    /// on: their records are 59 members with the name at slot 6, so admitting
+    /// a shifted one would be a claim no observation backs.
+    ///
+    /// `GanttChartField` is discriminator `12`. Census of the whole population
+    /// the eight stand corpora have -- 20 items, one in Документооборот КОРП
+    /// 3.0.21.3 and 19 in ERP УХ 3.2.12.6, and the reader had no arm for the
+    /// code at all, so every one of them was dropped whole. All 20 spell a
+    /// wrapper-`37` record; 17 carry a trailing 60th member and 3 do not, and
+    /// slot 58 reads `1` on exactly those 17 and `0` on the 3. Over every
+    /// wrapper-`37` field record of the same 20 bodies -- 366 of them, every
+    /// field kind the forms use -- slot 58 reads `0` on all 349 that carry no
+    /// member past the shared 59-member layout and `1` on exactly the 17 that
+    /// do, and the trailing member is a wrapper-`55` `Table` record on all 17.
+    /// So the slot is the declared count of the trailing member, and the arity
+    /// is checked against what the record declares rather than against a list
+    /// of observed lengths.
+    ///
+    /// The option bag is `3` at 16 members on 19 of the 20. The twentieth --
+    /// ERP УХ `Reports/ИсполнениеСтадийМеропритияДиаграммаГанта/Forms/
+    /// ФормаОтчета`, `ГантРезультат` -- declares `2` at 12, and its twelve
+    /// members are member for member the first twelve of the `3`/16 bag four
+    /// other items of the same corpus carry (`{3,50,10,1,1,{0,1,0},1,0,0,1,0,
+    /// 0,0,0,2,2}`), the leading member apart. That pairing proves the
+    /// truncation for *that* value tuple and nothing more: every member of the
+    /// short bag holds the value the platform publishes nothing for, so no
+    /// coordinate of revision `2` is told apart from its neighbours by any
+    /// observation. The revision is therefore admitted only as that exact
+    /// literal, and the schema then publishes no extent, no stretch and no
+    /// event from it -- which is what the platform writes on the one record
+    /// that has it. A revision-`2` bag with any other member is refused rather
+    /// than read at revision-`3` coordinates.
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         discriminator: Option<&str>,
-        option_count: usize,
-        option_kind: Option<&str>,
+        top_level_offset: usize,
+        options: &[&str],
+        nested_item_count: Option<&str>,
     ) -> Option<Self> {
+        let option_count = options.len();
+        let option_kind = options.first().map(|field| field.trim());
         let kind = match (
             wrapper,
             field_count,
+            top_level_offset,
             discriminator,
             option_count,
             option_kind,
         ) {
-            ("37", 59, Some("9"), 16, Some("4")) => FormSpecialFieldKind::ProgressBar,
-            ("37", 59, Some("10"), 18, Some("2")) => FormSpecialFieldKind::TrackBar,
-            ("37", 59, Some("11"), 11, Some("1")) => FormSpecialFieldKind::Chart,
+            ("37", 59, 0, Some("9"), 16, Some("4")) => FormSpecialFieldKind::ProgressBar,
+            ("37", 59, 0, Some("10"), 18, Some("2")) => FormSpecialFieldKind::TrackBar,
+            ("37", 59, 0, Some("11"), 11, Some("1")) => FormSpecialFieldKind::Chart,
+            ("37", _, _, Some("12"), 16, Some("3")) | ("37", _, _, Some("12"), 12, Some("2")) => {
+                FormSpecialFieldKind::GanttChart
+            }
             _ => return None,
         };
-        Some(Self { kind })
+        let mut gantt_short_option_revision = false;
+        let mut trailing_members = 0;
+        if kind == FormSpecialFieldKind::GanttChart {
+            gantt_short_option_revision = option_kind == Some("2");
+            if gantt_short_option_revision
+                && !options
+                    .iter()
+                    .map(|field| field.trim())
+                    .eq(FORM_GANTT_CHART_SHORT_OPTION_BAG)
+            {
+                return None;
+            }
+            trailing_members = match nested_item_count.map(str::trim) {
+                Some("0") => 0,
+                Some("1") => 1,
+                _ => return None,
+            };
+            if field_count != 59 + top_level_offset + trailing_members {
+                return None;
+            }
+        }
+        Some(Self {
+            kind,
+            gantt_short_option_revision,
+            trailing_members,
+        })
+    }
+
+    pub(crate) const fn gantt_short_option_revision(self) -> bool {
+        self.gantt_short_option_revision
+    }
+
+    /// The record slot the nested `Table` a `GanttChartField` owns sits in, at
+    /// the record's own top-level offset, or `None` when the record declares
+    /// none.
+    pub(crate) const fn nested_item_slot(self, top_level_offset: usize) -> Option<usize> {
+        if self.trailing_members == 0 {
+            None
+        } else {
+            Some(59 + top_level_offset)
+        }
     }
 
     pub(crate) const fn xml_tag(self) -> &'static str {
@@ -6458,6 +6624,7 @@ impl FormSpecialFieldSchema {
             FormSpecialFieldKind::ProgressBar => "ProgressBarField",
             FormSpecialFieldKind::TrackBar => "TrackBarField",
             FormSpecialFieldKind::Chart => "ChartField",
+            FormSpecialFieldKind::GanttChart => "GanttChartField",
         }
     }
 
@@ -6486,21 +6653,48 @@ impl FormSpecialFieldSchema {
         (value != default && value.parse::<i64>().is_ok()).then(|| value.to_string())
     }
 
+    /// The Gantt chart's own extent pair, read off the whole population the
+    /// eight stand corpora have.
+    ///
+    /// Option member 1 is `Width`, default `50`: over the 19 revision-`3`
+    /// items it reads `50` on the 17 the platform writes no `<Width>` on, `30`
+    /// on ERP УХ `DataProcessors/ПланированиеГрафикаПроизводства2_2/Forms/
+    /// ПланированиеГрафикаЗаказа` `СрокиВыполнения` (`<Width>30</Width>`) and
+    /// `150` on `Reports/МониторБюджетныхПроцессов/Forms/ФормаОтчета`
+    /// `Результат` (`<Width>150</Width>`).
+    ///
+    /// Option member 2 is `Height`, default `10`: `10` on the 17 without the
+    /// element, `5` on the same `СрокиВыполнения` (`<Height>5</Height>`) and
+    /// `3` on `DataProcessors/ДиспетчированиеГрафикаПроизводства/Forms/
+    /// ДиагностикаФормированияГрафика` `ДиаграммаГанта` (`<Height>3</Height>`).
+    fn gantt_dimension(self, options: &[&str], slot: usize, default: &str) -> Option<String> {
+        if self.gantt_short_option_revision {
+            return None;
+        }
+        let value = options.get(slot)?.trim();
+        (value != default && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+
     pub(crate) fn width(self, options: &[&str]) -> Option<String> {
+        if self.kind == FormSpecialFieldKind::GanttChart {
+            return self.gantt_dimension(options, 1, "50");
+        }
         let value = options.get(1)?.trim();
         let is_non_default = match self.kind {
             FormSpecialFieldKind::ProgressBar | FormSpecialFieldKind::TrackBar => {
                 value != "0" && value != "32"
             }
-            FormSpecialFieldKind::Chart => false,
+            FormSpecialFieldKind::Chart | FormSpecialFieldKind::GanttChart => false,
         };
         (is_non_default && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
     pub(crate) fn height(self, options: &[&str]) -> Option<String> {
-        (self.kind == FormSpecialFieldKind::TrackBar)
-            .then(|| Self::track_bar_dimension(options, 2, "2"))
-            .flatten()
+        match self.kind {
+            FormSpecialFieldKind::TrackBar => Self::track_bar_dimension(options, 2, "2"),
+            FormSpecialFieldKind::GanttChart => self.gantt_dimension(options, 2, "10"),
+            _ => None,
+        }
     }
 
     pub(crate) fn min_value(self, options: &[&str]) -> Option<String> {
@@ -6539,7 +6733,7 @@ impl FormSpecialFieldSchema {
         let slot = match self.kind {
             FormSpecialFieldKind::ProgressBar => 11,
             FormSpecialFieldKind::TrackBar => 13,
-            FormSpecialFieldKind::Chart => return None,
+            FormSpecialFieldKind::Chart | FormSpecialFieldKind::GanttChart => return None,
         };
         (options.get(slot).map(|field| field.trim()) == Some("0")).then_some(false)
     }
@@ -6558,8 +6752,29 @@ impl FormSpecialFieldSchema {
             {
                 Some(false)
             }
+            FormSpecialFieldKind::GanttChart => self.gantt_stretch(options, 3),
             _ => None,
         }
+    }
+
+    /// The Gantt chart's own stretch pair, option members 3 and 4. Over the 19
+    /// revision-`3` items of the stand both read `1` on the 18 the platform
+    /// writes neither element on, and both read `0` on the one that carries
+    /// `<HorizontalStretch>false</HorizontalStretch>` and
+    /// `<VerticalStretch>false</VerticalStretch>` -- ERP УХ
+    /// `DataProcessors/ПланированиеГрафикаПроизводства2_2/Forms/
+    /// ПланированиеГрафикаЗаказа` `СрокиВыполнения`. No other code occurs in
+    /// either member, so the raised state stays unread rather than guessed.
+    fn gantt_stretch(self, options: &[&str], slot: usize) -> Option<bool> {
+        (!self.gantt_short_option_revision
+            && options.get(slot).map(|field| field.trim()) == Some("0"))
+        .then_some(false)
+    }
+
+    pub(crate) fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
+        (self.kind == FormSpecialFieldKind::GanttChart)
+            .then(|| self.gantt_stretch(options, 4))
+            .flatten()
     }
 
     /// Slot 54 is the shared alignment slot of the 59-field field layout, so it
@@ -6579,7 +6794,7 @@ impl FormSpecialFieldSchema {
             FormSpecialFieldKind::ProgressBar | FormSpecialFieldKind::TrackBar => {
                 Self::track_bar_dimension(options, 6, "100")
             }
-            FormSpecialFieldKind::Chart => None,
+            FormSpecialFieldKind::Chart | FormSpecialFieldKind::GanttChart => None,
         }
     }
 
