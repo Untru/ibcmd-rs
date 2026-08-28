@@ -289,6 +289,16 @@ impl MetadataFieldDeclarationIndex {
     }
 
     #[cfg(test)]
+    pub(super) fn with_constant(
+        mut self,
+        uuid: &str,
+        declared: MetadataConstantDeclaration,
+    ) -> Self {
+        self.constants.insert(uuid.to_string(), declared);
+        self
+    }
+
+    #[cfg(test)]
     pub(super) fn with_common_attribute(
         mut self,
         name: &str,
