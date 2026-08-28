@@ -5357,8 +5357,13 @@ impl FormChildItemUserVisibleSchema {
             | (
                 "37",
                 60,
-                "PictureField" | "LabelField" | "InputField" | "CheckBoxField" | "RadioButtonField"
-                | "TextDocumentField",
+                "PictureField"
+                | "LabelField"
+                | "InputField"
+                | "CheckBoxField"
+                | "RadioButtonField"
+                | "TextDocumentField"
+                | "SpreadSheetDocumentField",
                 1,
                 Some("1"),
             ) => user_visible,
@@ -5958,9 +5963,10 @@ impl FormContainerReadOnlySchema {
             options.len(),
             options.first().map(|field| field.trim()),
         ) {
-            ("ColumnGroup", Some("2"), 12, Some("2")) | ("Page", Some("4"), 20, Some("18")) => {
-                Some(Self)
-            }
+            ("ColumnGroup", Some("2"), 12, Some("2"))
+            | ("Page", Some("4"), 20, Some("18"))
+            | ("Page", Some("4"), 18, Some("17"))
+            | ("ButtonGroup", Some("6"), 4, Some("2")) => Some(Self),
             // A `Popup` keeps the same flag in the same slot: over all 3 911
             // native popups of UT 11.5.27.75 slot 11 reads `1` on exactly the
             // one whose document carries `<ReadOnly>true</ReadOnly>` and `0` on
@@ -7134,6 +7140,7 @@ enum FormTooltipRepresentationItemKind {
     ChartField,
     SpreadSheetDocumentField,
     HTMLDocumentField,
+    FormattedDocumentField,
     CommandBar,
     Button,
     Other,
@@ -7162,6 +7169,7 @@ impl FormTooltipRepresentationItemKind {
             "ChartField" => Self::ChartField,
             "SpreadSheetDocumentField" => Self::SpreadSheetDocumentField,
             "HTMLDocumentField" => Self::HTMLDocumentField,
+            "FormattedDocumentField" => Self::FormattedDocumentField,
             "CommandBar" => Self::CommandBar,
             "Button" => Self::Button,
             _ => Self::Other,
@@ -7276,6 +7284,7 @@ pub(crate) fn form_tooltip_representation_schema(
                 | FormTooltipRepresentationItemKind::ChartField
                 | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
                 | FormTooltipRepresentationItemKind::HTMLDocumentField
+                | FormTooltipRepresentationItemKind::FormattedDocumentField
         )
     {
         return Some(FormTooltipRepresentationSchema {
@@ -7343,7 +7352,8 @@ pub(crate) fn form_tooltip_representation_xml_order(
         // do: behind `DataPath`/`SkipOnInput`/`TitleLocation` and ahead of the
         // geometry run (`Width`, `Height`, `MaxHeight`), `BorderColor`,
         // `ContextMenu` and `ExtendedTooltip`.
-        | FormTooltipRepresentationItemKind::HTMLDocumentField => {
+        | FormTooltipRepresentationItemKind::HTMLDocumentField
+        | FormTooltipRepresentationItemKind::FormattedDocumentField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }
         // A `SpreadSheetDocumentField` writes it one step earlier, ahead of its
@@ -8392,6 +8402,9 @@ impl FormTableSchema {
     pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(6)?.trim() {
             "1" => Some("Auto"),
+            // Census of all 19 078 tables: code 2 occurs once and that table
+            // is written with `<TitleLocation>Left</TitleLocation>`.
+            "2" => Some("Left"),
             "3" => Some("Top"),
             // Read off the platform, not interpolated: of the 4 543 traced
             // `Table` items of UT 11.5.27.75 exactly one holds `5` here, and
