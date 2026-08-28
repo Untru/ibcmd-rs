@@ -21166,6 +21166,7 @@ fn formats_table_search_additions_as_direct_sections() {
         usual_group_current_row_use: None,
         decoration_enable_start_drag: None,
         decoration_enable_drag: None,
+        picture_field_enable_drag: None,
         special_text_input_mode: None,
         auto_show_clear_button_mode: None,
         auto_correction_on_text_input: None,
@@ -21430,6 +21431,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 usual_group_current_row_use: None,
                 decoration_enable_start_drag: None,
                 decoration_enable_drag: None,
+                picture_field_enable_drag: None,
                 special_text_input_mode: None,
                 auto_show_clear_button_mode: None,
                 auto_correction_on_text_input: None,
@@ -21695,6 +21697,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 usual_group_current_row_use: None,
                 decoration_enable_start_drag: None,
                 decoration_enable_drag: None,
+                picture_field_enable_drag: None,
                 special_text_input_mode: None,
                 auto_show_clear_button_mode: None,
                 auto_correction_on_text_input: None,
@@ -27085,6 +27088,13 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         ("{0,90,0}", "Z"),
         ("{0,96,0}", "Num 0"),
         ("{0,105,16}", "Alt+Num 9"),
+        // Real bytes: seed `hg7-a` against 8.3.27.2214 stores `{0,106,0}` for
+        // a form command written `<Shortcut>Num *</Shortcut>`, and the eight
+        // stand trees spell that element twice -- the `КнопкаУмножить`
+        // command of ERP УХ 3.2.12.6
+        // `DataProcessors/НастройкаСтруктурыОтчета/Forms/ФормаКонструктора`
+        // and of `Catalogs/БланкиОтчетов/Forms/ФормаМакета`.
+        ("{0,106,0}", "Num *"),
         ("{0,107,0}", "Num +"),
         ("{0,109,0}", "Num -"),
         ("{0,110,0}", "Num ."),
@@ -27159,12 +27169,11 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         "{0,58,0}",
         "{0,91,0}",
         "{0,95,0}",
-        // VK_MULTIPLY=106 and VK_SEPARATOR=108 are the two members of the
-        // 106..=109 numpad run that occur nowhere in the eight stand trees:
-        // they stay unread rather than guessed from their neighbours, which
-        // is the fail-closed half of this matrix. VK_ADD=107 and
-        // VK_SUBTRACT=109 do occur and are pinned above.
-        "{0,106,0}",
+        // VK_SEPARATOR=108 is the one member of the 106..=109 numpad run that
+        // occurs in no stand tree and in no seed: it stays unread rather than
+        // guessed from its neighbours, which is the fail-closed half of this
+        // matrix. VK_ADD=107, VK_SUBTRACT=109 and VK_MULTIPLY=106 do occur and
+        // are pinned above.
         "{0,108,0}",
         "{0,124,0}",
         "{0,70,1}",

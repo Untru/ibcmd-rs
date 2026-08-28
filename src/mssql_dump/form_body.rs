@@ -1336,6 +1336,7 @@ pub(super) struct FormExtendedTooltip {
     pub(super) max_width: Option<String>,
     pub(super) height: Option<String>,
     pub(super) auto_max_height: Option<bool>,
+    pub(super) max_height: Option<String>,
     pub(super) horizontal_stretch: Option<bool>,
     pub(super) vertical_stretch: Option<bool>,
     pub(super) text_color: Option<String>,
@@ -1366,6 +1367,7 @@ impl FormExtendedTooltip {
             || self.max_width.is_some()
             || self.height.is_some()
             || self.auto_max_height.is_some()
+            || self.max_height.is_some()
             || self.horizontal_stretch.is_some()
             || self.vertical_stretch.is_some()
             || self.text_color.is_some()
@@ -1571,6 +1573,7 @@ pub(super) struct FormChildItem {
     pub(super) usual_group_current_row_use: Option<&'static str>,
     pub(super) decoration_enable_start_drag: Option<bool>,
     pub(super) decoration_enable_drag: Option<bool>,
+    pub(super) picture_field_enable_drag: Option<bool>,
     pub(super) special_text_input_mode: Option<&'static str>,
     pub(super) auto_capitalization_on_text_input: Option<&'static str>,
     pub(super) on_screen_keyboard_return_key_text: Option<&'static str>,
@@ -2341,7 +2344,25 @@ pub(super) fn extract_form_save_data_in_settings(fields: &[&str]) -> Option<&'st
     // second reader of this property, so gating on it only suppressed the 2
     // roots that carry both. The legacy `59` layout keeps the old gate, having
     // no observation of its own.
-    if fields.first().map(|field| field.trim()) != Some("50") && form_root_uses_property_bag(fields)
+    //
+    // The `49` root reads the property out of the very same field 6, bag or no
+    // bag, and the gate was a condition on the discriminator rather than on
+    // what the record says. Census of the exported root layouts of all eight
+    // stand corpora joined with the `<SaveDataInSettings>` of the platform's
+    // own `<Form>` element -- 22 637 roots, 1 652 under `49` and 20 985 under
+    // `50`, 3 616 of them carrying the property bag: field 6 is a total
+    // function of the element in all four combinations. It reads `0` on all
+    // 22 335 roots the platform writes no element for -- 1 331 `49` without a
+    // bag, 300 `49` with one, 17 412 `50` without and 3 292 `50` with -- and
+    // `1` on all 302 it writes `UseList` for -- 19, 2, 259 and 22
+    // respectively. No root contradicts, and `UseList` is the only value the
+    // whole stand spells. The `59` legacy layout keeps the old gate, having no
+    // observation of its own: no root of any corpus carries that
+    // discriminator.
+    if !matches!(
+        fields.first().map(|field| field.trim()),
+        Some("49") | Some("50")
+    ) && form_root_uses_property_bag(fields)
     {
         return None;
     }
@@ -3642,6 +3663,17 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         // `MultipleValueOpening` (6 of 6) and `7de586c4` with `BeforePrint`
         // (3 of 3, beside the spreadsheet field's own `BeforePrint`
         // identifier, which the item-scoped table already names).
+        // The form-level `ActivationProcessing` identifier, measured directly
+        // rather than read off a tree: seed `hg7-a` against 8.3.27.2214 is a
+        // managed form whose only root event is
+        // `<Event name="ActivationProcessing">ОбработкаАктивизации</Event>`,
+        // and its stored root event list is
+        // `{1,b47699e1-b5d8-4c8a-91e9-183dec5820f5,"ОбработкаАктивизации",1,0,
+        // b47699e1-b5d8-4c8a-91e9-183dec5820f5,0,1}`. The identifier is
+        // spelled once in the eight native stand trees -- ERP УХ 3.2.12.6
+        // `InformationRegisters/ЖурналОбменаСЭТП/Forms/ФормаСписка` -- where
+        // the platform writes the same name beside the same handler.
+        "b47699e1-b5d8-4c8a-91e9-183dec5820f5" => Some("ActivationProcessing"),
         "2c5f182c-1a2b-4fe1-a340-71979d5c39a8" => Some("OnPasteFromClipboard"),
         "e6e68c5f-dc83-43c1-b6ca-438be00b77c1" => Some("MultipleValueOpening"),
         "7de586c4-b5b7-40f7-917f-8049b127e015" => Some("BeforePrint"),
@@ -11334,27 +11366,36 @@ fn parse_form_child_item_with_metadata_owners(
     let page_schema = show_title_options.as_deref().and_then(|options| {
         FormPageSchema::from_raw_layout(wrapper, fields.len(), tag, direct_discriminator, options)
     });
-    let page_properties = page_schema.and_then(|schema| {
-        show_title_options
-            .as_deref()
-            .map(|options| schema.properties(&fields, options))
-    });
-    let popup_schema = (tag == "Popup")
+    let page_properties = page_schema
+        .and_then(|schema| {
+            show_title_options
+                .as_deref()
+                .map(|options| schema.properties(&fields, options))
+        })
+        // The short `17`/18 revision of the page bag answers four of the same
+        // members out of the same slots; everything else it holds stays unread.
+        .or_else(|| {
+            show_title_options.as_deref().and_then(|options| {
+                FormPageSchema::short_revision_properties(
+                    wrapper,
+                    fields.len(),
+                    tag,
+                    direct_discriminator,
+                    &fields,
+                    options,
+                )
+            })
+        });
+    let popup_options = (tag == "Popup")
         .then(|| {
             fields
                 .get(FormPopupSchema::OPTIONS_SLOT)
                 .and_then(|field| split_1c_braced_fields(field.trim(), 0))
         })
-        .flatten()
-        .and_then(|options| {
-            FormPopupSchema::from_raw_layout(
-                wrapper,
-                fields.len(),
-                tag,
-                direct_discriminator,
-                &options,
-            )
-        });
+        .flatten();
+    let popup_schema = popup_options.as_deref().and_then(|options| {
+        FormPopupSchema::from_raw_layout(wrapper, fields.len(), tag, direct_discriminator, options)
+    });
     let popup_color_schema = (tag == "Popup")
         .then(|| {
             fields
@@ -11534,9 +11575,30 @@ fn parse_form_child_item_with_metadata_owners(
         "GraphicalSchemaField" | "HTMLDocumentField" => Some("3"),
         _ => None,
     };
+    // The option bag sits at the field class's own options base, and the
+    // conditional-appearance prefix pushes it along with the rest of the
+    // record -- exactly as `form_document_field_geometry_options` already
+    // reads it. Spelling the unprefixed slot 39 alone made every prefixed
+    // document field of these three kinds miss its bag: the `<Height>` and the
+    // whole `<Events>` list of the four prefixed `HTMLDocumentField` items of
+    // ERP УХ 3.2.12.6 went unwritten while the geometry table's own
+    // offset-corrected `<AutoMaxWidth>` on the very same item came out right.
+    //
+    // Measured, not inferred: seed `hg7-b` against 8.3.27.2214 is seed `hg7-a`
+    // with `<UserVisible><xr:Common>false</xr:Common></UserVisible>` added to
+    // three items and nothing else changed. Its `HTMLDocumentField` record
+    // grows from 59 to 60 members, its name moves from slot 6 to slot 7 and
+    // its bag from slot 39 to slot 40 -- `{3,50,5,{3,4,{0}},0,{1,da8dfb86-…,
+    // "ПолеHTMLПриНажатии",1,0,da8dfb86-…,0,1},…}`, the same 13-member `3`
+    // tuple the unprefixed seed spells at slot 39, with the same `5` in the
+    // height slot and the same event record in slot 5. The unprefixed read
+    // landed on the scalar `1` beside it and answered nothing at all.
     let document_field_options = document_field_options_kind.and_then(|options_kind| {
+        let offset = form_input_field_layout_is_extended(&fields)
+            .then(|| form_input_field_top_level_offset(&fields))
+            .unwrap_or(0);
         fields
-            .get(39)
+            .get(39 + offset)
             .and_then(|field| split_1c_braced_fields(field.trim(), 0))
             .filter(|options| options.first().map(|field| field.trim()) == Some(options_kind))
     });
@@ -12185,7 +12247,15 @@ fn parse_form_child_item_with_metadata_owners(
         shape_representation: button_shape_representation_schema
             .and_then(|schema| schema.shape_representation(&fields))
             .or(popup_shape_representation),
-        shape: button_shape_schema.and_then(|schema| schema.shape(&fields)),
+        shape: button_shape_schema
+            .and_then(|schema| schema.shape(&fields))
+            // A `Popup` keeps its own `<Shape>` in member 5 of its option
+            // tuple, under the same two-code table the button reads.
+            .or_else(|| {
+                popup_schema
+                    .zip(popup_options.as_deref())
+                    .and_then(|(schema, options)| schema.shape(options))
+            }),
         picture_location: button_shape_schema.and_then(|schema| schema.picture_location(&fields)),
         representation_in_context_menu: if tag == "Button"
             && form_button_layout_is_extended(&fields)
@@ -12331,7 +12401,21 @@ fn parse_form_child_item_with_metadata_owners(
             // unrelated forms that carry no `<Shortcut>` all read `{0,0,0}`
             // there, which the shared decoder already turns into `None`, with
             // no counter-example.
-            "LabelDecoration" => fields
+            // A `PictureDecoration` is the same wrapper-`12` decoration record
+            // and keeps the tuple in the same fixed slot 16. The eight stand
+            // corpora spell exactly one `<Shortcut>` on a picture decoration --
+            // `X` on `ДекорацияИнформация` of ERP УХ 3.2.12.6
+            // `InformationRegisters/НастройкиОбменаФСС/Forms/ФормаЗаписи` --
+            // and the kind was simply not listed beside its label twin.
+            //
+            // Measured: seed `hg7-c` against 8.3.27.2214 carries a picture
+            // decoration written `<Shortcut>X</Shortcut>` and a twin written
+            // none; their 36-member records agree member for member except at
+            // slot 16, which reads `{0,88,0}` on the first and `{0,0,0}` on
+            // the second. `88` is the virtual key the shared decoder already
+            // spells `X`, and `{0,0,0}` is the empty tuple it already answers
+            // nothing for.
+            "LabelDecoration" | "PictureDecoration" => fields
                 .get(16)
                 .and_then(|field| parse_common_command_shortcut_value(field)),
             _ => None,
@@ -13432,6 +13516,22 @@ fn parse_form_child_item_with_metadata_owners(
             let slot = FormPictureDecorationSchema.enable_drag_option_slot(options)?;
             (options.get(slot)?.trim() == "1").then_some(true)
         }),
+        // A `PictureField` keeps its own `EnableDrag` in member 15 of its
+        // 24-member `10` tuple, right ahead of the field's event collection.
+        //
+        // Measured: seed `hg7-c` against 8.3.27.2214 carries a picture field
+        // written `<EnableDrag>true</EnableDrag>` and a twin written none, and
+        // their tuples agree member for member except at 10 and 11 (the two
+        // colours the twin does not carry either), 15 -- `1` against `0` --
+        // and 16, the event collection. `0` is the unwritten state: the
+        // platform writes no element for the twin.
+        picture_field_enable_drag: (tag == "PictureField")
+            .then(|| {
+                picture_field_options
+                    .as_deref()
+                    .and_then(|options| (options.get(15)?.trim() == "1").then_some(true))
+            })
+            .flatten(),
         auto_capitalization_on_text_input: field_schema_and_options
             .as_ref()
             .filter(|_| tag == "InputField")
@@ -15039,6 +15139,19 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
         // sits at options slot 9, the same relative position
         // `FormattedDocumentField` and `PictureField` keep theirs at (9 and
         // 12 respectively, out of their own shorter/longer option runs).
+        // The height cap sits immediately behind the auto flag that bounds it,
+        // where the width pair's own spacing puts it (`auto_max_width` 10,
+        // `max_width` 11, `auto_max_height` 13, `max_height` 14), and the
+        // vertical stretch flag sits in slot 4, where the picture, spreadsheet,
+        // calendar and chart fields keep theirs.
+        //
+        // Measured: seed `hg7-c` against 8.3.27.2214 carries a text document
+        // field written `<MaxHeight>7</MaxHeight>` and
+        // `<VerticalStretch>false</VerticalStretch>` and a twin written
+        // neither. Their 16-member `5` tuples agree member for member except
+        // at slot 4 -- `0` against `1` -- and slot 14 -- `7` against `0`. Slot
+        // 3 reads `1` on both, so the horizontal flag beside it stays
+        // unclaimed rather than guessed from the sibling shape.
         "TextDocumentField",
         FormDocumentFieldGeometry {
             discriminator: "5",
@@ -15046,11 +15159,11 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             width: Some((1, "50")),
             height: Some((2, "10")),
             max_width: Some(11),
-            max_height: None,
+            max_height: Some(14),
             auto_max_width: Some(10),
             auto_max_height: Some(13),
             horizontal_stretch: None,
-            vertical_stretch: None,
+            vertical_stretch: Some(4),
             edit: None,
             enable_start_drag: None,
             font: Some(9),
@@ -20170,6 +20283,7 @@ pub(super) fn parse_form_child_item_extended_tooltip(
             Some("0") => Some(false),
             _ => None,
         };
+        tooltip.max_height = extract_form_dimension(&nested, schema.max_height_slot());
         tooltip.horizontal_stretch = match nested
             .get(schema.horizontal_stretch_slot())
             .map(|value| value.trim())
@@ -28925,6 +29039,29 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_location)
         ));
     }
+    // A `SpreadSheetDocumentField` carries `<ToolTip>` in the same slot every
+    // other field kind does -- directly behind the title block and ahead of
+    // `ToolTipRepresentation`, its own `CommandSet` and everything else it
+    // writes. It used to fall through to the trailing catch-all, which put the
+    // element behind the whole spreadsheet property run.
+    //
+    // Census over the native `Form.xml` of all eight stand corpora, every
+    // `<SpreadSheetDocumentField>` element (2 709 of them, 5 carrying the
+    // element): `<ToolTip>` trails `DataPath` (5) and `TitleLocation` (5), and
+    // leads `ToolTipRepresentation` (3), the scroll pair (4 each),
+    // `ViewScalingMode` (2), `CommandSet` (1), `SelectionShowMode` (1),
+    // `ShowGroups` (1), `Edit` (1), `Width` (1), `Height` (1),
+    // `HorizontalStretch` (1), `ContextMenu` (5), `ExtendedTooltip` (5) and
+    // `Events` (4). No pair is counted in both directions. Seed `hg7-a`
+    // against 8.3.27.2214 writes the same order for a field carrying
+    // `<ToolTip>` beside its scroll pair.
+    if item.tag == "SpreadSheetDocumentField" {
+        xml.push_str(&format_form_localized_section(
+            "ToolTip",
+            &item.tooltip,
+            indent + 1,
+        ));
+    }
     // A graphical scheme field's `<CommandSet>` sits between its
     // `<TitleLocation>` and its geometry: the corpus's only such block --
     // Документооборот КОРП 3.0.21.3's
@@ -29378,7 +29515,13 @@ pub(super) fn format_form_child_item_xml(
     // `Shortcut`, which trails the title block instead. SSL demo's sole
     // native example -- DataProcessors/ОбновлениеВерсииИБ -- writes it in
     // exactly that slot.
-    if item.tag == "LabelDecoration"
+    // A `PictureDecoration` writes it in the same slot: ERP УХ 3.2.12.6
+    // `InformationRegisters/НастройкиОбменаФСС/Forms/ФормаЗаписи` -- the eight
+    // stand corpora's only such decoration -- puts `<Shortcut>X</Shortcut>`
+    // ahead of its `<Title>`, `<GroupVerticalAlign>`, `<Picture>`,
+    // `<FileDragMode>`, `<ContextMenu>` and `<ExtendedTooltip>`, and seed
+    // `hg7-c` writes it ahead of `<PictureSize>` too.
+    if matches!(item.tag, "LabelDecoration" | "PictureDecoration")
         && let Some(shortcut) = &item.item_shortcut
     {
         xml.push_str(&format!(
@@ -29766,6 +29909,33 @@ pub(super) fn format_form_child_item_xml(
             "NonselectedPictureText",
             &item.nonselected_picture_text,
             indent + 1,
+        ));
+    }
+    // A `PictureField`'s own `EnableDrag` closes the picture run's leading
+    // half. Both native picture fields of the eight stand corpora that carry
+    // it -- `АдресКартинкиПросмотр` and `АдресКартинкиМиниПросмотр` of ERP УХ
+    // 3.2.12.6 `Catalogs/СканированныеДокументыДляПередачиВЭлектронномВиде/
+    // Forms/ФормаЭлементаНовая` -- write it behind `DataPath`,
+    // `TitleLocation`, `Zoomable`, `Hyperlink`, `NonselectedPictureText`,
+    // `PictureSize` and `Width` and ahead of `TextColor`, `Font`,
+    // `FileDragMode`, `ContextMenu`, `ExtendedTooltip` and `Events`, with no
+    // pair counted both ways; neither shares a field with `ValuesPicture`,
+    // `Border` or `BorderColor`, so those pairs are unobserved.
+    if item.tag == "PictureField" && item.picture_field_enable_drag == Some(true) {
+        xml.push_str(&format!("{tab}\t<EnableDrag>true</EnableDrag>\r\n"));
+    }
+    // `TextColor` leads `BorderColor` on a picture field. The eight stand
+    // corpora spell the two together on exactly one item --
+    // `АдресКартинкиМиниПросмотр` of the form above -- and it writes
+    // `TextColor` first; seed `hg7-c` writes the same order. Nothing pairs
+    // `TextColor` with `ValuesPicture` or `Border`, so moving it ahead of the
+    // colour that does is unconstrained.
+    if item.tag == "PictureField"
+        && let Some(text_color) = &item.text_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TextColor>{}</TextColor>\r\n",
+            escape_xml_text(text_color)
         ));
     }
     if item.tag == "PictureField" {
@@ -30296,18 +30466,11 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
         }
     }
-    // `PictureField` carries `TextColor` here as well: the native tree writes
-    // it behind `NonselectedPictureText` (17) and ahead of `Font` (12) and
-    // `ContextMenu`. A `RadioButtonField` is the one kind that puts its `Font`
-    // *first*, so it writes the element from the site below instead.
-    if item.tag == "PictureField"
-        && let Some(text_color) = &item.text_color
-    {
-        xml.push_str(&format!(
-            "{tab}\t<TextColor>{}</TextColor>\r\n",
-            escape_xml_text(text_color)
-        ));
-    }
+    // `PictureField` used to carry `TextColor` here; it is written above now,
+    // directly ahead of `BorderColor`, which is where the one native field
+    // that carries both puts it. The pairs that placed it here --
+    // `NonselectedPictureText` (17) ahead of it, `Font` (12) and `ContextMenu`
+    // behind it -- are all still satisfied there.
     // The colour triple precedes `Font` on every control kind that carries both
     // (`InputField` 90/11/8, `Button` 273/79/35, `LabelField` 177/1, …), with no
     // counter-example outside `LabelDecoration`, which has its own emitter.
@@ -30784,6 +30947,21 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
+    // A `Popup` writes `<Shape>` between its `Representation` and its
+    // `ShapeRepresentation`, exactly where a `Button` writes its own. The four
+    // native popups of the eight stand corpora that carry the element put it
+    // behind `Title` (4), `ToolTip` (1), `ToolTipRepresentation` (1) and
+    // `Representation` (1) and ahead of `ShapeRepresentation` (3),
+    // `BorderColor` (3), `BackColor` (1), `ExtendedTooltip` (4) and
+    // `ChildItems` (4), with no pair counted both ways.
+    if item.tag == "Popup"
+        && let Some(shape) = item.shape
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Shape>{}</Shape>\r\n",
+            escape_xml_text(shape)
+        ));
+    }
     // A `Popup` writes `ShapeRepresentation` behind its representation and just
     // ahead of `BackColor`.  UT 11.5.27.75 native tree, all 89 popups carrying
     // it: it trails `Title` (89), `TitleTextColor` (86), `TitleFont` (84),
@@ -30836,6 +31014,7 @@ pub(super) fn format_form_child_item_xml(
             | "TextDocumentField"
             | "FormattedDocumentField"
             | "HTMLDocumentField"
+            | "SpreadSheetDocumentField"
             | "Table"
             | "LabelDecoration"
             | "PictureDecoration"
@@ -32134,6 +32313,11 @@ fn format_form_extended_tooltip_property_xml(
                     xml_bool(value)
                 )
             })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::MaxHeight => tooltip
+            .max_height
+            .as_ref()
+            .map(|value| format!("{tab}<MaxHeight>{}</MaxHeight>\r\n", escape_xml_text(value)))
             .unwrap_or_default(),
         FormExtendedTooltipXmlProperty::HorizontalStretch => tooltip
             .horizontal_stretch
