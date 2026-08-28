@@ -2339,6 +2339,7 @@ pub(crate) enum FormControlBorderStyle {
     WithoutBorder,
     Single,
     Embossed,
+    Indented,
     Underline,
     Overline,
     Double,
@@ -2353,11 +2354,22 @@ impl FormControlBorderStyle {
     /// `Underline` (10), `7` `Overline` (3) and `200` `Double` (4) -- and no
     /// code maps to two spellings.  `Embossed` and `Double` used to be missing,
     /// which dropped seven borders outright.
+    ///
+    /// `3` is `Indented`, and the eight stand corpora spell it exactly twice:
+    /// the `LabelDecoration` items `Режим` (id 341) and `СуммаЯчеек` (id 344)
+    /// of ERP УХ 3.2.12.6
+    /// `Catalogs/УдалитьПанелиОтчетов/Forms/ФормаЭлемента_Управляемая`, whose
+    /// border tuples read `{3,0,{0},3,1,0,<border uuid>}` and which the
+    /// platform writes `<Border width="1">` with `Indented` on. They are also
+    /// the only two `<v8ui:style xsi:type="v8ui:ControlBorderType">Indented</>`
+    /// elements in the eight native trees. The code had no arm, so both
+    /// borders went unwritten.
     pub(crate) fn from_raw_code(value: &str) -> Option<Self> {
         match value.trim() {
             "0" => Some(Self::WithoutBorder),
             "1" => Some(Self::Single),
             "2" => Some(Self::Embossed),
+            "3" => Some(Self::Indented),
             "4" => Some(Self::Underline),
             "7" => Some(Self::Overline),
             "200" => Some(Self::Double),
@@ -2370,6 +2382,7 @@ impl FormControlBorderStyle {
             Self::WithoutBorder => "0",
             Self::Single => "1",
             Self::Embossed => "2",
+            Self::Indented => "3",
             Self::Underline => "4",
             Self::Overline => "7",
             Self::Double => "200",
@@ -2381,6 +2394,7 @@ impl FormControlBorderStyle {
             "WithoutBorder" => Some(Self::WithoutBorder),
             "Single" => Some(Self::Single),
             "Embossed" => Some(Self::Embossed),
+            "Indented" => Some(Self::Indented),
             "Underline" => Some(Self::Underline),
             "Overline" => Some(Self::Overline),
             "Double" => Some(Self::Double),
@@ -2393,6 +2407,7 @@ impl FormControlBorderStyle {
             Self::WithoutBorder => "WithoutBorder",
             Self::Single => "Single",
             Self::Embossed => "Embossed",
+            Self::Indented => "Indented",
             Self::Underline => "Underline",
             Self::Overline => "Overline",
             Self::Double => "Double",

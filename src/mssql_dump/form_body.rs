@@ -34113,6 +34113,54 @@ const MAX_FORM_CHART_SERIES: usize = 64;
 /// A stored member with its layout whitespace removed, for the members whose
 /// whole shape is compared against a fixed token: the record is line-broken and
 /// the breaks fall inside braced members.
+/// A member that declares how many entries the list behind it carries.
+fn t_count_declared(field: &str) -> Option<usize> {
+    field.trim().parse().ok()
+}
+
+/// The chart's own two palette records, `{0,<palette code>,<gradient start
+/// colour>,{3,4,{0}},0,0}` -- the same shape the spreadsheet-document chart
+/// reads, at the two fixed offsets `179` and `180`. `Some(None)` is code `14`,
+/// "no palette named".
+///
+/// The palette, not slot 63, is what `paletteKind` is a function of. Over all
+/// 41 chart-family form attributes of the eight stand corpora that this reader
+/// accepts -- 22 `Chart`-typed and 19 `GanttChart`-typed -- slot 63 reads `0`
+/// on every one while the published `paletteKind` takes three values, and the
+/// palette record at `179` separates them without exception: `14` on the 33
+/// that publish `Auto` and no `<colorPaletteDescription>` block, `0` on the 5
+/// that publish `Palette8` and a block naming it, `1` on the 3 that publish
+/// `Palette32` and a block naming it. The reader wrote the flat `Auto` for all
+/// of them and no block at all.
+///
+/// Slot 180 is the reference-bands palette and reads `14` on all 41; a record
+/// that names one is refused rather than published, because the element name
+/// the form path would spell it under is unobserved.
+///
+/// Codes `13` (`Gradient`) and its gradient start colour, which the
+/// spreadsheet-document chart reads in the same slot, occur nowhere in the form
+/// corpus and are not carried over: member 2 is required to be the "no start
+/// colour" shape so a gradient palette is refused rather than published
+/// without it.
+fn form_chart_palette_name(field: &str) -> Option<Option<&'static str>> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 6
+        || fields.first()?.trim() != "0"
+        || form_chart_compact(fields.get(2)?) != "{3,4,{0}}"
+        || form_chart_compact(fields.get(3)?) != "{3,4,{0}}"
+        || fields.get(4)?.trim() != "0"
+        || fields.get(5)?.trim() != "0"
+    {
+        return None;
+    }
+    match fields.get(1)?.trim() {
+        "0" => Some(Some("Palette8")),
+        "1" => Some(Some("Palette32")),
+        "14" => Some(None),
+        _ => None,
+    }
+}
+
 fn form_chart_compact(text: &str) -> String {
     let mut compact = String::with_capacity(text.len());
     let mut quoted = false;
@@ -34594,7 +34642,25 @@ fn format_form_chart_settings_body_xml(
         "74" => FORM_CHART_TAIL_FIELDS_BASE,
         _ => return None,
     };
-    let expected_tail_fields = tail_base + 3 * series_count + point_count * (1 + 4 * series_count);
+    // The scale-id list is as long as the record's own member 123 declares, not
+    // as long as the series count implies. Over the 19 `GanttChart` form
+    // attributes of the stand 17 declare `1` -- the `1 + series_count` the
+    // formula assumed -- and two declare `0` and carry no id entry at all: ERP
+    // УХ `DataProcessors/ДиаграммаГантаОперации/Forms/Форма` (revision `74`,
+    // 196 tail members where the 74s carry 197) and
+    // `Reports/ИсполнениеСтадийМеропритияДиаграммаГанта/Forms/ФормаОтчета`
+    // (revision `73`, 190 where the 73s carry 191). Both still carry their one
+    // `{0,0}` entry and their one legend entry, so only the id list is shorter,
+    // and the arity check that assumed otherwise refused both records whole.
+    //
+    // Reading the declared count reproduces the previous formula exactly
+    // wherever the count is `1 + series_count`: `tail_base - 1 + id_count +
+    // 2 * series_count` is `tail_base + 3 * series_count` there, and the same
+    // substitution turns the two `tidx` shifts into `id_count + series_count`
+    // and `id_count + 2 * series_count` minus one.
+    let id_count: usize = t_count_declared(data.get(tail_start + 123)?)?;
+    let expected_tail_fields =
+        tail_base - 1 + id_count + 2 * series_count + point_count * (1 + 4 * series_count);
     if data.len() != tail_start + expected_tail_fields {
         return None;
     }
@@ -34607,8 +34673,9 @@ fn format_form_chart_settings_body_xml(
     // the per-series copy of the funnel-link-shaped record (both proven by
     // the same seed) have grown the tail.
     let n_scale = 1 + series_count;
-    let shift_a = 2 * series_count;
-    let shift_b = series_count;
+    if id_count != 0 && id_count != n_scale {
+        return None;
+    }
     // `shift_b` is the growth of the per-scale-item legend list itself, and
     // the list *starts* at fixed `147`: at `series_count = 4` (native UT/УХ
     // `DataProcessors/ПроверкаКонтрагента/Forms/Форма`) its five ten-member
@@ -34621,20 +34688,17 @@ fn format_form_chart_settings_body_xml(
         if fixed < 126 {
             fixed
         } else if fixed < 148 {
-            fixed + shift_a
+            fixed - 1 + id_count + series_count
         } else {
-            fixed + shift_a + shift_b
+            fixed - 1 + id_count + 2 * series_count
         }
     };
-    if t.get(123)?.trim() != n_scale.to_string() {
-        return None;
-    }
     let mut expected_ids = Vec::with_capacity(n_scale);
     expected_ids.push(form_chart_integer(series.get(7)?)?.to_string());
     for chunk in real_series.chunks(FORM_CHART_SERIES_FIELDS) {
         expected_ids.push(form_chart_integer(chunk.get(7)?)?.to_string());
     }
-    for (offset, expected_id) in expected_ids.iter().enumerate() {
+    for (offset, expected_id) in expected_ids.iter().take(id_count).enumerate() {
         let entry = split_1c_braced_fields(t.get(124 + offset)?, 0)?;
         if entry.len() != 3
             || entry.first()?.trim() != "0"
@@ -34645,7 +34709,7 @@ fn format_form_chart_settings_body_xml(
         }
     }
     for offset in 0..n_scale {
-        if form_chart_compact(t.get(124 + n_scale + offset)?) != "{0,0}" {
+        if form_chart_compact(t.get(124 + id_count + offset)?) != "{0,0}" {
             return None;
         }
     }
@@ -34680,6 +34744,10 @@ fn format_form_chart_settings_body_xml(
     // the same list, in the same order, that the spreadsheet-document chart
     // reads at `axes_position + 20`. `point_count` is zero on every
     // form-chart record of the stand, so the list has no point prefix here.
+    let color_palette = form_chart_palette_name(t.get(tidx(179))?)?;
+    if form_chart_palette_name(t.get(tidx(180))?)?.is_some() {
+        return None;
+    }
     let legend_start = tidx(147);
     let mut appearance = Vec::with_capacity(n_scale);
     for offset in 0..n_scale {
@@ -34747,7 +34815,14 @@ fn format_form_chart_settings_body_xml(
     );
     scalar!(
         "labelsLocation",
-        form_chart_code(t.get(5)?, &[("0", "Edge"), ("3", "EdgeAuto")])?
+        // `4` is `Auto`: ERP УХ `Reports/МониторингЗаказа/Forms/ФормаОтчета`
+        // is the corpus's one record that stores it, and the platform writes
+        // `<d4p1:labelsLocation>Auto</d4p1:labelsLocation>` for it; the other
+        // 18 `GanttChart` attributes store `0` and publish `Edge`.
+        form_chart_code(
+            t.get(5)?,
+            &[("0", "Edge"), ("3", "EdgeAuto"), ("4", "Auto")]
+        )?
     );
     xml.push_str(&form_chart_localized_xml("lbFormat", t.get(6)?, child)?);
     xml.push_str(&form_chart_localized_xml("lbpFormat", t.get(7)?, child)?);
@@ -34839,10 +34914,13 @@ fn format_form_chart_settings_body_xml(
     scalar!("dtHAlign", form_chart_code(t.get(60)?, &[("2", "Right")])?);
     xml.push_str(&form_chart_localized_xml("dtFormat", t.get(61)?, child)?);
     scalar!("dtKeys", form_chart_bool(t.get(62)?)?);
-    scalar!(
-        "paletteKind",
-        form_chart_code(t.get(63)?, &[("0", "Auto")])?
-    );
+    // Slot 63 is kept as the guard it always was -- it reads `0` on every
+    // record of the corpus -- but the published name comes from the palette
+    // record. See `form_chart_palette_name`.
+    if t.get(63)?.trim() != "0" {
+        return None;
+    }
+    scalar!("paletteKind", color_palette.unwrap_or("Auto"));
     // `animation` is `t[120]`, not `t[64]`. From `t[100]` on, the form
     // chart's tail is the spreadsheet-document chart's `post` shifted by
     // exactly one hundred -- `t[111]`/`post[11]` translucence,
@@ -34867,7 +34945,14 @@ fn format_form_chart_settings_body_xml(
     // `legendPlacement` and `titleAreaPlacement` too.
     scalar!(
         "animation",
-        form_chart_code(t.get(120)?, &[("0", "Auto"), ("2", "DontUse")])?
+        // `1` is `Use`: four of the 19 `GanttChart` form attributes of the
+        // stand store it and all four publish
+        // `<d4p1:animation>Use</d4p1:animation>`; the other 15 store `0` and
+        // publish `Auto`.
+        form_chart_code(
+            t.get(120)?,
+            &[("0", "Auto"), ("1", "Use"), ("2", "DontUse")]
+        )?
     );
     scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
     scalar!("isTransposed", "false");
@@ -35258,6 +35343,18 @@ fn format_form_chart_settings_body_xml(
                 )?
             );
         }
+    }
+    // The palette block closes the chart. It trails `pointsAxis` on all 8
+    // records of the corpus that carry one and, on the 4 of those that also
+    // place their areas, `titleAreaPlacement` too; no record carries both this
+    // block and a show-mode element, so their relative order is unobserved and
+    // the block is written last, which reproduces all 8.
+    if let Some(name) = color_palette {
+        xml.push_str(&format!(
+            "{child_tab}<d4p1:colorPaletteDescription>\r\n\
+{child_tab}\t<d4p1:colorPalette>{name}</d4p1:colorPalette>\r\n\
+{child_tab}</d4p1:colorPaletteDescription>\r\n"
+        ));
     }
     Some(xml)
 }

@@ -1041,6 +1041,16 @@ const CHART_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
 /// written on any of them.
 pub(super) const GANTT_CHART_TYPE_UUID: &str = "3a6e63bf-16aa-42eb-b48c-2fff9670ad2f";
 pub(super) const GANTT_CHART_TYPE_REFERENCE: &str = "d5p1:GanttChart";
+/// The data-analysis time-interval unit. Named by every form attribute of the
+/// eight stand corpora that declares it -- 7 of them, all in ERP UH 3.2.12.6
+/// and all in forms that also carry a Gantt chart: each stores this type id
+/// with an empty settings slot, and the platform writes this QName in the
+/// attribute's `<v8:Type>` and no `<Settings>` block. The id had no entry at
+/// all, so the element was written on none of them. The QName occurs nowhere
+/// else in the eight native trees.
+const DATA_ANALYSIS_TIME_INTERVAL_UNIT_TYPE_UUID: &str = "77a01c71-e9b2-4617-af07-c95a4b74548a";
+const DATA_ANALYSIS_TIME_INTERVAL_UNIT_TYPE_REFERENCE: &str =
+    "d5p1:DataAnalysisTimeIntervalUnitType";
 const REPORT_BUILDER_TYPE_UUID: &str = "0dda99d9-ae9f-43d2-b7ac-44f3fb0d4059";
 pub(super) const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str =
     "cab0d12b-3c88-4993-8edc-8c3827cadc7d";
@@ -1065,6 +1075,10 @@ const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     ("52616226-8ccf-4d1d-a3da-827eeb4f9cf9", "v8ui:VerticalAlign"),
     (CHART_TYPE_UUID, "d5p1:Chart"),
     (GANTT_CHART_TYPE_UUID, GANTT_CHART_TYPE_REFERENCE),
+    (
+        DATA_ANALYSIS_TIME_INTERVAL_UNIT_TYPE_UUID,
+        DATA_ANALYSIS_TIME_INTERVAL_UNIT_TYPE_REFERENCE,
+    ),
     (
         "4af83795-fc2a-48cd-9bea-ce665789a62c",
         "d5p1:FlowchartContextType",
@@ -41794,6 +41808,12 @@ fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'st
             if reference == "d5p1:FlowchartContextType" =>
         {
             r#" xmlns:d5p1="http://v8.1c.ru/8.2/data/graphscheme""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == DATA_ANALYSIS_TIME_INTERVAL_UNIT_TYPE_REFERENCE =>
+        {
+            r#" xmlns:d5p1="http://v8.1c.ru/8.2/data/data-analysis""#
         }
         ConstantValueType::Reference { reference }
         | ConstantValueType::ReferenceTypeSet { reference }
