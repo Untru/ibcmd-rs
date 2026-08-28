@@ -5064,6 +5064,16 @@ impl FormPopupShapeRepresentationSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
     const OPTION_COUNT: usize = 9;
     const SHAPE_REPRESENTATION_OPTION_SLOT: usize = 6;
+    /// `Shape` rides the member just ahead of the representation code, under
+    /// the same table `Button` reads for the property.
+    ///
+    /// Census of the dumped layouts of all eight stand corpora joined to the
+    /// platform's own element for the same item id -- all 16 217 `Popup`
+    /// records: member 5 is `0` on the 16 213 popups that carry no `<Shape>`,
+    /// `1` on the one that says `Usual` and `2` on the three that say `Oval`,
+    /// with no code mapping to two answers and no other code anywhere. The
+    /// member had no reader, so all four elements were lost.
+    const SHAPE_OPTION_SLOT: usize = 5;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
         (wrapper == "22"
@@ -5081,6 +5091,17 @@ impl FormPopupShapeRepresentationSchema {
             Some("1") => Some("Always"),
             Some("2") => Some("WhenActive"),
             Some("3") => Some("None"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn shape(self, options: &[&str]) -> Option<&'static str> {
+        match options
+            .get(Self::SHAPE_OPTION_SLOT)
+            .map(|field| field.trim())
+        {
+            Some("1") => Some("Usual"),
+            Some("2") => Some("Oval"),
             _ => None,
         }
     }

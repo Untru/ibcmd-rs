@@ -11363,7 +11363,7 @@ fn parse_form_child_item_with_metadata_owners(
             FormSearchStringAdditionSchema::from_raw_layout(wrapper, fields.len(), tag, &options)
                 .map(|schema| (schema, options))
         });
-    let popup_shape_representation = fields
+    let popup_shape_options = fields
         .get(FormPopupShapeRepresentationSchema::OPTIONS_SLOT)
         .and_then(|field| {
             let options_text = field.trim();
@@ -11372,9 +11372,15 @@ fn parse_form_child_item_with_metadata_owners(
                 .flatten()
         })
         .and_then(|options| {
-            FormPopupShapeRepresentationSchema::from_raw_layout(wrapper, tag, &options)?
-                .shape_representation(&options)
+            FormPopupShapeRepresentationSchema::from_raw_layout(wrapper, tag, &options)
+                .map(|schema| (schema, options))
         });
+    let popup_shape_representation = popup_shape_options
+        .as_ref()
+        .and_then(|(schema, options)| schema.shape_representation(options));
+    let popup_shape = popup_shape_options
+        .as_ref()
+        .and_then(|(schema, options)| schema.shape(options));
     let button_common_schema = FormButtonCommonSchema::from_raw_layout(
         wrapper,
         fields.len(),
@@ -31953,6 +31959,21 @@ pub(super) fn format_form_child_item_xml(
     // `VerticalStretch` (42), `ToolTip` (10) and `Representation` (3), and
     // leads `ExtendedTooltip` (89), `ChildItems` (3) and `BorderColor` (1),
     // with no pair counted both ways.
+    // `Shape` opens the popup's shape run, exactly as it does a `Button`'s.
+    // Census over the native `Form.xml` of all eight stand corpora, all 16 217
+    // `<Popup>` elements: the 4 that carry a `<Shape>` write it behind `Title`
+    // (4), `ToolTip` (1), `ToolTipRepresentation` (1) and `Representation` (1)
+    // and ahead of `ShapeRepresentation` (3), `BorderColor` (3), `BackColor`
+    // (1), `ExtendedTooltip` (4) and `ChildItems` (4), with no pair counted
+    // both ways.
+    if item.tag == "Popup"
+        && let Some(shape) = item.shape
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Shape>{}</Shape>\r\n",
+            escape_xml_text(shape)
+        ));
+    }
     if item.tag == "Popup"
         && let Some(shape_representation) = item.shape_representation
     {
