@@ -5993,6 +5993,8 @@ fn extracts_command_interface_subsystems_order() {
                 name: "Sales".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
         (
@@ -6002,6 +6004,8 @@ fn extracts_command_interface_subsystems_order() {
                 name: "Purchases".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
     ]);
@@ -6096,6 +6100,8 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 name: "РеестрТорговыхДокументов".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
         (
@@ -6105,6 +6111,8 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 name: "КонтактнаяИнформация".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
         (
@@ -6114,6 +6122,8 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 name: "ОтчетыМаркетолога".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
         (
@@ -6123,6 +6133,8 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 name: "ОтчетыРуководителяОтделаПродаж".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
         (
@@ -6132,6 +6144,8 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
                 name: "ПолныеПрава".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
     ]);
@@ -6197,6 +6211,8 @@ fn platform_command_interface_declines_standard_command_when_use_standard_comman
                 name: "ТабличныеЧастиБД".to_string(),
                 use_standard_commands: false,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
         (
@@ -6206,6 +6222,8 @@ fn platform_command_interface_declines_standard_command_when_use_standard_comman
                 name: "ТипыБазДанных".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
         (
@@ -6215,6 +6233,8 @@ fn platform_command_interface_declines_standard_command_when_use_standard_comman
                 name: "ВнешниеИнформационныеБазы".to_string(),
                 use_standard_commands: true,
                 based_on_declared: None,
+                owners_declared: None,
+                recorder_subordinate: None,
             },
         ),
     ]);
@@ -22540,6 +22560,8 @@ fn extracts_real_world_navigation_panel_declines_disabled_standard_command_and_s
             name: "СправочникиБД".to_string(),
             use_standard_commands: false,
             based_on_declared: None,
+            owners_declared: None,
+            recorder_subordinate: None,
         },
     )]);
 

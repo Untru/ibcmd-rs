@@ -24725,6 +24725,14 @@ fn form_command_target_declares_standard_command(
     if command_name.ends_with(".StandardCommand.CreateBasedOn") {
         return facts.based_on_declared != Some(0);
     }
+    if facts.kind == "Catalog" && command_name.ends_with(".StandardCommand.OpenByValue") {
+        return facts.owners_declared != Some(0);
+    }
+    if facts.kind == "InformationRegister"
+        && command_name.ends_with(".StandardCommand.OpenByRecorder")
+    {
+        return facts.recorder_subordinate != Some(false);
+    }
     true
 }
 
@@ -26862,12 +26870,27 @@ fn form_command_interface_command_named(
             if !form_command_interface_target_use_standard_commands(&uuid, context) {
                 return Some(format!("{kind}:{uuid}"));
             }
-            form_object_family_standard_command_name(
+            // The same declaration slots 1, 2 and 3 already read: a target
+            // that cannot have what the command opens by has no such command,
+            // and the platform keeps the raw sentinel.
+            if let Some(name) = form_object_family_standard_command_name(
                 kind,
                 reference,
                 FormCommandRecordReader::CommandInterfaceItem,
-            )
-            .or_else(|| resolve_information_register_open_by_value_command(kind, target, context))
+            ) {
+                return Some(
+                    if form_command_target_declares_standard_command(
+                        &uuid,
+                        &name,
+                        context.metadata_command_refs,
+                    ) {
+                        name
+                    } else {
+                        format!("{kind}:{uuid}")
+                    },
+                );
+            }
+            resolve_information_register_open_by_value_command(kind, target, context)
         }
         // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
         // theirs with the object commands handled above. The gate belongs here
@@ -26945,9 +26968,16 @@ pub(super) fn parse_form_command_interface_command(
     // seven; in each case the refusal dropped the whole `<Item>`, and where the
     // refused item was the container's only one it dropped the container.
     //
-    // The six uuids that *do* name something stay refused here: their targets
-    // exist, so their case is a rule about the target, not about the name being
-    // unconstructible, and they are open.
+    // The two uuids that *do* name something stay refused here. Both are in
+    // ERP УХ 3.2.12.6 `Catalogs/Сценарии/Forms/ФормаЭлемента` --
+    // `5:f18047cf-…` (`InformationRegister.ПараметрыУчетаВНАМСФО`) and
+    // `8:50635584-…` (`InformationRegister.ПротоколыОбъектов`) -- and the
+    // platform writes the sentinel for them too. Dropping this condition would
+    // reproduce both, but it would also spell a sentinel for every record this
+    // reader merely fails to name -- a register whose open-by-value dimension
+    // is ambiguous, say -- where the platform does write a name. Those are two
+    // different states and nothing measured here separates them, so the two
+    // records stay unwritten rather than joined by fabricated ones.
     named.or_else(|| {
         let uuid = target.and_then(parse_non_zero_uuid)?;
         (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
