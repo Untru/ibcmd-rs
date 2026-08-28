@@ -76,6 +76,51 @@ pub(super) struct ClientApplicationInterface {
     pub(super) top: Vec<ClientApplicationInterfaceNode>,
     pub(super) left: Vec<ClientApplicationInterfaceNode>,
     pub(super) bottom: Vec<ClientApplicationInterfaceNode>,
+    /// Every panel-definition record the body carries, in stored order.
+    ///
+    /// This is a known, measured over-read on exactly one stand file, kept
+    /// deliberately because nothing in the input tells the two cases apart.
+    ///
+    /// Nine configurations were read for their stored record list (the four
+    /// the stand publishes a reference for -- ERP УХ 3.2.12.6, 1С:УТ
+    /// 11.5.27.75, БСП демо 3.1.12.297, Документооборот КОРП 3.0.21.3 -- plus
+    /// БСП WE base and demo, WMS5, and ERP WE both editions). All nine store
+    /// the same five identifiers, in the same order, each announced by the
+    /// code `2` and each spelling the record `{<uuid>,0}` (Документооборот
+    /// spells the first `{<uuid>,2,4}`). Seven of them additionally store a
+    /// sixth entry announced by the code `1`, `{8e10648b-…,1,""}`, at the end
+    /// of the list. Where a reference exists, the platform publishes every
+    /// code-`2` entry and every code-`1` entry, in stored order.
+    ///
+    /// ERP УХ 3.2.12.6 alone stores that sixth identifier announced by the
+    /// code `2`, second in the list, with the record `{<uuid>,0}` -- byte for
+    /// byte the shape of the five that are published -- and the platform
+    /// publishes nothing for it, writing only the other five. Its own areas
+    /// name that panel exactly the way 1С:УТ's do, and 1С:УТ publishes it.
+    ///
+    /// A seed settles what the two codes mean. Importing a tree whose
+    /// `Ext/ClientApplicationInterface.xml` lists seven panel definitions --
+    /// the five, that sixth identifier spliced in second, and a seventh
+    /// identifier no configuration has ever carried -- and saving the
+    /// configuration back writes the five under the code `2` as `{<uuid>,0}`,
+    /// *in the platform's own order rather than the tree's*, and both others
+    /// after them under the code `1`: `{8e10648b-…,1,""}` and
+    /// `{<seventh>,1,"Панель1"}`, the last with a name the platform generated
+    /// for it. Its own export of that seed publishes all seven, the five
+    /// first and the two code-`1` entries behind them.
+    ///
+    /// So the code is the platform's classification, not the body's: `2` says
+    /// "one of my own standard definitions", `1` says "a definition this body
+    /// names". ERP УХ's record claims the sixth identifier is standard, and
+    /// the platform, rendering a code-`2` record from its own table, finds
+    /// nothing there and writes nothing. Its own writer cannot produce that
+    /// record, and its bytes are identical to the five it does publish, so
+    /// separating them needs the platform's table of standard identifiers.
+    /// Naming those five here would assert a property of the platform that no
+    /// input on the stand measures, and a "first five code-`2` records" rule
+    /// keeps the wrong five. The reader therefore publishes what the body
+    /// states and leaves `Ext/ClientApplicationInterface.xml` of ERP УХ one
+    /// `<panelDef/>` long.
     pub(super) panel_defs: Vec<ClientApplicationPanelDef>,
 }
 

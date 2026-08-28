@@ -77428,3 +77428,50 @@ xsi:type=\"dcsset:SettingsParameterValue\">\r\n\
     // nothing declares.
     assert_eq!(transliterate("xs:string", &BTreeMap::new()), None);
 }
+
+/// A QName inside `<types>` that names the definition's own target namespace is
+/// published with the namespace's later-declared prefix; the same namespace
+/// outside `<types>` keeps `tns`, and a document that already agrees is left
+/// byte for byte alone.
+///
+/// The stand's own evidence is in
+/// `normalize_ws_definition_own_namespace_prefixes`; this fixture is the same
+/// shape in miniature.
+#[test]
+fn ws_definition_publishes_schema_local_qnames_with_the_later_prefix() {
+    const WSDL: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+		xmlns:tns="http://example.test/"
+		xmlns:xsd1="http://example.test/"
+		targetNamespace="http://example.test/">
+	<types>
+		<s:schema xmlns:s="http://www.w3.org/2001/XMLSchema"
+				targetNamespace="http://example.test/">
+			<s:element name="Answer"
+					type="tns:AnswerType"/>
+			<s:complexType name="AnswerType">
+				<s:sequence>
+					<s:element name="Value"
+							type="s:string"/>
+				</s:sequence>
+			</s:complexType>
+		</s:schema>
+	</types>
+	<message name="AnswerIn">
+		<part name="parameters"
+				element="tns:Answer"/>
+	</message>
+</definitions>"#;
+
+    let normalized = normalize_ws_definition_own_namespace_prefixes(WSDL)
+        .expect("the schema-local QName is rewritten");
+    let text = String::from_utf8(normalized).expect("UTF-8");
+    assert!(text.contains("type=\"xsd1:AnswerType\""), "{text}");
+    // The builtin QName and the WSDL-level reference are untouched.
+    assert!(text.contains("type=\"s:string\""), "{text}");
+    assert!(text.contains("element=\"tns:Answer\""), "{text}");
+    assert_eq!(text.matches("tns:").count(), 1);
+
+    // A document that already spells it that way is left exactly as stored.
+    assert!(normalize_ws_definition_own_namespace_prefixes(text.as_bytes()).is_none());
+}

@@ -21858,6 +21858,7 @@ fn parse_metadata_child_fill_value(
             }
             Some("\"#\"") => {
                 return parse_design_time_reference(value, object_refs)
+                    .or_else(|| owner_scoped_design_time_reference(value, object_refs))
                     .map(MetadataChildFillValue::DesignTimeRef);
             }
             _ => {}
@@ -30948,6 +30949,58 @@ fn parse_design_time_reference(
         .rev()
         .filter_map(|uuid| object_refs.get(&uuid).cloned())
         .next()
+}
+
+/// The reference an owner-scoped value identifier names.
+///
+/// A predefined item and an enumeration value are indexed under the owner-
+/// qualified key `owner-value:<owner reference>:<uuid>`, not under the bare
+/// identifier, so a reader that only asks `object_refs` for the identifier
+/// itself cannot see them. The information-register reader already builds that
+/// key, because its record spells the owner beside the value; the wrapped
+/// child record spells the pair one level deeper -- `{"#",<type>,{0,<owner>,
+/// <value>}}` -- and its reader had no owner to build the key from.
+///
+/// The identifier answers for itself instead: the entry is taken only when
+/// exactly one owner-qualified key in the whole index carries it, and only when
+/// the reference that key holds belongs to the owner the key itself names.
+///
+/// Evidence (ERP УХ 3.2.12.6): the configuration publishes 6 290
+/// `<FillValue xsi:type="xr:DesignTimeRef">`, of which 3 898 name three parts
+/// and 1 325 four. Every occurrence under `DataProcessors/` resolves through
+/// the bare identifier except one -- a tabular-section attribute whose stored
+/// value is the wrapped `{"#",<type>,{0,<owner>,<value>}}` and whose target is
+/// a predefined catalog item. That same item is published byte for byte from a
+/// chart of calculation types, which reaches it through the register reader's
+/// owner-qualified key, so the reference is one the index does hold; only this
+/// reader could not ask for it.
+fn owner_scoped_design_time_reference(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    uuid_like_values(text)
+        .into_iter()
+        .rev()
+        .find_map(|value_uuid| {
+            let mut resolved = None;
+            for (key, reference) in object_refs {
+                let Some((owner, candidate)) = metadata_owner_value_reference_key_parts(key) else {
+                    continue;
+                };
+                if candidate != value_uuid {
+                    continue;
+                }
+                if !information_register_reference_belongs_to_owner(owner, reference) {
+                    return None;
+                }
+                if resolved.is_some_and(|previous| previous != reference) {
+                    return None;
+                }
+                resolved = Some(reference);
+            }
+            resolved
+        })
+        .cloned()
 }
 
 fn parse_design_time_references(text: &str, object_refs: &BTreeMap<String, String>) -> Vec<String> {

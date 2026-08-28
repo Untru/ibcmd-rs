@@ -1911,6 +1911,18 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let has_sparse_column_sets = column_sets
         .iter()
         .any(|column_set| column_set.columns.len() != column_set.size);
+    // The leading default-format record is read here, ahead of the line table,
+    // because it is a published format: `moxel_format_for_index` renders the
+    // slot `<defaultFormatIndex>` materializes from it, so the lines it cites
+    // are lines the document publishes and the table must keep them. Reading it
+    // only after the table was compacted left
+    // `Documents/ОперацияМеждународный/Templates/
+    // МакетЗагрузкиПроводокБезКорреспонденции` -- whose 22 stored formats cite
+    // no line at all and whose leading record cites line 0 through its
+    // `border` member -- publishing no `<line>` against native's one.
+    let mut leading_default_format = fields
+        .get(MOXEL_LEADING_DEFAULT_FORMAT_FIELD)
+        .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs));
     // The document's own line table is authoritative wherever it decodes; the
     // legacy reconstruction below only runs when the slot refuses.
     let resolved_lines = match parse_moxel_line_table(&fields)
@@ -1921,6 +1933,12 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
                 .iter()
                 .cloned()
                 .chain(std::iter::once(default_format.clone()))
+                .chain(
+                    leading_default_format
+                        .iter()
+                        .filter(|format| !format.is_empty())
+                        .cloned(),
+                )
                 .collect::<Vec<_>>();
             let (lines, line_remap) = compact_moxel_line_table(lines, &line_scan_formats);
             let all_formats = if let Some(line_remap) = &line_remap {
@@ -1928,6 +1946,9 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
                     remap_moxel_format_line_refs(format, line_remap);
                 }
                 remap_moxel_format_line_refs(&mut default_format, line_remap);
+                if let Some(leading) = leading_default_format.as_mut() {
+                    remap_moxel_format_line_refs(leading, line_remap);
+                }
                 column_formats
                     .iter()
                     .chain(formats.iter())
@@ -2014,10 +2035,8 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     );
     // The leading record is what `<defaultFormatIndex>` names, so a table entry
     // that already carries its bytes is the slot: the pool must not grow a copy
-    // of it beside the original.
-    let leading_default_format = fields
-        .get(MOXEL_LEADING_DEFAULT_FORMAT_FIELD)
-        .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs));
+    // of it beside the original. (It is read further up, before the line table,
+    // because the lines it cites are published lines.)
     if default_format_index.is_some_and(|index| index > column_formats.len() + formats.len())
         && let Some(leading) = leading_default_format
             .as_ref()
@@ -2171,7 +2190,80 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         remap_moxel_source_fonts(&source_font_map, &mut spreadsheet);
     }
     normalize_moxel_lines_to_published_citation_order(&mut spreadsheet);
+    restore_moxel_text_of_cells_whose_format_states_no_parameter(&mut spreadsheet);
     Some(spreadsheet)
+}
+
+/// A cell's text container is published as `<parameter>` only where the cell's
+/// own format states `fillType` `Parameter`; every other cell publishes the
+/// same container as a text list.
+///
+/// The container cannot answer this by itself. `{1,1,{"",<content>}}` -- a sole
+/// item with an empty language -- is what both a parameter reference and a
+/// one-item text list store, so the leading-empty-language test the cell reader
+/// applies is a guess wherever a document spells a text list that way. The
+/// format the cell names does answer it, and the whole stand agrees:
+///
+/// Evidence (all eight native corpora -- ERP УХ 3.2.12.6, 1С:УТ 11.5.27.75,
+/// Документооборот КОРП 3.0.21.3, БСП demo and base, WMS5 Модуль Web-обмена,
+/// ERP УХ Web_Service and MDM_Management -- every spreadsheet document in every
+/// published XML, 18 715 661 cells): all 94 332 cells that publish
+/// `<parameter>` name a format whose published body carries
+/// `<fillType>Parameter</fillType>`, and not one cell behind such a format
+/// publishes `<tl>`/`<tfl>` instead. In the other direction only three cells in
+/// the entire stand publish a text list whose leading item has an empty
+/// language -- two in ERP УХ's `Catalogs/СоответствиеВнешнимИБ/Templates/
+/// МакетОтображения` (formats stating `Text` and stating no `fillType`) and one
+/// in `DataProcessors/ДокументооборотСКонтролирующимиОрганами/Templates/
+/// АктСверкиСФНС5_03` -- and those three are exactly the cells the guess spells
+/// as parameters.
+///
+/// The pass reads the format through `moxel_format_for_index`, which is the
+/// same call the published pool entry is rendered from, so the `fillType` it
+/// tests is the one the document itself publishes for that slot. A cell whose
+/// format slot is 0 names no format at all and therefore states no
+/// `fillType`; the stand publishes no `<parameter>` behind such a cell.
+fn restore_moxel_text_of_cells_whose_format_states_no_parameter(
+    spreadsheet: &mut MoxelSpreadsheet,
+) {
+    let cited = spreadsheet
+        .rows
+        .iter()
+        .flat_map(|row| row.cells.iter())
+        .filter(|cell| cell.parameter.is_some())
+        .map(|cell| cell.format_index)
+        .collect::<BTreeSet<_>>();
+    if cited.is_empty() {
+        return;
+    }
+    let parameter_formats = cited
+        .into_iter()
+        .filter(|format_index| {
+            *format_index > 0
+                && moxel_format_for_index(spreadsheet, *format_index).fill_type == Some("Parameter")
+        })
+        .collect::<BTreeSet<_>>();
+    for cell in spreadsheet
+        .rows
+        .iter_mut()
+        .flat_map(|row| row.cells.iter_mut())
+    {
+        if cell.parameter.is_none() {
+            continue;
+        }
+        if parameter_formats.contains(&cell.format_index) {
+            // The format names a parameter: the container is the reference the
+            // cell publishes, and no text list is published beside it.
+            cell.text = Vec::new();
+            continue;
+        }
+        cell.parameter = None;
+        // An item whose content is empty is not published as content; the
+        // container is the self-closed element instead, exactly as the text
+        // branch of the reader above spells it.
+        cell.text.retain(|item| !item.content.is_empty());
+        cell.empty_text = cell.text.is_empty();
+    }
 }
 
 /// The line references one published `<format>` element names, in the order the
@@ -3713,15 +3805,20 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
     // cannot spell out is dropped rather than costing the cell.
     let localized = text_at.and_then(|at| parse_moxel_localized_cell_value(fields.get(at)?));
     let has_text_member = localized.is_some();
-    // An empty language on the leading item marks a parameter reference
-    // rather than a text list (see `MoxelDrawingMembers::text`, the same
-    // container); a parameter is always the sole item, everything else is
-    // the text list in full, every declared language included.
+    // An empty language on the leading item is what a parameter reference
+    // stores (see `MoxelDrawingMembers::text`, the same container) -- and it
+    // is also what a text list whose sole declared language is the empty one
+    // stores. The container cannot separate them, so both readings are kept
+    // here, the items verbatim beside the parameter the leading item would
+    // name, and
+    // `restore_moxel_text_of_cells_whose_format_states_no_parameter` settles
+    // the cell against the `fillType` its own format states. Everything else
+    // is the text list in full, every declared language included.
     let (text, parameter) = match localized {
-        Some(items) if items.first().is_some_and(|first| first.lang.is_empty()) => (
-            Vec::new(),
-            items.into_iter().next().map(|item| item.content),
-        ),
+        Some(items) if items.first().is_some_and(|first| first.lang.is_empty()) => {
+            let parameter = items.first().map(|item| item.content.clone());
+            (items, parameter)
+        }
         // An item whose content is empty is not published. Evidence: over the
         // whole `Templates/*/Ext/Template.xml` corpus of ERP УХ 3.2.12.6,
         // 1С:УТ 11.5.27.75 and Документооборот КОРП 3.0.21.3 -- 10 163 199
@@ -12474,6 +12571,31 @@ pub(super) fn moxel_format_for_index(
         {
             return format;
         }
+        // The slot `<defaultFormatIndex>` materializes carries the leading
+        // default-format record's own bytes wherever the body states one. The
+        // reader already reads that record for the index itself -- a table
+        // entry equal to it repoints the index onto that entry rather than
+        // growing a copy beside it -- so the slot the index does land on is
+        // that same record.
+        //
+        // Evidence (ERP УХ 3.2.12.6, `Documents/ОперацияМеждународный/
+        // Templates/МакетЗагрузкиПроводокБезКорреспонденции` and
+        // `…СКорреспонденцией`): both bodies state a leading record --
+        // `{190,0,0,0,0,0,72}` and its five-member sibling -- that no entry of
+        // their 22- and 25-entry tables carries, and native publishes exactly
+        // 23 and 26 `<format>` elements whose last one is that record, named by
+        // `<defaultFormatIndex>` 23 and 26. Rendering the slot from the
+        // `{1,0,<style>}` border-colour record plus the scanned default width
+        // instead put different bytes there, which left the leading record
+        // unfound in the pool and appended it as one more entry - the two
+        // documents' only difference from native.
+        if let Some(leading) = spreadsheet
+            .leading_default_format
+            .as_ref()
+            .filter(|format| !format.is_empty())
+        {
+            return leading.clone();
+        }
         let mut format = spreadsheet.default_format.clone();
         if format.width.is_none() {
             format.width = spreadsheet.default_format_width;
@@ -13876,10 +13998,21 @@ pub(super) fn push_moxel_row_xml(
             xml.push_str(&format!("\t\t\t\t\t<{text_element}>\r\n"));
             for item in &cell.text {
                 xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
-                xml.push_str(&format!(
-                    "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                    escape_xml_element_text(&item.lang)
-                ));
+                // The empty language is spelled by the self-closed element.
+                // Evidence (all eight native corpora): `<v8:lang></v8:lang>`
+                // does not occur once, while `<v8:lang/>` occurs in four
+                // files - two of them, ERP УХ's `ChartsOfAccounts/МСФО.xml`
+                // and `DataProcessors/анлУправлениеПоставляемымиПанелями1С\
+                // Аналитика/Forms/Форма/Ext/Form.xml`, are written byte-exact
+                // through other writers that already self-close it.
+                if item.lang.is_empty() {
+                    xml.push_str("\t\t\t\t\t\t\t<v8:lang/>\r\n");
+                } else {
+                    xml.push_str(&format!(
+                        "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                        escape_xml_element_text(&item.lang)
+                    ));
+                }
                 xml.push_str(&format!(
                     "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
                     escape_xml_element_text(&item.content)
