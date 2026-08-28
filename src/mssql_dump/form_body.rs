@@ -21569,41 +21569,107 @@ fn resolve_form_owner_scoped_button_data_path(
 ) -> FormOwnerScopedDataPath {
     let no_global_binding_paths = BTreeMap::new();
     FormOwnerScopedDataPath::from_option(
-        parse_form_button_data_path(
-            field,
-            attribute_names_by_id,
-            table_name_by_id,
-            table_column_names_by_id,
-            type_link_data_path_by_table_column,
-            &no_global_binding_paths,
-            owner_scoped_bindings,
-        )
-        // A button addresses its data in the same chain grammar every other
-        // item uses, so a slot the button-only route cannot spell is read as
-        // the chain it is rather than dropped. Evidence: UT 11.5.27.75
-        // `Catalogs/СделкиСКлиентами/Forms/ФормаЭлемента`, Button `Кнопка`
-        // carries `{2,{1},{0,2a0c92dc-…}}` against the `Объект` attribute and
-        // the platform writes `<DataPath>Объект.ВидСделки</DataPath>`.
-        .or_else(|| {
-            resolve_form_bound_chain_member_path(
-                field,
-                attribute_metadata_owners_by_id,
-                owner_scoped_bindings,
-                object_refs,
-                false,
-            )
-        }), // A negative marker on the root attribute names one of the standard
-            // attributes that attribute's own type declares. It used to be read
-            // here by a route of its own that admitted the two-segment chain
-            // `{2,{<attribute>},{<marker>}}` and nothing longer; the chain walker
-            // above reads the very same declaration in the very same position, so
-            // the route is gone and the fact has one reader. Evidence:
-            // UT 11.5.27.75 `ExchangePlans/ОбменССайтом/Forms/ФормаУзла`, Button
-            // `ФормаПланОбменаОбменССайтомВыполнитьОбменДанными` carries
-            // `{2,{1},{-6}}` against the `Объект` attribute of type
-            // `cfg:ExchangePlanObject.ОбменССайтом`, and the platform writes
-            // `<DataPath>Объект.Ref</DataPath>`.
+        // The standard member a negative marker names is the one the root
+        // attribute's own declared type names, exactly as every other bound
+        // slot reads it. The button route behind this one answers `-5` and `-8`
+        // with a flat `Ref` whatever the type is, which is right for the two
+        // families that carry the marker most often and wrong for the two that
+        // do not.
+        //
+        // Census over every `{2,{attribute},{-n}}` bound slot of the eight stand
+        // corpora, paired against the `<DataPath>` the platform writes for the
+        // item that carries it: no `(family, marker)` pair is spelled two ways,
+        // and buttons and non-buttons agree on every pair they share. The 727
+        // such slots on `Button` items are `CatalogObject`/`-8` -> `Ref` (292),
+        // `DocumentObject`/`-5` -> `Ref` (351), `BusinessProcessObject`/`-5` ->
+        // `Ref` (64), `ExchangePlanObject`/`-6` -> `Ref` (6), `TaskObject`/`-5`
+        // -> `Ref` (5), `ChartOfAccountsObject`/`-2` -> `Ref` (2),
+        // `CatalogObject`/`-4` -> `Parent` (1), `CatalogObject`/`-5` -> `Owner`
+        // (1, ERP УХ `Catalogs/БланкиОтчетов/Forms/ФормаМакета`) and
+        // `DocumentObject`/`-8` -> `RegisterRecords` (5, ERP УХ
+        // `Documents/Лот/Forms/ФормаДокумента`). The family tables answer all
+        // but the last, and `-8` on a document object is the collection the
+        // use-always route already reads it as; the two families whose table
+        // does not name the marker keep the flat `Ref` behind this route.
+        resolve_form_button_standard_terminal_data_path(field, attribute_metadata_owners_by_id)
+            .or_else(|| {
+                parse_form_button_data_path(
+                    field,
+                    attribute_names_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    type_link_data_path_by_table_column,
+                    &no_global_binding_paths,
+                    owner_scoped_bindings,
+                )
+            })
+            // A button addresses its data in the same chain grammar every other
+            // item uses, so a slot the button-only route cannot spell is read as
+            // the chain it is rather than dropped. Evidence: UT 11.5.27.75
+            // `Catalogs/СделкиСКлиентами/Forms/ФормаЭлемента`, Button `Кнопка`
+            // carries `{2,{1},{0,2a0c92dc-…}}` against the `Объект` attribute and
+            // the platform writes `<DataPath>Объект.ВидСделки</DataPath>`.
+            .or_else(|| {
+                resolve_form_bound_chain_member_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                    false,
+                )
+            })
+            // A button may also address one field of a list by that field's own
+            // map id, which is the same `{2,{attribute},{column}}` slot every
+            // field item carries and which the route above cannot answer,
+            // because a field-map id is not a declared column.
+            //
+            // Evidence: two buttons on the whole stand carry that shape --
+            // `ИспользованиеСчетаМеждународногоУчета` and
+            // `СоответствующиеСчетаРеглУчета` of ERP УХ 3.2.12.6
+            // `ChartsOfAccounts/Международный/Forms/ФормаСписка`, both
+            // `{2,{1},{15}}` against the `Список` dynamic list, both written
+            // `Список.Ссылка`. Both were written with no `<DataPath>` at all.
+            .or_else(|| {
+                match resolve_form_attribute_column_data_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                    owner_scoped_bindings,
+                ) {
+                    FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+                    FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+                }
+            }),
     )
+}
+
+/// The standard member a button's two-segment bound slot `{2,{attribute},{-n}}`
+/// names, read against the root attribute's own declared type.
+///
+/// Two readings, both already stated elsewhere in this file for the very same
+/// `(type, marker)` pair: the family's standard-attribute table, and the
+/// object's own collection property, which is what `-8` names on a document.
+/// A marker neither reading names is left to the routes behind this one.
+fn resolve_form_button_standard_terminal_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+) -> Option<String> {
+    let segments = parse_form_bound_chain_segments(field)?;
+    let [root, terminal] = segments.as_slice() else {
+        return None;
+    };
+    let ([attribute_id], [marker]) = (root.as_slice(), terminal.as_slice()) else {
+        return None;
+    };
+    let marker = marker.trim();
+    let code = marker.parse::<i64>().ok()?;
+    if code >= 0 {
+        return None;
+    }
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
+    let reference = attribute.exact_single_type_reference.as_deref()?;
+    let member = form_standard_attribute_name_for_type_reference(reference, marker)
+        .or_else(|| form_object_standard_property_name(reference, code))?;
+    Some(format!("{}.{member}", attribute.name))
 }
 
 /// Resolves a multi-segment binding against a dynamic-list attribute.
