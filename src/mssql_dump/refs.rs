@@ -2731,7 +2731,7 @@ pub(super) fn build_template_source_reference_index_from_texts(
             .or_else(|| {
                 rows_by_file_name
                     .get(body_id.as_str())
-                    .and_then(|row| decode_hex(&row.binary_hex).ok())
+                    .and_then(|row| row.binary_bytes().ok())
                     .and_then(|bytes| infer_template_type_from_body(&bytes))
             })
             .unwrap_or("BinaryData");
@@ -2991,7 +2991,7 @@ pub(super) fn form_help_asset_paths(
                 continue;
             }
             if let Some(row) = rows_by_file_name.get(*body_id)
-                && let Ok(bytes) = decode_hex(&row.binary_hex)
+                && let Ok(bytes) = row.binary_bytes()
                 && parse_help_blob_pages(&bytes).is_some()
             {
                 paths.insert(

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Read;
@@ -2338,11 +2339,17 @@ pub fn export_storage_image_to_source(
                 record.logical_key()
             )
         })?;
+        #[cfg(test)]
+        let binary_hex = encode_hex_lower(payload.as_ref());
+        #[cfg(not(test))]
+        let binary_hex = String::new();
         rows.push(ConfigRow {
             file_name: record.logical_name().to_owned(),
             part_no: 0,
             data_size,
-            binary_hex: encode_hex_lower(payload.as_ref()),
+            binary_hex,
+            #[cfg(not(test))]
+            binary: Some(payload.into_owned()),
         });
     }
 
@@ -3171,8 +3178,9 @@ fn dump_table_rows_with_options_mode(
                 bail!("Config versions row was fetched more than once");
             }
             versions_blob = Some(
-                decode_hex(&row.binary_hex)
-                    .with_context(|| "Config versions row is not valid hex".to_string())?,
+                row.binary_bytes()
+                    .with_context(|| "Config versions row is not valid hex".to_string())?
+                    .into_owned(),
             );
         }
 
@@ -4488,6 +4496,8 @@ fn rows_for_source_indexes(
             part_no: header.part_no,
             data_size: header.data_size,
             binary_hex: String::new(),
+            #[cfg(not(test))]
+            binary: None,
         });
     }
     rows
@@ -4502,7 +4512,7 @@ struct MetadataTextRowsAudit {
 fn build_metadata_text_rows_audited(rows: &[ConfigRow]) -> MetadataTextRowsAudit {
     let mut audit = MetadataTextRowsAudit::default();
     for row in rows.iter().filter(|row| !row.file_name.contains('.')) {
-        let row_audit = match decode_hex(&row.binary_hex) {
+        let row_audit = match row.binary_bytes() {
             Ok(bytes) => metadata_text_row_audit_from_blob(&row.file_name, &bytes),
             Err(_) => MetadataTextRowAudit::Miss(MetadataExtractionMiss {
                 file_name: row.file_name.clone(),
@@ -4832,7 +4842,7 @@ fn business_process_flowchart_predefined_owner_ids(
         if !flowchart_file_names.contains(&row.file_name) {
             continue;
         }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         let Ok(inflated) = inflate_raw_deflate(&bytes) else {
@@ -4891,7 +4901,8 @@ fn merge_config_rows_by_file_name(
 }
 
 fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<DumpedRow> {
-    let bytes = decode_hex(&row.binary_hex)
+    let bytes = row
+        .binary_bytes()
         .with_context(|| format!("failed to decode {} row {}", context.table, row.file_name))?;
     dump_table_row_bytes(context, &row.file_name, row.part_no, row.data_size, &bytes)
 }
@@ -42591,6 +42602,7 @@ fn inflate_raw_deflate(input: &[u8]) -> Result<Vec<u8>> {
     Ok(output)
 }
 
+#[cfg(test)]
 fn encode_hex_lower(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -42613,6 +42625,24 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>> {
                 .with_context(|| format!("invalid hex byte at offset {index}"))
         })
         .collect()
+}
+
+impl ConfigRow {
+    fn binary_bytes(&self) -> Result<Cow<'_, [u8]>> {
+        #[cfg(not(test))]
+        if let Some(bytes) = self.binary.as_deref() {
+            return Ok(Cow::Borrowed(bytes));
+        }
+        decode_hex(&self.binary_hex).map(Cow::Owned)
+    }
+
+    fn binary_is_empty(&self) -> bool {
+        #[cfg(not(test))]
+        if let Some(bytes) = self.binary.as_deref() {
+            return bytes.is_empty();
+        }
+        self.binary_hex.is_empty()
+    }
 }
 
 #[cfg(test)]

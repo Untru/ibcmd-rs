@@ -4,7 +4,7 @@
 //! data page headers. Entry payload bytes are fetched on an explicit read.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
     io::{self, Read, Seek, SeekFrom},
@@ -416,10 +416,85 @@ struct ClaimedRange {
     start: u64,
     end: u64,
     owner: u64,
+    order: usize,
+}
+
+struct ClaimIndex {
+    by_start: BTreeMap<u64, ClaimedRange>,
+    next_order: usize,
+}
+
+impl ClaimIndex {
+    fn with_initial(start: u64, end: u64, owner: u64) -> Self {
+        let mut index = Self {
+            by_start: BTreeMap::new(),
+            next_order: 0,
+        };
+        index.insert_unchecked(start, end, owner);
+        index
+    }
+
+    fn ensure_unclaimed(&self, address: u64, end: u64) -> Result<(), ReaderError> {
+        let predecessor = self
+            .by_start
+            .range(..address)
+            .next_back()
+            .map(|(_, claimed)| claimed)
+            .filter(|claimed| address < claimed.end);
+        let mut successors = self
+            .by_start
+            .range(address..end)
+            .map(|(_, claimed)| claimed);
+        let successor = successors.next();
+        let Some(mut conflict) = predecessor.or(successor) else {
+            return Ok(());
+        };
+
+        // A malformed candidate may span multiple existing ranges. Preserve the
+        // former linear check's observable error by reporting the earliest claim.
+        if let Some(claimed) = successor {
+            if claimed.order < conflict.order {
+                conflict = claimed;
+            }
+        }
+        for claimed in successors {
+            if claimed.order < conflict.order {
+                conflict = claimed;
+            }
+        }
+
+        if address == conflict.start {
+            return Err(ReaderError::RepeatedAddress {
+                address,
+                claimed_by: conflict.owner,
+            });
+        }
+        Err(ReaderError::Overlap {
+            address,
+            end,
+            conflicting_address: conflict.start,
+            conflicting_end: conflict.end,
+        })
+    }
+
+    fn insert_unchecked(&mut self, start: u64, end: u64, owner: u64) {
+        let order = self.next_order;
+        self.next_order += 1;
+        let previous = self.by_start.insert(
+            start,
+            ClaimedRange {
+                start,
+                end,
+                owner,
+                order,
+            },
+        );
+        debug_assert!(previous.is_none());
+    }
 }
 
 struct IndexState {
-    claims: Vec<ClaimedRange>,
+    claims: ClaimIndex,
     pages: usize,
     maximum_pages: usize,
 }
@@ -452,11 +527,11 @@ fn build_index<R: Read + Seek>(
 
     let maximum_pages = limits.max_entries().saturating_mul(PAGE_MULTIPLIER).max(1);
     let mut state = IndexState {
-        claims: vec![ClaimedRange {
-            start: layout.base_offset,
-            end: layout.base_offset + layout.file_header_size as u64,
-            owner: 0,
-        }],
+        claims: ClaimIndex::with_initial(
+            layout.base_offset,
+            layout.base_offset + layout.file_header_size as u64,
+            0,
+        ),
         pages: 0,
         maximum_pages,
     };
@@ -586,7 +661,6 @@ fn index_chain<R: Read + Seek>(
 ) -> Result<ChainIndex, ReaderError> {
     let mut address = start_address;
     let mut seen = BTreeSet::new();
-    let mut local = Vec::new();
     let mut pages = Vec::new();
     let mut declared_size = None;
     let mut collected = 0_u64;
@@ -612,7 +686,7 @@ fn index_chain<R: Read + Seek>(
                 address: physical,
                 length: layout.block_header_size as u64,
             })?;
-        ensure_unclaimed(physical, header_end, &state.claims, &local)?;
+        state.claims.ensure_unclaimed(physical, header_end)?;
         let raw_header = read_vec_at(source, physical, layout.block_header_size, stream_length)?;
         let fields = parse_block_header(&raw_header, address, layout)?;
         let page_end =
@@ -629,7 +703,7 @@ fn index_chain<R: Read + Seek>(
                 stream_length,
             });
         }
-        ensure_unclaimed(physical, page_end, &state.claims, &local)?;
+        state.claims.ensure_unclaimed(physical, page_end)?;
 
         state.pages = state
             .pages
@@ -656,11 +730,9 @@ fn index_chain<R: Read + Seek>(
                 collected_size: u64::MAX,
                 next_page_address: None,
             })?;
-        local.push(ClaimedRange {
-            start: physical,
-            end: page_end,
-            owner: start_address,
-        });
+        state
+            .claims
+            .insert_unchecked(physical, page_end, start_address);
         pages.push(PageIndex {
             address,
             payload_offset: header_end,
@@ -681,7 +753,6 @@ fn index_chain<R: Read + Seek>(
                     next_page_address: next,
                 });
             }
-            state.claims.extend(local);
             return Ok(ChainIndex {
                 data_size: total,
                 pages,
@@ -829,31 +900,6 @@ fn ensure_structural_limit(actual: u64, limits: ResourceLimits) -> Result<(), Re
     Ok(())
 }
 
-fn ensure_unclaimed(
-    address: u64,
-    end: u64,
-    global: &[ClaimedRange],
-    local: &[ClaimedRange],
-) -> Result<(), ReaderError> {
-    for claimed in global.iter().chain(local) {
-        if address == claimed.start {
-            return Err(ReaderError::RepeatedAddress {
-                address,
-                claimed_by: claimed.owner,
-            });
-        }
-        if address < claimed.end && claimed.start < end {
-            return Err(ReaderError::Overlap {
-                address,
-                end,
-                conflicting_address: claimed.start,
-                conflicting_end: claimed.end,
-            });
-        }
-    }
-    Ok(())
-}
-
 fn stream_length<R: Seek>(source: &mut R) -> Result<u64, ReaderError> {
     source
         .seek(SeekFrom::End(0))
@@ -914,8 +960,69 @@ mod tests {
 
     use ibcmd_core::limits::ResourceLimits;
 
-    use super::StreamingReader;
+    use super::{ClaimIndex, ClaimedRange, ReaderError, StreamingReader};
     use crate::format15;
+
+    fn legacy_ensure_unclaimed(
+        address: u64,
+        end: u64,
+        claims: &[ClaimedRange],
+    ) -> Result<(), ReaderError> {
+        for claimed in claims {
+            if address == claimed.start {
+                return Err(ReaderError::RepeatedAddress {
+                    address,
+                    claimed_by: claimed.owner,
+                });
+            }
+            if address < claimed.end && claimed.start < end {
+                return Err(ReaderError::Overlap {
+                    address,
+                    end,
+                    conflicting_address: claimed.start,
+                    conflicting_end: claimed.end,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn claim_index_matches_legacy_overlap_errors() {
+        let ranges = [(40, 50, 4), (0, 10, 0), (20, 30, 2), (60, 70, 6)];
+        let mut index = ClaimIndex::with_initial(ranges[0].0, ranges[0].1, ranges[0].2);
+        for &(start, end, owner) in &ranges[1..] {
+            index.insert_unchecked(start, end, owner);
+        }
+        let legacy = ranges
+            .into_iter()
+            .enumerate()
+            .map(|(order, (start, end, owner))| ClaimedRange {
+                start,
+                end,
+                owner,
+                order,
+            })
+            .collect::<Vec<_>>();
+
+        for address in 0..80 {
+            for end in address + 1..=80 {
+                assert_eq!(
+                    index.ensure_unclaimed(address, end),
+                    legacy_ensure_unclaimed(address, end, &legacy),
+                    "candidate range {address}..{end}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn claim_index_accepts_adjacent_ranges() {
+        let index = ClaimIndex::with_initial(10, 20, 10);
+
+        assert_eq!(index.ensure_unclaimed(0, 10), Ok(()));
+        assert_eq!(index.ensure_unclaimed(20, 30), Ok(()));
+    }
 
     #[derive(Default)]
     struct SparseSource {

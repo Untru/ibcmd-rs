@@ -9,9 +9,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 
+#[cfg(test)]
+use super::encode_hex_lower;
 use super::{
-    BinaryConfigRow, ConfigChunkRow, ConfigRow, ConfigRowHeader, encode_hex_lower,
-    qualified_storage_table, quote_string,
+    BinaryConfigRow, ConfigChunkRow, ConfigRow, ConfigRowHeader, qualified_storage_table,
+    quote_string,
 };
 use crate::runtime_evidence_schema::{SanitizedRuntimeArgumentKind, SubprocessJournalSchema};
 
@@ -585,11 +587,17 @@ pub(super) fn config_rows_from_binary(rows: Vec<BinaryConfigRow>) -> Vec<ConfigR
 }
 
 pub(super) fn config_row_from_binary(row: BinaryConfigRow) -> ConfigRow {
+    #[cfg(test)]
+    let binary_hex = encode_hex_lower(&row.binary);
+    #[cfg(not(test))]
+    let binary_hex = String::new();
     ConfigRow {
         file_name: row.file_name,
         part_no: row.part_no,
         data_size: row.data_size,
-        binary_hex: encode_hex_lower(&row.binary),
+        binary_hex,
+        #[cfg(not(test))]
+        binary: Some(row.binary),
     }
 }
 
@@ -1026,6 +1034,8 @@ pub(super) fn parse_config_direct_rows(stdout: &str) -> Result<Vec<ConfigRow>> {
                 format!("invalid data_size on direct row line {}", line_index + 1)
             })?,
             binary_hex: fields[3].trim().to_ascii_lowercase(),
+            #[cfg(not(test))]
+            binary: None,
         });
     }
     Ok(rows)
@@ -1108,6 +1118,8 @@ pub(super) fn assemble_config_rows(chunks: Vec<ConfigChunkRow>) -> Result<Vec<Co
                 part_no: chunk.part_no,
                 data_size: chunk.data_size,
                 binary_hex: chunk.binary_hex,
+                #[cfg(not(test))]
+                binary: None,
             });
     }
 
@@ -1137,6 +1149,8 @@ pub(super) fn assemble_config_rows(chunks: Vec<ConfigChunkRow>) -> Result<Vec<Co
                 part_no: 0,
                 data_size: part.data_size,
                 binary_hex: part.binary_hex,
+                #[cfg(not(test))]
+                binary: None,
             });
     }
 
