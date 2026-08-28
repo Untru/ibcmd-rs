@@ -23620,6 +23620,28 @@ fn resolve_form_attribute_column_data_path(
             .value_list_attribute_ids
             .contains(attribute_id)
     {
+        // On a dynamic list that is not a refusal to answer but a statement
+        // that the slot names no field of the list at all -- a field map
+        // numbers its entries from one -- and the platform writes no
+        // `<DataPath>`. Leaving the slot merely unknown handed it to the
+        // binding-key index, which answers with a name inferred from what other
+        // items called the same key.
+        //
+        // Evidence: over every `{2,{attribute},{0}}` bound slot of the eight
+        // stand corpora, 914 stand on a `v8:ValueListType` attribute, 18 on a
+        // `v8:StandardPeriod`, 30 on a `dcsset:SettingsComposer` and 2 on a
+        // dynamic list. Every one of the first three groups is written exactly
+        // as the export already writes it; the two on a dynamic list -- ERP УХ
+        // 3.2.12.6 `InformationRegisters/ИменаФайловИКаталогов/Forms/
+        // ФормаСпискаУправляемая`, InputField `СписокОтборовЗначение` -- are
+        // written with no `<DataPath>`, and the export invented
+        // `ВидыСубконто.СписокОтборовЗначение` for them.
+        if owner_scoped_bindings
+            .dynamic_list_attribute_ids
+            .contains(attribute_id)
+        {
+            return FormOwnerScopedDataPath::Ambiguous;
+        }
         return FormOwnerScopedDataPath::Unknown;
     }
     let key = FormAttributeColumnKey {
