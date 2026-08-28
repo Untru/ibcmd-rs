@@ -5200,6 +5200,19 @@ impl FormCheckBoxFieldSchema {
     /// platform writes one on, with the decoded text equal to the platform's own
     /// `<v8:content>` on every one of them.
     const EDIT_FORMAT_OPTION_SLOT: usize = 5;
+    /// `ItemTitleHeight` of the same 13-member `11`-headed tuple.
+    ///
+    /// Census of the dumped layouts of all eight stand corpora joined to the
+    /// platform's own `<CheckBoxField>` for the same item id -- all 20 386
+    /// check boxes: member 8 is `0` on the 20 385 that carry no
+    /// `<ItemTitleHeight>` and `1` on the one that carries
+    /// `<ItemTitleHeight>1</ItemTitleHeight>` (ERP УХ
+    /// `Documents/ПоясненияКДекларацииПоНДС/Forms/ФормаРеквизитыСчетаФактуры`,
+    /// field `СтандартныйСчетФактура`). The member is read as the written
+    /// height, the way the radio button already reads its own out of its own
+    /// tuple; `1` is the only non-zero value the stand shows here, so no other
+    /// height is claimed.
+    const ITEM_TITLE_HEIGHT_OPTION_SLOT: usize = 8;
 
     pub(crate) fn top_level_offset_for_raw_layout(
         wrapper: &str,
@@ -5274,6 +5287,11 @@ impl FormCheckBoxFieldSchema {
 
     pub(crate) const fn edit_format_option_slot(self) -> usize {
         Self::EDIT_FORMAT_OPTION_SLOT
+    }
+
+    pub(crate) fn item_title_height(self, options: &[&str]) -> Option<String> {
+        let value = options.get(Self::ITEM_TITLE_HEIGHT_OPTION_SLOT)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
     }
 
     pub(crate) const fn tooltip_slot(self) -> usize {
@@ -7189,6 +7207,7 @@ enum FormTooltipRepresentationItemKind {
     ChartField,
     SpreadSheetDocumentField,
     HTMLDocumentField,
+    FormattedDocumentField,
     CommandBar,
     Button,
     Other,
@@ -7217,6 +7236,7 @@ impl FormTooltipRepresentationItemKind {
             "ChartField" => Self::ChartField,
             "SpreadSheetDocumentField" => Self::SpreadSheetDocumentField,
             "HTMLDocumentField" => Self::HTMLDocumentField,
+            "FormattedDocumentField" => Self::FormattedDocumentField,
             "CommandBar" => Self::CommandBar,
             "Button" => Self::Button,
             _ => Self::Other,
@@ -7331,6 +7351,25 @@ pub(crate) fn form_tooltip_representation_schema(
                 | FormTooltipRepresentationItemKind::ChartField
                 | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
                 | FormTooltipRepresentationItemKind::HTMLDocumentField
+                // The formatted document reads the same reverse offset and was
+                // simply never named. Census of the dumped layouts of all eight
+                // stand corpora joined to the platform's own element for the
+                // same item id, every wrapper-`37` record: reverse offset 9 is
+                // a total function of `<ToolTipRepresentation>` on every kind,
+                // and on this one it reads `0` on the 185 records that carry no
+                // element and `2` on the one that says `Balloon` (ERP УХ
+                // `Catalogs/ШаблоныОповещений/Forms/ФормаРедактированияШаблона`,
+                // field `ТекстПроверка`), with no code mapping to two answers.
+                //
+                // The kinds the stand never writes the element on stay out --
+                // `TextDocumentField` (all 287 read `0`), `GraphicalSchemaField`
+                // (21), `PlannerField` (5) -- because their position in the
+                // element order is unobserved, and so do `PDFDocumentField` and
+                // `GanttChartField`, whose records are one member longer and
+                // whose reverse offset 9 reads `1` on all 14 PDF viewers and on
+                // 17 of the 20 Gantt charts, none of which the platform writes
+                // any element for: there the coordinate is a different member.
+                | FormTooltipRepresentationItemKind::FormattedDocumentField
         )
     {
         return Some(FormTooltipRepresentationSchema {
@@ -7398,7 +7437,13 @@ pub(crate) fn form_tooltip_representation_xml_order(
         // do: behind `DataPath`/`SkipOnInput`/`TitleLocation` and ahead of the
         // geometry run (`Width`, `Height`, `MaxHeight`), `BorderColor`,
         // `ContextMenu` and `ExtendedTooltip`.
-        | FormTooltipRepresentationItemKind::HTMLDocumentField => {
+        | FormTooltipRepresentationItemKind::HTMLDocumentField
+        // A `FormattedDocumentField` puts it in the same run: the one native
+        // formatted document that carries the property writes it behind
+        // `DataPath`, `ReadOnly`, `Title`, `TitleLocation` and `ToolTip` and
+        // ahead of `ContextMenu` and `ExtendedTooltip`, which is exactly this
+        // site.
+        | FormTooltipRepresentationItemKind::FormattedDocumentField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }
         // A `SpreadSheetDocumentField` writes it one step earlier, ahead of its
@@ -8447,11 +8492,18 @@ impl FormTableSchema {
     pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(6)?.trim() {
             "1" => Some("Auto"),
+            // The left side of the same enumeration, read off the platform and
+            // not interpolated. Census of the dumped layouts of all eight stand
+            // corpora joined to the platform's own `<Table>` for the same item
+            // id -- all 19 078 tables: slot 6 is `0` on the 18 397 that carry
+            // no `<TitleLocation>`, `1` on the 123 that say `Auto`, `2` on the
+            // one that says `Left` (ERP УХ
+            // `Catalogs/ГруппыАналитикСтатьи/Forms/ФормаЭлемента`, table
+            // `ВидыАналитик`), `3` on the 555 that say `Top` and `5` on the 2
+            // that say `Bottom`, with no code mapping to two answers and no
+            // other code anywhere.
+            "2" => Some("Left"),
             "3" => Some("Top"),
-            // Read off the platform, not interpolated: of the 4 543 traced
-            // `Table` items of UT 11.5.27.75 exactly one holds `5` here, and
-            // the platform writes `<TitleLocation>Bottom</TitleLocation>` on
-            // exactly that table. The remaining ordinals stay unread.
             "5" => Some("Bottom"),
             _ => None,
         }

@@ -11529,24 +11529,25 @@ fn parse_form_child_item_with_metadata_owners(
             options,
         )
     });
-    let container_read_only_schema = matches!(tag, "ColumnGroup" | "Page" | "Popup")
-        .then(|| {
-            let options_text = fields
-                .get(FormChildItemShowTitleSchema::OPTIONS_SLOT)?
-                .trim();
-            if scan_1c_braced_value(options_text, 0) != Some(options_text.len()) {
-                return None;
-            }
-            let options = split_1c_braced_fields(options_text, 0)?;
-            FormContainerReadOnlySchema::from_raw_layout(
-                wrapper,
-                fields.len(),
-                tag,
-                direct_discriminator,
-                &options,
-            )
-        })
-        .flatten();
+    let container_read_only_schema =
+        matches!(tag, "ColumnGroup" | "Page" | "Popup" | "ButtonGroup")
+            .then(|| {
+                let options_text = fields
+                    .get(FormChildItemShowTitleSchema::OPTIONS_SLOT)?
+                    .trim();
+                if scan_1c_braced_value(options_text, 0) != Some(options_text.len()) {
+                    return None;
+                }
+                let options = split_1c_braced_fields(options_text, 0)?;
+                FormContainerReadOnlySchema::from_raw_layout(
+                    wrapper,
+                    fields.len(),
+                    tag,
+                    direct_discriminator,
+                    &options,
+                )
+            })
+            .flatten();
     let nested_auto_command_bar_schema = FormNestedAutoCommandBarSchema::from_raw_layout(
         wrapper,
         tag,
@@ -12735,6 +12736,17 @@ fn parse_form_child_item_with_metadata_owners(
                             | "GraphicalSchemaField"
                             | "HTMLDocumentField"
                             | "RadioButtonField"
+                            // The progress bar reads the flag out of the same
+                            // offset-corrected slot and simply had no arm.
+                            // Census of the dumped layouts of all eight stand
+                            // corpora joined to the platform's own
+                            // `<ProgressBarField>` for the same item id -- all
+                            // 150 progress bars: slot `14 + offset` is `1` on
+                            // exactly the one that carries
+                            // `<ReadOnly>true</ReadOnly>` (ERP УХ
+                            // `CommonForms/АЛКОДлительнаяОперация`, field
+                            // `ПроцентВыполнения`) and `0` on the other 149.
+                            | "ProgressBarField"
                     ) && form_input_field_layout_is_extended(&fields))
                     .then(|| {
                         fields
@@ -12891,7 +12903,12 @@ fn parse_form_child_item_with_metadata_owners(
         item_width: parse_form_radio_button_item_width(radio_button_options.as_deref()),
         item_title_height: parse_form_radio_button_item_title_height(
             radio_button_options.as_deref(),
-        ),
+        )
+        .or_else(|| {
+            check_box_field_layout
+                .as_ref()
+                .and_then(|(schema, options)| schema.item_title_height(options))
+        }),
         radio_button_type: if tag == "RadioButtonField" {
             parse_form_radio_button_type(radio_button_options.as_deref())
         } else {
@@ -16380,10 +16397,24 @@ pub(super) fn parse_form_container_enabled(tag: &str, fields: &[&str]) -> Option
     (fields.get(slot)?.trim() == "0").then_some(false)
 }
 
-/// `MarkNegatives` is a tri-state option member: `1` writes `true`, `2` writes
-/// nothing. It never carries any other code.
+/// `MarkNegatives` is a tri-state option member: `1` writes `true`, `0` writes
+/// `false` and `2` writes nothing.
+///
+/// The `0` code used to be missing, on a census that had not seen it. Census of
+/// the dumped layouts of all eight stand corpora joined to the platform's own
+/// element for the same item id: over all 132 108 `InputField` records option
+/// member 10 is `2` on the 131 661 that carry no `<MarkNegatives>`, `1` on the
+/// 446 that say `true` and `0` on the one that says `false` (ERP УХ
+/// `Documents/ПлановаяКалькуляция/Forms/ФормаДокумента`, field
+/// `СтатьиКалькуляцииСумма`); over all 62 914 `LabelField` records member 5 is
+/// `2` on 62 806 and `1` on the 108 that say `true`, and no label field of the
+/// stand carries the `0` code. No code maps to two answers on either kind.
 pub(super) fn parse_form_option_mark_negatives(options: &[&str], slot: usize) -> Option<bool> {
-    (options.get(slot)?.trim() == "1").then_some(true)
+    match options.get(slot)?.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
 }
 
 /// `HeaderHeight` of a `Table` is the plain top-level slot 27; `1` is the default
@@ -29943,6 +29974,11 @@ pub(super) fn format_form_child_item_xml(
                 // writes it ahead of `EnableContentChange` and `Title`, i.e. at
                 // the same early site the field kinds use.
                 | "Popup"
+                // The one native progress bar that carries the flag writes it
+                // behind `DataPath` and `Visible` and ahead of `TitleLocation`,
+                // `Width`, `AutoMaxHeight`, `MaxValue`, `ShowPercent`,
+                // `ContextMenu` and `ExtendedTooltip` -- the same early site.
+                | "ProgressBarField"
                 // The one native button group that carries the flag opens its
                 // element with it: nothing precedes it, and it leads `Title`,
                 // `ToolTip`, `ExtendedTooltip` and `ChildItems`.
@@ -30429,7 +30465,9 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(item_width)
         ));
     }
-    if let Some(item_title_height) = &item.item_title_height {
+    if item.tag != "CheckBoxField"
+        && let Some(item_title_height) = &item.item_title_height
+    {
         xml.push_str(&format!(
             "{tab}\t<ItemTitleHeight>{}</ItemTitleHeight>\r\n",
             escape_xml_text(item_title_height)
@@ -31449,6 +31487,21 @@ pub(super) fn format_form_child_item_xml(
             "EditFormat",
             &item.edit_format,
             indent + 1,
+        ));
+    }
+    // A check box writes its `ItemTitleHeight` behind its own `EditFormat`, not
+    // in the radio button's run further up: the one native check box that
+    // carries it writes it behind `DataPath`, `TitleLocation`, `CheckBoxType`
+    // and `EditFormat` and ahead of `ContextMenu`, `ExtendedTooltip` and
+    // `Events`, and no check box of the stand carries it together with
+    // `EqualItemsWidth`, so that pair is unobserved and the two keep their
+    // neighbouring sites.
+    if item.tag == "CheckBoxField"
+        && let Some(item_title_height) = &item.item_title_height
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ItemTitleHeight>{}</ItemTitleHeight>\r\n",
+            escape_xml_text(item_title_height)
         ));
     }
     // `EqualItemsWidth` closes the check box body, behind `CheckBoxType` (3 of
