@@ -98,13 +98,29 @@ pub(super) struct ClientApplicationInterface {
     /// publishes nothing for it, writing only the other five. Its own areas
     /// name that panel exactly the way 1С:УТ's do, and 1С:УТ publishes it.
     ///
-    /// So the entry that is dropped is indistinguishable, in the body, from
-    /// the entries that are kept: separating them needs a platform-side table
-    /// of which identifiers name a standard panel definition, and naming those
-    /// five identifiers here would assert a property of the platform that no
-    /// input on the stand measures. The reader therefore publishes what the
-    /// body states and leaves `Ext/ClientApplicationInterface.xml` of ERP УХ
-    /// one `<panelDef/>` long.
+    /// A seed settles what the two codes mean. Importing a tree whose
+    /// `Ext/ClientApplicationInterface.xml` lists seven panel definitions --
+    /// the five, that sixth identifier spliced in second, and a seventh
+    /// identifier no configuration has ever carried -- and saving the
+    /// configuration back writes the five under the code `2` as `{<uuid>,0}`,
+    /// *in the platform's own order rather than the tree's*, and both others
+    /// after them under the code `1`: `{8e10648b-…,1,""}` and
+    /// `{<seventh>,1,"Панель1"}`, the last with a name the platform generated
+    /// for it. Its own export of that seed publishes all seven, the five
+    /// first and the two code-`1` entries behind them.
+    ///
+    /// So the code is the platform's classification, not the body's: `2` says
+    /// "one of my own standard definitions", `1` says "a definition this body
+    /// names". ERP УХ's record claims the sixth identifier is standard, and
+    /// the platform, rendering a code-`2` record from its own table, finds
+    /// nothing there and writes nothing. Its own writer cannot produce that
+    /// record, and its bytes are identical to the five it does publish, so
+    /// separating them needs the platform's table of standard identifiers.
+    /// Naming those five here would assert a property of the platform that no
+    /// input on the stand measures, and a "first five code-`2` records" rule
+    /// keeps the wrong five. The reader therefore publishes what the body
+    /// states and leaves `Ext/ClientApplicationInterface.xml` of ERP УХ one
+    /// `<panelDef/>` long.
     pub(super) panel_defs: Vec<ClientApplicationPanelDef>,
 }
 
