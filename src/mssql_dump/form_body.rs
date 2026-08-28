@@ -616,6 +616,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
             .iter()
             .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
             .collect::<BTreeMap<_, _>>();
+        let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(&attributes);
         let empty_metadata_command_refs = BTreeMap::new();
         let register_context = FormCommandInterfaceParseContext {
             commands: &commands,
@@ -624,6 +625,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
             information_register_master_dimensions: context.information_register_master_dimensions,
             form_owner_reference: context.form_owner_reference,
             attribute_names_by_id: &attribute_names_by_id,
+            attribute_metadata_owners_by_id: &attribute_metadata_owners_by_id,
             child_item_indexes: &child_item_indexes,
             metadata_command_refs: context
                 .metadata_command_refs
@@ -27235,6 +27237,7 @@ pub(super) fn extract_form_command_interface_with_context(
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
+    let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
     let empty_metadata_command_refs = BTreeMap::new();
     let context = FormCommandInterfaceParseContext {
         commands,
@@ -27243,6 +27246,7 @@ pub(super) fn extract_form_command_interface_with_context(
         information_register_master_dimensions,
         form_owner_reference,
         attribute_names_by_id: &attribute_names_by_id,
+        attribute_metadata_owners_by_id: &attribute_metadata_owners_by_id,
         child_item_indexes,
         metadata_command_refs: metadata_command_refs.unwrap_or(&empty_metadata_command_refs),
     };
@@ -27270,6 +27274,7 @@ pub(super) struct FormCommandInterfaceParseContext<'a> {
     information_register_master_dimensions: &'a InformationRegisterMasterDimensionIndex,
     form_owner_reference: Option<&'a str>,
     attribute_names_by_id: &'a BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &'a BTreeMap<String, FormAttributeMetadataOwner>,
     child_item_indexes: &'a FormChildItemIndexes,
     /// Whether each target metadata object declares
     /// `<UseStandardCommands>`. Empty behaves as "unknown, assume true"
@@ -27329,11 +27334,7 @@ pub(super) fn parse_form_command_interface_item(
     form_command_interface_visibility_schema(fields.get(8)?)?;
     let command = parse_form_command_interface_command(fields.get(2)?, context)?;
     let item_type = parse_form_command_interface_item_type(fields.get(4).copied())?;
-    let attribute = parse_form_command_interface_attribute(
-        fields.get(3)?,
-        context.attribute_names_by_id,
-        context.child_item_indexes,
-    )?;
+    let attribute = parse_form_command_interface_attribute(fields.get(3)?, context)?;
     let command_group = fields
         .get(5)
         .and_then(|field| parse_form_command_group_reference(field, context.object_refs));
@@ -27377,34 +27378,126 @@ pub(super) fn parse_form_command_interface_item(
 
 pub(super) fn parse_form_command_interface_attribute(
     field: &str,
-    attribute_names_by_id: &BTreeMap<String, String>,
-    child_item_indexes: &FormChildItemIndexes,
+    context: &FormCommandInterfaceParseContext<'_>,
 ) -> Option<Option<String>> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.len() == 1 && fields.first()?.trim() == "0" {
         return Some(None);
     }
-    if fields.len() != 3 || fields.first()?.trim() != "2" {
-        return None;
-    }
-    let attribute = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
-    let binding = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    if attribute.len() != 1 || binding.len() != 1 {
-        return None;
-    }
-    if binding.first()?.trim() == "-8" {
-        let attribute_name = attribute_names_by_id.get(attribute.first()?.trim())?;
-        return Some(Some(format!("{attribute_name}.Ref")));
-    }
-    parse_form_bound_data_path(
+    resolve_form_command_interface_attribute_path(field, context).map(Some)
+}
+
+/// Resolves a command-interface `<Attribute>` through the same ordered path
+/// grammar used by form items. The command record stores the complete binding,
+/// so no command-specific spelling table is needed.
+fn resolve_form_command_interface_attribute_path(
+    field: &str,
+    context: &FormCommandInterfaceParseContext<'_>,
+) -> Option<String> {
+    let indexes = context.child_item_indexes;
+    resolve_form_settings_composer_chain_data_path(
         field,
-        attribute_names_by_id,
-        &child_item_indexes.table_name_by_id,
-        &child_item_indexes.table_column_names_by_id,
-        &child_item_indexes.bound_table_path_by_binding_key,
-        &child_item_indexes.table_column_names_by_binding_key,
+        context.attribute_metadata_owners_by_id,
+        context.object_refs,
+        &indexes.owner_scoped_bindings.metadata_field_types,
     )
-    .map(Some)
+    .or_else(|| {
+        resolve_form_standard_period_column_data_path(
+            field,
+            context.attribute_metadata_owners_by_id,
+        )
+    })
+    .or_else(|| {
+        resolve_form_register_record_set_member_data_path(
+            field,
+            true,
+            context.attribute_metadata_owners_by_id,
+            context.object_refs,
+        )
+    })
+    .or_else(|| {
+        resolve_form_bound_chain_member_path(
+            field,
+            context.attribute_metadata_owners_by_id,
+            &indexes.owner_scoped_bindings,
+            context.object_refs,
+            false,
+        )
+    })
+    .or_else(|| {
+        resolve_form_dynamic_list_member_data_path(field, context.attribute_metadata_owners_by_id)
+    })
+    .or_else(|| {
+        resolve_form_document_register_records_data_path(
+            field,
+            context.attribute_metadata_owners_by_id,
+            context.object_refs,
+        )
+    })
+    .or_else(|| {
+        resolve_form_register_record_set_member_data_path(
+            field,
+            false,
+            context.attribute_metadata_owners_by_id,
+            context.object_refs,
+        )
+    })
+    .or_else(|| {
+        match resolve_form_owner_scoped_bound_data_path(
+            field,
+            context.attribute_metadata_owners_by_id,
+            &indexes.owner_scoped_bindings,
+            context.object_refs,
+        ) {
+            FormOwnerScopedDataPath::Resolved(path) => Some(path),
+            FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+        }
+    })
+    .or_else(|| {
+        resolve_form_item_scoped_current_data_path(
+            field,
+            &indexes.table_name_by_id,
+            &indexes.table_column_names_by_id,
+            &indexes.type_link_data_path_by_table_column,
+            context.object_refs,
+            &indexes.owner_scoped_bindings,
+        )
+    })
+    .or_else(|| {
+        resolve_form_item_rooted_settings_composer_path(
+            field,
+            &indexes.table_name_by_id,
+            &indexes.owner_scoped_bindings,
+        )
+    })
+    .or_else(|| {
+        resolve_form_item_rooted_chain_data_path(
+            field,
+            &indexes.table_name_by_id,
+            &indexes.owner_scoped_bindings,
+            context.object_refs,
+        )
+    })
+    .or_else(|| {
+        resolve_form_item_rooted_record_set_standard_attribute_path(
+            field,
+            &indexes.table_name_by_id,
+            context.attribute_metadata_owners_by_id,
+            &indexes.owner_scoped_bindings,
+        )
+    })
+    .or_else(|| {
+        parse_form_bound_data_path_with_metadata_owner(
+            field,
+            context.attribute_names_by_id,
+            context.attribute_metadata_owners_by_id,
+            &indexes.table_name_by_id,
+            &indexes.table_column_names_by_id,
+            &indexes.bound_table_path_by_binding_key,
+            &indexes.table_column_names_by_binding_key,
+            context.object_refs,
+        )
+    })
 }
 
 pub(super) fn form_command_interface_item_schema(
@@ -27852,6 +27945,7 @@ pub(super) fn parse_form_command_interface_command_for_test_with_metadata_refs(
     metadata_command_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<String> {
     let attribute_names_by_id = BTreeMap::new();
+    let attribute_metadata_owners_by_id = BTreeMap::new();
     let child_item_indexes = FormChildItemIndexes::default();
     parse_form_command_interface_command(
         field,
@@ -27862,6 +27956,7 @@ pub(super) fn parse_form_command_interface_command_for_test_with_metadata_refs(
             information_register_master_dimensions,
             form_owner_reference: Some(form_owner_reference),
             attribute_names_by_id: &attribute_names_by_id,
+            attribute_metadata_owners_by_id: &attribute_metadata_owners_by_id,
             child_item_indexes: &child_item_indexes,
             metadata_command_refs,
         },

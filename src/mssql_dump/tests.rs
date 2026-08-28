@@ -22524,6 +22524,44 @@ fn extracts_form_command_interface_command_bar() {
     assert_eq!(form_xml.matches("<xr:Common>false</xr:Common>").count(), 2);
 }
 
+#[test]
+fn command_interface_attribute_uses_the_form_data_path_grammar() {
+    let command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let trailing = vec![
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        format!(
+            r#"{{0,1,{{3,0,{{0,{command_uuid}}},{{2,{{1}},{{-2}}}},0,{{0}},0,1,{{0,{{0,{{"B",1}},0}}}}}}}}"#
+        ),
+    ];
+    let attributes = vec![data_path_typed_form_attribute(
+        "1",
+        "Объект",
+        "cfg:DocumentObject.ЗаказПокупателя",
+    )];
+
+    let command_interface = extract_form_command_interface_with_context(
+        &trailing,
+        &[],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &InformationRegisterMasterDimensionIndex::new(),
+        None,
+        &attributes,
+        &FormChildItemIndexes::default(),
+        None,
+    )
+    .expect("the command-interface item must use the standard bound-path resolver");
+
+    assert_eq!(command_interface.command_bar.len(), 1);
+    assert_eq!(
+        command_interface.command_bar[0].attribute.as_deref(),
+        Some("Объект.Number")
+    );
+}
+
 /// The three sub-fixes of f8b3251 on one real record:
 /// `parse_form_command_interface_command`'s `UseStandardCommands` gate (item
 /// 3, target `Catalog.СправочникиБД`, `UseStandardCommands=false`, must stay
