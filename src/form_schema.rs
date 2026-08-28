@@ -3585,6 +3585,20 @@ impl FormChildItemEventCollectionSchema {
     /// 200 that do, the 51 items whose two slots disagree included (41 without
     /// an event, 10 with). Requiring slot 5 to repeat slot 1 is what lost those
     /// ten `OnCurrentPageChange` handlers.
+    ///
+    /// Slot 0 is the container's own declared member count, not the constant
+    /// `4` that census read off a corpus which only ever spells one revision:
+    /// every one of the 2 687 UT containers reads `4` at six members, and ERP
+    /// УХ 3.2.12.6 spells a shorter revision that reads `3` at five --
+    /// `{3,1,{1,526c501f-…,"ГруппаРежимПриСменеСтраницы",1,0,526c501f-…,0,1},2,0}`
+    /// on `DataProcessors/ВыгрузкаЗагрузкаДанныхXML/Forms/Форма` `ГруппаРежим`
+    /// and the identically shaped one on
+    /// `CommonForms/ФормаИзмененияПоказателейСводнойТаблицы` `Действия`. Both
+    /// keep the canonical `2`/`0` at slots 3/4 and hold a well-formed event
+    /// record at slot 2 naming the `OnCurrentPageChange` identifier and the
+    /// handler the platform writes, so the revision drops the trailing member
+    /// the count already accounts for. Reading the declared count admits both
+    /// without naming either arity.
     pub(crate) fn from_pages_layout(
         wrapper: &str,
         field_count: usize,
@@ -3592,13 +3606,17 @@ impl FormChildItemEventCollectionSchema {
         direct_discriminator: Option<&str>,
         container: &[&str],
     ) -> Option<Self> {
+        let declared_members = container
+            .first()
+            .and_then(|field| field.trim().parse::<usize>().ok());
         (wrapper == "22"
             && field_count >= 30
             && (field_count - 30) % 2 == 0
             && item_tag == "Pages"
             && direct_discriminator == Some("3")
-            && container.len() == 6
-            && container.first().map(|field| field.trim()) == Some("4")
+            && declared_members
+                .and_then(|declared| declared.checked_add(2))
+                .is_some_and(|declared| declared == container.len())
             && container.get(3).map(|field| field.trim()) == Some("2")
             && container.get(4).map(|field| field.trim()) == Some("0"))
         .then_some(Self {

@@ -20442,15 +20442,32 @@ fn parse_form_schema_backed_child_item_events(
         return parse_form_schema_backed_event_record(schema, &record);
     }
 
+    // A `Pages` record that carries the conditional `UserVisible`-common
+    // prefix has every one of its top-level members shifted by one, exactly as
+    // `form_child_item_tag` and `parse_form_child_item_name` already read them
+    // -- the discriminator moves to slot 6, the name to slot 7 and the event
+    // container to slot 21. Reading the container at its unshifted slot landed
+    // on the scalar beside it, and the unshifted discriminator landed on the
+    // prefix tuple itself, so a prefixed `Pages` never reached this arm at all
+    // and lost its whole `<Events>` element.
+    let pages_prefix_offset = form_conditional_group_schema(wrapper, fields)
+        .map(|_| 1)
+        .unwrap_or_default();
     if tag == "Pages"
         && let Some(container) = fields
-            .get(20)
+            .get(20 + pages_prefix_offset)
             .and_then(|field| split_1c_braced_fields(field.trim(), 0))
         && let Some(schema) = FormChildItemEventCollectionSchema::from_pages_layout(
             wrapper,
-            fields.len(),
+            fields.len().saturating_sub(pages_prefix_offset),
             tag,
-            direct_discriminator,
+            if pages_prefix_offset == 0 {
+                direct_discriminator
+            } else {
+                fields
+                    .get(5 + pages_prefix_offset)
+                    .map(|field| field.trim())
+            },
             &container,
         )
         && let Some(record) = container
