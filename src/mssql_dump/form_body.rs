@@ -25776,26 +25776,25 @@ pub(super) fn parse_form_command_interface_item_type(field: Option<&str>) -> Opt
     }
 }
 
-pub(super) fn parse_form_command_interface_command(
-    field: &str,
+/// The name a `{kind, uuid}` command-interface record spells, before the raw
+/// `kind:uuid` fallback its caller applies.
+///
+/// The arms live in a function of their own so that a `?` inside one answers
+/// *this* reading with `None`.  Held inline, the very same `?` returned from
+/// `parse_form_command_interface_command` itself and jumped over the caller's
+/// fallback: `3075f50` measured that the platform keeps the raw sentinel for a
+/// uuid that names nothing in the configuration and wrote the fallback for
+/// every kind, but slots 1, 2, 3 and 4 each resolve their target with
+/// `context.object_refs.get(&uuid)?`, so on exactly the records the fallback
+/// was written for the function was already gone and the item was dropped.
+/// Only the kinds whose arms carry their own copy of the fallback -- `0`,
+/// `5`, `6`, `7` -- and the kinds with no arm at all ever reached it.
+fn form_command_interface_command_named(
+    kind: &str,
+    target: Option<&str>,
     context: &FormCommandInterfaceParseContext<'_>,
 ) -> Option<String> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let kind = fields.first()?.trim();
-    let target = fields.get(1).map(|value| value.trim());
-    if kind != "0"
-        && let Some(uuid) = target.and_then(parse_non_zero_uuid)
-        && let Some(command) = context
-            .commands
-            .iter()
-            .find(|command| command.id == kind && command.reference_uuid == uuid)
-    {
-        return Some(format!("Form.Command.{}", command.name));
-    }
-    if let Some(name) = form_command_record_single_field_name(&fields) {
-        return Some(name);
-    }
-    let named = match kind {
+    match kind {
         "0" => {
             let Some(target) = target else {
                 return Some("0".to_string());
@@ -25978,14 +25977,36 @@ pub(super) fn parse_form_command_interface_command(
             (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
         }
         _ => None,
-    };
+    }
+}
+
+pub(super) fn parse_form_command_interface_command(
+    field: &str,
+    context: &FormCommandInterfaceParseContext<'_>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let kind = fields.first()?.trim();
+    let target = fields.get(1).map(|value| value.trim());
+    if kind != "0"
+        && let Some(uuid) = target.and_then(parse_non_zero_uuid)
+        && let Some(command) = context
+            .commands
+            .iter()
+            .find(|command| command.id == kind && command.reference_uuid == uuid)
+    {
+        return Some(format!("Form.Command.{}", command.name));
+    }
+    if let Some(name) = form_command_record_single_field_name(&fields) {
+        return Some(name);
+    }
+    let named = form_command_interface_command_named(kind, target, context);
     // A well-formed uuid that names nothing in this configuration is a
     // reference the platform cannot construct a name for, and it writes the raw
     // `kind:uuid` sentinel for it — in *every* record slot, not only in the
     // three the rule was first measured in. The `0` arm and the `5`/`6`/`7` arm
-    // above each carry their own copy of it; this is the same reading, applied
-    // once for every kind, so a slot the arms above leave unresolved no longer
-    // takes the whole item down with it.
+    // of `form_command_interface_command_named` each carry their own copy of
+    // it; this is the same reading, applied once for every kind, so a slot
+    // those arms leave unresolved no longer takes the whole item down with it.
     //
     // Evidence: ERP УХ 3.2.12.6, the whole differing set. The platform writes
     // 65 `<Command>` values inside `<CommandInterface>` that this export does
