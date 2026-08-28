@@ -21,8 +21,9 @@ use crate::form_schema::{
     FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
     FormFieldGroupHorizontalAlign, FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty,
     FormFieldSchema, FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot,
-    FormFieldVerticalAlign, FormFixingInTable, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormFieldVerticalAlign, FormFixingInTable, FormGroupAssociatedTableElementSchema,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -1497,6 +1498,7 @@ pub(super) struct FormChildItem {
     pub(super) button_representation: Option<&'static str>,
     pub(super) shape_representation: Option<&'static str>,
     pub(super) shape: Option<&'static str>,
+    pub(super) associated_table_element_id: Option<String>,
     pub(super) picture_location: Option<&'static str>,
     pub(super) representation_in_context_menu: Option<&'static str>,
     pub(super) group_horizontal_align: Option<&'static str>,
@@ -11381,6 +11383,29 @@ fn parse_form_child_item_with_metadata_owners(
     let popup_shape = popup_shape_options
         .as_ref()
         .and_then(|(schema, options)| schema.shape(options));
+    // The group's own binding to a table element. The id is resolved to the
+    // bound item's name, and an id the form declares no item for is written
+    // physically -- `<id>:<form item type uuid>` -- exactly as the form root's
+    // own item references already spell an unresolved one. Both shapes are
+    // observed: five of the seven native groups name an item, and the two
+    // groups of ERP УХ `DataProcessors/ПомощникПланирования/Forms/Форма` carry
+    // the id `116`, which that form declares no item for, and the platform
+    // writes `116:02023637-7868-4a5f-8576-835a76e0c9ba`.
+    let group_associated_table_element_id =
+        FormGroupAssociatedTableElementSchema::for_item_tag(tag).and_then(|schema| {
+            let options_text = fields.get(FormUsualGroupSchema::OPTIONS_SLOT)?.trim();
+            if scan_1c_braced_value(options_text, 0) != Some(options_text.len()) {
+                return None;
+            }
+            let options = split_1c_braced_fields(options_text, 0)?;
+            let item_id = schema.item_id(&options)?;
+            Some(
+                item_name_by_id
+                    .get(item_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{item_id}:{FORM_ITEM_TYPE_UUID}")),
+            )
+        });
     let button_common_schema = FormButtonCommonSchema::from_raw_layout(
         wrapper,
         fields.len(),
@@ -12429,6 +12454,7 @@ fn parse_form_child_item_with_metadata_owners(
                     .zip(popup_options.as_deref())
                     .and_then(|(schema, options)| schema.shape(options))
             }),
+        associated_table_element_id: group_associated_table_element_id,
         picture_location: button_shape_schema.and_then(|schema| schema.picture_location(&fields)),
         representation_in_context_menu: if tag == "Button"
             && form_button_layout_is_extended(&fields)
@@ -32308,6 +32334,24 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<ScrollOnCompress>{}</ScrollOnCompress>\r\n",
             if scroll_on_compress { "true" } else { "false" }
+        ));
+    }
+    // The group's binding closes its own run. Census over the native
+    // `Form.xml` of all eight stand corpora: the 7 `<UsualGroup>` elements that
+    // carry an `<AssociatedTableElementId>` write it behind `Title` (7),
+    // `Behavior` (7), `ShowTitle` (5), `Group` (4), `Collapsed` (3), `Visible`
+    // (3), `ToolTip` (3), `ShowLeftMargin` (3), `Width` (2), `CurrentRowUse`
+    // (2), `TitleFont` (2), `Representation` (2), `ThroughAlign` (2),
+    // `VerticalStretch` (1) and `ControlRepresentation` (1) and ahead of
+    // `ExtendedTooltip` (7) and `ChildItems` (6) and nothing else; the one
+    // `<Pages>` element that carries it writes it behind `Title`, `Height` and
+    // `PagesRepresentation` and ahead of `ExtendedTooltip` and `ChildItems`.
+    // No pair is counted both ways, so the site immediately ahead of the
+    // extended tooltip satisfies every observation on both kinds.
+    if let Some(associated_table_element_id) = &item.associated_table_element_id {
+        xml.push_str(&format!(
+            "{tab}\t<AssociatedTableElementId xsi:type=\"xs:string\">{}</AssociatedTableElementId>\r\n",
+            escape_xml_text(associated_table_element_id)
         ));
     }
     if item.tag != "Table"

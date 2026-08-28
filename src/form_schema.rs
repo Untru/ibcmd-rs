@@ -1518,6 +1518,47 @@ impl FormUsualGroupGroupVerticalAlign {
     }
 }
 
+/// The form item a container group is bound to, published as
+/// `<AssociatedTableElementId>`.
+///
+/// Census of the dumped layouts of all eight stand corpora, joined to the
+/// platform's own element for the same item id:
+///
+///   * all 114 015 `UsualGroup` records carry the 29-member `29`-headed option
+///     tuple at slot `20 + head offset`, and its member 26 is `0` on the
+///     114 008 groups that publish no `<AssociatedTableElementId>` and the id
+///     of a form item on all 7 that publish one -- `1`, `3`, `138`, `878`,
+///     `2289` resolving to the table the platform names, and `116` twice on the
+///     two groups whose element the platform itself writes unresolved;
+///   * all 9 799 `Pages` records carry their own option tuple in the same slot,
+///     and its member 4 is `0` on the 9 798 that publish nothing and `327` on
+///     the one that publishes `ВНА`, the id of the table of that name.
+///
+/// No raw value maps to two different published answers on either kind, and no
+/// value that publishes an element also occurs on a group that publishes none.
+/// Neither member had a reader, so the writer had nothing to emit.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormGroupAssociatedTableElementSchema {
+    option_slot: usize,
+}
+
+impl FormGroupAssociatedTableElementSchema {
+    pub(crate) fn for_item_tag(item_tag: &str) -> Option<Self> {
+        match item_tag {
+            "UsualGroup" => Some(Self { option_slot: 26 }),
+            "Pages" => Some(Self { option_slot: 4 }),
+            _ => None,
+        }
+    }
+
+    /// The raw form-item id, or `None` when the member is the platform's own
+    /// "unbound" zero or anything that is not an item id at all.
+    pub(crate) fn item_id<'a>(self, options: &'a [&'a str]) -> Option<&'a str> {
+        let value = options.get(self.option_slot)?.trim();
+        (value != "0" && value.parse::<u64>().is_ok()).then_some(value)
+    }
+}
+
 impl FormUsualGroupSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
     const GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET: usize = 3;
