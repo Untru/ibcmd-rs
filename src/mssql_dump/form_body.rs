@@ -6075,7 +6075,9 @@ pub(super) fn form_dynamic_list_use_always_universe(
             universe = BTreeSet::new();
         } else {
             let selection = parse_form_dynamic_list_query_selection(query_text)?;
-            if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
+            if form_dynamic_list_query_source_is_undeclared(&selection, declarations) {
+                universe = BTreeSet::new();
+            } else if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
                 universe = selection.extension.clone().unwrap_or_default();
             } else {
                 universe = selection.aliases.clone();
@@ -6253,9 +6255,49 @@ fn form_dynamic_list_star_source_fields(
 /// like counter-examples name it in a different case, which the query language
 /// resolves and this reader does too.
 ///
-/// Only the `ЗНАЧЕНИЕ(...)` literal is read here. A `FROM` source naming
-/// undeclared metadata is the same failure in principle and has no observation
-/// on the stand, so it is left alone rather than guessed at.
+/// Only the `ЗНАЧЕНИЕ(...)` literal is read here; the `FROM` source is read by
+/// [`form_dynamic_list_query_source_is_undeclared`], which needs the parsed
+/// selection this one runs ahead of.
+/// Whether the final select reads from a table the configuration does not
+/// declare.
+///
+/// The same failure the `ЗНАЧЕНИЕ(...)` rule above states, read off the source
+/// clause: a query whose `FROM` names no declared table does not compile, and a
+/// list whose query does not compile resolves no field at all.
+///
+/// A virtual table is tested by the base table it belongs to -- the third
+/// segment names the virtual table, not a metadata record, and the declaration
+/// index carries none.
+///
+/// Evidence, equality of sets over the 4 054 manual-query dynamic lists of the
+/// eight stand corpora: exactly one names an undeclared table in its source
+/// clause -- ERP УХ 3.2.12.6
+/// `InformationRegisters/УдалитьПараметрыЛимитированияЦФО/Forms/ФормаВыбораЦФО`,
+/// which reads `РегистрСведений.ПараметрыЛимитированияЦФО` while the
+/// configuration declares only the `Удалить…` register -- and the platform
+/// marks both fields that list remembers, `~Список.ЦФО` and
+/// `~Список.ВалютаЛимитирования`, which the export wrote plain. The other 4 053
+/// name only declared tables and are untouched. The list's `DefaultPicture` is
+/// not a remembered field and keeps the rule of its own that leaves it plain
+/// here, exactly as the platform writes it.
+fn form_dynamic_list_query_source_is_undeclared(
+    selection: &FormDynamicListQuerySelection,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> bool {
+    let Some(declarations) = declarations else {
+        return false;
+    };
+    selection.sources.iter().any(|(reference, _)| {
+        reference.as_deref().is_some_and(|reference| {
+            let mut segments = reference.split('.');
+            let (Some(kind), Some(name)) = (segments.next(), segments.next()) else {
+                return false;
+            };
+            declarations.declares_table(&format!("{kind}.{name}")) == Some(false)
+        })
+    })
+}
+
 fn form_dynamic_list_query_names_undeclared_metadata(
     query_text: &str,
     declarations: Option<&MetadataFieldDeclarationIndex>,
