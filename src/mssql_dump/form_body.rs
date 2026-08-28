@@ -5426,7 +5426,13 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             _ => {}
         }
     }
+    let main_table_base = main_table.clone();
     main_table = normalize_form_main_table_category(main_table, main_table_category.as_deref());
+    main_table = reconcile_form_main_table_with_query_source(
+        main_table_base.as_deref(),
+        main_table,
+        query_text.as_deref(),
+    );
     fields.extend(parse_form_dynamic_list_field_map_items(&settings_fields));
     dedupe_form_dynamic_list_fields(&mut fields);
     if query_text.is_none()
@@ -8627,6 +8633,45 @@ pub(super) fn normalize_form_main_table_category(
         return Some(main_table);
     }
     Some(format!("{main_table}.{suffix}"))
+}
+
+/// A category code is not sufficient to distinguish every virtual table: the
+/// same accounting-register code is observed as both `RecordsWithExtDimensions`
+/// and `Balance`. When the final query has exactly one metadata source for the
+/// declared main-table object and that source names one of the already known
+/// virtual tables, the query itself provides the missing discriminator.
+pub(super) fn reconcile_form_main_table_with_query_source(
+    base_main_table: Option<&str>,
+    categorized_main_table: Option<String>,
+    query_text: Option<&str>,
+) -> Option<String> {
+    let (Some(base), Some(query)) = (base_main_table, query_text) else {
+        return categorized_main_table;
+    };
+    if categorized_main_table.as_deref() == Some(base) {
+        return categorized_main_table;
+    }
+    let Some(selection) = parse_form_dynamic_list_query_selection(query) else {
+        return categorized_main_table;
+    };
+    let mut candidates = selection
+        .sources
+        .into_iter()
+        .filter_map(|(reference, _)| reference)
+        .filter(|reference| {
+            reference.rsplit_once('.').is_some_and(|(owner, suffix)| {
+                owner == base
+                    && (FORM_MAIN_TABLE_CATEGORY_SUFFIXES
+                        .iter()
+                        .any(|(_, _, known)| *known == suffix)
+                        || matches!(suffix, "BalanceAndTurnovers" | "SliceFirst"))
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    match (candidates.len(), candidates.pop_first()) {
+        (1, Some(reference)) => Some(reference),
+        _ => categorized_main_table,
+    }
 }
 
 /// The virtual table each `MainTableCategory` code names, per metadata kind.

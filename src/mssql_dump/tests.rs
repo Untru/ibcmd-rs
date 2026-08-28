@@ -74629,6 +74629,48 @@ fn appends_the_virtual_table_the_main_table_category_names() {
     }
 }
 
+/// The stored category alone is ambiguous for accounting registers. The
+/// dynamic-list query resolves that ambiguity when it names exactly one known
+/// virtual table of the declared main-table object.
+#[test]
+fn reconciles_an_ambiguous_main_table_category_with_its_query_source() {
+    assert_eq!(
+        reconcile_form_main_table_with_query_source(
+            Some("AccountingRegister.МСФО"),
+            Some("AccountingRegister.МСФО.RecordsWithExtDimensions".to_string()),
+            Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.МСФО.Остатки КАК Остатки"),
+        ),
+        Some("AccountingRegister.МСФО.Balance".to_string())
+    );
+
+    let categorized = Some("AccumulationRegister.СтоимостьВНАМСФО.Balance".to_string());
+    assert_eq!(
+        reconcile_form_main_table_with_query_source(
+            Some("AccumulationRegister.СтоимостьВНАМСФО"),
+            categorized.clone(),
+            Some(concat!(
+                "ВЫБРАТЬ Остатки.Сумма ИЗ РегистрНакопления.СтоимостьВНАМСФО.Остатки КАК Остатки ",
+                "ОБЪЕДИНИТЬ ВСЕ ВЫБРАТЬ Обороты.Сумма ИЗ ",
+                "РегистрНакопления.СтоимостьВНАМСФО.Обороты КАК Обороты"
+            )),
+        ),
+        categorized
+    );
+
+    let bare = Some("InformationRegister.РезультатыОбмена".to_string());
+    assert_eq!(
+        reconcile_form_main_table_with_query_source(
+            Some("InformationRegister.РезультатыОбмена"),
+            bare.clone(),
+            Some(concat!(
+                "ВЫБРАТЬ Данные.Период ИЗ РегистрСведений.РезультатыОбмена КАК Данные ",
+                "ЛЕВОЕ СОЕДИНЕНИЕ РегистрСведений.РезультатыОбмена.СрезПоследних КАК Последние"
+            )),
+        ),
+        bare
+    );
+}
+
 /// An embedded spreadsheet document is a child of its `<Settings>` element, so
 /// its own children start one level deeper, and the `xsi:type` QName inside it
 /// is re-spelled with the same prefix its element names get.
