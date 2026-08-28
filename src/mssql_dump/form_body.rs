@@ -21299,6 +21299,25 @@ pub(super) fn parse_form_child_item_data_path(
         .flatten()
         .unwrap_or(0);
     let input_slots = [11 + input_field_offset, 12 + input_field_offset];
+    // The second bound slot is the *footer's* binding, not a second spelling of
+    // the item's own. Reading it for the primary path when the first slot holds
+    // the empty binding `{0}` puts a `<DataPath>` on an item the platform's own
+    // bytes say shows no data -- the same statement the two-empty-slots rule
+    // below already reads.
+    //
+    // Evidence: over every field item of the eight stand corpora exactly one
+    // has an empty first slot and a bound second one -- ERP УХ 3.2.12.6
+    // `Documents/КорректировкаПланов/Forms/ФормаДокумента`, InputField
+    // `ТребуетсяПеренесеноРезерв` -- and the platform writes no `<DataPath>`
+    // for it and the `<FooterDataPath>Объект.Требуется.TotalПеренесено</…>`
+    // that second slot actually spells. Restricting the primary to the first
+    // slot keeps the footer, which returning early would throw away.
+    let primary_slots: &[usize] =
+        if fields.get(input_slots[0]).map(|field| field.trim()) == Some("{0}") {
+            &input_slots[..1]
+        } else {
+            &input_slots
+        };
     // Both bound slots spelling the empty binding `{0}` is the platform's own
     // statement that the item shows no data, and it then writes no `DataPath`
     // at all -- 280 such items across UT 11.5.27.75, every one of them without
@@ -21389,7 +21408,7 @@ pub(super) fn parse_form_child_item_data_path(
         | "FormattedDocumentField"
         | "ProgressBarField"
         | "TrackBarField"
-        | "ChartField" => resolve_slots(&input_slots, &parse_bound).or_else(|| {
+        | "ChartField" => resolve_slots(primary_slots, &parse_bound).or_else(|| {
             FormChildItemDataPathResolution::from_option(
                 parent_data_path.map(|parent| {
                     let name = normalize_form_data_path_child_name(parent, name);
@@ -21416,9 +21435,9 @@ pub(super) fn parse_form_child_item_data_path(
         // of the eight stand corpora hold a one-segment chain there naming the
         // form attribute the platform writes in `<DataPath>`, and none of them
         // falls back to a parent path.
-        | "GanttChartField" => resolve_slots(&input_slots, &parse_bound),
-        "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
-        "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        | "GanttChartField" => resolve_slots(primary_slots, &parse_bound),
+        "LabelField" => resolve_slots(primary_slots, &parse_direct_bound),
+        "TextDocumentField" => resolve_slots(primary_slots, &parse_bound),
         "Button" => button_data_path_slot
             .and_then(|slot| fields.get(slot))
             .map(|field| {
