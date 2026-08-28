@@ -74738,6 +74738,39 @@ fn reconciles_an_ambiguous_main_table_category_with_its_query_source() {
     );
 }
 
+#[test]
+fn preserves_numeric_report_root_values_and_the_short_root_variant_appearance() {
+    let mut fields = vec!["0"; 23];
+    fields[0] = "49";
+    fields[18] = "2";
+    fields[19] = "5";
+    fields[20] = r#"{"N",3}"#;
+    fields[21] = "6";
+    fields[22] = r#"{"N",0}"#;
+
+    assert_eq!(
+        extract_form_report_root_value(&fields, "5", &[]),
+        Some(FormReportRootValue {
+            value: "3".to_string(),
+            xsi_type: Some("xs:decimal")
+        })
+    );
+    assert_eq!(
+        extract_form_report_root_value(&fields, "6", &[]),
+        Some(FormReportRootValue {
+            value: "0".to_string(),
+            xsi_type: Some("xs:decimal")
+        })
+    );
+    assert!(
+        crate::form_schema::FormRootVariantAppearanceSchema::from_raw_layout(Some("49")).is_some()
+    );
+    assert_eq!(
+        parse_form_control_color(r#"{3,4,{-1}}"#, &BTreeMap::new()),
+        Some("auto".to_string())
+    );
+}
+
 /// An embedded spreadsheet document is a child of its `<Settings>` element, so
 /// its own children start one level deeper, and the `xsi:type` QName inside it
 /// is re-spelled with the same prefix its element names get.

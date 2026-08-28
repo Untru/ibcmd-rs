@@ -416,8 +416,8 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     }
 
     let started = Instant::now();
-    properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
-    properties.details_data = extract_form_report_attribute_ref(&form_fields, "6", &attributes);
+    properties.report_result = extract_form_report_root_value(&form_fields, "5", &attributes);
+    properties.details_data = extract_form_report_root_value(&form_fields, "6", &attributes);
     properties.variant_appearance = FormRootVariantAppearanceSchema::from_raw_layout(
         form_fields.first().map(|field| field.trim()),
     )
@@ -962,8 +962,8 @@ pub(super) struct FormBodyProperties {
     pub(super) mobile_device_command_bar_content: Vec<String>,
     pub(super) show_title: Option<bool>,
     pub(super) show_close_button: Option<bool>,
-    pub(super) report_result: Option<String>,
-    pub(super) details_data: Option<String>,
+    pub(super) report_result: Option<FormReportRootValue>,
+    pub(super) details_data: Option<FormReportRootValue>,
     pub(super) report_form_type: Option<&'static str>,
     pub(super) variant_appearance: Option<String>,
     pub(super) auto_show_state: Option<&'static str>,
@@ -2688,6 +2688,43 @@ pub(super) fn extract_form_report_attribute_ref(
         .iter()
         .find(|attribute| attribute.id == attribute_id)
         .map(|attribute| attribute.name.clone())
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormReportRootValue {
+    pub(super) value: String,
+    pub(super) xsi_type: Option<&'static str>,
+}
+
+/// `ReportResult` and `DetailsData` normally reference form attributes, but
+/// their property-bag values are typed variants and the platform preserves a
+/// numeric variant too. Across the eight native trees the only numeric pair is
+/// ERP UH `Reports/ДвиженияНастраиваемойОтчетности/Forms/ФормаОтчета`: keys 5
+/// and 6 store `{"N",3}` / `{"N",0}` and are written as `xs:decimal` with
+/// those exact values. Keeping the variant tag separate avoids treating an
+/// arbitrary unrecognised value as text.
+pub(super) fn extract_form_report_root_value(
+    fields: &[&str],
+    property_key: &str,
+    attributes: &[FormAttribute],
+) -> Option<FormReportRootValue> {
+    if let Some(value) = extract_form_report_attribute_ref(fields, property_key, attributes) {
+        return Some(FormReportRootValue {
+            value,
+            xsi_type: None,
+        });
+    }
+    let value = form_root_property_bag_value(fields, property_key)?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match value_fields.as_slice() {
+        [kind, number] if kind.trim() == r#""N""# && number.trim().parse::<i64>().is_ok() => {
+            Some(FormReportRootValue {
+                value: number.trim().to_string(),
+                xsi_type: Some("xs:decimal"),
+            })
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
@@ -15015,6 +15052,13 @@ fn parse_form_control_color_space(
                 .map(|name| format!("style:{name}"))
         }
         "4" if payload.len() == 1 && payload.first()?.trim() == "0" => None,
+        // The automatic colour is a distinct payload of the same space, not
+        // an unset colour. Full-layout census over the eight stand corpora
+        // finds `{3,4,{-1}}` exactly once, on the BackColor slot of ERP UH
+        // `Reports/ДвиженияНастраиваемойОтчетности/Forms/ФормаОтчета` button
+        // `КнопкаСформировать`; the native tree's sole `<BackColor>auto` is on
+        // that same item. No other raw occurrence or native element exists.
+        "4" if payload.len() == 1 && payload.first()?.trim() == "-1" => Some("auto".to_string()),
         _ => None,
     }
 }
@@ -28545,15 +28589,23 @@ fn format_form_body_xml_with_dcs_profiles(
         ));
     }
     if let Some(value) = &properties.report_result {
+        let xsi_type = value
+            .xsi_type
+            .map(|value| format!(" xsi:type=\"{}\"", escape_xml_text(value)))
+            .unwrap_or_default();
         xml.push_str(&format!(
-            "\t<ReportResult>{}</ReportResult>\r\n",
-            escape_xml_text(value)
+            "\t<ReportResult{xsi_type}>{}</ReportResult>\r\n",
+            escape_xml_text(&value.value)
         ));
     }
     if let Some(value) = &properties.details_data {
+        let xsi_type = value
+            .xsi_type
+            .map(|value| format!(" xsi:type=\"{}\"", escape_xml_text(value)))
+            .unwrap_or_default();
         xml.push_str(&format!(
-            "\t<DetailsData>{}</DetailsData>\r\n",
-            escape_xml_text(value)
+            "\t<DetailsData{xsi_type}>{}</DetailsData>\r\n",
+            escape_xml_text(&value.value)
         ));
     }
     if let Some(value) = properties.report_form_type {

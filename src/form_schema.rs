@@ -6210,7 +6210,7 @@ impl FormRootVariantAppearanceSchema {
     pub(crate) const PROPERTY_BAG_KEY: &'static str = "20";
 
     pub(crate) fn from_raw_layout(root_discriminator: Option<&str>) -> Option<Self> {
-        (root_discriminator == Some("50")).then_some(Self)
+        matches!(root_discriminator, Some("49" | "50")).then_some(Self)
     }
 }
 
