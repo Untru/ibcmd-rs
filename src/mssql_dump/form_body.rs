@@ -30044,6 +30044,27 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_height)
         ));
     }
+    // A `SpreadSheetDocumentField` writes its `ToolTip` in the same early run
+    // its `ToolTipRepresentation` already uses, one site ahead of it, not down
+    // in the late fallback block.  Census over the native `Form.xml` of all
+    // eight stand corpora, every `<SpreadSheetDocumentField>` (2 709 of them,
+    // 5 carrying a `<ToolTip>`): the tooltip trails only `DataPath` (5) and
+    // `TitleLocation` (5) and leads `ToolTipRepresentation` (3), `CommandSet`
+    // (1), `VerticalScrollBar` (4), `HorizontalScrollBar` (4),
+    // `ViewScalingMode` (2), `Width`, `Height`, `HorizontalStretch`,
+    // `SelectionShowMode`, `Edit`, `ShowGroups` (1 each), `ContextMenu` (5),
+    // `ExtendedTooltip` (5) and `Events` (4), with no pair counted both ways.
+    // The 20 `<ToolTipRepresentation>` of the same element trail `DataPath`
+    // (20), `TitleLocation` (20) and `ToolTip` (3) and lead `CommandSet` (7)
+    // and the rest, so the representation stays put and only the tooltip moves
+    // ahead of it.
+    if item.tag == "SpreadSheetDocumentField" {
+        xml.push_str(&format_form_localized_section(
+            "ToolTip",
+            &item.tooltip,
+            indent + 1,
+        ));
+    }
     xml.push_str(&format_form_tooltip_representation_xml(
         item,
         FormTooltipRepresentationXmlOrder::FieldPropertiesBeforeCommandSet,
@@ -31980,6 +32001,9 @@ pub(super) fn format_form_child_item_xml(
             | "Pages"
             | "Page"
             | "CommandBar"
+            // The spreadsheet field writes its tooltip from the early run
+            // above, ahead of its own `ToolTipRepresentation`.
+            | "SpreadSheetDocumentField"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
