@@ -21186,6 +21186,14 @@ pub(super) fn parse_form_child_item_data_path(
                         )
                     })
                     .or_else(|| {
+                        resolve_form_item_rooted_record_set_standard_attribute_path(
+                            field,
+                            table_name_by_id,
+                            attribute_metadata_owners_by_id,
+                            owner_scoped_bindings,
+                        )
+                    })
+                    .or_else(|| {
                         resolve_form_dynamic_list_member_data_path(
                             field,
                             attribute_metadata_owners_by_id,
@@ -22888,6 +22896,63 @@ fn resolve_form_item_rooted_chain_data_path(
             });
         format!("{marker}{path}")
     })
+}
+
+/// The standard attribute a marker names on one row of a table bound to a
+/// register record set.
+///
+/// A record set is a collection of records, so what the table shows in a row is
+/// one record, and the members a marker addresses on it are the set's own --
+/// the very table `resolve_form_register_record_set_member_data_path` reads
+/// when the same marker follows the attribute itself. Only the route differs:
+/// the platform spells the row `Items.<table>.CurrentData`, exactly as it
+/// spells every other chain rooted at a form item.
+///
+/// The same fact is already read one slot over: the choice-parameter-link
+/// route records `Items.<table>.CurrentData.<standard attribute>` for a table
+/// whose bound attribute declares a type with a standard-attribute table, and
+/// the platform writes `Items.НаборЗаписей.CurrentData.Period` for the `-2` of
+/// an `InformationRegisterRecordSet` there.
+///
+/// Evidence for this route: over every `{2,{<item>,02023637-…},{-n}}` bound
+/// slot of the eight stand corpora -- one slot in all -- ERP УХ 3.2.12.6
+/// `AccumulationRegisters/ПланыПроизводства/Forms/ФормаРедактированияПолуфабриката`,
+/// InputField `Период` on table `СписокКорректировок`, whose attribute is
+/// declared `cfg:AccumulationRegisterRecordSet.ПланыПроизводства`; `-2` is
+/// `Period` on that family's record set by the same table the attribute-rooted
+/// route reads (98 slots across the stand spell `-2` -> `Period` on a record
+/// set, and no marker is spelled two ways), and the platform writes
+/// `Items.СписокКорректировок.CurrentData.Period`. The slot was written with no
+/// `<DataPath>` at all.
+fn resolve_form_item_rooted_record_set_standard_attribute_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> Option<String> {
+    let (item_id, members) = parse_form_item_rooted_chain(field)?;
+    let [terminal] = members.as_slice() else {
+        return None;
+    };
+    let [marker] = terminal.as_slice() else {
+        return None;
+    };
+    let marker = marker.trim();
+    if marker.parse::<i64>().ok()? >= 0 {
+        return None;
+    }
+    let table_name = table_name_by_id.get(item_id)?;
+    let root = owner_scoped_bindings.table_root.get(item_id)?;
+    let attribute = attribute_metadata_owners_by_id.get(&root.attribute_id)?;
+    // The table has to stand on the record set itself, not on a member of it:
+    // a row of some other collection is not a record.
+    if root.attribute_path != attribute.name {
+        return None;
+    }
+    let (family, _) =
+        form_register_record_set_owner(attribute.exact_single_type_reference.as_deref()?)?;
+    let member = form_register_record_set_standard_attribute_name(family, marker)?;
+    Some(format!("Items.{table_name}.CurrentData.{member}"))
 }
 
 /// The settings-composer members a chain reads past a table item's
