@@ -76,10 +76,8 @@ pub(super) struct ClientApplicationInterface {
     pub(super) top: Vec<ClientApplicationInterfaceNode>,
     pub(super) left: Vec<ClientApplicationInterfaceNode>,
     pub(super) bottom: Vec<ClientApplicationInterfaceNode>,
-    /// Every panel-definition record the body carries, in stored order.
-    ///
-    /// This is a known, measured over-read on exactly one stand file, kept
-    /// deliberately because nothing in the input tells the two cases apart.
+    /// The panel-definition records the body carries that the platform
+    /// publishes, in stored order.
     ///
     /// Nine configurations were read for their stored record list (the four
     /// the stand publishes a reference for -- ERP УХ 3.2.12.6, 1С:УТ
@@ -113,15 +111,43 @@ pub(super) struct ClientApplicationInterface {
     /// "one of my own standard definitions", `1` says "a definition this body
     /// names". ERP УХ's record claims the sixth identifier is standard, and
     /// the platform, rendering a code-`2` record from its own table, finds
-    /// nothing there and writes nothing. Its own writer cannot produce that
-    /// record, and its bytes are identical to the five it does publish, so
-    /// separating them needs the platform's table of standard identifiers.
-    /// Naming those five here would assert a property of the platform that no
-    /// input on the stand measures, and a "first five code-`2` records" rule
-    /// keeps the wrong five. The reader therefore publishes what the body
-    /// states and leaves `Ext/ClientApplicationInterface.xml` of ERP УХ one
-    /// `<panelDef/>` long.
+    /// nothing there and writes nothing.
+    ///
+    /// Separating that record from the five needs the platform's own table of
+    /// standard identifiers, and the platform prints it when asked: see
+    /// [`CLIENT_APPLICATION_STANDARD_PANEL_DEFS`]. A code-`2` record the table
+    /// does not name is dropped; every code-`1` record is kept whatever it
+    /// names.
     pub(super) panel_defs: Vec<ClientApplicationPanelDef>,
+}
+
+/// The panel definitions the platform owns, in the platform's own order.
+///
+/// Read off 8.3.27.2214 with nothing of ours in the input: the seed
+/// `seeds/ada-panels` is the Web_Service tree plus an
+/// `Ext/ClientApplicationInterface.xml` whose only `<panelDef/>` is a freshly
+/// generated identifier no configuration on the stand carries, placed in one
+/// `<top>` panel. Importing that tree and exporting the infobase back writes
+/// six definitions: these five, in this order, and the seed's one behind them.
+/// Not one of the five was supplied to the platform, so the list is the
+/// platform naming its own table rather than a white list read off a corpus.
+///
+/// The companion seed that classifies the codes -- import seven definitions,
+/// save, and read the stored record -- puts exactly these five under the code
+/// `2` and everything else under the code `1`, which is what makes the table
+/// usable as the code-`2` test.
+const CLIENT_APPLICATION_STANDARD_PANEL_DEFS: [&str; 5] = [
+    "b553047f-c9aa-4157-978d-448ecad24248",
+    "13322b22-3960-4d68-93a6-fe2dd7f28ca3",
+    "c933ac92-92cd-459d-81cc-e0c8a83ced99",
+    "cbab57f2-a0f3-4f0a-89ea-4cb19570ab75",
+    "b2735bd3-d822-4430-ba59-c9e869693b24",
+];
+
+fn client_application_panel_def_is_standard(id: &str) -> bool {
+    CLIENT_APPLICATION_STANDARD_PANEL_DEFS
+        .iter()
+        .any(|standard| standard.eq_ignore_ascii_case(id))
 }
 
 pub(super) struct ClientApplicationPanelDef {
@@ -665,11 +691,18 @@ pub(super) fn parse_client_application_interface_text(
         }
         let panel_def_fields = split_1c_braced_fields(fields.get(index + 1)?, 0)?;
         let id = parse_non_zero_uuid(panel_def_fields.first()?.trim())?;
+        index += 2;
+        // The code `2` claims the record is one of the platform's own standard
+        // definitions, and the platform renders such a record from its own
+        // table rather than from the body: an identifier the table does not
+        // name renders as nothing.
+        if code == "2" && !client_application_panel_def_is_standard(&id) {
+            continue;
+        }
         panel_defs.push(ClientApplicationPanelDef {
             id,
             spr: client_application_panel_def_spr(&panel_def_fields),
         });
-        index += 2;
     }
 
     Some(ClientApplicationInterface {

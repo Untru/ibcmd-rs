@@ -21434,7 +21434,8 @@ fn parse_metadata_child_properties_from_fields(
         fill_value: parse_metadata_child_fill_value(
             fields.get(header_index + 12).copied(),
             value_types,
-            object_refs,
+            type_index,
+            metadata_object_refs,
         ),
         emit_fill_value: true,
         fill_checking: metadata_fill_checking_xml(fields.get(header_index + 13).copied()),
@@ -21586,10 +21587,17 @@ fn parse_data_processor_wrapped_child_properties(
         max_value: parse_constant_bound_value(fields.get(10).copied()),
         fill_from_filling_value: parse_1c_bool_field(fields.get(21).copied()).unwrap_or(false),
         emit_fill_from_filling_value: true,
+        // The wider index, the only one carrying owner-qualified predefined-item
+        // and enumeration-value names: a `<FillValue>` of this shape names a
+        // predefined item, and the plain object index has no key for one. The
+        // chart-of-calculation-types decoder already hands its children the
+        // wider index for exactly this reason; the two key spaces are disjoint,
+        // so every lookup that answered before answers the same.
         fill_value: parse_metadata_child_fill_value(
             fields.get(20).copied(),
             value_types,
-            object_refs,
+            type_index,
+            metadata_object_refs,
         ),
         emit_fill_value: true,
         fill_checking: match fields.get(14).map(|field| field.trim()) {
@@ -21871,6 +21879,7 @@ fn parse_data_processor_tabular_section_properties_from_fields(
 fn parse_metadata_child_fill_value(
     field: Option<&str>,
     value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildFillValue> {
     let value = field?.trim();
@@ -21909,6 +21918,7 @@ fn parse_metadata_child_fill_value(
             }
             Some("\"#\"") => {
                 return parse_design_time_reference(value, object_refs)
+                    .or_else(|| owner_named_design_time_reference(value, type_index, object_refs))
                     .or_else(|| owner_scoped_design_time_reference(value, object_refs))
                     .map(MetadataChildFillValue::DesignTimeRef);
             }
@@ -31000,6 +31010,48 @@ fn parse_design_time_reference(
         .rev()
         .filter_map(|uuid| object_refs.get(&uuid).cloned())
         .next()
+}
+
+/// The reference a design-time value names when its own bytes spell the owner.
+///
+/// `{"#",<design-time ref>,{0,<owner>,<value>}}` carries the owner beside the
+/// value, and a predefined item is indexed under the owner-qualified key
+/// `owner-value:<owner reference>:<uuid>`, so the pair is enough to name the
+/// item outright. The information-register reader has read the shape this way
+/// all along; only the metadata-child `<FillValue>` reader had not, and it fell
+/// back on [`owner_scoped_design_time_reference`], which asks the identifier to
+/// answer for itself and refuses when two owners carry it.
+///
+/// Evidence (ERP УХ 3.2.12.6): the tabular-section attribute
+/// `DataProcessors/УточнениеУчетаНДФЛПоНалоговымБазамПриОтменеДолейРКиСН`
+/// `КодДоходаНДФЛ` stores
+/// `{"#",5c14e26f-…,{0,4c013061-…,7bfa392c-…}}`. The value uuid is carried by
+/// two owner-qualified keys at once -- `Catalog.ВидыДоходовНДФЛ` and its
+/// deprecated twin `Catalog.УдалитьВидыДоходовНДФЛ`, which the distribution
+/// copied item uuid for item uuid -- so the self-answering route refuses, while
+/// the owner the value itself names, `4c013061-…`, is the `Ref` type id of
+/// `Catalog.ВидыДоходовНДФЛ` and settles it. The platform writes
+/// `Catalog.ВидыДоходовНДФЛ.КодДоходаПоУмолчанию`.
+///
+/// Only the fully-named case is read here: a zero owner or a zero value is the
+/// register reader's own business and stays there.
+fn owner_named_design_time_reference(
+    text: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let (owner_uuid, value_uuid) = parse_information_register_design_time_ref_ids(text)?;
+    if information_register_uuid_is_zero(&owner_uuid)
+        || information_register_uuid_is_zero(&value_uuid)
+    {
+        return None;
+    }
+    let owner =
+        information_register_design_time_owner_reference(&owner_uuid, type_index, object_refs)?;
+    let reference = object_refs
+        .get(&metadata_owner_value_reference_key(&owner, &value_uuid))?
+        .clone();
+    information_register_reference_belongs_to_owner(&owner, &reference).then_some(reference)
 }
 
 /// The reference an owner-scoped value identifier names.

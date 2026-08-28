@@ -4499,16 +4499,34 @@ pub(super) fn form_value_type_property_name(uuid: &str, path: &[i64]) -> Option<
         ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", [0]) => Some("Variant"),
         ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", [1]) => Some("StartDate"),
         ("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88", [2]) => Some("EndDate"),
-        // v8:StandardBeginningDate
+        // v8:StandardBeginningDate. `1` is the type's own date, read off the
+        // platform: the seed `seeds/ada-probe` gives one form attribute per
+        // probed member name, and 8.3.27.2214 stores `SBD1.Variant` as
+        // `{1,{0}}` and `SBD2.Date` as `{1,{1}}`.
         ("0387f3a2-7df5-4804-948b-4580a51e4a15", [0]) => Some("Variant"),
+        ("0387f3a2-7df5-4804-948b-4580a51e4a15", [1]) => Some("Date"),
         // dcsset:SettingsComposer. Indexes 1 and 2 are named by the one
         // composer attribute of UT 11.5.27.75 whose use-always list spells
         // them, `CommonForms/ФормаВыбораДоступногоПоля`: it holds `{1}` and
-        // `{2}` and the platform writes `FixedSettings` and `UserSettings`.
+        // `{2}`, and the platform writes `FixedSettings` and `UserSettings`.
+        //
+        // That list carries both indexes at once and the platform sorts the
+        // block, so it could not tell the two apart; read in sorted order it
+        // put `FixedSettings` on `1`, and that is the wrong way round. A seed
+        // separates them: a data processor whose form holds one settings
+        // composer per probed name, each with a single-entry `<UseAlways>`,
+        // imported and saved by 8.3.27.2214 (`seeds/ada-composer2`), stores
+        // `B7.FixedSettings` as `{1,{2}}` and `B8.UserSettings` as `{1,{1}}`.
+        // The composer's own member table read the same numbering all along --
+        // `form_settings_composer_member` has `1` as `UserSettings` -- so the
+        // swap also removes a contradiction between the two tables. Both
+        // indexes occur only side by side in all eight stand corpora (7 blocks,
+        // never one without the other), which is why the sorted output never
+        // showed the error.
         ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [0]) => Some("Settings"),
         ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [0, 1]) => Some("Settings.Filter"),
-        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [1]) => Some("FixedSettings"),
-        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [2]) => Some("UserSettings"),
+        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [1]) => Some("UserSettings"),
+        ("cab0d12b-3c88-4993-8edc-8c3827cadc7d", [2]) => Some("FixedSettings"),
         // v8:ValueListType. Solved from the platform's own answer over the 11
         // value-list attributes of UT 11.5.27.75 whose use-always list is a
         // pure index list: `{3}` alone yields `Picture`, `{-1,3}` yields
@@ -4521,7 +4539,15 @@ pub(super) fn form_value_type_property_name(uuid: &str, path: &[i64]) -> Option<
         // The type-blind table this replaces had `-1` and `3` the other way
         // round; the swap stayed invisible because a list that carries both
         // writes the same sorted pair either way.
+        //
+        // `0` is the list's own value, the fifth member. It is not deducible
+        // from UT: no list there names it. The seed `seeds/ada-probe` names it
+        // alone -- 8.3.27.2214 stores `VL1.Value` as `{1,{0}}` -- and the same
+        // seed re-reads the four rows above off the platform one at a time,
+        // `{1,{-1}}`, `{1,{1}}`, `{1,{2}}`, `{1,{3}}`, which confirms the UT
+        // deduction member by member instead of as a sorted set.
         ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [-1]) => Some("ValueType"),
+        ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [0]) => Some("Value"),
         ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [1]) => Some("Presentation"),
         ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [2]) => Some("Check"),
         ("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3", [3]) => Some("Picture"),
@@ -5688,6 +5714,8 @@ pub(super) fn parse_form_attribute_direct_use_always(
         // composer's head alone gets every step past the first wrong.
         let joined = if value_type_uuid == Some(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID) {
             form_settings_composer_use_always_path(&parts)
+        } else if let Some(path) = form_object_settings_composer_use_always_path(&parts) {
+            Some(path)
         } else {
             parts
                 .iter()
@@ -5783,10 +5811,12 @@ fn form_constants_set_use_always<'a>(
 /// second one against the composer's own top-level table, so every one of
 /// those six entries was dropped and the block never written.
 ///
-/// The composer's own head keeps the top-level table: only there does `1` name
-/// `FixedSettings`, a member no chain walk has ever reached. A path that steps
-/// past a head other than `Settings`, or past a member the table gives no
-/// collection for, refuses -- the entry is dropped, exactly as before.
+/// A head other than `Settings` is a member of the composer itself and is read
+/// off the composer's own value-type table. That table and the chain table
+/// agree on every id -- both now say `1` is `UserSettings` and `2` is
+/// `FixedSettings`, as the seed `seeds/ada-composer2` reads them off the
+/// platform one at a time. A path that steps past a member the table gives no
+/// collection for refuses -- the entry is dropped, exactly as before.
 fn form_settings_composer_use_always_path(components: &[Vec<&str>]) -> Option<String> {
     let head = components.first()?.first()?.trim();
     let mut owner = match head {
@@ -5825,6 +5855,49 @@ fn form_settings_composer_use_always_path(components: &[Vec<&str>]) -> Option<St
     Some(names.join("."))
 }
 
+/// One entry of a use-always list whose attribute is the object that *owns* a
+/// settings composer rather than the composer itself.
+///
+/// The entry names the object's built-in composer member by the same uuid a
+/// bound field slot names it by, and then walks the composer's own member
+/// tables. Resolving each component against the attribute's own value type
+/// instead -- a report object -- named the member for nothing and dropped the
+/// entry, and with it the whole block.
+///
+/// Evidence, ERP УХ 3.2.12.6
+/// `Reports/ОборотноСальдоваяВедомостьПоСчету/Forms/ФормаОтчета`: attribute
+/// `Отчет`, declared `cfg:ReportObject.ОборотноСальдоваяВедомостьПоСчету`,
+/// holds the two entries `{2,{0,b9754f01-…},{1}}` and `{2,{0,b9754f01-…},{2}}`,
+/// and the platform writes `Отчет.SettingsComposer.FixedSettings` and
+/// `Отчет.SettingsComposer.UserSettings`. `b9754f01-…` is the member uuid the
+/// bound-slot route already reads as `SettingsComposer`, and `1`/`2` are the
+/// composer's own members.
+fn form_object_settings_composer_use_always_path(components: &[Vec<&str>]) -> Option<String> {
+    let (head, rest) = components.split_first()?;
+    let [marker, uuid] = head.as_slice() else {
+        return None;
+    };
+    if marker.trim() != "0"
+        || !uuid
+            .trim()
+            .eq_ignore_ascii_case(FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID)
+    {
+        return None;
+    }
+    let mut owner = Some(FormSettingsComposerType::SettingsComposer);
+    let mut path = String::from("SettingsComposer");
+    for component in rest {
+        let [member] = component.as_slice() else {
+            return None;
+        };
+        let (name, next) = form_settings_composer_member(owner?, member.trim())?;
+        path.push('.');
+        path.push_str(name);
+        owner = next;
+    }
+    Some(path)
+}
+
 /// One step of a use-always path: either a metadata object the configuration
 /// names - a tabular section, an attribute, a column - or a code that stands
 /// for a property the metadata does not carry a reference for.
@@ -5835,7 +5908,12 @@ pub(super) fn form_attribute_use_always_segment_name(
     value_type: Option<&str>,
     value_type_uuid: Option<&str>,
 ) -> Option<String> {
-    if value_fields.first().map(|value| value.trim()) == Some("0") {
+    // `{0,<uuid>}` names a metadata object; a bare `{0}` is the code zero, and
+    // reading it as a truncated pair refused it before it ever reached the
+    // type's own property table. Evidence: the seed `seeds/ada-probe` stores
+    // `SBD1.Variant`, `VL1.Value` and `SP1.Variant` as `{1,{0}}`, and the
+    // platform writes all three.
+    if value_fields.len() == 2 && value_fields.first().map(|value| value.trim()) == Some("0") {
         let uuid = parse_uuid_field(value_fields.get(1)?.trim())?;
         let reference = object_refs.get(&uuid)?;
         return Some(reference.rsplit_once('.')?.1.to_string());
@@ -5858,6 +5936,23 @@ pub(super) fn form_attribute_use_always_segment_name(
         {
             return Some(property.to_string());
         }
+    }
+    // The standard attributes and standard tabular sections of the generated
+    // owner type the attribute is declared as, read from the same per-family
+    // tables a bound field slot reads. The two id spaces are the same one: the
+    // seed `seeds/ada-probe` stores `Date` as `{1,{-3}}`, `DeletionMark`
+    // `{-4}`, `Number` `{-2}`, `Posted` `{-7}` and `Ref` `{-5}` for an
+    // attribute declared `cfg:DocumentObject.…`, which is
+    // `DOCUMENT_STANDARD_ATTRIBUTES` marker for marker -- a table built from
+    // the 1 395 bound slots of UT 11.5.27.75, never from a use-always list.
+    //
+    // It sits ahead of the type-blind table below and behind the two rows above
+    // it: `-8` is `RegisterRecords` on a document object and `Ref` on a catalog
+    // object, and neither family's own table claims that marker.
+    if let Some(property) = value_type
+        .and_then(|value_type| form_standard_attribute_name_for_type_reference(value_type, code))
+    {
+        return Some(property.to_string());
     }
     match code {
         "-10" => Some("Predefined".to_string()),
@@ -22935,9 +23030,15 @@ fn form_settings_composer_member(
 ) -> Option<(&'static str, Option<FormSettingsComposerType>)> {
     use FormSettingsComposerType::*;
     let table: &[(&str, &str, Option<FormSettingsComposerType>)] = match owner {
+        // `2` is `FixedSettings`, the composer's third top-level member, read
+        // off the platform by the seed `seeds/ada-composer2`: an attribute
+        // whose single `<UseAlways>` entry is `B7.FixedSettings` is stored
+        // `{1,{2}}`. It carries no next type -- the seed names the member
+        // alone, and nothing has been observed walking past it.
         SettingsComposer => &[
             ("0", "Settings", Some(Settings)),
             ("1", "UserSettings", Some(UserSettings)),
+            ("2", "FixedSettings", None),
         ],
         // `5` and `6` join the five UT 11.5.27.75 pinned from ERP УХ 3.2.12.6,
         // where two forms bind an item straight onto the member and the
@@ -22950,6 +23051,26 @@ fn form_settings_composer_member(
         // `КомпоновщикНастроек.Settings.UserFields`. Each form's chain slots
         // and its composer data paths are in bijection, so neither code has a
         // second reading.
+        //
+        // The sixteen `1000x` members are read off the platform one at a time.
+        // Three ERP УХ forms carry all of them at once -- the two
+        // `InformationRegisters/НастройкаЗаполнения…` record forms and
+        // `РедактированиеНастройкиВСтрокеНабораЗаписей` -- and each stores the
+        // whole run `10000`…`10015` while the platform sorts the block, so the
+        // corpus cannot separate one code from its neighbour. A seed can: a
+        // data processor whose form holds one settings composer per probed
+        // name, each with a single-entry `<UseAlways>`, imported and saved by
+        // 8.3.27.2214 (`seeds/ada-composer`, `seeds/ada-composer2`). It stores
+        // `Settings.Use` as `{2,{0},{10000}}`, `Settings.ReportStructure` as
+        // `{10001}`, `HasSelection` `{10002}`, `HasFilter` `{10003}`,
+        // `HasOrder` `{10004}`, `HasConditionalAppearance` `{10005}`,
+        // `HasOutputParameters` `{10006}`, `ItemDataParameters` `{10007}`
+        // through `ItemUserFields` `{10014}`, and `ReportStructurePicture`
+        // `{10015}` -- an order no sorted reading would have produced. The same
+        // seed re-reads `0`…`6` above one at a time and confirms every one.
+        //
+        // The `1000x` rows carry no next type: the seed names each member
+        // alone, and a walk past one stays unmeasured and refuses.
         Settings => &[
             ("0", "DataParameters", None),
             ("1", "Filter", Some(Filter)),
@@ -22958,6 +23079,22 @@ fn form_settings_composer_member(
             ("4", "ConditionalAppearance", Some(ConditionalAppearance)),
             ("5", "OutputParameters", None),
             ("6", "UserFields", None),
+            ("10000", "Use", None),
+            ("10001", "ReportStructure", None),
+            ("10002", "HasSelection", None),
+            ("10003", "HasFilter", None),
+            ("10004", "HasOrder", None),
+            ("10005", "HasConditionalAppearance", None),
+            ("10006", "HasOutputParameters", None),
+            ("10007", "ItemDataParameters", None),
+            ("10008", "ItemFilter", None),
+            ("10009", "ItemGroupFields", None),
+            ("10010", "ItemSelection", None),
+            ("10011", "ItemOrder", None),
+            ("10012", "ItemConditionalAppearance", None),
+            ("10013", "ItemOutputParameters", None),
+            ("10014", "ItemUserFields", None),
+            ("10015", "ReportStructurePicture", None),
         ],
         Filter => &[
             ("0", "FilterAvailableFields", Some(AvailableFields)),
@@ -23622,6 +23759,10 @@ fn form_standard_attribute_table_for_type_reference(
             Some(TASK_OBJECT_STANDARD_ATTRIBUTES)
         }
         (
+            GeneratedMetadataOwnerFamily::ChartOfCalculationTypes,
+            GeneratedMetadataOwnerRole::Object,
+        ) => Some(CHART_OF_CALCULATION_TYPES_OBJECT_STANDARD_ATTRIBUTES),
+        (
             GeneratedMetadataOwnerFamily::ChartOfCharacteristicTypes,
             GeneratedMetadataOwnerRole::Object,
         ) => Some(CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES),
@@ -23779,6 +23920,38 @@ const EXCHANGE_PLAN_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-14", "ExchangeDate"),
 ];
 const INFORMATION_REGISTER_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Period")];
+/// The members a chart of calculation types carries beside its own attributes:
+/// seven standard attributes and three standard tabular sections, all reachable
+/// by marker from a form attribute typed as the object.
+///
+/// The corpus cannot name them: the one ERP УХ use-always list that reaches
+/// them (`Catalogs/ВидыРасчетовРезервовПоОплатеТруда/Forms/ФормаЭлемента`,
+/// attribute `ВидРасчета`) carries `-4`, `-20` and `-30` among fifty entries the
+/// platform sorts, so no marker is separable from its neighbour. A seed names
+/// each one alone: a chart of calculation types built from the ССЛ demo chart
+/// with its child objects dropped, plus a data processor whose form holds one
+/// attribute per probed member with a single-entry `<UseAlways>`, imported and
+/// saved by 8.3.27.2214 (`seeds/ada-probe`). It stores `Code` as `{1,{-2}}`,
+/// `Description` `{-3}`, `ActionPeriodIsBasic` `{-4}`, `DeletionMark` `{-5}`,
+/// `Ref` `{-6}`, `Predefined` `{-8}`, `BaseCalculationTypes` `{-10}`,
+/// `PredefinedDataName` `{-11}`, `DisplacingCalculationTypes` `{-20}` and
+/// `LeadingCalculationTypes` `{-30}`.
+///
+/// Note `-8` is `Predefined` here and `RegisterRecords` in the type-blind table
+/// of last resort, and `-10` is `BaseCalculationTypes` here and `Predefined`
+/// there: the family decides, which is why this table is read before that one.
+const CHART_OF_CALCULATION_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-2", "Code"),
+    ("-3", "Description"),
+    ("-4", "ActionPeriodIsBasic"),
+    ("-5", "DeletionMark"),
+    ("-6", "Ref"),
+    ("-8", "Predefined"),
+    ("-10", "BaseCalculationTypes"),
+    ("-11", "PredefinedDataName"),
+    ("-20", "DisplacingCalculationTypes"),
+    ("-30", "LeadingCalculationTypes"),
+];
 /// Reached only by dereferencing a *column* whose declared type is exactly one
 /// document reference. Evidence: UT 11.5.27.75
 /// `Documents/ЗаказПоставщику/Forms/СозданиеЗаказовПоставщикамНаОсновании`,

@@ -5587,7 +5587,7 @@ fn writes_configuration_module_text_to_source_layout_without_metadata_row() {
             .as_bytes()
             .to_vec();
     let client_application_interface_blob = deflate_for_test(
-            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,0}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},2,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
+            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,0}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},1,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
         );
     let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
     let standalone_configuration_content = b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<StandaloneContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n</StandaloneContent>\r\n".to_vec();
@@ -5933,7 +5933,7 @@ fn extracts_home_page_work_area_with_form_references() {
 #[test]
 fn extracts_client_application_interface_layout() {
     let body = deflate_for_test(
-            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,0}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},2,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
+            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,0}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},1,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
         );
 
     let interface = parse_client_application_interface_blob(&body).unwrap();
@@ -30256,21 +30256,30 @@ fn parses_and_formats_metadata_child_fill_value_variants() {
         "Catalog.Валюты.EmptyRef".to_string(),
     )]);
 
-    let date_time =
-        parse_metadata_child_fill_value(Some(r#"{"D",00010101000000}"#), &[], &object_refs)
+    let type_index = BTreeMap::new();
+    let date_time = parse_metadata_child_fill_value(
+        Some(r#"{"D",00010101000000}"#),
+        &[],
+        &type_index,
+        &object_refs,
+    )
+    .unwrap();
+    let decimal =
+        parse_metadata_child_fill_value(Some(r#"{"N",0}"#), &[], &type_index, &object_refs)
             .unwrap();
-    let decimal = parse_metadata_child_fill_value(Some(r#"{"N",0}"#), &[], &object_refs).unwrap();
     let design_time_ref = parse_metadata_child_fill_value(
             Some(
                 r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab,00000000-0000-0000-0000-000000000000}}"##,
             ),
             &[],
+            &type_index,
             &object_refs,
         )
         .unwrap();
     let boolean_nil = parse_metadata_child_fill_value(
         Some(r#"{"U"}"#),
         &[ConstantValueType::Boolean],
+        &type_index,
         &object_refs,
     )
     .unwrap();
