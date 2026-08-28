@@ -36197,6 +36197,7 @@ const FORM_CHART_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
 /// The one series record a chart with no series still carries, and the first
 /// slot of the tail behind it.
 const FORM_CHART_SERIES_FIELDS: usize = 11;
+const FORM_CHART_POINT_FIELDS: usize = 11;
 /// The tail length at `series_count=0, point_count=0` -- the shape both
 /// original 197-tail proofs carried. `format_form_chart_settings_xml` grows
 /// this by the same formula `moxel.rs` uses for its own chart record.
@@ -36204,6 +36205,7 @@ const FORM_CHART_TAIL_FIELDS_BASE: usize = 197;
 /// Mirrors `moxel.rs`'s own `MAX_MOXEL_CHART_SERIES` bound for the same
 /// spreadsheet-document chart record family.
 const MAX_FORM_CHART_SERIES: usize = 64;
+const MAX_FORM_CHART_POINTS: usize = 4096;
 
 /// A stored member with its layout whitespace removed, for the members whose
 /// whole shape is compared against a fixed token: the record is line-broken and
@@ -36511,7 +36513,6 @@ fn form_chart_scale_title_area_xml(
         || fields.get(1)?.trim() != "4"
         || fields.get(2)?.trim() != "0.5"
         || fields.get(3)?.trim() != "0.5"
-        || form_chart_compact(fields.get(4)?) != "{7,3,0,1,100}"
         || fields.get(7)?.trim() != "1"
         || fields.get(10)?.trim() != "4"
         || fields.get(11)?.trim() != "2"
@@ -36520,7 +36521,13 @@ fn form_chart_scale_title_area_xml(
         return None;
     }
     let mut xml = format!("{tab}<d4p1:titleArea>\r\n");
-    xml.push_str(&format!("{inner_tab}<d4p1:font kind=\"AutoFont\"/>\r\n"));
+    if form_chart_compact(fields.get(4)?) == "{7,3,0,1,100}" {
+        xml.push_str(&format!("{inner_tab}<d4p1:font kind=\"AutoFont\"/>\r\n"));
+    } else {
+        let rendered =
+            parse_form_font_tuple_xml_tag(fields.get(4)?.trim(), object_refs, "d4p1:font")?;
+        xml.push_str(&format!("{inner_tab}{rendered}\r\n"));
+    }
     xml.push_str(&format!(
         "{inner_tab}<d4p1:textColor>{}</d4p1:textColor>\r\n",
         form_chart_color(fields.get(5)?, object_refs)?
@@ -36536,6 +36543,77 @@ fn form_chart_scale_title_area_xml(
     ));
     xml.push_str(&format!("{tab}</d4p1:titleArea>\r\n"));
     Some(xml)
+}
+
+fn form_chart_scale_title_members_xml(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    match fields.get(1)?.trim() {
+        "0" => {}
+        "1" => xml.push_str(&format!(
+            "{tab}<d4p1:showTitle>DontShow</d4p1:showTitle>\r\n"
+        )),
+        "2" => xml.push_str(&format!("{tab}<d4p1:showTitle>Show</d4p1:showTitle>\r\n")),
+        _ => return None,
+    }
+    match fields.get(2)?.trim() {
+        "0" => {
+            if form_chart_compact(fields.get(4)?) != "{1,0}" {
+                return None;
+            }
+        }
+        "1" => {
+            xml.push_str(&format!(
+                "{tab}<d4p1:titleTextSource>UseText</d4p1:titleTextSource>\r\n"
+            ));
+            xml.push_str(&form_chart_localized_xml(
+                "titleText",
+                fields.get(4)?,
+                indent,
+            )?);
+        }
+        _ => return None,
+    }
+    xml.push_str(&form_chart_scale_title_area_xml(
+        fields.get(5)?,
+        object_refs,
+        indent,
+    )?);
+    match fields.get(3)?.trim() {
+        "2" => {}
+        "1" => xml.push_str(&format!(
+            "{tab}<d4p1:titlePlacement>PlotArea</d4p1:titlePlacement>\r\n"
+        )),
+        _ => return None,
+    }
+    Some(xml)
+}
+
+fn form_chart_scale_no_grid_shape(fields: &[&str]) -> bool {
+    fields.len() == 22
+        && fields.first().is_some_and(|value| value.trim() == "2")
+        && fields.get(6).is_some_and(|value| value.trim() == "2")
+        && fields.get(8).is_some_and(|value| value.trim() == "0")
+        && fields
+            .get(9)
+            .is_some_and(|value| form_chart_compact(value) == "{3,4,{0}}")
+        && fields
+            .get(11)
+            .is_some_and(|value| form_chart_compact(value) == "{3,4,{0}}")
+        && fields
+            .get(13)
+            .is_some_and(|value| form_chart_compact(value) == "{1,0}")
+        && fields.get(14).is_some_and(|value| value.trim() == "0")
+        && fields
+            .get(15)
+            .is_some_and(|value| form_chart_compact(value) == "{3,4,{0}}")
+        && [16usize, 18, 20, 21]
+            .into_iter()
+            .all(|slot| fields.get(slot).is_some_and(|value| value.trim() == "0"))
 }
 
 /// A stored decimal, written the way the platform writes it. The two records
@@ -36648,6 +36726,107 @@ fn form_chart_series_xml(
     Some(xml)
 }
 
+/// A real point uses the same eleven-member record as the spreadsheet-chart
+/// reader: text, changed flag, id, cached colour, line, marker, two flags,
+/// two undefined placeholders and colour priority. Its published colour is
+/// the resolved one-member entry from the chart's legend list.
+fn form_chart_point_xml(
+    fields: &[&str],
+    color: &str,
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Option<String> {
+    let tab = "\t".repeat(indent);
+    let inner = indent + 1;
+    let inner_tab = "\t".repeat(inner);
+    if fields.len() != FORM_CHART_POINT_FIELDS
+        || form_chart_compact(fields.get(8)?) != r#"{"U"}"#
+        || form_chart_compact(fields.get(9)?) != r#"{"U"}"#
+    {
+        return None;
+    }
+    // The cached colour is a valid colour but the platform publishes the
+    // resolved legend entry, just as it does for series records.
+    form_chart_color(fields.get(3)?, object_refs)?;
+    let mut xml = format!("{tab}<d4p1:realPointData>\r\n");
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:id>{}</d4p1:id>\r\n",
+        form_chart_integer(fields.get(2)?)?
+    ));
+    xml.push_str(&format!("{inner_tab}<d4p1:color>{color}</d4p1:color>\r\n"));
+    xml.push_str(&form_chart_line_xml("line", fields.get(4)?, inner)?);
+    xml.push_str(&format!(
+        "{inner_tab}<d4p1:marker>{}</d4p1:marker>\r\n",
+        form_chart_marker(fields.get(5)?)?
+    ));
+    xml.push_str(&form_chart_localized_xml("text", fields.first()?, inner)?);
+    for (name, slot) in [
+        ("strIsChanged", 1usize),
+        ("isExpand", 6),
+        ("isIndicator", 7),
+        ("colorPriority", 10),
+    ] {
+        xml.push_str(&format!(
+            "{inner_tab}<d4p1:{name}>{}</d4p1:{name}>\r\n",
+            form_chart_bool(fields.get(slot)?)?
+        ));
+    }
+    xml.push_str(&format!("{tab}</d4p1:realPointData>\r\n"));
+    Some(xml)
+}
+
+fn form_chart_real_data_items_xml(
+    fields: &[&str],
+    item_count: usize,
+    indent: usize,
+) -> Option<String> {
+    if item_count == 0 {
+        return Some(String::new());
+    }
+    if fields.len() != item_count.checked_mul(3)? {
+        return None;
+    }
+    let tab = "\t".repeat(indent);
+    let item_tab = "\t".repeat(indent + 1);
+    let value_tab = "\t".repeat(indent + 2);
+    let mut xml = format!("{tab}<d4p1:realDataItems>\r\n");
+    for item in fields.chunks_exact(3) {
+        let typed = split_1c_braced_fields(item.first()?, 0)?;
+        if typed.len() != 2 || form_chart_compact(item.get(1)?) != r#"{"U"}"# {
+            return None;
+        }
+        let (value_type, value) = match parse_1c_string(typed.first()?)?.as_str() {
+            "N" => ("xs:decimal", form_chart_decimal(typed.get(1)?)?.to_string()),
+            "S" => ("xs:string", parse_1c_string(typed.get(1)?)?),
+            _ => return None,
+        };
+        let tooltip = parse_1c_string(item.get(2)?)?;
+        xml.push_str(&format!("{item_tab}<d4p1:item>\r\n"));
+        if value.is_empty() {
+            xml.push_str(&format!(
+                "{value_tab}<d4p1:valData xsi:type=\"{value_type}\"/>\r\n"
+            ));
+        } else {
+            xml.push_str(&format!(
+                "{value_tab}<d4p1:valData xsi:type=\"{value_type}\">{}</d4p1:valData>\r\n",
+                escape_xml_element_text(&value)
+            ));
+        }
+        xml.push_str(&format!("{value_tab}<d4p1:valInfo xsi:nil=\"true\"/>\r\n"));
+        if tooltip.is_empty() {
+            xml.push_str(&format!("{value_tab}<d4p1:toolTip/>\r\n"));
+        } else {
+            xml.push_str(&format!(
+                "{value_tab}<d4p1:toolTip>{}</d4p1:toolTip>\r\n",
+                escape_xml_element_text(&tooltip)
+            ));
+        }
+        xml.push_str(&format!("{item_tab}</d4p1:item>\r\n"));
+    }
+    xml.push_str(&format!("{tab}</d4p1:realDataItems>\r\n"));
+    Some(xml)
+}
+
 /// The design members, in the order the platform writes them.
 ///
 /// Every read below names the tail slot it comes from.  Six members are
@@ -36709,12 +36888,20 @@ fn format_form_chart_settings_body_xml(
     // `chart-form-control` zero-series seed, which has only the placeholder.
     // See `tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/`.
     let series_count: usize = data.get(4)?.trim().parse().ok()?;
-    if series_count > MAX_FORM_CHART_SERIES || data.get(17 + 11 * series_count)?.trim() != "0" {
+    if series_count > MAX_FORM_CHART_SERIES {
         return None;
     }
     let real_series_end = 5 + FORM_CHART_SERIES_FIELDS * series_count;
     let ex_series_start = real_series_end;
-    let tail_start = ex_series_start + FORM_CHART_SERIES_FIELDS + 2;
+    let point_count = data
+        .get(ex_series_start + FORM_CHART_SERIES_FIELDS + 1)
+        .and_then(|value| value.trim().parse::<usize>().ok())?;
+    if point_count > MAX_FORM_CHART_POINTS {
+        return None;
+    }
+    let point_data_start = ex_series_start + FORM_CHART_SERIES_FIELDS + 2;
+    let tail_start =
+        point_data_start.checked_add(FORM_CHART_POINT_FIELDS.checked_mul(point_count)?)?;
     // The scale-id list right after `rebuildTime` grows the tail by three
     // members per real series (a count field plus two `series_count+1`-long
     // lists) -- the same `197 + 3*series_count + point_count*(1+4*
@@ -36722,7 +36909,6 @@ fn format_form_chart_settings_body_xml(
     // for `series_count`/`point_count`, cross-checked here at
     // `series_count=1` and, directly against native UT XML with no seed, at
     // `series_count=4`.
-    let point_count = 0usize; // not yet observed nonzero on a form chart
     // Version 73 is version 74 minus six trailing zeros -- the same relation
     // `moxel.rs`'s spreadsheet-document chart records, and the same one
     // `uh` `Reports/МатрицаРисков/Forms/ФормаОтчета` shows here: its tail is
@@ -36753,7 +36939,8 @@ fn format_form_chart_settings_body_xml(
     // 2 * series_count` is `tail_base + 3 * series_count` there, and the same
     // substitution turns the two `tidx` shifts into `id_count + series_count`
     // and `id_count + 2 * series_count` minus one.
-    let id_count: usize = t_count_declared(data.get(tail_start + 123)?)?;
+    let real_data_growth = 3usize.checked_mul(series_count.checked_mul(point_count)?)?;
+    let id_count: usize = t_count_declared(data.get(tail_start + 123 + real_data_growth)?)?;
     let expected_tail_fields =
         tail_base - 1 + id_count + 2 * series_count + point_count * (1 + 4 * series_count);
     if data.len() != tail_start + expected_tail_fields {
@@ -36761,6 +36948,7 @@ fn format_form_chart_settings_body_xml(
     }
     let real_series = data.get(5..real_series_end)?;
     let series = data.get(ex_series_start..ex_series_start + FORM_CHART_SERIES_FIELDS)?;
+    let real_points = data.get(point_data_start..tail_start)?;
     let t = data.get(tail_start..)?;
     // Positions in `t` from here on are given as the fixed (`series_count`
     // `=` `0`) offset the two original 197-tail proofs established; `tidx`
@@ -36768,7 +36956,7 @@ fn format_form_chart_settings_body_xml(
     // the per-series copy of the funnel-link-shaped record (both proven by
     // the same seed) have grown the tail.
     let n_scale = 1 + series_count;
-    if id_count != 0 && id_count != n_scale {
+    if id_count != 0 && id_count != series_count && id_count != n_scale {
         return None;
     }
     // `shift_b` is the growth of the per-scale-item legend list itself, and
@@ -36780,21 +36968,33 @@ fn format_form_chart_settings_body_xml(
     // is therefore `148`, not `147`; no read used fixed `147` before, so this
     // only makes room for the list read below.
     let tidx = |fixed: usize| -> usize {
-        if fixed < 126 {
+        if fixed < 100 {
             fixed
+        } else if fixed < 126 {
+            fixed + real_data_growth
         } else if fixed < 148 {
-            fixed - 1 + id_count + series_count
+            fixed + real_data_growth - 1 + id_count + series_count
         } else {
-            fixed - 1 + id_count + 2 * series_count
+            fixed + real_data_growth - 1 + id_count + 2 * series_count + point_count
         }
     };
-    let mut expected_ids = Vec::with_capacity(n_scale);
-    expected_ids.push(form_chart_integer(series.get(7)?)?.to_string());
-    for chunk in real_series.chunks(FORM_CHART_SERIES_FIELDS) {
-        expected_ids.push(form_chart_integer(chunk.get(7)?)?.to_string());
-    }
+    let mut real_series_ids = real_series
+        .chunks(FORM_CHART_SERIES_FIELDS)
+        .map(|chunk| form_chart_integer(chunk.get(7)?).map(str::to_string))
+        .collect::<Option<Vec<_>>>()?;
+    let expected_ids = if id_count == n_scale {
+        let mut ids = Vec::with_capacity(n_scale);
+        ids.push(form_chart_integer(series.get(7)?)?.to_string());
+        ids.append(&mut real_series_ids);
+        ids
+    } else if id_count == series_count {
+        real_series_ids
+    } else {
+        Vec::new()
+    };
+    let scale_list_start = 124 + real_data_growth;
     for (offset, expected_id) in expected_ids.iter().take(id_count).enumerate() {
-        let entry = split_1c_braced_fields(t.get(124 + offset)?, 0)?;
+        let entry = split_1c_braced_fields(t.get(scale_list_start + offset)?, 0)?;
         if entry.len() != 3
             || entry.first()?.trim() != "0"
             || entry.get(1)?.trim() != expected_id
@@ -36804,7 +37004,7 @@ fn format_form_chart_settings_body_xml(
         }
     }
     for offset in 0..n_scale {
-        if form_chart_compact(t.get(124 + id_count + offset)?) != "{0,0}" {
+        if form_chart_compact(t.get(scale_list_start + id_count + offset)?) != "{0,0}" {
             return None;
         }
     }
@@ -36844,9 +37044,20 @@ fn format_form_chart_settings_body_xml(
         return None;
     }
     let legend_start = tidx(147);
+    let mut point_colors = Vec::with_capacity(point_count);
+    for offset in 0..point_count {
+        let entry = split_1c_braced_fields(t.get(legend_start.checked_add(offset)?)?, 0)?;
+        if entry.len() != 1 {
+            return None;
+        }
+        point_colors.push(form_chart_color(entry.first()?, object_refs)?);
+    }
     let mut appearance = Vec::with_capacity(n_scale);
     for offset in 0..n_scale {
-        let entry = split_1c_braced_fields(t.get(legend_start.checked_add(offset)?)?, 0)?;
+        let entry = split_1c_braced_fields(
+            t.get(legend_start.checked_add(point_count)?.checked_add(offset)?)?,
+            0,
+        )?;
         if entry.len() != 10 {
             return None;
         }
@@ -36877,7 +37088,15 @@ fn format_form_chart_settings_body_xml(
         "isPointsDesign",
         form_chart_bool(data.get(ex_series_start + FORM_CHART_SERIES_FIELDS)?)?
     );
-    scalar!("realPointCount", "0");
+    scalar!("realPointCount", point_count);
+    for (index, chunk) in real_points.chunks(FORM_CHART_POINT_FIELDS).enumerate() {
+        xml.push_str(&form_chart_point_xml(
+            chunk,
+            point_colors.get(index)?,
+            object_refs,
+            child,
+        )?);
+    }
     scalar!("curSeries", form_chart_integer(t.first()?)?);
     scalar!("curPoint", form_chart_integer(t.get(1)?)?);
     scalar!(
@@ -36896,13 +37115,17 @@ fn format_form_chart_settings_body_xml(
                 ("0", "Line"),
                 ("6", "Column3D"),
                 ("12", "Pie"),
-                ("38", "Gauge")
+                ("38", "Gauge"),
+                ("44", "Bubble")
             ]
         )?
     );
     scalar!(
         "circleLabelType",
-        form_chart_code(t.get(3)?, &[("0", "None"), ("7", "ValuePercent")])?
+        form_chart_code(
+            t.get(3)?,
+            &[("0", "None"), ("1", "Series"), ("7", "ValuePercent")]
+        )?
     );
     scalar!(
         "labelsDelimiter",
@@ -36929,9 +37152,13 @@ fn format_form_chart_settings_body_xml(
         "{child_tab}<d4p1:labelsFont kind=\"AutoFont\"/>\r\n"
     ));
     scalar!("transparentLabelsBkg", "true");
-    color!("labelsBkgColor", 104);
-    xml.push_str(&form_chart_border_xml("labelsBorder", t.get(105)?, child)?);
-    color!("labelsBorderColor", 106);
+    color!("labelsBkgColor", tidx(104));
+    xml.push_str(&form_chart_border_xml(
+        "labelsBorder",
+        t.get(tidx(105))?,
+        child,
+    )?);
+    color!("labelsBorderColor", tidx(106));
     scalar!("circleExpandMode", "None");
     scalar!("chart3Dcrd", "SouthWest");
     xml.push_str(&form_chart_localized_xml("title", t.get(11)?, child)?);
@@ -37045,11 +37272,11 @@ fn format_form_chart_settings_body_xml(
         // `<d4p1:animation>Use</d4p1:animation>`; the other 15 store `0` and
         // publish `Auto`.
         form_chart_code(
-            t.get(120)?,
+            t.get(tidx(120))?,
             &[("0", "Auto"), ("1", "Use"), ("2", "DontUse")]
         )?
     );
-    scalar!("rebuildTime", form_chart_integer(t.get(121)?)?);
+    scalar!("rebuildTime", form_chart_integer(t.get(tidx(121))?)?);
     scalar!("isTransposed", "false");
     scalar!("autoTransposition", "false");
     // `legendScrollEnable` is `t[65]`, the same slot the spreadsheet-document
@@ -37121,27 +37348,45 @@ fn format_form_chart_settings_body_xml(
     }
     scalar!("isDataSourceMode", form_chart_bool(t.get(98)?)?);
     scalar!("isRandomizedNewValues", form_chart_bool(t.get(99)?)?);
+    let real_data_count = series_count.checked_mul(point_count)?;
+    xml.push_str(&form_chart_real_data_items_xml(
+        t.get(100..100 + real_data_growth)?,
+        real_data_count,
+        child,
+    )?);
     // Written only when its slot names a mode: seed `chart-form-splinemode`
     // (`chart-form-4series` control plus only `<d4p1:splineMode>` added)
     // flips exactly `t[110]` from `"0"` to `"1"`, the same
     // present-only-when-nonzero shape `legendPlacement` already uses.
-    if t.get(110)?.trim() != "0" {
+    if t.get(tidx(110))?.trim() != "0" {
         scalar!(
             "splineMode",
-            form_chart_code(t.get(110)?, &[("1", "SmoothCurve")])?
+            form_chart_code(t.get(tidx(110))?, &[("1", "SmoothCurve")])?
         );
     }
-    scalar!("splineStrain", form_chart_integer(t.get(112)?)?);
-    scalar!("translucencePercent", form_chart_decimal(t.get(111)?)?);
-    scalar!("funnelNeckHeightPercent", form_chart_percent(t.get(113)?)?);
-    scalar!("funnelNeckWidthPercent", form_chart_percent(t.get(114)?)?);
-    scalar!("funnelGapSumPercent", form_chart_percent(t.get(115)?)?);
+    scalar!("splineStrain", form_chart_integer(t.get(tidx(112))?)?);
+    scalar!(
+        "translucencePercent",
+        form_chart_decimal(t.get(tidx(111))?)?
+    );
+    scalar!(
+        "funnelNeckHeightPercent",
+        form_chart_percent(t.get(tidx(113))?)?
+    );
+    scalar!(
+        "funnelNeckWidthPercent",
+        form_chart_percent(t.get(tidx(114))?)?
+    );
+    scalar!(
+        "funnelGapSumPercent",
+        form_chart_percent(t.get(tidx(115))?)?
+    );
     xml.push_str(&form_chart_line_xml(
         "multiStageLinkLine",
-        t.get(116)?,
+        t.get(tidx(116))?,
         child,
     )?);
-    color!("multiStageLinkColor", 117);
+    color!("multiStageLinkColor", tidx(117));
     for (name, slot) in [("valuesAxis", 127usize), ("pointsAxis", 128)] {
         if form_chart_compact(t.get(tidx(slot))?) != "{0,0,{0,1,0,1,0},0,0}" {
             return None;
@@ -37164,53 +37409,83 @@ fn format_form_chart_settings_body_xml(
     // sub-field count from 22 to 23. The two slots right after gridLine
     // stay constant across every observation (unclaimed).
     let points_scale = split_1c_braced_fields(t.get(tidx(139))?, 0)?;
-    if points_scale.first()?.trim() != "2"
-        || points_scale.get(1)?.trim() != "0"
-        || points_scale.get(2)?.trim() != "0"
-        || points_scale.get(3)?.trim() != "2"
-        || form_chart_compact(points_scale.get(4)?) != "{1,0}"
+    if form_chart_scale_no_grid_shape(&points_scale)
+        && form_chart_compact(points_scale.get(10)?) == "{7,3,0,1,100}"
+        && points_scale.get(12)?.trim() == "2"
+        && points_scale.get(17)?.trim() == "0"
+        && points_scale.get(19)?.trim() == "0"
+        && matches!(
+            (
+                points_scale.get(1)?.trim(),
+                points_scale.get(2)?.trim(),
+                points_scale.get(3)?.trim(),
+                points_scale.get(7)?.trim(),
+            ),
+            ("2", "1", "2", "0") | ("0", "0", "2", "1")
+        )
     {
-        return None;
-    }
-    let points_title_area =
-        form_chart_scale_title_area_xml(points_scale.get(5)?, object_refs, child + 1)?;
-    match points_scale.get(6)?.trim() {
-        "2" => {
-            if points_scale.len() != 22 {
-                return None;
-            }
-        }
-        state @ ("0" | "1") => {
-            if points_scale.len() != 23
-                || points_scale.get(7)?.trim() != "0"
-                || points_scale.get(8)?.trim() != "1"
-                || form_chart_compact(points_scale.get(10)?) != "{3,4,{0}}"
-                || form_chart_compact(points_scale.get(11)?) != "{7,3,0,1,100}"
-                || points_scale.get(13)?.trim() != "2"
-            {
-                return None;
-            }
-            let inner_tab = "\t".repeat(child + 1);
-            xml.push_str(&format!("{child_tab}<d4p1:pointsScale>\r\n"));
-            xml.push_str(&points_title_area);
+        let inner_tab = "\t".repeat(child + 1);
+        xml.push_str(&format!("{child_tab}<d4p1:pointsScale>\r\n"));
+        xml.push_str(&form_chart_scale_title_members_xml(
+            &points_scale,
+            object_refs,
+            child + 1,
+        )?);
+        if points_scale.get(7)?.trim() == "1" {
             xml.push_str(&format!(
-                "{inner_tab}<d4p1:gridLinesShowMode>{}</d4p1:gridLinesShowMode>\r\n",
-                if state == "0" { "Show" } else { "DontShow" }
+                "{inner_tab}<d4p1:scaleLabelLocation>None</d4p1:scaleLabelLocation>\r\n"
             ));
-            xml.push_str(&form_chart_line_xml(
-                "gridLine",
-                points_scale.get(9)?,
-                child + 1,
-            )?);
-            let label_color = form_chart_color(points_scale.get(12)?, object_refs)?;
-            if label_color != "auto" {
-                xml.push_str(&format!(
-                    "{inner_tab}<d4p1:labelColor>{label_color}</d4p1:labelColor>\r\n"
-                ));
-            }
-            xml.push_str(&format!("{child_tab}</d4p1:pointsScale>\r\n"));
         }
-        _ => return None,
+        xml.push_str(&format!("{child_tab}</d4p1:pointsScale>\r\n"));
+    } else {
+        if points_scale.first()?.trim() != "2"
+            || points_scale.get(1)?.trim() != "0"
+            || points_scale.get(2)?.trim() != "0"
+            || points_scale.get(3)?.trim() != "2"
+            || form_chart_compact(points_scale.get(4)?) != "{1,0}"
+        {
+            return None;
+        }
+        let points_title_area =
+            form_chart_scale_title_area_xml(points_scale.get(5)?, object_refs, child + 1)?;
+        match points_scale.get(6)?.trim() {
+            "2" => {
+                if points_scale.len() != 22 {
+                    return None;
+                }
+            }
+            state @ ("0" | "1") => {
+                if points_scale.len() != 23
+                    || points_scale.get(7)?.trim() != "0"
+                    || points_scale.get(8)?.trim() != "1"
+                    || form_chart_compact(points_scale.get(10)?) != "{3,4,{0}}"
+                    || form_chart_compact(points_scale.get(11)?) != "{7,3,0,1,100}"
+                    || points_scale.get(13)?.trim() != "2"
+                {
+                    return None;
+                }
+                let inner_tab = "\t".repeat(child + 1);
+                xml.push_str(&format!("{child_tab}<d4p1:pointsScale>\r\n"));
+                xml.push_str(&points_title_area);
+                xml.push_str(&format!(
+                    "{inner_tab}<d4p1:gridLinesShowMode>{}</d4p1:gridLinesShowMode>\r\n",
+                    if state == "0" { "Show" } else { "DontShow" }
+                ));
+                xml.push_str(&form_chart_line_xml(
+                    "gridLine",
+                    points_scale.get(9)?,
+                    child + 1,
+                )?);
+                let label_color = form_chart_color(points_scale.get(12)?, object_refs)?;
+                if label_color != "auto" {
+                    xml.push_str(&format!(
+                        "{inner_tab}<d4p1:labelColor>{label_color}</d4p1:labelColor>\r\n"
+                    ));
+                }
+                xml.push_str(&format!("{child_tab}</d4p1:pointsScale>\r\n"));
+            }
+            _ => return None,
+        }
     }
     // `tidx(140)`, right after `pointsScale`'s block, is `valuesScale`'s --
     // same `2,?,0,2,{1,0},<titleArea>,...` wrapper shape, but WITHOUT a
@@ -37226,48 +37501,77 @@ fn format_form_chart_settings_body_xml(
     // native re-export, but `labelFormat` reads its own slot here rather
     // than cross-referencing `t[39]`).
     let values_scale = split_1c_braced_fields(t.get(tidx(140))?, 0)?;
-    if values_scale.len() != 22
-        || values_scale.first()?.trim() != "2"
-        || values_scale.get(2)?.trim() != "0"
-        || values_scale.get(3)?.trim() != "2"
-        || form_chart_compact(values_scale.get(4)?) != "{1,0}"
-        || values_scale.get(6)?.trim() != "2"
-        || values_scale.get(7)?.trim() != "0"
-        || values_scale.get(8)?.trim() != "0"
-        || form_chart_compact(values_scale.get(9)?) != "{3,4,{0}}"
-        || form_chart_compact(values_scale.get(10)?) != "{7,3,0,1,100}"
-        || form_chart_compact(values_scale.get(11)?) != "{3,4,{0}}"
-        || values_scale.get(12)?.trim() != "2"
-        || values_scale.get(14)?.trim() != "0"
-        || form_chart_compact(values_scale.get(15)?) != "{3,4,{0}}"
-        || values_scale.get(16)?.trim() != "0"
-        || values_scale.get(17)?.trim() != "0"
-        || values_scale.get(18)?.trim() != "0"
-        || values_scale.get(19)?.trim() != "0"
-        || values_scale.get(20)?.trim() != "0"
-        || values_scale.get(21)?.trim() != "0"
+    if form_chart_scale_no_grid_shape(&values_scale)
+        && values_scale.get(1)?.trim() == "2"
+        && values_scale.get(7)?.trim() == "0"
+        && values_scale.get(12)?.trim() == "2"
+        && values_scale.get(17)?.trim() == "0"
+        && values_scale.get(19)?.trim() == "0"
+        && matches!(
+            (values_scale.get(2)?.trim(), values_scale.get(3)?.trim()),
+            ("1", "2") | ("0", "1")
+        )
     {
-        return None;
-    }
-    let values_title_area =
-        form_chart_scale_title_area_xml(values_scale.get(5)?, object_refs, child + 1)?;
-    match values_scale.get(1)?.trim() {
-        "0" => {}
-        "1" => {
-            let inner_tab = "\t".repeat(child + 1);
-            xml.push_str(&format!("{child_tab}<d4p1:valuesScale>\r\n"));
-            xml.push_str(&format!(
-                "{inner_tab}<d4p1:showTitle>DontShow</d4p1:showTitle>\r\n"
-            ));
-            xml.push_str(&values_title_area);
-            xml.push_str(&form_chart_localized_xml(
-                "labelFormat",
-                values_scale.get(13)?,
-                child + 1,
-            )?);
-            xml.push_str(&format!("{child_tab}</d4p1:valuesScale>\r\n"));
+        let inner_tab = "\t".repeat(child + 1);
+        xml.push_str(&format!("{child_tab}<d4p1:valuesScale>\r\n"));
+        xml.push_str(&form_chart_scale_title_members_xml(
+            &values_scale,
+            object_refs,
+            child + 1,
+        )?);
+        if form_chart_compact(values_scale.get(10)?) != "{7,3,0,1,100}" {
+            let rendered = parse_form_font_tuple_xml_tag(
+                values_scale.get(10)?.trim(),
+                object_refs,
+                "d4p1:labelFont",
+            )?;
+            xml.push_str(&format!("{inner_tab}{rendered}\r\n"));
         }
-        _ => return None,
+        xml.push_str(&format!("{child_tab}</d4p1:valuesScale>\r\n"));
+    } else {
+        if values_scale.len() != 22
+            || values_scale.first()?.trim() != "2"
+            || values_scale.get(2)?.trim() != "0"
+            || values_scale.get(3)?.trim() != "2"
+            || form_chart_compact(values_scale.get(4)?) != "{1,0}"
+            || values_scale.get(6)?.trim() != "2"
+            || values_scale.get(7)?.trim() != "0"
+            || values_scale.get(8)?.trim() != "0"
+            || form_chart_compact(values_scale.get(9)?) != "{3,4,{0}}"
+            || form_chart_compact(values_scale.get(10)?) != "{7,3,0,1,100}"
+            || form_chart_compact(values_scale.get(11)?) != "{3,4,{0}}"
+            || values_scale.get(12)?.trim() != "2"
+            || values_scale.get(14)?.trim() != "0"
+            || form_chart_compact(values_scale.get(15)?) != "{3,4,{0}}"
+            || values_scale.get(16)?.trim() != "0"
+            || values_scale.get(17)?.trim() != "0"
+            || values_scale.get(18)?.trim() != "0"
+            || values_scale.get(19)?.trim() != "0"
+            || values_scale.get(20)?.trim() != "0"
+            || values_scale.get(21)?.trim() != "0"
+        {
+            return None;
+        }
+        let values_title_area =
+            form_chart_scale_title_area_xml(values_scale.get(5)?, object_refs, child + 1)?;
+        match values_scale.get(1)?.trim() {
+            "0" => {}
+            "1" => {
+                let inner_tab = "\t".repeat(child + 1);
+                xml.push_str(&format!("{child_tab}<d4p1:valuesScale>\r\n"));
+                xml.push_str(&format!(
+                    "{inner_tab}<d4p1:showTitle>DontShow</d4p1:showTitle>\r\n"
+                ));
+                xml.push_str(&values_title_area);
+                xml.push_str(&form_chart_localized_xml(
+                    "labelFormat",
+                    values_scale.get(13)?,
+                    child + 1,
+                )?);
+                xml.push_str(&format!("{child_tab}</d4p1:valuesScale>\r\n"));
+            }
+            _ => return None,
+        }
     }
     // `tidx(141)`, right after `valuesScale`'s block, is `seriesScale`'s --
     // same shared wrapper+titleArea prefix as `pointsScale`/`valuesScale`.
@@ -37282,59 +37586,89 @@ fn format_form_chart_settings_body_xml(
     // pointsscale`'s), and the block's last slot becomes `"2"`
     // (`showInChart=DontShow`; `Show`'s code is unobserved).
     let series_scale = split_1c_braced_fields(t.get(tidx(141))?, 0)?;
-    if series_scale.first()?.trim() != "2"
-        || series_scale.get(1)?.trim() != "0"
-        || series_scale.get(2)?.trim() != "0"
-        || series_scale.get(3)?.trim() != "2"
-        || form_chart_compact(series_scale.get(4)?) != "{1,0}"
-        || series_scale.get(6)?.trim() != "2"
-        || series_scale.get(7)?.trim() != "0"
+    if form_chart_scale_no_grid_shape(&series_scale)
+        && series_scale.get(1)?.trim() == "0"
+        && series_scale.get(2)?.trim() == "1"
+        && series_scale.get(3)?.trim() == "2"
+        && series_scale.get(7)?.trim() == "0"
+        && form_chart_compact(series_scale.get(10)?) == "{7,3,0,1,100}"
+        && series_scale.get(12)?.trim() == "3"
+        && series_scale.get(19)?.trim() == "1"
     {
-        return None;
-    }
-    let series_title_area =
-        form_chart_scale_title_area_xml(series_scale.get(5)?, object_refs, child + 1)?;
-    match series_scale.get(8)?.trim() {
-        "0" => {
-            if series_scale.len() != 22 || series_scale.get(21)?.trim() != "0" {
-                return None;
-            }
+        let inner_tab = "\t".repeat(child + 1);
+        xml.push_str(&format!("{child_tab}<d4p1:seriesScale>\r\n"));
+        xml.push_str(&form_chart_scale_title_members_xml(
+            &series_scale,
+            object_refs,
+            child + 1,
+        )?);
+        xml.push_str(&format!(
+            "{inner_tab}<d4p1:labelOrientation>CustomAngle</d4p1:labelOrientation>\r\n"
+        ));
+        xml.push_str(&format!(
+            "{inner_tab}<d4p1:maxLabelRows>{}</d4p1:maxLabelRows>\r\n",
+            form_chart_integer(series_scale.get(19)?)?
+        ));
+        xml.push_str(&format!(
+            "{inner_tab}<d4p1:labelAngle>{}</d4p1:labelAngle>\r\n",
+            form_chart_integer(series_scale.get(17)?)?
+        ));
+        xml.push_str(&format!("{child_tab}</d4p1:seriesScale>\r\n"));
+    } else {
+        if series_scale.first()?.trim() != "2"
+            || series_scale.get(1)?.trim() != "0"
+            || series_scale.get(2)?.trim() != "0"
+            || series_scale.get(3)?.trim() != "2"
+            || form_chart_compact(series_scale.get(4)?) != "{1,0}"
+            || series_scale.get(6)?.trim() != "2"
+            || series_scale.get(7)?.trim() != "0"
+        {
+            return None;
         }
-        "1" => {
-            if series_scale.len() != 23
-                || form_chart_compact(series_scale.get(10)?) != "{3,4,{0}}"
-                || form_chart_compact(series_scale.get(11)?) != "{7,3,0,1,100}"
-                || form_chart_compact(series_scale.get(12)?) != "{3,4,{0}}"
-                || series_scale.get(13)?.trim() != "2"
-                || form_chart_compact(series_scale.get(14)?) != "{1,0}"
-                || series_scale.get(15)?.trim() != "0"
-                || form_chart_compact(series_scale.get(16)?) != "{3,4,{0}}"
-                || series_scale.get(17)?.trim() != "0"
-                || series_scale.get(18)?.trim() != "0"
-                || series_scale.get(19)?.trim() != "0"
-                || series_scale.get(20)?.trim() != "0"
-                || series_scale.get(21)?.trim() != "0"
-            {
-                return None;
+        let series_title_area =
+            form_chart_scale_title_area_xml(series_scale.get(5)?, object_refs, child + 1)?;
+        match series_scale.get(8)?.trim() {
+            "0" => {
+                if series_scale.len() != 22 || series_scale.get(21)?.trim() != "0" {
+                    return None;
+                }
             }
-            let show_in_chart = match series_scale.get(22)?.trim() {
-                "2" => "DontShow",
-                _ => return None,
-            };
-            let inner_tab = "\t".repeat(child + 1);
-            xml.push_str(&format!("{child_tab}<d4p1:seriesScale>\r\n"));
-            xml.push_str(&series_title_area);
-            xml.push_str(&form_chart_line_xml(
-                "gridLine",
-                series_scale.get(9)?,
-                child + 1,
-            )?);
-            xml.push_str(&format!(
-                "{inner_tab}<d4p1:showInChart>{show_in_chart}</d4p1:showInChart>\r\n"
-            ));
-            xml.push_str(&format!("{child_tab}</d4p1:seriesScale>\r\n"));
+            "1" => {
+                if series_scale.len() != 23
+                    || form_chart_compact(series_scale.get(10)?) != "{3,4,{0}}"
+                    || form_chart_compact(series_scale.get(11)?) != "{7,3,0,1,100}"
+                    || form_chart_compact(series_scale.get(12)?) != "{3,4,{0}}"
+                    || series_scale.get(13)?.trim() != "2"
+                    || form_chart_compact(series_scale.get(14)?) != "{1,0}"
+                    || series_scale.get(15)?.trim() != "0"
+                    || form_chart_compact(series_scale.get(16)?) != "{3,4,{0}}"
+                    || series_scale.get(17)?.trim() != "0"
+                    || series_scale.get(18)?.trim() != "0"
+                    || series_scale.get(19)?.trim() != "0"
+                    || series_scale.get(20)?.trim() != "0"
+                    || series_scale.get(21)?.trim() != "0"
+                {
+                    return None;
+                }
+                let show_in_chart = match series_scale.get(22)?.trim() {
+                    "2" => "DontShow",
+                    _ => return None,
+                };
+                let inner_tab = "\t".repeat(child + 1);
+                xml.push_str(&format!("{child_tab}<d4p1:seriesScale>\r\n"));
+                xml.push_str(&series_title_area);
+                xml.push_str(&form_chart_line_xml(
+                    "gridLine",
+                    series_scale.get(9)?,
+                    child + 1,
+                )?);
+                xml.push_str(&format!(
+                    "{inner_tab}<d4p1:showInChart>{show_in_chart}</d4p1:showInChart>\r\n"
+                ));
+                xml.push_str(&format!("{child_tab}</d4p1:seriesScale>\r\n"));
+            }
+            _ => return None,
         }
-        _ => return None,
     }
     // Three placement slots, `tidx(160..163)`, each written only when its own
     // slot names a placement and each reading its own code off its own slot.
@@ -37395,7 +37729,10 @@ fn format_form_chart_settings_body_xml(
     if t.get(tidx(162))?.trim() != "0" {
         scalar!(
             "titleAreaPlacement",
-            form_chart_code(t.get(tidx(162))?, &[("1", "UseCoordinates"), ("8", "None")])?
+            form_chart_code(
+                t.get(tidx(162))?,
+                &[("1", "UseCoordinates"), ("3", "Top"), ("8", "None")]
+            )?
         );
     }
     // `tidx(183)` holds a 5-member tuple carrying three independent,

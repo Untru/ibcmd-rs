@@ -6881,7 +6881,7 @@ impl FormSpecialFieldSchema {
         ) {
             ("37", 59, 0, Some("9"), 16, Some("4")) => FormSpecialFieldKind::ProgressBar,
             ("37", 59, 0, Some("10"), 18, Some("2")) => FormSpecialFieldKind::TrackBar,
-            ("37", 59, 0, Some("11"), 11, Some("1")) => FormSpecialFieldKind::Chart,
+            ("37", _, _, Some("11"), 11, Some("1")) => FormSpecialFieldKind::Chart,
             ("37", _, _, Some("12"), 16, Some("3")) | ("37", _, _, Some("12"), 12, Some("2")) => {
                 FormSpecialFieldKind::GanttChart
             }
@@ -6889,6 +6889,9 @@ impl FormSpecialFieldSchema {
         };
         let mut gantt_short_option_revision = false;
         let mut trailing_members = 0;
+        if kind == FormSpecialFieldKind::Chart && field_count != 59 + top_level_offset {
+            return None;
+        }
         if kind == FormSpecialFieldKind::GanttChart {
             gantt_short_option_revision = option_kind == Some("2");
             if gantt_short_option_revision

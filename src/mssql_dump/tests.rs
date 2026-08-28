@@ -74629,6 +74629,53 @@ fn appends_the_virtual_table_the_main_table_category_names() {
     }
 }
 
+#[test]
+fn renders_the_two_uh_chart_edge_records_byte_for_byte() {
+    for (raw, native) in [
+        (
+            include_str!(concat!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "form-chart-uh-edge/raw/mobile-point.txt"
+            )),
+            include_str!(concat!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "form-chart-uh-edge/native/mobile-point-settings.xml"
+            )),
+        ),
+        (
+            include_str!(concat!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "form-chart-uh-edge/raw/bubble.txt"
+            )),
+            include_str!(concat!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "form-chart-uh-edge/native/bubble-settings.xml"
+            )),
+        ),
+    ] {
+        let rendered = parse_and_render_form_chart_settings_for_test(raw)
+            .unwrap_or_else(|| panic!("refused chart fixture"));
+        assert_eq!(rendered, native.replace('\n', "\r\n"));
+    }
+}
+
+#[test]
+fn accepts_the_declared_shifted_chart_field_layout() {
+    let options = [
+        "1", "50", "10", "1", "1", "{0,1,0}", "1", "0", "0", "1", "0",
+    ];
+    let schema = crate::form_schema::FormSpecialFieldSchema::from_raw_layout(
+        "37",
+        60,
+        Some("11"),
+        1,
+        &options,
+        Some("0"),
+    )
+    .expect("conditional-appearance prefix shifts the whole declared record");
+    assert_eq!(schema.xml_tag(), "ChartField");
+}
+
 /// The stored category alone is ambiguous for accounting registers. The
 /// dynamic-list query resolves that ambiguity when it names exactly one known
 /// virtual table of the declared main-table object.
