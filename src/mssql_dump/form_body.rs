@@ -5617,23 +5617,37 @@ pub(super) fn parse_form_attribute_direct_use_always(
         if components == 0 || entry_fields.len() != 1 + components {
             continue;
         }
-        let segments = entry_fields[1..]
+        let parts = entry_fields[1..]
             .iter()
-            .map(|component| {
-                let value_fields = split_1c_braced_fields(component.trim(), 0)?;
-                form_attribute_use_always_segment_name(
-                    &value_fields,
-                    columns,
-                    object_refs,
-                    value_type,
-                    value_type_uuid,
-                )
-            })
+            .map(|component| split_1c_braced_fields(component.trim(), 0))
             .collect::<Option<Vec<_>>>();
-        let Some(segments) = segments else {
+        let Some(parts) = parts else {
             continue;
         };
-        let field_name = format!("{attribute_name}.{}", segments.join("."));
+        // A settings composer walks its own member tables end to end: its
+        // members name each other, and naming each component against the
+        // composer's head alone gets every step past the first wrong.
+        let joined = if value_type_uuid == Some(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID) {
+            form_settings_composer_use_always_path(&parts)
+        } else {
+            parts
+                .iter()
+                .map(|value_fields| {
+                    form_attribute_use_always_segment_name(
+                        value_fields,
+                        columns,
+                        object_refs,
+                        value_type,
+                        value_type_uuid,
+                    )
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(|segments| segments.join("."))
+        };
+        let Some(joined) = joined else {
+            continue;
+        };
+        let field_name = format!("{attribute_name}.{joined}");
         if seen.insert(field_name.clone()) {
             parsed.push(field_name);
         }
@@ -5696,6 +5710,60 @@ fn form_constants_set_use_always<'a>(
     }
     named.sort();
     Some(named)
+}
+
+/// One entry of a `dcsset:SettingsComposer` attribute's `<UseAlways>`, walked
+/// through the same member tables an item's bound chain walks.
+///
+/// The two id spaces are the same one: ERP УХ 3.2.12.6 spells
+/// `{3,{0},{1},{10002}}` for `Settings.Filter.LeftValue` on five composer
+/// attributes and `{3,{0},{4},{10005}}` for
+/// `Settings.ConditionalAppearance.UseArea` on a sixth, and `Settings` member
+/// `1` is `Filter` and `4` is `ConditionalAppearance` in the chain table, read
+/// off UT 11.5.27.75. Resolving each component on its own instead named the
+/// second one against the composer's own top-level table, so every one of
+/// those six entries was dropped and the block never written.
+///
+/// The composer's own head keeps the top-level table: only there does `1` name
+/// `FixedSettings`, a member no chain walk has ever reached. A path that steps
+/// past a head other than `Settings`, or past a member the table gives no
+/// collection for, refuses -- the entry is dropped, exactly as before.
+fn form_settings_composer_use_always_path(components: &[Vec<&str>]) -> Option<String> {
+    let head = components.first()?.first()?.trim();
+    let mut owner = match head {
+        "0" => FormSettingsComposerType::Settings,
+        _ => {
+            return (components.len() == 1)
+                .then(|| {
+                    form_value_type_property_name(
+                        DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID,
+                        &[head.parse::<i64>().ok()?],
+                    )
+                    .map(str::to_string)
+                })
+                .flatten();
+        }
+    };
+    let mut names = vec![
+        form_value_type_property_name(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID, &[0])?
+            .to_string(),
+    ];
+    for component in &components[1..] {
+        if component.len() != 1 {
+            return None;
+        }
+        let (name, next) = form_settings_composer_member(owner, component.first()?.trim())?;
+        names.push(name.to_string());
+        match next {
+            Some(next) => owner = next,
+            None => {
+                if names.len() != components.len() {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(names.join("."))
 }
 
 /// One step of a use-always path: either a metadata object the configuration
@@ -22501,12 +22569,25 @@ fn form_settings_composer_member(
             ("0", "Settings", Some(Settings)),
             ("1", "UserSettings", Some(UserSettings)),
         ],
+        // `5` and `6` join the five UT 11.5.27.75 pinned from ERP УХ 3.2.12.6,
+        // where two forms bind an item straight onto the member and the
+        // platform writes the name in the item's own `<DataPath>`:
+        // `Catalogs/ПроизвольныеОтчеты/Forms/ФормаПроизвольногоОтчетаПоИсточнику`
+        // holds `{3,{3},{0},{5}}` against
+        // `КомпоновщикНастроек.Settings.OutputParameters`, and
+        // `DataProcessors/КонструкторПользовательскихПолей/Forms/Форма_Управляемая`
+        // holds `{3,{2},{0},{6}}` against
+        // `КомпоновщикНастроек.Settings.UserFields`. Each form's chain slots
+        // and its composer data paths are in bijection, so neither code has a
+        // second reading.
         Settings => &[
             ("0", "DataParameters", None),
             ("1", "Filter", Some(Filter)),
             ("2", "Selection", Some(Selection)),
             ("3", "Order", Some(Order)),
             ("4", "ConditionalAppearance", Some(ConditionalAppearance)),
+            ("5", "OutputParameters", None),
+            ("6", "UserFields", None),
         ],
         Filter => &[
             ("0", "FilterAvailableFields", Some(AvailableFields)),
@@ -22529,12 +22610,18 @@ fn form_settings_composer_member(
             ("10002", "Field", None),
             ("10003", "OrderType", None),
         ],
+        // `10005` is pinned by ERP УХ 3.2.12.6
+        // `DataProcessors/АналитическийБланкСводнаяТаблица/Forms/ФормаНастройкиУсловногоОформления`:
+        // the composer's use-always record holds the single entry
+        // `{3,{0},{4},{10005}}` and the platform writes the single field
+        // `НастройкиКДОтборы.Settings.ConditionalAppearance.UseArea`.
         ConditionalAppearance => &[
             ("10000", "Use", None),
             ("10001", "Appearance", Some(Appearance)),
             ("10002", "Filter", Some(Filter)),
             ("10003", "Fields", Some(Fields)),
             ("10004", "Presentation", None),
+            ("10005", "UseArea", None),
         ],
         UserSettings => &[
             ("10000", "Use", None),
