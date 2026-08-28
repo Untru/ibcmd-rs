@@ -76,6 +76,35 @@ pub(super) struct ClientApplicationInterface {
     pub(super) top: Vec<ClientApplicationInterfaceNode>,
     pub(super) left: Vec<ClientApplicationInterfaceNode>,
     pub(super) bottom: Vec<ClientApplicationInterfaceNode>,
+    /// Every panel-definition record the body carries, in stored order.
+    ///
+    /// This is a known, measured over-read on exactly one stand file, kept
+    /// deliberately because nothing in the input tells the two cases apart.
+    ///
+    /// Nine configurations were read for their stored record list (the four
+    /// the stand publishes a reference for -- ERP УХ 3.2.12.6, 1С:УТ
+    /// 11.5.27.75, БСП демо 3.1.12.297, Документооборот КОРП 3.0.21.3 -- plus
+    /// БСП WE base and demo, WMS5, and ERP WE both editions). All nine store
+    /// the same five identifiers, in the same order, each announced by the
+    /// code `2` and each spelling the record `{<uuid>,0}` (Документооборот
+    /// spells the first `{<uuid>,2,4}`). Seven of them additionally store a
+    /// sixth entry announced by the code `1`, `{8e10648b-…,1,""}`, at the end
+    /// of the list. Where a reference exists, the platform publishes every
+    /// code-`2` entry and every code-`1` entry, in stored order.
+    ///
+    /// ERP УХ 3.2.12.6 alone stores that sixth identifier announced by the
+    /// code `2`, second in the list, with the record `{<uuid>,0}` -- byte for
+    /// byte the shape of the five that are published -- and the platform
+    /// publishes nothing for it, writing only the other five. Its own areas
+    /// name that panel exactly the way 1С:УТ's do, and 1С:УТ publishes it.
+    ///
+    /// So the entry that is dropped is indistinguishable, in the body, from
+    /// the entries that are kept: separating them needs a platform-side table
+    /// of which identifiers name a standard panel definition, and naming those
+    /// five identifiers here would assert a property of the platform that no
+    /// input on the stand measures. The reader therefore publishes what the
+    /// body states and leaves `Ext/ClientApplicationInterface.xml` of ERP УХ
+    /// one `<panelDef/>` long.
     pub(super) panel_defs: Vec<ClientApplicationPanelDef>,
 }
 
