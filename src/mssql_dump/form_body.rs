@@ -20841,6 +20841,21 @@ pub(super) fn parse_form_child_item_data_path(
                     attribute_metadata_owners_by_id,
                 )
             })
+            // A record-set member the register splits between the two sides of
+            // an entry is named by the terminal's marker as much as by its
+            // uuid, and the chain walker below reads only the uuid -- so it
+            // answers `НаборЗаписей.Подразделение` where the platform writes
+            // `НаборЗаписей.ПодразделениеDr`. This pass answers that one shape
+            // and nothing else, leaving every shape the walker already spells
+            // right to the walker.
+            .or_else(|| {
+                resolve_form_register_record_set_member_data_path(
+                    field,
+                    true,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                )
+            })
             .or_else(|| {
                 resolve_form_bound_chain_member_path(
                     field,
@@ -20878,6 +20893,7 @@ pub(super) fn parse_form_child_item_data_path(
             .or_else(|| {
                 resolve_form_register_record_set_member_data_path(
                     field,
+                    false,
                     attribute_metadata_owners_by_id,
                     object_refs,
                 )
@@ -21663,8 +21679,19 @@ const FORM_REGISTER_RECORD_SET_FAMILIES: [&str; 4] = [
 /// terminal `{id,5bdad865-…}` is deliberately not answered here — the
 /// declared-column reader already spells all 34 of those correctly — and a
 /// terminal this reader cannot name leaves the slot to the routes behind it.
+///
+/// `correspondence_only` selects the one shape that has to be read *ahead* of
+/// the generic chain walker rather than behind it. The walker reaches a member
+/// named by its own metadata uuid and spells it by that name, which is the
+/// right answer everywhere except on an accounting register that splits the
+/// member between the two sides of an entry: there the terminal's marker is the
+/// side, and the walker, which does not read it, drops the `Dr`/`Cr` the
+/// platform writes. Running the whole reader first would put it ahead of routes
+/// that are right today for shapes where it agrees with them anyway, so only
+/// the suffixed shape goes first — the pass answers nothing else.
 fn resolve_form_register_record_set_member_data_path(
     field: &str,
+    correspondence_only: bool,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
@@ -21680,6 +21707,9 @@ fn resolve_form_register_record_set_member_data_path(
         form_register_record_set_owner(attribute.exact_single_type_reference.as_deref()?)?;
     let member = match terminal.as_slice() {
         [marker] => {
+            if correspondence_only {
+                return None;
+            }
             form_register_record_set_standard_attribute_name(family, marker.trim())?.to_string()
         }
         [index, uuid] => {
@@ -21694,9 +21724,15 @@ fn resolve_form_register_record_set_member_data_path(
             if let Some(name) =
                 form_register_record_set_ext_dimension_name(family, index.trim(), uuid.trim())
             {
+                if correspondence_only {
+                    return None;
+                }
                 name
             } else {
                 let suffix = form_register_record_set_member_suffix(family, index.trim())?;
+                if correspondence_only && suffix.is_empty() {
+                    return None;
+                }
                 let uuid = parse_non_zero_uuid(uuid.trim())?;
                 let reference = object_refs.get(&uuid)?;
                 let (owner_reference, relative_path) = form_metadata_data_path_route(reference)?;
