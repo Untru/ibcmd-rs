@@ -27428,8 +27428,26 @@ pub(super) fn parse_form_command_interface_visibility(
     let mut role_values = Vec::with_capacity(schema.role_count());
     for pair in scope.get(3..)?.chunks_exact(2) {
         let uuid = parse_non_zero_uuid(pair[0].trim())?;
-        let role = object_refs.get(&uuid)?.strip_prefix("Role.")?;
-        role_values.push((format!("Role.{role}"), parse_form_typed_bool(pair[1])?));
+        // An override's uuid does not always name a role still present in the
+        // exported corpus, and the platform neither drops the override nor the
+        // whole block over it: it falls back to the bare uuid as
+        // `<xr:Value name="...">`. This is the very fallback
+        // `command_interface::parse_command_interface_adjustable_visibility`
+        // already carries, on the evidence of ERP УХ
+        // `Subsystems/БюджетированиеИОтчетность/Subsystems/БизнесАнализ/
+        // Subsystems/Настройка/Ext/CommandInterface.xml`, whose eight
+        // unresolved uuids are written bare and whose file is byte-exact.
+        // Census of all eight native corpora: `<xr:Value name="<uuid>">`
+        // occurs 42 times in four ERP УХ files and nowhere else -- that
+        // command interface plus three `Form.xml`, all three of which this
+        // reader used to refuse whole, losing every proven per-role value in
+        // the same block along with the unresolved one.
+        let name = object_refs
+            .get(&uuid)
+            .and_then(|reference| reference.strip_prefix("Role."))
+            .map(|role| format!("Role.{role}"))
+            .unwrap_or(uuid);
+        role_values.push((name, parse_form_typed_bool(pair[1])?));
     }
     Some(
         (!common || !role_values.is_empty()).then_some(FormCommandInterfaceVisibility {
