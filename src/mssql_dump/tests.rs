@@ -21251,6 +21251,7 @@ fn formats_table_search_additions_as_direct_sections() {
         multiple_value_present_data_path: None,
         title_data_path: None,
         command_name: None,
+        command_record: None,
         command_source: None,
         child_items: vec![
             FormChildItem {
@@ -21515,6 +21516,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 multiple_value_present_data_path: None,
                 title_data_path: None,
                 command_name: None,
+                command_record: None,
                 command_source: None,
                 child_items: Vec::new(),
             },
@@ -21780,6 +21782,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 multiple_value_present_data_path: None,
                 title_data_path: None,
                 command_name: None,
+                command_record: None,
                 command_source: None,
                 child_items: Vec::new(),
             },

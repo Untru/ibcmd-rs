@@ -636,6 +636,23 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
             );
         }
     }
+    // A button names a table's standard command only while the table has it --
+    // the third reader of the very fact the table's own `<CommandSet>` and the
+    // root set already read, asked once the item tree (and therefore every
+    // table's finished command set) exists.
+    {
+        let mut ownership = BTreeMap::new();
+        collect_form_table_command_ownership(
+            &child_items,
+            &attributes,
+            &child_item_indexes.bound_attribute_id_by_table_id,
+            &mut ownership,
+        );
+        withhold_form_button_commands_the_table_lacks(&mut child_items, &ownership);
+        if let Some(command_bar) = auto_command_bar.as_mut() {
+            withhold_form_button_commands_the_table_lacks(&mut command_bar.child_items, &ownership);
+        }
+    }
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_child_items_cpu_ms +=
             child_item_indexes_cpu_ms + elapsed_ms(started);
@@ -1667,6 +1684,12 @@ pub(super) struct FormChildItem {
     pub(super) multiple_values_back_color: Option<String>,
     pub(super) title_data_path: Option<String>,
     pub(super) command_name: Option<String>,
+    /// The `{kind, uuid}` record a `<Button>`'s command slot declares, kept
+    /// beside the name it was resolved to. The readers that decide *after* the
+    /// item tree is built -- a command belongs to its owner only while the
+    /// owner has it -- need the record to spell the raw sentinel the platform
+    /// writes there, and the name alone does not carry the uuid back.
+    pub(super) command_record: Option<String>,
     pub(super) command_source: Option<String>,
     pub(super) child_items: Vec<FormChildItem>,
 }
@@ -11556,6 +11579,13 @@ fn parse_form_child_item_with_metadata_owners(
     } else {
         None
     };
+    let command_record = if tag == "Button" {
+        fields
+            .get(8 + button_top_level_offset)
+            .map(|field| field.trim().to_string())
+    } else {
+        None
+    };
     let (title, title_formatted) = parse_form_child_item_title(
         tag,
         wrapper,
@@ -14065,6 +14095,7 @@ fn parse_form_child_item_with_metadata_owners(
             object_refs,
         ),
         command_name,
+        command_record,
         command_source: if tag == "CommandBar" {
             parse_form_command_bar_source_with_items(&fields, item_name_by_id)
         } else if tag == "ButtonGroup" {
@@ -25554,6 +25585,144 @@ fn retain_form_table_list_owned_commands(
             bound_attribute_id_by_table_id,
             declarations,
         );
+    }
+}
+
+/// What one `<Table>` of the built item tree answers about the standard
+/// commands it owns.
+///
+/// Collected from the finished tree rather than from the item record, because
+/// two of the three answers are the very sets the table's own `<CommandSet>`
+/// reader has just produced.
+struct FormTableCommandOwnership {
+    /// The names the table's own `<CommandSet>` excludes, as finally written.
+    excluded_commands: Vec<&'static str>,
+    /// The table shows a dynamic list whose row set the form declares
+    /// unchangeable.
+    row_set_unchangeable: bool,
+    /// The table shows a dynamic list that declares no `<MainTable>`.
+    list_without_main_table: bool,
+}
+
+/// Index every `<Table>` of the tree by its item id, which is exactly the
+/// `kind` a button's command record carries when the command is that table's.
+fn collect_form_table_command_ownership(
+    items: &[FormChildItem],
+    attributes: &[FormAttribute],
+    bound_attribute_id_by_table_id: &BTreeMap<String, String>,
+    ownership: &mut BTreeMap<String, FormTableCommandOwnership>,
+) {
+    for item in items {
+        if item.tag == "Table" {
+            let settings = bound_attribute_id_by_table_id
+                .get(&item.id)
+                .and_then(|attribute_id| {
+                    attributes
+                        .iter()
+                        .find(|attribute| &attribute.id == attribute_id)
+                })
+                .and_then(|attribute| attribute.settings.as_ref());
+            ownership.insert(
+                item.id.clone(),
+                FormTableCommandOwnership {
+                    excluded_commands: item.command_set_excluded_commands.clone(),
+                    row_set_unchangeable: settings.is_some() && item.change_row_set == Some(false),
+                    list_without_main_table: settings
+                        .is_some_and(|settings| settings.main_table.is_none()),
+                },
+            );
+        }
+        collect_form_table_command_ownership(
+            &item.child_items,
+            attributes,
+            bound_attribute_id_by_table_id,
+            ownership,
+        );
+    }
+}
+
+/// Whether the table a button's command record names still owns the standard
+/// command the reader spelled for it.
+///
+/// Three facts about the table, all of them already read for the table's own
+/// `<CommandSet>`, and all three the same statement: a command belongs to the
+/// item only while the item has it, and what the platform cannot name it keeps
+/// as the raw `kind:uuid` sentinel.
+///
+/// * **The row set is unchangeable.** Census over the eight stand corpora of
+///   every native `Form.Item.<table>.StandardCommand.<name>` whose owner is a
+///   `<Table>` -- 14 057 of them: `Copy` is written 539 times, `Create` 442,
+///   `CreateFolder` 71, `Delete` 1 584, `MoveItem` 10 and `SetDeletionMark`
+///   259, and of those 2 905 records exactly four sit on a table that declares
+///   `<ChangeRowSet>false</ChangeRowSet>` -- all four on a table shown over a
+///   value table rather than over a dynamic list, which is the same pairing
+///   `parse_form_table_command_set_excluded_commands_for_table` already reads
+///   for the table's own set. Over a dynamic list the split is 0 against
+///   1 218, with no counter-example on any corpus.
+///
+/// * **The list has no main table.** The same census split by the
+///   `<MainTable>` of the list each table is shown over: of the 4 994 records
+///   whose owner is a table over a `cfg:DynamicList`, 420 sit on a list that
+///   declares no `<MainTable>`, and **not one** of the 420 names any of the
+///   twelve row commands `FORM_LIST_MAIN_TABLE_ROW_COMMANDS` holds, while the
+///   4 574 over a list that does declare one name them 10..442 times each.
+///
+/// * **The table's own `<CommandSet>` excludes the command.** Of all 14 057
+///   records, **not one** names a command that the same table's
+///   `<ExcludedCommand>` list carries. A command excluded from the set is not
+///   on the table, so no button of that table can name it.
+///
+/// Evidenced from the other side by ERP УХ 3.2.12.6, which writes the raw
+/// sentinel at exactly these positions: `1:0f8d6d98-…`, `1:0ae4bea5-…` and
+/// `1:a2f737a8-…` in `Catalogs/СчетаБД/Forms/ФормаВыбора` and
+/// `3:8d772f97-…` in `InformationRegisters/Заместители/Forms/ФормаСписка`
+/// (unchangeable row set); `610:0f8d6d98-…`, `610:d82ca05c-…` and
+/// `610:0ae4bea5-…` in `Reports/УправлениеЛимитами/Forms/ФормаОтчета` (a list
+/// with no main table); `20:c0519548-…`, `20:44ad3ec9-…` and
+/// `20:49602716-…` in `Reports/ПлатежныйКалендарьУХ/Forms/ФормаОтчета`
+/// (`Find`, `CancelSearch` and `OutputList`, all three excluded by that
+/// table's own `<CommandSet>`).
+fn form_table_owns_button_standard_command(
+    command: &str,
+    ownership: &FormTableCommandOwnership,
+) -> bool {
+    if ownership.excluded_commands.contains(&command) {
+        return false;
+    }
+    if ownership.row_set_unchangeable && FORM_TABLE_ROW_SET_EXCLUDED_COMMANDS.contains(&command) {
+        return false;
+    }
+    if ownership.list_without_main_table && FORM_LIST_MAIN_TABLE_ROW_COMMANDS.contains(&command) {
+        return false;
+    }
+    true
+}
+
+/// Put back the raw sentinel on every `<Button>` that names a standard command
+/// its owner table does not have.
+fn withhold_form_button_commands_the_table_lacks(
+    items: &mut [FormChildItem],
+    ownership: &BTreeMap<String, FormTableCommandOwnership>,
+) {
+    for item in items.iter_mut() {
+        if item.tag == "Button"
+            && let Some(name) = item.command_name.as_deref()
+            && let Some(suffix) = name.strip_prefix("Form.Item.")
+            && let Some((_owner, command)) = suffix.rsplit_once(".StandardCommand.")
+            && let Some(record) = item.command_record.as_deref()
+            && let Some(fields) = split_1c_braced_fields(record, 0)
+            && let (Some(kind), Some(uuid)) = (
+                fields.first().map(|field| field.trim()),
+                fields
+                    .get(1)
+                    .and_then(|field| parse_non_zero_uuid(field.trim())),
+            )
+            && let Some(table) = ownership.get(kind)
+            && !form_table_owns_button_standard_command(command, table)
+        {
+            item.command_name = Some(form_command_record_sentinel(kind, &uuid));
+        }
+        withhold_form_button_commands_the_table_lacks(&mut item.child_items, ownership);
     }
 }
 
