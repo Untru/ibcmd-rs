@@ -25431,8 +25431,90 @@ fn form_table_list_declares_standard_command(
     form_list_owner_declares_standard_command(command, main_table, declarations)
 }
 
+/// The three names that spell a *hierarchy view mode* of a table.
+///
+/// They are the table's own view switches, not the list's row commands, and a
+/// flat collection has no hierarchy to switch to.
+///
+/// Evidence, the 6 515 native `<Table>` `<CommandSet>` blocks of the eight
+/// stand corpora, each table joined to the form attribute the root segment of
+/// its own `<DataPath>` names: 694 of the 947 tables rooted at a
+/// `v8:ValueTree` write at least one of the three, and **not one** of the
+/// 2 197 rooted at a `v8:ValueTable` and **not one** of the 270 rooted at a
+/// `v8:ValueListType` writes any of them. Counted name by name over the whole
+/// stand, `HierarchicalList` is written 684 times on a value tree, `List` 693
+/// and `Tree` 672, against 0/0/0 on the two flat collections.
+///
+/// The level and move commands are not of this kind and are not listed here:
+/// `LevelUp`, `LevelDown`, `MoveItem` and `CreateFolder` are written 161, 161,
+/// 154 and 144 times respectively and every single one of them on a table over
+/// a `cfg:DynamicList` -- never on a value tree either -- so they belong to
+/// the list rules below and not to the collection's own shape.
+const FORM_TABLE_HIERARCHY_VIEW_COMMANDS: [&str; 3] = ["HierarchicalList", "List", "Tree"];
+
+/// Whether the table itself -- rather than the list behind it -- has the
+/// standard command this name spells.
+///
+/// Two of the table's own declared properties answer for three names, and both
+/// are properties the writer already emits for the same element, so the reader
+/// asks the element about itself instead of guessing from its data.
+///
+/// `Choose`: census over the eight stand corpora of every table whose
+/// excluded-command list declares `8969c93a-...`, joined to the
+/// `<ExcludedCommand>` elements the platform writes for the same table -- 186
+/// tables. All 179 the platform names `Choose` declare
+/// `<ChoiceMode>true</ChoiceMode>`, and all 7 it leaves unnamed declare no
+/// `<ChoiceMode>` at all. The split is total in both directions and holds
+/// across every attribute kind a table is shown over -- 84 of the 179 are over
+/// a `v8:ValueTable`, 72 over a `cfg:DynamicList`, 14 over a `v8:ValueTree`
+/// and 9 over a `v8:ValueListType` -- so it is the table's declaration and not
+/// its data that decides. The seven are ERP УХ 3.2.12.6
+/// `CommonForms/ФормаНастройкиФормулРасчета` (both its operand tables),
+/// `Catalogs/Лоты/Forms/ЛотыДоступныеПоставщику`,
+/// `Documents/Лот/Forms/ЛотыДоступныеПоставщику`,
+/// `Documents/ЭкземплярПроцесса/Forms/ФормаПроцессов`,
+/// `Documents/ТрансформационнаяКорректировка/Forms/ФормаСписка` and
+/// `DataProcessors/ВзысканиеДебиторскойЗадолженности/Forms/Форма`.
+///
+/// `SelectAll` and `ShowMultipleSelection`: the same census on their own
+/// uuids. Of the 1 462 tables that declare `51c99108-...`, 1 461 are named
+/// `SelectAll` and every one of the 1 461 declares no `<SelectionMode>`; the
+/// single unnamed one declares `<SelectionMode>SingleRow</SelectionMode>`. Of
+/// the 948 that declare `e7216412-...`, 946 are named `ShowMultipleSelection`
+/// and none of the 946 declares a `<SelectionMode>`; both unnamed ones declare
+/// `SingleRow`. A table that admits one row at a time has neither a
+/// multiple-selection switch nor a select-all command, and the three unnamed
+/// records are on the two ERP УХ forms
+/// `DataProcessors/ВзысканиеДебиторскойЗадолженности/Forms/Форма` and
+/// `DataProcessors/АналитическийБланк/Forms/ФормаМастераМакетаРаскрытия`.
+fn form_table_declares_own_standard_command(
+    command: &str,
+    choice_mode: Option<bool>,
+    selection_mode: Option<&str>,
+) -> bool {
+    match command {
+        "Choose" => choice_mode == Some(true),
+        "SelectAll" | "ShowMultipleSelection" => selection_mode != Some("SingleRow"),
+        _ => true,
+    }
+}
+
+/// Whether a form attribute declares exactly one of the two flat value
+/// collections a table can be shown over.
+///
+/// A value table and a value list are rows without a hierarchy; a value tree
+/// is the same collection with one. The declaration is read as the whole
+/// declared type rather than as membership, because a table shown over a union
+/// of types is not one of these collections.
+fn form_attribute_is_flat_value_collection(attribute: &FormAttribute) -> bool {
+    let [ConstantValueType::Reference { reference }] = attribute.value_types.as_slice() else {
+        return false;
+    };
+    matches!(reference.as_str(), "v8:ValueTable" | "v8:ValueListType")
+}
+
 /// Drop from every `<Table>`'s own `<CommandSet>` the standard commands the
-/// list behind that table does not have.
+/// table and the list behind it do not have.
 fn retain_form_table_list_owned_commands(
     items: &mut [FormChildItem],
     attributes: &[FormAttribute],
@@ -25440,20 +25522,31 @@ fn retain_form_table_list_owned_commands(
     declarations: Option<&MetadataFieldDeclarationIndex>,
 ) {
     for item in items.iter_mut() {
-        if item.tag == "Table"
-            && !item.command_set_excluded_commands.is_empty()
-            && let Some(settings) = bound_attribute_id_by_table_id
-                .get(&item.id)
-                .and_then(|attribute_id| {
-                    attributes
-                        .iter()
-                        .find(|attribute| &attribute.id == attribute_id)
-                })
-                .and_then(|attribute| attribute.settings.as_ref())
-        {
+        if item.tag == "Table" && !item.command_set_excluded_commands.is_empty() {
+            let choice_mode = item.table_choice_mode;
+            let selection_mode = item.table_selection_mode;
             item.command_set_excluded_commands.retain(|command| {
-                form_table_list_declares_standard_command(command, settings, declarations)
+                form_table_declares_own_standard_command(command, choice_mode, selection_mode)
             });
+            if let Some(attribute) =
+                bound_attribute_id_by_table_id
+                    .get(&item.id)
+                    .and_then(|attribute_id| {
+                        attributes
+                            .iter()
+                            .find(|attribute| &attribute.id == attribute_id)
+                    })
+            {
+                if let Some(settings) = attribute.settings.as_ref() {
+                    item.command_set_excluded_commands.retain(|command| {
+                        form_table_list_declares_standard_command(command, settings, declarations)
+                    });
+                }
+                if form_attribute_is_flat_value_collection(attribute) {
+                    item.command_set_excluded_commands
+                        .retain(|command| !FORM_TABLE_HIERARCHY_VIEW_COMMANDS.contains(command));
+                }
+            }
         }
         retain_form_table_list_owned_commands(
             &mut item.child_items,
