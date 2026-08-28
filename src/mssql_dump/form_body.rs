@@ -30137,27 +30137,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_height)
         ));
     }
-    // A `SpreadSheetDocumentField` writes its `ToolTip` in the same early run
-    // its `ToolTipRepresentation` already uses, one site ahead of it, not down
-    // in the late fallback block.  Census over the native `Form.xml` of all
-    // eight stand corpora, every `<SpreadSheetDocumentField>` (2 709 of them,
-    // 5 carrying a `<ToolTip>`): the tooltip trails only `DataPath` (5) and
-    // `TitleLocation` (5) and leads `ToolTipRepresentation` (3), `CommandSet`
-    // (1), `VerticalScrollBar` (4), `HorizontalScrollBar` (4),
-    // `ViewScalingMode` (2), `Width`, `Height`, `HorizontalStretch`,
-    // `SelectionShowMode`, `Edit`, `ShowGroups` (1 each), `ContextMenu` (5),
-    // `ExtendedTooltip` (5) and `Events` (4), with no pair counted both ways.
-    // The 20 `<ToolTipRepresentation>` of the same element trail `DataPath`
-    // (20), `TitleLocation` (20) and `ToolTip` (3) and lead `CommandSet` (7)
-    // and the rest, so the representation stays put and only the tooltip moves
-    // ahead of it.
-    if item.tag == "SpreadSheetDocumentField" {
-        xml.push_str(&format_form_localized_section(
-            "ToolTip",
-            &item.tooltip,
-            indent + 1,
-        ));
-    }
     xml.push_str(&format_form_tooltip_representation_xml(
         item,
         FormTooltipRepresentationXmlOrder::FieldPropertiesBeforeCommandSet,
@@ -32066,21 +32045,6 @@ pub(super) fn format_form_child_item_xml(
     // `VerticalStretch` (42), `ToolTip` (10) and `Representation` (3), and
     // leads `ExtendedTooltip` (89), `ChildItems` (3) and `BorderColor` (1),
     // with no pair counted both ways.
-    // `Shape` opens the popup's shape run, exactly as it does a `Button`'s.
-    // Census over the native `Form.xml` of all eight stand corpora, all 16 217
-    // `<Popup>` elements: the 4 that carry a `<Shape>` write it behind `Title`
-    // (4), `ToolTip` (1), `ToolTipRepresentation` (1) and `Representation` (1)
-    // and ahead of `ShapeRepresentation` (3), `BorderColor` (3), `BackColor`
-    // (1), `ExtendedTooltip` (4) and `ChildItems` (4), with no pair counted
-    // both ways.
-    if item.tag == "Popup"
-        && let Some(shape) = item.shape
-    {
-        xml.push_str(&format!(
-            "{tab}\t<Shape>{}</Shape>\r\n",
-            escape_xml_text(shape)
-        ));
-    }
     if item.tag == "Popup"
         && let Some(shape_representation) = item.shape_representation
     {
