@@ -560,7 +560,6 @@ impl FormPopupSchema {
             || options.len() != 9
             || options.first().map(|field| field.trim()) != Some("7")
             || options.get(3).map(|field| field.trim()) != Some("2")
-            || options.get(5).map(|field| field.trim()) != Some("0")
         {
             return None;
         }
@@ -571,6 +570,40 @@ impl FormPopupSchema {
 
     pub(crate) const fn representation(self) -> Option<&'static str> {
         self.representation.xml_value()
+    }
+
+    /// The popup's own `<Shape>`, member 5 of the same tuple.
+    ///
+    /// The member used to be a *guard*: the schema refused any tuple whose
+    /// member 5 was not `0`, so a popup that carries a shape lost its
+    /// `<Representation>` as well as its `<Shape>` -- a condition on one
+    /// property's value deciding whether another is read at all.
+    ///
+    /// The code table is the one `FormButtonShapeSchema` already reads, and it
+    /// is measured here, not borrowed: seed `hg7-e` against 8.3.27.2214
+    /// carries six popups that differ only in these two elements --
+    /// `<Representation>PictureAndText</Representation><Shape>Usual</Shape>`,
+    /// neither, `Representation` alone, `Shape` alone,
+    /// `<Shape>Oval</Shape><ShapeRepresentation>WhenActive</ShapeRepresentation>`
+    /// and `<Shape>Auto</Shape>` -- and their tuples read `(4,5) = (2,1)`,
+    /// `(3,0)`, `(2,0)`, `(3,1)`, `(3,2)` and `(3,0)` respectively. `Auto` is
+    /// the state the platform writes no element for, so `0` is an absence and
+    /// not a spelling; `Rectangle` and `None` are refused by the XDTO
+    /// enumeration itself, so the type has no further value to miss.
+    ///
+    /// Census over the whole native population: the eight stand corpora spell
+    /// `<Shape>` on 4 of their 16 217 popups -- `Usual` once and `Oval` three
+    /// times, all in ERP УХ 3.2.12.6 -- and member 4 stays a total function of
+    /// `<Representation>` across the 5 143 popups of the seven corpora whose
+    /// dumped tuples were joined with the platform's element (`3` on the 3 208
+    /// written none, `1`/`2`/`0` on exactly the 1 373/540/22 written `Picture`,
+    /// `PictureAndText` and `Text`).
+    pub(crate) fn shape(self, options: &[&str]) -> Option<&'static str> {
+        match options.get(5)?.trim() {
+            "1" => Some("Usual"),
+            "2" => Some("Oval"),
+            _ => None,
+        }
     }
 }
 
@@ -1169,6 +1202,76 @@ impl FormPageSchema {
                 _ => None,
             },
         }
+    }
+
+    /// The four members of a short-`17`/18-revision page that were measured
+    /// against the platform, and nothing else.
+    ///
+    /// The stretch pair is not in the option bag at all -- it is top-level
+    /// slots 14 and 15, which the canonical reader already samples -- so the
+    /// short bag only gated it. The two members that *are* in the bag sit in
+    /// the same slots the canonical bag holds them in, exactly as the grouping
+    /// triple and the title flag above already do.
+    ///
+    /// Census over the whole population the construct has: 122 short-revision
+    /// pages, all of them in ERP УХ 3.2.12.6 -- the other seven stand corpora
+    /// spell no short page bag at all, all 17 963 of their pages carry the
+    /// canonical `18`/20 one -- joined against the pages the platform writes.
+    /// Top-level slot 14 reads `2` on all 121 that carry no
+    /// `<HorizontalStretch>` and `1` on exactly the one that carries `true`;
+    /// slot 15 reads `2` on 120 and `1` on exactly the two that carry
+    /// `<VerticalStretch>true</VerticalStretch>`. Of the 119 whose bag the
+    /// dump carries in full, member 11 reads `0` on all 118 that carry no
+    /// `<VerticalSpacing>` and `2` on exactly the one that carries `Half`, and
+    /// member 13 reads `3` on all 118 that carry no `<VerticalAlign>` and `0`
+    /// on exactly the one that carries `Top` -- the same codes, under the same
+    /// two tables, the canonical revision uses. Every remaining member of the
+    /// short bag stays unread: nothing measures it.
+    pub(crate) fn short_revision_properties(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        fields: &[&str],
+        options: &[&str],
+    ) -> Option<FormPageProperties> {
+        if !Self::is_short_revision(
+            wrapper,
+            field_count,
+            item_tag,
+            direct_discriminator,
+            options,
+        ) {
+            return None;
+        }
+        Some(FormPageProperties {
+            enable_content_change: None,
+            horizontal_stretch: match fields.get(14).map(|field| field.trim()) {
+                Some("0") => Some(false),
+                Some("1") => Some(true),
+                _ => None,
+            },
+            vertical_stretch: match fields.get(15).map(|field| field.trim()) {
+                Some("0") => Some(false),
+                Some("1") => Some(true),
+                _ => None,
+            },
+            group: None,
+            horizontal_align: None,
+            vertical_align: match options.get(13).map(|field| field.trim()) {
+                Some("0") => Some("Top"),
+                Some("1") => Some("Center"),
+                Some("2") => Some("Bottom"),
+                _ => None,
+            },
+            children_align: None,
+            child_items_width: None,
+            horizontal_spacing: None,
+            vertical_spacing: options
+                .get(Self::VERTICAL_SPACING_OPTION_SLOT)
+                .and_then(|field| form_item_spacing_xml(field)),
+            scroll_on_compress: None,
+        })
     }
 
     pub(crate) const fn picture_option_slot(self) -> usize {
@@ -2038,6 +2141,7 @@ pub(crate) enum FormExtendedTooltipXmlProperty {
     MaxWidth,
     Height,
     AutoMaxHeight,
+    MaxHeight,
     HorizontalStretch,
     VerticalStretch,
     TextColor,
@@ -2065,6 +2169,15 @@ pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProper
     FormExtendedTooltipXmlProperty::MaxWidth,
     FormExtendedTooltipXmlProperty::Height,
     FormExtendedTooltipXmlProperty::AutoMaxHeight,
+    // `MaxHeight` follows the auto flag that bounds it, exactly as `MaxWidth`
+    // follows `AutoMaxWidth` two lines above. Of the 736 377 native
+    // `ExtendedTooltip` elements of the eight stand corpora, exactly 2 carry
+    // it; the one that shares a tooltip with other geometry writes
+    // `AutoMaxWidth`, `MaxWidth`, `MaxHeight` in that order, and no tooltip
+    // anywhere carries `MaxHeight` together with `AutoMaxHeight`, `Height` or
+    // either stretch flag, so those pairs are unobserved and this position is
+    // the nearest one that satisfies the pair that is.
+    FormExtendedTooltipXmlProperty::MaxHeight,
     FormExtendedTooltipXmlProperty::HorizontalStretch,
     FormExtendedTooltipXmlProperty::VerticalStretch,
     FormExtendedTooltipXmlProperty::TextColor,
@@ -2103,6 +2216,7 @@ pub(crate) struct FormExtendedTooltipSchema {
     auto_max_width_slot: usize,
     max_width_slot: usize,
     auto_max_height_slot: usize,
+    max_height_slot: usize,
     group_horizontal_align_slot: usize,
     group_vertical_align_slot: usize,
     horizontal_align_option_slot: usize,
@@ -2173,6 +2287,20 @@ impl FormExtendedTooltipSchema {
             auto_max_width_slot: 25,
             max_width_slot: 26,
             auto_max_height_slot: 28,
+            // The height cap sits immediately behind the auto flag that bounds
+            // it, in the slot the width pair's own spacing already names:
+            // `auto_max_width` 25, `max_width` 26, `auto_max_height` 28,
+            // `max_height` 29.
+            //
+            // Measured on real bytes, not inferred from the shape: seed
+            // `hg7-a` against 8.3.27.2214 carries two `ExtendedTooltip`
+            // records that differ in exactly one element -- `Надпись`'s is
+            // written `<MaxHeight>2</MaxHeight>` and `Картинка`'s is written
+            // empty -- and their 34-member records agree member for member
+            // except at slot 29, which reads `2` on the first and `0` on the
+            // second. `0` is therefore the unwritten state, which is what
+            // `extract_form_dimension` already treats it as.
+            max_height_slot: 29,
             group_horizontal_align_slot: 30,
             // The tooltip's group alignment pair sits in adjacent top-level
             // slots, the vertical one directly behind the horizontal one.
@@ -2247,6 +2375,10 @@ impl FormExtendedTooltipSchema {
 
     pub(crate) const fn auto_max_height_slot(self) -> usize {
         self.auto_max_height_slot
+    }
+
+    pub(crate) const fn max_height_slot(self) -> usize {
+        self.max_height_slot
     }
 
     pub(crate) const fn group_horizontal_align_slot(self) -> usize {
@@ -2623,12 +2755,32 @@ impl FormPictureDecorationSchema {
         self.option_tuple_is_exact(options).then_some(12)
     }
 
-    /// The option tuple every native `PictureDecoration` carries: 13 slots
-    /// discriminated by a leading `4`, with slot 2 a plain hyperlink flag.
+    /// The option tuple a native `PictureDecoration` carries, in either of its
+    /// two revisions: the canonical 13 slots discriminated by a leading `4`,
+    /// and the short 12 slots discriminated by a leading `3` -- the same
+    /// `len - lead` of 9, one member shorter. Slot 2 is a plain hyperlink flag
+    /// in both.
+    ///
+    /// The short revision is a tail truncation of the canonical one, confirmed
+    /// by value rather than by shape. Its whole population across the eight
+    /// stand corpora is 7 items, all in ERP УХ 3.2.12.6, and every coordinate
+    /// the canonical layout names lands on its own value in all seven: member
+    /// 3 reads `0` on the six the platform writes no `<PictureSize>` for and
+    /// `4` -- the code the canonical census pins to `AutoSize` -- on exactly
+    /// the one it writes `<PictureSize>AutoSize</PictureSize>` for
+    /// (`Catalogs/ОтправкиМинобороны/Forms/ФормаЭлемента`,
+    /// `КартинкаПервичноеСообщениеЭмблема`); member 2 reads `0` and none of
+    /// the seven carries `<Hyperlink>`; member 4 reads `0` and none carries
+    /// `<Zoomable>`; member 5 reads the empty `{1,0}` and none carries
+    /// `<NonselectedPictureText>`; members 8 and 9 read `0` and none carries
+    /// either drag flag. The dropped member is the tuple's last, `ImageScale`,
+    /// whose unwritten default `100` is exactly what its absence stands for --
+    /// and no short-revision decoration carries the element.
     fn option_tuple_is_exact(self, options: &[&str]) -> bool {
-        options.len() == 13
-            && options.first().map(|field| field.trim()) == Some("4")
-            && matches!(options.get(2).map(|field| field.trim()), Some("0" | "1"))
+        let lead = options.first().map(|field| field.trim());
+        let revision = (options.len() == 13 && lead == Some("4"))
+            || (options.len() == 12 && lead == Some("3"));
+        revision && matches!(options.get(2).map(|field| field.trim()), Some("0" | "1"))
     }
 
     pub(crate) fn properties(self, fields: &[&str]) -> FormPictureDecorationProperties {
@@ -3516,6 +3668,10 @@ const FORM_SPREADSHEET_DETAIL_PROCESSING_EVENT_UUID: &str = "2988b2a5-c887-4928-
 // and shared by both owner tables.
 const FORM_ITEM_DRAG_EVENT_UUID: &str = "8ad48496-8d0b-4f6c-ae48-99d95227884b";
 const FORM_ITEM_DRAG_CHECK_EVENT_UUID: &str = "0d644ff6-443b-4390-86fa-7f9105e42711";
+// The other half of the drag family, shared the same way: the raw-slot event
+// decoder already names both identifiers, the strict collections did not.
+const FORM_ITEM_DRAG_START_EVENT_UUID: &str = "6d4d6747-a823-4f61-ab31-a426572f2c6c";
+const FORM_ITEM_DRAG_END_EVENT_UUID: &str = "cb286ab3-3a1c-40d2-a232-6e64f624ccec";
 const FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID: &str = "2042ec93-3108-4190-b767-ec6c10dd9ff4";
 const FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID: &str =
     "411a4578-276c-4f4a-b56a-b3b01181c997";
@@ -3690,9 +3846,30 @@ impl FormChildItemEventCollectionSchema {
                 (FORM_LABEL_FIELD_CLICK_EVENT_UUID, "Click"),
                 (FORM_LABEL_FIELD_URL_PROCESSING_EVENT_UUID, "URLProcessing"),
             ],
-            FormChildItemEventCollectionOwner::PictureField => {
-                &[(FORM_PICTURE_FIELD_CLICK_EVENT_UUID, "Click")]
-            }
+            // The picture field carries the same shared drag pair every other
+            // draggable control does, and the single-entry table cost it every
+            // event beside them: a collection that names one identifier this
+            // table does not know is discarded whole. The two native picture
+            // fields of the eight stand corpora that carry a three-member
+            // collection -- `АдресКартинкиПросмотр` and
+            // `АдресКартинкиМиниПросмотр` of ERP УХ 3.2.12.6
+            // `Catalogs/СканированныеДокументыДляПередачиВЭлектронномВиде/
+            // Forms/ФормаЭлементаНовая` -- lost their whole `<Events>` list.
+            //
+            // Measured: seed `hg7-c` against 8.3.27.2214 carries a picture
+            // field written `<Event name="DragCheck">`, `<Event name="Drag">`,
+            // `<Event name="Click">` and a twin written none. Their option
+            // bags agree member for member except at slot 16, where the twin
+            // holds the empty `{0,1,0}` and the first holds
+            // `{3,0d644ff6-…,"…ПроверкаПеретаскивания",8ad48496-…,
+            // "…Перетаскивание",996b8c30-…,"…Нажатие",1,0,…}` -- the two
+            // shared identifiers, in the platform's own print order, beside
+            // the `Click` identifier this table already named.
+            FormChildItemEventCollectionOwner::PictureField => &[
+                (FORM_PICTURE_FIELD_CLICK_EVENT_UUID, "Click"),
+                (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
+                (FORM_ITEM_DRAG_EVENT_UUID, "Drag"),
+            ],
             FormChildItemEventCollectionOwner::SpreadSheetDocumentField => &[
                 (
                     FORM_SPREADSHEET_ADDITIONAL_DETAIL_PROCESSING_EVENT_UUID,
@@ -3720,6 +3897,22 @@ impl FormChildItemEventCollectionSchema {
                 // `BeforePrint` for them.
                 (FORM_SPREADSHEET_URL_PROCESSING_EVENT_UUID, "URLProcessing"),
                 (FORM_SPREADSHEET_BEFORE_PRINT_EVENT_UUID, "BeforePrint"),
+                // The other half of the drag family, missing for the same
+                // reason and at the same cost: the two spreadsheet fields of
+                // ERP УХ 3.2.12.6
+                // `Reports/СетеваяДиаграммаШаблонаУниверсальногоПроцесса/
+                // Forms/Форма` name `DragStart` and `DragEnd` beside already
+                // named members and lost every event in the collection.
+                //
+                // Measured: seed `hg7-c` against 8.3.27.2214 carries a
+                // spreadsheet field written `DragCheck`, `OnActivate`,
+                // `Selection`, `DragStart`, `Drag`, `DragEnd`, and its
+                // collection at option slot 18 spells the six identifiers in
+                // that order -- `0d644ff6`, `2042ec93`, `22287505`,
+                // `6d4d6747`, `8ad48496`, `cb286ab3` -- so the two unnamed
+                // ones are exactly `DragStart` and `DragEnd`.
+                (FORM_ITEM_DRAG_START_EVENT_UUID, "DragStart"),
+                (FORM_ITEM_DRAG_END_EVENT_UUID, "DragEnd"),
             ],
             FormChildItemEventCollectionOwner::CalendarField => &[
                 (FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID, "OnPeriodOutput"),
@@ -3995,19 +4188,36 @@ impl FormFieldSchema {
         //   native `DetailProcessing` occurrences across ssl/sslbase/ut/mdm/
         //   ws, none of them previously offset 1). Native writes `<Events>`
         //   with this one `DetailProcessing` entry.
+        //
+        // The kind whitelist that used to guard `top_level_offset == 1` is
+        // gone. It was a condition on the kind, not on what the record says:
+        // every coordinate this schema hands out is already spelled as
+        // `<slot> + top_level_offset`, and the offset itself is computed the
+        // same way for every kind at the one call site. The list grew one kind
+        // at a time as each new corpus produced a prefixed record, and each
+        // kind it had not yet reached lost whatever this schema is the only
+        // route to. `GraphicalSchemaField` was the next one: its event
+        // collection has no fallback either, so the three prefixed graphical
+        // scheme fields of ERP УХ 3.2.12.6 -- `DataProcessors/
+        // СтруктураВладения/Forms/Форма` `РезультатГраф`, and the `ГрафСхема`
+        // of `Catalogs/ПроизвольныеОтчеты` and
+        // `Catalogs/МониторыКлючевыхПоказателей`
+        // `Forms/ФормаПроизвольногоОтчетаПоМКП` -- each lost their whole
+        // `<Events>` element.
+        //
+        // Measured: seed `hg7-b` against 8.3.27.2214 is seed `hg7-a` with
+        // `<UserVisible><xr:Common>false</xr:Common></UserVisible>` added to
+        // three items and nothing else changed. Its `GraphicalSchemaField`
+        // record grows from 59 to 60 members and its option bag moves from
+        // slot 39 to slot 40, staying the same 14-member `14`-headed tuple
+        // with the same event record -- `{1,3c3da18f-…,"СхемаВыбор",1,0,
+        // 3c3da18f-…,0,1}` -- in the same collection slot 6. The unprefixed
+        // seed writes `<Events><Event name="Selection">СхемаВыбор</Event>`;
+        // the prefixed one is written the same way by the platform and was
+        // written empty by this decoder.
         if wrapper != "37"
             || field_count != field_count_base + top_level_offset
             || top_level_offset > 1
-            || (top_level_offset == 1
-                && !matches!(
-                    item_tag,
-                    "LabelField"
-                        | "InputField"
-                        | "CheckBoxField"
-                        | "PictureField"
-                        | "RadioButtonField"
-                        | "SpreadSheetDocumentField"
-                ))
             || direct_discriminator != Some(discriminator)
             || options.len() != options_len
             || options.first().map(|field| field.trim()) != Some(options_kind)

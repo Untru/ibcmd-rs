@@ -33094,6 +33094,19 @@ fn parse_common_command_shortcut_value_with_style(
         // `Cmd+Shift+Num -` for them. VK_MULTIPLY=106 and VK_SEPARATOR=108
         // occur nowhere in the eight trees and stay unread rather than guessed
         // from the run.
+        //
+        // VK_MULTIPLY=106 does occur: the eight native stand trees spell
+        // `<Shortcut>Num *</Shortcut>` twice, on the `КнопкаУмножить` command
+        // of ERP УХ 3.2.12.6
+        // `DataProcessors/НастройкаСтруктурыОтчета/Forms/ФормаКонструктора`
+        // and of `Catalogs/БланкиОтчетов/Forms/ФормаМакета`, so the census
+        // that declared the code absent had not seen them. Seed `hg7-a`
+        // against 8.3.27.2214 measures the code itself: a form command written
+        // `<Shortcut>Num *</Shortcut>` stores `{0,106,0}` and its sibling
+        // written `<Shortcut>Num /</Shortcut>` stores `{0,111,0}`, the code
+        // this run already spells. VK_SEPARATOR=108 is spelled by no tree and
+        // no seed and stays unread.
+        106 => "Num *".to_string(),
         107 => "Num +".to_string(),
         109 => "Num -".to_string(),
         110 => "Num .".to_string(),
