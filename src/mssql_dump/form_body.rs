@@ -11380,9 +11380,6 @@ fn parse_form_child_item_with_metadata_owners(
     let popup_shape_representation = popup_shape_options
         .as_ref()
         .and_then(|(schema, options)| schema.shape_representation(options));
-    let popup_shape = popup_shape_options
-        .as_ref()
-        .and_then(|(schema, options)| schema.shape(options));
     // The group's own binding to a table element. The id is resolved to the
     // bound item's name, and an id the form declares no item for is written
     // physically -- `<id>:<form item type uuid>` -- exactly as the form root's
@@ -31047,8 +31044,11 @@ pub(super) fn format_form_child_item_xml(
     // `VerticalStretch`, `Wrap` and `EditMode` - and precedes `Format` (35),
     // `EditFormat`, `Font`, `TextColor`, `AutoMarkIncomplete` (11),
     // `AutoChoiceIncomplete` (3) and `SpinButton` (1), with no counter-example.
-    if item.mark_negatives == Some(true) {
-        xml.push_str(&format!("{tab}\t<MarkNegatives>true</MarkNegatives>\r\n"));
+    if let Some(mark_negatives) = item.mark_negatives {
+        xml.push_str(&format!(
+            "{tab}\t<MarkNegatives>{}</MarkNegatives>\r\n",
+            xml_bool(mark_negatives)
+        ));
     }
     if item.tag != "LabelField"
         && let Some(password_mode) = item.password_mode

@@ -1278,18 +1278,9 @@ impl FormPageSchema {
         1
     }
 
-    /// The page's picture rides option member 1 in *both* revisions of its
-    /// bag, so the short one no longer has to refuse it.
-    ///
-    /// Census of the dumped layouts of all eight stand corpora joined to the
-    /// platform's own `<Page>` for the same item id -- all 25 101 pages: the
-    /// 122 that carry the short `17`/18 bag hold a reference value in member 1
-    /// on exactly the 2 whose page publishes a `<Picture>` and something else
-    /// on the other 120, and the 24 979 that carry the canonical `18`/20 bag
-    /// hold one on exactly 405 of the 408 that publish one, the remaining
-    /// three being the embedded-payload and standard-picture kinds the same
-    /// member already carries. No page publishes a picture whose member 1 is
-    /// the empty value, and no page with a value in member 1 publishes none.
+    /// Option member 1 carries the page picture in both the canonical and
+    /// short revisions. Across all 25 101 observed pages it is populated
+    /// exactly when the platform publishes a picture value.
     pub(crate) fn picture_revision(
         wrapper: &str,
         field_count: usize,
@@ -1555,25 +1546,10 @@ impl FormUsualGroupGroupVerticalAlign {
     }
 }
 
-/// The form item a container group is bound to, published as
-/// `<AssociatedTableElementId>`.
-///
-/// Census of the dumped layouts of all eight stand corpora, joined to the
-/// platform's own element for the same item id:
-///
-///   * all 114 015 `UsualGroup` records carry the 29-member `29`-headed option
-///     tuple at slot `20 + head offset`, and its member 26 is `0` on the
-///     114 008 groups that publish no `<AssociatedTableElementId>` and the id
-///     of a form item on all 7 that publish one -- `1`, `3`, `138`, `878`,
-///     `2289` resolving to the table the platform names, and `116` twice on the
-///     two groups whose element the platform itself writes unresolved;
-///   * all 9 799 `Pages` records carry their own option tuple in the same slot,
-///     and its member 4 is `0` on the 9 798 that publish nothing and `327` on
-///     the one that publishes `ВНА`, the id of the table of that name.
-///
-/// No raw value maps to two different published answers on either kind, and no
-/// value that publishes an element also occurs on a group that publishes none.
-/// Neither member had a reader, so the writer had nothing to emit.
+/// Reads the form-item binding published by container groups as
+/// `<AssociatedTableElementId>`. A census of all eight corpora places the raw
+/// item id in option member 26 for `UsualGroup` and member 4 for `Pages`; zero
+/// is the unbound state and no observed value maps to two platform answers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormGroupAssociatedTableElementSchema {
     option_slot: usize,
@@ -1588,8 +1564,6 @@ impl FormGroupAssociatedTableElementSchema {
         }
     }
 
-    /// The raw form-item id, or `None` when the member is the platform's own
-    /// "unbound" zero or anything that is not an item id at all.
     pub(crate) fn item_id<'a>(self, options: &'a [&'a str]) -> Option<&'a str> {
         let value = options.get(self.option_slot)?.trim();
         (value != "0" && value.parse::<u64>().is_ok()).then_some(value)
@@ -5142,16 +5116,6 @@ impl FormPopupShapeRepresentationSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
     const OPTION_COUNT: usize = 9;
     const SHAPE_REPRESENTATION_OPTION_SLOT: usize = 6;
-    /// `Shape` rides the member just ahead of the representation code, under
-    /// the same table `Button` reads for the property.
-    ///
-    /// Census of the dumped layouts of all eight stand corpora joined to the
-    /// platform's own element for the same item id -- all 16 217 `Popup`
-    /// records: member 5 is `0` on the 16 213 popups that carry no `<Shape>`,
-    /// `1` on the one that says `Usual` and `2` on the three that say `Oval`,
-    /// with no code mapping to two answers and no other code anywhere. The
-    /// member had no reader, so all four elements were lost.
-    const SHAPE_OPTION_SLOT: usize = 5;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
         (wrapper == "22"
@@ -5172,17 +5136,6 @@ impl FormPopupShapeRepresentationSchema {
             _ => None,
         }
     }
-
-    pub(crate) fn shape(self, options: &[&str]) -> Option<&'static str> {
-        match options
-            .get(Self::SHAPE_OPTION_SLOT)
-            .map(|field| field.trim())
-        {
-            Some("1") => Some("Usual"),
-            Some("2") => Some("Oval"),
-            _ => None,
-        }
-    }
 }
 
 impl FormCheckBoxFieldSchema {
@@ -5200,18 +5153,8 @@ impl FormCheckBoxFieldSchema {
     /// platform writes one on, with the decoded text equal to the platform's own
     /// `<v8:content>` on every one of them.
     const EDIT_FORMAT_OPTION_SLOT: usize = 5;
-    /// `ItemTitleHeight` of the same 13-member `11`-headed tuple.
-    ///
-    /// Census of the dumped layouts of all eight stand corpora joined to the
-    /// platform's own `<CheckBoxField>` for the same item id -- all 20 386
-    /// check boxes: member 8 is `0` on the 20 385 that carry no
-    /// `<ItemTitleHeight>` and `1` on the one that carries
-    /// `<ItemTitleHeight>1</ItemTitleHeight>` (ERP УХ
-    /// `Documents/ПоясненияКДекларацииПоНДС/Forms/ФормаРеквизитыСчетаФактуры`,
-    /// field `СтандартныйСчетФактура`). The member is read as the written
-    /// height, the way the radio button already reads its own out of its own
-    /// tuple; `1` is the only non-zero value the stand shows here, so no other
-    /// height is claimed.
+    /// All 20 386 observed check boxes place `ItemTitleHeight` in member 8:
+    /// zero on the 20 385 absent values and `1` on the single written value.
     const ITEM_TITLE_HEIGHT_OPTION_SLOT: usize = 8;
 
     pub(crate) fn top_level_offset_for_raw_layout(
@@ -5415,19 +5358,7 @@ impl FormChildItemUserVisibleSchema {
                 "37",
                 60,
                 "PictureField" | "LabelField" | "InputField" | "CheckBoxField" | "RadioButtonField"
-                | "TextDocumentField"
-                // The spreadsheet field wraps the same envelope in the same
-                // slots and was simply never named. Census of the dumped
-                // layouts of all eight stand corpora joined to the platform's
-                // own `<SpreadSheetDocumentField>` for the same item id -- all
-                // 152 records with a shifted head: the marker is `1` on every
-                // one, and the prefix tuple is the platform's own default
-                // `{0,{0,{"B",1},0}}` on the 151 that publish no
-                // `<UserVisible>` and `{0,{0,{"B",0},0}}` on the one that
-                // publishes `<xr:Common>false</xr:Common>` (ERP УХ
-                // `Reports/РеестрДокументовПодтверждающихНалоговуюЛьготуПоНДС/
-                // Forms/ФормаОтчета`, field `Результат`).
-                | "SpreadSheetDocumentField",
+                | "TextDocumentField",
                 1,
                 Some("1"),
             ) => user_visible,
@@ -6027,25 +5958,9 @@ impl FormContainerReadOnlySchema {
             options.len(),
             options.first().map(|field| field.trim()),
         ) {
-            ("ColumnGroup", Some("2"), 12, Some("2"))
-            | ("Page", Some("4"), 20, Some("18"))
-            // The flag is a top-level slot, not an option member, so the
-            // page's short `17`/18 bag has no bearing on it. Census of the
-            // dumped layouts of all eight stand corpora joined to the
-            // platform's own `<Page>` for the same item id -- all 25 101
-            // pages: slot 11 is `1` on exactly the 54 that carry
-            // `<ReadOnly>true</ReadOnly>` (53 canonical-bag, one short-bag)
-            // and `0` on the other 25 047, with no third code and no
-            // counter-example on either revision.
-            | ("Page", Some("4"), 18, Some("17"))
-            // A `ButtonGroup` keeps the same flag in the same slot: over all
-            // 32 968 button groups of the eight corpora slot 11 is `1` on
-            // exactly the one whose document carries
-            // `<ReadOnly>true</ReadOnly>` -- ERP УХ
-            // `Documents/ПротоколВыбораПобедителей/Forms/ФормаДокумента`,
-            // group `ПредложенияПобедителейГруппаОценить` -- and `0` on the
-            // other 32 967. The kind had no arm here at all.
-            | ("ButtonGroup", Some("6"), 4, Some("2")) => Some(Self),
+            ("ColumnGroup", Some("2"), 12, Some("2")) | ("Page", Some("4"), 20, Some("18")) => {
+                Some(Self)
+            }
             // A `Popup` keeps the same flag in the same slot: over all 3 911
             // native popups of UT 11.5.27.75 slot 11 reads `1` on exactly the
             // one whose document carries `<ReadOnly>true</ReadOnly>` and `0` on
@@ -7219,7 +7134,6 @@ enum FormTooltipRepresentationItemKind {
     ChartField,
     SpreadSheetDocumentField,
     HTMLDocumentField,
-    FormattedDocumentField,
     CommandBar,
     Button,
     Other,
@@ -7248,7 +7162,6 @@ impl FormTooltipRepresentationItemKind {
             "ChartField" => Self::ChartField,
             "SpreadSheetDocumentField" => Self::SpreadSheetDocumentField,
             "HTMLDocumentField" => Self::HTMLDocumentField,
-            "FormattedDocumentField" => Self::FormattedDocumentField,
             "CommandBar" => Self::CommandBar,
             "Button" => Self::Button,
             _ => Self::Other,
@@ -7363,25 +7276,6 @@ pub(crate) fn form_tooltip_representation_schema(
                 | FormTooltipRepresentationItemKind::ChartField
                 | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
                 | FormTooltipRepresentationItemKind::HTMLDocumentField
-                // The formatted document reads the same reverse offset and was
-                // simply never named. Census of the dumped layouts of all eight
-                // stand corpora joined to the platform's own element for the
-                // same item id, every wrapper-`37` record: reverse offset 9 is
-                // a total function of `<ToolTipRepresentation>` on every kind,
-                // and on this one it reads `0` on the 185 records that carry no
-                // element and `2` on the one that says `Balloon` (ERP УХ
-                // `Catalogs/ШаблоныОповещений/Forms/ФормаРедактированияШаблона`,
-                // field `ТекстПроверка`), with no code mapping to two answers.
-                //
-                // The kinds the stand never writes the element on stay out --
-                // `TextDocumentField` (all 287 read `0`), `GraphicalSchemaField`
-                // (21), `PlannerField` (5) -- because their position in the
-                // element order is unobserved, and so do `PDFDocumentField` and
-                // `GanttChartField`, whose records are one member longer and
-                // whose reverse offset 9 reads `1` on all 14 PDF viewers and on
-                // 17 of the 20 Gantt charts, none of which the platform writes
-                // any element for: there the coordinate is a different member.
-                | FormTooltipRepresentationItemKind::FormattedDocumentField
         )
     {
         return Some(FormTooltipRepresentationSchema {
@@ -7449,13 +7343,7 @@ pub(crate) fn form_tooltip_representation_xml_order(
         // do: behind `DataPath`/`SkipOnInput`/`TitleLocation` and ahead of the
         // geometry run (`Width`, `Height`, `MaxHeight`), `BorderColor`,
         // `ContextMenu` and `ExtendedTooltip`.
-        | FormTooltipRepresentationItemKind::HTMLDocumentField
-        // A `FormattedDocumentField` puts it in the same run: the one native
-        // formatted document that carries the property writes it behind
-        // `DataPath`, `ReadOnly`, `Title`, `TitleLocation` and `ToolTip` and
-        // ahead of `ContextMenu` and `ExtendedTooltip`, which is exactly this
-        // site.
-        | FormTooltipRepresentationItemKind::FormattedDocumentField => {
+        | FormTooltipRepresentationItemKind::HTMLDocumentField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }
         // A `SpreadSheetDocumentField` writes it one step earlier, ahead of its
@@ -8504,18 +8392,11 @@ impl FormTableSchema {
     pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(6)?.trim() {
             "1" => Some("Auto"),
-            // The left side of the same enumeration, read off the platform and
-            // not interpolated. Census of the dumped layouts of all eight stand
-            // corpora joined to the platform's own `<Table>` for the same item
-            // id -- all 19 078 tables: slot 6 is `0` on the 18 397 that carry
-            // no `<TitleLocation>`, `1` on the 123 that say `Auto`, `2` on the
-            // one that says `Left` (ERP УХ
-            // `Catalogs/ГруппыАналитикСтатьи/Forms/ФормаЭлемента`, table
-            // `ВидыАналитик`), `3` on the 555 that say `Top` and `5` on the 2
-            // that say `Bottom`, with no code mapping to two answers and no
-            // other code anywhere.
-            "2" => Some("Left"),
             "3" => Some("Top"),
+            // Read off the platform, not interpolated: of the 4 543 traced
+            // `Table` items of UT 11.5.27.75 exactly one holds `5` here, and
+            // the platform writes `<TitleLocation>Bottom</TitleLocation>` on
+            // exactly that table. The remaining ordinals stay unread.
             "5" => Some("Bottom"),
             _ => None,
         }
