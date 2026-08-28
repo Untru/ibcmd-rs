@@ -1495,6 +1495,252 @@ pub(super) struct WsReferenceDefinitionMembers {
     pub(super) imports: Vec<(String, Vec<u8>)>,
 }
 
+/// Attribute values the XML Schema vocabulary spells as exactly one QName.
+///
+/// `memberTypes` is deliberately absent: it is a whitespace-separated *list* of
+/// QNames, and nothing in the stand exercises it, so it is left alone rather
+/// than rewritten by a reader that has never seen one.
+const WS_DEFINITION_QNAME_ATTRIBUTES: [&str; 5] =
+    ["type", "base", "ref", "itemType", "substitutionGroup"];
+
+/// One start tag of a WSDL document, as its own bytes describe it.
+struct WsDefinitionTag<'a> {
+    name: &'a str,
+    closing: bool,
+    self_closing: bool,
+    /// `(name, value, value byte range)` in document order.
+    attributes: Vec<(&'a str, &'a str, std::ops::Range<usize>)>,
+    /// Byte offset just past the tag's `>`.
+    end: usize,
+}
+
+/// Rewrites the prefix of every QName inside `<types>` that names the
+/// definition's own target namespace to the last prefix in scope bound to that
+/// namespace, and touches nothing else. `None` means the document says nothing
+/// to change - or says something this reader cannot spell - and the stored
+/// bytes stand.
+///
+/// A `WSReference` body's WSDL member is otherwise the platform's own export
+/// byte for byte; this is the single divergence the stand shows. Evidence (all
+/// five `Ext/WSDefinition.xml` the stand publishes, across ERP УХ 3.2.12.6 and
+/// 1С:УТ 11.5.27.75): inside `<types>` the platform writes 13 QNames that name
+/// the definition's target namespace and spells every one of them with the
+/// namespace's *other*, later-declared prefix - never `tns` - while outside
+/// `<types>` it writes 881 QNames on that same namespace and spells every one
+/// of them `tns`. Zero counterexamples either way. Four of the five members are
+/// stored exactly as the platform publishes them, and this pass is a no-op on
+/// all four; the fifth, ERP УХ's
+/// `WSReferences/WSИнформацияПоРынкуЦенныхБумагЦБ`, stores a single
+/// `type="tns:ArrayOfString"` inside its schema where the platform publishes
+/// `type="xsd1:ArrayOfString"`, and this pass rewrites exactly that attribute.
+pub(super) fn normalize_ws_definition_own_namespace_prefixes(wsdl: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(wsdl).ok()?;
+    // Namespace declarations per open element, in declaration order.
+    let mut scopes: Vec<Vec<(&str, &str)>> = vec![Vec::new()];
+    let mut target_namespace: Option<&str> = None;
+    let mut types_depth: Option<usize> = None;
+    let mut depth = 0usize;
+    let mut edits: Vec<(std::ops::Range<usize>, &str)> = Vec::new();
+    let mut at = 0usize;
+    while let Some(offset) = text.get(at..)?.find('<') {
+        let start = at + offset;
+        let rest = text.get(start..)?;
+        if let Some(skip) = ws_definition_skipped_markup_end(rest) {
+            at = start + skip;
+            continue;
+        }
+        let tag = parse_ws_definition_tag(text, start)?;
+        at = tag.end;
+        if tag.closing {
+            depth = depth.checked_sub(1)?;
+            if types_depth.is_some_and(|types| depth <= types) {
+                types_depth = None;
+            }
+            if scopes.len() > 1 {
+                scopes.pop();
+            }
+            continue;
+        }
+        let mut declarations = Vec::new();
+        for (name, value, _) in &tag.attributes {
+            if let Some(prefix) = name.strip_prefix("xmlns:") {
+                declarations.push((prefix, *value));
+            }
+        }
+        let local_name = tag.name.rsplit(':').next()?;
+        if depth == 0 && local_name == "definitions" {
+            target_namespace = tag
+                .attributes
+                .iter()
+                .find(|(name, _, _)| *name == "targetNamespace")
+                .map(|(_, value, _)| *value);
+        }
+        if local_name == "types" && types_depth.is_none() {
+            types_depth = Some(depth);
+        }
+        if types_depth.is_some()
+            && let Some(target) = target_namespace
+        {
+            let in_scope = scopes
+                .iter()
+                .flatten()
+                .copied()
+                .chain(declarations.iter().copied())
+                .collect::<Vec<_>>();
+            let resolve = |prefix: &str| -> Option<&str> {
+                in_scope
+                    .iter()
+                    .rev()
+                    .find(|(declared, _)| *declared == prefix)
+                    .map(|(_, uri)| *uri)
+            };
+            let published_prefix = in_scope
+                .iter()
+                .filter(|(prefix, uri)| {
+                    *uri == target && !prefix.is_empty() && resolve(prefix) == Some(target)
+                })
+                .next_back()
+                .map(|(prefix, _)| *prefix);
+            for (name, value, range) in &tag.attributes {
+                if !WS_DEFINITION_QNAME_ATTRIBUTES.contains(&name.rsplit(':').next()?) {
+                    continue;
+                }
+                let Some((prefix, _)) = value.split_once(':') else {
+                    continue;
+                };
+                if resolve(prefix) != Some(target) {
+                    continue;
+                }
+                let Some(published) = published_prefix.filter(|published| *published != prefix)
+                else {
+                    continue;
+                };
+                edits.push((range.start..range.start + prefix.len(), published));
+            }
+        }
+        if !tag.self_closing {
+            scopes.push(declarations);
+            depth += 1;
+        }
+    }
+    if edits.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(wsdl.len() + edits.len());
+    let mut copied = 0usize;
+    for (range, published) in edits {
+        out.extend_from_slice(text.get(copied..range.start)?.as_bytes());
+        out.extend_from_slice(published.as_bytes());
+        copied = range.end;
+    }
+    out.extend_from_slice(text.get(copied..)?.as_bytes());
+    Some(out)
+}
+
+/// The length of the markup at `rest` that carries no start tag - a processing
+/// instruction, a comment, a CDATA section or a declaration - or `None` when
+/// `rest` opens an element.
+fn ws_definition_skipped_markup_end(rest: &str) -> Option<usize> {
+    for (open, close) in [
+        ("<!--", "-->"),
+        ("<![CDATA[", "]]>"),
+        ("<?", "?>"),
+        ("<!", ">"),
+    ] {
+        if rest.starts_with(open) {
+            return rest[open.len()..]
+                .find(close)
+                .map(|at| open.len() + at + close.len());
+        }
+    }
+    None
+}
+
+/// Reads one tag starting at `start`, with attribute values located by their
+/// own byte ranges. `None` refuses anything this reader cannot spell.
+fn parse_ws_definition_tag(text: &str, start: usize) -> Option<WsDefinitionTag<'_>> {
+    let bytes = text.as_bytes();
+    let mut at = start + 1;
+    let closing = bytes.get(at) == Some(&b'/');
+    if closing {
+        at += 1;
+    }
+    let name_start = at;
+    while bytes
+        .get(at)
+        .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b'>' && *byte != b'/')
+    {
+        at += 1;
+    }
+    let name = text.get(name_start..at)?;
+    if name.is_empty() {
+        return None;
+    }
+    let mut attributes = Vec::new();
+    let mut self_closing = false;
+    loop {
+        while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            at += 1;
+        }
+        match bytes.get(at)? {
+            b'>' => {
+                at += 1;
+                break;
+            }
+            b'/' => {
+                self_closing = true;
+                at += 1;
+                if bytes.get(at)? != &b'>' {
+                    return None;
+                }
+                at += 1;
+                break;
+            }
+            _ => {}
+        }
+        let attribute_start = at;
+        while bytes
+            .get(at)
+            .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b'=')
+        {
+            at += 1;
+        }
+        let attribute = text.get(attribute_start..at)?;
+        if attribute.is_empty() {
+            return None;
+        }
+        while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            at += 1;
+        }
+        if bytes.get(at)? != &b'=' {
+            return None;
+        }
+        at += 1;
+        while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            at += 1;
+        }
+        let quote = *bytes.get(at)?;
+        if quote != b'"' && quote != b'\'' {
+            return None;
+        }
+        at += 1;
+        let value_start = at;
+        while bytes.get(at).is_some_and(|byte| *byte != quote) {
+            at += 1;
+        }
+        let value = text.get(value_start..at)?;
+        attributes.push((attribute, value, value_start..at));
+        at += 1;
+    }
+    Some(WsDefinitionTag {
+        name,
+        closing,
+        self_closing,
+        attributes,
+        end: at,
+    })
+}
+
 /// Splits a `WSReference` body into the WSDL member and its sibling imports.
 ///
 /// The body is a Format15 container, not a bare XML blob: its member names are
@@ -1521,9 +1767,11 @@ pub(super) fn ws_reference_definition_members(
                     element.name
                 );
             }
-            let mut content = Vec::with_capacity(3 + element.data.len());
+            let member = normalize_ws_definition_own_namespace_prefixes(&element.data)
+                .unwrap_or(element.data);
+            let mut content = Vec::with_capacity(3 + member.len());
             content.extend_from_slice(b"\xEF\xBB\xBF");
-            content.extend_from_slice(&element.data);
+            content.extend_from_slice(&member);
             definition = Some(content);
             continue;
         }
