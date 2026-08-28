@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 1,
+  "contract": "8.3.27-xml-2.20-dcs-inner-schema-bounded-v1",
+  "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27 / XML 2.20",
+    "derivation": "bounded inner DataCompositionSchema policy synthesized from the immutable dcs-core, dcs-filter, dcs-typeid-reference and two-variant envelope corpora on 8.3.27.2214; no other patch build or schema cohort is inferred"
+  },
+  "sources": {
+    "platformLine": "8.3.27",
+    "platformVersion": "8.3.27.2214",
+    "sourceVersion": "2.20",
+    "ibcmdSha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "core": {
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-core",
+      "seedReportSha256": "1917a90a7a1c9f047f20ac28d0503229dd403fa2a5ef68a5d982b22197e2ff1a",
+      "seedDcsSha256": "55eebfe0cdc0af3597205ba468aa3be7b80c61020e4f5e6d6c7fba8fafdad733",
+      "seedTemplateSha256": "bf1ebf1bcb4cf0992060989915a005c6cc18ef5da94ea3d978b6506b22331319",
+      "round1CfSha256": "91ffa78b699e1c9ca8f847269f0aa7775fe02e556893184b9dee3e5e15637b6b",
+      "round2CfSha256": "d5cc56c9e63720d07a3b0d92cc75507bda7c7e27e0e9eebb20fdfdecc550c6a8",
+      "configurationEncodedSha256": "018be3b0505e1cda246a47603eaf7ea73529cb1273e3f2059cee97666228b9c7",
+      "configurationDecodedSha256": "d5cc56c9e63720d07a3b0d92cc75507bda7c7e27e0e9eebb20fdfdecc550c6a8",
+      "nativeXmlSha256": "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f",
+      "packedBodySha256": "6c9d6e02140f1410bf92650d5fe717b07cd66ec45db1567ab4b2ae7dc0782a8b",
+      "unpackedBodySha256": "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510",
+      "compilerCommit": "52641f9310af8b1f829f938ac410344fe49cbaa1",
+      "compiledPackedBodySha256": "5b8f758dc3d64e56b744b7554148245b0bf1f3023ce5aa81df63bcd730058ca8",
+      "compiledUnpackedBodySha256": "928de9e6a9fbcfe89530e5d02fe8f08c0efe491c392b671fa61c4c36d48ec81a",
+      "candidateCfSha256": "86521776c1530306c1b9fe1d406b92ecb6d6ece8551125fc7d987e421bb0b45a",
+      "roundTrips": 2,
+      "platformLoadAndApplySucceeded": true,
+      "selectedTreeEqualToRound2": true
+    },
+    "simpleFilter": {
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-filter",
+      "round1CfSha256": "a5ac836be4d0d04f7445cfd9744863e8b90723eca12de353e790ecdff110bd4b",
+      "round2CfSha256": "fad8f529230bc474920f925245eba0054f3f85d97039aa38d1fd850fd7c5bd4c",
+      "configurationEncodedSha256": "83462fcaf018063a1fee3c7e75a1c68a3ad0e099d4d025bb7b3e545e5e24f8e8",
+      "nativeXmlSha256": "bcc29901ebd9edbb863d4eaa9ba3c1d40350dd92c001437aaa0358deddf02b45",
+      "packedBodySha256": "6288d1b0a2b790e22964073af4e1516b6aea09b42510f8246261daff4890e0c2",
+      "unpackedBodySha256": "b8e1e2cb0b47ce2fdb5cd44caf382a24ad5d8c3afd044bb8b3ed26e50707b718",
+      "roundTrips": 2
+    },
+    "multiVariant": {
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-multi-variant-envelope",
+      "extractorIdentity": "ibcmd-rs cf extract retained lab build",
+      "extractorSha256": "5ec1be63f1a850c2673ee8ce7b896fb98934f363d86fff4e9d581b57cfcab722",
+      "seedSha256": "d32bf50308d0af77243ac4a5b2b9d090ef9c32ddf5575e9583b679dbb785e881",
+      "round1CfSha256": "de78c33dc31f49112f26bc9e880a079f3a8a122275ddea7e00f64a348c0807e6",
+      "round2CfSha256": "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4",
+      "round1TemplateSha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+      "round2TemplateSha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+      "round1PackedSha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c",
+      "round2PackedSha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c",
+      "round1UnpackedSha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87",
+      "round2UnpackedSha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87",
+      "configurationEncodedSha256": "bc5a9f7823b061fdf285de591dec24696016c751afa0f88751967fb4604040e0",
+      "configurationDecodedSha256": "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4",
+      "nativeXmlEncodedSha256": "94a3fe8358475179213c176c49f3615a16d195166174927961b21334cdb62020",
+      "nativeXmlDecodedSha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+      "roundTrips": 2,
+      "settingsVariantCount": 2,
+      "variantNames": [
+        "Main",
+        "Secondary Secondary"
+      ],
+      "sourceVariantOrderMatchesExternalSettingsOrder": true
+    },
+    "typeIdReference": {
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-typeid-reference",
+      "seedTemplateSha256": "88a5e42672923c9908654dad21bc5ce9833a486bed379cd8fee5a56669dc7080",
+      "round1CfSha256": "10e812cd1bbedba323e13c74a44b2c2f808a8dbaf2b16b3f459a7946f348ca4e",
+      "round2CfSha256": "2698d5e411c914f8c460516f59dbff477a294133ca502c2972fcbfe5bfb85ecd",
+      "nativeXmlSha256": "3a42405b2c790b00953984acd4340d2c66a23deee88592ca27ccc6f7ecddc1b0",
+      "packedBodySha256": "3edb0f46155b238c68f2b3879e25695ca148b197e6e706f7719a41953ac51ff5",
+      "unpackedBodySha256": "14bc430e2f284e08759a94f6e4cd78d344cfcc524281f979b16c8db03c7a0b90",
+      "roundTrips": 2,
+      "storageTypeId": "488c0ffa-ef24-480c-a420-3bd2736317f9",
+      "sourceQualifiedName": "CatalogRef.FilterProbe"
+    }
+  },
+  "policy": {
+    "schemaNamespace": "http://v8.1c.ru/8.1/data-composition-system/schema",
+    "settingsNamespace": "http://v8.1c.ru/8.1/data-composition-system/settings",
+    "dataCoreNamespace": "http://v8.1c.ru/8.1/data/core",
+    "xmlSchemaNamespace": "http://www.w3.org/2001/XMLSchema",
+    "xsiNamespace": "http://www.w3.org/2001/XMLSchema-instance",
+    "currentConfigNamespace": "http://v8.1c.ru/8.1/data/enterprise/current-config",
+    "referenceStorageTypeId": "488c0ffa-ef24-480c-a420-3bd2736317f9",
+    "referenceSourceQualifiedName": "CatalogRef.FilterProbe",
+    "rootQname": "{http://v8.1c.ru/8.1/data-composition-system/schema}DataCompositionSchema",
+    "xsiTypeAttributeQname": "{http://www.w3.org/2001/XMLSchema-instance}type",
+    "rootChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}dataSource",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}dataSet",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}calculatedField",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}totalField",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}parameter",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}settingsVariant"
+    ],
+    "dataSourceChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}name",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}dataSourceType"
+    ],
+    "dataSetChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}name",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}field",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}dataSource",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}objectName"
+    ],
+    "dataSetFieldChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}dataPath",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}field",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}valueType"
+    ],
+    "calculatedFieldChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}dataPath",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}expression",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}valueType"
+    ],
+    "totalFieldChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}dataPath",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}expression"
+    ],
+    "sumTotalFunctionToken": "Sum",
+    "sumTotalExpressionGrammar": "Sum({dataPath})",
+    "parameterChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}name",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}title",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}valueType",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}value",
+      "{http://v8.1c.ru/8.1/data-composition-system/schema}useRestriction"
+    ],
+    "localizedValueChildOrder": [
+      "{http://v8.1c.ru/8.1/data/core}item"
+    ],
+    "localizedItemChildOrder": [
+      "{http://v8.1c.ru/8.1/data/core}lang",
+      "{http://v8.1c.ru/8.1/data/core}content"
+    ],
+    "stringValueTypeChildOrder": [
+      "{http://v8.1c.ru/8.1/data/core}Type",
+      "{http://v8.1c.ru/8.1/data/core}StringQualifiers"
+    ],
+    "decimalValueTypeChildOrder": [
+      "{http://v8.1c.ru/8.1/data/core}Type",
+      "{http://v8.1c.ru/8.1/data/core}NumberQualifiers"
+    ],
+    "stringQualifiersChildOrder": [
+      "{http://v8.1c.ru/8.1/data/core}Length",
+      "{http://v8.1c.ru/8.1/data/core}AllowedLength"
+    ],
+    "numberQualifiersChildOrder": [
+      "{http://v8.1c.ru/8.1/data/core}Digits",
+      "{http://v8.1c.ru/8.1/data/core}FractionDigits",
+      "{http://v8.1c.ru/8.1/data/core}AllowedSign"
+    ],
+    "settingsVariantChildOrder": [
+      "{http://v8.1c.ru/8.1/data-composition-system/settings}name",
+      "{http://v8.1c.ru/8.1/data-composition-system/settings}presentation",
+      "{http://v8.1c.ru/8.1/data-composition-system/settings}settings"
+    ],
+    "dataSetObjectTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/schema}DataSetObject",
+    "dataSetFieldTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/schema}DataSetFieldField",
+    "localStringTypeQname": "{http://v8.1c.ru/8.1/data/core}LocalStringType",
+    "stringValueTypeQname": "{http://www.w3.org/2001/XMLSchema}string",
+    "decimalValueTypeQname": "{http://www.w3.org/2001/XMLSchema}decimal",
+    "supportedDataSourceTypeTokens": [
+      "Local"
+    ],
+    "supportedValueTypeQnames": [
+      "{http://www.w3.org/2001/XMLSchema}string",
+      "{http://www.w3.org/2001/XMLSchema}decimal"
+    ],
+    "supportedAllowedLengthTokens": [
+      "Variable"
+    ],
+    "supportedAllowedSignTokens": [
+      "Any"
+    ],
+    "supportedBooleanTokens": [
+      "false"
+    ],
+    "supportedLanguageTokens": [
+      "ru"
+    ],
+    "supportedStringLengths": [
+      20,
+      40
+    ],
+    "supportedNumberDigits": [
+      15
+    ],
+    "supportedFractionDigits": [
+      2
+    ],
+    "maximumDataSources": 1,
+    "maximumDataSets": 1,
+    "maximumDataSetFields": 2,
+    "maximumCalculatedFields": 1,
+    "maximumTotalFields": 2,
+    "maximumParameters": 1,
+    "minimumSettingsVariants": 1,
+    "maximumSettingsVariants": 2,
+    "maximumLocalizedItems": 1,
+    "settingsBodyOwnership": "delegated-existing-common-settings-layer",
+    "unknownQnames": "unsupported",
+    "unknownAttributes": "unsupported",
+    "unknownTypes": "unsupported",
+    "unknownTokens": "unsupported",
+    "wrongOrder": "unsupported"
+  },
+  "provenClaims": [
+    "The dcs-filter source authenticates the simple one-string-field DataSetObject cohort with calculatedField, totalField and parameter absent.",
+    "The dcs-core source authenticates one dataSource, one DataSetObject with two DataSetFieldField fields, one calculatedField, two totalField nodes, one parameter and one direct settingsVariant in exact QName and child order.",
+    "The dcs-core source authenticates only xs:string and xs:decimal value types, their exact qualifier child order and the Local, Variable, Any, false and ru tokens retained by two platform rounds.",
+    "The multi-variant source authenticates two direct settingsVariant metadata shells in source order, each with name, LocalStringType presentation and delegated inline settings.",
+    "The dcs-core compiler candidate loaded and applied on pinned 8.3.27.2214 and exported the same selected tree as round two."
+  ],
+  "nonClaims": [
+    "AreaTemplate, appearance side tables and appIndex are outside this bounded inner-schema cohort.",
+    "Only the exact CatalogRef.FilterProbe direct DataSetObject field TypeId/current-config mapping is admitted; TypeSet, DefinedType, characteristic and other contexts remain outside this cohort.",
+    "DataSetQuery, DataSetUnion, nested data sets and dataSetLink are outside this bounded inner-schema cohort.",
+    "defaultSettings, nested settingsVariant, absent inline Settings, duplicate or empty variant metadata and more than two direct settingsVariant nodes are outside this bounded inner-schema cohort.",
+    "No unknown QName, attribute, type token, enum token, child order, cross-profile replay or full DataCompositionSchema model is inferred.",
+    "Unica generated only the hypothesis seeds; pinned 8.3.27.2214 native output is the authority."
+  ]
+}

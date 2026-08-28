@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-usual-group-options",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": null,
+  "contract": "8.3.27-xml-2.20-form-usual-group-options-v1",
+  "body_contract": "8.3.27-xml-2.20-form-usual-group-options-body-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-14",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_fresh_file_infobases",
+    "database_locale": "ru_RU",
+    "creation_args": "infobase create --locale=ru_RU --load <input.cf> --apply --force",
+    "patch_build_policy": "the exact build is retained as experiment provenance; this wrapper contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "kind": "clean_room_form_usual_group_options_discriminator_three_variants_on_platform_authenticated_base_cf",
+    "base_fixture_id": "8.3.27.2214-xml-2.20-dcs-form-dynamic-list-server-state",
+    "base_cf_size": 88686,
+    "base_cf_sha256": "a0ba6431996a4349b3c3336ab974e867390e3f309e6805acb82e5f0c9721a9f6",
+    "authority": "hypothesis_only",
+    "basis": "FORM-EVIDENCE-PROBES-SPEC.md FE3 (exploratory), built on form-evidence-recon.md Q3. Base: same real-config-export wrapper tree as FE1/FE2. Delta: one UsualGroup 'MainGroup' (empty ChildItems) in three variants -- plain (all default), notitle (ShowTitle=false), extended (Group=HorizontalIfPossible/Behavior=Collapsible/Representation=NormalSeparation, matching the failing test parses_extended_usual_group_properties).",
+    "delta": "UsualGroup discriminator exploration with ShowTitle and Group/Behavior/Representation property variants"
+  },
+  "rounds": {
+    "plain": {
+      "round_1_cf_sha256": "ffe8eb6f8066f8f04566d256c5fb8093bf7776acd59d05c2443197f1d2163158",
+      "round_2_cf_sha256": "aa75bc01b8a3c2a80c04e9ee001040704520e97cedcd4ce09569406d3eef1c42"
+    },
+    "notitle": {
+      "round_1_cf_sha256": "bebf09e6ab378fc1186557ea51b6a9c540504d7e8a44bd3aa05e2c6f8d3b46dc",
+      "round_2_cf_sha256": "45c09b851e67ec410a0ee0159932ff9f78f2ed5dfdb9c6fa159798ca1256b479"
+    },
+    "extended": {
+      "round_1_cf_sha256": "e0f29f01f53b8762c79b9165df834c3bb15233f4ff55823fdf6056708b1acd15",
+      "round_2_cf_sha256": "11fc9ce007ed5fdbfe41e3e5a86e0abe9edd9b9893b2ebd1830be3dd35def961"
+    },
+    "selected_native_equal_between_rounds_per_variant": true,
+    "packed_rows_equal_between_rounds_per_variant": true,
+    "unpacked_rows_equal_between_rounds_per_variant": true
+  },
+  "configuration_cf": {
+    "plain": {
+      "path": "configuration-plain.cf.b64",
+      "encoded_size": 125869,
+      "encoded_sha256": "731130121416a961d87721163a766adae36714d7a6cd451656110678b7a38d3b",
+      "decoded_size": 92992,
+      "decoded_sha256": "aa75bc01b8a3c2a80c04e9ee001040704520e97cedcd4ce09569406d3eef1c42"
+    },
+    "notitle": {
+      "path": "configuration-notitle.cf.b64",
+      "encoded_size": 126957,
+      "encoded_sha256": "54b1ce01772bf42d419b5156fcb05836ab11a469c0051ae22d9722407a106306",
+      "decoded_size": 94968,
+      "decoded_sha256": "45c09b851e67ec410a0ee0159932ff9f78f2ed5dfdb9c6fa159798ca1256b479"
+    },
+    "extended": {
+      "path": "configuration-extended.cf.b64",
+      "encoded_size": 125213,
+      "encoded_sha256": "94f96681f68c1bf3a47813ff3a695125cfcf4be6d15fceb6b15008b8c0200bc9",
+      "decoded_size": 93564,
+      "decoded_sha256": "11fc9ce007ed5fdbfe41e3e5a86e0abe9edd9b9893b2ebd1830be3dd35def961"
+    }
+  },
+  "form": {
+    "owner": "Catalog.CorpusList",
+    "name": "ListForm",
+    "plain": {
+      "native_xml": {
+        "path": "native-form-plain.xml.b64",
+        "encoded_size": 7565,
+        "encoded_sha256": "463a6a0fb44d8ee1d24ba40d4c15ec75c1bae85f485a5584c4e114e53aaffb02",
+        "decoded_size": 5658,
+        "sha256": "6984aac52d4ccc47d35a838cf45d3dada5cb63586e24a3654959d2b25172c0dc"
+      },
+      "body_row": {
+        "packed_size": 2841,
+        "packed_sha256": "7675787cd52d5a15e4ec262e895820ef384ed603cbfca5237eb225995ef99a25",
+        "packed_file": {
+          "path": "form-body-packed-plain.bin.b64",
+          "encoded_size": 3901,
+          "encoded_sha256": "93ca03bdb4aba7a916ed6b24eb15f9f4940bd1d70925e6b1c7f7652eb00a67dd"
+        },
+        "unpacked_size": 14709,
+        "unpacked_sha256": "748e2e0f65ab2df83f8511320adc5d36847cb03b7531517f6c5c9caea8de86b9",
+        "unpacked_file": {
+          "path": "form-body-unpacked-plain.bin.b64",
+          "encoded_size": 19813,
+          "encoded_sha256": "59a712984c5938e9d53b87e03a7ccec8d798def8634f37dd30a55b9baec05ff2"
+        }
+      }
+    },
+    "notitle": {
+      "native_xml": {
+        "path": "native-form-notitle.xml.b64",
+        "encoded_size": 7609,
+        "encoded_sha256": "e63fad415302997edb3881b4b7bd937567124a7747033724420a23b964710246",
+        "decoded_size": 5694,
+        "sha256": "a2939287e42aaa0bba775d7bc06861825d2cd13fe004f31b8921a5b751b7cf17"
+      },
+      "body_row": {
+        "packed_size": 2841,
+        "packed_sha256": "9abaa4324eddf032934a6cdadbce0710a5afa127edd8e0c2187ad29724e9628e",
+        "packed_file": {
+          "path": "form-body-packed-notitle.bin.b64",
+          "encoded_size": 3901,
+          "encoded_sha256": "d2436a96db3be32e0c437eb7866dd46a49f6f629631e5af9f0e0ee45d2ee27c5"
+        },
+        "unpacked_size": 14709,
+        "unpacked_sha256": "473f37aa225d5c49c327743d2f801812b6c86b76089ed75a5807aa98d0dac06a",
+        "unpacked_file": {
+          "path": "form-body-unpacked-notitle.bin.b64",
+          "encoded_size": 19813,
+          "encoded_sha256": "ae1253554e1d7a2582479dcdcde4bca1ada32161da289286ba45d4a6270e4c2e"
+        }
+      }
+    },
+    "extended": {
+      "native_xml": {
+        "path": "native-form-extended.xml.b64",
+        "encoded_size": 7685,
+        "encoded_sha256": "67d2fc1dfb7e3d1e0595121bffd5f2bb725d5bdca94dd8cdfaa05d6684fcb405",
+        "decoded_size": 5760,
+        "sha256": "7c80bb3442600f21b6a48a122f2f181f8a6ea5218d4bd0707d0b8907e23db009"
+      },
+      "body_row": {
+        "packed_size": 2837,
+        "packed_sha256": "a655e1d28cef5ae40062f16e4d48774b8c0bb5b360b03d1c83abadafe33f7f7e",
+        "packed_file": {
+          "path": "form-body-packed-extended.bin.b64",
+          "encoded_size": 3897,
+          "encoded_sha256": "d2c9a50ff233c5e0b6c98fab2d1c776dac7cdfa6c63b762f1b6fa8327c39ab86"
+        },
+        "unpacked_size": 14709,
+        "unpacked_sha256": "d468f2acd5ffa9b564cf76b730219f38defd525b37ceb06f03a2eea4c12df33f",
+        "unpacked_file": {
+          "path": "form-body-unpacked-extended.bin.b64",
+          "encoded_size": 19813,
+          "encoded_sha256": "6b5c376022cbe2c62ce36c5861e873c6796272f6813982941fec6eb151b41387"
+        }
+      }
+    }
+  },
+  "proven_shape": {
+    "catalog_name": "CorpusList",
+    "form_name": "ListForm",
+    "usual_group_wrapper": "22",
+    "options_discriminator_observed": "29 in all variants",
+    "show_title_slot": "options[4]: 1→0 (confirmed; ShowTitle=false in notitle variant)",
+    "representation_candidate_slot": "options[3]: default 2, NormalSeparation 3 (plain vs. extended)",
+    "group_and_behavior_observation": "Group silently dropped on childless group (no slot signal); Behavior and Representation reached storage but individual slots [24]/[28] remain unattributed between them"
+  },
+  "proven_claims": [
+    "Platform 8.3.27.2214 emits the '29'-shaped (29-field) UsualGroup options block for every tested configuration, including one matching the failing test's exact Group/Behavior/Representation values -- '38' was never observed on this build with these properties.",
+    "options[4]=0 for ShowTitle=false (notitle), options[4]=1 for default/true (plain, extended) -- independently reconfirms the existing '29'-shape mapping already documented in src/form_schema.rs / tests.rs:11159-11168."
+  ],
+  "non_claims": [
+    "Group slot: <Group>HorizontalIfPossible</Group> on a childless, top-level UsualGroup is silently dropped by the platform (native re-export omits it entirely), same class of silent no-op as HierarchicalList in FE1. No signal at options[27] -- consistent with Group never reaching storage. The existing test's claimed options[27]=Group slot cannot be confirmed or refuted by this probe (Group was never stored under these conditions).",
+    "Behavior/Representation attribution: Because Group did not take effect, only 2 of 3 intended properties (Behavior, Representation) actually changed raw storage. Three raw-slot deltas were observed (options[3], options[24], options[28]) that cannot be fully attributed 1:1 to 2 properties from this single batched probe.",
+    "No claim about which of options[24]/options[28] is Behavior vs. any Representation-derived effect.",
+    "No claim about the '38' shape's trigger condition -- not identified in this session; only established that these specific Group/Behavior/Representation values on 8.3.27.2214 do not produce it.",
+    "No claim about whether adding child items to the UsualGroup would let Group take effect -- plausible hypothesis, not tested.",
+    "HierarchicalList wire-код не различим между default и explicit (both produce raw '1'); precondition for HierarchicalList effect unknown.",
+    "compiler_acceptance is intentionally omitted; not part of this probe session.",
+    "Provenance: produced in a probe session (scratchpad/design/FORM-EVIDENCE-PROBES-SPEC.md), not yet reviewed or integrated."
+  ]
+}

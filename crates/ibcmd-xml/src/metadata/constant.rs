@@ -1,10 +1,11 @@
 //! Offline canonical codec for the `Constant` metadata family.
 //!
 //! The stable canonical schema extends the common `Name` / `Synonym` fields
-//! with `Comment: Text`, `UseStandardCommands: Bool`, and `Type: Record`.
-//! `Type.kind` is one of `Boolean`, `String`, `Number`, `DateTime`,
-//! `Reference`, or `ReferenceTypeSet`; the remaining record fields are the
-//! corresponding XML qualifiers in source order.
+//! with `Comment: Text`, `UseStandardCommands: Bool`, and `Type: Sequence` of
+//! records, one per declared type in source order. Each record's `kind` is one
+//! of `Boolean`, `String`, `Number`, `DateTime`, `Reference`, or
+//! `ReferenceTypeSet`; the remaining record fields are the corresponding XML
+//! qualifiers in source order.
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::diagnostic::ObjectPath;
@@ -171,7 +172,13 @@ enum ConstantType {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ConstantProjection {
     comment: String,
-    value_type: ConstantType,
+    /// A constant's `Type` element is a list, not a scalar slot: the platform
+    /// writes one `<v8:Type>` per declared type inside the single element.
+    /// Документооборот КОРП 3.0.21.3 declares two in
+    /// `Constants/ОтветственныйЗаУдалениеНеактивныхВерсий` and
+    /// `Constants/СотрудникДляЗаданияРаспознавания`; reading only the first
+    /// and refusing the rest lost both files entirely.
+    value_types: Vec<ConstantType>,
     use_standard_commands: bool,
 }
 
@@ -238,7 +245,7 @@ fn decode_constant(
     )?);
     parts.properties.push(canonical_field(
         "Type",
-        constant_type_value(&projection.value_type)?,
+        constant_types_value(&projection.value_types)?,
     )?);
     parts.properties.push(canonical_field(
         "UseStandardCommands",
@@ -285,6 +292,14 @@ fn integer_value(value: u32) -> Result<CanonicalValue, MetadataDecodeError> {
     CanonicalInteger::new(&value.to_string())
         .map(CanonicalValue::integer)
         .map_err(|error| MetadataDecodeError::Core(error.to_string()))
+}
+
+fn constant_types_value(values: &[ConstantType]) -> Result<CanonicalValue, MetadataDecodeError> {
+    let members = values
+        .iter()
+        .map(constant_type_value)
+        .collect::<Result<Vec<_>, _>>()?;
+    CanonicalValue::sequence(members).map_err(|error| MetadataDecodeError::Core(error.to_string()))
 }
 
 fn constant_type_value(value: &ConstantType) -> Result<CanonicalValue, MetadataDecodeError> {
@@ -349,7 +364,7 @@ fn project_constant(document: &XmlDocument) -> Result<ConstantProjection, Metada
     let properties = required_child(object, "Properties", expected, &uris)?;
     let comment = required_text_child(properties, "Comment", expected, &uris)?;
     let type_element = required_child(properties, "Type", expected, &uris)?;
-    let value_type = parse_constant_type(type_element, &uris)?;
+    let value_types = parse_constant_types(type_element, &uris)?;
     let use_standard_commands =
         match required_text_child(properties, "UseStandardCommands", expected, &uris)?.trim() {
             "true" => true,
@@ -362,7 +377,7 @@ fn project_constant(document: &XmlDocument) -> Result<ConstantProjection, Metada
         };
     Ok(ConstantProjection {
         comment,
-        value_type,
+        value_types,
         use_standard_commands,
     })
 }
@@ -399,11 +414,19 @@ fn required_text_child(
     ))
 }
 
-fn parse_constant_type(
+/// Every type the `Type` element declares, in source order.
+///
+/// A single-type element keeps its qualifier contract exactly: the qualifier
+/// block must match the scalar's kind, and a stray one is refused. A element
+/// declaring several types is only accepted when every member is a reference,
+/// because nothing observed says where a qualifier block would sit relative
+/// to the scalars it belongs to -- both multi-type constants on the stand
+/// name catalog references only.
+fn parse_constant_types(
     element: &XmlElement,
     uris: &ResolvedNamespaces,
-) -> Result<ConstantType, MetadataDecodeError> {
-    let mut scalar: Option<(&str, String)> = None;
+) -> Result<Vec<ConstantType>, MetadataDecodeError> {
+    let mut scalars: Vec<(&str, String)> = Vec::new();
     let mut string_qualifiers = None;
     let mut number_qualifiers = None;
     let mut date_qualifiers = None;
@@ -416,10 +439,7 @@ fn parse_constant_type(
         }
         match child.name().local() {
             "Type" | "TypeSet" => {
-                if scalar.is_some() {
-                    return Err(MetadataDecodeError::Duplicate("Type scalar"));
-                }
-                scalar = Some((
+                scalars.push((
                     child.name().local(),
                     element_text(child)?.ok_or(MetadataDecodeError::InvalidEnvelope(
                         "Type scalar must contain text only",
@@ -444,7 +464,32 @@ fn parse_constant_type(
             _ => {}
         }
     }
-    let (tag, value) = scalar.ok_or(MetadataDecodeError::Missing("Type scalar"))?;
+    if scalars.len() > 1 {
+        if string_qualifiers.is_some() || number_qualifiers.is_some() || date_qualifiers.is_some() {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "qualifier in a multi-type Constant Type",
+            ));
+        }
+        return scalars
+            .into_iter()
+            .map(|(tag, value)| match (tag, value.trim()) {
+                ("Type", reference) if !reference.is_empty() && !reference.starts_with("xs:") => {
+                    Ok(ConstantType::Reference {
+                        reference: reference.to_owned(),
+                    })
+                }
+                ("TypeSet", reference) if !reference.is_empty() => {
+                    Ok(ConstantType::ReferenceTypeSet {
+                        reference: reference.to_owned(),
+                    })
+                }
+                _ => Err(MetadataDecodeError::InvalidEnvelope("Constant Type scalar")),
+            })
+            .collect();
+    }
+    let (tag, value) = scalars
+        .pop()
+        .ok_or(MetadataDecodeError::Missing("Type scalar"))?;
     let value = value.trim();
     let result = match (tag, value) {
         ("Type", "xs:boolean") => ConstantType::Boolean,
@@ -485,7 +530,7 @@ fn parse_constant_type(
             "qualifier does not match Constant Type",
         ));
     }
-    Ok(result)
+    Ok(vec![result])
 }
 
 fn set_once<T>(
@@ -685,14 +730,14 @@ fn projection_from_object(
     path: &ObjectPath,
 ) -> Result<ConstantProjection, MetadataEncodeError> {
     let comment = value_text(property(object, "Comment", path)?, path, "Comment")?.to_owned();
-    let value_type = constant_type_from_value(property(object, "Type", path)?, path)?;
+    let value_types = constant_types_from_value(property(object, "Type", path)?, path)?;
     let use_standard_commands = match property(object, "UseStandardCommands", path)?.kind() {
         CanonicalValueKind::Bool(value) => value,
         _ => return Err(invalid_model(path, "UseStandardCommands")),
     };
     Ok(ConstantProjection {
         comment,
-        value_type,
+        value_types,
         use_standard_commands,
     })
 }
@@ -743,6 +788,22 @@ fn record_field<'a>(
         .find(|field| field.name().as_str() == name)
         .map(CanonicalField::value)
         .ok_or_else(|| invalid_model(path, "Type"))
+}
+
+fn constant_types_from_value(
+    value: &CanonicalValue,
+    path: &ObjectPath,
+) -> Result<Vec<ConstantType>, MetadataEncodeError> {
+    let CanonicalValueKind::Sequence(members) = value.kind() else {
+        return Err(invalid_model(path, "Type"));
+    };
+    if members.is_empty() {
+        return Err(invalid_model(path, "Type"));
+    }
+    members
+        .iter()
+        .map(|member| constant_type_from_value(member, path))
+        .collect()
 }
 
 fn constant_type_from_value(
@@ -1020,14 +1081,15 @@ fn patch_properties(
                 }
             }
             XmlNode::Element(child) if typed(child, "Type", expected, uris) => {
-                if source_projection.value_type == desired_projection.value_type {
+                if source_projection.value_types == desired_projection.value_types {
                     node.clone()
                 } else {
-                    XmlNode::Element(render_type(
+                    XmlNode::Element(render_types(
                         child,
-                        &desired_projection.value_type,
+                        &desired_projection.value_types,
                         core_prefix,
                         uris,
+                        path,
                     )?)
                 }
             }
@@ -1191,13 +1253,44 @@ fn generated_text_element(
     generated_element(prefix, local, vec![XmlNode::text(value)])
 }
 
-fn render_type(
+/// Renders the whole `Type` element from the model.
+///
+/// A multi-type element is written as one scalar per member and nothing else,
+/// which is exactly what the decode side accepts back: a qualifier-bearing
+/// member has no observed placement among several scalars, so it is refused
+/// here rather than placed on a guess.
+fn render_types(
     source: &XmlElement,
-    value: &ConstantType,
+    values: &[ConstantType],
     prefix: Option<&str>,
     uris: &ResolvedNamespaces,
+    path: &ObjectPath,
 ) -> Result<XmlElement, MetadataEncodeError> {
-    let scalar_attributes = source
+    match values {
+        [] => Err(invalid_model(path, "Type")),
+        [value] => render_type(source, value, prefix, uris),
+        _ => {
+            let scalar_attributes = scalar_attributes_of(source, uris);
+            let mut children = Vec::with_capacity(values.len());
+            for value in values {
+                let (scalar_tag, scalar_value) = match value {
+                    ConstantType::Reference { reference } => ("Type", reference.as_str()),
+                    ConstantType::ReferenceTypeSet { reference } => ("TypeSet", reference.as_str()),
+                    _ => return Err(invalid_model(path, "Type")),
+                };
+                children.push(XmlNode::Element(XmlElement::with_parts(
+                    core_qname(prefix, scalar_tag)?,
+                    scalar_attributes.clone(),
+                    vec![XmlNode::text(scalar_value)],
+                )));
+            }
+            Ok(source.with_children(children))
+        }
+    }
+}
+
+fn scalar_attributes_of(source: &XmlElement, uris: &ResolvedNamespaces) -> Vec<Attribute> {
+    source
         .children()
         .iter()
         .find_map(|node| match node {
@@ -1209,7 +1302,16 @@ fn render_type(
             }
             _ => None,
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn render_type(
+    source: &XmlElement,
+    value: &ConstantType,
+    prefix: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<XmlElement, MetadataEncodeError> {
+    let scalar_attributes = scalar_attributes_of(source, uris);
     let (scalar_tag, scalar_value) = match value {
         ConstantType::Boolean => ("Type", "xs:boolean"),
         ConstantType::String { .. } => ("Type", "xs:string"),
@@ -1584,7 +1686,11 @@ mod tests {
             field(envelope.root(), "UseStandardCommands").kind(),
             CanonicalValueKind::Bool(true)
         ));
-        let fields = field(envelope.root(), "Type").as_record().unwrap();
+        let CanonicalValueKind::Sequence(types) = field(envelope.root(), "Type").kind() else {
+            panic!("Constant Type is a sequence of type records");
+        };
+        assert_eq!(types.len(), 1);
+        let fields = types[0].as_record().unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].name().as_str(), "kind");
         assert_eq!(
@@ -1688,9 +1794,9 @@ mod tests {
             let input = fixture("2.20", body, false);
             let envelope = decode(&input, "2.20");
             assert_eq!(
-                constant_type_from_value(field(envelope.root(), "Type"), &ObjectPath::root())
+                constant_types_from_value(field(envelope.root(), "Type"), &ObjectPath::root())
                     .unwrap(),
-                expected
+                vec![expected]
             );
             assert_eq!(
                 bundled_metadata_registry()
@@ -1721,7 +1827,10 @@ mod tests {
                     "Comment",
                     CanonicalValue::text(CanonicalText::new("Changed & confirmed").unwrap()),
                 ),
-                ("Type", constant_type_value(&changed_type).unwrap()),
+                (
+                    "Type",
+                    constant_types_value(std::slice::from_ref(&changed_type)).unwrap(),
+                ),
                 ("UseStandardCommands", CanonicalValue::boolean(false)),
             ],
             Some(changed_generated),

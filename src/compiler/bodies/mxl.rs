@@ -121,7 +121,11 @@ fn decode(blob: &[u8], strict: bool) -> Result<MxlBody, MxlCodecError> {
     decode_plain(plain, strict, false)
 }
 
-fn decode_plain(plain: Vec<u8>, strict: bool, exact_inflated_framing: bool) -> Result<MxlBody, MxlCodecError> {
+fn decode_plain(
+    plain: Vec<u8>,
+    strict: bool,
+    exact_inflated_framing: bool,
+) -> Result<MxlBody, MxlCodecError> {
     if !plain.starts_with(b"MOXCEL") {
         return Err(MxlCodecError::UnsupportedLayout(
             "missing MOXCEL signature".to_string(),
@@ -168,8 +172,18 @@ fn decode_plain(plain: Vec<u8>, strict: bool, exact_inflated_framing: bool) -> R
     if declared_columns > MAX_COLUMNS {
         return Err(MxlCodecError::LimitExceeded("MOXCEL column count"));
     }
+    // `{current, default, 0, count, (id, code, description) * count, 0}`: the
+    // record declares its own member count at position 3, so the shape check
+    // has to read that declared count rather than assume a single language
+    // (evidence: ERP UH `Web_Service`, two spreadsheets carry a two-language
+    // record - `ru` and `en` - at 11 fields, `count=2`, still `count*3+5`).
     let language = required_list(&fields[3], "MOXCEL language descriptor")?;
-    if language.len() != 8 {
+    let language_shape_ok = language.len() >= 5
+        && required_token(&language[3], "MOXCEL language count")
+            .ok()
+            .and_then(|token| token.parse::<usize>().ok())
+            .is_some_and(|count| count <= 64 && language.len() == count * 3 + 5);
+    if !language_shape_ok {
         return Err(MxlCodecError::InvalidShape(
             "MOXCEL language descriptor has an unknown layout".to_string(),
         ));
@@ -280,7 +294,18 @@ mod tests {
         let xml = crate::mssql_dump::extract_moxel_spreadsheet_xml(&first, &BTreeMap::new())
             .expect("evidenced MOXCEL body must remain exportable");
         assert!(xml.contains("<v8:content>Hello</v8:content>"));
-        assert!(xml.contains("<parameter>Name</parameter>"));
+        // The parameter's content round-trips, but not the element it is
+        // spelled with: this compiler stores the cell on format slot 0, and a
+        // cell whose format states no `fillType` `Parameter` publishes its
+        // container as the text list -- the rule
+        // `restore_moxel_text_of_cells_whose_format_states_no_parameter`
+        // reads off the eight native corpora, where every one of the 94 332
+        // published `<parameter>` cells names a `fillType`-`Parameter` format
+        // and no cell on slot 0 publishes one at all. The assertion this
+        // replaces read the container's empty leading language instead, which
+        // is what a one-item text list stores too, and spelled three native
+        // ERP УХ cells as parameters against the platform's own `<tl>`.
+        assert!(xml.contains("<v8:content>Name</v8:content>"), "{xml}");
     }
 
     #[test]

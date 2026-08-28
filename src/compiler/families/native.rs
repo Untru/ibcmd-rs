@@ -10,10 +10,32 @@ use ibcmd_core::limits::ResourceLimits;
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const MAX_PLAIN_BYTES: usize = 64 * 1_048_576;
 const MAX_NATIVE_DEPTH: usize = 64;
-// A valid, shallow 2.27 MiB enterprise MXL is evidenced at 564,948
-// scalar/list nodes. Keep fixed headroom for such dense documents while the
-// independent 64 MiB plaintext and depth bounds continue to cap resources.
-const MAX_NATIVE_NODES: usize = 1_000_000;
+/// The node bound a plaintext proves about itself.
+///
+/// Every node this parser creates owns a byte of the input no other node
+/// owns: a list owns its `{`, a text its opening `"`, a token its first
+/// byte, and the one empty-token form owns the `,` that delimits it (the
+/// `{,1}` / `{1,,2}` shapes `list` handles explicitly). No node is created
+/// without one, so the plaintext's own length is an upper bound on the node
+/// count, and one byte of slack keeps the comparison inclusive.
+///
+/// This replaces a flat 2,500,000. That constant was arrived at by taking the
+/// largest node count anyone had measured and multiplying by ~1.8, which is
+/// not a fact about the platform: nothing in the format caps a document's
+/// node count, and four ERP УХ 3.2.12.6 templates exceed it -
+/// `РегламентированныйОтчетСтатистикаФорма1{ЦеныПроизв,ТОРГ,Услуги}` and
+/// `.../Списки20{21,23}Кв1`, whose bodies measure 22,767,481 / 30,902,115 /
+/// 17,824,329 / 36,849,823 inflated bytes and 2,930,764 / 5,523,231 /
+/// 2,695,201 / 5,514,558 nodes. The platform exports all four; we refused
+/// them with `native value exceeds its node bound` and wrote no file at all.
+/// The independent 64 MiB plaintext bound and the depth bound continue to cap
+/// resources, and they are the bounds that actually cap them - across all
+/// eight stand corpora the node count runs at 0.13-0.18 nodes per plaintext
+/// byte, so a payload that passes `MAX_PLAIN_BYTES` can never approach this
+/// one.
+fn node_bound(input: &[u8]) -> usize {
+    input.len().saturating_add(1)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NativeValue {
@@ -453,6 +475,7 @@ struct NativeParser<'a> {
     input: &'a [u8],
     offset: usize,
     nodes: usize,
+    max_nodes: usize,
 }
 
 impl<'a> NativeParser<'a> {
@@ -461,6 +484,7 @@ impl<'a> NativeParser<'a> {
             input,
             offset: 0,
             nodes: 0,
+            max_nodes: node_bound(input),
         }
     }
 
@@ -499,7 +523,7 @@ impl<'a> NativeParser<'a> {
             return Err(NativeError::DepthExceeded);
         }
         self.nodes = self.nodes.checked_add(1).ok_or(NativeError::NodeOverflow)?;
-        if self.nodes > MAX_NATIVE_NODES {
+        if self.nodes > self.max_nodes {
             return Err(NativeError::TooManyNodes);
         }
         Ok(())
@@ -850,13 +874,13 @@ mod tests {
         const EVIDENCED_NATIVE_DEPTH: usize = 4;
         const EVIDENCED_NATIVE_NODES: usize = 564_948;
 
-        assert_eq!(MAX_NATIVE_NODES, 1_000_000);
         assert!(EVIDENCED_PLAIN_BYTES <= MAX_PLAIN_BYTES);
         assert!(EVIDENCED_NATIVE_DEPTH <= MAX_NATIVE_DEPTH);
-        assert!(EVIDENCED_NATIVE_NODES <= MAX_NATIVE_NODES);
+        assert!(EVIDENCED_NATIVE_NODES <= node_bound(&vec![0u8; EVIDENCED_PLAIN_BYTES]));
 
         let mut parser = NativeParser::new(b"\xef\xbb\xbf0");
         parser.offset = UTF8_BOM.len();
+        parser.max_nodes = EVIDENCED_NATIVE_NODES;
         parser.nodes = EVIDENCED_NATIVE_NODES - 1;
         assert_eq!(
             parser.value(EVIDENCED_NATIVE_DEPTH),
@@ -867,16 +891,93 @@ mod tests {
     }
 
     #[test]
-    fn parser_node_bound_is_inclusive_and_rejects_the_next_node() {
-        let mut accepted = NativeParser::new(b"\xef\xbb\xbf0");
-        accepted.offset = UTF8_BOM.len();
-        accepted.nodes = MAX_NATIVE_NODES - 1;
-        assert_eq!(accepted.value(0), Ok(token("0")));
-        assert_eq!(accepted.nodes, MAX_NATIVE_NODES);
+    fn parser_accepts_evidenced_large_role_rights_node_count() {
+        // `Roles/БазовыеПраваБПУХ`'s Rights payload on ERP УХ 3.2.12.6:
+        // 16,198,940 inflated bytes, 1,355,230 scalar/list nodes -- the
+        // largest role Rights payload on the stand, and the one that used to
+        // trip the old 1,000,000 bound.
+        const EVIDENCED_ROLE_RIGHTS_BYTES: usize = 16_198_940;
+        const EVIDENCED_ROLE_RIGHTS_NODES: usize = 1_355_230;
 
-        let mut rejected = NativeParser::new(b"\xef\xbb\xbf0");
+        assert!(EVIDENCED_ROLE_RIGHTS_NODES <= node_bound(&vec![0u8; EVIDENCED_ROLE_RIGHTS_BYTES]));
+
+        let mut parser = NativeParser::new(b"\xef\xbb\xbf0");
+        parser.offset = UTF8_BOM.len();
+        parser.max_nodes = EVIDENCED_ROLE_RIGHTS_NODES;
+        parser.nodes = EVIDENCED_ROLE_RIGHTS_NODES - 1;
+        assert_eq!(parser.value(0), Ok(token("0")));
+        assert_eq!(parser.nodes, EVIDENCED_ROLE_RIGHTS_NODES);
+    }
+
+    /// The four ERP УХ 3.2.12.6 template bodies the flat 2,500,000 bound
+    /// refused outright -- `РегламентированныйОтчетСтатистикаФорма1ЦеныПроизв`,
+    /// `...ТОРГ` and `...Услуги`'s `Списки2021Кв1`/`Списки2023Кв1` -- measured
+    /// straight off `cf extract`'s `unpacked.bin`.
+    #[test]
+    fn the_node_bound_admits_the_largest_measured_template_bodies() {
+        for (bytes, nodes) in [
+            (22_767_481usize, 2_930_764usize),
+            (30_902_115, 5_523_231),
+            (17_824_329, 2_695_201),
+            (36_849_823, 5_514_558),
+        ] {
+            assert!(bytes <= MAX_PLAIN_BYTES);
+            assert!(
+                nodes <= node_bound(&vec![0u8; bytes]),
+                "{nodes} nodes must fit the bound {bytes} bytes prove"
+            );
+        }
+    }
+
+    #[test]
+    fn parser_node_bound_is_inclusive_and_rejects_the_next_node() {
+        // `{,}` is the densest shape the grammar admits: three bytes, and the
+        // bound is the byte count plus one.
+        let input = b"\xef\xbb\xbf0";
+        let bound = node_bound(input);
+
+        let mut accepted = NativeParser::new(input);
+        accepted.offset = UTF8_BOM.len();
+        accepted.nodes = bound - 1;
+        assert_eq!(accepted.value(0), Ok(token("0")));
+        assert_eq!(accepted.nodes, bound);
+
+        let mut rejected = NativeParser::new(input);
         rejected.offset = UTF8_BOM.len();
-        rejected.nodes = MAX_NATIVE_NODES;
+        rejected.nodes = bound;
         assert_eq!(rejected.value(0), Err(NativeError::TooManyNodes));
+    }
+
+    /// The bound must hold for the shapes that pack the most nodes per byte:
+    /// the empty-token forms, which create a node per delimiter.
+    #[test]
+    fn the_node_bound_holds_for_the_densest_grammar_shapes() {
+        for body in [
+            "0",
+            "{}",
+            "{0}",
+            "{,0}",
+            "{0,,0}",
+            "{0,,,0}",
+            "{{,0},{0,,0},{}}",
+            "{0,{,0},{,,0}}",
+        ] {
+            let mut input = UTF8_BOM.to_vec();
+            input.extend_from_slice(body.as_bytes());
+            let mut counting = NativeParser::new(&input);
+            let bound = counting.max_nodes;
+            counting.offset = UTF8_BOM.len();
+            let outcome = counting.value(0);
+            assert_ne!(
+                outcome.as_ref().err(),
+                Some(&NativeError::TooManyNodes),
+                "{body} must never be refused by the bound its own bytes prove"
+            );
+            assert!(
+                counting.nodes <= bound,
+                "{body} produced {} nodes against a bound of {bound}",
+                counting.nodes
+            );
+        }
     }
 }

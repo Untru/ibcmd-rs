@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "contract": "8.3.27-xml-2.20-dcs-settings-filter-v1",
+  "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27 / XML 2.20",
+    "derivation": "component contract synthesized from two clean-room standalone/Form cohorts on the exact pinned build; patch builds remain provenance and do not select separate XML dialects without a structural counterexample"
+  },
+  "sources": {
+    "comparison": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two fresh isolated file-infobase round-trips from a clean-room Unica scaffold with one exact comparison item; raw rows and selected native XML were byte-stable",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-filter",
+      "formRawBodySha256": "af500de1fb95017835b050b457f0c7d22ea317f4a2737bd7b9b2e9ad3e3b2706",
+      "formNativeXmlSha256": "8e73cb500558cbc496dc132153a1bac7a696f442765d74d0c27c8535164d4a31",
+      "formStorageFilterSha256": "58a66d4cef0c358da6969524f635600e4cdf1e20845069c86bc3f8ed46924757",
+      "formEmbeddedFilterSha256": "838234d631b355ca86778af8fd48fc204a2c4cb83a6f8ae2a34bcc764d326677",
+      "standaloneRawBodySha256": "b8e1e2cb0b47ce2fdb5cd44caf382a24ad5d8c3afd044bb8b3ed26e50707b718",
+      "standaloneNativeXmlSha256": "bcc29901ebd9edbb863d4eaa9ba3c1d40350dd92c001437aaa0358deddf02b45",
+      "standaloneFilterSha256": "e9058eb6bce0ddd7329fca322e1438e054d1d5cd889173931e434c5df05333f3",
+      "roundTrips": 2
+    },
+    "metadataOnly": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two fresh isolated file-infobase round-trips of the same clean-room Form with only the comparison item removed; the embedded metadata filter was byte-stable while the raw storage Filter property remained absent",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-filter",
+      "formRawBodySha256": "1e5c4292c55143a1175115380e0bdd39ad47a02790babc98d245333b5e689071",
+      "formNativeXmlSha256": "9e503c83bf2f183b9f2013c95cec91b389cff423d86989f6834b8e764a5f379a",
+      "formEmbeddedFilterSha256": "cbe32fff31ce82ea3809801f2297dc5e4902b4ce4092d8644b0d51dd9ce55478",
+      "roundTrips": 2
+    },
+    "unicaCrossEvidence": {
+      "product": "1C:Enterprise Platform via the public Unica corpus",
+      "release": "8.3.27.2074",
+      "derivation": "public rich dcs.compile checkpoint with FilterItemComparison accepted through two semantic platform round-trips; Unica lexical output and heuristics are not policy authority",
+      "repositoryRevision": "a527d40962d047c6922c903b37510b30f697da42",
+      "roundTrips": 2
+    },
+    "sourceVersion": "2.20",
+    "platformLine": "8.3.27",
+    "ibcmdSha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "policy": {
+    "namespace": "http://v8.1c.ru/8.1/data-composition-system/settings",
+    "coreNamespace": "http://v8.1c.ru/8.1/data-composition-system/core",
+    "xmlSchemaNamespace": "http://www.w3.org/2001/XMLSchema",
+    "filterQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}filter",
+    "storageFilterQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}Filter",
+    "itemQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}item",
+    "useQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}use",
+    "leftQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}left",
+    "comparisonTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}comparisonType",
+    "rightQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}right",
+    "viewModeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}viewMode",
+    "userSettingIdQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}userSettingID",
+    "comparisonItemTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}FilterItemComparison",
+    "leftFieldTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/core}Field",
+    "rightStringTypeQname": "{http://www.w3.org/2001/XMLSchema}string",
+    "settingsPlacement": "after-selection-before-order-and-structure-items",
+    "itemChildOrder": ["use?", "left", "comparisonType", "right"],
+    "filterChildOrder": ["items", "viewMode?", "userSettingID?"],
+    "supportedComparisonTypes": ["Equal"],
+    "supportedUseValues": ["omitted"],
+    "supportedRightTypes": ["string"],
+    "maxEmittedItems": 1,
+    "supportedViewModes": ["Normal"],
+    "metadataOnlyUserSettingId": "dfcece9d-5077-440b-b6b3-45a5cb4538eb",
+    "comparisonStorageRecordTypeUuid": "f6841c6b-6c71-4c82-ae9e-d08b49db326c",
+    "metadataOnlyEmbeddedEmission": "requires-viewMode-and-userSettingID",
+    "metadataOnlyStorageRepresentation": "Filter-property-absent-when-AutoSaveUserSettings-true",
+    "propertylessEmptyFilterEmission": "unsupported"
+  }
+}

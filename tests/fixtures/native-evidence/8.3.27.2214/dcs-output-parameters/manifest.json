@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-output-parameters",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "orchestrated batch spec over retained dcs-area-template-appearance corpus export; platform bytes are authority",
+    "path": "seed/Template.xml",
+    "size": 4139,
+    "sha256": "99e1e00fb88e5617299898cc525ddd76d6969010a614128e0679f28f2b1bbe3e"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "700962ffd141798e3ce893d529e1889a945dc61228e3d39a42a3ab781700cb60",
+    "round_2_cf_sha256": "1c3dd7602c5e3483923b094f910663d36f5da96e4448a43a06b4dda1252f34d1",
+    "native_template_sha256": "bc27a20de1bb75a83b3727ac457db04791cdd092c64e2e31e5b58ebecf296ddb",
+    "packed_body_sha256": "1bab2e8e93c491f33d094473d8456e7877c1673d45656cca9d4729ea40c82fd7",
+    "unpacked_body_sha256": "e0b0889117ffdf84f89c4024553be7236b3e37a8a9436448e3e9a49cbfc5b776",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 80780,
+      "sha256": "1c3dd7602c5e3483923b094f910663d36f5da96e4448a43a06b4dda1252f34d1"
+    },
+    "native_template": {
+      "path": "native-template.xml.b64",
+      "decoded_size": 4180,
+      "sha256": "bc27a20de1bb75a83b3727ac457db04791cdd092c64e2e31e5b58ebecf296ddb"
+    },
+    "packed_body": {
+      "path": "raw-packed.bin.b64",
+      "decoded_size": 1066,
+      "sha256": "1bab2e8e93c491f33d094473d8456e7877c1673d45656cca9d4729ea40c82fd7"
+    },
+    "unpacked_body": {
+      "path": "raw-unpacked.bin.b64",
+      "decoded_size": 4683,
+      "sha256": "e0b0889117ffdf84f89c4024553be7236b3e37a8a9436448e3e9a49cbfc5b776"
+    }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [
+      3029,
+      1367
+    ],
+    "primary_schema_sha256": "5124cc181b46586289d2a1ff667f2e8e659c27beefcf806f1f54cc256d82be0c",
+    "settings_sha256": "d10a641c48de79bb934eb1bf8607b1eeae3e495b096884a91dc6b7608e68053f",
+    "trailing_area_schema_file_size": 263,
+    "trailing_area_schema_file_sha256": "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81"
+  },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body (compile_dcs on the retained round-2 native Template.xml; the evidenced cohort parser requires platform storage order) overlaid via the common overlay APIs into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 5005,
+    "candidate_body_unpacked_sha256": "64d6e74e1b2a937ac4dd7b0d3ef662159c500cd214e31d316d30ccf54751c675",
+    "candidate_cf_sha256": "d2bf4069c042beb5d1845405ced0460ea679ecdfd29361dc1b98691d39cf29b3",
+    "platform_saved_cf_size": 81482,
+    "platform_saved_cf_sha256": "db9f99aa7fc9b0c91adaeb377e39a7e731dcf233708659cf1cf09e9efe61b822",
+    "reexported_template_size": 4180,
+    "reexported_template_sha256": "bc27a20de1bb75a83b3727ac457db04791cdd092c64e2e31e5b58ebecf296ddb",
+    "reexport_matches_two_round_native_template": true
+  },
+  "cohort": {
+    "canonical_placement": "immediately after dcsset:order, immediately before dcsset:item xsi:type=dcsset:StructureItemGroup -- identical to the placement submitted in the seed",
+    "canonical_item_xsi_type": "dcsset:SettingsParameterValue",
+    "seed_item_xsi_type": "none (bare dcscor:item)",
+    "output_parameter_name": "Заголовок",
+    "output_parameter_value_type": "xs:string",
+    "output_parameter_value": "Probe Title"
+  },
+  "negative_observations": [
+    "The platform does not relocate dcsset:outputParameters from the submitted position; canonical placement equals the seed's placement for this exact insertion point.",
+    "The platform adds xsi:type=\"dcsset:SettingsParameterValue\" to the outputParameters item, which the seed's bare dcscor:item did not declare -- this matches the same xsi:type already seen (via retained fixture, not this session) on dcsset:conditionalAppearance items, suggesting it is the general canonical marker for dcsset:* parameter-value containers rather than something specific to conditionalAppearance."
+  ],
+  "non_claims": [
+    "No claim about outputParameters placement relative to other dcsset:settings children besides dcsset:order and StructureItemGroup (e.g. relative to dcsset:filter, dcsset:selection) -- not exercised by this coordinate.",
+    "No claim about multiple outputParameters items or non-string value types for outputParameters.",
+    "Compiler acceptance is proven only for the exact Заголовок / xs:string / \"Probe Title\" outputParameters coordinate recorded in compiler_acceptance above; it does not extend to other parameter names, value types, or multiple items."
+  ]
+}

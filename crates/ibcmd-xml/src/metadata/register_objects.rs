@@ -18,6 +18,7 @@ use super::business_objects::{
     push_localized, push_reference_collection, push_text, push_u32, require_empty,
     required_properties, text_field,
 };
+use super::characteristics::project_characteristics;
 use super::common::{
     MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces,
     decode_metadata_envelope_with_child_references, element_text, resolve_namespaces, typed,
@@ -30,6 +31,7 @@ use super::language::{
 use super::registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
+use super::utility_objects::validate_supported_standard_attributes;
 use crate::{LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlWriter};
 
 pub const INFORMATION_REGISTER: &str = "InformationRegister";
@@ -40,6 +42,21 @@ pub const RECALCULATION: &str = "Recalculation";
 pub const CHART_OF_CHARACTERISTIC_TYPES: &str = "ChartOfCharacteristicTypes";
 pub const CHART_OF_ACCOUNTS: &str = "ChartOfAccounts";
 pub const CHART_OF_CALCULATION_TYPES: &str = "ChartOfCalculationTypes";
+
+/// Platform standard-attribute inventory of a `ChartOfCharacteristicTypes`,
+/// in emission order, evidenced by the platform export tree of the bundled
+/// `chart-of-characteristic-types` coordinate.
+const CCT_STANDARD_ATTRIBUTES: &[&str] = &[
+    "PredefinedDataName",
+    "ValueType",
+    "Description",
+    "Code",
+    "IsFolder",
+    "Parent",
+    "Predefined",
+    "DeletionMark",
+    "Ref",
+];
 
 const INFORMATION_REGISTER_PROPERTIES: &[&str] = &[
     "Name",
@@ -524,7 +541,11 @@ fn project_root(
                     "AuxiliaryListForm",
                 ],
             )?;
-            require_empty(map["StandardAttributes"], "StandardAttributes")?;
+            require_empty(
+                map["StandardAttributes"],
+                INFORMATION_REGISTER,
+                "StandardAttributes",
+            )?;
             push_presentations(
                 parts,
                 map,
@@ -550,7 +571,11 @@ fn project_root(
                 push_enum(parts, map, name)?;
             }
             push_forms(parts, map, &["DefaultListForm", "AuxiliaryListForm"])?;
-            require_empty(map["StandardAttributes"], "StandardAttributes")?;
+            require_empty(
+                map["StandardAttributes"],
+                ACCUMULATION_REGISTER,
+                "StandardAttributes",
+            )?;
             push_presentations(
                 parts,
                 map,
@@ -580,8 +605,12 @@ fn project_root(
                 map,
                 &["ChartOfAccounts", "DefaultListForm", "AuxiliaryListForm"],
             )?;
-            require_empty(map["BasedOn"], "BasedOn")?;
-            require_empty(map["StandardAttributes"], "StandardAttributes")?;
+            require_empty(map["BasedOn"], ACCOUNTING_REGISTER, "BasedOn")?;
+            require_empty(
+                map["StandardAttributes"],
+                ACCOUNTING_REGISTER,
+                "StandardAttributes",
+            )?;
             push_presentations(
                 parts,
                 map,
@@ -617,7 +646,11 @@ fn project_root(
                     "ChartOfCalculationTypes",
                 ],
             )?;
-            require_empty(map["StandardAttributes"], "StandardAttributes")?;
+            require_empty(
+                map["StandardAttributes"],
+                CALCULATION_REGISTER,
+                "StandardAttributes",
+            )?;
             push_presentations(
                 parts,
                 map,
@@ -696,13 +729,17 @@ fn project_cct(
     )?;
     project_type(parts, map["Type"], uris)?;
     push_field_collection(parts, map, "InputByString", uris)?;
-    for name in [
-        "StandardAttributes",
-        "Characteristics",
-        "BasedOn",
-        "DataLockFields",
-    ] {
-        require_empty(map[name], name)?;
+    // Platform trees emit the family-derived inventory at the platform
+    // defaults; the block carries no object data, so nothing is projected.
+    validate_supported_standard_attributes(
+        map["StandardAttributes"],
+        CHART_OF_CHARACTERISTIC_TYPES,
+        CCT_STANDARD_ATTRIBUTES,
+        uris,
+    )?;
+    project_characteristics(parts, map["Characteristics"], uris)?;
+    for name in ["BasedOn", "DataLockFields"] {
+        require_empty(map[name], CHART_OF_CHARACTERISTIC_TYPES, name)?;
     }
     push_presentations(
         parts,
@@ -781,7 +818,7 @@ fn project_coa(
         "StandardTabularSections",
         "DataLockFields",
     ] {
-        require_empty(map[name], name)?;
+        require_empty(map[name], CHART_OF_ACCOUNTS, name)?;
     }
     push_presentations(
         parts,
@@ -855,7 +892,7 @@ fn project_cot(
         "StandardTabularSections",
         "DataLockFields",
     ] {
-        require_empty(map[name], name)?;
+        require_empty(map[name], CHART_OF_CALCULATION_TYPES, name)?;
     }
     push_presentations(
         parts,
@@ -1009,4 +1046,79 @@ fn encode_register_object(
         LexicalPolicy::Preserve,
     )
     .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::XmlReader;
+
+    /// Platform `ibcmd config export` bytes for a
+    /// `ChartOfCharacteristicTypes` whose `StandardAttributes` block is the
+    /// family-derived inventory at the platform defaults.
+    const NATIVE_CCT: &[u8] = include_bytes!(concat!(
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "chart-of-characteristic-types/native/ChartsOfCharacteristicTypes/CorpusCharacteristics.xml"
+    ));
+
+    fn decode_native_cct(xml: &[u8]) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        let document = XmlReader::from_slice(xml).unwrap();
+        decode_register_object(
+            &document,
+            ProfileId::parse("xml-2.20").unwrap(),
+            ObjectPath::root(),
+            CHART_OF_CHARACTERISTIC_TYPES,
+        )
+    }
+
+    fn native_cct_standard_attributes(text: &str) -> &str {
+        let start = text.find("<StandardAttributes>").unwrap();
+        let end = text.find("</StandardAttributes>").unwrap() + "</StandardAttributes>".len();
+        &text[start..end]
+    }
+
+    #[test]
+    fn native_cct_standard_attributes_decode_and_round_trip_losslessly() {
+        let envelope = decode_native_cct(NATIVE_CCT).unwrap();
+        let encoded = encode_register_object(
+            &envelope,
+            &ProfileId::parse("xml-2.20").unwrap(),
+            CHART_OF_CHARACTERISTIC_TYPES,
+        )
+        .unwrap();
+        assert_eq!(encoded, NATIVE_CCT);
+    }
+
+    #[test]
+    fn native_cct_default_standard_attributes_project_no_object_data() {
+        let text = String::from_utf8(NATIVE_CCT.to_vec()).unwrap();
+        let emptied = text.replace(
+            native_cct_standard_attributes(&text),
+            "<StandardAttributes/>",
+        );
+        let populated = decode_native_cct(NATIVE_CCT).unwrap();
+        let empty = decode_native_cct(emptied.as_bytes()).unwrap();
+        assert_eq!(populated.root().properties(), empty.root().properties());
+        assert_eq!(populated.descendants(), empty.descendants());
+    }
+
+    #[test]
+    fn native_cct_standard_attribute_synonym_names_its_coordinate() {
+        let text = String::from_utf8(NATIVE_CCT.to_vec()).unwrap();
+        let block = native_cct_standard_attributes(&text);
+        let deviated = block.replacen(
+            "<xr:Synonym/>",
+            "<xr:Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>x</v8:content></v8:item></xr:Synonym>",
+            1,
+        );
+        assert_ne!(deviated, block);
+        let xml = text.replace(block, &deviated);
+        assert!(matches!(
+            decode_native_cct(xml.as_bytes()),
+            Err(MetadataDecodeError::UnevidencedProperty {
+                ref owner,
+                property: "Synonym",
+            }) if owner == "ChartOfCharacteristicTypes StandardAttribute[PredefinedDataName]"
+        ));
+    }
 }

@@ -5129,6 +5129,16 @@ mod tests {
         family: BusinessObjectFamily,
     ) -> (BusinessObjectNativeIr, Vec<u8>) {
         let configuration = register_configuration(family);
+        let blob = compile_register_configuration(family, configuration).unwrap();
+        let profile = BusinessObjectMetadataProfile::fixture("platform-test", family);
+        let ir = decode_business_object_blob(&blob, &profile).unwrap();
+        (ir, blob)
+    }
+
+    fn compile_register_configuration(
+        family: BusinessObjectFamily,
+        configuration: CanonicalConfiguration,
+    ) -> Result<Vec<u8>, BusinessObjectBuildError> {
         let validated = validate_configuration(&configuration).unwrap();
         let identities = collect_bootstrap_identities(&validated).unwrap();
         let root_uuid = ObjectUuid::parse(register_root_uuid(family)).unwrap();
@@ -5146,14 +5156,42 @@ mod tests {
         )
         .unwrap();
         let profile = BusinessObjectMetadataProfile::fixture("platform-test", family);
-        let first =
-            compile_business_object(&validated, &graph, root_uuid, &axes(), &profile).unwrap();
-        let second =
-            compile_business_object(&validated, &graph, root_uuid, &axes(), &profile).unwrap();
+        let first = compile_business_object(&validated, &graph, root_uuid, &axes(), &profile)?;
+        let second = compile_business_object(&validated, &graph, root_uuid, &axes(), &profile)?;
         assert_eq!(first, second);
-        let blob = first.outcome().compiled_payload().unwrap().bytes().to_vec();
-        let ir = decode_business_object_blob(&blob, &profile).unwrap();
-        (ir, blob)
+        Ok(first.outcome().compiled_payload().unwrap().bytes().to_vec())
+    }
+
+    fn register_configuration_with_children(
+        family: BusinessObjectFamily,
+        children: &str,
+        child_objects: Vec<CanonicalObject>,
+    ) -> CanonicalConfiguration {
+        let xml = String::from_utf8(register_xml(family)).unwrap().replacen(
+            "<ChildObjects></ChildObjects>",
+            &format!("<ChildObjects>{children}</ChildObjects>"),
+            1,
+        );
+        let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        let envelope = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse(family.as_str()).unwrap(),
+                &document,
+                ProfileId::parse("xml-2.20").unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap();
+        let mut objects = vec![simple_object(
+            930,
+            CONFIGURATION_UUID,
+            "Configuration",
+            "Fixture",
+            None,
+        )];
+        objects.push(envelope.root().clone());
+        objects.extend(envelope.descendants().iter().cloned());
+        objects.extend(child_objects);
+        CanonicalConfiguration::new(objects).unwrap()
     }
 
     fn hierarchical_configuration(family: BusinessObjectFamily) -> CanonicalConfiguration {
@@ -5640,6 +5678,187 @@ mod tests {
                 Err(BusinessObjectBuildError::Native(_))
             ));
         }
+    }
+
+    #[test]
+    fn cct_templates_compile_decode_and_roundtrip_in_declared_order() {
+        let root = CHART_OF_CHARACTERISTIC_TYPES_UUID;
+        let single_uuid = fixture_uuid(8_510);
+        let single = register_configuration_with_children(
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            "<Template>Only</Template>",
+            vec![simple_owned_object(
+                931,
+                &single_uuid,
+                "Template",
+                "Only",
+                root,
+            )],
+        );
+        let single_blob = compile_register_configuration(
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            single,
+        )
+        .unwrap();
+        let profile = BusinessObjectMetadataProfile::fixture(
+            "platform-test",
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+        );
+        let single_ir = decode_business_object_blob(&single_blob, &profile).unwrap();
+        assert_eq!(
+            single_ir.template_uuids,
+            [ObjectUuid::parse(&single_uuid).unwrap()]
+        );
+
+        let first_uuid = fixture_uuid(8_520);
+        let second_uuid = fixture_uuid(8_521);
+        let form_uuid = fixture_uuid(8_522);
+        let multiple = register_configuration_with_children(
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            "<Form>Main</Form><Template>Second</Template><Template>First</Template>",
+            vec![
+                simple_owned_object(932, &form_uuid, "Form", "Main", root),
+                simple_owned_object(933, &second_uuid, "Template", "Second", root),
+                simple_owned_object(934, &first_uuid, "Template", "First", root),
+            ],
+        );
+        let multiple_blob = compile_register_configuration(
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            multiple,
+        )
+        .unwrap();
+        let multiple_ir = decode_business_object_blob(&multiple_blob, &profile).unwrap();
+        assert_eq!(
+            multiple_ir.template_uuids,
+            [
+                ObjectUuid::parse(&second_uuid).unwrap(),
+                ObjectUuid::parse(&first_uuid).unwrap(),
+            ]
+        );
+        assert_eq!(
+            multiple_ir.form_uuids,
+            [ObjectUuid::parse(&form_uuid).unwrap()]
+        );
+
+        let plain = inflate_bounded(&multiple_blob).unwrap();
+        let parsed = NativeParser::new(&plain).parse().unwrap();
+        let NativeValue::List(root) = &parsed else {
+            panic!("CCT compiler must emit a root list");
+        };
+        assert_eq!(
+            parse_uuid_collection(&root[4], TEMPLATE_COLLECTION_UUID, "CCT templates").unwrap(),
+            multiple_ir.template_uuids
+        );
+        assert!(
+            parse_uuid_collection(
+                &root[7],
+                CHART_OF_CHARACTERISTIC_TYPES_COLLECTION_UUIDS[4],
+                "CCT forms",
+            )
+            .unwrap()
+            .iter()
+            .all(|uuid| !multiple_ir.template_uuids.contains(uuid))
+        );
+    }
+
+    #[test]
+    fn cct_template_inventory_and_other_register_template_cells_fail_closed() {
+        let root = CHART_OF_CHARACTERISTIC_TYPES_UUID;
+        let wrong_kind_uuid = fixture_uuid(8_530);
+        let wrong_kind = copy_with_owner(
+            &simple_object(
+                935,
+                &wrong_kind_uuid,
+                "Form",
+                "WrongKind",
+                Some("ChartOfCharacteristicTypes.Kinds.Template.WrongKind"),
+            ),
+            root,
+        );
+        let wrong_owner_uuid = fixture_uuid(8_531);
+        let wrong_owner = copy_with_owner(
+            &simple_object(
+                936,
+                &wrong_owner_uuid,
+                "Template",
+                "Foreign",
+                Some("ChartOfCharacteristicTypes.Kinds.Template.Foreign"),
+            ),
+            CONFIGURATION_UUID,
+        );
+        for (children, objects) in [
+            ("<Template>WrongKind</Template>", vec![wrong_kind]),
+            ("<Template>Foreign</Template>", vec![wrong_owner]),
+            ("<Template>Missing</Template>", Vec::new()),
+        ] {
+            assert!(matches!(
+                compile_register_configuration(
+                    BusinessObjectFamily::ChartOfCharacteristicTypes,
+                    register_configuration_with_children(
+                        BusinessObjectFamily::ChartOfCharacteristicTypes,
+                        children,
+                        objects,
+                    ),
+                ),
+                Err(BusinessObjectBuildError::InvalidModel { .. })
+            ));
+        }
+
+        let non_cct_template_uuid = fixture_uuid(8_540);
+        assert!(matches!(
+            compile_register_configuration(
+                BusinessObjectFamily::InformationRegister,
+                register_configuration_with_children(
+                    BusinessObjectFamily::InformationRegister,
+                    "<Template>Print</Template>",
+                    vec![simple_owned_object(
+                        938,
+                        &non_cct_template_uuid,
+                        "Template",
+                        "Print",
+                        INFORMATION_REGISTER_UUID,
+                    )],
+                ),
+            ),
+            Err(BusinessObjectBuildError::InvalidModel { .. })
+        ));
+
+        let native_duplicate_uuid = fixture_uuid(8_541);
+        let native_duplicate = register_configuration_with_children(
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            "<Template>NativeDuplicate</Template>",
+            vec![simple_owned_object(
+                939,
+                &native_duplicate_uuid,
+                "Template",
+                "NativeDuplicate",
+                root,
+            )],
+        );
+        let blob = compile_register_configuration(
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            native_duplicate,
+        )
+        .unwrap();
+        let plain = inflate_bounded(&blob).unwrap();
+        let mut parsed = NativeParser::new(&plain).parse().unwrap();
+        let NativeValue::List(root) = &mut parsed else {
+            panic!("CCT compiler must emit a root list");
+        };
+        let NativeValue::List(templates) = &mut root[4] else {
+            panic!("CCT template collection must be a list");
+        };
+        templates[1] = token("2");
+        templates.push(templates[2].clone());
+        let duplicate_blob = raw_deflate(&serialize_native(&parsed).unwrap()).unwrap();
+        let profile = BusinessObjectMetadataProfile::fixture(
+            "platform-test",
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+        );
+        assert!(matches!(
+            decode_business_object_blob(&duplicate_blob, &profile),
+            Err(BusinessObjectBuildError::Native(_))
+        ));
     }
 
     #[test]

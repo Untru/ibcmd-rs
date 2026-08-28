@@ -31,7 +31,7 @@ use super::language::{
 use super::registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
-use super::utility_objects::validate_standard_attributes;
+use super::utility_objects::validate_supported_standard_attributes;
 use crate::{LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlWriter};
 
 const SUBSYSTEM: &str = "Subsystem";
@@ -458,6 +458,7 @@ fn project_root_properties(
             project_shared_forms_and_references(parts, properties, uris, true)?;
             validate_supported_standard_attributes(
                 properties["StandardAttributes"],
+                EXCHANGE_PLAN,
                 &[
                     "ExchangeDate",
                     "ThisNode",
@@ -470,7 +471,11 @@ fn project_root_properties(
                 ],
                 uris,
             )?;
-            require_empty(properties["Characteristics"], "Characteristics")?;
+            require_empty(
+                properties["Characteristics"],
+                EXCHANGE_PLAN,
+                "Characteristics",
+            )?;
         }
         BUSINESS_PROCESS => {
             for name in [
@@ -505,6 +510,7 @@ fn project_root_properties(
             project_shared_forms_and_references(parts, properties, uris, false)?;
             validate_supported_standard_attributes(
                 properties["StandardAttributes"],
+                BUSINESS_PROCESS,
                 &[
                     "Started",
                     "HeadTask",
@@ -516,7 +522,11 @@ fn project_root_properties(
                 ],
                 uris,
             )?;
-            require_empty(properties["Characteristics"], "Characteristics")?;
+            require_empty(
+                properties["Characteristics"],
+                BUSINESS_PROCESS,
+                "Characteristics",
+            )?;
         }
         TASK => {
             for name in [
@@ -555,6 +565,7 @@ fn project_root_properties(
             project_shared_forms_and_references(parts, properties, uris, false)?;
             validate_supported_standard_attributes(
                 properties["StandardAttributes"],
+                TASK,
                 &[
                     "Executed",
                     "Description",
@@ -567,7 +578,7 @@ fn project_root_properties(
                 ],
                 uris,
             )?;
-            require_empty(properties["Characteristics"], "Characteristics")?;
+            require_empty(properties["Characteristics"], TASK, "Characteristics")?;
         }
         _ => unreachable!("family guard is exhaustive"),
     }
@@ -768,7 +779,7 @@ fn project_addressing_attribute(
         "ChoiceParameters",
         "LinkByType",
     ] {
-        require_empty(map[name], name)?;
+        require_empty(map[name], "AddressingAttribute", name)?;
     }
     Ok(())
 }
@@ -787,28 +798,18 @@ fn project_workflow_tabular(
     };
     let map = exact_property_map(properties, expected, uris)?;
     push_text(parts, &map, "Comment")?;
-    require_empty(map["ToolTip"], "ToolTip")?;
+    require_empty(map["ToolTip"], "workflow TabularSection", "ToolTip")?;
     push_enum(parts, &map, "FillChecking")?;
     if family == EXCHANGE_PLAN {
-        validate_supported_standard_attributes(map["StandardAttributes"], &["LineNumber"], uris)?;
+        validate_supported_standard_attributes(
+            map["StandardAttributes"],
+            "ExchangePlan TabularSection",
+            &["LineNumber"],
+            uris,
+        )?;
     }
     push_u32(parts, &map, "LineNumberLength")?;
     Ok(())
-}
-
-fn validate_supported_standard_attributes(
-    container: &XmlElement,
-    expected_names: &[&str],
-    uris: &ResolvedNamespaces,
-) -> Result<(), MetadataDecodeError> {
-    if !container
-        .children()
-        .iter()
-        .any(|node| matches!(node, XmlNode::Element(_)))
-    {
-        return require_empty(container, "StandardAttributes");
-    }
-    validate_standard_attributes(container, expected_names, uris)
 }
 
 fn encode_hierarchical_object(

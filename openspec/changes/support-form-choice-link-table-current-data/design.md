@@ -1,0 +1,70 @@
+# Дизайн: TableCurrentData ChoiceParameterLinks
+
+## Граница слоёв
+
+```text
+raw 5006/5007
+  -> ibcmd-schema exact physical decoder
+  -> typed TableCurrentData(table_id, BindingId | MetadataUuid | BindingUuid)
+  -> mssql form-index resolver
+  -> canonical FormChoiceParameterLink
+  -> ibcmd-xml writer
+```
+
+Schema-layer принимает новый профиль только при точном совпадении:
+
+- mode равен `2`;
+- owner содержит canonical positive table id и exact
+  `02023637-7868-4a5f-8576-835a76e0c9ba`;
+- terminal содержит либо один canonical positive column id, либо точную пару
+  `{canonical-binding-id,canonical-lowercase-non-nil-uuid}`;
+- duplicate имеет два пустых хвостовых значения;
+- полностью разобранные primary и duplicate равны.
+
+Для numeric BindingId adapter сначала использует доказанный
+`type_link_data_path_by_table_column`, затем общий
+`resolve_form_item_current_data_path`.
+
+Для MetadataUuid adapter строит однозначный маршрут из двух raw-связей той же
+формы:
+
+1. table item id связан со своим table binding key;
+2. дочернее поле таблицы связано с тем же table binding key и UUID колонки.
+
+Индекс имеет ключ `(table_item_id, metadata_binding_uuid)`. Разные имена для
+одного ключа делают маршрут ambiguous и удаляют его из production lookup.
+
+Для прямого attribute binding платформа использует более компактную пару:
+
+1. table item: `{1,{attribute-id}}`;
+2. структурно вложенное поле: `{2,{attribute-id},{column-id}}`.
+
+Resolver переносит контекст родительской таблицы при обходе layout и принимает
+такую колонку только при точном совпадении `attribute-id`. Маршрут получает ключ
+`(table_item_id, column-id)`. Разные имена для одного ключа делают маршрут
+неоднозначным; соседнее поле вне таблицы и поле другого атрибута не участвуют.
+
+## Разделение UUID-смыслов
+
+UUID второго поля owner — идентификатор платформенного типа элемента формы.
+Он не передаётся в `object_refs`, не считается metadata UUID и не участвует в
+owner-scoped metadata resolution.
+
+Профиль form-attribute metadata UUID-terminal остаётся отдельным:
+
+```text
+owner={form-attribute-id}, terminal={0,metadata-uuid}
+```
+
+В TableCurrentData UUID означает binding дочернего поля формы и не проходит
+через `object_refs`.
+
+Для `BindingUuid` UUID route обязателен. Если одновременно существует numeric
+route для binding id, оба пути обязаны совпадать; расхождение возвращает
+unresolved/opaque.
+
+## Совместимость
+
+Прежний standard-marker API сохраняется. Production typed-resolver получает
+достаточно данных для выбора одного из путей: direct attribute, standard
+terminal, metadata UUID либо TableCurrentData.

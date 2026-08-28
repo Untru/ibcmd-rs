@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-command-interface-ut-role-visibility",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "storage_element": "86e05022-b8c0-4115-b7db-bc4853c53e50.1",
+    "source_path": "Subsystems/CRMИМаркетинг/Ext/CommandInterface.xml",
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 716,
+      "sha256": "54110a7878d50cca7c5decd9d2b11d6e6ef4e2628853e94763d190e7c0e271fd"
+    },
+    "unpacked_body": {
+      "size": 1842,
+      "sha256": "e54329cd0b8794e229a7d5114afb76ae4f92115559a9292991aabd1df0839837"
+    },
+    "native_command_interface": {
+      "size": 4564,
+      "sha256": "acf24545f6aaf23e091aae4f563c19f979fd5f5f925e4ac6dca362494f8daadf"
+    }
+  }
+}

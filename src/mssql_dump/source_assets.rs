@@ -1,8 +1,12 @@
 use super::*;
+use crate::compiler::families::assets::{
+    ConfigRowId, SourceAssetRelationError, SourceAssetRole, SourceAssetRoute,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct BodyOwnerSourceReference {
     pub(super) kind: String,
+    pub(super) canonical_name: String,
     pub(super) object_path: PathBuf,
 }
 
@@ -40,6 +44,7 @@ pub(super) fn build_body_owner_source_index_from_texts(
             row.file_name.clone(),
             BodyOwnerSourceReference {
                 kind: kind.to_string(),
+                canonical_name: header.name.clone(),
                 object_path,
             },
         );
@@ -50,16 +55,13 @@ pub(super) fn build_body_owner_source_index_from_texts(
 pub(super) fn configuration_module_groups(file_names: &BTreeSet<String>) -> BTreeSet<String> {
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
     suffixes_by_id
         .into_iter()
@@ -81,16 +83,13 @@ pub(super) fn standalone_content_asset_file_names<'a>(
 ) -> BTreeSet<String> {
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
 
     suffixes_by_id
@@ -179,10 +178,9 @@ pub(super) fn dynamic_source_asset(
     file_name: &str,
     bytes: &[u8],
 ) -> Option<SourceAsset> {
-    let (owner_uuid, suffix) = file_name.rsplit_once('.')?;
-    if owner_uuid.is_empty() {
-        return None;
-    }
+    let row_id = ConfigRowId::parse(file_name).ok()?;
+    let owner_uuid = row_id.owner();
+    let suffix = row_id.suffix_component();
 
     if let Some(form_ref) = context.form_refs.get(owner_uuid)
         && suffix != "0"
@@ -218,40 +216,15 @@ pub(super) fn dynamic_source_asset(
     }
 
     let owner = context.body_owners.get(owner_uuid)?;
-    if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
-        .route(
-            "Role",
-            crate::compiler::families::assets::SourceAssetRole::Rights,
-        )
-        .filter(|route| route.suffix().strip_prefix('.') == Some(suffix))
-        && owner.kind == "Role"
-        && parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
-            .is_some()
-    {
-        return Some(SourceAsset {
-            primary_path: owner.object_path.join(route.relative_path()),
-            kind: SourceAssetKind::RoleRights,
-        });
-    }
-    if owner.kind == "AccumulationRegister"
-        && suffix == "3"
-        && parse_accumulation_register_aggregates_blob(bytes).is_some()
-    {
-        let register_name = context
-            .object_refs
-            .get(owner_uuid)
-            .and_then(|reference| reference.strip_prefix("AccumulationRegister."))
-            .map(str::to_string)
-            .or_else(|| {
-                owner
-                    .object_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })?;
-        return Some(SourceAsset {
-            primary_path: owner.object_path.join("Ext").join("Aggregates.xml"),
-            kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
-        });
+    if let Some(asset) = dynamic_owner_bound_source_asset(
+        &row_id,
+        owner,
+        context.object_refs.get(owner_uuid).map(String::as_str),
+        bytes,
+        context.role_rights_object_refs,
+        context.field_refs,
+    ) {
+        return Some(asset);
     }
     if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
         .route_by_suffix(&owner.kind, suffix)
@@ -260,7 +233,7 @@ pub(super) fn dynamic_source_asset(
         })
         && matches!(suffix, "0" | "1")
         && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
-            .is_some()
+            .is_some_and(|interface| !interface.is_empty())
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join(route.relative_path()),
@@ -283,12 +256,16 @@ pub(super) fn dynamic_source_asset(
     }
     if let Some(model) = predefined_data_source_model(&owner.kind)
         && predefined_data_suffix(&owner.kind) == Some(suffix)
-        && parse_predefined_data_blob_with_model(bytes, context.type_index, model).is_some()
+        && parse_predefined_data_blob_with_model(bytes, context.type_index, model)
+            .is_some_and(|items| !items.is_empty())
     {
         let route = predefined_data_route(&owner.kind)?;
         return Some(SourceAsset {
             primary_path: owner.object_path.join(route.relative_path()),
-            kind: SourceAssetKind::PredefinedData { model },
+            kind: SourceAssetKind::PredefinedData {
+                model,
+                owner_uuid: owner_uuid.to_string(),
+            },
         });
     }
     if let Some(module_route) = module_owner_route(&owner.kind, suffix)
@@ -303,6 +280,99 @@ pub(super) fn dynamic_source_asset(
         });
     }
     None
+}
+
+pub(super) fn dynamic_owner_bound_source_asset(
+    row_id: &ConfigRowId<'_>,
+    owner: &BodyOwnerSourceReference,
+    owner_reference: Option<&str>,
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+) -> Option<SourceAsset> {
+    let owner_family = FamilyId::parse(&owner.kind).ok()?;
+    let route = crate::compiler::families::assets::SourceAssetRegistry
+        .owner_bound_relation(&owner_family, row_id.suffix())
+        .ok()?;
+    owner_bound_source_asset(
+        route,
+        &owner.object_path,
+        &owner.canonical_name,
+        owner_reference,
+        bytes,
+        object_refs,
+        field_refs,
+    )
+    .ok()
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum OwnerBoundSourceAssetFailure {
+    Decoder,
+    /// Decoded cleanly to zero items -- not a decoder failure, but still not
+    /// an asset: the platform does not write `Ext/Aggregates.xml` for a
+    /// register whose aggregates row decodes to an empty set (ERP UH
+    /// `AccumulationRegisters/ОперацииБюджетов`, confirmed against its
+    /// native tree). Kept distinct from `Decoder` so the miss reason stays
+    /// honest about what actually happened.
+    Empty,
+    Relation(SourceAssetRelationError),
+}
+
+const ROLE_RIGHTS_DECODER_MISS: &str = "role_rights_decoder_failed";
+const ACCUMULATION_REGISTER_AGGREGATES_DECODER_MISS: &str =
+    "accumulation_register_aggregates_decoder_failed";
+const ACCUMULATION_REGISTER_AGGREGATES_EMPTY: &str = "accumulation_register_aggregates_empty";
+
+pub(super) fn owner_bound_source_asset(
+    route: &SourceAssetRoute,
+    object_path: &Path,
+    header_name: &str,
+    owner_reference: Option<&str>,
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+) -> std::result::Result<SourceAsset, OwnerBoundSourceAssetFailure> {
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    match route.role() {
+        SourceAssetRole::Rights => {
+            parse_role_rights_blob(bytes, object_refs, field_refs)
+                .ok_or(OwnerBoundSourceAssetFailure::Decoder)?;
+            registry
+                .canonical_owner_name(route, header_name, owner_reference)
+                .map_err(OwnerBoundSourceAssetFailure::Relation)?;
+            Ok(SourceAsset {
+                primary_path: object_path.join(route.relative_path()),
+                kind: SourceAssetKind::RoleRights,
+            })
+        }
+        SourceAssetRole::Aggregates => {
+            let aggregates = parse_accumulation_register_aggregates_blob(bytes)
+                .ok_or(OwnerBoundSourceAssetFailure::Decoder)?;
+            if aggregates.is_empty() {
+                return Err(OwnerBoundSourceAssetFailure::Empty);
+            }
+            let register_name = registry
+                .canonical_owner_name(route, header_name, owner_reference)
+                .map_err(OwnerBoundSourceAssetFailure::Relation)?
+                .to_owned();
+            Ok(SourceAsset {
+                primary_path: object_path.join(route.relative_path()),
+                kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
+            })
+        }
+        _ => Err(OwnerBoundSourceAssetFailure::Relation(
+            SourceAssetRelationError::UnsupportedFamily,
+        )),
+    }
+}
+
+fn owner_bound_decoder_miss(role: SourceAssetRole) -> Option<&'static str> {
+    match role {
+        SourceAssetRole::Rights => Some(ROLE_RIGHTS_DECODER_MISS),
+        SourceAssetRole::Aggregates => Some(ACCUMULATION_REGISTER_AGGREGATES_DECODER_MISS),
+        _ => None,
+    }
 }
 
 pub(super) fn is_binary_module_container(bytes: &[u8]) -> bool {
@@ -404,23 +474,41 @@ pub(super) fn parse_hex_u32_bytes(bytes: &[u8]) -> Option<u32> {
     u32::from_str_radix(std::str::from_utf8(bytes).ok()?, 16).ok()
 }
 
-pub(super) fn ensure_unique_source_asset_paths(
+/// Every storage entry whose output path another entry also claims, with the
+/// message naming both claimants.
+///
+/// A collision is a refusal about those entries, not about the export: writing
+/// either one would silently overwrite the other, so both are withheld and
+/// named, and every entry that claims its path alone is still produced. Taking
+/// down the whole run instead hides the rest of the picture, which is exactly
+/// what a foreign configuration is exported to reveal.
+pub(super) fn colliding_source_asset_paths(
     source_assets: &BTreeMap<String, SourceAsset>,
     diagnostics: &BTreeMap<String, String>,
-) -> Result<()> {
-    let mut paths = BTreeMap::<String, &str>::new();
+) -> BTreeMap<String, String> {
+    let mut claimants = BTreeMap::<String, Vec<&str>>::new();
     for (file_name, asset) in source_assets {
         let path = asset.primary_path.to_string_lossy().replace('\\', "/");
-        if let Some(previous_file_name) = paths.insert(path.clone(), file_name.as_str()) {
-            let mut message = format!(
-                "source asset output path {path} is produced by both {previous_file_name} and {file_name}"
-            );
-            append_source_asset_diagnostic(&mut message, previous_file_name, diagnostics);
-            append_source_asset_diagnostic(&mut message, file_name, diagnostics);
-            bail!("{message}");
+        claimants.entry(path).or_default().push(file_name.as_str());
+    }
+    let mut refused = BTreeMap::<String, String>::new();
+    for (path, names) in claimants {
+        if names.len() < 2 {
+            continue;
+        }
+        let mut message = format!(
+            "source asset output path {path} is produced by both {} and {}",
+            names[0],
+            names[1..].join(" and ")
+        );
+        for name in &names {
+            append_source_asset_diagnostic(&mut message, name, diagnostics);
+        }
+        for name in names {
+            refused.insert(name.to_string(), message.clone());
         }
     }
-    Ok(())
+    refused
 }
 
 fn append_source_asset_diagnostic(
@@ -436,6 +524,138 @@ fn append_source_asset_diagnostic(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum OutputWriteRoute {
+    SourceAsset,
+    MetadataXml,
+    ModuleText,
+}
+
+/// Refused output paths for the write routes `colliding_source_asset_paths`
+/// cannot see: a form/template/subsystem's own descriptor XML, and a
+/// canonical module body. Grouped by write route rather than a single flat
+/// file-name key because the same row uuid can be a claimant on more than
+/// one route at once -- a form body is both a source asset (`Ext/Form.xml`)
+/// and a module-text owner (`Ext/Form/Module.bsl`) -- so refusing one
+/// route's collision must never silently withhold the other, unrelated
+/// route's output for the same uuid.
+#[derive(Debug, Default)]
+pub(super) struct ReferenceOutputCollisions {
+    /// Additional `source_assets` entries this pass refuses that
+    /// `colliding_source_asset_paths` could not see, because the collision
+    /// is with a form/template/subsystem/module path rather than another
+    /// source asset. Keyed exactly like `source_assets`.
+    pub(super) source_assets: BTreeMap<String, String>,
+    /// Keyed by the metadata row's own uuid: a form, template, or
+    /// subsystem's own descriptor-XML row.
+    pub(super) metadata_xml: BTreeMap<String, String>,
+    /// Keyed by the module body row id (`<uuid>.<suffix>`), matching
+    /// `module_text_paths`.
+    pub(super) module_text: BTreeMap<String, String>,
+}
+
+fn record_output_claim(
+    claimants: &mut BTreeMap<String, Vec<(OutputWriteRoute, String)>>,
+    route: OutputWriteRoute,
+    file_name: &str,
+    path: &Path,
+) {
+    let path = path.to_string_lossy().replace('\\', "/");
+    claimants
+        .entry(path)
+        .or_default()
+        .push((route, file_name.to_string()));
+}
+
+/// Every canonical output path claimed by more than one row across every
+/// file-writing route: `source_assets`, form/template/subsystem descriptor
+/// XML, and canonical module bodies. `colliding_source_asset_paths` only
+/// sees `source_assets` -- forms, templates, subsystems, and modules resolve
+/// their own output path through their own reference index
+/// (`form_refs`/`template_refs`/`subsystem_refs`/`module_text_paths`) that
+/// never passed through that check, so two objects resolving to the
+/// identical path there raced a writer instead of being refused. Folding
+/// `source_assets` back in here also catches a collision between routes, not
+/// just within one. A collision is a refusal about those specific
+/// claimants, not about the export: both are withheld and named, and every
+/// path claimed once alone is still produced.
+pub(super) fn colliding_reference_output_paths(
+    source_assets: &BTreeMap<String, SourceAsset>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    module_text_paths: &BTreeMap<String, PathBuf>,
+) -> ReferenceOutputCollisions {
+    let mut claimants = BTreeMap::<String, Vec<(OutputWriteRoute, String)>>::new();
+    for (file_name, asset) in source_assets {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::SourceAsset,
+            file_name,
+            &asset.primary_path,
+        );
+    }
+    for (uuid, form_ref) in form_refs {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::MetadataXml,
+            uuid,
+            &form_ref.relative_path,
+        );
+    }
+    for (uuid, template_ref) in template_refs {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::MetadataXml,
+            uuid,
+            &template_ref.relative_path,
+        );
+    }
+    for (uuid, subsystem_ref) in subsystem_refs {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::MetadataXml,
+            uuid,
+            &subsystem_ref.relative_path,
+        );
+    }
+    for (file_name, path) in module_text_paths {
+        record_output_claim(
+            &mut claimants,
+            OutputWriteRoute::ModuleText,
+            file_name,
+            path,
+        );
+    }
+
+    let mut refused = ReferenceOutputCollisions::default();
+    for (path, entries) in claimants {
+        let mut distinct_names = entries
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>();
+        distinct_names.sort_unstable();
+        distinct_names.dedup();
+        if distinct_names.len() < 2 {
+            continue;
+        }
+        let message = format!(
+            "output path {path} is produced by both {} and {}",
+            distinct_names[0],
+            distinct_names[1..].join(" and ")
+        );
+        for (route, name) in entries {
+            let bucket = match route {
+                OutputWriteRoute::SourceAsset => &mut refused.source_assets,
+                OutputWriteRoute::MetadataXml => &mut refused.metadata_xml,
+                OutputWriteRoute::ModuleText => &mut refused.module_text,
+            };
+            bucket.insert(name, message.clone());
+        }
+    }
+    refused
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum PredefinedDataRowsetLayout {
     NestedTable,
@@ -445,6 +665,11 @@ pub(crate) enum PredefinedDataRowsetLayout {
 #[derive(Clone, Copy)]
 pub(crate) enum PredefinedItemLayout {
     Generic,
+    /// Reads exactly like `Generic`, but its items carry a value-type slot, so
+    /// every item writes a `Type` element -- empty for the folders that have no
+    /// type. All 166 items of this shape in 1C:УТ 11.5.27.75 write one: 144
+    /// typed leaves and 22 empty folders, with no counterexample.
+    Characteristic,
     Account,
     Calculation,
 }
@@ -458,26 +683,55 @@ pub(crate) struct PredefinedDataSourceModel {
     item_layout: PredefinedItemLayout,
 }
 
+/// Owner identity an `Ext/AdditionalIndexes.xml` body needs to be readable.
+///
+/// The stored body is a serialized 1C value whose records name their table by
+/// uuid, so the owner has to travel with the asset: only it turns that uuid into
+/// a source table name.
+#[derive(Clone)]
+pub(crate) struct AdditionalIndexesOwner {
+    pub(crate) kind: String,
+    pub(crate) name: String,
+    pub(crate) uuid: String,
+}
+
 #[derive(Clone)]
 pub(crate) enum SourceAssetKind {
-    AccumulationRegisterAggregates { register_name: String },
+    AccumulationRegisterAggregates {
+        register_name: String,
+    },
+    AdditionalIndexes {
+        owner: AdditionalIndexesOwner,
+    },
     CommandInterface,
     ClientApplicationInterface,
     ExchangePlanContent,
     BusinessProcessFlowchart,
     DataCompositionSchema,
     ExtPicture,
-    Form { owner_reference: Option<String> },
+    Form {
+        owner_reference: Option<String>,
+    },
     Help,
     HomePageWorkArea,
     InflatedBase64OrBinary,
     InflatedBinary,
     MoxelSpreadsheet,
-    PredefinedData { model: PredefinedDataSourceModel },
+    PredefinedData {
+        model: PredefinedDataSourceModel,
+        /// The metadata object that owns the body. A chart of accounts names
+        /// its accounting flags and its ext dimension types through its own
+        /// record, and a predefined item uuid is unique only inside its owner.
+        owner_uuid: String,
+    },
     RoleRights,
     Schedule,
     StandaloneContent,
     StyleBody,
+    TemplateGraphicalScheme,
+    // A form body whose owning record declared no form type this reader can
+    // name. Refused rather than guessed.
+    UndeclaredFormType,
     WsDefinition,
 }
 
@@ -489,6 +743,21 @@ pub(super) struct StandaloneContentReferences {
 pub(super) struct SourceAsset {
     pub(super) primary_path: PathBuf,
     pub(super) kind: SourceAssetKind,
+}
+
+pub(super) enum WrittenSourceAsset {
+    Emitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    OpaqueNotEmitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    RejectedNotEmitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
 }
 
 pub(super) fn source_asset_paths_with_indexes(
@@ -513,16 +782,13 @@ pub(super) fn source_asset_paths_with_indexes(
         .collect::<BTreeSet<_>>();
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in &file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
     let role_rights_object_refs = build_role_rights_object_reference_index(object_refs, form_refs);
 
@@ -585,13 +851,21 @@ pub(super) fn source_asset_paths_with_indexes(
             let is_selected_header = rows_by_file_name
                 .get(interface_id.as_str())
                 .is_some_and(|row| row.binary_hex.is_empty());
+            // A decoded-but-entirely-empty root command interface (wire
+            // shape `{7,0,0,0,0,0,0}`) is a record the platform tracks by
+            // identity without ever rendering a file for -- confirmed
+            // against WMS5's `МодульWebОбмена_ERP25.cf`, whose Configuration
+            // `.9`/`.a` records decode cleanly to zero sections and stay
+            // absent from the native export tree. `CommandInterface::is_empty`
+            // is the fail-closed line: it only suppresses emission when
+            // every section decoded to nothing, never on a decode failure.
             let is_command_interface = is_selected_header
                 || rows_by_file_name
                     .get(interface_id.as_str())
                     .and_then(|row| decode_hex(&row.binary_hex).ok())
                     .is_some_and(|bytes| {
                         parse_command_interface_blob(&bytes, &command_refs, &metadata_refs)
-                            .is_some()
+                            .is_some_and(|interface| !interface.is_empty())
                     });
             if is_command_interface {
                 paths.insert(
@@ -605,7 +879,7 @@ pub(super) fn source_asset_paths_with_indexes(
         }
     }
     for row in metadata_texts {
-        for (body_id, asset) in source_assets_from_metadata_text(
+        let Some(discovery) = source_assets_from_metadata_text_inner(
             row,
             &file_names,
             &rows_by_file_name,
@@ -615,15 +889,118 @@ pub(super) fn source_asset_paths_with_indexes(
             &field_refs,
             &type_index,
             &subsystem_refs,
-        ) {
+        ) else {
+            continue;
+        };
+        for (body_id, asset) in discovery.assets {
             paths.insert(body_id, asset);
         }
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
-    paths.extend(form_body_asset_paths(&form_refs, &file_names));
+    paths.extend(form_body_asset_paths(
+        &form_refs,
+        &file_names,
+        &declared_form_types(metadata_texts),
+    ));
     paths.extend(template_body_asset_paths(&template_refs, &file_names));
 
     paths
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn source_asset_discovery_misses(
+    metadata_texts: &[MetadataTextRow],
+    file_names: &BTreeSet<&str>,
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut misses = BTreeMap::new();
+    for row in metadata_texts.iter().filter(|row| row.folder.is_some()) {
+        match source_assets_from_metadata_text_inner(
+            row,
+            file_names,
+            rows_by_file_name,
+            command_refs,
+            metadata_refs,
+            object_refs,
+            field_refs,
+            type_index,
+            subsystem_refs,
+        ) {
+            Some(discovery) => misses.extend(discovery.misses),
+            None => {
+                misses.insert(
+                    row.file_name.clone(),
+                    "metadata_source_asset_relation_unclassified".to_string(),
+                );
+            }
+        }
+    }
+    let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for file_name in file_names {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
+            continue;
+        };
+        suffixes_by_id
+            .entry(row_id.owner())
+            .or_default()
+            .insert(row_id.suffix_component());
+    }
+    for (owner_id, suffixes) in suffixes_by_id {
+        if !is_configuration_module_group(&suffixes) {
+            continue;
+        }
+        for suffix in ["9", "a"] {
+            let body_id = format!("{owner_id}.{suffix}");
+            if !file_names.contains(body_id.as_str()) {
+                continue;
+            }
+            let parsed = rows_by_file_name
+                .get(body_id.as_str())
+                .and_then(|row| decode_hex(&row.binary_hex).ok())
+                .is_some_and(|bytes| {
+                    parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
+                });
+            if !parsed {
+                misses.insert(
+                    body_id,
+                    "configuration_command_interface_decoder_failed".to_string(),
+                );
+            }
+        }
+    }
+    for form_uuid in form_refs.keys() {
+        let help_id = format!("{form_uuid}.1");
+        if !file_names.contains(help_id.as_str()) {
+            continue;
+        }
+        let parsed = rows_by_file_name
+            .get(help_id.as_str())
+            .and_then(|row| decode_hex(&row.binary_hex).ok())
+            .is_some_and(|bytes| parse_help_blob_pages(&bytes).is_some());
+        if !parsed {
+            misses.insert(help_id, "form_help_decoder_failed".to_string());
+        }
+    }
+    for (uuid, template_ref) in template_refs {
+        let body_id = format!("{uuid}.0");
+        if file_names.contains(body_id.as_str())
+            && template_body_source_asset(template_ref.template_type).is_none()
+        {
+            misses.insert(
+                body_id,
+                "template_source_asset_type_unclassified".to_string(),
+            );
+        }
+    }
+    misses
 }
 
 pub(super) fn template_body_asset_paths(
@@ -665,7 +1042,7 @@ pub(super) fn template_body_source_asset(
             Some(("Template.xml", SourceAssetKind::InflatedBinary))
         }
         "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::DataCompositionSchema)),
-        "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
+        "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::TemplateGraphicalScheme)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
         "SpreadsheetDocument" => Some(("Template.xml", SourceAssetKind::MoxelSpreadsheet)),
@@ -673,9 +1050,30 @@ pub(super) fn template_body_source_asset(
     }
 }
 
+/// Every form uuid these metadata rows declare, mapped to the form type the
+/// record itself declares. A uuid absent from this map declared nothing this
+/// reader can name; the body routing below turns that into a typed refusal.
+pub(super) fn declared_form_types(
+    metadata_texts: &[MetadataTextRow],
+) -> BTreeMap<String, DeclaredFormType> {
+    let mut types = BTreeMap::new();
+    for row in metadata_texts {
+        if !is_form_metadata_text(&row.text, &row.file_name)
+            && !is_direct_code14_form_metadata_text(&row.text, &row.file_name)
+        {
+            continue;
+        }
+        if let Some(form_type) = parse_declared_form_type(&row.text, &row.file_name) {
+            types.insert(row.file_name.clone(), form_type);
+        }
+    }
+    types
+}
+
 pub(super) fn form_body_asset_paths(
     form_refs: &BTreeMap<String, FormSourceReference>,
     file_names: &BTreeSet<&str>,
+    form_types: &BTreeMap<String, DeclaredFormType>,
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
     for (form_uuid, form_ref) in form_refs {
@@ -685,15 +1083,28 @@ pub(super) fn form_body_asset_paths(
         }
         let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
-        paths.insert(
-            body_id,
-            SourceAsset {
+        // The declared form type, not the shape of the body, picks the file
+        // the platform writes: a managed form gets the rendered `Form.xml`,
+        // an ordinary one gets its stored body verbatim as `Form.bin`.
+        // Confirmed byte-for-byte on all nine ordinary ERP УХ 3.2.12.6 forms
+        // (`docs/evidence/uh-ordinary-form-body-20260826.md`).
+        let asset = match form_types.get(form_uuid) {
+            Some(DeclaredFormType::Ordinary) => SourceAsset {
+                primary_path: form_dir.join("Ext").join("Form.bin"),
+                kind: SourceAssetKind::InflatedBinary,
+            },
+            Some(DeclaredFormType::Managed) => SourceAsset {
                 primary_path: form_dir.join("Ext").join("Form.xml"),
                 kind: SourceAssetKind::Form {
                     owner_reference: form_owner_reference_name(form_ref),
                 },
             },
-        );
+            None => SourceAsset {
+                primary_path: form_dir.join("Ext").join("Form.xml"),
+                kind: SourceAssetKind::UndeclaredFormType,
+            },
+        };
+        paths.insert(body_id, asset);
     }
 
     paths
@@ -746,9 +1157,11 @@ pub(super) fn source_assets_from_metadata_blob(
                 subsystem_refs,
             )
         })
+        .map(|discovery| discovery.assets)
         .unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub(super) fn source_assets_from_metadata_text(
     row: &MetadataTextRow,
     file_names: &BTreeSet<&str>,
@@ -771,7 +1184,13 @@ pub(super) fn source_assets_from_metadata_text(
         type_index,
         subsystem_refs,
     )
+    .map(|discovery| discovery.assets)
     .unwrap_or_default()
+}
+
+pub(super) struct SourceAssetDiscovery {
+    pub(super) assets: Vec<(String, SourceAsset)>,
+    pub(super) misses: BTreeMap<String, String>,
 }
 
 pub(super) fn source_assets_from_metadata_text_inner(
@@ -784,11 +1203,13 @@ pub(super) fn source_assets_from_metadata_text_inner(
     field_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
-) -> Option<Vec<(String, SourceAsset)>> {
+) -> Option<SourceAssetDiscovery> {
     let uuid = row.file_name.as_str();
     let kind = row.kind.as_deref()?;
     let folder = row.folder?;
     let header = row.header.as_ref()?;
+    let owner_family = FamilyId::parse(kind).ok()?;
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
     let object_path = if kind == "Subsystem" {
         subsystem_refs
             .get(uuid)
@@ -800,6 +1221,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
         PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
     };
     let mut assets = Vec::new();
+    let mut misses = BTreeMap::new();
 
     if kind == "ExchangePlan" {
         let content_id = format!("{uuid}.1");
@@ -834,9 +1256,51 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 additional_indexes_id,
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("AdditionalIndexes.xml"),
-                    kind: SourceAssetKind::InflatedBinary,
+                    kind: SourceAssetKind::AdditionalIndexes {
+                        owner: AdditionalIndexesOwner {
+                            kind: kind.to_string(),
+                            name: header.name.clone(),
+                            uuid: uuid.to_string(),
+                        },
+                    },
                 },
             ));
+        }
+    }
+
+    if let Some(route) = registry.owner_bound_route(&owner_family) {
+        let body_id = format!("{uuid}{}", route.suffix());
+        if file_names.contains(body_id.as_str()) {
+            let row_id = ConfigRowId::parse(&body_id).ok()?;
+            let route = registry
+                .owner_bound_relation(&owner_family, row_id.suffix())
+                .ok()?;
+            let relation_result = rows_by_file_name
+                .get(body_id.as_str())
+                .and_then(|row| decode_hex(&row.binary_hex).ok())
+                .map(|bytes| {
+                    owner_bound_source_asset(
+                        route,
+                        &object_path,
+                        &header.name,
+                        object_refs.get(uuid).map(String::as_str),
+                        &bytes,
+                        object_refs,
+                        field_refs,
+                    )
+                })
+                .unwrap_or(Err(OwnerBoundSourceAssetFailure::Decoder));
+            match relation_result {
+                Ok(asset) => assets.push((body_id, asset)),
+                Err(OwnerBoundSourceAssetFailure::Decoder) => {
+                    let reason = owner_bound_decoder_miss(route.role())?;
+                    misses.insert(body_id, reason.to_owned());
+                }
+                Err(OwnerBoundSourceAssetFailure::Empty) => {
+                    misses.insert(body_id, ACCUMULATION_REGISTER_AGGREGATES_EMPTY.to_owned());
+                }
+                Err(OwnerBoundSourceAssetFailure::Relation(_)) => {}
+            }
         }
     }
 
@@ -873,22 +1337,6 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 primary_path: object_path.join("Ext").join("WSDefinition.xml"),
                 kind: SourceAssetKind::WsDefinition,
             }),
-            "Role"
-                if rows_by_file_name
-                    .get(body_id.as_str())
-                    .and_then(|row| decode_hex(&row.binary_hex).ok())
-                    .and_then(|bytes| parse_role_rights_blob(&bytes, object_refs, field_refs))
-                    .is_some() =>
-            {
-                let route = crate::compiler::families::assets::SourceAssetRegistry.route(
-                    "Role",
-                    crate::compiler::families::assets::SourceAssetRole::Rights,
-                )?;
-                Some(SourceAsset {
-                    primary_path: object_path.join(route.relative_path()),
-                    kind: SourceAssetKind::RoleRights,
-                })
-            }
             _ => None,
         };
         if let Some(asset) = asset {
@@ -899,39 +1347,87 @@ pub(super) fn source_assets_from_metadata_text_inner(
     let command_mapped_ids = assets
         .iter()
         .map(|(body_id, _)| body_id.clone())
+        .chain(misses.keys().cloned())
         .collect::<BTreeSet<_>>();
     for suffix in ["0", "1"] {
         let body_id = format!("{uuid}.{suffix}");
         if command_mapped_ids.contains(&body_id) {
             continue;
         }
-        if let Some(row) = rows_by_file_name.get(body_id.as_str())
-            && let Ok(bytes) = decode_hex(&row.binary_hex)
-            && parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
-        {
-            assets.push((
-                body_id,
-                SourceAsset {
-                    primary_path: object_path.join("Ext").join("CommandInterface.xml"),
-                    kind: SourceAssetKind::CommandInterface,
-                },
-            ));
+        let is_command_relation = crate::compiler::families::assets::SourceAssetRegistry
+            .route_by_suffix(kind, suffix)
+            .is_some_and(|route| {
+                route.role() == crate::compiler::families::assets::SourceAssetRole::CommandInterface
+            });
+        if !is_command_relation || !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        let decoded = rows_by_file_name
+            .get(body_id.as_str())
+            .and_then(|row| decode_hex(&row.binary_hex).ok())
+            .and_then(|bytes| parse_command_interface_blob(&bytes, command_refs, metadata_refs));
+        match decoded {
+            // Mirrors the identical `CommandInterface::is_empty` check in
+            // `source_asset_paths_with_indexes`'s Configuration-root loop: a
+            // decoded-but-entirely-empty command interface is a record the
+            // platform tracks by identity without ever rendering a file for.
+            // Six ERP UH nested subsystems (e.g.
+            // `Subsystems/ГосИС/Subsystems/ЗЕРНО`) decode their own
+            // `.0`/`.1` command interface to zero sections and stay absent
+            // from the native export tree.
+            Some(interface) if !interface.is_empty() => {
+                let route = crate::compiler::families::assets::SourceAssetRegistry
+                    .route_by_suffix(kind, suffix)?;
+                assets.push((
+                    body_id,
+                    SourceAsset {
+                        primary_path: object_path.join(route.relative_path()),
+                        kind: SourceAssetKind::CommandInterface,
+                    },
+                ));
+            }
+            Some(_) => {
+                misses.insert(body_id, "command_interface_empty".to_string());
+            }
+            None => {
+                misses.insert(body_id, "command_interface_decoder_failed".to_string());
+            }
         }
     }
 
+    let preferred_help_body_id = preferred_help_body_id(kind, uuid);
     let mapped_ids = assets
         .iter()
         .map(|(body_id, _)| body_id.clone())
+        .chain(misses.keys().cloned())
         .collect::<BTreeSet<_>>();
-    let object_row_prefix = format!("{uuid}.");
-    let preferred_help_body_id = preferred_help_body_id(kind, uuid);
-    for (body_id, body_row) in rows_by_file_name {
-        if !body_id.starts_with(&object_row_prefix) || mapped_ids.contains(*body_id) {
+    // `rows_by_file_name` is keyed by `"<owner-uuid>.<suffix>"`, so every row
+    // owned by this object lives in the exact lexicographic range
+    // `[uuid+".", uuid+"/")` -- `.` (0x2E) and `/` (0x2F) are adjacent bytes,
+    // so this range is tight: it holds precisely the keys whose owner prefix
+    // equals `uuid`, nothing more and nothing less. Scanning that range
+    // instead of the whole corpus turns an O(rows-per-object) owner lookup
+    // into O(log rows), which matters here because this function runs once
+    // per metadata object -- a full scan per object made the caller
+    // quadratic in corpus size. The `row_id.owner() != uuid` check below is
+    // kept as a defensive no-op so behavior is unchanged even if that
+    // assumption is ever wrong for some key.
+    let owner_range_start = format!("{uuid}.");
+    let owner_range_end = format!("{uuid}/");
+    for (body_id, body_row) in
+        rows_by_file_name.range(owner_range_start.as_str()..owner_range_end.as_str())
+    {
+        let Ok(row_id) = ConfigRowId::parse(body_id) else {
+            continue;
+        };
+        if row_id.owner() != uuid || mapped_ids.contains(*body_id) {
             continue;
         }
-        if let Ok(help_bytes) = decode_hex(&body_row.binary_hex)
-            && parse_help_blob_pages(&help_bytes).is_some()
-        {
+        let is_preferred_help = *body_id == preferred_help_body_id;
+        let help_parsed = decode_hex(&body_row.binary_hex)
+            .ok()
+            .is_some_and(|help_bytes| parse_help_blob_pages(&help_bytes).is_some());
+        if help_parsed {
             if rows_by_file_name.contains_key(preferred_help_body_id.as_str())
                 && *body_id != preferred_help_body_id
             {
@@ -949,22 +1445,47 @@ pub(super) fn source_assets_from_metadata_text_inner(
             continue;
         }
         if let Some(model) = predefined_data_source_model(kind)
-            && (*body_id).strip_prefix(&object_row_prefix) == predefined_data_suffix(kind)
-            && let Ok(predefined_bytes) = decode_hex(&body_row.binary_hex)
-            && parse_predefined_data_blob_with_model(&predefined_bytes, type_index, model).is_some()
+            && Some(row_id.suffix_component()) == predefined_data_suffix(kind)
         {
-            let route = predefined_data_route(kind)?;
-            assets.push((
-                (*body_id).to_string(),
-                SourceAsset {
-                    primary_path: object_path.join(route.relative_path()),
-                    kind: SourceAssetKind::PredefinedData { model },
-                },
-            ));
+            let decoded = decode_hex(&body_row.binary_hex)
+                .ok()
+                .and_then(|bytes| parse_predefined_data_blob_with_model(&bytes, type_index, model));
+            match decoded {
+                Some(items) if !items.is_empty() => {
+                    let route = predefined_data_route(kind)?;
+                    assets.push((
+                        (*body_id).to_string(),
+                        SourceAsset {
+                            primary_path: object_path.join(route.relative_path()),
+                            kind: SourceAssetKind::PredefinedData {
+                                model,
+                                owner_uuid: row_id.owner().to_string(),
+                            },
+                        },
+                    ));
+                }
+                // Decoded cleanly to zero predefined items. The platform
+                // does not write `Ext/Predefined.xml` for these -- confirmed
+                // against 12 ERP UH catalogs/charts whose predefined-items
+                // row decodes to an empty set and whose native tree has no
+                // `Predefined.xml` at all. Recorded under its own reason,
+                // distinct from a genuine decode failure.
+                Some(_) => {
+                    misses.insert((*body_id).to_string(), "predefined_data_empty".to_string());
+                }
+                None => {
+                    misses.insert(
+                        (*body_id).to_string(),
+                        "predefined_data_decoder_failed".to_string(),
+                    );
+                }
+            }
+        } else if is_preferred_help {
+            misses.insert((*body_id).to_string(), "help_decoder_failed".to_string());
         }
     }
 
-    Some(assets)
+    Some(SourceAssetDiscovery { assets, misses })
 }
 
 pub(super) fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
@@ -981,6 +1502,311 @@ pub(super) fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
         .expect("source-asset registry defines the help suffix policy")
         .trim_start_matches('.');
     format!("{uuid}.{suffix}")
+}
+
+/// The members of one `WSReference` body container, split by the role their
+/// stored names give them.
+pub(super) struct WsReferenceDefinitionMembers {
+    /// The WSDL member, already carrying the UTF-8 BOM the platform writes.
+    pub(super) definition: Vec<u8>,
+    /// Every other member, under the exact name the container stores.
+    pub(super) imports: Vec<(String, Vec<u8>)>,
+}
+
+/// Attribute values the XML Schema vocabulary spells as exactly one QName.
+///
+/// `memberTypes` is deliberately absent: it is a whitespace-separated *list* of
+/// QNames, and nothing in the stand exercises it, so it is left alone rather
+/// than rewritten by a reader that has never seen one.
+const WS_DEFINITION_QNAME_ATTRIBUTES: [&str; 5] =
+    ["type", "base", "ref", "itemType", "substitutionGroup"];
+
+/// One start tag of a WSDL document, as its own bytes describe it.
+struct WsDefinitionTag<'a> {
+    name: &'a str,
+    closing: bool,
+    self_closing: bool,
+    /// `(name, value, value byte range)` in document order.
+    attributes: Vec<(&'a str, &'a str, std::ops::Range<usize>)>,
+    /// Byte offset just past the tag's `>`.
+    end: usize,
+}
+
+/// Rewrites the prefix of every QName inside `<types>` that names the
+/// definition's own target namespace to the last prefix in scope bound to that
+/// namespace, and touches nothing else. `None` means the document says nothing
+/// to change - or says something this reader cannot spell - and the stored
+/// bytes stand.
+///
+/// A `WSReference` body's WSDL member is otherwise the platform's own export
+/// byte for byte; this is the single divergence the stand shows. Evidence (all
+/// five `Ext/WSDefinition.xml` the stand publishes, across ERP УХ 3.2.12.6 and
+/// 1С:УТ 11.5.27.75): inside `<types>` the platform writes 13 QNames that name
+/// the definition's target namespace and spells every one of them with the
+/// namespace's *other*, later-declared prefix - never `tns` - while outside
+/// `<types>` it writes 881 QNames on that same namespace and spells every one
+/// of them `tns`. Zero counterexamples either way. Four of the five members are
+/// stored exactly as the platform publishes them, and this pass is a no-op on
+/// all four; the fifth, ERP УХ's
+/// `WSReferences/WSИнформацияПоРынкуЦенныхБумагЦБ`, stores a single
+/// `type="tns:ArrayOfString"` inside its schema where the platform publishes
+/// `type="xsd1:ArrayOfString"`, and this pass rewrites exactly that attribute.
+pub(super) fn normalize_ws_definition_own_namespace_prefixes(wsdl: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(wsdl).ok()?;
+    // Namespace declarations per open element, in declaration order.
+    let mut scopes: Vec<Vec<(&str, &str)>> = vec![Vec::new()];
+    let mut target_namespace: Option<&str> = None;
+    let mut types_depth: Option<usize> = None;
+    let mut depth = 0usize;
+    let mut edits: Vec<(std::ops::Range<usize>, &str)> = Vec::new();
+    let mut at = 0usize;
+    while let Some(offset) = text.get(at..)?.find('<') {
+        let start = at + offset;
+        let rest = text.get(start..)?;
+        if let Some(skip) = ws_definition_skipped_markup_end(rest) {
+            at = start + skip;
+            continue;
+        }
+        let tag = parse_ws_definition_tag(text, start)?;
+        at = tag.end;
+        if tag.closing {
+            depth = depth.checked_sub(1)?;
+            if types_depth.is_some_and(|types| depth <= types) {
+                types_depth = None;
+            }
+            if scopes.len() > 1 {
+                scopes.pop();
+            }
+            continue;
+        }
+        let mut declarations = Vec::new();
+        for (name, value, _) in &tag.attributes {
+            if let Some(prefix) = name.strip_prefix("xmlns:") {
+                declarations.push((prefix, *value));
+            }
+        }
+        let local_name = tag.name.rsplit(':').next()?;
+        if depth == 0 && local_name == "definitions" {
+            target_namespace = tag
+                .attributes
+                .iter()
+                .find(|(name, _, _)| *name == "targetNamespace")
+                .map(|(_, value, _)| *value);
+        }
+        if local_name == "types" && types_depth.is_none() {
+            types_depth = Some(depth);
+        }
+        if types_depth.is_some()
+            && let Some(target) = target_namespace
+        {
+            let in_scope = scopes
+                .iter()
+                .flatten()
+                .copied()
+                .chain(declarations.iter().copied())
+                .collect::<Vec<_>>();
+            let resolve = |prefix: &str| -> Option<&str> {
+                in_scope
+                    .iter()
+                    .rev()
+                    .find(|(declared, _)| *declared == prefix)
+                    .map(|(_, uri)| *uri)
+            };
+            let published_prefix = in_scope
+                .iter()
+                .filter(|(prefix, uri)| {
+                    *uri == target && !prefix.is_empty() && resolve(prefix) == Some(target)
+                })
+                .next_back()
+                .map(|(prefix, _)| *prefix);
+            for (name, value, range) in &tag.attributes {
+                if !WS_DEFINITION_QNAME_ATTRIBUTES.contains(&name.rsplit(':').next()?) {
+                    continue;
+                }
+                let Some((prefix, _)) = value.split_once(':') else {
+                    continue;
+                };
+                if resolve(prefix) != Some(target) {
+                    continue;
+                }
+                let Some(published) = published_prefix.filter(|published| *published != prefix)
+                else {
+                    continue;
+                };
+                edits.push((range.start..range.start + prefix.len(), published));
+            }
+        }
+        if !tag.self_closing {
+            scopes.push(declarations);
+            depth += 1;
+        }
+    }
+    if edits.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(wsdl.len() + edits.len());
+    let mut copied = 0usize;
+    for (range, published) in edits {
+        out.extend_from_slice(text.get(copied..range.start)?.as_bytes());
+        out.extend_from_slice(published.as_bytes());
+        copied = range.end;
+    }
+    out.extend_from_slice(text.get(copied..)?.as_bytes());
+    Some(out)
+}
+
+/// The length of the markup at `rest` that carries no start tag - a processing
+/// instruction, a comment, a CDATA section or a declaration - or `None` when
+/// `rest` opens an element.
+fn ws_definition_skipped_markup_end(rest: &str) -> Option<usize> {
+    for (open, close) in [
+        ("<!--", "-->"),
+        ("<![CDATA[", "]]>"),
+        ("<?", "?>"),
+        ("<!", ">"),
+    ] {
+        if rest.starts_with(open) {
+            return rest[open.len()..]
+                .find(close)
+                .map(|at| open.len() + at + close.len());
+        }
+    }
+    None
+}
+
+/// Reads one tag starting at `start`, with attribute values located by their
+/// own byte ranges. `None` refuses anything this reader cannot spell.
+fn parse_ws_definition_tag(text: &str, start: usize) -> Option<WsDefinitionTag<'_>> {
+    let bytes = text.as_bytes();
+    let mut at = start + 1;
+    let closing = bytes.get(at) == Some(&b'/');
+    if closing {
+        at += 1;
+    }
+    let name_start = at;
+    while bytes
+        .get(at)
+        .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b'>' && *byte != b'/')
+    {
+        at += 1;
+    }
+    let name = text.get(name_start..at)?;
+    if name.is_empty() {
+        return None;
+    }
+    let mut attributes = Vec::new();
+    let mut self_closing = false;
+    loop {
+        while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            at += 1;
+        }
+        match bytes.get(at)? {
+            b'>' => {
+                at += 1;
+                break;
+            }
+            b'/' => {
+                self_closing = true;
+                at += 1;
+                if bytes.get(at)? != &b'>' {
+                    return None;
+                }
+                at += 1;
+                break;
+            }
+            _ => {}
+        }
+        let attribute_start = at;
+        while bytes
+            .get(at)
+            .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b'=')
+        {
+            at += 1;
+        }
+        let attribute = text.get(attribute_start..at)?;
+        if attribute.is_empty() {
+            return None;
+        }
+        while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            at += 1;
+        }
+        if bytes.get(at)? != &b'=' {
+            return None;
+        }
+        at += 1;
+        while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            at += 1;
+        }
+        let quote = *bytes.get(at)?;
+        if quote != b'"' && quote != b'\'' {
+            return None;
+        }
+        at += 1;
+        let value_start = at;
+        while bytes.get(at).is_some_and(|byte| *byte != quote) {
+            at += 1;
+        }
+        let value = text.get(value_start..at)?;
+        attributes.push((attribute, value, value_start..at));
+        at += 1;
+    }
+    Some(WsDefinitionTag {
+        name,
+        closing,
+        self_closing,
+        attributes,
+        end: at,
+    })
+}
+
+/// Splits a `WSReference` body into the WSDL member and its sibling imports.
+///
+/// The body is a Format15 container, not a bare XML blob: its member names are
+/// authoritative, so this reads the declared table of contents instead of
+/// scanning the payload for a `<?xml` marker. Exactly one member must carry
+/// the `.wsdl` extension -- that member becomes `Ext/WSDefinition.xml`; any
+/// other member keeps its own name. A container that does not name exactly one
+/// WSDL member is refused rather than guessed at.
+pub(super) fn ws_reference_definition_members(
+    inflated: &[u8],
+) -> Result<WsReferenceDefinitionMembers> {
+    let elements = crate::v8_container::parse_v8_container(inflated)?;
+    let mut definition = None;
+    let mut imports = Vec::new();
+    for element in elements {
+        if Path::new(&element.name)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(std::ffi::OsStr::new("wsdl")))
+        {
+            if definition.is_some() {
+                bail!(
+                    "web service definition container names more than one WSDL member \
+                     (second is `{}`)",
+                    element.name
+                );
+            }
+            let member = normalize_ws_definition_own_namespace_prefixes(&element.data)
+                .unwrap_or(element.data);
+            let mut content = Vec::with_capacity(3 + member.len());
+            content.extend_from_slice(b"\xEF\xBB\xBF");
+            content.extend_from_slice(&member);
+            definition = Some(content);
+            continue;
+        }
+        if Path::new(&element.name).file_name() != Some(std::ffi::OsStr::new(&element.name)) {
+            bail!(
+                "web service definition container member `{}` is not a plain file name",
+                element.name
+            );
+        }
+        imports.push((element.name, element.data));
+    }
+    let definition = definition
+        .ok_or_else(|| anyhow!("web service definition container names no WSDL member"))?;
+    Ok(WsReferenceDefinitionMembers {
+        definition,
+        imports,
+    })
 }
 
 pub(super) fn write_source_xml_file(
@@ -1029,8 +1855,10 @@ pub(super) fn write_source_asset(
     bytes: &[u8],
     parsed_form_body: Option<&ParsedFormBodyBlob>,
     timings: &mut MssqlDumpTimingReport,
-) -> Result<PathBuf> {
+) -> Result<WrittenSourceAsset> {
     let output_dir = context.output_dir;
+    let mut diagnostics = Vec::new();
+    let mut opaque_not_emitted = false;
     match &asset.kind {
         SourceAssetKind::ExtPicture => {
             let picture = extract_ext_picture(bytes).with_context(|| {
@@ -1093,12 +1921,13 @@ pub(super) fn write_source_asset(
             write_source_xml_file(&path, xml, context.source_version)?;
         }
         SourceAssetKind::StyleBody => {
-            let xml = extract_style_body_xml(bytes, context.object_refs).with_context(|| {
-                format!(
-                    "failed to extract style body from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+            let xml = extract_style_body_xml(bytes, context.object_refs, context.source_version)
+                .with_context(|| {
+                    format!(
+                        "failed to extract style body from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1120,47 +1949,93 @@ pub(super) fn write_source_asset(
                 })?;
                 &owned_body
             };
+            let adapter = MssqlLegacyAdapter::from_legacy_selector(context.source_version);
+            let dcs_target_profile =
+                ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
+                    .expect("legacy source-version profiles are valid");
             let form_context = FormParseContext::new(
                 context.type_index,
+                context.type_index_collisions,
                 context.dcs_type_index,
-                context.object_refs,
+                context.form_object_refs,
+                context.field_type_refs,
                 context.information_register_field_refs,
+                context.information_register_master_dimensions,
                 owner_reference.as_deref(),
-            );
-            let xml = extract_form_body_xml_from_body_timed(
-                body,
-                &form_context,
-                Some(timings),
             )
-            .with_context(|| {
-                format!(
-                    "failed to extract form xml from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
-            let path = output_dir.join(&asset.primary_path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
-            }
-            write_source_xml_file(&path, xml, context.source_version)?;
-            timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
+            .with_form_reference_index(context.role_rights_object_refs)
+            .with_metadata_command_refs(context.metadata_refs)
+            .with_metadata_command_facts(context.metadata_command_facts)
+            .with_metadata_field_declarations(context.metadata_field_declarations)
+            .with_dcs_profiles(adapter.provider_id().clone(), dcs_target_profile);
+            let extraction =
+                extract_form_body_xml_from_body_detailed_timed(body, &form_context, Some(timings))
+                    .with_context(|| {
+                        format!(
+                            "failed to extract form xml from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
+            match extraction {
+                DetailedFormBodyExtraction::Emitted {
+                    xml,
+                    diagnostics: extraction_diagnostics,
+                } => {
+                    diagnostics = extraction_diagnostics;
+                    let path = output_dir.join(&asset.primary_path);
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| format!("failed to create {}", parent.display()))?;
+                    }
+                    write_source_xml_file(&path, xml, context.source_version)?;
 
-            let form_items_started = Instant::now();
-            for item_asset in extract_form_item_assets(bytes) {
-                let item_path = output_dir
-                    .join(asset.primary_path.with_extension(""))
-                    .join("Items")
-                    .join(sanitize_source_path_segment(&item_asset.item_name))
-                    .join(&item_asset.file_name);
-                if let Some(parent) = item_path.parent() {
-                    fs::create_dir_all(parent)
-                        .with_context(|| format!("failed to create {}", parent.display()))?;
+                    let form_items_started = Instant::now();
+                    for item_asset in extract_form_item_assets(bytes) {
+                        let item_path = output_dir
+                            .join(asset.primary_path.with_extension(""))
+                            .join("Items")
+                            .join(sanitize_source_path_segment(&item_asset.item_name))
+                            .join(&item_asset.file_name);
+                        if let Some(parent) = item_path.parent() {
+                            fs::create_dir_all(parent).with_context(|| {
+                                format!("failed to create {}", parent.display())
+                            })?;
+                        }
+                        fs::write(&item_path, &item_asset.content)
+                            .with_context(|| format!("failed to write {}", item_path.display()))?;
+                    }
+                    timings.source_asset_form_items_cpu_ms += elapsed_ms(form_items_started);
                 }
-                fs::write(&item_path, &item_asset.content)
-                    .with_context(|| format!("failed to write {}", item_path.display()))?;
+                DetailedFormBodyExtraction::OpaqueNotEmitted {
+                    diagnostics: extraction_diagnostics,
+                } => {
+                    debug_assert!(!extraction_diagnostics.is_empty());
+                    diagnostics = extraction_diagnostics;
+                    opaque_not_emitted = true;
+                }
+                DetailedFormBodyExtraction::Rejected {
+                    diagnostics: extraction_diagnostics,
+                    error,
+                } => {
+                    if context.collect_all_source_asset_diagnostics
+                        && !extraction_diagnostics.is_empty()
+                    {
+                        return Ok(WrittenSourceAsset::RejectedNotEmitted {
+                            primary_path: asset.primary_path.clone(),
+                            diagnostics: extraction_diagnostics,
+                        });
+                    }
+                    let diagnostic_codes = extraction_diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.code)
+                        .collect::<Vec<_>>();
+                    bail!(
+                        "form source asset {} was rejected: {error:?}; diagnostics={diagnostic_codes:?}",
+                        asset.primary_path.display()
+                    );
+                }
             }
-            timings.source_asset_form_items_cpu_ms += elapsed_ms(form_items_started);
+            timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
         }
         SourceAssetKind::Help => {
             let help = parse_help_blob(bytes).with_context(|| {
@@ -1213,13 +2088,33 @@ pub(super) fn write_source_asset(
                     asset.primary_path.display()
                 )
             })?;
-            let inflated = body.plaintext().to_vec();
-            let content = normalize_data_composition_schema_template_xml(
-                &inflated,
-                context.dcs_type_index,
-                context.object_refs,
-            )
-            .unwrap_or(inflated);
+            let adapter = MssqlLegacyAdapter::from_legacy_selector(context.source_version);
+            let target_profile =
+                ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
+                    .expect("legacy source-version profiles are valid");
+            let content = match body.layout() {
+                crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument => {
+                    let documents = body.documents();
+                    crate::mssql_dump::dcs::normalize_data_composition_schema_template_documents_with_profiles(
+                        &documents,
+                        context.dcs_type_index,
+                        context.object_refs,
+                        adapter.provider_id(),
+                        &target_profile,
+                    )
+                    // The typed step-level reason travels out as this error's
+                    // source, so `{error:#}` in the failed-row ledger names the
+                    // stage that rejected the template instead of reporting a
+                    // bare "failed to normalize".
+                    .with_context(|| {
+                        format!(
+                            "failed to normalize native data-composition source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?
+                }
+                crate::compiler::bodies::dcs::DcsBodyLayout::DirectXml => body.plaintext().to_vec(),
+            };
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1234,22 +2129,48 @@ pub(super) fn write_source_asset(
                     asset.primary_path.display()
                 )
             })?;
-            let content = extract_ws_definition_xml(&inflated).unwrap_or(inflated);
+            let members = ws_reference_definition_members(&inflated).with_context(|| {
+                format!(
+                    "failed to read web service definition container for source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            let directory = path
+                .parent()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "web service definition asset {} has no parent directory",
+                        asset.primary_path.display()
+                    )
+                })?
+                .to_path_buf();
+            fs::create_dir_all(&directory)
+                .with_context(|| format!("failed to create {}", directory.display()))?;
+            write_source_xml_file(&path, members.definition, context.source_version)?;
+            // Imported schemas travel inside the very same container as the
+            // WSDL and are written out verbatim under their own member names
+            // -- no BOM, no dialect rewrite. Census over the whole corpus (five
+            // `WSReference` bodies, `uh` + `ut`): four containers carry the
+            // single `0.wsdl` member and write only `Ext/WSDefinition.xml`;
+            // `uh`'s `WSСборОтчетностиРосстата` carries `0.wsdl` plus
+            // `1.xsd`..`4.xsd` and the platform emits all four beside it, each
+            // byte-identical to the stored member payload.
+            for (member_name, member_bytes) in members.imports {
+                let member_path = directory.join(&member_name);
+                fs::write(&member_path, member_bytes)
+                    .with_context(|| format!("failed to write {}", member_path.display()))?;
             }
-            write_source_xml_file(&path, content, context.source_version)?;
         }
         SourceAssetKind::HomePageWorkArea => {
             let work_area =
-                parse_home_page_work_area_blob(bytes, context.form_refs).with_context(|| {
-                    format!(
-                        "failed to extract home page work area from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+                parse_home_page_work_area_blob(bytes, context.form_refs, context.metadata_refs)
+                    .with_context(|| {
+                        format!(
+                            "failed to extract home page work area from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1305,6 +2226,12 @@ pub(super) fn write_source_asset(
             }
             write_source_xml_file(&path, xml, context.source_version)?;
         }
+        SourceAssetKind::UndeclaredFormType => {
+            bail!(
+                "form source asset {} declares no form-type discriminator",
+                asset.primary_path.display()
+            );
+        }
         SourceAssetKind::InflatedBinary => {
             let inflated = inflate_raw_deflate(bytes).with_context(|| {
                 format!(
@@ -1350,7 +2277,7 @@ pub(super) fn write_source_asset(
                     .with_context(|| format!("failed to write {}", path.display()))?;
             }
         }
-        SourceAssetKind::PredefinedData { model } => {
+        SourceAssetKind::PredefinedData { model, owner_uuid } => {
             let items = parse_predefined_data_blob_with_model(bytes, context.type_index, *model)
                 .with_context(|| {
                     format!(
@@ -1358,11 +2285,36 @@ pub(super) fn write_source_asset(
                         asset.primary_path.display()
                     )
                 })?;
+            let chart_names = match model.item_layout {
+                PredefinedItemLayout::Account => Some(
+                    context
+                        .metadata_texts_by_file_name
+                        .get(owner_uuid.as_str())
+                        .with_context(|| {
+                            format!("no metadata text for chart of accounts {owner_uuid}")
+                        })
+                        .and_then(|row| {
+                            chart_of_accounts_predefined_names(
+                                &row.text,
+                                owner_uuid,
+                                context.object_refs,
+                            )
+                        })
+                        .with_context(|| {
+                            format!(
+                                "failed to read declared names for source asset {}",
+                                asset.primary_path.display()
+                            )
+                        })?,
+                ),
+                _ => None,
+            };
             let xml = format_predefined_data_xml(
                 *model,
                 &items,
                 context.object_refs,
                 context.predefined_item_refs,
+                chart_names.as_ref(),
             )
             .with_context(|| {
                 format!(
@@ -1445,10 +2397,40 @@ pub(super) fn write_source_asset(
                 context.source_version,
             )?;
         }
+        SourceAssetKind::AdditionalIndexes { owner } => {
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let indexes = super::additional_indexes::parse_additional_indexes(
+                &inflated,
+                owner,
+                context.object_refs,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract additional indexes from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            write_source_xml_file(
+                &path,
+                super::additional_indexes::format_additional_indexes_xml(&indexes),
+                context.source_version,
+            )?;
+        }
         SourceAssetKind::BusinessProcessFlowchart => {
             let flowchart = parse_business_process_flowchart_blob(
                 bytes,
                 context.object_refs,
+                context.metadata_object_refs,
                 context.type_index,
                 context.type_index_collisions,
             )
@@ -1468,15 +2450,70 @@ pub(super) fn write_source_asset(
                 format_business_process_flowchart_xml(&flowchart),
                 context.source_version,
             )?;
+            write_graphical_scheme_pictures(&path, &flowchart)?;
         }
-        SourceAssetKind::MoxelSpreadsheet => {
-            let xml =
-                extract_moxel_spreadsheet_xml(bytes, context.object_refs).with_context(|| {
+        SourceAssetKind::TemplateGraphicalScheme => {
+            // A standalone `GraphicalSchema` Template body comes in one of
+            // two representations: some are already pre-serialized XML
+            // after raw-deflate (the `8.3/xcf/scheme` marker `refs::
+            // infer_template_type_from_body` checks first), which just
+            // needs the same passthrough `InflatedBinary` uses. Others are
+            // the platform's brace-tuple grammar -- the exact same one
+            // `BusinessProcess.Flowchart`'s `Ext/Flowchart.xml` decodes via
+            // `parse_business_process_flowchart_blob` above; see `mod::
+            // flowchart_grammar_fields`'s doc comment for how the two
+            // classes were told apart on real ERP UH bytes. There is no
+            // third option: a body that is neither is a typed failure here,
+            // not a silent default -- the defect this asset kind exists to
+            // fix (`output-path-collisions-and-module-text-fallback-
+            // 20260825.md` section 4) was exactly a silent default in the
+            // other direction (misclassified as `TextDocument`).
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            let text = std::str::from_utf8(&inflated)
+                .ok()
+                .map(|text| text.trim_start_matches('\u{feff}').trim_start())
+                .filter(|text| looks_like_graphical_scheme_blob_text(text));
+            if let Some(text) = text {
+                let flowchart = parse_business_process_flowchart_text_with_types(
+                    text,
+                    context.object_refs,
+                    context.metadata_object_refs,
+                    context.type_index,
+                    context.type_index_collisions,
+                )
+                .with_context(|| {
                     format!(
-                        "failed to extract spreadsheet template from source asset {}",
+                        "failed to extract graphical scheme from source asset {}",
                         asset.primary_path.display()
                     )
                 })?;
+                write_source_xml_file(
+                    &path,
+                    format_business_process_flowchart_xml(&flowchart),
+                    context.source_version,
+                )?;
+                write_graphical_scheme_pictures(&path, &flowchart)?;
+            } else {
+                write_source_xml_file(&path, inflated, context.source_version)?;
+            }
+        }
+        SourceAssetKind::MoxelSpreadsheet => {
+            let xml = extract_moxel_source_asset_xml(
+                bytes,
+                context.object_refs,
+                context.moxel_generated_types,
+                &asset.primary_path,
+            )?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1486,7 +2523,90 @@ pub(super) fn write_source_asset(
         }
     }
 
-    Ok(asset.primary_path.clone())
+    if opaque_not_emitted {
+        Ok(WrittenSourceAsset::OpaqueNotEmitted {
+            primary_path: asset.primary_path.clone(),
+            diagnostics,
+        })
+    } else {
+        Ok(WrittenSourceAsset::Emitted {
+            primary_path: asset.primary_path.clone(),
+            diagnostics,
+        })
+    }
+}
+
+/// Publishes the pictures a graphical scheme carries inline. The platform
+/// puts each beside the scheme file, under the scheme's own stem:
+/// `<stem>/Items/<item name>/Picture.<ext>`. Evidence: ERP УХ
+/// `DataProcessors/ВыполнениеМаршрутныхЛистов/Templates/МетодикаББВ/Ext/
+/// Template/Items/Декорация11/Picture.png` and the 69 other inline pictures
+/// of that corpus.
+fn write_graphical_scheme_pictures(
+    scheme_path: &Path,
+    flowchart: &BusinessProcessFlowchart,
+) -> Result<()> {
+    let pictures = flowchart.picture_files();
+    if pictures.is_empty() {
+        return Ok(());
+    }
+    let stem = scheme_path.with_extension("");
+    for (item_name, file_name, data) in pictures {
+        if item_name.is_empty() || item_name.contains(['/', '\\']) {
+            bail!(
+                "graphical scheme item name {item_name:?} cannot name a picture directory beside {}",
+                scheme_path.display()
+            );
+        }
+        let directory = stem.join("Items").join(&item_name);
+        fs::create_dir_all(&directory)
+            .with_context(|| format!("failed to create {}", directory.display()))?;
+        let file = directory.join(&file_name);
+        fs::write(&file, &data).with_context(|| format!("failed to write {}", file.display()))?;
+    }
+    Ok(())
+}
+
+fn extract_moxel_source_asset_xml(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+    source_path: &Path,
+) -> Result<String> {
+    try_extract_moxel_spreadsheet_xml_with_generated_types(bytes, object_refs, generated_types)
+        .with_context(|| {
+            format!(
+                "failed to extract spreadsheet template from source asset {}",
+                source_path.display()
+            )
+        })
+}
+
+#[cfg(test)]
+mod mxl_source_asset_tests {
+    use super::*;
+
+    #[test]
+    fn typed_mxl_diagnostic_survives_source_asset_context() {
+        let error = extract_moxel_source_asset_xml(
+            &[0],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Path::new("Templates/Example/Ext/Template.xml"),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to extract spreadsheet template from source asset")
+        );
+        let diagnostic = error
+            .chain()
+            .find_map(|source| source.downcast_ref::<MxlDiagnostic>())
+            .expect("typed MXL diagnostic must remain in the anyhow error chain");
+        assert_eq!(diagnostic.stage(), MxlDiagnosticStage::Decoder);
+        assert_eq!(diagnostic.code(), "mxl.decoder.binary-container");
+    }
 }
 
 pub(super) struct HelpPage {
@@ -1835,6 +2955,7 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
         return content.to_vec();
     };
     let text = rewrite_help_picture_refs(text, refs);
+    let text = rewrite_help_attachment_folder_refs(&text);
     let pattern = "../id";
     let mut output = String::with_capacity(text.len());
     let mut offset = 0usize;
@@ -1843,17 +2964,30 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
         let start = offset + relative_start;
         let uuid_start = start + pattern.len();
         let uuid_end = uuid_start + 36;
-        let Some(uuid) = text.get(uuid_start..uuid_end) else {
-            break;
-        };
-        if parse_non_zero_uuid(uuid).is_none()
+        // A `../id…` that is not followed by a uuid is not the end of the
+        // document, it is just not a link this rewrite owns. The 36-byte
+        // window can also land inside a multi-byte character -- `../idn0"`
+        // followed by Cyrillic link text does exactly that, and Документооборот
+        // КОРП 3.0.21.3's `CommonForms/ВводПароляСОписаниями` help page has
+        // one before two real links, which the old `break` then left
+        // unrewritten along with the whole rest of the page.
+        let uuid = text.get(uuid_start..uuid_end);
+        if uuid.is_none_or(|uuid| parse_non_zero_uuid(uuid).is_none())
             || text.as_bytes().get(uuid_end).copied() != Some(b'/')
         {
             output.push_str(&text[offset..uuid_start]);
             offset = uuid_start;
             continue;
         }
-        let Some(reference) = refs.get(uuid) else {
+        let Some(uuid) = uuid else {
+            output.push_str(&text[offset..uuid_start]);
+            offset = uuid_start;
+            continue;
+        };
+        let Some(reference) = refs
+            .get(uuid)
+            .filter(|_| help_link_marker_is_anchor(&text, start))
+        else {
             output.push_str(&text[offset..uuid_end]);
             offset = uuid_end;
             continue;
@@ -1865,10 +2999,46 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
         output.push_str(&text[offset..start]);
         output.push_str(reference);
         output.push_str("/Help");
+        // A stored help link may address an anchor inside the target page
+        // (`../id<uuid>/<page>#<anchor>`). The platform keeps that fragment on
+        // the rewritten `<Reference>/Help` link; only the storage path in front
+        // of it is replaced.
+        if let Some(relative_fragment) = text[uuid_end..quote_end].find('#') {
+            output.push_str(&text[uuid_end + relative_fragment..quote_end]);
+        }
         offset = quote_end;
     }
     output.push_str(&text[offset..]);
     output.replace("\r\n", "\n").into_bytes()
+}
+
+/// Whether a stored `../id…` marker sits inside an `<a …>` start tag.
+///
+/// The platform requalifies a stored help link to `<Reference>/Help` only on an
+/// anchor. Census of the whole stand (ERP УХ, UT, Документооборот, БСП demo and
+/// base): of 20 322 requalified `…/Help` links every single one is on an `<a>`,
+/// and of the 442 markers the platform left raw, 316 are on an `<area>` inside
+/// an image map -- not one `<area>` anywhere carries a requalified link. Our
+/// rewriter was attribute-blind and requalified whichever markers it could
+/// resolve, so an image map with a resolvable target lost its raw link: 27 pages
+/// of ERP УХ 3.2.12.6 (`DataProcessors/СхемыСправки` and its forms,
+/// `DataProcessors/УправлениеОтклонениями`, two
+/// `Documents/ВерсияСоглашения*`) differ for that reason alone.
+fn help_link_marker_is_anchor(text: &str, marker_start: usize) -> bool {
+    let Some(tag_start) = text[..marker_start].rfind('<') else {
+        return false;
+    };
+    // A `>` between the tag's own `<` and the marker means the marker is in
+    // element content, not in that start tag's attributes.
+    if text[tag_start..marker_start].contains('>') {
+        return false;
+    }
+    let mut name = text[tag_start + 1..marker_start].chars();
+    name.next()
+        .is_some_and(|first| first.eq_ignore_ascii_case(&'a'))
+        && name
+            .next()
+            .is_some_and(|second| second.is_whitespace() || second == '>' || second == '/')
 }
 
 pub(super) fn rewrite_help_picture_refs(text: &str, refs: &BTreeMap<String, String>) -> String {
@@ -1894,6 +3064,44 @@ pub(super) fn rewrite_help_picture_refs(text: &str, refs: &BTreeMap<String, Stri
     output
 }
 
+/// Help and HTML-document attachments are exported into a single `_files`
+/// directory beside the page, which this exporter already writes. Inside the
+/// stored HTML the platform still addresses that directory through the storage
+/// identifier of the owning document (`src="<uuid>_files/name.png"`); the
+/// exported page addresses it relatively (`src="_files/name.png"`). Only an
+/// attribute value that starts with a non-nil UUID immediately followed by
+/// `_files/` is requalified; every other occurrence is copied through.
+pub(super) fn rewrite_help_attachment_folder_refs(text: &str) -> String {
+    const MARKER: &str = "_files/";
+    const ATTRIBUTE_PREFIX: &str = "=\"";
+    const UUID_LEN: usize = 36;
+    const QUALIFIER_LEN: usize = ATTRIBUTE_PREFIX.len() + UUID_LEN;
+
+    let mut output = String::with_capacity(text.len());
+    let mut offset = 0usize;
+
+    while let Some(relative_start) = text[offset..].find(MARKER) {
+        let marker_start = offset + relative_start;
+        let qualified = marker_start >= offset + QUALIFIER_LEN
+            && text.get(marker_start - QUALIFIER_LEN..marker_start - UUID_LEN)
+                == Some(ATTRIBUTE_PREFIX)
+            && text
+                .get(marker_start - UUID_LEN..marker_start)
+                .and_then(parse_non_zero_uuid)
+                .is_some();
+        let copy_end = if qualified {
+            marker_start - UUID_LEN
+        } else {
+            marker_start
+        };
+        output.push_str(&text[offset..copy_end]);
+        output.push_str(MARKER);
+        offset = marker_start + MARKER.len();
+    }
+    output.push_str(&text[offset..]);
+    output
+}
+
 fn resolve_help_picture_reference(token: &str, refs: &BTreeMap<String, String>) -> Option<String> {
     if let Some(index) = token.strip_prefix("idn-") {
         return help_standard_picture_by_negative_index(index).map(str::to_string);
@@ -1907,7 +3115,7 @@ fn resolve_help_picture_reference(token: &str, refs: &BTreeMap<String, String>) 
     {
         return Some(reference.clone());
     }
-    common_command_standard_picture_name(uuid).map(str::to_string)
+    standard_picture_name(uuid).map(str::to_string)
 }
 
 fn help_standard_picture_by_negative_index(index: &str) -> Option<&'static str> {
@@ -1945,7 +3153,7 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
             root_tag: "1",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
             unwrap_single_root: true,
-            item_layout: PredefinedItemLayout::Generic,
+            item_layout: PredefinedItemLayout::Characteristic,
         },
     ),
     (
@@ -2061,6 +3269,67 @@ pub(super) fn build_predefined_item_reference_index(
     Ok(index)
 }
 
+/// Predefined-item references for every owner that stores predefined data.
+///
+/// [`build_predefined_item_reference_index`] is built for the owners whose own
+/// XML needs the names; a form names a predefined item of *any* object, so this
+/// one walks every owner that has a predefined-data body.  An owner the
+/// reference index does not name, a body the blob reader does not read and a
+/// collision inside one owner are all skipped rather than fatal: a form that
+/// cannot resolve its reference keeps the raw identifiers the platform itself
+/// keeps for an unresolvable one.
+pub(super) fn build_form_predefined_item_reference_index(
+    rows: &[ConfigRow],
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let rows_by_file_name = rows
+        .iter()
+        .filter(|row| !row.binary_hex.is_empty())
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let mut index = BTreeMap::new();
+    for (owner_uuid, owner) in body_owners {
+        let Some(model) = predefined_data_source_model(&owner.kind) else {
+            continue;
+        };
+        let Some(suffix) = predefined_data_suffix(&owner.kind) else {
+            continue;
+        };
+        let Some(row) = rows_by_file_name.get(format!("{owner_uuid}.{suffix}").as_str()) else {
+            continue;
+        };
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some(items) = parse_predefined_data_blob_with_model(&bytes, type_index, model) else {
+            continue;
+        };
+        let Some(owner_reference) = object_refs.get(owner_uuid) else {
+            continue;
+        };
+        let mut ambiguous_item_ids = BTreeSet::new();
+        let mut owner_index = BTreeMap::new();
+        if insert_predefined_item_references(
+            &mut owner_index,
+            &mut ambiguous_item_ids,
+            owner_reference,
+            &items,
+        )
+        .is_err()
+        {
+            continue;
+        }
+        for (key, reference) in owner_index {
+            if metadata_owner_value_reference_key_parts(&key).is_some() {
+                index.insert(key, reference);
+            }
+        }
+    }
+    index
+}
+
 pub(super) fn insert_predefined_item_references(
     index: &mut BTreeMap<String, String>,
     ambiguous_item_ids: &mut BTreeSet<String>,
@@ -2140,7 +3409,7 @@ fn parse_predefined_data_blob_inner(
     };
 
     match model.item_layout {
-        PredefinedItemLayout::Generic => {
+        PredefinedItemLayout::Generic | PredefinedItemLayout::Characteristic => {
             let root_items = parse_predefined_rowset_roots(rowset_value, type_index)?;
             if model.unwrap_single_root {
                 let [root_item] = root_items.as_slice() else {
@@ -2284,6 +3553,32 @@ fn predefined_rowset_item_value<'a>(
     fields.get(3usize.checked_add(value_offset)?).copied()
 }
 
+/// The value a row stores for `column_id`, distinguishing "the row declares no
+/// value that far" from "there is no such column".
+///
+/// A row carries its own value count in field 2 and may stop short of the
+/// schema: the seed `accflag-seed1` -- three declared accounting flags, a
+/// twelve-column schema -- stores eleven values, and the platform exports the
+/// twelfth column's flag as `false`. Every synthetic `Счета` root row of the
+/// stand is truncated the same way.
+///
+/// * `None` -- the schema has no such column;
+/// * `Some(None)` -- the column exists and the row's declared count stops
+///   before it;
+/// * `Some(Some(value))` -- the stored value.
+fn predefined_rowset_stored_value<'a>(
+    fields: &[&'a str],
+    schema: &PredefinedRowsetSchema,
+    column_id: i64,
+) -> Option<Option<&'a str>> {
+    let value_offset = *schema.value_offsets.get(&column_id)?;
+    let declared_values = fields.get(2)?.trim().parse::<usize>().ok()?;
+    if value_offset >= declared_values {
+        return Some(None);
+    }
+    Some(Some(*fields.get(3usize.checked_add(value_offset)?)?))
+}
+
 fn parse_predefined_item_list(
     value: &str,
     mut parse_item: impl FnMut(&str) -> Option<PredefinedItem>,
@@ -2347,8 +3642,14 @@ fn parse_account_predefined_item(
         parse_predefined_ext_dimension_types(predefined_rowset_item_value(&fields, schema, 6)?)?;
     let order =
         parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 10_000)?)?;
-    if parse_predefined_number_value(predefined_rowset_item_value(&fields, schema, 20_000)?)? != 0 {
-        return None;
+    // Column 20000 carries no exported property and is `0` wherever it is
+    // stored. `uh` `МСФО` and `Международный` declare no such column at all,
+    // and their `Ext/Predefined.xml` is the same shape as the charts that do:
+    // its absence is not a missing property, so it is not a refusal.
+    match predefined_rowset_stored_value(&fields, schema, 20_000) {
+        None | Some(None) => {}
+        Some(Some(value)) if parse_predefined_number_value(value)? == 0 => {}
+        Some(Some(_)) => return None,
     }
 
     let accounting_flags = parse_predefined_dynamic_flags(&fields, schema, FIXED_COLUMNS)?;
@@ -2386,11 +3687,16 @@ fn parse_predefined_dynamic_flags(
             if !column.is_boolean {
                 return None;
             }
+            let value = match predefined_rowset_stored_value(fields, schema, column.id)? {
+                Some(value) => parse_predefined_bool_value(value)?,
+                // The row's own declared value count stops before this
+                // column. Measured on `accflag-seed1`: the platform writes
+                // `false` for exactly that flag.
+                None => false,
+            };
             Some(PredefinedFlag {
                 reference_uuid: column.reference_uuid.clone()?,
-                value: parse_predefined_bool_value(predefined_rowset_item_value(
-                    fields, schema, column.id,
-                )?)?,
+                value,
             })
         })
         .collect()
@@ -2721,11 +4027,17 @@ mod predefined_code_tests {
             data,
             children: Vec::new(),
         };
+        let chart_names = ChartOfAccountsPredefinedNames {
+            ext_dimension_types_owner: "ChartOfCharacteristicTypes.Субконто".to_string(),
+            accounting_flags: Vec::new(),
+            ext_dimension_accounting_flags: Vec::new(),
+        };
         format_predefined_data_xml(
             predefined_data_source_model(kind).unwrap(),
             &[item],
             &BTreeMap::new(),
             &BTreeMap::new(),
+            Some(&chart_names),
         )
         .unwrap()
     }
@@ -2745,6 +4057,7 @@ mod predefined_code_tests {
             &[item],
             &BTreeMap::new(),
             &BTreeMap::new(),
+            None,
         )
         .unwrap();
 
@@ -2754,19 +4067,15 @@ mod predefined_code_tests {
     #[test]
     fn all_predefined_layouts_preserve_numeric_and_text_code_representation() {
         for kind in ["Catalog", "ChartOfAccounts", "ChartOfCalculationTypes"] {
-            let numeric = format_item_code(
-                kind,
-                parse_predefined_code_value(r#"{"N",0}"#).unwrap(),
-            );
+            let numeric =
+                format_item_code(kind, parse_predefined_code_value(r#"{"N",0}"#).unwrap());
             assert!(
                 numeric.contains(r#"<Code xsi:type="xs:decimal">0</Code>"#),
                 "{kind}: {numeric}"
             );
 
-            let text = format_item_code(
-                kind,
-                parse_predefined_code_value(r#"{"S","A01"}"#).unwrap(),
-            );
+            let text =
+                format_item_code(kind, parse_predefined_code_value(r#"{"S","A01"}"#).unwrap());
             assert!(text.contains("<Code>A01</Code>"), "{kind}: {text}");
             assert!(!text.contains(r#"<Code xsi:type="#), "{kind}: {text}");
         }
@@ -2998,17 +4307,60 @@ pub(super) fn format_help_xml(pages: &[HelpPage]) -> String {
     xml
 }
 
+/// What a chart of accounts' own record says about the names its predefined
+/// data has to spell out: the two flag collections in declaration order, and
+/// the chart of characteristic types its ext dimensions come from.
+pub(super) struct ChartOfAccountsPredefinedNames {
+    ext_dimension_types_owner: String,
+    accounting_flags: Vec<(String, String)>,
+    ext_dimension_accounting_flags: Vec<(String, String)>,
+}
+
+pub(super) fn chart_of_accounts_predefined_names(
+    text: &str,
+    owner_uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<ChartOfAccountsPredefinedNames> {
+    let ext_dimension_types_owner =
+        crate::mssql_dump::refs::chart_of_accounts_ext_dimension_types_reference(text, object_refs)
+            .with_context(|| {
+                format!("chart of accounts {owner_uuid} does not name its ext dimension types")
+            })?;
+    let named = |family: crate::mssql_dump::refs::ChartOfAccountsFlagFamily| {
+        crate::mssql_dump::refs::chart_of_accounts_declared_flag_uuids(text, owner_uuid, family)
+            .into_iter()
+            .map(|uuid| {
+                let reference = object_refs.get(&uuid).with_context(|| {
+                    format!("missing metadata reference for declared {family:?} flag {uuid}")
+                })?;
+                Ok((uuid, reference.clone()))
+            })
+            .collect::<Result<Vec<_>>>()
+    };
+    Ok(ChartOfAccountsPredefinedNames {
+        ext_dimension_types_owner,
+        accounting_flags: named(crate::mssql_dump::refs::ChartOfAccountsFlagFamily::Accounting)?,
+        ext_dimension_accounting_flags: named(
+            crate::mssql_dump::refs::ChartOfAccountsFlagFamily::ExtDimensionAccounting,
+        )?,
+    })
+}
+
 pub(super) fn format_predefined_data_xml(
     model: PredefinedDataSourceModel,
     items: &[PredefinedItem],
     object_refs: &BTreeMap<String, String>,
     predefined_item_refs: &BTreeMap<String, String>,
+    chart_names: Option<&ChartOfAccountsPredefinedNames>,
 ) -> Result<String> {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <PredefinedData xmlns=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"{}\" version=\"2.20\">\r\n",
         escape_xml_text(model.xsi_type)
     );
+    if matches!(model.item_layout, PredefinedItemLayout::Account) && chart_names.is_none() {
+        bail!("chart of accounts predefined data without its owner's declared names");
+    }
     for item in items {
         push_predefined_item_xml(
             &mut xml,
@@ -3016,6 +4368,7 @@ pub(super) fn format_predefined_data_xml(
             model.item_layout,
             object_refs,
             predefined_item_refs,
+            chart_names,
             1,
         )?;
     }
@@ -3029,6 +4382,7 @@ pub(super) fn push_predefined_item_xml(
     layout: PredefinedItemLayout,
     object_refs: &BTreeMap<String, String>,
     predefined_item_refs: &BTreeMap<String, String>,
+    chart_names: Option<&ChartOfAccountsPredefinedNames>,
     indent: usize,
 ) -> Result<()> {
     let tab = "\t".repeat(indent);
@@ -3057,9 +4411,14 @@ pub(super) fn push_predefined_item_xml(
                 value_types,
                 is_folder,
             },
-            PredefinedItemLayout::Generic,
+            PredefinedItemLayout::Generic | PredefinedItemLayout::Characteristic,
         ) => {
-            xml.push_str(&format_predefined_type_xml(value_types, indent + 1));
+            let type_xml = format_predefined_type_xml(value_types, indent + 1);
+            if type_xml.is_empty() && matches!(layout, PredefinedItemLayout::Characteristic) {
+                xml.push_str(&format!("{tab}\t<Type/>\r\n"));
+            } else {
+                xml.push_str(&type_xml);
+            }
             xml.push_str(&format!(
                 "{tab}\t<IsFolder>{}</IsFolder>\r\n",
                 xml_bool(*is_folder)
@@ -3087,11 +4446,23 @@ pub(super) fn push_predefined_item_xml(
                 xml_bool(*off_balance),
                 escape_xml_text(order),
             ));
-            push_predefined_flags_xml(xml, accounting_flags, object_refs, indent + 1)?;
+            let chart_names = chart_names.with_context(|| {
+                format!(
+                    "predefined account {} without its chart's declared names",
+                    item.id
+                )
+            })?;
+            push_predefined_flags_xml(
+                xml,
+                "AccountingFlags",
+                &chart_names.accounting_flags,
+                accounting_flags,
+                indent + 1,
+            )?;
             push_predefined_ext_dimension_types_xml(
                 xml,
                 ext_dimension_types,
-                object_refs,
+                chart_names,
                 predefined_item_refs,
                 indent + 1,
             )?;
@@ -3146,6 +4517,7 @@ pub(super) fn push_predefined_item_xml(
                 layout,
                 object_refs,
                 predefined_item_refs,
+                chart_names,
                 indent + 2,
             )?;
         }
@@ -3166,38 +4538,72 @@ fn push_predefined_text_element(xml: &mut String, tab: &str, name: &str, value: 
     }
 }
 
+/// Writes one `<AccountingFlags>` block against the owner's *declared* flags.
+///
+/// The stored rowset is not the authority for which flags exist, only for
+/// their values: `uh` `МСФО` declares four accounting flags and stores columns
+/// for two, `Международный` declares four and stores three, and both export
+/// all four -- the ones with no column as `false`, each at its declaration
+/// position. `Хозрасчетный` and `ssl` `_ДемоОсновной` store a column for every
+/// declared flag and export them in the same order. A stored column the owner
+/// no longer declares is unobserved on the stand and refuses the file rather
+/// than being named or dropped.
 fn push_predefined_flags_xml(
     xml: &mut String,
-    flags: &[PredefinedFlag],
-    object_refs: &BTreeMap<String, String>,
+    element_name: &str,
+    declared: &[(String, String)],
+    stored: &[PredefinedFlag],
     indent: usize,
 ) -> Result<()> {
-    if flags.is_empty() {
+    let mut declared_positions = BTreeMap::new();
+    for (position, (uuid, _)) in declared.iter().enumerate() {
+        declared_positions.insert(uuid.as_str(), position);
+    }
+    let mut previous = None;
+    let mut values = BTreeMap::new();
+    for flag in stored {
+        let position = declared_positions
+            .get(flag.reference_uuid.as_str())
+            .copied()
+            .with_context(|| {
+                format!(
+                    "stored predefined flag {} is not declared by its owner",
+                    flag.reference_uuid
+                )
+            })?;
+        // Every stored column list of the stand runs in declaration order, and
+        // a re-imported seed rebuilds it that way. A rowset that disagrees
+        // would leave the emitted order unmeasured, so it refuses.
+        if previous.is_some_and(|previous| previous >= position) {
+            bail!(
+                "stored predefined flag {} is out of its owner's declaration order",
+                flag.reference_uuid
+            );
+        }
+        previous = Some(position);
+        values.insert(flag.reference_uuid.as_str(), flag.value);
+    }
+
+    if declared.is_empty() {
         return Ok(());
     }
     let tab = "\t".repeat(indent);
-    xml.push_str(&format!("{tab}<AccountingFlags>\r\n"));
-    for flag in flags {
-        let reference = object_refs.get(&flag.reference_uuid).with_context(|| {
-            format!(
-                "missing metadata reference for predefined accounting flag {}",
-                flag.reference_uuid
-            )
-        })?;
+    xml.push_str(&format!("{tab}<{element_name}>\r\n"));
+    for (uuid, reference) in declared {
         xml.push_str(&format!(
             "{tab}\t<Flag ref=\"{}\">{}</Flag>\r\n",
             escape_xml_text(reference),
-            xml_bool(flag.value),
+            xml_bool(values.get(uuid.as_str()).copied().unwrap_or(false)),
         ));
     }
-    xml.push_str(&format!("{tab}</AccountingFlags>\r\n"));
+    xml.push_str(&format!("{tab}</{element_name}>\r\n"));
     Ok(())
 }
 
 fn push_predefined_ext_dimension_types_xml(
     xml: &mut String,
     ext_dimension_types: &[PredefinedExtDimensionType],
-    object_refs: &BTreeMap<String, String>,
+    chart_names: &ChartOfAccountsPredefinedNames,
     predefined_item_refs: &BTreeMap<String, String>,
     indent: usize,
 ) -> Result<()> {
@@ -3209,14 +4615,20 @@ fn push_predefined_ext_dimension_types_xml(
 
     xml.push_str(&format!("{tab}<ExtDimensionTypes>\r\n"));
     for ext_dimension_type in ext_dimension_types {
-        let reference = predefined_item_refs
-            .get(&ext_dimension_type.item_uuid)
-            .with_context(|| {
-                format!(
-                    "missing predefined item reference for ext dimension type {}",
-                    ext_dimension_type.item_uuid
-                )
-            })?;
+        // Scoped to the chart's own `<ExtDimensionTypes>` owner: a predefined
+        // item uuid is unique only inside its owner, and `uh` stores
+        // `23114858-dd43-4912-aa6c-cf52cfa4b660` under two charts of
+        // characteristic types at once.
+        let key = metadata_owner_value_reference_key(
+            &chart_names.ext_dimension_types_owner,
+            &ext_dimension_type.item_uuid,
+        );
+        let reference = predefined_item_refs.get(&key).with_context(|| {
+            format!(
+                "missing predefined item reference for ext dimension type {} of {}",
+                ext_dimension_type.item_uuid, chart_names.ext_dimension_types_owner
+            )
+        })?;
         xml.push_str(&format!(
             "{tab}\t<ExtDimensionType name=\"{}\">\r\n\
 {tab}\t\t<Turnover>{}</Turnover>\r\n",
@@ -3225,14 +4637,219 @@ fn push_predefined_ext_dimension_types_xml(
         ));
         push_predefined_flags_xml(
             xml,
+            "AccountingFlags",
+            &chart_names.ext_dimension_accounting_flags,
             &ext_dimension_type.accounting_flags,
-            object_refs,
             indent + 2,
         )?;
         xml.push_str(&format!("{tab}\t</ExtDimensionType>\r\n"));
     }
     xml.push_str(&format!("{tab}</ExtDimensionTypes>\r\n"));
     Ok(())
+}
+
+#[cfg(test)]
+mod chart_of_accounts_predefined_tests {
+    use super::*;
+
+    const ITEM_TYPE: &str = "ae135932-4f94-44df-92c1-c91f15a92848";
+    const EXT_DIMENSION_TYPE: &str = "acf6192e-81ca-46ef-93a6-5a6968b78663";
+    const FLAG_ONE: &str = "11111111-1111-4111-8111-111111111111";
+    const FLAG_TWO: &str = "22222222-2222-4222-8222-222222222222";
+    const FLAG_THREE: &str = "33333333-3333-4333-8333-333333333333";
+    const ACCOUNT: &str = "44444444-4444-4444-8444-444444444444";
+
+    /// A rowset shaped like the stand's: seven fixed columns, `column_ids`
+    /// worth of accounting flags, and the order column. The account row
+    /// declares `declared_values` values, so a caller can stop it short of the
+    /// schema exactly as the platform's own records do.
+    ///
+    /// Written with `%`-placeholders rather than `format!`: the layout is
+    /// almost all braces.
+    fn account_rowset(column_ids: &[(&str, &str)], declared_values: usize) -> (String, String) {
+        let mut schema = String::new();
+        schema.push_str(&(column_ids.len() + 8).to_string());
+        schema.push_str(
+            ",\r\n{0,\"\",{\"Pattern\",{\"#\",%I}},\"\",0},\
+\r\n{1,\"\",{\"Pattern\",{\"S\"}},\"\",0},\
+\r\n{2,\"\",{\"Pattern\",{\"S\",5,1}},\"\",0},\
+\r\n{3,\"\",{\"Pattern\",{\"S\",120,1}},\"\",0},\
+\r\n{4,\"\",{\"Pattern\",{\"N\"}},\"\",0},\
+\r\n{5,\"\",{\"Pattern\",{\"B\"}},\"\",0},\
+\r\n{6,\"\",{\"Pattern\"},\"\",0},\r\n",
+        );
+        for (id, uuid) in column_ids {
+            schema.push_str(
+                &"{%D,\"%U\",{\"Pattern\",{\"B\"}},\"\",0},\r\n"
+                    .replace("%D", id)
+                    .replace("%U", uuid),
+            );
+        }
+        schema.push_str("{10000,\"\",{\"Pattern\",{\"S\",5,1}},\"\",0}\r\n");
+        let schema = format!("{{{schema}}}").replace("%I", ITEM_TYPE);
+
+        // Values 0..6 are the fixed columns, value 7 is the order column and
+        // the flag values follow it -- the same permutation `uh` writes.
+        let mut mappings = String::new();
+        for index in 0..7 {
+            mappings.push_str(&format!("{index},{index},"));
+        }
+        for (offset, (id, _)) in column_ids.iter().enumerate() {
+            mappings.push_str(&format!("{},{id},", offset + 8));
+        }
+        mappings.push_str("7,10000,");
+
+        // Seven values: reference, name, code, description, account type, off
+        // balance, and an ext dimension rowset with no rows.
+        let head = "{\"#\",%I,{1,%U}},{\"S\",\"%N\"},{\"S\",\"%C\"},{\"S\",\"%N\"},\
+{\"N\",0},{\"B\",0},\
+{\"#\",%E,{9,{2,{0,\"\",{\"Pattern\",{\"#\",%I}},\"\",0},\
+{1,\"\",{\"Pattern\",{\"B\"}},\"\",0}},{2,2,0,0,1,1,{1,0},1,-1},{0,0}}}";
+        let head = |uuid: &str, name: &str, code: &str| {
+            head.replace("%I", ITEM_TYPE)
+                .replace("%E", EXT_DIMENSION_TYPE)
+                .replace("%U", uuid)
+                .replace("%N", name)
+                .replace("%C", code)
+        };
+
+        let mut account = format!("{{2,1,{declared_values},{}", head(ACCOUNT, "Счет", "01"));
+        account.push_str(",{\"S\",\"01\"}");
+        for _ in 8..declared_values {
+            account.push_str(",{\"B\",1}");
+        }
+        account.push_str(",0}");
+        let root = format!(
+            "{{2,0,7,{},1,{{1,1,{account}}}}}",
+            head("00000000-0000-0000-0000-000000000000", "Счета", "")
+        );
+        let rowset = format!("{{2,{},{mappings}{{1,1,{root}}}}}", column_ids.len() + 8);
+        (schema, rowset)
+    }
+
+    fn names(declared: &[(&str, &str)]) -> ChartOfAccountsPredefinedNames {
+        ChartOfAccountsPredefinedNames {
+            ext_dimension_types_owner: "ChartOfCharacteristicTypes.Субконто".to_string(),
+            accounting_flags: declared
+                .iter()
+                .map(|(uuid, name)| {
+                    (
+                        (*uuid).to_string(),
+                        format!("ChartOfAccounts.План.AccountingFlag.{name}"),
+                    )
+                })
+                .collect(),
+            ext_dimension_accounting_flags: Vec::new(),
+        }
+    }
+
+    fn emit(
+        column_ids: &[(&str, &str)],
+        declared_values: usize,
+        declared: &[(&str, &str)],
+    ) -> Result<String> {
+        let (schema, rowset) = account_rowset(column_ids, declared_values);
+        let items = parse_account_predefined_rowset(&schema, &rowset)
+            .expect("the account rowset must read");
+        format_predefined_data_xml(
+            predefined_data_source_model("ChartOfAccounts").unwrap(),
+            &items,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Some(&names(declared)),
+        )
+    }
+
+    #[test]
+    fn row_shorter_than_its_schema_writes_false_for_the_columns_it_omits() {
+        // Nine values cover offsets 0..8: the seven fixed columns, the order
+        // column and the first flag. The second flag's column exists and the
+        // row stops before it. `accflag-seed1` is this shape, and the platform
+        // writes `false` for exactly that flag.
+        let xml = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_TWO)],
+            9,
+            &[(FLAG_ONE, "Первый"), (FLAG_TWO, "Второй")],
+        )
+        .unwrap();
+
+        assert!(
+            xml.contains(
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Первый\">true</Flag>\r\n"
+            ),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Второй\">false</Flag>\r\n"
+            ),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn declared_flag_without_a_stored_column_is_written_false_in_place() {
+        // `uh` `МСФО` declares four accounting flags and stores two;
+        // `Международный` declares four and stores three. Both export all
+        // four, the unstored ones `false`, each at its declaration position.
+        // On both the unstored flags trail the stored ones; the gap in the
+        // middle used here is those two measured facts composed -- the value
+        // of a flag with no column, and the position every flag takes.
+        let xml = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_THREE)],
+            10,
+            &[
+                (FLAG_ONE, "Первый"),
+                (FLAG_TWO, "Второй"),
+                (FLAG_THREE, "Третий"),
+            ],
+        )
+        .unwrap();
+
+        let flags = xml
+            .lines()
+            .filter(|line| line.contains("<Flag "))
+            .map(str::trim)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            flags,
+            [
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Первый\">true</Flag>",
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Второй\">false</Flag>",
+                "<Flag ref=\"ChartOfAccounts.План.AccountingFlag.Третий\">true</Flag>",
+            ],
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn stored_flag_the_owner_no_longer_declares_refuses_the_file() {
+        let error = emit(
+            &[("7", FLAG_ONE), ("8", FLAG_TWO)],
+            10,
+            &[(FLAG_ONE, "Первый")],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("is not declared by its owner"), "{error}");
+    }
+
+    #[test]
+    fn stored_flags_out_of_declaration_order_refuse_the_file() {
+        let error = emit(
+            &[("7", FLAG_TWO), ("8", FLAG_ONE)],
+            10,
+            &[(FLAG_ONE, "Первый"), (FLAG_TWO, "Второй")],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("out of its owner's declaration order"),
+            "{error}"
+        );
+    }
 }
 
 fn push_predefined_calculation_type_refs_xml(
@@ -3268,12 +4885,18 @@ pub(super) fn format_predefined_type_xml(
         return String::new();
     }
     let tab = "\t".repeat(indent);
+    // The current-config prefix is numbered by the absolute element depth of the
+    // `v8:Type` element it sits on, not by a constant: `PredefinedData` is 1, the
+    // outermost `Item` is 2, its `Type` is 3 and the `v8:Type` inside it is 4,
+    // and every `ChildItems`/`Item` pair below adds 2. All 466 occurrences in
+    // 1C:УТ 11.5.27.75 follow it - 367 at depth 4, 68 at 6, 29 at 8 and 2 at 10.
+    let prefix = format!("d{}p1", indent + 2);
     let mut xml = format!("{tab}<Type>\r\n");
     for value_type in value_types {
         match value_type {
             ConstantValueType::Reference { reference } if reference.starts_with("cfg:") => {
                 xml.push_str(&format!(
-                    "{tab}\t<v8:Type xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">d4p1:{}</v8:Type>\r\n",
+                    "{tab}\t<v8:Type xmlns:{prefix}=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">{prefix}:{}</v8:Type>\r\n",
                     escape_xml_text(reference.trim_start_matches("cfg:"))
                 ));
             }
@@ -3284,6 +4907,41 @@ pub(super) fn format_predefined_type_xml(
                 ));
             }
         }
+    }
+    // A predefined item's type carries the same qualifier blocks every other
+    // `<Type>` in the tree does, written in the same order the shared metadata
+    // emitter uses (`format_form_metadata_types_xml_with_indent`): number,
+    // string, date. Only the string block had a writer here, so a predefined
+    // item typed `xs:decimal` or `xs:dateTime` lost its qualifiers whole --
+    // ERP УХ 3.2.12.6 `ChartsOfCharacteristicTypes/ПараметрыЗакупки` and
+    // `.../РеквизитыЭлементовФинансовыхОтчетов` (number) and
+    // `.../ТипыРеквизитовКомментариев` (date). No `<Type>` anywhere on the
+    // stand carries two of the three blocks at once, so the order between them
+    // is inherited from the shared emitter rather than observed here.
+    if let Some((digits, fraction_digits, allowed_sign_flag)) =
+        value_types.iter().find_map(|value_type| {
+            if let ConstantValueType::Number {
+                digits,
+                fraction_digits,
+                allowed_sign_flag,
+            } = value_type
+            {
+                Some((*digits, *fraction_digits, *allowed_sign_flag))
+            } else {
+                None
+            }
+        })
+    {
+        xml.push_str(&format!("{tab}\t<v8:NumberQualifiers>\r\n"));
+        xml.push_str(&format!("{tab}\t\t<v8:Digits>{digits}</v8:Digits>\r\n"));
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n"
+        ));
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
+            number_allowed_sign_xml(allowed_sign_flag)
+        ));
+        xml.push_str(&format!("{tab}\t</v8:NumberQualifiers>\r\n"));
     }
     if let Some((length, allowed_length_flag)) = value_types.iter().find_map(|value_type| {
         if let ConstantValueType::String {
@@ -3303,6 +4961,19 @@ pub(super) fn format_predefined_type_xml(
             predefined_string_allowed_length_xml(allowed_length_flag)
         ));
         xml.push_str(&format!("{tab}\t</v8:StringQualifiers>\r\n"));
+    }
+    if let Some(date_fractions) = value_types.iter().find_map(|value_type| {
+        if let ConstantValueType::DateTime { date_fractions } = value_type {
+            Some(*date_fractions)
+        } else {
+            None
+        }
+    }) {
+        xml.push_str(&format!("{tab}\t<v8:DateQualifiers>\r\n"));
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n"
+        ));
+        xml.push_str(&format!("{tab}\t</v8:DateQualifiers>\r\n"));
     }
     xml.push_str(&format!("{tab}</Type>\r\n"));
     xml
@@ -3547,9 +5218,23 @@ pub(super) fn parse_schedule_number_list(
     Some(values)
 }
 
+/// A compact-schedule slot holds a signed integer, not a digit string.
+///
+/// Census over the `Schedule.xml` files of the eight stand configurations:
+/// `DayInMonth` is written 1441 times as `0`, 14 times as `1`, 6 times as `5`
+/// and once as `-1` (`uh`'s `ScheduledJobs/ОтправкаРасхожденийВГО`). Refusing
+/// the leading minus refused that whole schedule instead of the one slot.
 pub(super) fn parse_schedule_number(value: &str) -> Option<String> {
     let value = value.trim();
-    if value.chars().all(|ch| ch.is_ascii_digit()) {
+    let digits = value.strip_prefix('-');
+    if digits.is_some_and(str::is_empty) {
+        return None;
+    }
+    if digits
+        .unwrap_or(value)
+        .chars()
+        .all(|ch| ch.is_ascii_digit())
+    {
         Some(value.to_string())
     } else {
         None

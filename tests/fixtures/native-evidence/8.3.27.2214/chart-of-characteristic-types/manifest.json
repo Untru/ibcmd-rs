@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-chart-of-characteristic-types",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 282,
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-12",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_isolated_file_infobases",
+    "vm": "Parallels Windows 11 ARM64; x86-64 platform under Windows emulation"
+  },
+  "seed": {
+    "kind": "unica_main_hypothesis_then_platform_attested",
+    "definition_path": "seed/unica-main-definition.json",
+    "definition_size": 137,
+    "definition_sha256": "91f6cccac20aa8cc7c7093c28e56165b86bda5ec4337a0dc8d0b876be7af365a",
+    "unica_main_sha": "a527d40962d047c6922c903b37510b30f697da42",
+    "generator": "public unica.meta.compile MCP handler",
+    "platform_correction_required": false,
+    "unica_source_xml_size": 14032,
+    "unica_source_xml_sha256": "4bf57d650e614f4e997aecabeeacfb0271639b04641dc4e9bb8c0b4e66a5ec05"
+  },
+  "platform_attestation": {
+    "procedure": [
+      "Compile the minimal ChartOfCharacteristicTypes definition into an XML 2.20 source tree with public Unica main.",
+      "Import and apply the source in a new isolated file infobase with pinned ibcmd 8.3.27.2214, save a CF, export only the ChartOfCharacteristicTypes object, and extract its exact UUID storage element as raw-deflate.",
+      "Load the first CF into a second isolated file infobase, save a second CF, repeat the selected XML export and exact raw extraction.",
+      "Compare both packed payloads, unpacked payloads, and selected native XML outputs byte-for-byte."
+    ],
+    "round_1_cf": {
+      "size": 93404,
+      "sha256": "22811967f38287613f22393b993d2a7ee943c5752bd31609da019e05282c000d"
+    },
+    "round_2_cf": {
+      "size": 93466,
+      "sha256": "31c0315385799baabef603be12f19c737d6958a3bdefca7d07b859108c38f7a9"
+    },
+    "packed_equal_between_rounds": true,
+    "unpacked_equal_between_rounds": true,
+    "selected_native_xml_equal_between_rounds": true
+  },
+  "object": {
+    "kind": "ChartOfCharacteristicTypes",
+    "name": "CorpusCharacteristics",
+    "uuid": "d003f1f8-d632-4f80-adad-af1583998864",
+    "raw_entry": {
+      "compression": "raw-deflate",
+      "packed": {
+        "path": "raw/d003f1f8-d632-4f80-adad-af1583998864.deflate",
+        "size": 1744,
+        "sha256": "bce6330b1cdd8c681ecfd7a40a74ffe92b2c341bd7effc6842c87f4494bc630e"
+      },
+      "unpacked": {
+        "path": "raw/d003f1f8-d632-4f80-adad-af1583998864.txt",
+        "size": 20384,
+        "sha256": "696811a5bbef9ad98ebc8e330efea3941497a1ad3f216fc99d59b02d11118ba2"
+      }
+    },
+    "native_xml": {
+      "path": "native/ChartsOfCharacteristicTypes/CorpusCharacteristics.xml",
+      "size": 14372,
+      "sha256": "cea1d60b3c4896f3f23dc6bd32a6b9b8e438a5eea7f0df860cefbe6bc601e491"
+    }
+  },
+  "proven_shape": {
+    "owner_discriminator": "34",
+    "owner_field_count": 59,
+    "owner_header_slot": 13,
+    "generated_type_uuid_range": {
+      "start_slot": 1,
+      "count": 12
+    },
+    "generated_types_in_order": [
+      "ChartOfCharacteristicTypesObject.CorpusCharacteristics:Object",
+      "ChartOfCharacteristicTypesRef.CorpusCharacteristics:Ref",
+      "ChartOfCharacteristicTypesSelection.CorpusCharacteristics:Selection",
+      "ChartOfCharacteristicTypesList.CorpusCharacteristics:List",
+      "Characteristic.CorpusCharacteristics:Characteristic",
+      "ChartOfCharacteristicTypesManager.CorpusCharacteristics:Manager"
+    ],
+    "standard_attribute_count": 9,
+    "standard_attribute_bag_property_count": 25,
+    "standard_attribute_type_reduction_mode": "TransformValues",
+    "data_lock_control_raw_slot": 51,
+    "data_lock_control_raw_value": "1",
+    "data_lock_control_xml_value": "Automatic",
+    "value_type": "String(100)",
+    "child_object_count": 0
+  },
+  "proven_claims": [
+    "Pinned 8.3.27.2214 accepted and applied the unmodified Unica-generated XML 2.20 seed in an isolated file infobase.",
+    "The exact packed and unpacked object payload and selected native XML were byte-identical across two independent platform rounds.",
+    "The owner uses discriminator 34, 59 fields, header slot 13, and a complete 12-UUID generated type/value vector.",
+    "All six generated types, their identities, categories, and native XML order are exact.",
+    "All nine standard attributes use the 25-property bag with TypeReductionMode=TransformValues.",
+    "Raw owner slot 51 value 1 maps to native XML DataLockControlMode=Automatic for this exact platform and object shape.",
+    "The production decoder reproduces the complete selected native XML file byte-for-byte."
+  ],
+  "non_claims": [
+    "Unica is not treated as an authority; it supplied only the initial source hypothesis.",
+    "No behavior for platform 8.3.27 builds other than 8.3.27.2214 is inferred.",
+    "No legacy 24-property CCT standard-attribute bag is accepted or claimed compatible.",
+    "No alternative raw DataLockControlMode encoding is inferred.",
+    "No non-empty CCT child Attribute, TabularSection, Form, Template, Command, or Characteristics collection is inferred.",
+    "The complete CF files and dependency objects are not committed.",
+    "The fixture is diagnostic-only and is never read as a production fallback."
+  ]
+}

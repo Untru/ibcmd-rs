@@ -55,6 +55,8 @@ pub enum Commands {
     SourceDiffMatrix(SourceDiffMatrixArgs),
     /// Merge independently produced parity matrices without collapsing database results.
     SourceDiffMatrixMerge(SourceDiffMatrixMergeArgs),
+    /// Compare pre-existing native, EDT, and ibcmd-rs source trees without launching external tools.
+    SourceThreeWayOracle(SourceThreeWayOracleArgs),
     /// Print the current compatibility matrix for implemented operations.
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
@@ -287,6 +289,8 @@ pub enum CfCommands {
     Inspect(CfInspectArgs),
     /// Verify CF structure, selected payloads, and optional SHA-256 expectations.
     Verify(CfVerifyArgs),
+    /// Extract one exact CF storage element into a new evidence directory.
+    Extract(CfExtractArgs),
     /// Export recognized CF storage records to hierarchical XML sources offline.
     Export(CfExportArgs),
     /// Apply selected source files to a base CF and publish a new CF offline.
@@ -348,6 +352,22 @@ pub struct CfVerifyArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct CfExtractArgs {
+    /// CF archive to read.
+    pub input: PathBuf,
+    /// Exact top-level storage element name.
+    pub element: String,
+    /// New directory that will receive packed.bin and unpacked.bin.
+    pub output_dir: PathBuf,
+    /// Stable source-storage profile recorded in the JSON report.
+    #[arg(long, default_value = "storage:cf-cli")]
+    pub profile: String,
+    /// Explicit payload representation; payload bytes are never guessed.
+    #[arg(long, value_enum, default_value_t = CfCompression::RawDeflate)]
+    pub compression: CfCompression,
+}
+
+#[derive(Debug, Args)]
 pub struct CfExportArgs {
     /// CF archive to export.
     pub input: PathBuf,
@@ -386,8 +406,22 @@ pub struct CfOverlayArgs {
     #[arg(long = "module", value_name = "KEY=FILE")]
     pub modules: Vec<String>,
     /// Replace a raw-deflated asset from exact source bytes (`STORAGE_KEY=FILE`); repeatable.
+    ///
+    /// The plain source bytes are deflated exactly once. For a body that a
+    /// compiler already produced as a raw-deflate stream, use
+    /// `--compiled-asset` instead: deflating such bytes again would store a
+    /// double-compressed payload the platform cannot export.
     #[arg(long = "raw-asset", value_name = "KEY=FILE")]
     pub raw_assets: Vec<String>,
+    /// Write an already-compiled body verbatim as the final physical payload (`STORAGE_KEY=FILE`); repeatable.
+    ///
+    /// Unlike `--raw-asset`, the file bytes are never re-compressed. The file
+    /// must already be one complete raw RFC 1951 DEFLATE stream (for example a
+    /// DCS Template body produced by the offline compiler); this is validated
+    /// fail-closed, and plain source bytes are rejected with a pointer back to
+    /// `--raw-asset`.
+    #[arg(long = "compiled-asset", value_name = "KEY=FILE")]
+    pub compiled_assets: Vec<String>,
     /// Patch a metadata row using its base row and source XML (`STORAGE_KEY=FILE`); repeatable.
     #[arg(long = "metadata-xml", value_name = "KEY=FILE")]
     pub metadata_xml: Vec<String>,
@@ -397,6 +431,9 @@ pub struct CfOverlayArgs {
     /// Patch CommandInterface using its base row when necessary (`STORAGE_KEY=FILE`); repeatable.
     #[arg(long = "command-interface", value_name = "KEY=FILE")]
     pub command_interfaces: Vec<String>,
+    /// Compile managed Form.xml against its existing native body row (`STORAGE_KEY=FILE`); repeatable.
+    #[arg(long = "form-xml", value_name = "KEY=FILE")]
+    pub form_xml: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -843,8 +880,10 @@ pub struct MxlLineProvenanceCorpusArgs {
 
 #[derive(Debug, Args)]
 pub struct FormContextSummaryArgs {
-    #[arg(long)] pub run_root: PathBuf,
-    #[arg(long)] pub source_commit: Option<String>,
+    #[arg(long)]
+    pub run_root: PathBuf,
+    #[arg(long)]
+    pub source_commit: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -974,6 +1013,46 @@ pub struct SourceDiffMatrixMergeArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct SourceThreeWayOracleArgs {
+    /// Pre-existing source tree exported by native ibcmd. This command only reads it.
+    #[arg(long)]
+    pub native: PathBuf,
+    /// Pre-existing source tree produced by an EDT import/export cycle. This command only reads it.
+    #[arg(long)]
+    pub edt: PathBuf,
+    /// Pre-existing source tree produced by ibcmd-rs. This command only reads it.
+    #[arg(long)]
+    pub ours: PathBuf,
+    /// Exact source/configuration version shared by the three input trees.
+    #[arg(long)]
+    pub source_version: String,
+    /// Exact native ibcmd version used to produce --native.
+    #[arg(long)]
+    pub native_tool_version: String,
+    /// Exact EDT version and import/export route used to produce --edt.
+    #[arg(long)]
+    pub edt_tool_version: String,
+    /// Exact ibcmd-rs version or commit used to produce --ours.
+    #[arg(long)]
+    pub ours_tool_version: String,
+    /// Stop before hashing when a tree exceeds this many files.
+    #[arg(long, default_value_t = 100_000)]
+    pub max_files: usize,
+    /// Stop before hashing when a tree exceeds this total byte count.
+    #[arg(long, default_value_t = 4 * 1024 * 1024 * 1024_u64)]
+    pub max_total_bytes: u64,
+    /// Stop before hashing a file larger than this many bytes.
+    #[arg(long, default_value_t = 512 * 1024 * 1024_u64)]
+    pub max_file_bytes: u64,
+    /// New JSON report destination. Must share an existing parent with --markdown.
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// New deterministic Markdown destination. Must share --output's existing parent.
+    #[arg(long)]
+    pub markdown: PathBuf,
+}
+
+#[derive(Debug, Args)]
 pub struct CompatibilityArgs {
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
@@ -1039,6 +1118,9 @@ pub struct DumpSourcesArgs {
     /// Kill ibcmd after this many seconds.
     #[arg(long, default_value_t = 300)]
     pub timeout_sec: u64,
+    /// Durable atomic JSON journal for the nested ibcmd subprocess.
+    #[arg(long)]
+    pub runtime_journal: Option<PathBuf>,
     /// Replace files under the output directory after a successful export.
     #[arg(long)]
     pub overwrite: bool,
@@ -1052,6 +1134,12 @@ pub struct MssqlDumpConfigArgs {
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
+    /// bcp executable path.
+    #[arg(long, default_value = "bcp")]
+    pub bcp_executable: PathBuf,
+    /// Durable atomic JSON journal for nested sqlcmd and bcp subprocesses.
+    #[arg(long)]
+    pub runtime_journal: Option<PathBuf>,
     /// SQL Server name.
     #[arg(long, default_value = "localhost")]
     pub server: String,
@@ -1098,6 +1186,20 @@ pub struct MssqlDumpConfigArgs {
         conflicts_with_all = ["file_names", "file_name_lists"]
     )]
     pub require_complete_root_metadata: bool,
+    /// Fail when a reconstructed source asset omits an opaque property.
+    #[arg(
+        long,
+        requires_all = ["extract_metadata_xml", "no_binary_rows"],
+        conflicts_with_all = ["file_names", "file_name_lists"]
+    )]
+    pub require_complete_source_assets: bool,
+    /// Continue a full diagnostic export after form writer rejections that have structured source-asset diagnostics.
+    #[arg(
+        long,
+        requires_all = ["extract_metadata_xml", "no_binary_rows"],
+        conflicts_with_all = ["file_names", "file_name_lists"]
+    )]
+    pub collect_all_source_asset_diagnostics: bool,
     /// Source XML version for reconstructed source files.
     #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
     pub source_version: InfobaseConfigSourceVersion,
@@ -3721,6 +3823,41 @@ mod tests {
             other => panic!("unexpected command: {other:?}"),
         }
 
+        let oracle = Cli::parse_from([
+            "ibcmd-rs",
+            "source-three-way-oracle",
+            "--native",
+            r"C:\oracle\native",
+            "--edt",
+            r"C:\oracle\edt",
+            "--ours",
+            r"C:\oracle\ours",
+            "--source-version",
+            "2.20",
+            "--native-tool-version",
+            "8.3.27.1989",
+            "--edt-tool-version",
+            "2025.2.3+30 import/export",
+            "--ours-tool-version",
+            "git:abc",
+            "--output",
+            r"C:\oracle\report.json",
+            "--markdown",
+            r"C:\oracle\report.md",
+        ]);
+        match oracle.command {
+            Commands::SourceThreeWayOracle(args) => {
+                assert_eq!(args.native, PathBuf::from(r"C:\oracle\native"));
+                assert_eq!(args.edt, PathBuf::from(r"C:\oracle\edt"));
+                assert_eq!(args.ours, PathBuf::from(r"C:\oracle\ours"));
+                assert_eq!(args.source_version, "2.20");
+                assert_eq!(args.max_files, 100_000);
+                assert_eq!(args.max_total_bytes, 4 * 1024 * 1024 * 1024_u64);
+                assert_eq!(args.max_file_bytes, 512 * 1024 * 1024_u64);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
         let metadata = Cli::parse_from([
             "ibcmd-rs",
             "mssql-stage-source-metadata-objects",
@@ -3854,6 +3991,8 @@ mod tests {
             r"C:\repo\src\cfe\EmergingTravelGroup",
             "--timeout-sec",
             "180",
+            "--runtime-journal",
+            r"C:\repo\logs\native-runtime.json",
             "--user",
             "ws",
             "--password-env",
@@ -3874,6 +4013,10 @@ mod tests {
                     PathBuf::from(r"C:\repo\src\cfe\EmergingTravelGroup")
                 );
                 assert_eq!(args.timeout_sec, 180);
+                assert_eq!(
+                    args.runtime_journal,
+                    Some(PathBuf::from(r"C:\repo\logs\native-runtime.json"))
+                );
                 assert_eq!(args.user.as_deref(), Some("ws"));
                 assert_eq!(args.password_env, "IBCMD_USER_PSW");
                 assert!(args.overwrite);
@@ -4148,6 +4291,10 @@ mod tests {
             "mssql-dump-config",
             "--database",
             "TestDb",
+            "--runtime-journal",
+            r"C:\logs\candidate-runtime.json",
+            "--bcp-executable",
+            r"C:\tools\bcp.exe",
             "--sql-user",
             "test-sql-user",
             "--sql-pwd",
@@ -4169,6 +4316,11 @@ mod tests {
         match cli.command {
             Commands::MssqlDumpConfig(args) => {
                 assert_eq!(args.database, "TestDb");
+                assert_eq!(
+                    args.runtime_journal,
+                    Some(PathBuf::from(r"C:\logs\candidate-runtime.json"))
+                );
+                assert_eq!(args.bcp_executable, PathBuf::from(r"C:\tools\bcp.exe"));
                 assert_eq!(args.sql_user.as_deref(), Some("test-sql-user"));
                 assert_eq!(
                     args.sql_pwd.as_deref(),
@@ -4221,6 +4373,54 @@ mod tests {
     }
 
     #[test]
+    fn parses_strict_source_asset_mssql_dump_config_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-config",
+            "--database",
+            "TestDb",
+            "-o",
+            r"C:\dump",
+            "--extract-metadata-xml",
+            "--no-binary-rows",
+            "--require-complete-source-assets",
+        ]);
+
+        match cli.command {
+            Commands::MssqlDumpConfig(args) => {
+                assert!(args.extract_metadata_xml);
+                assert!(args.no_binary_rows);
+                assert!(args.require_complete_source_assets);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_collect_all_source_asset_diagnostics_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-config",
+            "--database",
+            "TestDb",
+            "-o",
+            r"C:\dump",
+            "--extract-metadata-xml",
+            "--no-binary-rows",
+            "--collect-all-source-asset-diagnostics",
+            "--require-complete-source-assets",
+        ]);
+
+        match cli.command {
+            Commands::MssqlDumpConfig(args) => {
+                assert!(args.collect_all_source_asset_diagnostics);
+                assert!(args.require_complete_source_assets);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn rejects_invalid_strict_mssql_dump_config_combinations() {
         assert!(
             Cli::try_parse_from([
@@ -4231,6 +4431,47 @@ mod tests {
                 "-o",
                 r"C:\dump",
                 "--require-complete-root-metadata",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--collect-all-source-asset-diagnostics",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--extract-metadata-xml",
+                "--no-binary-rows",
+                "--collect-all-source-asset-diagnostics",
+                "--file-name",
+                "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--extract-metadata-xml",
+                "--require-complete-source-assets",
             ])
             .is_err()
         );
@@ -4904,5 +5145,33 @@ mod tests {
         assert_eq!(args.storage_version, 7);
         assert_eq!(args.page_size, Some(1024));
         assert_eq!(args.reserved, 3);
+    }
+
+    #[test]
+    fn parses_exact_cf_extract_with_explicit_compression() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "cf",
+            "extract",
+            "configuration.cf",
+            "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+            "task-evidence",
+            "--profile",
+            "storage:native-evidence",
+            "--compression",
+            "raw-deflate",
+        ]);
+
+        let Commands::Cf(CfArgs {
+            command: CfCommands::Extract(args),
+        }) = cli.command
+        else {
+            panic!("expected cf extract command");
+        };
+        assert_eq!(args.input, PathBuf::from("configuration.cf"));
+        assert_eq!(args.element, "3ad08f4a-6202-4099-b6cc-bc116e6731a0");
+        assert_eq!(args.output_dir, PathBuf::from("task-evidence"));
+        assert_eq!(args.profile, "storage:native-evidence");
+        assert_eq!(args.compression, CfCompression::RawDeflate);
     }
 }

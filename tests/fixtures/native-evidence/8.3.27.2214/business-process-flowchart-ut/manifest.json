@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-business-process-flowchart-ut",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body, checked byte-for-byte against manifest-round2 of the same native export.",
+    "elements": [
+      {
+        "storage_element": "553dbd65-c1aa-406a-8ccc-ca1538267b13.7",
+        "source_path": "BusinessProcesses/СогласованиеЦенНоменклатуры/Ext/Flowchart.xml",
+        "native_export_size": 20378,
+        "native_export_sha256": "960ffec593f87052800302cac35025ee00000e38915cf315e4dd561e4b872673"
+      }
+    ],
+    "expectation": "The BusinessProcess flowchart storage element decodes through the graphical-scheme grammar and re-encodes to the platform's native Flowchart.xml byte-for-byte, including the byte-order mark, the addressing-attribute design-time reference to a predefined executor role, and no trailing newline."
+  },
+  "retained": {
+    "packed_body": {
+      "path": "raw/553dbd65-c1aa-406a-8ccc-ca1538267b13.7.deflate.b64",
+      "size": 1362,
+      "sha256": "25d6dadb85e615447be742ab46871edbf22646bdbd8fe7564b3fdfb370c42d51",
+      "unpacked_size": 5960,
+      "unpacked_sha256": "9dee730eca1cf684bf93a260b2eef514fb3bb62acc3d5cadeb57a397116439e5"
+    }
+  },
+  "non_claims": [
+    "No SubBusinessProcess item encoding is inferred from this fixture.",
+    "The complete proprietary CF and dependency closure are not committed.",
+    "The fixture is diagnostic-only and is never read as a production fallback."
+  ]
+}

@@ -101,7 +101,8 @@ impl PayloadDecoder {
             }
             PayloadEncoding::RawDeflate => decode_raw_deflate(
                 input,
-                remaining_decoded,
+                self.budget.decoded_bytes(),
+                self.budget.limits().max_decoded_bytes(),
                 self.budget.limits().max_compression_ratio(),
             )?,
         };
@@ -164,8 +165,17 @@ pub fn encode_payload(
     }
 }
 
+/// Inflates one payload while charging it against the *aggregate* decoded
+/// budget.
+///
+/// `already_decoded` is what the surrounding traversal has decoded so far and
+/// `maximum_decoded` is the configured aggregate ceiling, not the leftover
+/// budget. Reporting the leftover as `maximum` used to make the diagnostic
+/// claim a limit the operator never configured, which is actively misleading in
+/// a report; both numbers below are now the ones the reader can act on.
 fn decode_raw_deflate(
     input: &[u8],
+    already_decoded: u64,
     maximum_decoded: u64,
     maximum_ratio: u64,
 ) -> Result<Vec<u8>, PayloadDecodeError> {
@@ -196,10 +206,11 @@ fn decode_raw_deflate(
             .ok_or(PayloadDecodeError::CounterOverflow)?;
 
         let decoded_total = inflater.total_out();
-        if decoded_total > maximum_decoded {
+        let aggregate_decoded = already_decoded.saturating_add(decoded_total);
+        if aggregate_decoded > maximum_decoded {
             return Err(ResourceLimitError::DecodedBytesExceeded {
                 maximum: maximum_decoded,
-                actual: decoded_total,
+                actual: aggregate_decoded,
             }
             .into());
         }
@@ -347,6 +358,8 @@ impl From<ResourceLimitError> for PayloadEncodeError {
 
 #[cfg(test)]
 mod tests {
+    use ibcmd_core::limits::DEFAULT_MAX_COMPRESSION_RATIO;
+
     use super::*;
 
     fn limits(decoded: u64, ratio: u64) -> ResourceLimits {
@@ -433,6 +446,78 @@ mod tests {
             PayloadDecodeError::Limit(ResourceLimitError::DecodedBytesExceeded { .. })
                 | PayloadDecodeError::Limit(ResourceLimitError::CompressionRatioExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn input_derived_budgets_still_reject_a_deflate_bomb() {
+        // Eight mebibytes of one repeated byte deflate to a few kibibytes: an
+        // expansion far past the per-payload ratio that defines a bomb.
+        let expanded = vec![0_u8; 8 * 1_048_576];
+        let seed = ResourceLimits::for_input_bytes(8 * 1_048_576);
+        let encoded = encode_payload(PayloadEncoding::RawDeflate, &expanded, seed).unwrap();
+        let encoded_len = u64::try_from(encoded.len()).unwrap();
+        let decoded_len = u64::try_from(expanded.len()).unwrap();
+        assert!(
+            decoded_len > encoded_len.saturating_mul(DEFAULT_MAX_COMPRESSION_RATIO),
+            "fixture must actually exceed the ratio guard"
+        );
+
+        // Budgets derived from the hostile input's own size are the ones a CLI
+        // run would use, and they do not relax the ratio guard one bit.
+        let derived = ResourceLimits::for_input_bytes(encoded_len);
+        assert!(
+            derived.max_decoded_bytes() >= decoded_len,
+            "aggregate budget alone would allow it"
+        );
+        let error = decode_payload(PayloadEncoding::RawDeflate, &encoded, derived).unwrap_err();
+        assert!(matches!(
+            error,
+            PayloadDecodeError::Limit(ResourceLimitError::CompressionRatioExceeded {
+                maximum: DEFAULT_MAX_COMPRESSION_RATIO,
+                ..
+            })
+        ));
+
+        // Same verdict at the largest budgets the derivation can ever produce.
+        let unbounded = ResourceLimits::for_input_bytes(u64::MAX);
+        assert!(matches!(
+            decode_payload(PayloadEncoding::RawDeflate, &encoded, unbounded).unwrap_err(),
+            PayloadDecodeError::Limit(ResourceLimitError::CompressionRatioExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn decoded_budget_diagnostic_names_the_configured_limit() {
+        // A 64-byte pattern repeated to 3 KiB compresses well enough to fit the
+        // budget once but not twice, and stays far under the ratio guard.
+        let pattern: Vec<u8> = (0..64_u16).map(|value| (value * 7 % 251) as u8).collect();
+        let block: Vec<u8> = pattern.iter().copied().cycle().take(3_072).collect();
+        let configured_decoded = 4_096;
+        let limits = ResourceLimits::new(2, 8, 1_048_576, configured_decoded, 200).unwrap();
+        let encoded = encode_payload(PayloadEncoding::RawDeflate, &block, limits).unwrap();
+
+        let mut decoder = PayloadDecoder::new(limits);
+        decoder
+            .decode(PayloadEncoding::RawDeflate, &encoded)
+            .unwrap();
+        let remaining = decoder.budget().remaining_decoded_bytes();
+        let error = decoder
+            .decode(PayloadEncoding::RawDeflate, &encoded)
+            .unwrap_err();
+
+        // The diagnostic must name the limit the operator configured and the
+        // aggregate total that crossed it, never the leftover budget.
+        match error {
+            PayloadDecodeError::Limit(ResourceLimitError::DecodedBytesExceeded {
+                maximum,
+                actual,
+            }) => {
+                assert_eq!(maximum, configured_decoded);
+                assert_ne!(maximum, remaining);
+                assert!(actual > configured_decoded);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

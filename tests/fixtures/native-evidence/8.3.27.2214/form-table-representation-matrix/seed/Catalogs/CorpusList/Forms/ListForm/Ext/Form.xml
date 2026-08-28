@@ -1,0 +1,354 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Title>
+		<v8:item>
+			<v8:lang>ru</v8:lang>
+			<v8:content>Corpus list probe FE1</v8:content>
+		</v8:item>
+	</Title>
+	<AutoTitle>false</AutoTitle>
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+	<ChildItems>
+		<Table name="Список" id="1">
+			<CommandBarLocation>None</CommandBarLocation>
+			<DataPath>Список</DataPath>
+			<RowPictureDataPath>Список.DefaultPicture</RowPictureDataPath>
+			<AutoRefresh>false</AutoRefresh>
+			<AutoRefreshPeriod>60</AutoRefreshPeriod>
+			<Period>
+				<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>
+				<v8:startDate>0001-01-01T00:00:00</v8:startDate>
+				<v8:endDate>0001-01-01T00:00:00</v8:endDate>
+			</Period>
+			<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+			<RestoreCurrentRow>false</RestoreCurrentRow>
+			<TopLevelParent xsi:nil="true"/>
+			<ShowRoot>true</ShowRoot>
+			<AllowRootChoice>false</AllowRootChoice>
+			<UpdateOnDataChange>Auto</UpdateOnDataChange>
+			<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>
+			<ContextMenu name="СписокКонтекстноеМеню" id="2"/>
+			<AutoCommandBar name="СписокКоманднаяПанель" id="3">
+				<Autofill>false</Autofill>
+			</AutoCommandBar>
+			<ExtendedTooltip name="СписокРасширеннаяПодсказка" id="4"/>
+			<SearchStringAddition name="СписокСтрокаПоиска" id="5">
+				<AdditionSource>
+					<Item>Список</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокСтрокаПоискаКонтекстноеМеню" id="6"/>
+				<ExtendedTooltip name="СписокСтрокаПоискаРасширеннаяПодсказка" id="7"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="СписокСостояниеПросмотра" id="8">
+				<AdditionSource>
+					<Item>Список</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокСостояниеПросмотраКонтекстноеМеню" id="9"/>
+				<ExtendedTooltip name="СписокСостояниеПросмотраРасширеннаяПодсказка" id="10"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="СписокУправлениеПоиском" id="11">
+				<AdditionSource>
+					<Item>Список</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокУправлениеПоискомКонтекстноеМеню" id="12"/>
+				<ExtendedTooltip name="СписокУправлениеПоискомРасширеннаяПодсказка" id="13"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<LabelField name="НаименованиеСписок" id="14">
+					<DataPath>Список.Description</DataPath>
+					<ContextMenu name="НаименованиеСписокКонтекстноеМеню" id="15"/>
+					<ExtendedTooltip name="НаименованиеСписокРасширеннаяПодсказка" id="16"/>
+				</LabelField>
+				<LabelField name="КодСписок" id="17">
+					<DataPath>Список.Code</DataPath>
+					<ContextMenu name="КодСписокКонтекстноеМеню" id="18"/>
+					<ExtendedTooltip name="КодСписокРасширеннаяПодсказка" id="19"/>
+				</LabelField>
+				<LabelField name="SortKeyСписок" id="20">
+					<DataPath>Список.SortKey</DataPath>
+					<ContextMenu name="SortKeyСписокКонтекстноеМеню" id="21"/>
+					<ExtendedTooltip name="SortKeyСписокРасширеннаяПодсказка" id="22"/>
+				</LabelField>
+				<LabelField name="СсылкаСписок" id="23">
+					<DataPath>Список.Ref</DataPath>
+					<UserVisible>
+						<xr:Common>false</xr:Common>
+					</UserVisible>
+					<ContextMenu name="СсылкаСписокКонтекстноеМеню" id="24"/>
+					<ExtendedTooltip name="СсылкаСписокРасширеннаяПодсказка" id="25"/>
+				</LabelField>
+			</ChildItems>
+		</Table>
+		<Table name="СписокList" id="100">
+			<CommandBarLocation>None</CommandBarLocation>
+			<DataPath>СписокList</DataPath>
+			<RowPictureDataPath>СписокList.DefaultPicture</RowPictureDataPath>
+			<Representation>List</Representation>
+			<AutoRefresh>false</AutoRefresh>
+			<AutoRefreshPeriod>60</AutoRefreshPeriod>
+			<Period>
+				<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>
+				<v8:startDate>0001-01-01T00:00:00</v8:startDate>
+				<v8:endDate>0001-01-01T00:00:00</v8:endDate>
+			</Period>
+			<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+			<RestoreCurrentRow>false</RestoreCurrentRow>
+			<TopLevelParent xsi:nil="true"/>
+			<ShowRoot>true</ShowRoot>
+			<AllowRootChoice>false</AllowRootChoice>
+			<UpdateOnDataChange>Auto</UpdateOnDataChange>
+			<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>
+			<ContextMenu name="СписокListКонтекстноеМеню" id="101"/>
+			<AutoCommandBar name="СписокListКоманднаяПанель" id="102">
+				<Autofill>false</Autofill>
+			</AutoCommandBar>
+			<ExtendedTooltip name="СписокListРасширеннаяПодсказка" id="103"/>
+			<SearchStringAddition name="СписокListСтрокаПоиска" id="104">
+				<AdditionSource>
+					<Item>СписокList</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокListСтрокаПоискаКонтекстноеМеню" id="105"/>
+				<ExtendedTooltip name="СписокListСтрокаПоискаРасширеннаяПодсказка" id="106"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="СписокListСостояниеПросмотра" id="107">
+				<AdditionSource>
+					<Item>СписокList</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокListСостояниеПросмотраКонтекстноеМеню" id="108"/>
+				<ExtendedTooltip name="СписокListСостояниеПросмотраРасширеннаяПодсказка" id="109"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="СписокListУправлениеПоиском" id="110">
+				<AdditionSource>
+					<Item>СписокList</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокListУправлениеПоискомКонтекстноеМеню" id="111"/>
+				<ExtendedTooltip name="СписокListУправлениеПоискомРасширеннаяПодсказка" id="112"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<LabelField name="НаименованиеСписокList" id="113">
+					<DataPath>СписокList.Description</DataPath>
+					<ContextMenu name="НаименованиеСписокListКонтекстноеМеню" id="114"/>
+					<ExtendedTooltip name="НаименованиеСписокListРасширеннаяПодсказка" id="115"/>
+				</LabelField>
+				<LabelField name="КодСписокList" id="116">
+					<DataPath>СписокList.Code</DataPath>
+					<ContextMenu name="КодСписокListКонтекстноеМеню" id="117"/>
+					<ExtendedTooltip name="КодСписокListРасширеннаяПодсказка" id="118"/>
+				</LabelField>
+				<LabelField name="SortKeyСписокList" id="119">
+					<DataPath>СписокList.SortKey</DataPath>
+					<ContextMenu name="SortKeyСписокListКонтекстноеМеню" id="120"/>
+					<ExtendedTooltip name="SortKeyСписокListРасширеннаяПодсказка" id="121"/>
+				</LabelField>
+				<LabelField name="СсылкаСписокList" id="122">
+					<DataPath>СписокList.Ref</DataPath>
+					<UserVisible>
+						<xr:Common>false</xr:Common>
+					</UserVisible>
+					<ContextMenu name="СсылкаСписокListКонтекстноеМеню" id="123"/>
+					<ExtendedTooltip name="СсылкаСписокListРасширеннаяПодсказка" id="124"/>
+				</LabelField>
+			</ChildItems>
+		</Table>
+		<Table name="СписокHier" id="200">
+			<CommandBarLocation>None</CommandBarLocation>
+			<DataPath>СписокHier</DataPath>
+			<RowPictureDataPath>СписокHier.DefaultPicture</RowPictureDataPath>
+			<Representation>HierarchicalList</Representation>
+			<AutoRefresh>false</AutoRefresh>
+			<AutoRefreshPeriod>60</AutoRefreshPeriod>
+			<Period>
+				<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>
+				<v8:startDate>0001-01-01T00:00:00</v8:startDate>
+				<v8:endDate>0001-01-01T00:00:00</v8:endDate>
+			</Period>
+			<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+			<RestoreCurrentRow>false</RestoreCurrentRow>
+			<TopLevelParent xsi:nil="true"/>
+			<ShowRoot>true</ShowRoot>
+			<AllowRootChoice>false</AllowRootChoice>
+			<UpdateOnDataChange>Auto</UpdateOnDataChange>
+			<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>
+			<ContextMenu name="СписокHierКонтекстноеМеню" id="201"/>
+			<AutoCommandBar name="СписокHierКоманднаяПанель" id="202">
+				<Autofill>false</Autofill>
+			</AutoCommandBar>
+			<ExtendedTooltip name="СписокHierРасширеннаяПодсказка" id="203"/>
+			<SearchStringAddition name="СписокHierСтрокаПоиска" id="204">
+				<AdditionSource>
+					<Item>СписокHier</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокHierСтрокаПоискаКонтекстноеМеню" id="205"/>
+				<ExtendedTooltip name="СписокHierСтрокаПоискаРасширеннаяПодсказка" id="206"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="СписокHierСостояниеПросмотра" id="207">
+				<AdditionSource>
+					<Item>СписокHier</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокHierСостояниеПросмотраКонтекстноеМеню" id="208"/>
+				<ExtendedTooltip name="СписокHierСостояниеПросмотраРасширеннаяПодсказка" id="209"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="СписокHierУправлениеПоиском" id="210">
+				<AdditionSource>
+					<Item>СписокHier</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокHierУправлениеПоискомКонтекстноеМеню" id="211"/>
+				<ExtendedTooltip name="СписокHierУправлениеПоискомРасширеннаяПодсказка" id="212"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<LabelField name="НаименованиеСписокHier" id="213">
+					<DataPath>СписокHier.Description</DataPath>
+					<ContextMenu name="НаименованиеСписокHierКонтекстноеМеню" id="214"/>
+					<ExtendedTooltip name="НаименованиеСписокHierРасширеннаяПодсказка" id="215"/>
+				</LabelField>
+				<LabelField name="КодСписокHier" id="216">
+					<DataPath>СписокHier.Code</DataPath>
+					<ContextMenu name="КодСписокHierКонтекстноеМеню" id="217"/>
+					<ExtendedTooltip name="КодСписокHierРасширеннаяПодсказка" id="218"/>
+				</LabelField>
+				<LabelField name="SortKeyСписокHier" id="219">
+					<DataPath>СписокHier.SortKey</DataPath>
+					<ContextMenu name="SortKeyСписокHierКонтекстноеМеню" id="220"/>
+					<ExtendedTooltip name="SortKeyСписокHierРасширеннаяПодсказка" id="221"/>
+				</LabelField>
+				<LabelField name="СсылкаСписокHier" id="222">
+					<DataPath>СписокHier.Ref</DataPath>
+					<UserVisible>
+						<xr:Common>false</xr:Common>
+					</UserVisible>
+					<ContextMenu name="СсылкаСписокHierКонтекстноеМеню" id="223"/>
+					<ExtendedTooltip name="СсылкаСписокHierРасширеннаяПодсказка" id="224"/>
+				</LabelField>
+			</ChildItems>
+		</Table>
+		<Table name="СписокTree" id="300">
+			<CommandBarLocation>None</CommandBarLocation>
+			<DataPath>СписокTree</DataPath>
+			<RowPictureDataPath>СписокTree.DefaultPicture</RowPictureDataPath>
+			<Representation>Tree</Representation>
+			<AutoRefresh>false</AutoRefresh>
+			<AutoRefreshPeriod>60</AutoRefreshPeriod>
+			<Period>
+				<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>
+				<v8:startDate>0001-01-01T00:00:00</v8:startDate>
+				<v8:endDate>0001-01-01T00:00:00</v8:endDate>
+			</Period>
+			<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+			<RestoreCurrentRow>false</RestoreCurrentRow>
+			<TopLevelParent xsi:nil="true"/>
+			<ShowRoot>true</ShowRoot>
+			<AllowRootChoice>false</AllowRootChoice>
+			<UpdateOnDataChange>Auto</UpdateOnDataChange>
+			<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>
+			<ContextMenu name="СписокTreeКонтекстноеМеню" id="301"/>
+			<AutoCommandBar name="СписокTreeКоманднаяПанель" id="302">
+				<Autofill>false</Autofill>
+			</AutoCommandBar>
+			<ExtendedTooltip name="СписокTreeРасширеннаяПодсказка" id="303"/>
+			<SearchStringAddition name="СписокTreeСтрокаПоиска" id="304">
+				<AdditionSource>
+					<Item>СписокTree</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокTreeСтрокаПоискаКонтекстноеМеню" id="305"/>
+				<ExtendedTooltip name="СписокTreeСтрокаПоискаРасширеннаяПодсказка" id="306"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="СписокTreeСостояниеПросмотра" id="307">
+				<AdditionSource>
+					<Item>СписокTree</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокTreeСостояниеПросмотраКонтекстноеМеню" id="308"/>
+				<ExtendedTooltip name="СписокTreeСостояниеПросмотраРасширеннаяПодсказка" id="309"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="СписокTreeУправлениеПоиском" id="310">
+				<AdditionSource>
+					<Item>СписокTree</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="СписокTreeУправлениеПоискомКонтекстноеМеню" id="311"/>
+				<ExtendedTooltip name="СписокTreeУправлениеПоискомРасширеннаяПодсказка" id="312"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<LabelField name="НаименованиеСписокTree" id="313">
+					<DataPath>СписокTree.Description</DataPath>
+					<ContextMenu name="НаименованиеСписокTreeКонтекстноеМеню" id="314"/>
+					<ExtendedTooltip name="НаименованиеСписокTreeРасширеннаяПодсказка" id="315"/>
+				</LabelField>
+				<LabelField name="КодСписокTree" id="316">
+					<DataPath>СписокTree.Code</DataPath>
+					<ContextMenu name="КодСписокTreeКонтекстноеМеню" id="317"/>
+					<ExtendedTooltip name="КодСписокTreeРасширеннаяПодсказка" id="318"/>
+				</LabelField>
+				<LabelField name="SortKeyСписокTree" id="319">
+					<DataPath>СписокTree.SortKey</DataPath>
+					<ContextMenu name="SortKeyСписокTreeКонтекстноеМеню" id="320"/>
+					<ExtendedTooltip name="SortKeyСписокTreeРасширеннаяПодсказка" id="321"/>
+				</LabelField>
+				<LabelField name="СсылкаСписокTree" id="322">
+					<DataPath>СписокTree.Ref</DataPath>
+					<UserVisible>
+						<xr:Common>false</xr:Common>
+					</UserVisible>
+					<ContextMenu name="СсылкаСписокTreeКонтекстноеМеню" id="323"/>
+					<ExtendedTooltip name="СсылкаСписокTreeРасширеннаяПодсказка" id="324"/>
+				</LabelField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Список" id="26">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>false</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<MainTable>Catalog.CorpusList</MainTable>
+			</Settings>
+		</Attribute>
+		<Attribute name="СписокList" id="125">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>false</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>false</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<MainTable>Catalog.CorpusList</MainTable>
+			</Settings>
+		</Attribute>
+		<Attribute name="СписокHier" id="225">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>false</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>false</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<MainTable>Catalog.CorpusList</MainTable>
+			</Settings>
+		</Attribute>
+		<Attribute name="СписокTree" id="325">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>false</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>false</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<MainTable>Catalog.CorpusList</MainTable>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>

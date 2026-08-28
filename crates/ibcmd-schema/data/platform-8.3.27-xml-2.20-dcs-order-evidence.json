@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "contract": "8.3.27-xml-2.20-dcs-settings-order-v1",
+  "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27 / XML 2.20",
+    "derivation": "component contract synthesized from exact standalone and Form experiments; patch builds are retained as provenance and do not select separate XML dialects without a structural counterexample"
+  },
+  "sources": {
+    "standalone": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two fresh isolated file-infobase round-trips with pinned ibcmd; immutable raw body and selected native XML retained; Unica supplied the initial seed only",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-core",
+      "rawBodySha256": "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510",
+      "nativeXmlSha256": "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f",
+      "roundTrips": 2
+    },
+    "form": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "retained platform-saved CF followed by one fresh isolated file-infobase load/apply/save/export round-trip; exact raw Form row and native XML were byte-stable",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-order",
+      "rawBodySha256": "98c91a2a3069192fe455cca4507e1ba82d564c7d8df3620b3a76132f2016810b",
+      "nativeXmlSha256": "9b5d317fd073d41ff929c9908500bc0e768e9280d64d08271301f0151eb1c2ce",
+      "storageOrderSha256": "72a0a00e980574e28edd9dfd7e4d0cfe9da5624c545f108ba602113f6c8caf17",
+      "embeddedOrderSha256": "828cbc03cf0a8f16cca8c85bfd76beea3645c685523262570362a19d2b0776f6",
+      "roundTrips": 2
+    },
+    "formMetadataOnly": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "byte-identical lexical fragment observed in retained and fresh native Form exports; private owner locator is intentionally not published and this source authenticates only the exact metadata-only fragment",
+      "fragmentSha256": "34c3fe0efa47667495fcf49b63374643aed3472a52edeed64a73677d299a4492",
+      "roundTrips": 2
+    },
+    "unicaDesc": {
+      "product": "1C:Enterprise Platform via the public Unica corpus",
+      "release": "8.3.27.2074",
+      "derivation": "public Unica rich dcs.compile checkpoint with explicit Desc root and group order accepted through two semantic platform round-trips; prefix and whitespace bytes were not used as evidence",
+      "repositoryRevision": "a527d40962d047c6922c903b37510b30f697da42",
+      "roundTrips": 2
+    },
+    "sourceVersion": "2.20",
+    "platformLine": "8.3.27",
+    "ibcmdSha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "policy": {
+    "namespace": "http://v8.1c.ru/8.1/data-composition-system/settings",
+    "orderQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}order",
+    "storageOrderQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}Order",
+    "itemQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}item",
+    "useQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}use",
+    "fieldQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}field",
+    "orderTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}orderType",
+    "viewModeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}viewMode",
+    "userSettingIdQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}userSettingID",
+    "fieldTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}OrderItemField",
+    "settingsPlacement": "after-selection-before-structure-items",
+    "itemChildOrder": ["use?", "field", "orderType"],
+    "orderChildOrder": ["items", "viewMode?", "userSettingID?"],
+    "supportedOrderTypes": ["Asc", "Desc"],
+    "supportedUseValues": ["omitted", "false"],
+    "maxEmittedItems": 1,
+    "supportedViewModes": ["Normal"],
+    "metadataOnlyUserSettingId": "88619765-ccb3-46c6-ac52-38e9c992ebd4",
+    "storageRecordTypeUuid": "11743ff3-2db3-4cfc-9404-90ed8209437f",
+    "propertylessEmptyOrderEmission": "unsupported",
+    "metadataOnlyOrderEmission": "requires-viewMode-and-userSettingID",
+    "rootAutoEmission": "unsupported"
+  }
+}

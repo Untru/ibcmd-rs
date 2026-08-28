@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-chart-uh-edge",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-28",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "authority": "ERP UH 3.2.12.6 native export paired with its stored form record"
+  },
+  "objects": [
+    {"variant":"two series and one real point","raw_entry":{"path":"raw/mobile-point.txt"},"native_output":{"path":"native/mobile-point-settings.xml"}},
+    {"variant":"Bubble chart with titled point/value scales","raw_entry":{"path":"raw/bubble.txt"},"native_output":{"path":"native/bubble-settings.xml"}}
+  ]
+}

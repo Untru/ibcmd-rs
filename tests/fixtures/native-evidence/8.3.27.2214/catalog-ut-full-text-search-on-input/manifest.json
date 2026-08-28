@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-catalog-ut-full-text-search-on-input",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "elements": [
+      {
+        "storage_element": "799fac6c-3561-47b4-9482-ac276e504c94",
+        "source_path": "Catalogs/ВидыОповещенийКлиентам.xml",
+        "native_export_size": 36846,
+        "native_export_sha256": "86b1fdfb336fc4b888984d4e518de76772450ef06959406a1c313dcccfed607e"
+      }
+    ],
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body.",
+    "expectation": "Owner slot 56 is `{1,1,0}` and the platform export carries <FullTextSearchOnInputByString>Use</FullTextSearchOnInputByString>."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 3459,
+      "sha256": "b4fc357586f65a5742f5e31c385daa245164abec8dd330a43264bc7b9d789adc",
+      "unpacked_size": 30323,
+      "unpacked_sha256": "0eb1ac8cc843e2538393c91f04772b8d361e98b768c5f667af1e479dd90d8f7b"
+    }
+  }
+}

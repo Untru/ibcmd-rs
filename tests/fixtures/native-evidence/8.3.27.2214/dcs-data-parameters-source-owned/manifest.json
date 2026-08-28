@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-data-parameters-source-owned",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 283,
+  "contract": "dcs-recognized-untyped-source-owned-passthrough",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-13",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "extractor_sha256": "5ec1be63f1a850c2673ee8ce7b896fb98934f363d86fff4e9d581b57cfcab722",
+    "database_kind": "two_fresh_isolated_file_infobases",
+    "database_locale": "ru_RU",
+    "patch_build_policy": "the exact build is provenance; the observed component contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "base_fixture": "8.3.27.2214-xml-2.20-dcs-core",
+    "delta": {
+      "path": "seed/data-parameters-delta.json",
+      "size": 837,
+      "sha256": "64217f286f79646ee4049b10179c0b5bd67b441da1836358bd289dd28b5e75e6"
+    },
+    "authority": "hypothesis_only; pinned platform round 2 is the byte authority"
+  },
+  "rounds": {
+    "round_1_cf": {
+      "size": 81444,
+      "sha256": "7a13cb96661ba7c955a6e240a4846d11a066acabd8c9d0961b46e0dff5830257"
+    },
+    "round_2_cf": {
+      "size": 81444,
+      "sha256": "4c0b8e1a2bae7c6f1d12230a4d053a6eb4b096ced5e16bf9186cb5a37467a6c9"
+    },
+    "round_1_template_sha256": "db505e5863f238570714fd2f281303fdf6b0a940040535a66e29f080828d6f7c",
+    "round_2_template_sha256": "db505e5863f238570714fd2f281303fdf6b0a940040535a66e29f080828d6f7c",
+    "round_1_packed_sha256": "c1f1ba3b778c6a6054730ee389ed244f9c985d9e32c098caf61de18b8a4b4155",
+    "round_2_packed_sha256": "c1f1ba3b778c6a6054730ee389ed244f9c985d9e32c098caf61de18b8a4b4155",
+    "round_1_unpacked_sha256": "ff4bdb55f20904504c781bdd6ec7d1e2a3203fe53c497819c7c58ae6815e3713",
+    "round_2_unpacked_sha256": "ff4bdb55f20904504c781bdd6ec7d1e2a3203fe53c497819c7c58ae6815e3713",
+    "template_equal_between_rounds": true,
+    "packed_equal_between_rounds": true,
+    "unpacked_equal_between_rounds": true
+  },
+  "configuration_cf": {
+    "storage": "base64",
+    "path": "configuration.cf.b64",
+    "encoded_size": 108592,
+    "encoded_sha256": "bee6c0a1a2ec3913626a2ca90d4f34769186cb71d208e5fdb6e2092110d040ad",
+    "decoded_size": 81444,
+    "decoded_sha256": "4c0b8e1a2bae7c6f1d12230a4d053a6eb4b096ced5e16bf9186cb5a37467a6c9"
+  },
+  "template": {
+    "owner_kind": "Report",
+    "owner_name": "DcsCorpus",
+    "owner_uuid": "688ec52f-a520-4868-95c1-832c78c4813c",
+    "name": "MainSchema",
+    "uuid": "f4db0f6c-34f4-4449-995d-6265516e5fa8",
+    "body_key": "f4db0f6c-34f4-4449-995d-6265516e5fa8.0",
+    "raw_entry": {
+      "compression": "raw-deflate",
+      "packed": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate.b64",
+        "encoded_size": 1421,
+        "encoded_sha256": "f8cae4e1a9be8ee885353ae3c5975ea203dc3e673c00e7b4fd4aad25a868dca9",
+        "decoded_size": 1063,
+        "decoded_sha256": "c1f1ba3b778c6a6054730ee389ed244f9c985d9e32c098caf61de18b8a4b4155"
+      },
+      "unpacked": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin.b64",
+        "encoded_size": 6245,
+        "encoded_sha256": "f24cf4abbb51a073eb79639a6fe0dd908b3396f454b453ddaf4bf9c64cf110bd",
+        "decoded_size": 4682,
+        "decoded_sha256": "ff4bdb55f20904504c781bdd6ec7d1e2a3203fe53c497819c7c58ae6815e3713"
+      }
+    },
+    "native_xml": {
+      "path": "native-template.xml.b64",
+      "encoded_size": 5557,
+      "encoded_sha256": "748a43b4594f469f1242fe97c3f6c07711a7548316254f558e1a7d1af6c1a6c8",
+      "decoded_size": 4166,
+      "decoded_sha256": "db505e5863f238570714fd2f281303fdf6b0a940040535a66e29f080828d6f7c",
+      "export_path": "Reports/DcsCorpus/Templates/MainSchema/Ext/Template.xml"
+    },
+    "data_parameters_fragment": {
+      "decoded_size": 252,
+      "sha256": "a8318c0031c780148c9b3496f4b6981d3857e2b83b3f4d965c71b895b36831c9"
+    }
+  },
+  "proven_shape": {
+    "body_layout": "dcs-schema-three-document-v1",
+    "header_marker": 0,
+    "settings_document_count": 1,
+    "stored_document_lengths": [3029, 1366],
+    "trailing_document_length": 263,
+    "document_sha256": [
+      "5124cc181b46586289d2a1ff667f2e8e659c27beefcf806f1f54cc256d82be0c",
+      "bacd94ca8af543ee0ebb9b7674004260ba1f075b5f2ec724f9edbc64e54610ec",
+      "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81"
+    ],
+    "root_settings_child_order": ["selection", "dataParameters", "order", "item"],
+    "data_parameters_qname": "{http://v8.1c.ru/8.1/data-composition-system/settings}dataParameters",
+    "item_qname": "{http://v8.1c.ru/8.1/data-composition-system/core}item",
+    "item_type_qname": "{http://v8.1c.ru/8.1/data-composition-system/settings}SettingsParameterValue",
+    "parameter_qname": "{http://v8.1c.ru/8.1/data-composition-system/core}parameter",
+    "parameter": "Caption",
+    "value_qname": "{http://v8.1c.ru/8.1/data-composition-system/core}value",
+    "value_type_qname": "{http://www.w3.org/2001/XMLSchema}string",
+    "value": "Opaque probe"
+  },
+  "classification": {
+    "edt_release": "2025.2.3+30",
+    "xcore_classifier": "DataCompositionSettings",
+    "xcore_feature": "dataParameters",
+    "xcore_kind": "containment",
+    "xcore_model_type": "DataCompositionDataParameterValues",
+    "canonical_coverage_status": "unsupported",
+    "canonical_diagnostic_code": "schema.unmapped",
+    "passthrough_boundary": "unchanged source-owned subtree in the same XML 2.20 source document; not canonical opaque emission"
+  },
+  "proven_claims": [
+    "Pinned 8.3.27.2214 with ru_RU accepted and canonicalized one Settings dataParameters value bound to the existing Caption schema parameter.",
+    "The native Template.xml and packed and unpacked template body are byte-identical across two fresh isolated platform rounds.",
+    "The schema and trailing body documents are unchanged from dcs-core; only the Settings document changed.",
+    "The retained round-2 CF exercises the normal offline cf export path, which must reproduce the exact native Template.xml and dataParameters fragment.",
+    "EDT Xcore recognizes DataCompositionSettings.dataParameters while the ibcmd-rs canonical coverage keeps it unsupported; the subtree therefore remains source-owned rather than authorizing canonical opaque emission."
+  ],
+  "non_claims": [
+    "No typed canonical dataParameters model, mutation, regeneration, cross-profile transport, or opaque-lossless placement is inferred.",
+    "No multiple parameter, use flag, non-string value, missing schema parameter, user-setting metadata, nested parameter value, or alternate child order is inferred.",
+    "No Form ListSettings, Form storage row, wrapper QName, or storage record UUID is inferred.",
+    "The same-namespace and foreign-namespace unknown-child platform probes were not part of these clean positive artifacts; no platform rejection, drop, or retention behavior is claimed for them.",
+    "EDT readSettings unknown-child rejection remains separate exact-release evidence and is not promoted from this platform fixture.",
+    "The patch build is provenance, not a new XML dialect selector; the fixture is diagnostic-only and is never a production fallback."
+  ]
+}

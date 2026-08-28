@@ -420,7 +420,9 @@ impl MssqlDumpTimingReport {
 
     pub(crate) fn add_source_asset_kind(&mut self, kind: &SourceAssetKind, elapsed_ms: u64) {
         match kind {
-            SourceAssetKind::Form { .. } => self.source_asset_form_cpu_ms += elapsed_ms,
+            SourceAssetKind::Form { .. } | SourceAssetKind::UndeclaredFormType => {
+                self.source_asset_form_cpu_ms += elapsed_ms;
+            }
             SourceAssetKind::Help => self.source_asset_help_cpu_ms += elapsed_ms,
             SourceAssetKind::MoxelSpreadsheet => self.source_asset_moxel_cpu_ms += elapsed_ms,
             SourceAssetKind::DataCompositionSchema
@@ -446,11 +448,13 @@ impl MssqlDumpTimingReport {
             SourceAssetKind::ExchangePlanContent => {
                 self.source_asset_exchange_plan_cpu_ms += elapsed_ms;
             }
-            SourceAssetKind::BusinessProcessFlowchart => {
+            SourceAssetKind::BusinessProcessFlowchart
+            | SourceAssetKind::TemplateGraphicalScheme => {
                 self.source_asset_business_process_cpu_ms += elapsed_ms;
             }
             SourceAssetKind::Schedule => self.source_asset_schedule_cpu_ms += elapsed_ms,
-            SourceAssetKind::AccumulationRegisterAggregates { .. } => {
+            SourceAssetKind::AccumulationRegisterAggregates { .. }
+            | SourceAssetKind::AdditionalIndexes { .. } => {
                 self.source_asset_other_cpu_ms += elapsed_ms;
             }
         }

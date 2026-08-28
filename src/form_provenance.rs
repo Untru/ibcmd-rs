@@ -210,7 +210,9 @@ pub fn run_form_provenance_corpus(
             &context.type_index,
             &context.dcs_type_index,
             &context.object_refs,
+            &context.field_type_refs,
             &context.information_register_field_refs,
+            &context.information_register_master_dimensions,
             owner,
             &sink,
         )
@@ -529,7 +531,12 @@ fn correlate(
         FormItemSchemaTraceEvent,
     > = BTreeMap::new();
     for event in schema {
-        let key = (event.id.clone(), event.tag.clone(), event.name.clone(), event.occurrence);
+        let key = (
+            event.id.clone(),
+            event.tag.clone(),
+            event.name.clone(),
+            event.occurrence,
+        );
         if event.evidence_complete {
             if let Some(previous) = schema_by_identity.get_mut(&key) {
                 previous.evidence_complete = true;

@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-parameter-scalar-types",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "orchestrated batch spec over retained dcs-area-template-appearance corpus export; platform bytes are authority",
+    "path": "seed/Template.xml",
+    "size": 5245,
+    "sha256": "7f4f83f5e8adcb21b0e9e848726c3da19d9cbb94996a08e69a84784fc4c9f1e0"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "1e5ef64f8122560f31b84c5f9a1e7f8a545c1cfa88cc7bd10da0b99080f9bb47",
+    "round_2_cf_sha256": "0eec23236d4229dbf73567f6ce706ba45b5c5aedc2e34c0300e42893cf15e905",
+    "native_template_sha256": "7f4f83f5e8adcb21b0e9e848726c3da19d9cbb94996a08e69a84784fc4c9f1e0",
+    "packed_body_sha256": "e787dd364b36c76987e4c9d6640bf0f67f1775228954b9961b04ba1e474325aa",
+    "unpacked_body_sha256": "7eff1e38e649c8e0b36518068c8d8dfffc7460a6a2943a615ead724a9549ded7",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "native_template_equal_seed": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 81484,
+      "sha256": "0eec23236d4229dbf73567f6ce706ba45b5c5aedc2e34c0300e42893cf15e905"
+    },
+    "native_template": {
+      "path": "native-template.xml.b64",
+      "decoded_size": 5245,
+      "sha256": "7f4f83f5e8adcb21b0e9e848726c3da19d9cbb94996a08e69a84784fc4c9f1e0"
+    },
+    "packed_body": {
+      "path": "raw-packed.bin.b64",
+      "decoded_size": 1158,
+      "sha256": "e787dd364b36c76987e4c9d6640bf0f67f1775228954b9961b04ba1e474325aa"
+    },
+    "unpacked_body": {
+      "path": "raw-unpacked.bin.b64",
+      "decoded_size": 6172,
+      "sha256": "7eff1e38e649c8e0b36518068c8d8dfffc7460a6a2943a615ead724a9549ded7"
+    }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [
+      4743,
+      1142
+    ],
+    "primary_schema_sha256": "66061d435748072b14f3bbc9a55e54d91b1e016831d574fc2732dd2cd53e99f6",
+    "settings_sha256": "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4",
+    "trailing_area_schema_file_size": 263,
+    "trailing_area_schema_file_sha256": "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81"
+  },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body (compile_dcs on the retained round-2 native Template.xml; the evidenced cohort parser requires platform storage order) overlaid via the common overlay APIs into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 6070,
+    "candidate_body_unpacked_sha256": "602b10174c978ea0427304a02245ec6b66e9bc1a012a3333e72a17267fe7a5ce",
+    "candidate_cf_sha256": "17a211abffb78f12c887a34b4a1733d7d51c5d0caf240e9109391f2b1e29f7d5",
+    "platform_saved_cf_size": 81554,
+    "platform_saved_cf_sha256": "e8bd895065a65aa6bbd8aa6616a00136fe503290ec45dae68f30d0d203bb05da",
+    "reexported_template_size": 5245,
+    "reexported_template_sha256": "7f4f83f5e8adcb21b0e9e848726c3da19d9cbb94996a08e69a84784fc4c9f1e0",
+    "reexport_matches_two_round_native_template": true
+  },
+  "cohort": {
+    "new_parameter_order": [
+      "Флаг",
+      "Лимит",
+      "Период"
+    ],
+    "insertion_point": "immediately after the existing Caption parameter, before settingsVariant",
+    "flag_param": {
+      "name": "Флаг",
+      "valueType": "xs:boolean",
+      "value": "true",
+      "useRestriction": false
+    },
+    "limit_param": {
+      "name": "Лимит",
+      "valueType": "xs:decimal",
+      "digits": 10,
+      "fractionDigits": 2,
+      "allowedSign": "Any",
+      "value": "100.5",
+      "useRestriction": false
+    },
+    "period_param": {
+      "name": "Период",
+      "valueType": "v8:StandardPeriod",
+      "variant": "LastMonth",
+      "useRestriction": false
+    }
+  },
+  "negative_observations": [
+    "None observed for this coordinate: the native re-export is byte-identical to the submitted seed for all three new parameters, in the same order and position submitted."
+  ],
+  "non_claims": [
+    "No other StandardPeriodVariant enum member besides LastMonth is exercised or claimed.",
+    "No claim about behavior for boolean/decimal/StandardPeriod parameters used as area-template or query filter values, only as top-level DCS schema parameters.",
+    "Compiler acceptance is proven only for the exact Флаг/Лимит/Период scalar-parameter coordinate recorded in compiler_acceptance above; it does not extend to other parameter types, insertion points, or StandardPeriodVariant members."
+  ]
+}

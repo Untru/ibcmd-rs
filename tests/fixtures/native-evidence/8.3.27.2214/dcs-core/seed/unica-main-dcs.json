@@ -1,0 +1,39 @@
+{
+  "dataSets": [
+    {
+      "name": "Rows",
+      "objectName": "Rows",
+      "fields": [
+        "Name: string(20)",
+        "Amount: decimal(15,2)"
+      ]
+    }
+  ],
+  "calculatedFields": [
+    "DoubleAmount: decimal(15,2) = Amount * 2"
+  ],
+  "totalFields": [
+    "Amount: Sum",
+    "DoubleAmount: Sum"
+  ],
+  "parameters": [
+    "Caption [Caption]: string(40) = DCS corpus"
+  ],
+  "settingsVariants": [
+    {
+      "name": "Main",
+      "title": "Main",
+      "settings": {
+        "selection": [
+          "Name",
+          "Amount",
+          "DoubleAmount"
+        ],
+        "order": [
+          "Name asc"
+        ],
+        "structure": "details"
+      }
+    }
+  ]
+}

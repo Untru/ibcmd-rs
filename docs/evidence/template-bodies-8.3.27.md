@@ -1,7 +1,8 @@
 # Template bodies on 8.3.27
 
 Status: bounded evidence for the standalone compiler profile
-`platform-8.3.27.1989`.
+`platform-8.3.27.1989`, with additional DCS-only two-round attestations on
+`8.3.27.2214` / XML `2.20`.
 
 The native layouts were recovered from the independently retained inflated
 `Config` corpus under
@@ -46,26 +47,66 @@ to XML. Unknown headers and roots are hard errors.
 
 ## DataCompositionSchema / DCS
 
-An observed DCS schema plaintext starts with a 24-byte little-endian header:
+An observed DCS schema plaintext starts with a variable-size little-endian
+header of `8 + 8 * (settings_count + 1)` bytes:
 
 1. `u32` marker `0`;
-2. `u32` layout version `1`;
-3. `u64` byte length of the first XML document;
-4. `u64` byte length of the second XML document.
+2. `u32` count of external `Settings` documents;
+3. `settings_count + 1` `u64` byte lengths, first for the primary
+   `SchemaFile`, followed by one length for every external `Settings`
+   document.
 
-Three UTF-8-BOM XML documents follow: the main `SchemaFile`, one `Settings`
-document and a trailing `SchemaFile`. The third document occupies the
-remaining bytes. The compiler extracts the single source `settingsVariant`
-settings block into document two, including non-empty filter/settings content;
-the existing exporter inserts it back into the same variant. Header lengths,
-BOMs, roots, namespaces, XML balance, depth and node counts are validated
-before a body is accepted.
+The primary `SchemaFile` and positional external `Settings` documents follow,
+then a terminal `SchemaFile` occupies the remaining bytes. A body with one
+external settings document therefore has a 24-byte header and three XML
+documents; the evidenced two-variant body has a 32-byte header and four XML
+documents. The current reverse compiler extracts the single source
+`settingsVariant` settings block into document two, including non-empty
+filter/settings content; the existing exporter inserts it back into the same
+variant. Header lengths, BOMs, roots, namespaces, XML balance, depth and node
+counts are validated before a body is accepted.
 
-The evidenced layout has one settings variant. Missing/multiple variants and
-inline `AreaTemplate` values that require the separately indexed native area
-document remain explicit blockers. Historical direct-XML DCS rows remain
-readable only through the named compatibility decoder; the profile-selected
-writer and strict decoder accept only the three-document layout.
+The reverse compiler's evidenced emission cohort has one or two direct
+settings variants. More than two variants and inline `AreaTemplate` values
+that require the separately indexed native area document remain explicit
+compiler blockers.
+Historical direct-XML DCS rows remain readable only through the named
+compatibility decoder.
+
+The diagnostic fixture under
+`tests/fixtures/native-evidence/8.3.27.2214/dcs-core` independently confirms
+the same header and three-document layout on patch build `8.3.27.2214`. Its
+raw-deflate stream, 4,458-byte unpacked body, and selected native
+`Template.xml` are byte-identical across two isolated file-infobase rounds.
+The fixture also drives the normal offline `cf export` path and requires the
+complete selected XML to match the platform output byte-for-byte. This is
+evidence for a shared 8.3.27 / XML 2.20 DCS body contract, not a distinct
+patch-build dialect.
+
+A third isolated 8.3.27.2214 file infobase provides the reverse acceptance
+check. The production compiler rebuilt the native `Template.xml` into a valid
+4,734-byte three-document body, that body alone was overlaid onto the retained
+micro-CF, and pinned `ibcmd` loaded and applied it successfully. A recursive
+export of `Report.DcsCorpus` then matched all five selected round-2 files
+byte-for-byte. The compiler body is intentionally not byte-identical to the
+4,458-byte platform body because namespace declarations use different legal
+lexical placement; the platform canonicalizes both to the same source XML.
+Therefore byte-identical reverse storage spelling is not a correctness gate
+for this slice.
+
+The additional diagnostic fixture under
+`tests/fixtures/native-evidence/8.3.27.2214/dcs-multi-variant-envelope`
+confirms the physical envelope for two direct root `settingsVariant` values.
+Its second header field is `2`, its header is 32 bytes, its stored document
+lengths are `3467`, `1142`, and `826`, and the 263-byte terminal `SchemaFile`
+occupies the remainder. Two external `Settings` documents bind positionally
+to the two source variants. Selected XML, packed body, and unpacked body are
+byte-identical across two fresh platform rounds, and the retained CF drives
+the normal offline `cf export` and raw-row verifier paths. The fixture proves
+the envelope and delegation shape only, not a full typed schema model,
+alternate bindings, or cross-profile replay. The common namespace-aware
+binder and reverse compiler now consume this exact one-to-two variant evidence
+boundary.
 
 ## Retained evidence
 
@@ -89,11 +130,14 @@ explicit rather than being presented as corpus evidence.
 
 ## Version and compatibility boundary
 
-The codecs are enabled only when the platform build is `8.3.27.1989`, the
-storage profile is `storage:mssql-config-configsave`, and all three constants
-above select the exact evidenced layouts. The bundled 8.3.24 and 8.5.1
-profiles do not inherit them. Support for another platform version therefore
-requires explicit profile evidence and cannot silently reuse these bytes.
+The complete standalone compiler profile remains enabled only when the
+platform build is `8.3.27.1989`, the storage profile is
+`storage:mssql-config-configsave`, and all three constants above select the
+exact evidenced layouts. That conservative whole-profile gate must not be
+confused with the DCS component contract: the additional `8.3.27.2214`
+fixture demonstrates that this DCS layout is shared inside the 8.3.27 / XML
+2.20 family. It does not by itself attest every other metadata/body constant
+on `8.3.27.2214`, and the bundled 8.3.24 and 8.5.1 profiles do not inherit it.
 
 ## Verification
 

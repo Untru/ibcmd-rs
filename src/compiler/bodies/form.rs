@@ -314,6 +314,82 @@ mod tests {
         }
     }
 
+    /// Measures — rather than assumes — what the base-free packer can do with a
+    /// real platform form.
+    ///
+    /// The input is the platform's own `Ext/Form.xml` for
+    /// `Catalogs/CorpusList/Forms/ListForm`, retained under
+    /// `tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state`.
+    /// It sits outside the evidenced base-free cohort, and the exact reasons are
+    /// pinned here so the gap list is a checked fact rather than a note: when
+    /// the packer grows a facet this test fails, and whoever grew it has to
+    /// restate what is still missing.
+    #[test]
+    fn retained_native_form_is_refused_with_an_exact_gap_list() {
+        let form_xml = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-form-list-settings-server-state/native-form.xml.b64"
+        )));
+        let profile = ManagedFormCodecProfile::fixture();
+        let error = compile_managed_form(&profile, &form_xml, None, None)
+            .expect_err("the retained native form is outside the base-free cohort");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("Form XML is outside the evidenced base-free marker-50 cohort"),
+            "{rendered}"
+        );
+        for blocker in [
+            "has a dynamic-list MainTable but no source resolver",
+            "uses an unsupported decoration/font/border creation facet",
+            "uses strict-schema properties without an evidenced creation layout",
+        ] {
+            assert!(
+                rendered.contains(blocker),
+                "missing `{blocker}` in {rendered}"
+            );
+        }
+    }
+
+    /// Minimal decoder for the retained base64 evidence files.
+    fn decode_base64_fixture(input: &str) -> Vec<u8> {
+        fn value(byte: u8) -> u32 {
+            match byte {
+                b'A'..=b'Z' => u32::from(byte - b'A'),
+                b'a'..=b'z' => u32::from(byte - b'a') + 26,
+                b'0'..=b'9' => u32::from(byte - b'0') + 52,
+                b'+' => 62,
+                b'/' => 63,
+                _ => panic!("invalid base64 byte {byte}"),
+            }
+        }
+        let bytes = input
+            .as_bytes()
+            .iter()
+            .copied()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect::<Vec<_>>();
+        assert!(
+            bytes.len().is_multiple_of(4),
+            "base64 length is not canonical"
+        );
+        let mut output = Vec::with_capacity(bytes.len() / 4 * 3);
+        for chunk in bytes.chunks_exact(4) {
+            let padding = chunk.iter().filter(|byte| **byte == b'=').count();
+            let packed = (value(chunk[0]) << 18)
+                | (value(chunk[1]) << 12)
+                | (if padding > 1 { 0 } else { value(chunk[2]) } << 6)
+                | (if padding > 0 { 0 } else { value(chunk[3]) });
+            output.push((packed >> 16) as u8);
+            if padding < 2 {
+                output.push((packed >> 8) as u8);
+            }
+            if padding < 1 {
+                output.push(packed as u8);
+            }
+        }
+        output
+    }
+
     #[test]
     fn strict_reader_rejects_no_bom_and_legacy_layout() {
         let profile = ManagedFormCodecProfile::fixture();

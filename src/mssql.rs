@@ -45,7 +45,10 @@ use crate::cli::{
     MssqlStageWebServiceObjectArgs, MssqlStageXdtopackageObjectArgs, MssqlStorageExportArgs,
     MssqlStorageImportArgs,
 };
-use crate::compiler::bodies::template::{TemplateKind, TemplateSource, compile_evidenced_template};
+use crate::compiler::bodies::template::{
+    TemplateKind, TemplateSource, compile_evidenced_template,
+    compile_evidenced_template_with_references,
+};
 use crate::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
 use crate::compiler::{
     AdditionalIndexesMapping, CompileAxes, CompileRequest, SourcePayload, compile_source,
@@ -1428,6 +1431,72 @@ fn metadata_module_body_base_free_reason(kind: &str) -> &'static str {
     }
 }
 
+/// Scans `source_root/StyleItems/*.xml` for a uuid -> semantic-name map,
+/// the same fact a `DataCompositionSchema` custom-`StyleItem` style-color
+/// reference needs to compile base-free (see
+/// `compiler::bodies::dcs::compile_dcs_with_references`). Each object's
+/// name comes from its own file name -- the same `StyleItems/<Name>.xml`
+/// convention `source::infer_object_hint` already treats as this family's
+/// object identity -- paired with the root `<StyleItem uuid="...">`
+/// attribute read directly from that same file. A missing `StyleItems`
+/// directory, or any individual file that fails to parse or carries no
+/// `uuid` attribute, is skipped rather than treated as an error: this map
+/// is best-effort evidence gathering for one optional compile-direction
+/// coordinate, not a required precondition for the rest of the bootstrap
+/// scan.
+fn style_reference_types_from_source_root(source_root: &Path) -> BTreeMap<String, String> {
+    let mut style_reference_types = BTreeMap::new();
+    let Ok(entries) = fs::read_dir(source_root.join("StyleItems")) else {
+        return style_reference_types;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("xml") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let Ok(xml) = fs::read(&path) else {
+            continue;
+        };
+        if let Some(uuid) = parse_style_item_root_uuid(&xml) {
+            style_reference_types.insert(uuid, name.to_string());
+        }
+    }
+    style_reference_types
+}
+
+/// Reads the `uuid` attribute off a `StyleItems/<Name>.xml` object's root
+/// `<StyleItem>` element, canonicalized to the lowercase-hyphenated form
+/// (matching the `compile_dcs_with_references` resolver contract). Returns
+/// `None` for anything else (malformed XML, a different root element, a
+/// missing or non-UUID `uuid` attribute) -- the caller treats that as "this
+/// file contributes nothing," never as a hard error.
+fn parse_style_item_root_uuid(xml: &[u8]) -> Option<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer).ok()? {
+            Event::Start(event) | Event::Empty(event) => {
+                if event.local_name().as_ref() != b"StyleItem" {
+                    continue;
+                }
+                let uuid = xml_attr_value_for_stage(&event, "uuid")?;
+                return Some(
+                    uuid::Uuid::parse_str(uuid.trim())
+                        .ok()?
+                        .hyphenated()
+                        .to_string(),
+                );
+            }
+            Event::Eof => return None,
+            _ => {}
+        }
+        buffer.clear();
+    }
+}
+
 fn template_bootstrap_rows(
     source_root: &Path,
     xml_path: &Path,
@@ -1466,9 +1535,21 @@ fn template_bootstrap_rows(
                     let source = fs::read(&body_path).with_context(|| {
                         format!("failed to read DCS Template body {}", body_path.display())
                     })?;
-                    if let Err(error) =
-                        compile_evidenced_template(kind, TemplateSource::Bytes(&source))
-                    {
+                    // A custom-StyleItem style-color reference (see
+                    // `compiler::bodies::dcs::compile_dcs_with_references`)
+                    // needs a uuid -> semantic-name resolver to compile
+                    // base-free. The source tree itself carries that fact:
+                    // each `StyleItems/<Name>.xml` object's root `uuid`
+                    // attribute paired with its own file name (the same
+                    // convention `source::infer_object_hint` already uses
+                    // for this family). Building the map is this adapter's
+                    // job, not the XML codec's.
+                    let style_reference_types = style_reference_types_from_source_root(source_root);
+                    if let Err(error) = compile_evidenced_template_with_references(
+                        kind,
+                        TemplateSource::Bytes(&source),
+                        &style_reference_types,
+                    ) {
                         rows.push(bootstrap_row_report(
                             "metadata_object",
                             &properties.kind,
@@ -7690,10 +7771,16 @@ mod tests {
     }
 
     fn sample_data_composition_template_xml() -> &'static [u8] {
+        // Local/DataSetObject with one xs:string field: the same minimal
+        // shape the evidenced `dcs-filter` corpus proves is admitted by the
+        // live `normalize_data_composition_schema_template_documents_with_profiles`
+        // codec's typed inner-schema parser (a dataSource-only, dataSet-free
+        // schema is outside its admitted cohort shapes).
         br#"<?xml version="1.0" encoding="UTF-8"?>
-<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>
-	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings/></settingsVariant>
+	<dataSet xsi:type="DataSetObject"><name>Rows</name><field xsi:type="DataSetFieldField"><dataPath>Name</dataPath><field>Name</field><valueType><v8:Type>xs:string</v8:Type><v8:StringQualifiers><v8:Length>20</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength></v8:StringQualifiers></valueType></field><dataSource>Source1</dataSource><objectName>Rows</objectName></dataSet>
+	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="v8:LocalStringType"><v8:item><v8:lang>ru</v8:lang><v8:content>Main</v8:content></v8:item></dcsset:presentation><dcsset:settings><dcsset:item xsi:type="dcsset:StructureItemGroup"><dcsset:order><dcsset:item xsi:type="dcsset:OrderItemAuto"/></dcsset:order><dcsset:selection><dcsset:item xsi:type="dcsset:SelectedItemAuto"/></dcsset:selection></dcsset:item></dcsset:settings></settingsVariant>
 </DataCompositionSchema>
 "#
     }
@@ -11309,16 +11396,215 @@ mod tests {
             decoded.data_composition().unwrap().layout(),
             crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument
         );
-        let exported = crate::mssql_dump::normalize_data_composition_schema_template_xml(
-            decoded.data_composition().unwrap().plaintext(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
-        .unwrap();
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.data_composition().unwrap().documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ibcmd_core::artifact::ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ibcmd_core::artifact::ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
         assert!(
             String::from_utf8(exported)
                 .unwrap()
                 .contains("<name>Source1</name>")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut length = 0usize;
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            quartet[length] = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => 64,
+                _ => panic!("invalid fixture base64 byte {byte}"),
+            };
+            length += 1;
+            if length == 4 {
+                output.push((quartet[0] << 2) | (quartet[1] >> 4));
+                if quartet[2] != 64 {
+                    output.push((quartet[1] << 4) | (quartet[2] >> 2));
+                }
+                if quartet[3] != 64 {
+                    output.push((quartet[2] << 6) | quartet[3]);
+                }
+                length = 0;
+            }
+        }
+        assert_eq!(length, 0, "fixture base64 must contain complete quartets");
+        output
+    }
+
+    /// `template_bootstrap_rows` (the dry-run bootstrap-feasibility route,
+    /// distinct from the live-staging `prepare_template_body_row` pipeline)
+    /// has `source_root` in scope, so it builds a custom-StyleItem
+    /// uuid -> semantic-name resolver from the source tree's own
+    /// `StyleItems/<Name>.xml` objects and threads it into
+    /// `compile_evidenced_template_with_references`. Without a matching
+    /// `StyleItems/CorpusAccent.xml` sibling, the DCS bootstrap row stays
+    /// blocked exactly as before this work package; once that sibling
+    /// exists, the same evidenced `dcs-area-style-item-uuid` corpus
+    /// compiles base-free through the bootstrap route too, not just
+    /// through `compiler::bodies::dcs::compile_dcs_with_references`
+    /// directly.
+    #[test]
+    fn template_bootstrap_resolves_custom_style_item_reference_from_source_root() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-dcs-style-item-bootstrap-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("AreaProbe.xml");
+        let body_path = root
+            .join("CommonTemplates")
+            .join("AreaProbe")
+            .join("Ext")
+            .join("Template.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let owner = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonTemplate uuid="eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee">
+    <Properties><Name>AreaProbe</Name><TemplateType>DataCompositionSchema</TemplateType></Properties>
+  </CommonTemplate>
+</MetaDataObject>"#;
+        fs::write(&template_xml, owner).unwrap();
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-template.xml.b64"
+        )));
+        fs::write(&body_path, &native_template).unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonTemplate",
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+            "AreaProbe",
+        );
+
+        // Without a StyleItems/CorpusAccent.xml sibling in source_root, the
+        // custom-StyleItem coordinate has no resolver and the bootstrap row
+        // reports the DCS body as blocked -- unchanged pre-existing
+        // behavior (see `compiler::bodies::dcs` A6 NOT-COMPILABLE
+        // acceptance).
+        let rows_without_style_item = super::template_bootstrap_rows(
+            &root,
+            &template_xml,
+            owner,
+            &properties,
+            "CommonTemplates/AreaProbe",
+        )
+        .unwrap();
+        assert_eq!(rows_without_style_item.len(), 1);
+        assert!(
+            rows_without_style_item[0]
+                .reason
+                .contains("DCS bootstrap is blocked")
+        );
+
+        // With the source tree's own StyleItems/<Name>.xml object present
+        // (the same genuine bytes the fixture manifest retains as
+        // `native_style_item`), the bootstrap route builds the resolver
+        // itself and the DCS body compiles base-free.
+        fs::create_dir_all(root.join("StyleItems")).unwrap();
+        let native_style_item = decode_base64_fixture(include_str!(concat!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-style-item.xml.b64"
+        )));
+        fs::write(
+            root.join("StyleItems").join("CorpusAccent.xml"),
+            &native_style_item,
+        )
+        .unwrap();
+
+        let rows_with_style_item = super::template_bootstrap_rows(
+            &root,
+            &template_xml,
+            owner,
+            &properties,
+            "CommonTemplates/AreaProbe",
+        )
+        .unwrap();
+        assert!(
+            rows_with_style_item
+                .iter()
+                .any(|row| row.row_kind == "template_dcs_body"
+                    && row.generation == "can_generate_without_base_blob"),
+            "expected a base-free template_dcs_body row once StyleItems/CorpusAccent.xml is present: {rows_with_style_item:?}"
+        );
+        assert!(
+            rows_with_style_item
+                .iter()
+                .all(|row| !row.reason.contains("DCS bootstrap is blocked")),
+            "resolver built from StyleItems/CorpusAccent.xml must unblock the DCS bootstrap row: {rows_with_style_item:?}"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn style_reference_types_from_source_root_scans_multiple_objects_and_skips_bad_ones() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-style-reference-scan-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+
+        // No StyleItems directory at all: empty map, not an error.
+        assert_eq!(
+            super::style_reference_types_from_source_root(&root),
+            BTreeMap::new()
+        );
+
+        fs::create_dir_all(root.join("StyleItems")).unwrap();
+        let native_style_item = decode_base64_fixture(include_str!(concat!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-style-item-uuid/native-style-item.xml.b64"
+        )));
+        fs::write(
+            root.join("StyleItems").join("CorpusAccent.xml"),
+            &native_style_item,
+        )
+        .unwrap();
+        // A second, genuine-shaped object with a different uuid/name.
+        fs::write(
+            root.join("StyleItems").join("Secondary.xml"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+	<StyleItem uuid="11111111-2222-4333-8444-555555555555">
+		<Properties>
+			<Name>Secondary</Name>
+			<Type>Color</Type>
+			<Value xsi:type="v8ui:Color">web:Blue</Value>
+		</Properties>
+	</StyleItem>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        // A malformed sibling and a non-XML sibling must be skipped, not
+        // treated as a hard error for the whole scan.
+        fs::write(
+            root.join("StyleItems").join("Malformed.xml"),
+            b"not xml at all",
+        )
+        .unwrap();
+        fs::write(root.join("StyleItems").join("readme.txt"), b"ignored").unwrap();
+
+        let map = super::style_reference_types_from_source_root(&root);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("4a9d8536-ff59-4a90-a1cf-646d241dc53c")
+                .map(String::as_str),
+            Some("CorpusAccent")
+        );
+        assert_eq!(
+            map.get("11111111-2222-4333-8444-555555555555")
+                .map(String::as_str),
+            Some("Secondary")
         );
 
         let _ = fs::remove_dir_all(root);

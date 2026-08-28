@@ -12,6 +12,7 @@ pub(crate) mod form_schema;
 #[cfg(feature = "platform-oracle")]
 pub mod infobase;
 pub mod legacy_version;
+pub(crate) mod metadata_owner_graph;
 pub mod module_blob;
 pub mod mssql;
 pub mod mssql_dump;
@@ -23,8 +24,10 @@ pub mod probe;
 #[cfg(feature = "platform-oracle")]
 pub mod profile;
 pub mod profile_registry;
+pub(crate) mod runtime_evidence_schema;
 pub mod source;
 pub mod source_audit;
+pub mod source_oracle;
 pub mod storage_map;
 pub mod templates;
 pub mod trace;

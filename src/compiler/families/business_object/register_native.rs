@@ -828,7 +828,6 @@ fn build_cct(
 ) -> Result<NativeValue, BusinessObjectBuildError> {
     validate_top_level(validated, object, CCT_SCHEMA)?;
     let (forms, templates) = owned_forms_and_templates(object, indexes)?;
-    require_empty_templates(object, &templates)?;
     let generated = generated_or_derived(
         object,
         BusinessObjectFamily::ChartOfCharacteristicTypes,
@@ -936,6 +935,8 @@ fn build_cct(
         fields,
         &CHART_OF_CHARACTERISTIC_TYPES_COLLECTION_UUIDS,
         forms,
+        templates,
+        Some(1),
         5,
     ))
 }
@@ -1098,6 +1099,8 @@ fn build_coa(
         fields,
         &CHART_OF_ACCOUNTS_COLLECTION_UUIDS,
         forms,
+        Vec::new(),
+        None,
         7,
     ))
 }
@@ -1268,6 +1271,8 @@ fn build_cot(
         fields,
         &CHART_OF_CALCULATION_TYPES_COLLECTION_UUIDS,
         forms,
+        Vec::new(),
+        None,
         5,
     ))
 }
@@ -1276,6 +1281,8 @@ fn chart_root(
     fields: Vec<NativeValue>,
     markers: &[&str],
     forms: Vec<ObjectUuid>,
+    templates: Vec<ObjectUuid>,
+    template_collection: Option<usize>,
     collection_count: usize,
 ) -> NativeValue {
     let mut root = vec![
@@ -1284,7 +1291,9 @@ fn chart_root(
         token(collection_count.to_string()),
     ];
     for (index, marker) in markers.iter().enumerate() {
-        let items = if index + 1 == markers.len() {
+        let items = if Some(index) == template_collection {
+            templates.iter().copied().map(uuid_value).collect()
+        } else if index + 1 == markers.len() {
             forms.iter().copied().map(uuid_value).collect()
         } else {
             Vec::new()
@@ -1310,6 +1319,7 @@ pub(super) fn decode_register_family(
         generated_slots,
         markers,
         form_collection,
+        template_collection,
         recalc_collection,
     ) = match family {
         BusinessObjectFamily::InformationRegister => (
@@ -1322,6 +1332,7 @@ pub(super) fn decode_register_family(
             &INFORMATION_REGISTER_COLLECTION_UUIDS[..],
             5usize,
             None,
+            None,
         ),
         BusinessObjectFamily::AccumulationRegister => (
             9,
@@ -1332,6 +1343,7 @@ pub(super) fn decode_register_family(
             &[1, 3, 5, 7, 9, 11][..],
             &ACCUMULATION_REGISTER_COLLECTION_UUIDS[..],
             5,
+            None,
             None,
         ),
         BusinessObjectFamily::AccountingRegister => (
@@ -1344,6 +1356,7 @@ pub(super) fn decode_register_family(
             &ACCOUNTING_REGISTER_COLLECTION_UUIDS[..],
             5,
             None,
+            None,
         ),
         BusinessObjectFamily::CalculationRegister => (
             10,
@@ -1354,6 +1367,7 @@ pub(super) fn decode_register_family(
             &[1, 3, 5, 7, 9, 11, 13][..],
             &CALCULATION_REGISTER_COLLECTION_UUIDS[..],
             4,
+            None,
             Some(1usize),
         ),
         BusinessObjectFamily::ChartOfCharacteristicTypes => (
@@ -1365,6 +1379,7 @@ pub(super) fn decode_register_family(
             &[1, 3, 5, 7, 9, 11][..],
             &CHART_OF_CHARACTERISTIC_TYPES_COLLECTION_UUIDS[..],
             4,
+            Some(1usize),
             None,
         ),
         BusinessObjectFamily::ChartOfAccounts => (
@@ -1377,6 +1392,7 @@ pub(super) fn decode_register_family(
             &CHART_OF_ACCOUNTS_COLLECTION_UUIDS[..],
             3,
             None,
+            None,
         ),
         BusinessObjectFamily::ChartOfCalculationTypes => (
             8,
@@ -1387,6 +1403,7 @@ pub(super) fn decode_register_family(
             &[2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22][..],
             &CHART_OF_CALCULATION_TYPES_COLLECTION_UUIDS[..],
             4,
+            None,
             None,
         ),
         _ => return native("register decoder received another family"),
@@ -1413,10 +1430,13 @@ pub(super) fn decode_register_family(
         })
         .collect::<Result<Vec<_>, BusinessObjectBuildError>>()?;
     let mut forms = Vec::new();
+    let mut templates = Vec::new();
     let mut recalculations = Vec::new();
     for (index, marker) in markers.iter().enumerate() {
         if index == form_collection {
             forms = parse_uuid_collection(&root[index + 3], marker, "register forms")?;
+        } else if Some(index) == template_collection {
+            templates = parse_uuid_collection(&root[index + 3], marker, "register templates")?;
         } else if Some(index) == recalc_collection {
             recalculations =
                 parse_uuid_collection(&root[index + 3], marker, "register recalculations")?;
@@ -1428,7 +1448,14 @@ pub(super) fn decode_register_family(
             }
         }
     }
-    validate_register_inventory(uuid, &generated_types, &forms, &recalculations, &[])?;
+    validate_register_inventory(
+        uuid,
+        &generated_types,
+        &forms,
+        &templates,
+        &recalculations,
+        &[],
+    )?;
     Ok(BusinessObjectNativeIr {
         family,
         uuid,
@@ -1437,7 +1464,7 @@ pub(super) fn decode_register_family(
         tabular_sections: Vec::new(),
         command_uuids: Vec::new(),
         form_uuids: forms,
-        template_uuids: Vec::new(),
+        template_uuids: templates,
         addressing_attribute_uuids: Vec::new(),
         dimension_uuids: Vec::new(),
         resource_uuids: Vec::new(),
@@ -1501,7 +1528,7 @@ fn decode_recalculation(
         }
         dimensions.push(dimension);
     }
-    validate_register_inventory(uuid, &generated_types, &[], &[], &dimensions)?;
+    validate_register_inventory(uuid, &generated_types, &[], &[], &[], &dimensions)?;
     Ok(BusinessObjectNativeIr {
         family: BusinessObjectFamily::Recalculation,
         uuid,
@@ -1524,6 +1551,7 @@ fn validate_register_inventory(
     root: ObjectUuid,
     generated: &[(ObjectUuid, ObjectUuid)],
     forms: &[ObjectUuid],
+    templates: &[ObjectUuid],
     recalculations: &[ObjectUuid],
     dimensions: &[ObjectUuid],
 ) -> Result<(), BusinessObjectBuildError> {
@@ -1532,6 +1560,7 @@ fn validate_register_inventory(
         .iter()
         .flat_map(|pair| [pair.0, pair.1])
         .chain(forms.iter().copied())
+        .chain(templates.iter().copied())
         .chain(recalculations.iter().copied())
         .chain(dimensions.iter().copied())
     {

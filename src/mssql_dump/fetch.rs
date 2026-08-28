@@ -1,14 +1,309 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
+use serde::Serialize;
 
 use super::{
     BinaryConfigRow, ConfigChunkRow, ConfigRow, ConfigRowHeader, encode_hex_lower,
     qualified_storage_table, quote_string,
 };
+use crate::runtime_evidence_schema::{SanitizedRuntimeArgumentKind, SubprocessJournalSchema};
+
+#[derive(Clone, Debug, Serialize)]
+pub(super) struct SanitizedSubprocessCall {
+    pub executable: String,
+    pub arguments: Vec<String>,
+    pub started_unix_ms: u128,
+    pub ended_unix_ms: Option<u128>,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub exception: Option<String>,
+}
+
+struct SubprocessJournalState {
+    password_source_marker: String,
+    path: Option<PathBuf>,
+    server: String,
+    database: String,
+    started_unix_ms: u128,
+    calls: Vec<SanitizedSubprocessCall>,
+}
+
+#[derive(Serialize)]
+struct SubprocessJournalSnapshot<'a> {
+    protocol_version: u32,
+    status: &'a str,
+    server: &'a str,
+    database: &'a str,
+    started_unix_ms: u128,
+    ended_unix_ms: Option<u128>,
+    exception: Option<&'a str>,
+    calls: &'a [SanitizedSubprocessCall],
+}
+
+thread_local! {
+    static SUBPROCESS_JOURNAL: RefCell<Option<SubprocessJournalState>> = const { RefCell::new(None) };
+    #[cfg(test)]
+    static FAIL_NEXT_JOURNAL_PERSIST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(super) struct SubprocessJournalGuard {
+    finished: bool,
+}
+
+impl SubprocessJournalGuard {
+    pub(super) fn finish_passed(mut self) -> Result<Vec<SanitizedSubprocessCall>> {
+        let calls = SUBPROCESS_JOURNAL.with(|journal| -> Result<Vec<SanitizedSubprocessCall>> {
+            let mut state = journal.borrow_mut();
+            let Some(current) = state.as_ref() else {
+                return Ok(Vec::new());
+            };
+            persist_subprocess_journal(current, "passed", Some(unix_time_ms()), None)?;
+            Ok(state.take().expect("journal state checked above").calls)
+        })?;
+        self.finished = true;
+        Ok(calls)
+    }
+
+    pub(super) fn finish_failed(mut self, _error: &anyhow::Error) -> Result<()> {
+        SUBPROCESS_JOURNAL.with(|journal| -> Result<()> {
+            let mut state = journal.borrow_mut();
+            if let Some(current) = state.as_ref() {
+                persist_subprocess_journal(
+                    current,
+                    "failed",
+                    Some(unix_time_ms()),
+                    Some("MSSQL dump failed; nested subprocess details are recorded per call"),
+                )?;
+                let _ = state.take();
+            }
+            Ok(())
+        })?;
+        self.finished = true;
+        Ok(())
+    }
+}
+
+impl Drop for SubprocessJournalGuard {
+    fn drop(&mut self) {
+        if !self.finished {
+            SUBPROCESS_JOURNAL.with(|journal| {
+                if let Some(state) = journal.borrow_mut().take() {
+                    let _ = persist_subprocess_journal(
+                        &state,
+                        "failed",
+                        Some(unix_time_ms()),
+                        Some("subprocess journal guard dropped before explicit completion"),
+                    );
+                }
+            });
+        }
+    }
+}
+
+pub(super) fn begin_subprocess_journal(
+    password_source_marker: &str,
+    server: &str,
+    database: &str,
+    path: Option<&Path>,
+) -> Result<SubprocessJournalGuard> {
+    SUBPROCESS_JOURNAL.with(|journal| {
+        let state = SubprocessJournalState {
+            password_source_marker: password_source_marker.to_owned(),
+            path: path.map(Path::to_path_buf),
+            server: server.to_owned(),
+            database: database.to_owned(),
+            started_unix_ms: unix_time_ms(),
+            calls: Vec::new(),
+        };
+        persist_subprocess_journal(&state, "running", None, None)?;
+        *journal.borrow_mut() = Some(state);
+        Ok::<_, anyhow::Error>(())
+    })?;
+    Ok(SubprocessJournalGuard { finished: false })
+}
+
+fn password_source_marker() -> String {
+    SUBPROCESS_JOURNAL.with(|journal| {
+        journal
+            .borrow()
+            .as_ref()
+            .map(|state| state.password_source_marker.clone())
+            .unwrap_or_else(|| {
+                SubprocessJournalSchema::redacted_password_source_marker().to_owned()
+            })
+    })
+}
+
+fn start_subprocess_call(call: SanitizedSubprocessCall) -> Result<usize> {
+    SUBPROCESS_JOURNAL.with(|journal| {
+        if let Some(state) = journal.borrow_mut().as_mut() {
+            state.calls.push(call);
+            let index = state.calls.len() - 1;
+            persist_subprocess_journal(state, "running", None, None)?;
+            Ok(index)
+        } else {
+            Ok(usize::MAX)
+        }
+    })
+}
+
+fn complete_subprocess_call(
+    index: usize,
+    status: &str,
+    exit_code: Option<i32>,
+    exception: Option<String>,
+) -> Result<()> {
+    SUBPROCESS_JOURNAL.with(|journal| {
+        if let Some(state) = journal.borrow_mut().as_mut() {
+            let call = state
+                .calls
+                .get_mut(index)
+                .ok_or_else(|| anyhow!("subprocess journal call index is invalid"))?;
+            call.ended_unix_ms = Some(unix_time_ms());
+            call.status = status.to_owned();
+            call.exit_code = exit_code;
+            call.exception = exception;
+            persist_subprocess_journal(state, "running", None, None)?;
+        }
+        Ok(())
+    })
+}
+
+pub(super) fn current_subprocess_calls() -> Vec<SanitizedSubprocessCall> {
+    SUBPROCESS_JOURNAL.with(|journal| {
+        journal
+            .borrow()
+            .as_ref()
+            .map(|state| state.calls.clone())
+            .unwrap_or_default()
+    })
+}
+
+fn persist_subprocess_journal(
+    state: &SubprocessJournalState,
+    status: &str,
+    ended_unix_ms: Option<u128>,
+    exception: Option<&str>,
+) -> Result<()> {
+    #[cfg(test)]
+    FAIL_NEXT_JOURNAL_PERSIST.with(|fail_next| {
+        if fail_next.replace(false) {
+            bail!("injected subprocess journal persistence failure");
+        }
+        Ok::<_, anyhow::Error>(())
+    })?;
+    let Some(path) = state.path.as_deref() else {
+        return Ok(());
+    };
+    write_json_atomic(
+        path,
+        &SubprocessJournalSnapshot {
+            protocol_version: 1,
+            status,
+            server: &state.server,
+            database: &state.database,
+            started_unix_ms: state.started_unix_ms,
+            ended_unix_ms,
+            exception,
+            calls: &state.calls,
+        },
+    )
+}
+
+fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
+    let parent = SubprocessJournalSchema::journal_parent(path)
+        .ok_or_else(|| anyhow!(SubprocessJournalSchema::missing_parent_error(path)))?;
+    fs::create_dir_all(parent)?;
+    let temporary = parent.join(SubprocessJournalSchema::temporary_file_name(
+        path,
+        uuid::Uuid::new_v4().simple(),
+    ));
+    let bytes = serde_json::to_vec_pretty(value)?;
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    drop(file);
+    if let Err(error) = replace_file_atomic(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomic(source: &Path, destination: &Path) -> Result<()> {
+    fs::rename(source, destination)?;
+    let parent = SubprocessJournalSchema::journal_parent(destination)
+        .ok_or_else(|| anyhow!(SubprocessJournalSchema::missing_parent_error(destination)))?;
+    fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file_atomic(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        return Err(std::io::Error::last_os_error()).context("MoveFileExW failed");
+    }
+    Ok(())
+}
+
+fn unix_time_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+fn query_marker(query: &str) -> String {
+    SubprocessJournalSchema::query_digest_marker(query)
+}
+
+fn redact_password_value(arguments: &mut [String], password: Option<&str>) {
+    let Some(password) = password.filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let marker = password_source_marker();
+    for argument in arguments {
+        if SubprocessJournalSchema::argument_kind(argument)
+            == SanitizedRuntimeArgumentKind::Ordinary
+        {
+            *argument = argument.replace(password, &marker);
+        }
+    }
+}
 pub(super) fn fetch_rows(
     sqlcmd: &Path,
     server: &str,
@@ -43,7 +338,8 @@ pub(super) fn fetch_rows_direct_hex(
 }
 
 pub(super) fn fetch_binary_rows_bcp(
-    sqlcmd: &Path,
+    _sqlcmd: &Path,
+    bcp: &Path,
     server: &str,
     user: Option<&str>,
     password: Option<&str>,
@@ -66,7 +362,7 @@ pub(super) fn fetch_binary_rows_bcp(
                 let last = batch.last().map(String::as_str).unwrap_or("<empty>");
                 let query = build_fetch_binary_rows_query(database, table, &batch, false);
                 let mut batch_rows = fetch_binary_rows_bcp_query(
-                    sqlcmd, server, user, password, database, table, &query,
+                    bcp, server, user, password, database, table, &query,
                 )
                 .with_context(|| {
                     format!("failed to fetch exact bcp batch for {table} rows {first}..{last}")
@@ -79,11 +375,11 @@ pub(super) fn fetch_binary_rows_bcp(
 
     let query =
         build_fetch_binary_rows_query(database, table, selected_file_names, use_range_filter);
-    fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)
+    fetch_binary_rows_bcp_query(bcp, server, user, password, database, table, &query)
 }
 
 pub(super) fn fetch_binary_rows_bcp_query(
-    sqlcmd: &Path,
+    bcp: &Path,
     server: &str,
     user: Option<&str>,
     password: Option<&str>,
@@ -96,33 +392,72 @@ pub(super) fn fetch_binary_rows_bcp_query(
         std::process::id(),
         uuid::Uuid::new_v4().hyphenated()
     ));
-    let bcp = bcp_executable_for_sqlcmd(sqlcmd);
-    let mut command = Command::new(&bcp);
-    command
-        .arg(&query)
-        .arg("queryout")
-        .arg(&output_path)
-        .arg("-S")
-        .arg(server)
-        .arg("-n")
-        .arg("-u")
-        .arg("-a")
-        .arg("65535");
+    let mut arguments = vec![
+        query.to_owned(),
+        "queryout".to_owned(),
+        output_path.to_string_lossy().into_owned(),
+        "-S".to_owned(),
+        server.to_owned(),
+        "-n".to_owned(),
+        "-u".to_owned(),
+        "-a".to_owned(),
+        "65535".to_owned(),
+    ];
+    let mut sanitized_arguments = arguments.clone();
+    sanitized_arguments[0] = query_marker(query);
     match user {
         Some(user) => {
-            command.arg("-U").arg(user);
+            arguments.extend(["-U".to_owned(), user.to_owned()]);
+            sanitized_arguments.extend(["-U".to_owned(), user.to_owned()]);
             if let Some(password) = password {
-                command.arg("-P").arg(password);
+                arguments.extend(["-P".to_owned(), password.to_owned()]);
+                sanitized_arguments.extend(["-P".to_owned(), password_source_marker()]);
             }
         }
         None => {
-            command.arg("-T");
+            arguments.push("-T".to_owned());
+            sanitized_arguments.push("-T".to_owned());
         }
     }
+    redact_password_value(&mut sanitized_arguments, password);
 
-    let output = command
-        .output()
-        .with_context(|| format!("failed to run {}", bcp.display()))?;
+    let started_unix_ms = unix_time_ms();
+    let journal_index = start_subprocess_call(SanitizedSubprocessCall {
+        executable: bcp.to_string_lossy().into_owned(),
+        arguments: sanitized_arguments,
+        started_unix_ms,
+        ended_unix_ms: None,
+        status: "running".to_owned(),
+        exit_code: None,
+        timed_out: false,
+        exception: None,
+    })?;
+    let output = Command::new(bcp).args(&arguments).output();
+    let output = match output {
+        Ok(output) => {
+            complete_subprocess_call(
+                journal_index,
+                if output.status.success() {
+                    "passed"
+                } else {
+                    "failed"
+                },
+                output.status.code(),
+                (!output.status.success())
+                    .then(|| format!("bcp exited with code {:?}", output.status.code())),
+            )?;
+            output
+        }
+        Err(error) => {
+            complete_subprocess_call(
+                journal_index,
+                "failed",
+                None,
+                Some(format!("failed to spawn bcp: {error}")),
+            )?;
+            return Err(error).with_context(|| format!("failed to run {}", bcp.display()));
+        }
+    };
     if !output.status.success() {
         let _ = fs::remove_file(&output_path);
         bail!(
@@ -142,7 +477,8 @@ pub(super) fn fetch_binary_rows_bcp_query(
         .with_context(|| format!("failed to assemble native bcp rows for {database}.{table}"))
 }
 
-pub(super) fn bcp_executable_for_sqlcmd(sqlcmd: &Path) -> PathBuf {
+#[cfg_attr(not(feature = "platform-oracle"), allow(dead_code))]
+pub(crate) fn bcp_executable_for_sqlcmd(sqlcmd: &Path) -> PathBuf {
     if let Some(parent) = sqlcmd.parent() {
         for name in ["bcp.exe", "bcp"] {
             let candidate = parent.join(name);
@@ -172,7 +508,8 @@ pub(super) fn fetch_metadata_rows(
 }
 
 pub(super) fn fetch_metadata_rows_bcp(
-    sqlcmd: &Path,
+    _sqlcmd: &Path,
+    bcp: &Path,
     server: &str,
     user: Option<&str>,
     password: Option<&str>,
@@ -180,13 +517,13 @@ pub(super) fn fetch_metadata_rows_bcp(
     table: &str,
 ) -> Result<Vec<ConfigRow>> {
     let query = build_fetch_metadata_rows_bcp_query(database, table);
-    let rows =
-        fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)?;
+    let rows = fetch_binary_rows_bcp_query(bcp, server, user, password, database, table, &query)?;
     Ok(config_rows_from_binary(rows))
 }
 
 pub(super) fn fetch_metadata_owner_rows_bcp(
-    sqlcmd: &Path,
+    _sqlcmd: &Path,
+    bcp: &Path,
     server: &str,
     user: Option<&str>,
     password: Option<&str>,
@@ -210,7 +547,7 @@ pub(super) fn fetch_metadata_owner_rows_bcp(
         let last = batch.last().map(String::as_str).unwrap_or("<empty>");
         let query = build_fetch_metadata_owner_rows_bcp_query(database, table, &batch);
         let mut batch_rows =
-            fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)
+            fetch_binary_rows_bcp_query(bcp, server, user, password, database, table, &query)
                 .with_context(|| {
                     format!("failed to fetch metadata owner rows batch {first}..{last}")
                 })?;
@@ -221,6 +558,7 @@ pub(super) fn fetch_metadata_owner_rows_bcp(
 
 pub(super) fn fetch_config_rows_bcp(
     sqlcmd: &Path,
+    bcp: &Path,
     server: &str,
     user: Option<&str>,
     password: Option<&str>,
@@ -230,6 +568,7 @@ pub(super) fn fetch_config_rows_bcp(
 ) -> Result<Vec<ConfigRow>> {
     let rows = fetch_binary_rows_bcp(
         sqlcmd,
+        bcp,
         server,
         user,
         password,
@@ -937,23 +1276,19 @@ pub(super) fn run_sql_capture_tsv(
     password: Option<&str>,
     sql: &str,
 ) -> Result<String> {
-    let mut command = Command::new(sqlcmd);
-    command.arg("-C").arg("-S").arg(server);
+    let mut arguments = vec!["-C".to_owned(), "-S".to_owned(), server.to_owned()];
+    let mut sanitized_arguments = arguments.clone();
     if let Some(user) = user {
-        command.arg("-U").arg(user);
+        arguments.extend(["-U".to_owned(), user.to_owned()]);
+        sanitized_arguments.extend(["-U".to_owned(), user.to_owned()]);
         if let Some(password) = password {
-            command.arg("-P").arg(password);
+            arguments.extend(["-P".to_owned(), password.to_owned()]);
+            sanitized_arguments.extend(["-P".to_owned(), password_source_marker()]);
         }
     }
-    command
-        .arg("-s")
-        .arg("\t")
-        .arg("-w")
-        .arg("65535")
-        .arg("-y")
-        .arg("0")
-        .arg("-Y")
-        .arg("0");
+    let common_arguments = ["-s", "\t", "-w", "65535", "-y", "0", "-Y", "0"].map(ToOwned::to_owned);
+    arguments.extend(common_arguments.clone());
+    sanitized_arguments.extend(common_arguments);
     let sql_file = if sql.chars().count() > SQLCMD_INLINE_QUERY_MAX_CHARS {
         let path = std::env::temp_dir().join(format!(
             "ibcmd-rs-sqlcmd-{}-{}.sql",
@@ -961,19 +1296,55 @@ pub(super) fn run_sql_capture_tsv(
             uuid::Uuid::new_v4().hyphenated()
         ));
         fs::write(&path, sql).with_context(|| format!("failed to write {}", path.display()))?;
-        command.arg("-i").arg(&path);
+        arguments.extend(["-i".to_owned(), path.to_string_lossy().into_owned()]);
+        sanitized_arguments.extend(["-i".to_owned(), path.to_string_lossy().into_owned()]);
         Some(path)
     } else {
-        command.arg("-Q").arg(sql);
+        arguments.extend(["-Q".to_owned(), sql.to_owned()]);
+        sanitized_arguments.extend(["-Q".to_owned(), query_marker(sql)]);
         None
     };
-    let output = command
-        .output()
-        .with_context(|| format!("failed to run {}", sqlcmd.display()));
+    redact_password_value(&mut sanitized_arguments, password);
+    let started_unix_ms = unix_time_ms();
+    let journal_index = start_subprocess_call(SanitizedSubprocessCall {
+        executable: sqlcmd.to_string_lossy().into_owned(),
+        arguments: sanitized_arguments,
+        started_unix_ms,
+        ended_unix_ms: None,
+        status: "running".to_owned(),
+        exit_code: None,
+        timed_out: false,
+        exception: None,
+    })?;
+    let output = Command::new(sqlcmd).args(&arguments).output();
     if let Some(path) = &sql_file {
         let _ = fs::remove_file(path);
     }
-    let output = output?;
+    let output = match output {
+        Ok(output) => {
+            complete_subprocess_call(
+                journal_index,
+                if output.status.success() {
+                    "passed"
+                } else {
+                    "failed"
+                },
+                output.status.code(),
+                (!output.status.success())
+                    .then(|| format!("sqlcmd exited with code {:?}", output.status.code())),
+            )?;
+            output
+        }
+        Err(error) => {
+            complete_subprocess_call(
+                journal_index,
+                "failed",
+                None,
+                Some(format!("failed to spawn sqlcmd: {error}")),
+            )?;
+            return Err(error).with_context(|| format!("failed to run {}", sqlcmd.display()));
+        }
+    };
     if !output.status.success() {
         bail!(
             "sqlcmd failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
@@ -1005,13 +1376,219 @@ pub(super) fn normalize_sqlcmd_json(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::fs;
 
     use super::{
-        BCP_INLINE_QUERY_MAX_CHARS, build_fetch_binary_rows_query,
+        BCP_INLINE_QUERY_MAX_CHARS, FAIL_NEXT_JOURNAL_PERSIST, SanitizedSubprocessCall,
+        begin_subprocess_journal, build_fetch_binary_rows_query,
         build_fetch_metadata_owner_rows_bcp_query, build_fetch_row_headers_sql,
+        complete_subprocess_call, fetch_binary_rows_bcp_query, password_source_marker,
+        query_marker, redact_password_value, run_sql_capture_tsv,
         split_selected_file_names_for_bcp_query, split_selected_file_names_for_owner_rows_query,
-        split_selected_file_names_for_row_headers_query,
+        split_selected_file_names_for_row_headers_query, start_subprocess_call,
     };
+
+    #[test]
+    fn subprocess_journal_uses_query_hashes_and_password_source_markers() {
+        let raw_query = "SELECT top-secret-query";
+        let raw_password = "top-secret-password";
+        let guard = begin_subprocess_journal(
+            "<password-source:environment>",
+            "localhost",
+            "test_db",
+            None,
+        )
+        .unwrap();
+        let mut arguments = vec![
+            "-U".to_owned(),
+            raw_password.to_owned(),
+            "-P".to_owned(),
+            password_source_marker(),
+            "-Q".to_owned(),
+            query_marker(raw_query),
+        ];
+        redact_password_value(&mut arguments, Some(raw_password));
+        let index = start_subprocess_call(SanitizedSubprocessCall {
+            executable: "sqlcmd".to_owned(),
+            arguments,
+            started_unix_ms: 1,
+            ended_unix_ms: None,
+            status: "running".to_owned(),
+            exit_code: None,
+            timed_out: false,
+            exception: None,
+        })
+        .unwrap();
+        complete_subprocess_call(index, "passed", Some(0), None).unwrap();
+        let calls = guard.finish_passed().unwrap();
+        let serialized = serde_json::to_string(&calls).unwrap();
+
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].arguments[5].starts_with("<query-sha256:"));
+        assert!(!serialized.contains(raw_query));
+        assert!(!serialized.contains(raw_password));
+        assert!(serialized.contains("<password-source:environment>"));
+    }
+
+    #[test]
+    fn durable_subprocess_journal_redacts_hostile_marker_like_arguments() {
+        let raw_password = "top-secret-password";
+        let journal_path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-runtime-hostile-marker-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let guard = begin_subprocess_journal(
+            "<password-source:environment>",
+            "localhost",
+            "test_db",
+            Some(&journal_path),
+        )
+        .unwrap();
+        let exact_password_marker = password_source_marker();
+        let exact_query_marker = query_marker("SELECT 1");
+        let mut arguments = vec![
+            exact_password_marker.clone(),
+            exact_query_marker.clone(),
+            format!("<password-source:environment>{raw_password}"),
+            format!("<password-source:<query-sha256:{raw_password}"),
+            format!("<query-sha256:{raw_password}"),
+            format!("<query-sha256:{}>{raw_password}", "a".repeat(63)),
+            format!("<query-sha256:{}>{raw_password}", "A".repeat(64)),
+            format!("<query-sha256:{}>suffix-{raw_password}", "a".repeat(64)),
+        ];
+        redact_password_value(&mut arguments, Some(raw_password));
+
+        assert_eq!(arguments[0], exact_password_marker);
+        assert_eq!(arguments[1], exact_query_marker);
+        assert!(
+            arguments
+                .iter()
+                .skip(2)
+                .all(|argument| !argument.contains(raw_password))
+        );
+
+        let index = start_subprocess_call(SanitizedSubprocessCall {
+            executable: "sqlcmd".to_owned(),
+            arguments,
+            started_unix_ms: 1,
+            ended_unix_ms: None,
+            status: "running".to_owned(),
+            exit_code: None,
+            timed_out: false,
+            exception: None,
+        })
+        .unwrap();
+        complete_subprocess_call(index, "passed", Some(0), None).unwrap();
+        guard.finish_passed().unwrap();
+
+        let serialized = fs::read_to_string(&journal_path).unwrap();
+        assert!(!serialized.contains(raw_password));
+        assert!(serialized.contains(&exact_password_marker));
+        assert!(serialized.contains(&exact_query_marker));
+        let _ = fs::remove_file(journal_path);
+    }
+
+    #[test]
+    fn durable_subprocess_journal_survives_actual_spawn_failure() {
+        let journal_path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-runtime-failure-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let guard = begin_subprocess_journal(
+            "<password-source:environment>",
+            "localhost",
+            "test_db",
+            Some(&journal_path),
+        )
+        .unwrap();
+        let error = run_sql_capture_tsv(
+            std::path::Path::new("ibcmd-rs-sqlcmd-that-does-not-exist"),
+            "localhost",
+            Some("user"),
+            Some("top-secret-password"),
+            "SELECT top-secret-query",
+        )
+        .unwrap_err();
+        guard.finish_failed(&error).unwrap();
+
+        let journal: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
+        assert_eq!(journal["status"], "failed");
+        assert_eq!(journal["server"], "localhost");
+        assert_eq!(journal["database"], "test_db");
+        assert_eq!(journal["calls"][0]["status"], "failed");
+        assert!(journal["calls"][0]["ended_unix_ms"].as_u64().is_some());
+        let serialized = journal.to_string();
+        assert!(!serialized.contains("top-secret-password"));
+        assert!(!serialized.contains("SELECT top-secret-query"));
+        let _ = fs::remove_file(journal_path);
+    }
+
+    #[test]
+    fn failed_terminal_persist_is_retried_by_guard_drop() {
+        let journal_path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-runtime-retry-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let guard = begin_subprocess_journal(
+            "<password-source:none>",
+            "localhost",
+            "test_db",
+            Some(&journal_path),
+        )
+        .unwrap();
+        FAIL_NEXT_JOURNAL_PERSIST.with(|fail_next| fail_next.set(true));
+
+        assert!(guard.finish_passed().is_err());
+
+        let journal: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
+        assert_eq!(journal["status"], "failed");
+        assert_eq!(
+            journal["exception"],
+            "subprocess journal guard dropped before explicit completion"
+        );
+        let _ = fs::remove_file(journal_path);
+    }
+
+    #[test]
+    fn configured_bcp_executable_is_recorded_exactly() {
+        let journal_path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-bcp-runtime-path-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let configured_bcp = std::env::temp_dir().join(format!(
+            "ibcmd-rs-configured-bcp-that-does-not-exist-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let guard = begin_subprocess_journal(
+            "<password-source:none>",
+            "localhost",
+            "test_db",
+            Some(&journal_path),
+        )
+        .unwrap();
+        let error = fetch_binary_rows_bcp_query(
+            &configured_bcp,
+            "localhost",
+            None,
+            None,
+            "test_db",
+            "Config",
+            "SELECT 1",
+        )
+        .unwrap_err();
+        guard.finish_failed(&error).unwrap();
+
+        let journal: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
+        assert_eq!(
+            journal["calls"][0]["executable"],
+            configured_bcp.to_string_lossy().as_ref()
+        );
+        assert_eq!(journal["calls"][0]["status"], "failed");
+        let _ = fs::remove_file(journal_path);
+    }
 
     #[test]
     fn split_selected_file_names_for_bcp_query_keeps_small_selection_in_one_batch() {

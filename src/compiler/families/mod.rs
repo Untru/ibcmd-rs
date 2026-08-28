@@ -13,6 +13,7 @@ pub mod data_processor;
 pub mod document;
 pub mod r#enum;
 pub mod exchange_plan;
+pub mod form;
 pub mod modules;
 pub mod recalculation;
 pub mod registers;

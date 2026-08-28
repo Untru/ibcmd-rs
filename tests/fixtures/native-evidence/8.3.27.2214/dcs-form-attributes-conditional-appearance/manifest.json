@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-form-attributes-conditional-appearance",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 283,
+  "contract": "8.3.27-xml-2.20-dcs-form-attributes-conditional-appearance-v1",
+  "body_contract": "8.3.27-xml-2.20-dcs-settings-conditional-appearance-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-13",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_fresh_file_infobases",
+    "database_locale": "ru_RU",
+    "creation_args": "infobase create --locale=ru_RU --load <input.cf> --apply --force",
+    "patch_build_policy": "the exact build is retained as experiment provenance; this wrapper contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "kind": "clean_room_form_wrapper_delta_on_platform_authenticated_micro_cf",
+    "base_fixture_id": "8.3.27.2214-xml-2.20-dcs-conditional-appearance",
+    "base_cf_size": 88369,
+    "base_cf_sha256": "f929d6ecbf896d3dfaf202fb2df36370237a9fdcdbd627db1eb891176951d843",
+    "rule": {
+      "path": "seed/form-attributes-rule.json",
+      "size": 408,
+      "sha256": "e2ff919268e28469f82a1f1a248768206ded7f1deee562b3e00e59a2b39762be"
+    },
+    "probe_form": {
+      "path": "seed/probe-form.xml.b64",
+      "encoded_size": 10725,
+      "encoded_sha256": "4f5b6ff2f5fc627c9b1130e53e367f51ff2f560141fc1edc993c43a10e305797",
+      "decoded_size": 8042,
+      "decoded_sha256": "194cd2ea1e95aadf845d928bd1f30a4ad38c0fc25ba7dc0208897ee741ebd478"
+    },
+    "delta": "one direct Form/Attributes/ConditionalAppearance using the already authenticated one-item body with the context field path Список.SortKey",
+    "authority": "pinned_platform_output"
+  },
+  "rounds": {
+    "round_1": {
+      "cf_size": 88685,
+      "cf_sha256": "a9c543e68352929ea0cfd72c9b4d992e6115db47a050369670a370d2b13259fe"
+    },
+    "round_2": {
+      "cf_size": 88686,
+      "cf_sha256": "a0ba6431996a4349b3c3336ab974e867390e3f309e6805acb82e5f0c9721a9f6"
+    },
+    "selected_native_equal_between_rounds": true,
+    "packed_rows_equal_between_rounds": true,
+    "unpacked_rows_equal_between_rounds": true
+  },
+  "compiler_acceptance": {
+    "status": "platform_load_apply_save_export_passed",
+    "profile": "storage:mssql-config-configsave",
+    "base_fixture_id": "8.3.27.2214-xml-2.20-dcs-conditional-appearance",
+    "candidate_cf_size": 26929,
+    "candidate_cf_sha256_observed": "0b33d01e8576a75061fa225e64d133dc8b66401941f35fbe7bf5dc52e6641402",
+    "platform_saved_cf_size": 88606,
+    "platform_saved_cf_sha256": "bd499a4bc18a0f6748808b77f7d5650eb1050b8ecb34766b0d6751eeff482a5d",
+    "body_packed_size": 3545,
+    "body_packed_sha256": "0e3d753fdfdd0f7135a67d2fdcfc2099a58f5d61a881c7e1aec20abf980b9e32",
+    "body_unpacked_size": 15996,
+    "body_unpacked_sha256": "c94d5986894ac6eb437aefeb976a2d6d81fe90d63539e4913b5ba7bc130111cf",
+    "candidate_and_platform_saved_body_equal": true,
+    "outer_candidate_cf_hash_is_not_a_parity_criterion": true,
+    "platform_native_form_size": 8083,
+    "platform_native_form_sha256": "1cb8663940102065989f3c7a7bee9ebb860efefabc837e4e7d5be7be958e06af",
+    "platform_native_wrapper_sha256": "720d2f5d2e2edc8276f43f943ee4ce7d3119f9f393be105dd14a7b35c251ad55",
+    "only_native_delta_from_oracle_form": "platform emitted explicit Table/ChangeRowOrder=false outside the conditional-appearance wrapper"
+  },
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "encoded_size": 118249,
+    "encoded_sha256": "891ba9ff918334d8706d268681c43bbcebf144678a2365b49d4d4a263a4a6a09",
+    "decoded_size": 88686,
+    "decoded_sha256": "a0ba6431996a4349b3c3336ab974e867390e3f309e6805acb82e5f0c9721a9f6"
+  },
+  "form": {
+    "owner": "Catalog.FilterProbe",
+    "name": "ListForm",
+    "metadata_key": "c5de5590-395f-4f83-99ad-804a46463cf3",
+    "body_key": "c5de5590-395f-4f83-99ad-804a46463cf3.0",
+    "metadata_row": {
+      "packed_size": 151,
+      "packed_sha256": "187d47b2db27d4cd1560c5321951d1f3f84ca4492c5f5c4d0cc7c69a47834e77",
+      "unpacked_size": 261,
+      "unpacked_sha256": "108595043138bc92226c6e5bb3b9646926839c1e2d7f6db2185cf45462641972"
+    },
+    "body_row": {
+      "packed_size": 3624,
+      "packed_sha256": "fc46f3f90bce71c4ebe8385e8bdc6cae8a506ed24e05ad91098f36a5c6992b43",
+      "unpacked_size": 16093,
+      "unpacked_sha256": "cc3faff64a404929bd09f208a07751876f3448f1313f500f5cf8d1a55ae59a18"
+    },
+    "native_xml": {
+      "path": "native-form.xml.b64",
+      "encoded_size": 10721,
+      "encoded_sha256": "af9c55858a3e898e7e0c2cc1ff104b80deae0bda0aabb4fd184b62e468fc68ab",
+      "decoded_size": 8040,
+      "sha256": "4260e513e185a8cc09854327958a6ec39309d1a607ca2166dbc0be3e672ef23a"
+    },
+    "wrapper": {
+      "path": "form-attributes-conditional-appearance.xml.b64",
+      "encoded_size": 1097,
+      "encoded_sha256": "bc2cd24eba292f49064057ca3a81bb9e36d6654d485dd243dec77bfed3fe6f37",
+      "decoded_size": 820,
+      "sha256": "720d2f5d2e2edc8276f43f943ee4ce7d3119f9f393be105dd14a7b35c251ad55"
+    },
+    "storage_settings": {
+      "path": "form-attributes-storage-settings.xml.b64",
+      "encoded_size": 1637,
+      "encoded_sha256": "6c012f42d616d50f0cafdb19c15142390f2cf1bae666936a18b741c0adc1b0d1",
+      "decoded_size": 1226,
+      "sha256": "73a7cf10d9e6532d1f91f03bdb2c5202178174d8f5754fe5bb991d76390f5ea0",
+      "base64_candidates_in_raw_body": 4,
+      "matching_direct_tail_payloads": 1,
+      "storage_record_type_uuid": null
+    },
+    "storage_outer_tail": {
+      "container_marker": "4",
+      "absent_container_marker": "0",
+      "active_marker": ["0", "1"],
+      "field_order": ["selection", "filter"],
+      "field_values": ["Список.SortKey", "Список.SortKey"],
+      "selection_type_indexes": [26, 9],
+      "filter_type_indexes": [26],
+      "payload_follows_descriptors": true
+    },
+    "absent_baseline": {
+      "fixture_id": "8.3.27.2214-xml-2.20-dcs-conditional-appearance",
+      "body_unpacked_sha256": "f3ba8e137652de596fb5d773b021d29ccb39cbf9875fcd2fd0ea4da9916b92bd",
+      "native_form_sha256": "fbb4dbd511bf7ca07c875a80b55132661e051addb41a371395431999e9bab0eb",
+      "storage_representation": "inactive marker 0,0 followed by one empty Settings payload",
+      "empty_storage_settings": {
+        "path": "form-attributes-empty-storage-settings.xml.b64",
+        "encoded_size": 757,
+        "encoded_sha256": "874d9f9c98be6ed57d760c7e9db726c5b381f227ccc17148e3a1bb654403c7a7",
+        "decoded_size": 566,
+        "sha256": "852b09abf49db848742ef724187b9c4b875f0bc4b70f413f7c2ba055c27f630e"
+      }
+    }
+  },
+  "selected_native_files": [
+    {"path": "Catalogs/FilterProbe.xml", "size": 15309, "sha256": "b1863a5d4f6379912b1784733e09553bf4095fac7794ea65426d9de670d094bf"},
+    {"path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"},
+    {"path": "Catalogs/FilterProbe/Forms/ListForm.xml", "size": 1494, "sha256": "f8e11a1cf75666c4b989ca9222cc7a816bffd2659f86d7f833518d236cde0cf8"},
+    {"path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml", "size": 8040, "sha256": "4260e513e185a8cc09854327958a6ec39309d1a607ca2166dbc0be3e672ef23a"},
+    {"path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl", "size": 492, "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"}
+  ],
+  "proven_shape": {
+    "wrapper_qname": "{http://v8.1c.ru/8.3/xcf/logform}ConditionalAppearance",
+    "storage_root_qname": "{http://v8.1c.ru/8.1/data-composition-system/settings}Settings",
+    "storage_child_qname": "{http://v8.1c.ru/8.1/data-composition-system/settings}conditionalAppearance",
+    "wrapper_placement": "after-last-Attribute-before-Attributes-end",
+    "storage_envelope": "unkeyed-direct-base64-tail-with-active-descriptor-after-declared-attributes",
+    "container_metadata": "absent",
+    "selection": {"field": "Список.SortKey", "item_type": "none"},
+    "filter": {"item_type": "FilterItemComparison", "left_type": "dcscor:Field", "left": "Список.SortKey", "comparison_type": "Equal", "right_type": "xs:string", "right": "A"},
+    "appearance": {"item_namespace": "core", "item_type": "SettingsParameterValue", "parameter": "ЦветТекста", "value_type": "v8ui:Color", "value": "web:Red"}
+  },
+  "proven_claims": [
+    "Pinned 8.3.27.2214 accepted the bounded conditional-appearance body in the direct Form Attributes wrapper.",
+    "The complete selected Catalog tree and both Form raw rows are byte-stable across two fresh ru_RU file-infobase rounds.",
+    "The physical payload is an unkeyed direct base64 Settings document after exact active descriptor fields and has no record-type UUID.",
+    "The absent baseline has no Form wrapper and retains the exact inactive 0,0 plus empty Settings tail representation.",
+    "The production offline form overlay loaded, applied, saved, and re-exported through the pinned platform; its packed and unpacked body row remained exact."
+  ],
+  "non_claims": [
+    "No boolean, Font, StyleItem reference, missing selection/filter, metadata, multiple rule, multiple selected field, multiple appearance value, different operator/right/value type, or empty item behavior is inferred.",
+    "UniversalListServerOnlyState, nested structure conditional appearance, arbitrary opaque placement, actual EDT round-trip, and whole-profile aliasing are outside this wrapper contract.",
+    "The fixture is diagnostic-only and is never read as a production fallback."
+  ]
+}

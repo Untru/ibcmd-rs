@@ -37,6 +37,13 @@ pub const MAX_STORAGE_ENTRIES: usize = 262_144;
 /// The 512 MiB budget counts logical names and keys, compression and origin
 /// strings, opaque attributes and headers, and both packed and unpacked payload
 /// buffers. Per-entry limits remain independently enforced.
+///
+/// This is a *floor*, not the ceiling a caller must live with: it applies to
+/// [`StorageImage::new`], which has no idea how large the input was. A caller
+/// that does know — every CLI command opens a named local file — should derive
+/// the budget from that input with `ResourceLimits::for_input_bytes` and pass
+/// it to [`StorageImage::with_retained_byte_limit`]. See the note on
+/// [`StorageImage`] about this budget being resident memory.
 pub const MAX_STORAGE_IMAGE_RETAINED_BYTES: usize = 536_870_912;
 /// Maximum UTF-8 size of a stable storage-patch blocker reason.
 pub const MAX_STORAGE_PATCH_REASON_BYTES: usize = 4_096;
@@ -46,6 +53,11 @@ pub const MAX_STORAGE_PATCH_ENTRIES: usize = 262_144;
 ///
 /// The 512 MiB budget counts target keys and provenance, compiled payloads,
 /// required base keys, and blocker reasons.
+///
+/// Like [`MAX_STORAGE_IMAGE_RETAINED_BYTES`] this is a floor for callers that
+/// cannot see their own input; a compiler that knows the size of the source
+/// tree it is compiling should derive the budget from it and pass it to
+/// [`StoragePatch::with_retained_byte_limit`].
 pub const MAX_STORAGE_PATCH_RETAINED_BYTES: usize = 536_870_912;
 
 /// Error returned while constructing or deserializing neutral storage data.
@@ -1146,6 +1158,18 @@ impl<'de, const MAXIMUM_ENTRIES: usize, const MAXIMUM_RETAINED_BYTES: usize> Des
 ///
 /// [`StorageImage::new`] never sorts its input. Callers choose and can recover
 /// exact source order through [`StorageImage::entries`].
+///
+/// # Known limitation: the whole image is resident
+///
+/// An image owns the packed *and* the unpacked bytes of every entry for its
+/// whole lifetime, so its retained-byte budget is physical memory. Exporting
+/// the 953 MiB production reference configuration peaks at 6.2–6.5 GiB
+/// resident, roughly 7x the input on disk. A multi-gigabyte ERP configuration
+/// would
+/// therefore exhaust host memory long before any budget rejected it, and no
+/// larger constant can change that. Removing the wall requires streaming
+/// traversal that never holds a whole container at once, which is out of scope
+/// for the budget work here.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct StorageImage {
     entries: Vec<StorageEntry>,
@@ -1153,8 +1177,28 @@ pub struct StorageImage {
 
 impl StorageImage {
     /// Validates an image while preserving the exact supplied entry order.
+    ///
+    /// Uses the [`MAX_STORAGE_IMAGE_RETAINED_BYTES`] floor. Callers that know
+    /// their input size should prefer
+    /// [`StorageImage::with_retained_byte_limit`].
     pub fn new(entries: Vec<StorageEntry>) -> Result<Self, StorageBuildError> {
         validate_image(&entries)?;
+        Ok(Self { entries })
+    }
+
+    /// Validates an image against a caller-supplied heap-retention budget.
+    ///
+    /// Every other invariant — entry count, multipart ordering, per-entry byte
+    /// bounds, profile agreement — is unchanged; only the aggregate retention
+    /// ceiling is the caller's to choose.
+    pub fn with_retained_byte_limit(
+        entries: Vec<StorageEntry>,
+        maximum_retained_bytes: usize,
+    ) -> Result<Self, StorageBuildError> {
+        validate_image_with_retained_byte_limit(
+            &entries,
+            maximum_retained_bytes.max(MAX_STORAGE_IMAGE_RETAINED_BYTES),
+        )?;
         Ok(Self { entries })
     }
 
@@ -1659,11 +1703,31 @@ pub struct StoragePatch {
 
 impl StoragePatch {
     /// Validates a patch without sorting or otherwise changing supplied order.
+    ///
+    /// Uses the [`MAX_STORAGE_PATCH_RETAINED_BYTES`] floor. Callers that know
+    /// how large the source they compiled was should prefer
+    /// [`StoragePatch::with_retained_byte_limit`].
     pub fn new(entries: Vec<StoragePatchEntry>) -> Result<Self, StoragePatchBuildError> {
         validate_patch_with_limits(
             &entries,
             MAX_STORAGE_PATCH_ENTRIES,
             MAX_STORAGE_PATCH_RETAINED_BYTES,
+        )?;
+        Ok(Self { entries })
+    }
+
+    /// Validates a patch against a caller-supplied heap-retention budget.
+    ///
+    /// The supplied budget can only raise the ceiling above the floor; every
+    /// other patch invariant is unchanged.
+    pub fn with_retained_byte_limit(
+        entries: Vec<StoragePatchEntry>,
+        maximum_retained_bytes: usize,
+    ) -> Result<Self, StoragePatchBuildError> {
+        validate_patch_with_limits(
+            &entries,
+            MAX_STORAGE_PATCH_ENTRIES,
+            maximum_retained_bytes.max(MAX_STORAGE_PATCH_RETAINED_BYTES),
         )?;
         Ok(Self { entries })
     }

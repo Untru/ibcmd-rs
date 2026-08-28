@@ -11,7 +11,7 @@ use ibcmd_core::value::CanonicalValue;
 use super::business_objects::{
     collect_embedded_elements, exact_object_sections, exact_property_map, only_element_child,
     project_command, project_name_only_children, project_type, push_bool, push_enum,
-    push_localized, push_text, require_empty, required_properties, text_field,
+    push_localized, push_text, require_empty, require_no_text, required_properties, text_field,
 };
 use super::common::decode_metadata_envelope_with_child_references;
 use super::common::{
@@ -372,6 +372,7 @@ fn project_root_properties(
             push_bool(parts, properties, "UseStandardCommands")?;
             validate_standard_attributes(
                 properties["StandardAttributes"],
+                ENUM,
                 &["Order", "Ref"],
                 uris,
             )?;
@@ -379,7 +380,7 @@ fn project_root_properties(
                 "HasStandardAttributes",
                 CanonicalValue::boolean(true),
             )?);
-            require_empty(properties["Characteristics"], "Characteristics")?;
+            require_empty(properties["Characteristics"], ENUM, "Characteristics")?;
             push_bool(parts, properties, "QuickChoice")?;
             push_enum(parts, properties, "ChoiceMode")?;
             for name in [
@@ -460,7 +461,7 @@ fn project_attribute(
         "LinkByType",
     ] {
         if let Some(element) = map.get(name) {
-            require_empty(element, name)?;
+            require_empty(element, "utility object Attribute", name)?;
         }
     }
     Ok(())
@@ -476,7 +477,12 @@ fn project_tabular_section(
     push_text(parts, &map, "Comment")?;
     push_localized(parts, &map, "ToolTip", uris)?;
     push_enum(parts, &map, "FillChecking")?;
-    validate_standard_attributes(map["StandardAttributes"], &["LineNumber"], uris)?;
+    validate_standard_attributes(
+        map["StandardAttributes"],
+        "utility object TabularSection",
+        &["LineNumber"],
+        uris,
+    )?;
     parts.properties.push(canonical_field(
         "HasLineNumberStandardAttribute",
         CanonicalValue::boolean(true),
@@ -516,8 +522,34 @@ fn project_enum_value(
     Ok(())
 }
 
+/// Accepts a `StandardAttributes` block that is either absent (empty element)
+/// or the exact platform default profile for `expected_names`.
+///
+/// Every evidenced platform tree emits the block as a family-derived
+/// inventory whose entries all sit at the platform defaults; such a block
+/// carries no object data, so the canonical model deliberately projects
+/// nothing from it.  Any deviation is real object data that the compile
+/// direction cannot represent and is rejected, naming the offending
+/// attribute, sub-property, expectation and reading.
+pub(super) fn validate_supported_standard_attributes(
+    container: &XmlElement,
+    owner: &str,
+    expected_names: &[&str],
+    uris: &ResolvedNamespaces,
+) -> Result<(), MetadataDecodeError> {
+    if !container
+        .children()
+        .iter()
+        .any(|node| matches!(node, XmlNode::Element(_)))
+    {
+        return require_no_text(container, owner, "StandardAttributes");
+    }
+    validate_standard_attributes(container, owner, expected_names, uris)
+}
+
 pub(super) fn validate_standard_attributes(
     container: &XmlElement,
+    owner: &str,
     expected_names: &[&str],
     uris: &ResolvedNamespaces,
 ) -> Result<(), MetadataDecodeError> {
@@ -530,9 +562,12 @@ pub(super) fn validate_standard_attributes(
         })
         .collect::<Vec<_>>();
     if attributes.len() != expected_names.len() {
-        return Err(MetadataDecodeError::InvalidEnvelope(
-            "standard attribute inventory is not exact",
-        ));
+        return Err(MetadataDecodeError::UnevidencedStandardAttribute {
+            owner: owner.to_owned(),
+            property: "StandardAttributes",
+            expected: "the family standard-attribute inventory",
+            actual: attributes.len().to_string(),
+        });
     }
     for (attribute, expected_name) in attributes.into_iter().zip(expected_names) {
         if !typed(attribute, "StandardAttribute", Some(XR_NAMESPACE), uris)
@@ -542,18 +577,27 @@ pub(super) fn validate_standard_attributes(
                 "standard attribute identity is not exact",
             ));
         }
+        let scope = format!("{owner} StandardAttribute[{expected_name}]");
         let properties = exact_namespaced_property_map(
             attribute,
             STANDARD_ATTRIBUTE_PROPERTIES,
             XR_NAMESPACE,
             uris,
         )?;
+        // `Owner` is the single evidenced standard attribute whose type
+        // reduction is `Deny`; the native Catalog schema pins that raw code
+        // per name, so it is a property of the name and not object data.
+        let type_reduction = if *expected_name == "Owner" {
+            "Deny"
+        } else {
+            "TransformValues"
+        };
         for (name, expected) in [
             ("FillChecking", "DontCheck"),
             ("MultiLine", "false"),
             ("FillFromFillingValue", "false"),
             ("CreateOnInput", "Auto"),
-            ("TypeReductionMode", "TransformValues"),
+            ("TypeReductionMode", type_reduction),
             ("ExtendedEdit", "false"),
             ("QuickChoice", "Auto"),
             ("ChoiceHistoryOnInput", "Auto"),
@@ -562,10 +606,14 @@ pub(super) fn validate_standard_attributes(
             ("MarkNegatives", "false"),
             ("FullTextSearch", "Use"),
         ] {
-            if element_text(properties[name])?.as_deref() != Some(expected) {
-                return Err(MetadataDecodeError::InvalidEnvelope(
-                    "standard attribute scalar value is not evidenced",
-                ));
+            let actual = element_text(properties[name])?;
+            if actual.as_deref() != Some(expected) {
+                return Err(MetadataDecodeError::UnevidencedStandardAttribute {
+                    owner: scope.clone(),
+                    property: name,
+                    expected,
+                    actual: actual.unwrap_or_default(),
+                });
             }
         }
         for name in [
@@ -583,7 +631,7 @@ pub(super) fn validate_standard_attributes(
             "Mask",
             "ChoiceParameters",
         ] {
-            require_empty(properties[name], name)?;
+            require_empty(properties[name], &scope, name)?;
         }
     }
     Ok(())

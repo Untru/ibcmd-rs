@@ -62,6 +62,108 @@ drops unsupported customization.
 Flowchart and source assets remain separate storage artifacts; this issue
 covers the primary metadata rows and their identity/ownership references.
 
+## BusinessProcess attestation on 8.3.27.2214
+
+Issue #282 adds an immutable real-object pair for
+`BusinessProcess.Задание` at
+`tests/fixtures/native-evidence/8.3.27.2214/business-process-duty`. The exact
+native CF element is byte-identical in the parent CF and the isolated lab CF
+saved by `ibcmd 8.3.27.2214`; its native XML 2.20 export is also byte-identical
+to the paired source snapshot.
+
+This evidence confirms the 49-field owner, all five ordered collection markers
+and counts `0/4/0/27/0`, `UseStandardCommands=true`, and the six generated
+types through `BusinessProcessRoutePointRef` in schema/native XML order. Empty
+Template, Command, and TabularSection collections remain fixture-specific; no
+non-empty encoding for them is inferred here.
+
+## Task attestation on 8.3.27.2214
+
+Issue #317 adds an immutable real-object pair for
+`Task.ЗадачаИсполнителя` at
+`tests/fixtures/native-evidence/8.3.27.2214/task-assignee`. The exact native CF
+storage element was extracted before compilation, then independently preserved
+by `ibcmd 8.3.27.2214` while saving an isolated lab configuration. Its paired
+native XML 2.20 export is byte-identical to the source snapshot.
+
+This evidence confirms the 9-field Task root, discriminator `33`, 52 owner
+fields, all six ordered collection markers, nil internal UUID slots 13/14, and
+an empty Task `Templates` collection on 8.3.27.2214. It deliberately does not
+claim an encoding for a non-empty Task template collection.
+
+## Register and plan generated-type attestation on 8.3.27.2214
+
+Issue #282 also carries a compact diagnostic corpus at
+`tests/fixtures/native-evidence/8.3.27.2214/register-generated-types`. One
+minimal XML 2.20 configuration contains an `AccountingRegister`, a
+`CalculationRegister`, their required plans, and one shared recorder document.
+The first platform-saved CF is only 90,645 bytes. Loading it into a second
+isolated file infobase changes the outer CF hash, but the four selected exact
+raw payloads and native XML exports remain byte-identical. The initially saved
+CF was therefore reused to attest both plan objects without another import or
+full export.
+
+The seed follows Unica main at
+`a527d40962d047c6922c903b37510b30f697da42`, but Unica is not the authority.
+The first seed exposed an internal Unica inconsistency: the chart-of-accounts
+writer emitted `MaxExtDimensionCount=3` by default while its own hint logic
+treated the default as zero. Platform 8.3.27.2214 rejected that source without
+`ExtDimensionTypes`; the attested seed therefore states
+`maxExtDimensionCount=0` explicitly. Unica's public Rust handler on that same
+head already emits zero and has a focused test, so no production Unica defect
+is claimed. The discrepancy is retained only for review of its legacy
+model-equivalence fixture; a pull request is warranted only if that fixture is
+still required to match the public handler for this object family.
+
+The accepted double round proves seven generated types for each register. The
+accounting order begins with `Record`, `ExtDimensions`, `RecordSet`, and
+`RecordKey`, then ends with `Selection`, `List`, and `Manager`. The calculation
+order is `Record`, `Manager`, `Selection`, `List`, `RecordSet`, `RecordKey`, and
+`Recalcs`. The offline regression compares the complete generated-type writer
+block against native XML, including every type/value UUID. No recalculation
+child layout or unrelated register property is inferred.
+
+The same evidence proves seven generated types for `ChartOfAccounts`, including
+`ExtDimensionTypes` and `ExtDimensionTypesRow`, and eleven generated types for
+`ChartOfCalculationTypes`. The XML writer already emitted the complete native
+blocks, but the raw type index for object code `32` exposed only the first five
+ChartOfAccounts types. The evidence-backed schema now indexes all seven. This
+fix is deliberately limited to the declarative generated-type slots and their
+exact header/UUID-vector guard; a partial or malformed vector fails atomically.
+No new raw layout or XML property heuristic was added.
+
+## ChartOfCharacteristicTypes micro-corpus on 8.3.27.2214
+
+The next issue #282 slice uses a separate diagnostic corpus at
+`tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types`.
+Latest Unica main at `a527d40962d047c6922c903b37510b30f697da42` compiled a
+single `ChartOfCharacteristicTypes` with `String(100)` through its public
+`unica.meta.compile` MCP handler. The generated XML 2.20 source was accepted
+without correction by pinned platform 8.3.27.2214. Unica therefore shortened
+the seed-authoring step, but the two independent platform rounds remain the
+authority.
+
+The first saved CF is 93,404 bytes. Loading it into a second isolated file
+infobase changes the outer CF hash, while the exact packed payload, unpacked
+payload, and selected native XML stay byte-identical. This proves object code
+`34`, 59 owner fields, header slot 13, and all six ordered generated types. It
+also exposes two stale assumptions in the legacy decoder: all nine standard
+attributes use the modern 25-property bag with
+`TypeReductionMode=TransformValues`, and raw owner slot 51 value `1` is
+exported as `DataLockControlMode=Automatic`.
+
+The production decoder now accepts only that platform-proven contract. The raw
+type index also requires the exact header slot and complete 12-UUID
+type/value vector; a malformed vector fails atomically. The offline regression
+reproduces the complete selected native XML byte-for-byte. It deliberately
+does not admit the old 24-property standard-attribute bag, guess alternative
+data-lock encodings, or infer any non-empty CCT child collection.
+
+This micro-CF workflow is the preferred fast loop for new schema slices: one
+minimal object, selected native export, exact raw extraction, second-round
+stability check, then second-scale offline regression. Full configuration
+round-trips remain reserved for integration evidence that cannot be isolated.
+
 Portable fixtures cover minimal Subsystem content/hierarchy, child-rich
 ExchangePlan and BusinessProcess tabular metadata, Task addressing ownership,
 deterministic deflate output, profile fail-closed behavior, and strict native

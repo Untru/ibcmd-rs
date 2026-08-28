@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-area-template-style-free",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "Unica retained 1c-dcs-spec AreaTemplate vocabulary; platform output is the authority",
+    "path": "seed/Template.xml",
+    "size": 4560,
+    "sha256": "948b2b219999ef7d89beb5b1ade2e77d08db92ec1d483f771484fd3df4cc2d09"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "2a270d610ae255baa0bc0c05f97afb64458c635d8bab26fea5ef669ecfee8d04",
+    "round_2_cf_sha256": "65eeda45a9710aae7d64fc9d6e56224170a3d28774c449b4f502412080e83de8",
+    "native_template_sha256": "abbfe7ce1d305f6d83da10158e74e3ae7266c69dcaf25fe79828b5175aa813bd",
+    "packed_body_sha256": "0ed5bd864e5e3bb086fa9e2521173ac122972bb04d28cad48863dbc0b5fad919",
+    "unpacked_body_sha256": "7047c6cfe75f1eb4241572bf350c273a6a1b8996c7350b75b557def2a6d8b7a6",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": { "path": "configuration.cf.b64", "decoded_size": 81535, "sha256": "65eeda45a9710aae7d64fc9d6e56224170a3d28774c449b4f502412080e83de8" },
+    "native_template": { "path": "native-template.xml.b64", "decoded_size": 4567, "sha256": "abbfe7ce1d305f6d83da10158e74e3ae7266c69dcaf25fe79828b5175aa813bd" },
+    "packed_body": { "path": "raw-packed.bin.b64", "decoded_size": 1154, "sha256": "0ed5bd864e5e3bb086fa9e2521173ac122972bb04d28cad48863dbc0b5fad919" },
+    "unpacked_body": { "path": "raw-unpacked.bin.b64", "decoded_size": 5222, "sha256": "7047c6cfe75f1eb4241572bf350c273a6a1b8996c7350b75b557def2a6d8b7a6" },
+    "area_schema_file": { "path": "area-schema-file.xml.b64", "decoded_size": 1027, "sha256": "57142553ed4b315595833240a8a75954a32c4eacf2a5932c99f88973d6d71ad8" }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [3029, 1142],
+    "primary_schema_sha256": "5124cc181b46586289d2a1ff667f2e8e659c27beefcf806f1f54cc256d82be0c",
+    "settings_sha256": "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4",
+    "trailing_area_schema_file_size": 1027,
+    "trailing_area_schema_file_sha256": "57142553ed4b315595833240a8a75954a32c4eacf2a5932c99f88973d6d71ad8",
+    "primary_and_settings_equal_dcs_core": true
+  },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs source compiler body overlaid into retained dcs-core CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_sha256": "ab040507465f63dc1ca2184c3b24fee0a11cec9f208b83536b9affbacab6005c",
+    "candidate_cf_sha256": "08e33e6b7fa084eb511199d469ca57340adbceb78a049ff6fe56961808f00807",
+    "platform_saved_cf_size": 81554,
+    "platform_saved_cf_sha256": "cc2e9b52bcaedc1e8a3bcf8ca35b394d8845b216cd703999e158627582e7c49f",
+    "reexported_template_size": 4567,
+    "reexported_template_sha256": "abbfe7ce1d305f6d83da10158e74e3ae7266c69dcaf25fe79828b5175aa813bd",
+    "reexport_matches_two_round_native_template": true
+  },
+  "cohort": {
+    "template_name": "AreaProbe",
+    "root_order": ["name", "template:AreaTemplate", "parameter:ExpressionAreaTemplateParameter"],
+    "area_order": ["item:TableRow"],
+    "row_order": ["tableCell"],
+    "cell_order": ["item:Field"],
+    "field_order": ["value:Parameter"],
+    "parameter_order": ["name", "expression"],
+    "parameter_name": "Probe",
+    "expression": "\"Probe\"",
+    "has_root_appearance": false,
+    "has_app_index": false
+  },
+  "non_claims": [
+    "No appearance item, appIndex, style/color/picture/font/border, multiple rows/cells/templates or repeated parameters is inferred.",
+    "No side-table appearance mapping or index coverage rule is inferred from this style-free self-contained cohort.",
+    "No field/group/header/footer template binding, defaultSettings, other patch build or EDT round trip is inferred.",
+    "Reverse compiler acceptance is proven only for this exact style-free coordinate; broader AreaTemplate shapes remain unsupported."
+  ]
+}

@@ -10,7 +10,7 @@ use ibcmd_core::value::CanonicalValue;
 
 use super::business_objects::{
     exact_property_map, only_element_child, push_bool, push_enum, push_localized, push_text,
-    require_empty, text_field,
+    require_empty, require_no_text, text_field,
 };
 use super::common::{
     MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces, V8_NAMESPACE,
@@ -248,7 +248,7 @@ fn project_properties(
             )?;
             push_localized(parts, map, "ToolTip", uris)?;
             push_picture(parts, map["Picture"], uris)?;
-            require_empty(map["Shortcut"], "Shortcut")?;
+            require_empty(map["Shortcut"], COMMON_COMMAND, "Shortcut")?;
             push_bool(parts, map, "IncludeHelpInContents")?;
             push_parameter_type(parts, map["CommandParameterType"], uris)?;
             push_checked_enum(parts, map, "ParameterUseMode", &["Single", "Multiple"])?;
@@ -314,7 +314,7 @@ fn push_picture(
         })
         .collect::<Vec<_>>();
     let (reference, load_transparent) = if children.is_empty() {
-        require_empty(picture, "Picture")?;
+        require_no_text(picture, "common object", "Picture")?;
         (String::new(), false)
     } else {
         if children.len() != 2
@@ -369,7 +369,7 @@ fn push_parameter_type(
         })
         .collect::<Vec<_>>();
     let value = if children.is_empty() {
-        require_empty(property, "CommandParameterType")?;
+        require_no_text(property, COMMON_COMMAND, "CommandParameterType")?;
         String::new()
     } else {
         if children.len() != 1 || !typed(children[0], "TypeSet", Some(V8_NAMESPACE), uris) {

@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:EDT",
+    "release": "2025.2.3+30",
+    "derivation": "clean-room behavioural facts extracted from local bytecode inspection; no code copied"
+  },
+  "rules": [
+    {
+      "id": "form.choice-list.design-time-value",
+      "sourceClass": "com._1c.g5.v8.dt.form.export.xml.writer.FormChoiceListDesTimeValueWriter",
+      "modelType": "FormChoiceList",
+      "feature": "values",
+      "operations": [
+        "write feature wrapper",
+        "for each value write xr:item",
+        "write empty xr:presentation",
+        "write xr:checkState with lexical value 0",
+        "write xr:value with xsi:type FormChoiceListDesTimeValue",
+        "write presentation",
+        "delegate value to FormSmartFeatureWriter"
+      ],
+      "conditions": [
+        "feature must be many-valued and owned by the expected EClass",
+        "empty collection writes an empty wrapper only when writeDefault is true",
+        "write picture only for project version 8.5.1 or newer"
+      ],
+      "delegate": "com._1c.g5.v8.dt.form.export.xml.writer.FormSmartFeatureWriter",
+      "policy": {
+        "kind": "form-choice-list",
+        "itemOrder": [
+          "presentation",
+          "check-state",
+          "value"
+        ],
+        "emptyCollection": "write-wrapper-when-write-default",
+        "emptyStringValue": "self-closing"
+      },
+      "evidence": {
+        "kind": "javap-v-exact-method-control-flow-constant-pool",
+        "status": "verified",
+        "note": "Exact descriptors and control flow prove that the value feature delegates through FormSmartFeatureWriter and FormValueWriter into ValueWriter; an empty mcore StringValue calls ExportXmlStreamWriter.writeEmptyElement, which invokes XMLStreamWriter.writeEmptyElement, before writing xsi:type xs:string."
+      }
+    },
+    {
+      "id": "form.dynamic-list.list-settings",
+      "sourceClass": "com._1c.g5.v8.dt.form.export.xml.writer.ListSettingsWriter",
+      "modelType": "DynamicListExtInfo",
+      "feature": "listSettings",
+      "operations": [
+        "read listSettings feature",
+        "delegate non-null settings to DcsV8Serializer.writeSettings with project context"
+      ],
+      "conditions": [
+        "do not synthesize settings when feature value is null"
+      ],
+      "delegate": "DcsV8Serializer.writeSettings",
+      "policy": {
+        "kind": "form-list-settings",
+        "nullValue": "omit",
+        "delegate": "DcsV8Serializer.writeSettings"
+      },
+      "evidence": {
+        "kind": "javap-bytecode",
+        "status": "verified",
+        "note": "The EDT writer delegates the semantic settings model instead of hand-normalizing XML."
+      }
+    },
+    {
+      "id": "form.input-field-ext-info.choice-parameters",
+      "sourceClass": "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter",
+      "modelType": "InputFieldExtInfo",
+      "feature": "choiceParameters",
+      "operations": [
+        "write logform ChoiceParameters owner wrapper",
+        "for each ChoiceParameter write app:item with unqualified name attribute",
+        "write app:value with FormChoiceListDesTimeValue",
+        "write Presentation before Value",
+        "write FixedArray members as ordered v8:Value design-time values"
+      ],
+      "conditions": [
+        "owner feature order is ChoiceParameterLinks then ChoiceParameters then AvailableTypes",
+        "ExtInfoWriter passes writeDefault=false for EReference features",
+        "empty collection is omitted for this call site",
+        "feature cardinality is 0..many"
+      ],
+      "delegate": "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter",
+      "policy": {
+        "kind": "form-choice-parameters",
+        "ownerQName": "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameters",
+        "ownerPredecessorQName": "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameterLinks",
+        "ownerSuccessorQName": "{http://v8.1c.ru/8.3/xcf/logform}AvailableTypes",
+        "emptyCollection": "omit-when-write-default-false",
+        "item": {
+          "itemQName": "{http://v8.1c.ru/8.2/managed-application/core}item",
+          "nameAttributeQName": "{}name",
+          "valueQName": "{http://v8.1c.ru/8.2/managed-application/core}value",
+          "valueXsiType": "FormChoiceListDesTimeValue",
+          "valueOrder": [
+            "presentation",
+            "value"
+          ],
+          "presentationQName": "{http://v8.1c.ru/8.3/xcf/logform}Presentation",
+          "scalarValueQName": "{http://v8.1c.ru/8.3/xcf/logform}Value",
+          "booleanXsiType": "xs:boolean",
+          "designTimeRefXsiType": "xr:DesignTimeRef"
+        },
+        "fixedArray": {
+          "xsiType": "v8:FixedArray",
+          "itemQName": "{http://v8.1c.ru/8.1/data/core}Value",
+          "itemXsiType": "FormChoiceListDesTimeValue",
+          "itemOrder": [
+            "presentation",
+            "value"
+          ]
+        }
+      },
+      "evidence": {
+        "kind": "javap-v-exact-method-control-flow-constant-pool-and-live-native-export",
+        "status": "verified",
+        "note": "Exact EDT bytecode proves model cardinality, owner adjacency, delegation, and writeDefault=false for this EReference; the byte-bound raw slot-27/native Form.xml pair proves QNames, namespaces, hierarchy, order, and U/FixedArray/B values."
+      }
+    },
+    {
+      "id": "form.spreadsheet-content.structural-copy",
+      "sourceClass": "com._1c.g5.v8.dt.form.export.xml.writer.SpreadsheetContentWriter",
+      "modelType": "SpreadsheetDocumentFieldExtInfo",
+      "feature": "spreadsheetDocument",
+      "operations": [
+        "read spreadsheet data file as DOM",
+        "write Settings wrapper with MXL namespace and type",
+        "copy nodes and attributes recursively",
+        "trim blank text nodes",
+        "qualify supported xsi:type values"
+      ],
+      "conditions": [
+        "preserve document node order during recursive copy"
+      ],
+      "delegate": null,
+      "evidence": {
+        "kind": "javap-bytecode",
+        "status": "verified",
+        "note": "The XML layer is a structured pass-through; binary MXL decoding remains a separate adapter concern."
+      }
+    }
+  ]
+}

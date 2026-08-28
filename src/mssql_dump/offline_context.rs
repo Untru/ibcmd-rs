@@ -7,7 +7,14 @@ use std::{
     path::{Component, Path},
 };
 
-pub(crate) const OFFLINE_FORM_CONTEXT_SCHEMA_VERSION: u32 = 1;
+/// Bumped to 2 when the declared type of every metadata field joined the
+/// context: a trace run that lacked it would resolve fewer bound chains than
+/// the production export does, and an offline harness that silently differs
+/// from production is worse than no harness.
+///
+/// Bumped to 3 when the ordered master dimensions of every information register
+/// joined it, for the same reason.
+pub(crate) const OFFLINE_FORM_CONTEXT_SCHEMA_VERSION: u32 = 3;
 
 /// Reuses the production metadata-text builders for a saved `Config_inflated`
 /// corpus. It intentionally accepts only already-inflated UTF-8 text rows.
@@ -19,7 +26,9 @@ pub struct OfflineFormContext {
     pub(crate) type_index: BTreeMap<String, String>,
     pub(crate) dcs_type_index: DcsTypeIndex,
     pub(crate) object_refs: BTreeMap<String, String>,
+    pub(crate) field_type_refs: Arc<BTreeMap<String, String>>,
     pub(crate) information_register_field_refs: InformationRegisterFieldReferenceIndex,
+    pub(crate) information_register_master_dimensions: Arc<InformationRegisterMasterDimensionIndex>,
     pub(crate) form_owner_references: BTreeMap<String, String>,
     pub summary: OfflineFormContextSummary,
 }
@@ -33,7 +42,9 @@ pub struct OfflineFormContextSummary {
     pub(crate) type_index_entries: usize,
     pub(crate) dcs_type_index_entries: usize,
     pub(crate) object_ref_entries: usize,
+    pub(crate) field_type_ref_entries: usize,
     pub(crate) information_register_field_ref_entries: usize,
+    pub(crate) information_register_master_dimension_entries: usize,
     pub(crate) form_owner_entries: usize,
     pub(crate) type_collisions: usize,
     pub(crate) warnings: Vec<String>,
@@ -145,15 +156,30 @@ impl OfflineFormContextFactory {
         }
         let type_index = indexes.references;
         let object_refs = build_metadata_object_reference_index_from_texts(&metadata);
-        let defined =
-            build_defined_type_value_owner_reference_index_from_texts(&metadata, &type_index);
+        let field_type_refs = Arc::new(build_metadata_field_type_reference_index_from_texts(
+            &metadata,
+            &type_index,
+        ));
+        let defined = build_metadata_type_set_leaf_index_from_texts(&metadata, &type_index);
         let information_register_field_refs =
             build_information_register_field_reference_index_from_texts(
                 &metadata,
                 &type_index,
                 &defined,
             );
-        let form_owner_references = build_complete_form_source_reference_index(&metadata)
+        let form_refs = build_complete_form_source_reference_index(&metadata);
+        // The offline harness models the default `--source-version 2.20`, so raw
+        // data paths are not preserved -- the same argument production passes.
+        let information_register_master_dimensions = Arc::new(
+            build_information_register_master_dimension_index_from_texts(
+                &metadata,
+                &type_index,
+                &object_refs,
+                &form_refs,
+                false,
+            ),
+        );
+        let form_owner_references = form_refs
             .into_iter()
             .filter_map(|(id, reference)| {
                 form_owner_reference_name(&reference).map(|owner| (id, owner))
@@ -166,6 +192,9 @@ impl OfflineFormContextFactory {
         }
         for (key, value) in &object_refs {
             canonical.push(format!("object\0{key}\0{value}"));
+        }
+        for (key, value) in field_type_refs.iter() {
+            canonical.push(format!("fieldtype\0{key}\0{value}"));
         }
         for (key, value) in &form_owner_references {
             canonical.push(format!("owner\0{key}\0{value}"));
@@ -199,6 +228,9 @@ impl OfflineFormContextFactory {
                 canonical.push(format!("ir\0{register}\0{field}"));
             }
         }
+        for (register, dimensions) in information_register_master_dimensions.iter() {
+            canonical.push(format!("irmaster\0{register}\0{}", dimensions.join(",")));
+        }
         for warning in &warnings {
             canonical.push(format!("warning\0{warning}"));
         }
@@ -223,7 +255,10 @@ impl OfflineFormContextFactory {
             type_index_entries: type_index.len(),
             dcs_type_index_entries: dcs_type_index.len(),
             object_ref_entries: object_refs.len(),
+            field_type_ref_entries: field_type_refs.len(),
             information_register_field_ref_entries: information_register_field_refs.len(),
+            information_register_master_dimension_entries: information_register_master_dimensions
+                .len(),
             form_owner_entries: form_owner_references.len(),
             type_collisions: 0,
             warnings,
@@ -234,7 +269,9 @@ impl OfflineFormContextFactory {
             type_index,
             dcs_type_index,
             object_refs,
+            field_type_refs,
             information_register_field_refs,
+            information_register_master_dimensions,
             form_owner_references,
             summary,
         })

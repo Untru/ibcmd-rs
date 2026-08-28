@@ -193,6 +193,17 @@ pub(super) fn metadata_source_for_object_text(
     metadata_source_for_object_fields(code, &wrapped_text, uuid, &fields)
 }
 
+/// Fixed evidenced ValueId every `Command`-family `GeneratedType` pair
+/// carries (`docs/evidence/utility-objects-8.3.27.md`); independently
+/// redefined per module elsewhere in this crate (`compiler/families/
+/// commands.rs`, `business_object.rs`, `utility.rs`) rather than shared,
+/// matching the existing convention.
+const COMMAND_VALUE_UUID: &str = "078a6af8-d22c-4248-9c33-7e90075a3d2c";
+
+fn contains_common_command_value_marker(text: &str, uuid: &str) -> bool {
+    text.contains(&format!("{{2,{uuid},{COMMAND_VALUE_UUID}}}"))
+}
+
 pub(super) fn metadata_source_for_object_fields(
     code: u32,
     text: &str,
@@ -219,7 +230,16 @@ pub(super) fn metadata_source_for_object_fields(
             Some(("XDTOPackage", "XDTOPackages"))
         }
         1 if header_index == Some(1) => Some(("Bot", "Bots")),
-        2 if contains_wrapped_metadata_object_code(text, 9, uuid) => {
+        // The command wrapper's own leading count (`{8,` or `{9,`, one
+        // trailing `OnMainServerUnavailableBehavior` slot apart -- see
+        // `parse_common_command_properties_from_text`) is not a stable
+        // discriminator: a literal `{9,` substring check missed every
+        // record that happened to omit that slot. The `{2,<uuid>,<value
+        // id>}` GeneratedType pair right after the code is stable instead
+        // -- `COMMAND_VALUE_UUID` is the fixed, evidenced ValueId every
+        // Command-family object carries there regardless of the wrapper's
+        // own declared count (see docs/evidence/utility-objects-8.3.27.md).
+        2 if contains_common_command_value_marker(text, uuid) => {
             Some(("CommonCommand", "CommonCommands"))
         }
         2 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
@@ -242,6 +262,29 @@ pub(super) fn metadata_source_for_object_fields(
         }
         3 if header_index == Some(6) => Some(("CommandGroup", "CommandGroups")),
         3 if header_index == Some(3) => Some(("StyleItem", "StyleItems")),
+        // Code 3 with a lone header field is shared between `Style` and a
+        // `CommonPicture` written in the older of the two layouts the platform
+        // has used. They part on the header block's own leading member, the
+        // one that states how many members the block carries:
+        //
+        // * `{3,{3,{1,0,<uuid>},<Name>,<Synonym>,<Comment>,0,0,<nil uuid>,0}}`
+        //   -- eight-member block -- is a `Style`. ERP УХ 3.2.12.6 carries
+        //   exactly two, `Основной` among them.
+        // * `{3,{2,{1,0,<uuid>},<Name>,<Synonym>,<Comment>,0,0,<nil uuid>}}`
+        //   -- seven members, no trailing `0` -- is a `CommonPicture`.
+        //
+        // The same picture re-imported through the platform comes back as
+        // code 4 with the eight-member block, so only a distribution written
+        // before that change carries the code-3 spelling; УТ 11.5.27.75 and
+        // БСП демо 3.1.12.297 have none. ERP УХ has 673, and all 673 were
+        // routed to `Styles/` while the very same 673 `CommonPictures/` went
+        // unwritten -- the two sets coincide exactly.
+        3 if header_index == Some(1)
+            && fields.len() == 2
+            && field_starts_with(fields.get(1), "{2,") =>
+        {
+            Some(("CommonPicture", "CommonPictures"))
+        }
         3 if header_index == Some(1) && fields.len() == 2 => Some(("Style", "Styles")),
         3 if header_index == Some(1) => Some(("DocumentNumerator", "DocumentNumerators")),
         2 if header_index == Some(1)
@@ -266,6 +309,18 @@ pub(super) fn metadata_source_for_object_fields(
         19 => Some(("Report", "Reports")),
         20 if header_index == Some(5) => Some(("Enum", "Enums")),
         20 if header_index == Some(3) => Some(("Report", "Reports")),
+        // Discriminator 21 is shared between the register families and
+        // Subsystem: a real Calculation/Accounting register always embeds a
+        // long fixed preamble of bare well-known type-id UUIDs before its
+        // `{1,0,<uuid>}` header (confirmed on ERP UH 3.2.12.6's real
+        // `Начисления` calculation register and `МеждународныйБезКорреспонденции`
+        // accounting register: header_index == 15 for both), while a
+        // Subsystem's header is the very next field after the code (header_index
+        // == 1, exactly as for the unambiguous code-22 Subsystem shape below).
+        // Confirmed against the same corpus for the Subsystem `WebСервисУХ`,
+        // which the platform exports as `Subsystems/WebСервисУХ.xml` while we
+        // previously misrouted it to `CalculationRegisters/WebСервисУХ.xml`.
+        21 if header_index == Some(1) => Some(("Subsystem", "Subsystems")),
         21 if is_code21_accounting_register_fields(&fields, uuid) => {
             Some(("AccountingRegister", "AccountingRegisters"))
         }
@@ -317,8 +372,13 @@ pub(super) fn is_code21_accounting_register_fields(fields: &[&str], uuid: &str) 
 }
 
 pub(super) fn parse_metadata_header_from_text(text: &str, uuid: &str) -> Option<MetadataHeader> {
-    let marker = format!("{{1,0,{uuid}}},");
-    let mut offset = text.find(&marker)? + marker.len();
+    // `Name`, `Synonym` and `Comment` follow the object's own header tuple in
+    // both header-block layouts the platform writes; only the tuple's own
+    // first member differs. See `metadata_header_field_index` for the two
+    // spellings and where each was observed.
+    let mut offset = [format!("{{1,0,{uuid}}},"), format!("{{0,0,{uuid}}},")]
+        .into_iter()
+        .find_map(|marker| text.find(&marker).map(|start| start + marker.len()))?;
     offset = skip_ascii_ws_at(text, offset);
     let (name, consumed) = parse_1c_quoted_string_with_len(&text[offset..])?;
     offset += consumed;

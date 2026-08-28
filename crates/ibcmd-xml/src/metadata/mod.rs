@@ -1,6 +1,8 @@
 //! Canonical metadata-envelope mapping and lossless fallback support.
 
 mod business_objects;
+mod characteristics;
+mod children;
 mod common;
 mod common_objects;
 mod constant;
@@ -10,6 +12,7 @@ mod functional_option;
 mod functional_options_parameter;
 mod hierarchical_objects;
 mod language;
+mod order;
 mod register_objects;
 mod registry;
 mod services;
@@ -17,6 +20,11 @@ mod session_parameter;
 mod utility_objects;
 
 pub use business_objects::{register_catalog_codec, register_document_codec};
+pub use characteristics::{
+    CharacteristicsXmlError, render_cct_characteristics_xml, render_characteristics_xml,
+    render_metadata_characteristics_xml,
+};
+pub use children::{CctTemplateChildrenError, append_cct_template_children};
 pub use common::{
     MetadataDecodeError, MetadataEnvelope, decode_configuration_envelope, decode_metadata_envelope,
     decode_metadata_envelope_with_dialect,
@@ -34,6 +42,7 @@ pub use hierarchical_objects::{
     register_task_codec,
 };
 pub use language::register_language_codec;
+pub use order::{MetadataOrderError, order_metadata_features, order_produced_type_values};
 pub use register_objects::{
     register_accounting_register_codec, register_accumulation_register_codec,
     register_calculation_register_codec, register_chart_of_accounts_codec,

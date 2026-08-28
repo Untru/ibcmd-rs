@@ -221,6 +221,32 @@ impl Severity {
     }
 }
 
+/// Stable, reusable taxonomy for failures at the metadata-source boundary.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataSourceFailureClass {
+    Unknown,
+    Unsupported,
+    Malformed,
+    Unresolved,
+    Ambiguous,
+    Invariant,
+}
+
+impl MetadataSourceFailureClass {
+    /// Returns the exact token used by persisted diagnostics and diagnostic codes.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Unsupported => "unsupported",
+            Self::Malformed => "malformed",
+            Self::Unresolved => "unresolved",
+            Self::Ambiguous => "ambiguous",
+            Self::Invariant => "invariant",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 enum PathSegmentValue {
@@ -1099,6 +1125,41 @@ pub fn evaluate_loss(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn metadata_source_failure_class_has_stable_token_matrix_and_serde_roundtrip() {
+        for (class, token) in [
+            (MetadataSourceFailureClass::Unknown, "unknown"),
+            (MetadataSourceFailureClass::Unsupported, "unsupported"),
+            (MetadataSourceFailureClass::Malformed, "malformed"),
+            (MetadataSourceFailureClass::Unresolved, "unresolved"),
+            (MetadataSourceFailureClass::Ambiguous, "ambiguous"),
+            (MetadataSourceFailureClass::Invariant, "invariant"),
+        ] {
+            assert_eq!(class.as_str(), token);
+            let json = format!("\"{token}\"");
+            assert_eq!(serde_json::to_string(&class).unwrap(), json);
+            assert_eq!(
+                serde_json::from_str::<MetadataSourceFailureClass>(&json).unwrap(),
+                class
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_source_failure_class_rejects_unknown_token() {
+        assert!(
+            serde_json::from_str::<MetadataSourceFailureClass>("\"not_a_failure_class\"").is_err()
+        );
+    }
+
+    #[test]
+    fn metadata_source_failure_class_keeps_unknown_distinct_from_unsupported() {
+        assert_ne!(
+            MetadataSourceFailureClass::Unknown,
+            MetadataSourceFailureClass::Unsupported
+        );
+    }
 
     fn code(value: &str) -> DiagnosticCode {
         value.parse().unwrap()

@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-business-process-duty",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 282,
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-12",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "vm": "Parallels Windows 11 ARM64; x86-64 platform under Windows emulation"
+  },
+  "source_lineage": {
+    "kind": "native_parent_configuration_cf_paired_with_platform_exported_xcf",
+    "redacted_logical_path": "<private-wms-source>/configuration/Ext/ParentConfigurations/<configuration>.cf",
+    "parent_cf_size": 383001481,
+    "parent_cf_sha256": "1de68bfd3d92f322dc06c5c04e547159826595a385bf46511da0542e3700e7c2",
+    "parent_cf_format": "format16",
+    "parent_cf_storage_version": 12552,
+    "parent_cf_element_count": 12552
+  },
+  "platform_attestation": {
+    "procedure": [
+      "Load the native parent CF into a new isolated file infobase with the pinned ibcmd.exe.",
+      "Save the attested lab configuration to a second CF and perform a native full XML 2.20 export.",
+      "Extract the exact BusinessProcess UUID from both CF files with explicit raw-deflate encoding.",
+      "Compare the platform-exported BusinessProcess XML with the paired native source snapshot."
+    ],
+    "platform_saved_cf_size": 383001489,
+    "platform_saved_cf_sha256": "5d305907226075a9b4ead24227d932b545a22c8fe649cf94e9a6cabf8161e12f",
+    "parent_and_platform_saved_packed_equal": true,
+    "parent_and_platform_saved_unpacked_equal": true,
+    "source_and_platform_exported_business_process_xml_equal": true
+  },
+  "object": {
+    "kind": "BusinessProcess",
+    "name": "Задание",
+    "uuid": "dad11c2e-08fc-4a6b-8829-8be6c64c15fc",
+    "raw_entry": {
+      "compression": "raw-deflate",
+      "packed": {
+        "path": "raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.deflate",
+        "size": 5456,
+        "sha256": "1ce414849209b3f832baa90b171b14d5bf342518644c38c43408c467a524957e"
+      },
+      "unpacked": {
+        "path": "raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.txt",
+        "size": 35599,
+        "sha256": "0e552316ec845f25a22a60070aef2c565d49142f7569545c00cdcc161d932bea"
+      }
+    },
+    "native_xml": {
+      "path": "native/BusinessProcesses/Задание.xml",
+      "size": 64495,
+      "sha256": "565d2d12cb11321f8195b32ed8d93c50fb5d41c0a472e9e72f7b46e7235d13f3"
+    }
+  },
+  "proven_shape": {
+    "root_field_count": 8,
+    "owner_discriminator": "30",
+    "owner_field_count": 49,
+    "collection_count": 5,
+    "collection_markers_in_order": [
+      "3daea016-69b7-4ed4-9453-127911372fe6",
+      "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
+      "7a3e533c-f232-40d5-a932-6a311d2480bf",
+      "87c988de-ecbf-413b-87b0-b9516df05e28",
+      "a3fe6537-d787-40f7-8a06-419d2f0c1cfd"
+    ],
+    "collection_item_counts": [0, 4, 0, 27, 0],
+    "generated_types_in_order": [
+      "BusinessProcessObject.Задание:Object",
+      "BusinessProcessRef.Задание:Ref",
+      "BusinessProcessSelection.Задание:Selection",
+      "BusinessProcessList.Задание:List",
+      "BusinessProcessManager.Задание:Manager",
+      "BusinessProcessRoutePointRef.Задание:RoutePointRef"
+    ],
+    "use_standard_commands": true
+  },
+  "cross_evidence": {
+    "unica_main_sha": "a527d40962d047c6922c903b37510b30f697da42",
+    "status": "matching_inventory_only_not_oracle"
+  },
+  "proven_claims": [
+    "The exact BusinessProcess storage element was present in the native parent CF before any ibcmd-rs compilation.",
+    "Pinned 8.3.27.2214 preserved the exact packed and unpacked BusinessProcess bytes when saving the attested lab configuration.",
+    "Pinned 8.3.27.2214 exported the paired native XML 2.20 source byte-for-byte.",
+    "The raw root has 8 fields, the owner has discriminator 30 and 49 fields, and all five collection markers and counts are exact.",
+    "The six generated types, their identities, categories, and XML order are exact.",
+    "UseStandardCommands is true in both raw and native XML evidence."
+  ],
+  "non_claims": [
+    "No non-empty BusinessProcess Template, Command, or TabularSection encoding is inferred from this fixture.",
+    "The complete proprietary CF and dependency closure are not committed.",
+    "The fixture is diagnostic-only and is never read as a production fallback.",
+    "Unica was not used as an authority or generator for this real-object evidence."
+  ]
+}

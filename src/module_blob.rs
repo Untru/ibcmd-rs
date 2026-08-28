@@ -4,10 +4,27 @@ use std::io::{Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use crate::form_schema::form_text_document_context_menu_child_is_valid;
 use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
+use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
+use ibcmd_schema::{
+    FormTextDocumentContextMenuMultiplicity, bundled_dcs_conditional_appearance_policy,
+    bundled_dcs_filter_policy, bundled_dcs_form_attributes_conditional_appearance_policy,
+    bundled_dcs_order_policy, form_layout_single_child_item_slot_indices,
+    parse_form_text_document_context_menu_multiplicity,
+};
+use ibcmd_xml::{
+    DcsChildParseOutcome, emit_dcs_conditional_appearance_storage_document,
+    emit_dcs_filter_storage_document, emit_dcs_order_storage_document,
+    emit_form_attributes_conditional_appearance_storage_document,
+    emit_form_attributes_empty_storage_document, parse_dcs_conditional_appearance_storage_document,
+    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
+    parse_form_attributes_conditional_appearance_storage_document,
+    parse_form_attributes_empty_storage_document, parse_form_dcs_children,
+};
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
@@ -24,8 +41,9 @@ use crate::form_schema::{
     FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
     FormTableHorizontalScrollBar, FormTableInitialListView, FormTablePropertyBagKey as TableBagKey,
     FormTableSchema, FormTableSearchOnInput, FormTooltipRepresentation,
-    FormWarningOnEditRepresentation, form_tooltip_representation_schema,
-    form_tooltip_representation_supports_xml_tag,
+    FormWarningOnEditRepresentation, encode_form_table_command_bar_location,
+    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
+    normalize_form_table_command_bar_location_xml,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -83,6 +101,8 @@ pub struct PatchedVersionsBlob {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParsedFormBodyBlob {
+    /// The container revision the record declared in its own first slot.
+    pub revision: FormBodyRevision,
     pub layout: String,
     pub module_text: String,
     pub trailing: Vec<String>,
@@ -128,6 +148,7 @@ struct FormXmlBodyProperties {
     auto_command_bar: Option<FormXmlAutoCommandBar>,
     attributes_present: bool,
     attributes: Vec<FormXmlAttribute>,
+    attributes_conditional_appearance: Option<DcsConditionalAppearance>,
     parameters_present: bool,
     parameters: Vec<FormXmlParameter>,
     commands_present: bool,
@@ -210,36 +231,21 @@ struct FormXmlDynamicListField {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlListSettings {
-    filter: Option<FormXmlListSettingsStandardSection>,
+    filter: Option<FormXmlListSettingsFilter>,
     order: Option<FormXmlListSettingsOrder>,
-    conditional_appearance: Option<FormXmlListSettingsStandardSection>,
+    conditional_appearance: Option<DcsConditionalAppearance>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct FormXmlListSettingsStandardSection {
-    items: Vec<FormXmlListSettingsFieldItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlListSettingsFilter {
+    canonical: DcsFilter,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct FormXmlListSettingsFieldItem {
-    field: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlListSettingsOrder {
-    items: Vec<FormXmlListSettingsOrderItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct FormXmlListSettingsOrderItem {
-    field: Option<String>,
-    order_type: Option<String>,
+    canonical: DcsOrder,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -469,6 +475,7 @@ enum FormXmlAutoShowState {
 enum FormXmlReportResultViewMode {
     Auto,
     Default,
+    Compact,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -1067,6 +1074,49 @@ pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
     read_element_from_blob(blob, "text")
         .context("failed to read module blob text element")?
         .ok_or_else(|| anyhow!("module blob does not contain text element"))
+}
+
+/// Recognizes a module body carrying no V8-container framing at all: the
+/// row's own raw-deflate-inflated bytes *are* the final module text already,
+/// BOM-prefixed exactly like the platform's own `Ext/Module.bsl`
+/// (`docs/evidence/plain-text-module-body-lead-20260825.md`). Confirmed on
+/// three real ERP УХ 3.2.12.6 `CommonModules`
+/// (`БПМСФОУХ`/`ВариантыОтчетовПереопределяемый`/`ВзаиморасчетыВызовСервера`):
+/// inflated bytes diffed byte-for-byte against the platform's own
+/// `Ext/Module.bsl`, `diff` exit 0 on all three.
+///
+/// A first attempt at this fallback accepted any BOM-prefixed, valid-UTF-8
+/// payload and was reverted: on `sslbase`/`ssl` it turned a form's Help-topic
+/// XML wrapper (also BOM-prefixed, also valid UTF-8, by the same convention
+/// every 1C text blob uses) into a spurious `Bots/<name>/Ext/Module.bsl`
+/// through a `module_text_paths` collision the permissive check exposed but
+/// did not cause -- see that doc for the full trace. BOM-and-valid-UTF8 alone
+/// is not a safe enough discriminator: it is true of nearly every 1C text
+/// blob this project reads, module or not.
+///
+/// The narrower, evidenced discriminator here: real BSL module source never
+/// opens with `<`, `{` or `[` as its first non-whitespace byte -- those are
+/// exactly the leading bytes of the wrapper shapes (`<?xml ...`, a JSON-ish
+/// or brace-delimited record) this project's other plain-text blobs use, and
+/// none of them are legal as the first token of a BSL module (there is no
+/// top-level BSL construct that opens with a bare `<`, `{` or `[`; even a
+/// `<` comparison operator needs a preceding operand). Every confirmed real
+/// sample opens with a `//` line comment or a `#`-prefixed preprocessor
+/// region instead. This is deliberately not a positive BSL-keyword
+/// allowlist: legal BSL module bodies can open with many different
+/// constructs (annotations, labels, bare statements), so requiring one
+/// specific shape would fail closed on real modules; excluding the three
+/// wrapper-shape bytes is the narrowest cut the current negative evidence
+/// supports.
+pub(crate) fn unpack_plain_text_module_body(blob: &[u8]) -> Option<Vec<u8>> {
+    let inflated = inflate_raw(blob).ok()?;
+    let after_bom = inflated.strip_prefix(b"\xEF\xBB\xBF")?;
+    let text = std::str::from_utf8(after_bom).ok()?;
+    let trimmed = text.trim_start_matches([' ', '\t', '\r', '\n']);
+    if trimmed.starts_with(['<', '{', '[']) {
+        return None;
+    }
+    Some(inflated)
 }
 
 pub(crate) fn unpack_module_container_text(container: &[u8]) -> Result<Vec<u8>> {
@@ -1860,7 +1910,10 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
     if let Some(print_settings) = &spreadsheet.print_settings {
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings)?);
     }
-    fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
+    fields.extend(format_spreadsheet_drawings_for_moxel(
+        &spreadsheet,
+        column_format_slots,
+    ));
     let line_fields = format_spreadsheet_lines_for_moxel(&spreadsheet.lines);
     let (mut format_fields, number_format_refs) =
         format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots, number_format_hint);
@@ -1922,6 +1975,10 @@ struct SpreadsheetDocumentXml {
     print_area: Option<SpreadsheetDocumentXmlArea>,
     print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
     default_format_index: Option<usize>,
+    /// The document's own `<height>`.  The MOXCEL body stores this row count in
+    /// the scalar behind the default column-set record and the extractor reads
+    /// it back verbatim, so packing a re-derived value would not round-trip.
+    sheet_height: Option<usize>,
     formats: Vec<SpreadsheetDocumentXmlFormat>,
     fonts: Vec<SpreadsheetDocumentXmlFont>,
     lines: Vec<SpreadsheetDocumentXmlLine>,
@@ -2141,6 +2198,8 @@ impl Default for SpreadsheetDocumentXmlDrawing {
 
 #[derive(Debug)]
 enum SpreadsheetDocumentXmlDrawingKind {
+    /// `Line`, `Rectangle` or `Text`: the twelve-field, tail-less record.
+    Shape(String),
     Picture {
         picture_size: String,
         picture_index: usize,
@@ -3202,6 +3261,11 @@ fn apply_spreadsheet_text_value(
                 document.default_format_index = Some(parsed);
             }
         }
+        "height" if path_ends_with(path, &["document", "height"]) => {
+            if let Ok(parsed) = value.parse::<usize>() {
+                document.sheet_height = Some(parsed);
+            }
+        }
         "font" if path_ends_with(path, &["format", "font"]) => {
             set_spreadsheet_format_usize(format, value, |format, parsed| {
                 format.font = Some(parsed)
@@ -3361,6 +3425,9 @@ fn apply_spreadsheet_text_value(
             if let Some(drawing) = drawing {
                 drawing.kind = match value {
                     "Chart" => SpreadsheetDocumentXmlDrawingKind::Chart(None),
+                    "Line" | "Rectangle" | "Text" => {
+                        SpreadsheetDocumentXmlDrawingKind::Shape(value.to_string())
+                    }
                     _ => SpreadsheetDocumentXmlDrawingKind::Picture {
                         picture_size: String::new(),
                         picture_index: 0,
@@ -3595,14 +3662,37 @@ fn normalize_canonical_spreadsheet_format_order(spreadsheet: &mut SpreadsheetDoc
     if spreadsheet.formats.is_empty() {
         return;
     }
-    let should_normalize = spreadsheet.default_format_index.is_some();
-    if !should_normalize {
-        return;
-    }
     let offset = spreadsheet_column_format_offset(spreadsheet);
     if offset == 0 || offset >= spreadsheet.formats.len() {
         return;
     }
+
+    // MOXEL stores the column format block first.  Rotating only the format
+    // bodies changes the meaning of every global reference and makes the next
+    // XML -> blob -> XML pass non-idempotent.  Move the references together
+    // with the bodies so the resulting document uses the canonical indexes.
+    let remap = |index: usize| match index {
+        0 => 0,
+        index if index <= spreadsheet.formats.len() => {
+            ((index - 1 + spreadsheet.formats.len() - offset) % spreadsheet.formats.len()) + 1
+        }
+        index => index,
+    };
+    for column_set in &mut spreadsheet.column_sets {
+        for column in &mut column_set.columns {
+            column.format_index = remap(column.format_index);
+        }
+    }
+    for row in &mut spreadsheet.rows {
+        row.format_index = remap(row.format_index);
+        for cell in &mut row.cells {
+            cell.format_index = remap(cell.format_index);
+        }
+    }
+    for drawing in &mut spreadsheet.drawings {
+        drawing.format_index = remap(drawing.format_index);
+    }
+    spreadsheet.default_format_index = spreadsheet.default_format_index.map(remap);
     spreadsheet.formats.rotate_left(offset);
 }
 
@@ -3723,13 +3813,15 @@ fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml
         .iter()
         .filter(|column_set| column_set.id.is_some())
         .collect::<Vec<_>>();
-    let height = spreadsheet
-        .rows
-        .iter()
-        .map(|row| *row.expanded_indexes().end())
-        .max()
-        .unwrap_or(0)
-        + 1;
+    let height = spreadsheet.sheet_height.unwrap_or_else(|| {
+        spreadsheet
+            .rows
+            .iter()
+            .map(|row| *row.expanded_indexes().end())
+            .max()
+            .unwrap_or(0)
+            + 1
+    });
     fields.push(height.to_string());
     fields.push(additional_sets.len().to_string());
     for column_set in &additional_sets {
@@ -4160,6 +4252,52 @@ fn format_spreadsheet_formats_for_moxel(
     (fields, number_format_refs)
 }
 
+fn spreadsheet_format_physical_index_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_format_slots: usize,
+    global_index: usize,
+) -> usize {
+    if global_index == 0 {
+        return 0;
+    }
+    let source_format_count = spreadsheet
+        .formats
+        .len()
+        .max(spreadsheet.default_format_index.unwrap_or(0))
+        .max(column_format_slots);
+    let column_placeholder_count = column_format_slots.max(1);
+    let is_drawing_format = |index: usize| {
+        spreadsheet
+            .formats
+            .get(index.saturating_sub(1))
+            .is_some_and(|format| format.drawing_border.is_some())
+    };
+    let mut physical_index = 0usize;
+    for index in column_format_slots + 1..=source_format_count {
+        if !is_drawing_format(index) {
+            physical_index += 1;
+            if index == global_index {
+                return physical_index;
+            }
+        }
+    }
+    for index in 1..=column_placeholder_count {
+        physical_index += 1;
+        if index == global_index {
+            return physical_index;
+        }
+    }
+    for index in column_format_slots + 1..=source_format_count {
+        if is_drawing_format(index) {
+            physical_index += 1;
+            if index == global_index {
+                return physical_index;
+            }
+        }
+    }
+    global_index
+}
+
 fn format_spreadsheet_format_index_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     global_index: usize,
@@ -4280,18 +4418,19 @@ fn format_spreadsheet_format_for_moxel(
             .as_deref()
             .and_then(spreadsheet_text_placement_code),
     );
-    if drawing_slot {
-        push_spreadsheet_format_value(
-            &mut values,
-            13,
-            format
-                .pattern_color
-                .as_deref()
-                .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
-        );
-    } else {
-        push_spreadsheet_format_value(&mut values, 13, format.text_orientation);
-    }
+    // Mirror of the decoder: member 13 is `patternColor` for every format, not
+    // just for the ones a drawing references, and member 18 is
+    // `textOrientation`.  Writing the orientation into 13 was the packer half of
+    // the same conflation the decoder carried.
+    push_spreadsheet_format_value(
+        &mut values,
+        13,
+        format
+            .pattern_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
+    );
+    push_spreadsheet_format_value(&mut values, 18, format.text_orientation);
     push_spreadsheet_format_value(
         &mut values,
         15,
@@ -4631,41 +4770,86 @@ fn spreadsheet_line_style_code(value: &str) -> Option<i32> {
 }
 
 fn format_spreadsheet_drawings_for_moxel(
-    drawings: &[SpreadsheetDocumentXmlDrawing],
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_format_slots: usize,
 ) -> Vec<String> {
-    drawings
+    spreadsheet
+        .drawings
         .iter()
-        .filter_map(format_spreadsheet_drawing_for_moxel)
+        .filter_map(|drawing| {
+            format_spreadsheet_drawing_for_moxel(
+                drawing,
+                spreadsheet_format_physical_index_for_moxel(
+                    spreadsheet,
+                    column_format_slots,
+                    drawing.format_index,
+                ),
+            )
+        })
         .collect()
 }
 
-fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing) -> Option<String> {
+fn format_spreadsheet_drawing_for_moxel(
+    drawing: &SpreadsheetDocumentXmlDrawing,
+    format_index: usize,
+) -> Option<String> {
+    // Geometry is stored column-first and is neither ordered nor non-negative,
+    // so it is written through unchanged; the clamping this replaces silently
+    // rewrote the 9 records that end left of where they begin and the 2 that end
+    // above.
+    let geometry = format!(
+        "{},{},{},{},{},{},{},{}",
+        drawing.begin_column,
+        drawing.begin_row,
+        drawing.begin_column_offset,
+        drawing.begin_row_offset,
+        drawing.end_column,
+        drawing.end_row,
+        drawing.end_column_offset,
+        drawing.end_row_offset
+    );
+    let auto_size = usize::from(drawing.auto_size);
     match &drawing.kind {
+        // `Line`, `Rectangle` and `Text` keep the twelve-field record, whose
+        // last slot is the `autoSize` flag.
+        SpreadsheetDocumentXmlDrawingKind::Shape(shape) => {
+            let kind = match shape.as_str() {
+                "Line" => 1,
+                "Rectangle" => 2,
+                "Text" => 3,
+                _ => return None,
+            };
+            Some(format!(
+                "{{{{0,{format_index}}},{kind},{geometry},{},{auto_size}}}",
+                drawing.id
+            ))
+        }
         SpreadsheetDocumentXmlDrawingKind::Picture {
             picture_size,
             picture_index,
         } => {
-            if picture_size != "Stretch" {
-                return None;
-            }
-            let auto_size = if drawing.auto_size { 0 } else { 1 };
+            // The decoder reads slot 10 as the identifier, 11 as the picture
+            // index, 12 as the picture size and 13 as `autoSize`.  This branch
+            // used to write `autoSize`, a literal 1, the z-order and the picture
+            // index into those four slots, so a packed picture came back with a
+            // different id, a different picture index and an inverted
+            // `autoSize`; no test asserted that a drawing survived the round
+            // trip, so the four-way swap went unnoticed.
+            let picture_size_code = match picture_size.as_str() {
+                "RealSize" => 0,
+                "Stretch" => 1,
+                "Proportionally" => 2,
+                "AutoSize" => 4,
+                "ByFontSize" => 7,
+                _ => return None,
+            };
             Some(format!(
-                "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
-                drawing.format_index,
-                drawing.begin_column.max(0),
-                drawing.begin_row.max(0),
-                drawing.begin_column_offset.max(0),
-                drawing.begin_row_offset.max(0),
-                drawing.end_column.max(drawing.begin_column).max(0),
-                drawing.end_row.max(drawing.begin_row).max(0),
-                drawing.end_column_offset.max(0),
-                drawing.end_row_offset.max(0),
-                drawing.z_order,
-                picture_index
+                "{{{{0,{format_index}}},5,{geometry},{},{picture_index},{picture_size_code},{auto_size}}}",
+                drawing.id
             ))
         }
         SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) => {
-            format_spreadsheet_chart_drawing_for_moxel(drawing, chart)
+            format_spreadsheet_chart_drawing_for_moxel(drawing, format_index, chart)
         }
         SpreadsheetDocumentXmlDrawingKind::Chart(None) => None,
     }
@@ -4673,6 +4857,7 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
 
 fn format_spreadsheet_chart_drawing_for_moxel(
     drawing: &SpreadsheetDocumentXmlDrawing,
+    format_index: usize,
     chart: &SpreadsheetDocumentXmlChart,
 ) -> Option<String> {
     const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
@@ -4725,7 +4910,7 @@ fn format_spreadsheet_chart_drawing_for_moxel(
     let payload = format!("{{{{11}},{{{}}}}}", data.join(","));
     Some(format!(
         "{{{{0,{}}},10,{},{},{},{},{},{},{},{},{},{CHART_TYPE_UUID},{payload},0}}",
-        drawing.format_index,
+        format_index,
         drawing.begin_column.max(0),
         drawing.begin_row.max(0),
         drawing.begin_column_offset.max(0),
@@ -5783,6 +5968,11 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 let mut attributes = plain[attributes_range.clone()].trim().to_string();
                 patch_form_body_attributes(&mut attributes, &properties.attributes, source)
                     .context("failed to patch Form body attributes")?;
+                patch_form_body_attributes_conditional_appearance(
+                    &mut attributes,
+                    properties.attributes_conditional_appearance.as_ref(),
+                )
+                .context("failed to patch Form body Attributes conditional appearance")?;
                 plain.replace_range(attributes_range, &attributes);
             }
         }
@@ -6470,11 +6660,29 @@ fn sanitize_source_path_segment(value: &str) -> String {
 }
 
 fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
+    let canonical_dcs = parse_form_dcs_children(xml)
+        .map_err(|error| anyhow!("cannot parse Form DCS children: {error}"))?;
+    let mut canonical_filters = canonical_dcs.list_settings_filters.into_iter();
+    let mut canonical_orders = canonical_dcs.list_settings_orders.into_iter();
+    let mut canonical_conditional_appearances = canonical_dcs
+        .list_settings_conditional_appearances
+        .into_iter();
+    let attributes_conditional_appearance =
+        match canonical_dcs.form_attributes_conditional_appearance {
+            DcsChildParseOutcome::Typed(value) => Some(value),
+            DcsChildParseOutcome::Unsupported(reason) => {
+                return Err(anyhow!(
+                    "unsupported Form Attributes conditional appearance: {reason}"
+                ));
+            }
+            DcsChildParseOutcome::Absent => None,
+        };
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut text_value = String::new();
     let mut properties = FormXmlBodyProperties::default();
+    properties.attributes_conditional_appearance = attributes_conditional_appearance;
     let mut current_event_name = None::<String>;
     let mut current_command = None::<FormXmlCommand>;
     let mut current_localized_section = None::<String>;
@@ -6483,8 +6691,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_attribute = None::<FormXmlAttribute>;
     let mut current_parameter = None::<FormXmlParameter>;
     let mut current_dynamic_list_field = None::<FormXmlDynamicListField>;
-    let mut current_list_settings_field_item = None::<FormXmlListSettingsFieldItem>;
-    let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
     let mut current_child_localized_section = None::<String>;
@@ -6694,46 +6900,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Settings"])
                 {
                     current_dynamic_list_field = Some(FormXmlDynamicListField::default());
-                } else if local == "item"
-                    && (path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "filter",
-                        ],
-                    ) || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
-                        ],
-                    ))
-                {
-                    current_list_settings_field_item =
-                        Some(FormXmlListSettingsFieldItem::default());
-                } else if local == "item"
-                    && path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "order",
-                        ],
-                    )
-                {
-                    current_list_settings_order_item =
-                        Some(FormXmlListSettingsOrderItem::default());
                 } else if local == "Item"
                     && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
                 {
@@ -7064,7 +7230,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "userSettingID",
                         ],
                     )
-                    || path_ends_with_form_list_settings_standard_item_field(&path)
                     || path_ends_with(
                         &path,
                         &[
@@ -7112,31 +7277,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Settings",
                             "ListSettings",
                             "order",
-                            "userSettingID",
-                        ],
-                    )
-                    || path_ends_with_form_list_settings_standard_item_field(&path)
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
-                            "viewMode",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
                             "userSettingID",
                         ],
                     )
@@ -7636,30 +7776,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Settings",
                             "ListSettings",
                             "order",
-                            "userSettingID",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
-                            "viewMode",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "conditionalAppearance",
                             "userSettingID",
                         ],
                     )
@@ -8652,7 +8768,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             settings.fields.push(field);
                         }
                     }
-                    "viewMode"
+                    "filter"
                         if path_ends_with(
                             &path,
                             &[
@@ -8662,80 +8778,31 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Settings",
                                 "ListSettings",
                                 "filter",
-                                "viewMode",
                             ],
                         ) =>
                     {
+                        let canonical = match canonical_filters.next() {
+                            Some(DcsChildParseOutcome::Typed(filter)) => filter,
+                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
+                                return Err(anyhow!(
+                                    "unsupported Form ListSettings filter: {reason}"
+                                ));
+                            }
+                            Some(DcsChildParseOutcome::Absent) | None => {
+                                return Err(anyhow!(
+                                    "Form ListSettings filter has no canonical parse result"
+                                ));
+                            }
+                        };
                         if let Some(settings) = current_attribute
                             .as_mut()
                             .and_then(|attribute| attribute.settings.as_mut())
                         {
-                            settings
-                                .list_settings
-                                .filter
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .view_mode = Some(text_value.trim().to_string());
+                            settings.list_settings.filter =
+                                Some(FormXmlListSettingsFilter { canonical });
                         }
                     }
-                    "userSettingID"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "filter",
-                                "userSettingID",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .filter
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .user_setting_id = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "field" if path_ends_with_form_list_settings_standard_item_field(&path) => {
-                        if let Some(item) = current_list_settings_field_item.as_mut() {
-                            item.field = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "item"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "filter",
-                                "item",
-                            ],
-                        ) =>
-                    {
-                        if let Some(item) = current_list_settings_field_item.take()
-                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                            && let Some(settings) = current_attribute
-                                .as_mut()
-                                .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .filter
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .items
-                                .push(item);
-                        }
-                    }
-                    "item"
+                    "conditionalAppearance"
                         if path_ends_with(
                             &path,
                             &[
@@ -8745,116 +8812,30 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Settings",
                                 "ListSettings",
                                 "conditionalAppearance",
-                                "item",
                             ],
                         ) =>
                     {
-                        if let Some(item) = current_list_settings_field_item.take()
-                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                            && let Some(settings) = current_attribute
-                                .as_mut()
-                                .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .conditional_appearance
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .items
-                                .push(item);
-                        }
-                    }
-                    "field"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "item",
-                                "field",
-                            ],
-                        ) =>
-                    {
-                        if let Some(item) = current_list_settings_order_item.as_mut() {
-                            item.field = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "orderType"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "item",
-                                "orderType",
-                            ],
-                        ) =>
-                    {
-                        if let Some(item) = current_list_settings_order_item.as_mut() {
-                            item.order_type = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "item"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "item",
-                            ],
-                        ) =>
-                    {
-                        if let Some(item) = current_list_settings_order_item.take()
-                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                            && let Some(settings) = current_attribute
-                                .as_mut()
-                                .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .order
-                                .get_or_insert_with(FormXmlListSettingsOrder::default)
-                                .items
-                                .push(item);
-                        }
-                    }
-                    "viewMode"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "viewMode",
-                            ],
-                        ) =>
-                    {
+                        let canonical = match canonical_conditional_appearances.next() {
+                            Some(DcsChildParseOutcome::Typed(value)) => value,
+                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
+                                return Err(anyhow!(
+                                    "unsupported Form ListSettings conditional appearance: {reason}"
+                                ));
+                            }
+                            Some(DcsChildParseOutcome::Absent) | None => {
+                                return Err(anyhow!(
+                                    "Form ListSettings conditional appearance has no canonical parse result"
+                                ));
+                            }
+                        };
                         if let Some(settings) = current_attribute
                             .as_mut()
                             .and_then(|attribute| attribute.settings.as_mut())
                         {
-                            settings
-                                .list_settings
-                                .order
-                                .get_or_insert_with(FormXmlListSettingsOrder::default)
-                                .view_mode = Some(text_value.trim().to_string());
+                            settings.list_settings.conditional_appearance = Some(canonical);
                         }
                     }
-                    "userSettingID"
+                    "order"
                         if path_ends_with(
                             &path,
                             &[
@@ -8864,69 +8845,28 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Settings",
                                 "ListSettings",
                                 "order",
-                                "userSettingID",
                             ],
                         ) =>
                     {
+                        let canonical = match canonical_orders.next() {
+                            Some(DcsChildParseOutcome::Typed(order)) => order,
+                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
+                                return Err(anyhow!(
+                                    "unsupported Form ListSettings order: {reason}"
+                                ));
+                            }
+                            Some(DcsChildParseOutcome::Absent) | None => {
+                                return Err(anyhow!(
+                                    "Form ListSettings order has no canonical parse result"
+                                ));
+                            }
+                        };
                         if let Some(settings) = current_attribute
                             .as_mut()
                             .and_then(|attribute| attribute.settings.as_mut())
                         {
-                            settings
-                                .list_settings
-                                .order
-                                .get_or_insert_with(FormXmlListSettingsOrder::default)
-                                .user_setting_id = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "viewMode"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "conditionalAppearance",
-                                "viewMode",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .conditional_appearance
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .view_mode = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "userSettingID"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "conditionalAppearance",
-                                "userSettingID",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .conditional_appearance
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .user_setting_id = Some(text_value.trim().to_string());
+                            settings.list_settings.order =
+                                Some(FormXmlListSettingsOrder { canonical });
                         }
                     }
                     "itemsViewMode"
@@ -10191,35 +10131,22 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
         buffer.clear();
     }
 
+    if canonical_filters.next().is_some() {
+        return Err(anyhow!(
+            "Form ListSettings filter parse results were not consumed by the Form structure"
+        ));
+    }
+    if canonical_orders.next().is_some() {
+        return Err(anyhow!(
+            "Form ListSettings order parse results were not consumed by the Form structure"
+        ));
+    }
+    if canonical_conditional_appearances.next().is_some() {
+        return Err(anyhow!(
+            "Form ListSettings conditional-appearance parse results were not consumed by the Form structure"
+        ));
+    }
     Ok(properties)
-}
-
-fn path_ends_with_form_list_settings_standard_item_field(path: &[String]) -> bool {
-    path_ends_with(
-        path,
-        &[
-            "Form",
-            "Attributes",
-            "Attribute",
-            "Settings",
-            "ListSettings",
-            "filter",
-            "item",
-            "field",
-        ],
-    ) || path_ends_with(
-        path,
-        &[
-            "Form",
-            "Attributes",
-            "Attribute",
-            "Settings",
-            "ListSettings",
-            "conditionalAppearance",
-            "item",
-            "field",
-        ],
-    )
 }
 
 fn parse_form_auto_command_bar_xml(
@@ -11659,12 +11586,9 @@ fn parse_form_group_representation_xml(value: &str) -> Result<FormXmlGroupRepres
 }
 
 fn parse_form_table_command_bar_location_xml(value: &str) -> Result<String> {
-    match value {
-        "Top" => Ok(value.to_string()),
-        other => Err(anyhow!(
-            "unsupported Form Table CommandBarLocation: {other}"
-        )),
-    }
+    normalize_form_table_command_bar_location_xml(value)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| anyhow!("unsupported Form Table CommandBarLocation: {value}"))
 }
 
 fn parse_form_table_initial_tree_view_xml(value: &str) -> Result<String> {
@@ -11765,6 +11689,7 @@ fn parse_form_report_result_view_mode_xml(value: &str) -> Result<FormXmlReportRe
     match value {
         "Auto" => Ok(FormXmlReportResultViewMode::Auto),
         "Default" => Ok(FormXmlReportResultViewMode::Default),
+        "Compact" => Ok(FormXmlReportResultViewMode::Compact),
         other => Err(anyhow!("unsupported Form ReportResultViewMode: {other}")),
     }
 }
@@ -12257,13 +12182,18 @@ fn replace_form_vertical_align(layout: &mut String, value: FormRootVerticalAlign
     let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
         return Ok(());
     };
+    let trailer: Vec<&str> = fields[tail_start..]
+        .iter()
+        .map(|range| &layout[range.clone()])
+        .collect();
     let Some(schema) = FormRootVerticalAlignSchema::from_raw_layout(
         fields.first().map(|range| layout[range.clone()].trim()),
-        fields.len().saturating_sub(tail_start),
+        &trailer,
     ) else {
         return Ok(());
     };
-    let Some(range) = fields.get(tail_start + schema.trailer_slot()) else {
+    let slot = schema.trailer_slot();
+    let Some(range) = fields.get(tail_start + slot) else {
         return Ok(());
     };
     if schema.accepts_raw_value(&layout[range.clone()]) {
@@ -12646,10 +12576,17 @@ fn form_scaling_mode_code(value: FormXmlScalingMode) -> &'static str {
 }
 
 fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
-    let mut output = format!("{{{}", commands.len());
-    for command in commands {
+    // The platform stores standard command identifiers in UUID order, not in
+    // the source XML element order.  This keeps a re-packed layout canonical.
+    let mut command_uuids = commands
+        .iter()
+        .map(|command| form_excluded_command_uuid(*command))
+        .collect::<Vec<_>>();
+    command_uuids.sort_unstable();
+    let mut output = format!("{{{}", command_uuids.len());
+    for command in command_uuids {
         output.push(',');
-        output.push_str(form_excluded_command_uuid(*command));
+        output.push_str(command);
     }
     output.push('}');
     output
@@ -12703,6 +12640,7 @@ fn form_report_result_view_mode_code(value: FormXmlReportResultViewMode) -> &'st
     match value {
         FormXmlReportResultViewMode::Auto => "0",
         FormXmlReportResultViewMode::Default => "1",
+        FormXmlReportResultViewMode::Compact => "2",
     }
 }
 
@@ -13956,7 +13894,7 @@ fn format_form_layout_new_text_document_field_item(
     let width = item.width.as_deref().unwrap_or("0");
     let height = item.height.as_deref().unwrap_or("0");
     let mut text = format!(
-        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,{},{},0",
+        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,{},{},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
@@ -14748,7 +14686,12 @@ fn form_layout_control_border_style_range(
         .iter()
         .map(|range| &text[range.clone()])
         .collect::<Vec<_>>();
-    schema.tuple_style(&tuple)?;
+    // The packer only rewrites the style of a border the XML side accepts,
+    // and that side accepts only `width="1"`, so the same restriction stays
+    // here now that the reader admits the other widths.
+    schema
+        .tuple_border(&tuple)
+        .filter(|border| border.width == 1)?;
     tuple_ranges.get(3).cloned()
 }
 
@@ -15419,7 +15362,7 @@ fn patch_form_layout_child_item_entry(
             replacements.push((initial_tree_view_range.clone(), code.to_string()));
         }
         if let Some(choice_folders_and_items) = item.choice_folders_and_items {
-            let choice_range = form_layout_table_counted_property_bag_value_range(
+            let choice_range = form_layout_table_property_bag_value_range(
                 text,
                 fields,
                 TableBagKey::ChoiceFoldersAndItems,
@@ -16561,14 +16504,52 @@ fn patch_form_layout_single_child_items(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let is_text_document_context_menu_owner = fields.first().and_then(|range| {
+        form_layout_single_child_item_slot_indices(
+            text[range.clone()].trim(),
+            fields.get(5).map(|field| text[field.clone()].trim()),
+        )
+    }) == Some((41, 42));
+    if is_text_document_context_menu_owner
+        && (item.child_items.len() > 1
+            || item
+                .child_items
+                .iter()
+                .any(|child| !form_text_document_context_menu_child_is_valid(&child.tag)))
+    {
+        return Err(anyhow!(
+            "TextDocumentField accepts at most one direct ContextMenu child"
+        ));
+    }
+    if is_text_document_context_menu_owner
+        && form_layout_single_child_item_slot(text, &fields).is_none()
+    {
+        return Err(anyhow!(
+            "TextDocumentField ContextMenu slots have invalid multiplicity or payload"
+        ));
+    }
+    if is_text_document_context_menu_owner
+        && let Some((_, Some(item_range))) = form_layout_single_child_item_slot(text, &fields)
+    {
+        let child_fields = scan_braced_fields(text, item_range.start)?;
+        let child_tag = child_fields.first().and_then(|range| {
+            form_layout_child_item_tag(text[range.clone()].trim(), text, &child_fields)
+        });
+        if !child_tag.is_some_and(form_text_document_context_menu_child_is_valid) {
+            return Err(anyhow!(
+                "TextDocumentField ContextMenu payload is not a ContextMenu"
+            ));
+        }
+    }
     if item.child_items_present {
         retain_form_layout_single_child_items(text, &item.child_items)?;
     }
     for child in &item.child_items {
-        if child.tag != "ContextMenu" {
+        if !form_text_document_context_menu_child_is_valid(&child.tag) {
             continue;
         }
-        let _ = patch_or_append_form_layout_single_child_item(
+        let patched = patch_or_append_form_layout_single_child_item(
             text,
             child,
             commands,
@@ -16584,6 +16565,11 @@ fn patch_form_layout_single_child_items(
                 child.name
             )
         })?;
+        if is_text_document_context_menu_owner && !patched {
+            return Err(anyhow!(
+                "failed to patch TextDocumentField ContextMenu child"
+            ));
+        }
     }
     Ok(())
 }
@@ -16593,22 +16579,21 @@ fn form_layout_single_child_item_slot(
     fields: &[Range<usize>],
 ) -> Option<(Range<usize>, Option<Range<usize>>)> {
     let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    let (count_index, item_index) = match wrapper {
-        "48" => (41, 42),
-        "6" => (15, 16),
-        _ => return None,
-    };
+    let discriminator = fields.get(5).map(|range| text[range.clone()].trim());
+    let (count_index, item_index) =
+        form_layout_single_child_item_slot_indices(wrapper, discriminator)?;
     let count_range = fields.get(count_index)?.clone();
-    let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
-    match count {
-        0 => Some((count_range, None)),
-        1 => fields.get(item_index).cloned().and_then(|item_range| {
-            text[item_range.clone()]
-                .trim_start()
-                .starts_with('{')
-                .then_some((count_range, Some(item_range)))
-        }),
-        _ => None,
+    match parse_form_text_document_context_menu_multiplicity(&text[count_range.clone()]) {
+        Ok(FormTextDocumentContextMenuMultiplicity::Absent) => Some((count_range, None)),
+        Ok(FormTextDocumentContextMenuMultiplicity::Present) => {
+            fields.get(item_index).cloned().and_then(|item_range| {
+                text[item_range.clone()]
+                    .trim_start()
+                    .starts_with('{')
+                    .then_some((count_range, Some(item_range)))
+            })
+        }
+        Err(_) => None,
     }
 }
 
@@ -16897,10 +16882,7 @@ fn form_table_representation_code(value: &str) -> Option<&'static str> {
 }
 
 fn form_table_command_bar_location_code(value: &str) -> Option<&'static str> {
-    match value {
-        "Top" => Some("1"),
-        _ => None,
-    }
+    encode_form_table_command_bar_location(value)
 }
 
 fn form_table_initial_tree_view_code(value: &str) -> Option<&'static str> {
@@ -17185,18 +17167,6 @@ fn form_layout_table_property_bag_value_range(
             && text[value_range.clone()].trim_start().starts_with('{'))
         .then(|| value_range.clone())
     })
-}
-
-fn form_layout_table_counted_property_bag_value_range(
-    text: &str,
-    fields: &[Range<usize>],
-    key: TableBagKey,
-) -> Option<Range<usize>> {
-    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
-        schema.counted_property_bag_value_slot(normalized_fields, key)
-    })?;
-    let range = fields.get(slot)?.clone();
-    (scan_1c_braced_value_range(text, range.start) == Some(range.clone())).then_some(range)
 }
 
 fn is_form_property_bag_number_value(value: &str) -> bool {
@@ -18067,12 +18037,12 @@ fn retain_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute
     let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
         return Ok(());
     };
-    if fields.len() != 2 + count {
+    if fields.len() < 2 + count {
         return Ok(());
     }
 
     let mut entries = Vec::new();
-    for range in fields.iter().skip(2) {
+    for range in fields.iter().skip(2).take(count) {
         let entry = text[range.clone()].to_string();
         match form_body_attribute_entry_identity(&entry)? {
             Some((id, name))
@@ -18090,18 +18060,359 @@ fn retain_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute
     if entries.len() == count {
         return Ok(());
     }
-    if entries.is_empty() {
+    let extras = fields
+        .iter()
+        .skip(2 + count)
+        .map(|range| text[range.clone()].to_string())
+        .collect::<Vec<_>>();
+    if entries.is_empty() && extras.is_empty() {
         *text = "{0}".to_string();
         return Ok(());
     }
 
     let mut replacement = format!("{{4,{}", entries.len());
-    for entry in entries {
+    for entry in entries.into_iter().chain(extras) {
         replacement.push(',');
         replacement.push_str(&entry);
     }
     replacement.push('}');
     *text = replacement;
+    Ok(())
+}
+
+/// The physical layout of everything a packed form body writes after its
+/// declared attribute entries.
+///
+/// Read off the packed body of all 4 997 forms the UT 11.5.27.75
+/// configuration carries, with no counterexample:
+///
+/// ```text
+/// tail    = 4, attrCount, attribute x attrCount, EXTRAS
+/// EXTRAS  = subCount, subTable x subCount,
+///           bindingCount, bindingField x (4 * bindingCount),
+///           storage document
+/// binding = "sourcePath", "resolvedPath", resolvedChain, ownerChain
+/// chain   = n, segment x n         segment = index | index, uuid
+/// ```
+///
+/// The two leading fields the previous reading took for a pair of activity
+/// markers are these two counts: `0,0` is a body with no sub-tables and no
+/// bindings, `0,1` one with a single binding. Reading them as an enumerated
+/// marker pair accounted for 4 538 of the 4 997 bodies and silently mis-read
+/// the rest, because a body with sub-tables, or with more than one binding,
+/// has no marker to match.
+struct FormAttributesTailLayout {
+    /// How many `sourcePath -> resolvedPath` bindings the tail declares.
+    binding_count: usize,
+    /// The trailing field carrying the Base64 storage document.
+    payload: Range<usize>,
+    /// Everything from the binding count through the storage document. The
+    /// sub-tables sit before it and belong to properties this code does not
+    /// own, so a rewrite replaces exactly this span and nothing earlier.
+    binding_block: Range<usize>,
+}
+
+/// Walks the packed tail of a form body and reports where the storage
+/// document sits, or `Ok(None)` when the body carries no such tail at all.
+///
+/// Every field is accounted for: a tail whose counts do not consume it
+/// exactly is refused rather than read past, so a layout this walk does not
+/// describe can never be mistaken for one it does.
+fn scan_form_attributes_tail_layout(text: &str) -> Result<Option<FormAttributesTailLayout>> {
+    let fields = scan_braced_fields(text, 0)?;
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let container_marker = fields.first().map(|range| text[range.clone()].trim());
+    if container_marker != Some(policy.storage_container_marker()) {
+        return Ok(None);
+    }
+    let count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Form Attributes container has no valid declared count"))?;
+    let extras_start = 2usize
+        .checked_add(count)
+        .ok_or_else(|| anyhow!("Form Attributes declared count overflows"))?;
+    if fields.len() < extras_start {
+        return Err(anyhow!(
+            "Form Attributes container has fewer entries than its declared count"
+        ));
+    }
+    let extras = &fields[extras_start..];
+    if extras.is_empty() {
+        return Ok(None);
+    }
+    let sub_count = text[extras[0].clone()]
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| anyhow!("Form Attributes tail has no valid sub-table count"))?;
+    let mut index = 1usize
+        .checked_add(sub_count)
+        .ok_or_else(|| anyhow!("Form Attributes tail sub-table count overflows"))?;
+    let binding_block_start = extras
+        .get(index)
+        .ok_or_else(|| anyhow!("Form Attributes tail sub-tables overrun the container"))?
+        .start;
+    let binding_count = text[extras[index].clone()]
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| anyhow!("Form Attributes tail has no valid binding count"))?;
+    index += 1;
+    for _ in 0..binding_count {
+        let binding = extras
+            .get(index..index + FORM_ATTRIBUTES_TAIL_BINDING_FIELDS)
+            .ok_or_else(|| anyhow!("Form Attributes tail bindings overrun the container"))?;
+        validate_form_attributes_tail_binding(text, binding)?;
+        index += FORM_ATTRIBUTES_TAIL_BINDING_FIELDS;
+    }
+    if index + 1 != extras.len() {
+        return Err(anyhow!(
+            "Form Attributes tail carries fields its declared counts do not account for"
+        ));
+    }
+    let payload = extras[index].clone();
+    if !text[payload.clone()].trim().starts_with("{#base64:") {
+        // The trailing field is not a storage document at all. All 4 997 UT
+        // bodies do carry one -- a conditional appearance has nowhere else to
+        // live -- so this is a body that has none rather than one whose
+        // document failed to read, and only a tail that binds a path can
+        // contradict that.
+        if binding_count != 0 {
+            return Err(anyhow!(
+                "Form Attributes tail declares bindings but carries no storage document"
+            ));
+        }
+        return Ok(None);
+    }
+    Ok(Some(FormAttributesTailLayout {
+        binding_count,
+        binding_block: binding_block_start..payload.end,
+        payload,
+    }))
+}
+
+/// `"sourcePath"`, `"resolvedPath"`, `resolvedChain`, `ownerChain`.
+const FORM_ATTRIBUTES_TAIL_BINDING_FIELDS: usize = 4;
+
+/// Authenticates one binding against the two relations that hold across all
+/// 349 bindings the UT configuration carries.
+///
+/// Field 2 is the path as the settings document spells it and field 3 is the
+/// same path in its storage spelling (`ПометкаУдаления` -> `DeletionMark`),
+/// empty when it does not resolve. The chain in field 4 carries one segment
+/// per dot-separated step of that resolved path, and the owner chain in
+/// field 5 is either empty or a prefix of it. Both relations are checked
+/// here, so a tail split on the wrong field boundaries cannot pass.
+fn validate_form_attributes_tail_binding(text: &str, fields: &[Range<usize>]) -> Result<()> {
+    let [source_path, resolved_path, resolved_chain, owner_chain] = fields else {
+        return Err(anyhow!("Form Attributes tail binding is not four fields"));
+    };
+    parse_1c_quoted_string(&text[source_path.clone()])?;
+    let resolved = parse_1c_quoted_string(&text[resolved_path.clone()])?;
+    let resolved_chain = parse_form_attributes_tail_chain(text, resolved_chain)?;
+    let owner_chain = parse_form_attributes_tail_chain(text, owner_chain)?;
+    let steps = if resolved.is_empty() {
+        0
+    } else {
+        resolved.split('.').count()
+    };
+    if resolved_chain.len() != steps {
+        return Err(anyhow!(
+            "Form Attributes tail binding chain does not match its resolved path"
+        ));
+    }
+    if owner_chain.len() > resolved_chain.len()
+        || owner_chain != resolved_chain[..owner_chain.len()]
+    {
+        return Err(anyhow!(
+            "Form Attributes tail binding owner chain is not a prefix of its resolved chain"
+        ));
+    }
+    Ok(())
+}
+
+/// Reads one `{n, segment x n}` chain, returning its segments verbatim so the
+/// owner/resolved prefix relation can be compared without interpreting them.
+fn parse_form_attributes_tail_chain(text: &str, range: &Range<usize>) -> Result<Vec<String>> {
+    if scan_balanced_braces(text, range.start)? != range.end {
+        return Err(anyhow!(
+            "Form Attributes tail chain does not span its own field"
+        ));
+    }
+    let fields = scan_braced_fields(text, range.start)?;
+    let count = fields
+        .first()
+        .and_then(|field| text[field.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Form Attributes tail chain has no valid segment count"))?;
+    if fields.len() != count + 1 {
+        return Err(anyhow!(
+            "Form Attributes tail chain declares a segment count it does not carry"
+        ));
+    }
+    let mut segments = Vec::with_capacity(count);
+    for field in fields.iter().skip(1) {
+        let segment = scan_braced_fields(text, field.start)?;
+        let index = text[segment
+            .first()
+            .ok_or_else(|| anyhow!("Form Attributes tail chain segment is empty"))?
+            .clone()]
+        .trim();
+        if index.parse::<i64>().is_err() {
+            return Err(anyhow!(
+                "Form Attributes tail chain segment has no numeric index"
+            ));
+        }
+        match segment.len() {
+            1 => segments.push(index.to_string()),
+            2 => {
+                let uuid = text[segment[1].clone()].trim();
+                if uuid.is_empty()
+                    || !uuid
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+                {
+                    return Err(anyhow!(
+                        "Form Attributes tail chain segment reference is not a UUID"
+                    ));
+                }
+                segments.push(format!("{index}|{uuid}"));
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Form Attributes tail chain segment is outside the evidenced shape"
+                ));
+            }
+        }
+    }
+    Ok(segments)
+}
+
+/// The storage document the packed tail carries, or `Ok(None)` when the body
+/// has no tail. Callers that cannot type the document re-spell it instead.
+pub(crate) fn form_attributes_conditional_appearance_tail_storage_document(
+    text: &str,
+) -> Result<Option<Vec<u8>>> {
+    let Some(layout) = scan_form_attributes_tail_layout(text)? else {
+        return Ok(None);
+    };
+    Ok(Some(decode_base64_payload_field(
+        text[layout.payload].trim(),
+    )?))
+}
+
+pub(crate) fn parse_form_attributes_conditional_appearance_tail(
+    text: &str,
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearance>> {
+    let Some(layout) = scan_form_attributes_tail_layout(text)? else {
+        return Ok(DcsChildParseOutcome::Absent);
+    };
+    let bytes = decode_base64_payload_field(text[layout.payload].trim())?;
+    if layout.binding_count == 0 {
+        // A tail that binds no path carries the empty settings document, and
+        // that pairing holds for all 4 871 such UT bodies. Requiring it here
+        // keeps a document with content from being dropped as if absent.
+        parse_form_attributes_empty_storage_document(&bytes)
+            .map_err(|error| anyhow!(error.to_string()))?;
+        return Ok(DcsChildParseOutcome::Absent);
+    }
+    match parse_form_attributes_conditional_appearance_storage_document(&bytes)
+        .map_err(|error| anyhow!(error.to_string()))?
+    {
+        // The converse pairing: all 126 UT bodies that bind a path carry a
+        // conditional appearance. A document that reads as absent against a
+        // tail that declares bindings is not understood, so it is handed on
+        // as unsupported rather than silently dropping the property.
+        DcsChildParseOutcome::Absent => Ok(DcsChildParseOutcome::Unsupported(
+            "Form Attributes tail declares bindings but its storage document reads as absent",
+        )),
+        outcome => Ok(outcome),
+    }
+}
+
+fn format_form_attributes_type_index_descriptor(indexes: &[u32]) -> String {
+    let mut output = format!("{{{}", indexes.len());
+    for index in indexes {
+        output.push_str(&format!(",{{{index}}}"));
+    }
+    output.push('}');
+    output
+}
+
+fn patch_form_body_attributes_conditional_appearance(
+    text: &mut String,
+    value: Option<&DcsConditionalAppearance>,
+) -> Result<()> {
+    let existing = parse_form_attributes_conditional_appearance_tail(text)?;
+    if let DcsChildParseOutcome::Unsupported(reason) = existing {
+        return Err(anyhow!(
+            "unsupported Form Attributes conditional-appearance tail payload: {reason}"
+        ));
+    }
+    if matches!((&existing, value), (DcsChildParseOutcome::Typed(existing), Some(value)) if existing == value)
+    {
+        return Ok(());
+    }
+    if matches!((&existing, value), (DcsChildParseOutcome::Absent, None)) {
+        return Ok(());
+    }
+
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let Some(layout) = scan_form_attributes_tail_layout(text)? else {
+        if value.is_some() {
+            return Err(anyhow!(
+                "Form Attributes conditional appearance cannot be added without the evidenced marker-4 envelope"
+            ));
+        }
+        return Ok(());
+    };
+    if matches!(existing, DcsChildParseOutcome::Absent)
+        && value.is_some()
+        && layout.binding_count != 0
+    {
+        return Err(anyhow!(
+            "Form Attributes conditional appearance cannot be added without the authenticated bindingless tail"
+        ));
+    }
+    let tail = if let Some(value) = value {
+        let item = value
+            .items()
+            .first()
+            .ok_or_else(|| anyhow!("Form Attributes conditional appearance has no rule"))?;
+        let field = item.selected_field().as_str();
+        // The single binding the evidence pins resolves a two-step path whose
+        // owner chain is its one-step prefix. The relations the reader
+        // enforces are checked here too, so a field of any other arity is
+        // refused instead of being written against a chain that cannot
+        // describe it.
+        let resolved_chain = policy.storage_selection_type_indexes();
+        let owner_chain = policy.storage_filter_type_indexes();
+        if field.split('.').count() != resolved_chain.len()
+            || resolved_chain[..owner_chain.len()] != owner_chain[..]
+        {
+            return Err(anyhow!(
+                "Form Attributes conditional-appearance field is outside the evidenced binding shape"
+            ));
+        }
+        let bytes = emit_form_attributes_conditional_appearance_storage_document(value)
+            .map_err(|error| anyhow!(error.to_string()))?;
+        vec![
+            "1".to_string(),
+            format_1c_string(field),
+            format_1c_string(field),
+            format_form_attributes_type_index_descriptor(resolved_chain),
+            format_form_attributes_type_index_descriptor(owner_chain),
+            format!("{{#base64:{}}}", encode_base64(&bytes)),
+        ]
+    } else {
+        let bytes = emit_form_attributes_empty_storage_document()
+            .map_err(|error| anyhow!(error.to_string()))?;
+        vec![
+            "0".to_string(),
+            format!("{{#base64:{}}}", encode_base64(&bytes)),
+        ]
+    };
+    text.replace_range(layout.binding_block, &tail.join(","));
     Ok(())
 }
 
@@ -18299,6 +18610,8 @@ fn format_form_dynamic_list_settings_new(
     settings: &FormXmlDynamicListSettings,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    let conditional_appearance_policy = bundled_dcs_conditional_appearance_policy()
+        .map_err(|error| anyhow!("cannot load DCS conditional-appearance policy: {error}"))?;
     let mut pairs = Vec::<(&str, String)>::new();
     if let Some(query_text) = &settings.query_text {
         pairs.push(("QueryText", format_form_setting_string(query_text)));
@@ -18327,24 +18640,18 @@ fn format_form_dynamic_list_settings_new(
         pairs.push(("ManualQuery", format_form_setting_bool(manual_query)));
     }
     if let Some(filter) = &settings.list_settings.filter {
-        pairs.push((
-            "Filter",
-            format_form_setting_dcs_standard_section(filter, "Filter", "", "Filter")?,
-        ));
+        if let Some(value) = format_form_setting_dcs_filter(filter)? {
+            pairs.push(("Filter", value));
+        }
     }
     if let Some(order) = &settings.list_settings.order {
         pairs.push(("Order", format_form_setting_dcs_order(order, "", "Order")?));
     }
     if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
-        pairs.push((
-            "ConditionalAppearance",
-            format_form_setting_dcs_standard_section(
-                conditional_appearance,
-                "ConditionalAppearance",
-                "",
-                "ConditionalAppearance",
-            )?,
-        ));
+        if let Some(value) = format_form_setting_dcs_conditional_appearance(conditional_appearance)?
+        {
+            pairs.push((conditional_appearance_policy.storage_property_name(), value));
+        }
     }
     if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
         pairs.push(("ItemsViewMode", format_form_setting_string(items_view_mode)));
@@ -18412,6 +18719,12 @@ fn patch_form_dynamic_list_settings(
             &format_form_setting_dynamic_list_fields(&settings.fields),
         )?;
     }
+    if let Some(filter) = &settings.list_settings.filter {
+        patch_form_setting_dcs_filter(text, "Filter", filter)?;
+    }
+    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
+        patch_form_setting_dcs_conditional_appearance(text, conditional_appearance)?;
+    }
     let mut list_replacements = Vec::new();
     let list_settings_text = text.clone();
     if let Some(order) = &settings.list_settings.order {
@@ -18419,15 +18732,6 @@ fn patch_form_dynamic_list_settings(
             &list_settings_text,
             "Order",
             order,
-            &mut list_replacements,
-        )?;
-    }
-    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
-        push_form_setting_dcs_standard_replacement(
-            &list_settings_text,
-            "ConditionalAppearance",
-            conditional_appearance,
-            "ConditionalAppearance",
             &mut list_replacements,
         )?;
     }
@@ -18444,15 +18748,6 @@ fn patch_form_dynamic_list_settings(
             &list_settings_text,
             "ItemsUserSettingID",
             format_form_setting_string(items_user_setting_id),
-            &mut list_replacements,
-        )?;
-    }
-    if let Some(filter) = &settings.list_settings.filter {
-        push_form_setting_dcs_standard_replacement(
-            &list_settings_text,
-            "Filter",
-            filter,
-            "Filter",
             &mut list_replacements,
         )?;
     }
@@ -18479,6 +18774,134 @@ fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> 
         }
     }
     Ok(false)
+}
+
+fn patch_form_setting_dcs_filter(
+    text: &mut String,
+    key: &str,
+    filter: &FormXmlListSettingsFilter,
+) -> Result<()> {
+    let replacement = format_form_setting_dcs_filter(filter)?;
+    match replacement {
+        Some(replacement) => {
+            let expected_uuid = bundled_dcs_filter_policy()
+                .map_err(|error| anyhow!("cannot load DCS filter storage policy: {error}"))?
+                .comparison_storage_record_type_uuid()
+                .to_string();
+            if let Some(range) = find_form_setting_value_range(text, key)
+                && find_form_setting_ref_uuid(text, key).as_deref() == Some(expected_uuid.as_str())
+                && form_existing_dcs_filter_matches(&text[range.clone()], filter)?
+            {
+                return Ok(());
+            }
+            upsert_form_setting_pair(text, key, &replacement)
+        }
+        None => remove_form_setting_pair(text, key),
+    }
+}
+
+fn patch_form_setting_dcs_conditional_appearance(
+    text: &mut String,
+    value: &DcsConditionalAppearance,
+) -> Result<()> {
+    let policy = bundled_dcs_conditional_appearance_policy()
+        .map_err(|error| anyhow!("cannot load DCS conditional-appearance policy: {error}"))?;
+    let key = policy.storage_property_name();
+    match format_form_setting_dcs_conditional_appearance(value)? {
+        Some(replacement) => {
+            if let Some(range) = find_form_setting_value_range(text, key)
+                && find_form_setting_ref_uuid(text, key).as_deref()
+                    == Some(policy.storage_record_type_uuid())
+                && form_existing_dcs_conditional_appearance_matches(&text[range.clone()], value)?
+            {
+                return Ok(());
+            }
+            upsert_form_setting_pair(text, key, &replacement)
+        }
+        None => remove_form_setting_pair(text, key),
+    }
+}
+
+fn upsert_form_setting_pair(text: &mut String, key: &str, replacement: &str) -> Result<()> {
+    if patch_form_setting_value(text, key, replacement)? {
+        return Ok(());
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    let count = validate_form_settings_pair_list(text, &fields)?;
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form settings pair list is not closed"))?;
+    text.insert_str(
+        insert_at,
+        &format!(",{},{}", format_1c_string(key), replacement),
+    );
+    let fields = scan_braced_fields(text, 0)?;
+    let count_range = fields
+        .get(1)
+        .cloned()
+        .ok_or_else(|| anyhow!("Form settings pair count is missing"))?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    Ok(())
+}
+
+fn remove_form_setting_pair(text: &mut String, key: &str) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let count = validate_form_settings_pair_list(text, &fields)?;
+    let Some((key_range, value_range)) = fields
+        .iter()
+        .skip(2)
+        .collect::<Vec<_>>()
+        .chunks_exact(2)
+        .find_map(|pair| {
+            let parsed = parse_1c_quoted_string(&text[pair[0].clone()]).ok()?;
+            (parsed == key).then(|| ((*pair[0]).clone(), (*pair[1]).clone()))
+        })
+    else {
+        return Ok(());
+    };
+    let mut remove_start = key_range.start;
+    while remove_start > 0
+        && text
+            .as_bytes()
+            .get(remove_start - 1)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
+        remove_start -= 1;
+    }
+    if text.as_bytes().get(remove_start.wrapping_sub(1)) != Some(&b',') {
+        return Err(anyhow!(
+            "Form setting {key} is not preceded by a pair separator"
+        ));
+    }
+    text.replace_range(remove_start - 1..value_range.end, "");
+    let fields = scan_braced_fields(text, 0)?;
+    let count_range = fields
+        .get(1)
+        .cloned()
+        .ok_or_else(|| anyhow!("Form settings pair count is missing"))?;
+    text.replace_range(count_range, &(count - 1).to_string());
+    Ok(())
+}
+
+fn validate_form_settings_pair_list(text: &str, fields: &[Range<usize>]) -> Result<usize> {
+    if fields
+        .first()
+        .and_then(|range| text[range.clone()].trim().parse::<u8>().ok())
+        != Some(0)
+    {
+        return Err(anyhow!("Form settings pair list has an unsupported marker"));
+    }
+    let count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Form settings pair count is invalid"))?;
+    if fields.len() != 2 + count.saturating_mul(2) {
+        return Err(anyhow!(
+            "Form settings pair count {count} does not match {} fields",
+            fields.len()
+        ));
+    }
+    Ok(count)
 }
 
 fn form_setting_metadata_ref_contains_uuid(value: &str, uuid: &str) -> bool {
@@ -18540,26 +18963,6 @@ fn push_form_setting_replacement(
     Ok(())
 }
 
-fn push_form_setting_dcs_standard_replacement(
-    text: &str,
-    key: &str,
-    section: &FormXmlListSettingsStandardSection,
-    root_name: &str,
-    replacements: &mut Vec<(Range<usize>, String)>,
-) -> Result<()> {
-    if let Some(range) = find_form_setting_value_range(text, key)
-        && form_existing_dcs_standard_section_matches(&text[range.clone()], section)?
-    {
-        return Ok(());
-    }
-    push_form_setting_replacement(
-        text,
-        key,
-        format_form_setting_dcs_standard_section(section, root_name, text, key)?,
-        replacements,
-    )
-}
-
 fn push_form_setting_dcs_order_replacement(
     text: &str,
     key: &str,
@@ -18586,67 +18989,34 @@ fn form_existing_dcs_order_matches(
     let Some(xml) = form_setting_base64_xml(existing)? else {
         return Ok(false);
     };
-    let parsed = parse_form_dcs_order_xml(&xml)?;
-    if parsed.items.len() != order.items.len() {
-        return Ok(false);
-    }
-    let items_match = order
-        .items
-        .iter()
-        .zip(parsed.items.iter())
-        .all(|(expected, actual)| {
-            expected
-                .field
-                .as_deref()
-                .is_none_or(|field| actual.field.as_deref() == Some(field))
-                && expected
-                    .order_type
-                    .as_deref()
-                    .is_none_or(|order_type| actual.order_type.as_deref() == Some(order_type))
-        });
-    let view_mode_matches = order
-        .view_mode
-        .as_deref()
-        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
-    let user_setting_matches = order
-        .user_setting_id
-        .as_deref()
-        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
-    Ok(items_match && view_mode_matches && user_setting_matches)
+    let expected = canonical_form_xml_list_settings_order(order)?;
+    let parsed = parse_dcs_order_storage_document(xml.as_bytes())
+        .map_err(|error| anyhow!("invalid existing Form Order document: {error}"))?;
+    Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == expected))
 }
 
-fn form_existing_dcs_standard_section_matches(
+fn form_existing_dcs_filter_matches(
     existing: &str,
-    section: &FormXmlListSettingsStandardSection,
+    filter: &FormXmlListSettingsFilter,
 ) -> Result<bool> {
     let Some(xml) = form_setting_base64_xml(existing)? else {
         return Ok(false);
     };
-    let parsed = parse_form_dcs_standard_section_xml(&xml)?;
-    let view_mode_matches = section
-        .view_mode
-        .as_deref()
-        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
-    let user_setting_matches = section
-        .user_setting_id
-        .as_deref()
-        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
-    let items_match = if section.items.is_empty() {
-        true
-    } else {
-        parsed.items.len() == section.items.len()
-            && section
-                .items
-                .iter()
-                .zip(parsed.items.iter())
-                .all(|(expected, actual)| {
-                    expected
-                        .field
-                        .as_deref()
-                        .is_none_or(|field| actual.field.as_deref() == Some(field))
-                })
+    let parsed = parse_dcs_filter_storage_document(xml.as_bytes())
+        .map_err(|error| anyhow!("invalid existing Form Filter document: {error}"))?;
+    Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == filter.canonical))
+}
+
+fn form_existing_dcs_conditional_appearance_matches(
+    existing: &str,
+    expected: &DcsConditionalAppearance,
+) -> Result<bool> {
+    let Some(xml) = form_setting_base64_xml(existing)? else {
+        return Ok(false);
     };
-    Ok(items_match && view_mode_matches && user_setting_matches)
+    let parsed = parse_dcs_conditional_appearance_storage_document(xml.as_bytes())
+        .map_err(|error| anyhow!("invalid existing Form Appearance document: {error}"))?;
+    Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == *expected))
 }
 
 fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
@@ -18666,184 +19036,6 @@ fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
         return Ok(Some(xml.trim_start_matches('\u{feff}').to_string()));
     }
     Ok(None)
-}
-
-#[derive(Default)]
-struct ParsedFormDcsStandardSection {
-    items: Vec<ParsedFormDcsFieldItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
-}
-
-#[derive(Default)]
-struct ParsedFormDcsOrder {
-    items: Vec<ParsedFormDcsOrderItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
-}
-
-#[derive(Default)]
-struct ParsedFormDcsOrderItem {
-    field: Option<String>,
-    order_type: Option<String>,
-}
-
-#[derive(Default)]
-struct ParsedFormDcsFieldItem {
-    field: Option<String>,
-}
-
-fn parse_form_dcs_order_xml(xml: &str) -> Result<ParsedFormDcsOrder> {
-    let mut reader = Reader::from_reader(xml.as_bytes());
-    let mut buffer = Vec::new();
-    let mut current = None::<String>;
-    let mut text = String::new();
-    let mut parsed = ParsedFormDcsOrder::default();
-    let mut current_item = None::<ParsedFormDcsOrderItem>;
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if local == "item" {
-                    current_item = Some(ParsedFormDcsOrderItem::default());
-                } else if matches!(
-                    local.as_str(),
-                    "field" | "orderType" | "viewMode" | "userSettingID"
-                ) {
-                    current = Some(local);
-                    text.clear();
-                }
-            }
-            Ok(Event::Text(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::CData(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::GeneralRef(reference)) => {
-                if current.is_some() {
-                    let value = if let Some(ch) = reference.resolve_char_ref()? {
-                        ch.to_string()
-                    } else {
-                        let entity = reference.decode()?;
-                        resolve_xml_entity(entity.as_ref())
-                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
-                            .to_string()
-                    };
-                    text.push_str(&value);
-                }
-            }
-            Ok(Event::End(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if current.as_deref() == Some(local.as_str()) {
-                    match local.as_str() {
-                        "field" => {
-                            if let Some(item) = current_item.as_mut() {
-                                item.field = Some(text.trim().to_string());
-                            }
-                        }
-                        "orderType" => {
-                            if let Some(item) = current_item.as_mut() {
-                                item.order_type = Some(text.trim().to_string());
-                            }
-                        }
-                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
-                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
-                        _ => {}
-                    }
-                    current = None;
-                    text.clear();
-                }
-                if local == "item"
-                    && let Some(item) = current_item.take()
-                {
-                    parsed.items.push(item);
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(error) => return Err(error.into()),
-            _ => {}
-        }
-        buffer.clear();
-    }
-    Ok(parsed)
-}
-
-fn parse_form_dcs_standard_section_xml(xml: &str) -> Result<ParsedFormDcsStandardSection> {
-    let mut reader = Reader::from_reader(xml.as_bytes());
-    let mut buffer = Vec::new();
-    let mut current = None::<String>;
-    let mut text = String::new();
-    let mut parsed = ParsedFormDcsStandardSection::default();
-    let mut current_item = None::<ParsedFormDcsFieldItem>;
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if local == "item" {
-                    current_item = Some(ParsedFormDcsFieldItem::default());
-                } else if matches!(local.as_str(), "field" | "viewMode" | "userSettingID") {
-                    current = Some(local);
-                    text.clear();
-                }
-            }
-            Ok(Event::Text(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::CData(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::GeneralRef(reference)) => {
-                if current.is_some() {
-                    let value = if let Some(ch) = reference.resolve_char_ref()? {
-                        ch.to_string()
-                    } else {
-                        let entity = reference.decode()?;
-                        resolve_xml_entity(entity.as_ref())
-                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
-                            .to_string()
-                    };
-                    text.push_str(&value);
-                }
-            }
-            Ok(Event::End(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if current.as_deref() == Some(local.as_str()) {
-                    match local.as_str() {
-                        "field" => {
-                            if let Some(item) = current_item.as_mut() {
-                                item.field = Some(text.trim().to_string());
-                            }
-                        }
-                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
-                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
-                        _ => {}
-                    }
-                    current = None;
-                    text.clear();
-                }
-                if local == "item"
-                    && let Some(item) = current_item.take()
-                    && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                {
-                    parsed.items.push(item);
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(error) => return Err(error.into()),
-            _ => {}
-        }
-        buffer.clear();
-    }
-    Ok(parsed)
 }
 
 fn find_form_setting_value_range(text: &str, key: &str) -> Option<Range<usize>> {
@@ -18981,45 +19173,52 @@ fn format_form_setting_dcs_order(
     settings_text: &str,
     key: &str,
 ) -> Result<String> {
-    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
-        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
-    let xml = format_form_dcs_order_xml(order);
-    let mut bytes = b"\xEF\xBB\xBF".to_vec();
-    bytes.extend_from_slice(xml.as_bytes());
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key).unwrap_or(
+        bundled_dcs_order_policy()
+            .map_err(|error| anyhow!("cannot load DCS order storage policy: {error}"))?
+            .storage_record_type_uuid()
+            .to_string(),
+    );
+    let canonical = canonical_form_xml_list_settings_order(order)?;
+    let bytes = emit_dcs_order_storage_document(&canonical)
+        .map_err(|error| anyhow!("cannot emit canonical Form Order document: {error}"))?;
     Ok(format!(
         "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
         encode_base64(&bytes)
     ))
 }
 
-fn format_form_setting_dcs_standard_section(
-    section: &FormXmlListSettingsStandardSection,
-    root_name: &str,
-    settings_text: &str,
-    key: &str,
-) -> Result<String> {
-    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
-        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
-    let existing_xml = find_form_setting_value_range(settings_text, key).and_then(|range| {
-        form_setting_base64_xml(&settings_text[range])
-            .ok()
-            .flatten()
-    });
-    let xml = format_form_dcs_standard_section_xml(section, root_name, existing_xml.as_deref())?;
-    let mut bytes = b"\xEF\xBB\xBF".to_vec();
-    bytes.extend_from_slice(xml.as_bytes());
-    Ok(format!(
+fn format_form_setting_dcs_filter(filter: &FormXmlListSettingsFilter) -> Result<Option<String>> {
+    let bytes = emit_dcs_filter_storage_document(&filter.canonical)
+        .map_err(|error| anyhow!("cannot emit canonical Form Filter document: {error}"))?;
+    let Some(bytes) = bytes else {
+        return Ok(None);
+    };
+    let existing_uuid = bundled_dcs_filter_policy()
+        .map_err(|error| anyhow!("cannot load DCS filter storage policy: {error}"))?
+        .comparison_storage_record_type_uuid()
+        .to_string();
+    Ok(Some(format!(
         "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
         encode_base64(&bytes)
-    ))
+    )))
 }
 
-fn default_form_setting_ref_uuid(key: &str) -> &'static str {
-    match key {
-        "Filter" => "21743ff3-2db3-4cfc-9404-90ed8209437f",
-        "ConditionalAppearance" => "31743ff3-2db3-4cfc-9404-90ed8209437f",
-        _ => "11743ff3-2db3-4cfc-9404-90ed8209437f",
-    }
+fn format_form_setting_dcs_conditional_appearance(
+    value: &DcsConditionalAppearance,
+) -> Result<Option<String>> {
+    let Some(bytes) = emit_dcs_conditional_appearance_storage_document(value)
+        .map_err(|error| anyhow!("cannot emit canonical Form Appearance document: {error}"))?
+    else {
+        return Ok(None);
+    };
+    let policy = bundled_dcs_conditional_appearance_policy()
+        .map_err(|error| anyhow!("cannot load DCS conditional-appearance policy: {error}"))?;
+    Ok(Some(format!(
+        "{{\"#\",{},{{#base64:{}}}}}",
+        policy.storage_record_type_uuid(),
+        encode_base64(&bytes)
+    )))
 }
 
 fn find_form_setting_ref_uuid(text: &str, key: &str) -> Option<String> {
@@ -19048,192 +19247,8 @@ fn parse_non_zero_uuid(value: &str) -> Option<String> {
     (uuid != Uuid::nil()).then(|| uuid.hyphenated().to_string())
 }
 
-fn format_form_dcs_order_xml(order: &FormXmlListSettingsOrder) -> String {
-    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
-        .to_string();
-    for item in &order.items {
-        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
-            continue;
-        };
-        xml.push_str("\t<item xsi:type=\"OrderItemField\">\r\n");
-        xml.push_str(&format!(
-            "\t\t<field>{}</field>\r\n",
-            escape_xml_text(field)
-        ));
-        if let Some(order_type) = item.order_type.as_deref().filter(|value| !value.is_empty()) {
-            xml.push_str(&format!(
-                "\t\t<orderType>{}</orderType>\r\n",
-                escape_xml_text(order_type)
-            ));
-        }
-        xml.push_str("\t</item>\r\n");
-    }
-    if let Some(view_mode) = order.view_mode.as_deref().filter(|value| !value.is_empty()) {
-        xml.push_str(&format!(
-            "\t<viewMode>{}</viewMode>\r\n",
-            escape_xml_text(view_mode)
-        ));
-    }
-    if let Some(user_setting_id) = order
-        .user_setting_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        xml.push_str(&format!(
-            "\t<userSettingID>{}</userSettingID>\r\n",
-            escape_xml_text(user_setting_id)
-        ));
-    }
-    xml.push_str("</Order>");
-    xml
-}
-
-fn format_form_dcs_standard_section_xml(
-    section: &FormXmlListSettingsStandardSection,
-    root_name: &str,
-    existing_xml: Option<&str>,
-) -> Result<String> {
-    let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<{root_name} xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
-    );
-    for item in &section.items {
-        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
-            continue;
-        };
-        xml.push_str("\t<item xsi:type=\"FieldItem\">\r\n");
-        xml.push_str(&format!(
-            "\t\t<field>{}</field>\r\n",
-            escape_xml_text(field)
-        ));
-        xml.push_str("\t</item>\r\n");
-    }
-    if let Some(existing_xml) = existing_xml {
-        let replacement_fields = section
-            .items
-            .iter()
-            .filter_map(|item| item.field.as_deref())
-            .collect::<BTreeSet<_>>();
-        for block in form_dcs_direct_item_blocks(existing_xml)? {
-            if block
-                .field
-                .as_deref()
-                .is_some_and(|field| replacement_fields.contains(field))
-            {
-                continue;
-            }
-            xml.push('\t');
-            xml.push_str(block.xml.trim());
-            xml.push_str("\r\n");
-        }
-    }
-    if let Some(view_mode) = section
-        .view_mode
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        xml.push_str(&format!(
-            "\t<viewMode>{}</viewMode>\r\n",
-            escape_xml_text(view_mode)
-        ));
-    }
-    if let Some(user_setting_id) = section
-        .user_setting_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        xml.push_str(&format!(
-            "\t<userSettingID>{}</userSettingID>\r\n",
-            escape_xml_text(user_setting_id)
-        ));
-    }
-    xml.push_str(&format!("</{root_name}>"));
-    Ok(xml)
-}
-
-struct FormDcsDirectItemBlock {
-    xml: String,
-    field: Option<String>,
-}
-
-fn form_dcs_direct_item_blocks(xml: &str) -> Result<Vec<FormDcsDirectItemBlock>> {
-    let mut blocks = Vec::new();
-    let mut depth = 0usize;
-    let mut offset = 0usize;
-    let mut current_start = None::<usize>;
-    while let Some(relative_start) = xml[offset..].find('<') {
-        let start = offset + relative_start;
-        let Some(relative_end) = xml[start..].find('>') else {
-            break;
-        };
-        let end = start + relative_end + 1;
-        let tag = &xml[start + 1..end - 1];
-        let tag = tag.trim();
-        if tag.starts_with('?') || tag.starts_with('!') {
-            offset = end;
-            continue;
-        }
-        let closing = tag.starts_with('/');
-        let empty = tag.ends_with('/');
-        let name = tag
-            .trim_start_matches('/')
-            .trim_end_matches('/')
-            .split_ascii_whitespace()
-            .next()
-            .unwrap_or_default();
-        let local = name.rsplit(':').next().unwrap_or(name);
-        if closing {
-            if local == "item"
-                && depth == 2
-                && let Some(block_start) = current_start.take()
-            {
-                let block_xml = xml[block_start..end].to_string();
-                blocks.push(FormDcsDirectItemBlock {
-                    field: parse_form_dcs_direct_item_field(&block_xml)?,
-                    xml: block_xml,
-                });
-            }
-            depth = depth.saturating_sub(1);
-        } else {
-            if local == "item" && depth == 1 {
-                current_start = Some(start);
-            }
-            if !empty {
-                depth += 1;
-            } else if local == "item" && depth == 1 {
-                current_start = None;
-                blocks.push(FormDcsDirectItemBlock {
-                    field: None,
-                    xml: xml[start..end].to_string(),
-                });
-            }
-        }
-        offset = end;
-    }
-    Ok(blocks)
-}
-
-fn parse_form_dcs_direct_item_field(xml: &str) -> Result<Option<String>> {
-    let wrapper = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Items>{xml}</Items>");
-    Ok(parse_form_dcs_standard_section_xml(&wrapper)?
-        .items
-        .into_iter()
-        .find_map(|item| item.field))
-}
-
-fn escape_xml_text(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '&' => output.push_str("&amp;"),
-            '<' => output.push_str("&lt;"),
-            '>' => output.push_str("&gt;"),
-            '"' => output.push_str("&quot;"),
-            _ => output.push(ch),
-        }
-    }
-    output
+fn canonical_form_xml_list_settings_order(order: &FormXmlListSettingsOrder) -> Result<DcsOrder> {
+    Ok(order.canonical.clone())
 }
 
 fn patch_form_body_command(
@@ -19634,6 +19649,7 @@ pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
     let module_text = parse_1c_quoted_string(plain[container.module_range.clone()].trim())
         .context("Form body module text field is not a quoted string")?;
     Ok(ParsedFormBodyBlob {
+        revision: container.revision,
         layout,
         module_text,
         trailing: container
@@ -19645,8 +19661,46 @@ pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
     })
 }
 
+/// The container revision a Form body declares in its own first slot.
+///
+/// Both admitted revisions carry the identical ten-slot container -- marker,
+/// layout, module text, five blocks and two scalars. Measured over every form
+/// of all eight stand corpora (22,646 forms): revision `4` on 22,535 managed
+/// forms of all eight, revision `3` on 102 managed forms of ERP УХ 3.2.12.6
+/// only, and no other value anywhere. Layout revision `49` occurs under both
+/// container revisions, layout `50` only under `4`. See
+/// `docs/evidence/uh-form-body-container-revision-20260826.md`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum FormBodyRevision {
+    V3,
+    V4,
+}
+
+impl FormBodyRevision {
+    /// Reads the revision the record itself declares. Fail-closed: an
+    /// undeclared or unnamed revision is refused, never assumed.
+    fn parse(declared: Option<&str>) -> Result<Self> {
+        match declared {
+            Some("3") => Ok(Self::V3),
+            Some("4") => Ok(Self::V4),
+            Some(other) => Err(anyhow!(
+                "Form body declares unsupported container revision {other}"
+            )),
+            None => Err(anyhow!("Form body declares no container revision")),
+        }
+    }
+
+    pub const fn declared_marker(self) -> &'static str {
+        match self {
+            Self::V3 => "3",
+            Self::V4 => "4",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FormBodyContainer {
+    revision: FormBodyRevision,
     layout_range: Range<usize>,
     module_range: Range<usize>,
     trailing_ranges: Vec<Range<usize>>,
@@ -19659,9 +19713,8 @@ impl FormBodyContainer {
             .find('{')
             .ok_or_else(|| anyhow!("Form body has no braced payload"))?;
         let fields = scan_braced_fields(plain, body_start)?;
-        if fields.first().map(|range| plain[range.clone()].trim()) != Some("4") {
-            return Err(anyhow!("Form body does not start with type marker 4"));
-        }
+        let revision =
+            FormBodyRevision::parse(fields.first().map(|range| plain[range.clone()].trim()))?;
         let layout_range = fields
             .get(1)
             .ok_or_else(|| anyhow!("Form body has no layout field"))?
@@ -19677,6 +19730,7 @@ impl FormBodyContainer {
             ));
         }
         Ok(Self {
+            revision,
             layout_range,
             module_range,
             trailing_ranges: fields.iter().skip(3).cloned().collect(),
@@ -25976,7 +26030,12 @@ mod tests {
         };
 
         assert!(
-            super::format_spreadsheet_chart_drawing_for_moxel(&drawing, chart).is_none(),
+            super::format_spreadsheet_chart_drawing_for_moxel(
+                &drawing,
+                drawing.format_index,
+                chart,
+            )
+            .is_none(),
             "unsupported multi-series charts must not produce partial MOXCEL"
         );
     }
@@ -26094,6 +26153,95 @@ mod tests {
         let text = b"Procedure Run()\r\nEndProcedure\r\n";
         let packed = super::pack_module_blob_bytes(text, None, None).unwrap();
         assert_eq!(super::unpack_module_blob_text(&packed.blob).unwrap(), text);
+    }
+
+    /// Real ERP УХ 3.2.12.6 `CommonModules` module bodies carrying no V8
+    /// container -- the row's raw-deflate-inflated bytes are the final,
+    /// BOM-prefixed module text already
+    /// (`docs/evidence/plain-text-module-body-lead-20260825.md`). Both
+    /// fixtures are the exact `packed.bin` bytes `cf extract` produced for
+    /// `CommonModules/БПМСФОУХ.0` (uuid `5b02973d-ada1-48eb-bf0a-
+    /// f039f18b269d`, opens with a `//` comment) and
+    /// `CommonModules/ВзаиморасчетыВызовСервера.0` (uuid `3004a91e-0ecc-
+    /// 4c8b-9e3d-b901f848cff9`, opens with a `#Область` preprocessor
+    /// region); both inflated bytes diffed byte-for-byte against the
+    /// platform's own `Ext/Module.bsl` before being captured here.
+    /// `unpack_module_blob_text` must reject both (no V8 container to find
+    /// a `text` element in) while the new plain-text fallback must accept
+    /// both, unchanged.
+    #[test]
+    fn unpacks_plain_text_module_body_real_common_modules() -> anyhow::Result<()> {
+        let comment_led = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/plain-text-module-body/common-module-plain-text-bpmsfo.bin.b64"
+        ))?;
+        assert!(super::unpack_module_blob_text(&comment_led).is_err());
+        let text = super::unpack_plain_text_module_body(&comment_led)
+            .ok_or_else(|| anyhow::anyhow!("БПМСФОУХ fixture was not recognized as module text"))?;
+        assert!(text.starts_with(b"\xEF\xBB\xBF//"));
+
+        let region_led = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/plain-text-module-body/common-module-plain-text-vzr-region-directive.bin.b64"
+        ))?;
+        assert!(super::unpack_module_blob_text(&region_led).is_err());
+        let text = super::unpack_plain_text_module_body(&region_led).ok_or_else(|| {
+            anyhow::anyhow!("ВзаиморасчетыВызовСервера fixture was not recognized as module text")
+        })?;
+        assert!(text.starts_with(b"\xEF\xBB\xBF\r\n#"));
+        Ok(())
+    }
+
+    /// Negative control for the regression the first (reverted) attempt at
+    /// this fallback caused, captured from the exact colliding row named in
+    /// `docs/evidence/plain-text-module-body-lead-20260825.md`: `sslbase`
+    /// storage element `5a971dc0-28bf-4426-9426-9f456aea080a.1`, whose
+    /// `module_text_paths` entry is a spurious `Bots/АрхивАнкет/Ext/
+    /// Module.bsl` mapping (a form-classification false positive elsewhere
+    /// in this crate, out of scope here) while the row itself is really
+    /// `DataProcessors/ДоступныеАнкеты/Forms/АрхивАнкет/Ext/Help.xml`'s
+    /// per-language content record. Confirmed (`cf extract` on
+    /// `1cv8.cf` from `$D/kit/configs.sh`'s `sslbase` entry) that the row's
+    /// raw-deflate-inflated bytes are BOM-prefixed, valid UTF-8, and *not*
+    /// the `Help.xml` text itself but 1C's own typed-value wrapper around
+    /// it: `{5,1,"ru",{#base64:...},0}` -- opening with `{`, one of the
+    /// three wrapper-shape bytes `unpack_plain_text_module_body` excludes.
+    /// A permissive "BOM + valid UTF-8" fallback (the reverted attempt)
+    /// accepted this row as module text; this one must not.
+    #[test]
+    fn rejects_form_help_topic_braced_record_that_caused_the_reverted_regression()
+    -> anyhow::Result<()> {
+        let help_topic_record = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/plain-text-module-body/form-help-topic-braced-record.bin.b64"
+        ))?;
+        assert!(super::unpack_module_blob_text(&help_topic_record).is_err());
+        assert!(super::unpack_plain_text_module_body(&help_topic_record).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn plain_text_module_body_rejects_xml_and_json_leads_accepts_bare_statement() {
+        let wrap = |payload: &[u8]| {
+            let inner = deflate_raw(payload).unwrap();
+            inner
+        };
+        let xml = wrap(b"\xEF\xBB\xBF<?xml version=\"1.0\"?><Root/>");
+        assert!(super::unpack_plain_text_module_body(&xml).is_none());
+
+        let json = wrap(b"\xEF\xBB\xBF{\"a\":1}");
+        assert!(super::unpack_plain_text_module_body(&json).is_none());
+
+        let array = wrap(b"\xEF\xBB\xBF[1,2,3]");
+        assert!(super::unpack_plain_text_module_body(&array).is_none());
+
+        // No BOM at all: not the wire shape this fallback targets.
+        let no_bom = wrap(b"Procedure Run()\r\nEndProcedure\r\n");
+        assert!(super::unpack_plain_text_module_body(&no_bom).is_none());
+
+        // Leading whitespace before a real statement is still accepted.
+        let statement = wrap(b"\xEF\xBB\xBF  \r\nProcedure Run()\r\nEndProcedure\r\n");
+        assert_eq!(
+            super::unpack_plain_text_module_body(&statement).unwrap(),
+            b"\xEF\xBB\xBF  \r\nProcedure Run()\r\nEndProcedure\r\n"
+        );
     }
 
     #[test]
@@ -28836,7 +28984,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         )
         .expect("extract");
 
-        assert!(text.contains(r#"{2,{24576,900,3},{128,72}}"#));
+        assert!(text.contains(r#"{2,{278528,3,900},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert!(extracted.contains("<textOrientation>900</textOrientation>"));
         assert!(!extracted.contains("<patternColor>"));
@@ -28907,6 +29055,79 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(extracted.contains("<patternColor>style:FormBackColor</patternColor>"));
         assert!(extracted.contains("<pattern>WithoutPattern</pattern>"));
         assert!(!extracted.contains("<textOrientation>"));
+        // The drawing itself has to survive. The packer used to write `autoSize`,
+        // a literal 1, the z-order and the picture index into the four slots the
+        // decoder reads as id, picture index, picture size and `autoSize`, so
+        // this drawing came back as id 0, picture index 1 and `autoSize` false.
+        assert!(text.contains(r#"{{0,2},5,0,0,0,0,1,1,0,0,1,0,1,1}"#));
+        assert!(extracted.contains("<id>1</id>"));
+        assert!(extracted.contains("<pictureIndex>0</pictureIndex>"));
+        assert!(extracted.contains("<autoSize>true</autoSize>"));
+        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
+
+        Ok(())
+    }
+
+    /// A `Text` drawing packs into the twelve-field, tail-less record and comes
+    /// back unchanged. Before the decoder learned kinds 1/2/3 the platform's 12
+    /// `Line`, 3 `Rectangle` and 89 `Text` drawings were all dropped on read, and
+    /// the packer had no shape branch to write them back.
+    #[test]
+    fn packs_text_drawing_round_trip() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<drawing>
+		<drawingType>Text</drawingType>
+		<id>2</id>
+		<formatIndex>2</formatIndex>
+		<beginRow>42</beginRow>
+		<beginRowOffset>0</beginRowOffset>
+		<endRow>43</endRow>
+		<endRowOffset>30</endRowOffset>
+		<beginColumn>25</beginColumn>
+		<beginColumnOffset>51</beginColumnOffset>
+		<endColumn>30</endColumn>
+		<endColumnOffset>3</endColumnOffset>
+		<autoSize>false</autoSize>
+		<pictureSize>Stretch</pictureSize>
+		<zOrder>1</zOrder>
+	</drawing>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<width>72</width>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+
+        // The leading `{0,1}` is the format record: the XML's `formatIndex` 2
+        // projects onto physical slot 1. Everything after it is the drawing.
+        assert!(text.contains(r#"{{0,1},3,25,42,51,0,30,43,3,30,2,0}"#));
+        assert!(extracted.contains("<drawingType>Text</drawingType>"));
+        assert!(extracted.contains("<id>2</id>"));
+        assert!(extracted.contains("<beginColumnOffset>51</beginColumnOffset>"));
+        assert!(extracted.contains("<endColumn>30</endColumn>"));
+        assert!(extracted.contains("<autoSize>false</autoSize>"));
+        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
+        assert!(!extracted.contains("<pictureIndex>"));
 
         Ok(())
     }
@@ -29351,9 +29572,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,0,1,1,0}"));
+        // Slots 10..13 are id, picture index, picture size and `autoSize`.  The
+        // expectation this replaces read `0,1,1,0` there, which is the drawing's
+        // `autoSize`, a literal 1, its z-order and its picture index - the four
+        // values the packer used to write into those slots.  It encoded the
+        // corruption rather than catching it, because nothing here re-extracted
+        // the blob.
+        assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,1,0,1,1}"));
         assert!(text.contains(",1,{4,0},2,{0,1}"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+        assert!(extracted.contains("<id>1</id>"));
+        assert!(extracted.contains("<pictureIndex>0</pictureIndex>"));
+        assert!(extracted.contains("<autoSize>true</autoSize>"));
+        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
+        assert!(extracted.contains("<beginColumnOffset>24</beginColumnOffset>"));
+        assert!(extracted.contains("<endRowOffset>88</endRowOffset>"));
 
         Ok(())
     }
@@ -30890,7 +31129,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn packs_form_body_xml_existing_input_field_context_menu() -> anyhow::Result<()> {
+    fn does_not_inject_text_document_context_menu_slots_into_input_field() -> anyhow::Result<()> {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let mut field_parts = vec!["0".to_string(); 43];
         field_parts[0] = "48".to_string();
@@ -30925,14 +31164,200 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
         let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
-        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
-
         assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
-        assert_eq!(&parsed.layout[context_fields[0].clone()], "22");
-        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
-        assert!(!parsed.layout.contains("OldMenu"));
+        assert!(parsed.layout.contains("OldMenu"));
+        assert!(!parsed.layout.contains("NewMenu"));
         assert_eq!(parsed.module_text, "Old module");
 
+        Ok(())
+    }
+
+    #[test]
+    fn patches_existing_text_document_field_context_menu() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "7".to_string();
+        field_parts[6] = r#""Editor""#.to_string();
+        field_parts[41] = "1".to_string();
+        field_parts[42] =
+            format!(r#"{{22,{{23,{form_uuid}}},0,0,0,8,"OldMenu",{{1,0}},{{1,0}},0,1,0}}"#);
+        let base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><ContextMenu name="NewMenu" id="23"/></TextDocumentField></ChildItems></Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
+        assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
+        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
+        assert!(!parsed.layout.contains("OldMenu"));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_text_document_field_direct_children_before_packing() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "7".to_string();
+        field_parts[6] = r#""Editor""#.to_string();
+        field_parts[41] = "0".to_string();
+        let base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let original = super::parse_form_body_blob(&base)?.layout;
+        for xml in [
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><ContextMenu name="First" id="23"/><ContextMenu name="Second" id="24"/></TextDocumentField></ChildItems></Form>"#
+                .as_slice(),
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><AutoCommandBar name="Foreign" id="23"/></TextDocumentField></ChildItems></Form>"#
+                .as_slice(),
+        ] {
+            assert!(super::pack_form_body_blob_from_form_xml(&base, xml, None).is_err());
+            assert_eq!(super::parse_form_body_blob(&base)?.layout, original);
+        }
+        field_parts[41] = "01".to_string();
+        let malformed_base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let malformed_original = super::parse_form_body_blob(&malformed_base)?.layout;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"/></ChildItems></Form>"#;
+        assert!(super::pack_form_body_blob_from_form_xml(&malformed_base, xml, None).is_err());
+        assert_eq!(
+            super::parse_form_body_blob(&malformed_base)?.layout,
+            malformed_original
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn conditional_appearance_fixture_drives_form_storage_in_both_directions() -> anyhow::Result<()>
+    {
+        let embedded = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/form-embedded-conditional-appearance.xml.b64"
+        ))?;
+        let embedded = String::from_utf8(embedded)?;
+        let form = format!(
+            r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20"><Attributes><Attribute name="List" id="1"><Type><v8:Type>cfg:DynamicList</v8:Type></Type><Settings xsi:type="DynamicList"><ListSettings>{embedded}</ListSettings></Settings></Attribute></Attributes></Form>"#
+        );
+        let storage = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance/form-storage-conditional-appearance.xml.b64"
+        ))?;
+        let parsed = super::parse_form_xml_body_properties(form.as_bytes())?;
+        let value = parsed
+            .attributes
+            .iter()
+            .filter_map(|attribute| attribute.settings.as_ref())
+            .filter_map(|settings| settings.list_settings.conditional_appearance.as_ref())
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("fixture conditional appearance was not parsed"))?;
+
+        assert_eq!(
+            ibcmd_xml::emit_dcs_conditional_appearance_storage_document(value)?
+                .ok_or_else(|| anyhow::anyhow!("rich appearance storage was omitted"))?,
+            storage
+        );
+        let encoded = super::format_form_setting_dcs_conditional_appearance(value)?
+            .ok_or_else(|| anyhow::anyhow!("rich appearance setting was omitted"))?;
+        let policy = ibcmd_schema::bundled_dcs_conditional_appearance_policy()?;
+        assert!(encoded.contains(policy.storage_record_type_uuid()));
+
+        let default = ibcmd_xml::platform_default_form_list_settings_conditional_appearance()?;
+        assert!(super::format_form_setting_dcs_conditional_appearance(&default)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn form_attributes_conditional_appearance_tail_is_added_preserved_and_removed()
+    -> anyhow::Result<()> {
+        let form = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/native-form.xml.b64"
+        ))?;
+        let properties = super::parse_form_xml_body_properties(&form)?;
+        assert!(properties.attributes_conditional_appearance.is_some());
+        let parsed = ibcmd_xml::parse_form_dcs_children(&form)?;
+        let ibcmd_xml::DcsChildParseOutcome::Typed(value) =
+            &parsed.form_attributes_conditional_appearance
+        else {
+            anyhow::bail!("Form Attributes fixture value was not parsed");
+        };
+        let storage = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        ))?;
+        let empty_storage = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
+        ))?;
+        let inactive = format!(
+            "{{4,0,0,0,{{#base64:{}}}}}",
+            super::encode_base64(&empty_storage)
+        );
+        assert!(matches!(
+            super::parse_form_attributes_conditional_appearance_tail(&inactive)?,
+            ibcmd_xml::DcsChildParseOutcome::Absent
+        ));
+
+        let mut inserted = inactive.clone();
+        super::patch_form_body_attributes_conditional_appearance(&mut inserted, Some(value))?;
+        let fields = super::scan_braced_fields(&inserted, 0)?;
+        assert_eq!(fields.len(), 9);
+        assert_eq!(inserted[fields[2].clone()].trim(), "0");
+        assert_eq!(inserted[fields[3].clone()].trim(), "1");
+        assert_eq!(
+            super::parse_1c_quoted_string(&inserted[fields[4].clone()])?,
+            "Список.SortKey"
+        );
+        assert_eq!(
+            super::parse_1c_quoted_string(&inserted[fields[5].clone()])?,
+            "Список.SortKey"
+        );
+        assert_eq!(inserted[fields[6].clone()].trim(), "{2,{26},{9}}");
+        assert_eq!(inserted[fields[7].clone()].trim(), "{1,{26}}");
+        assert_eq!(
+            super::decode_base64_payload_field(inserted[fields[8].clone()].trim())?,
+            storage
+        );
+        let ibcmd_xml::DcsChildParseOutcome::Typed(inserted_value) =
+            super::parse_form_attributes_conditional_appearance_tail(&inserted)?
+        else {
+            anyhow::bail!("inserted Form Attributes tail was not typed");
+        };
+        assert_eq!(&inserted_value, value);
+
+        let mut preserved = inserted;
+        let original = preserved.clone();
+        super::patch_form_body_attributes_conditional_appearance(&mut preserved, Some(value))?;
+        assert_eq!(preserved, original);
+        super::patch_form_body_attributes_conditional_appearance(&mut preserved, None)?;
+        assert_eq!(preserved, inactive);
+
+        for original in ["{4,0}", "{4,0,9,9,{0}}"] {
+            let mut unsupported = original.to_string();
+            assert!(
+                super::patch_form_body_attributes_conditional_appearance(
+                    &mut unsupported,
+                    Some(value)
+                )
+                .is_err()
+            );
+            assert_eq!(unsupported, original);
+        }
         Ok(())
     }
 
@@ -30952,7 +31377,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,9,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0},"Filter",{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}},"ConditionalAppearance",{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}},"ItemsViewMode",{"S","Normal"},"ItemsUserSettingID",{"S","911b6018-f537-43e8-a417-da56b22f9aec"}},{0,0}}},{0,0},{0,0},{0}}"##,
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
 	<Attributes>
 		<Attribute name="Список" id="1">
 			<Type>
@@ -30966,8 +31391,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<MainTable>Catalog.Products</MainTable>
 				<ListSettings>
 					<dcsset:filter>
-						<dcsset:viewMode>Quick</dcsset:viewMode>
-						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
 					</dcsset:filter>
 					<dcsset:order>
 						<dcsset:item xsi:type="dcsset:OrderItemField">
@@ -30978,8 +31403,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
 					</dcsset:order>
 					<dcsset:conditionalAppearance>
-						<dcsset:viewMode>Compact</dcsset:viewMode>
-						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>
 					</dcsset:conditionalAppearance>
 					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
 					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
@@ -30997,7 +31422,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             .as_ref()
             .and_then(|settings| settings.list_settings.order.as_ref())
             .ok_or_else(|| anyhow::anyhow!("order was not parsed from form XML"))?;
-        assert_eq!(parsed_order.items[0].field.as_deref(), Some("Код"));
+        assert!(matches!(
+            parsed_order.canonical.items(),
+            [ibcmd_core::dcs::DcsOrderItem::Field(field)] if field.field().as_str() == "Код"
+        ));
 
         let packed =
             super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
@@ -31006,7 +31434,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
         assert_eq!(parsed.module_text, "Old module");
         assert!(parsed.trailing[0].contains(r#""Список""#));
-        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,9,"#));
         assert!(
             parsed.trailing[0]
                 .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
@@ -31015,16 +31442,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
         assert!(parsed.trailing[0].contains("\"MainTable\",{\"#\","));
         assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
-        assert!(
-            parsed.trailing[0]
-                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
-        );
-        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
-        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
-        assert!(
-            filter_xml
-                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Filter\""));
         assert!(
             parsed.trailing[0]
                 .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
@@ -31035,16 +31453,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             order_xml.contains("<orderType>Asc</orderType>"),
             "{order_xml}"
         );
-        assert!(parsed.trailing[0].contains(
-            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
-        ));
-        let appearance_xml =
-            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
-        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
-        assert!(
-            appearance_xml
-                .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Appearance\""));
         assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
         assert!(
             parsed.trailing[0]
@@ -31117,14 +31526,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn packs_form_body_xml_existing_dynamic_filter_preserves_unspecified_items()
+    fn packs_form_body_xml_metadata_only_filter_removes_physical_filter_property()
     -> anyhow::Result<()> {
         let filter_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
 \t<item xsi:type=\"FilterItemComparison\">\r\n\
-\t\t<left>ЭтоГруппа</left>\r\n\
+\t\t<left xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Field\">Old</left>\r\n\
 \t\t<comparisonType>Equal</comparisonType>\r\n\
-\t\t<right>false</right>\r\n\
+\t\t<right xsi:type=\"xs:string\">Old</right>\r\n\
 \t</item>\r\n\
 \t<viewMode>Normal</viewMode>\r\n\
 \t<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>\r\n\
@@ -31137,7 +31546,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         let base = super::deflate_raw(base_text.as_bytes())?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
 	<Attributes>
 		<Attribute name="List" id="1">
 			<Type>
@@ -31160,32 +31569,20 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
-        let filter_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
-
-        assert!(
-            filter_after.contains("FilterItemComparison"),
-            "{filter_after}"
-        );
-        assert!(
-            filter_after.contains("<left>ЭтоГруппа</left>"),
-            "{filter_after}"
-        );
-        assert!(
-            filter_after
-                .contains("<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Filter\""));
+        assert!(parsed.trailing[0].contains("\"DynamicalDataSelection\""));
         Ok(())
     }
 
     #[test]
-    fn packs_form_body_xml_existing_dynamic_filter_field_items_preserve_unspecified_items()
+    fn packs_form_body_xml_replaces_filter_through_platform_evidenced_comparison()
     -> anyhow::Result<()> {
         let filter_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
 \t<item xsi:type=\"FilterItemComparison\">\r\n\
-\t\t<left>ЭтоГруппа</left>\r\n\
+\t\t<left xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Field\">Old</left>\r\n\
 \t\t<comparisonType>Equal</comparisonType>\r\n\
-\t\t<right>false</right>\r\n\
+\t\t<right xsi:type=\"xs:string\">Old</right>\r\n\
 \t</item>\r\n\
 \t<viewMode>Normal</viewMode>\r\n\
 \t<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>\r\n\
@@ -31198,7 +31595,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         let base = super::deflate_raw(base_text.as_bytes())?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
 	<Attributes>
 		<Attribute name="List" id="1">
 			<Type>
@@ -31207,11 +31604,13 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			<Settings xsi:type="DynamicList">
 				<ListSettings>
 					<dcsset:filter>
-						<dcsset:item xsi:type="dcsset:FieldItem">
-							<dcsset:field>Code</dcsset:field>
+						<dcsset:item xsi:type="dcsset:FilterItemComparison">
+							<dcsset:left xsi:type="dcscor:Field">Code</dcsset:left>
+							<dcsset:comparisonType>Equal</dcsset:comparisonType>
+							<dcsset:right xsi:type="xs:string">A</dcsset:right>
 						</dcsset:item>
-						<dcsset:viewMode>Quick</dcsset:viewMode>
-						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
 					</dcsset:filter>
 				</ListSettings>
 			</Settings>
@@ -31227,28 +31626,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             .as_ref()
             .and_then(|settings| settings.list_settings.filter.as_ref())
             .ok_or_else(|| anyhow::anyhow!("filter was not parsed from form XML"))?;
-        assert_eq!(parsed_filter.items[0].field.as_deref(), Some("Code"));
+        assert!(matches!(
+            parsed_filter.canonical.items(),
+            [ibcmd_core::dcs::DcsFilterItem::Comparison(comparison)]
+                if comparison.field().as_str() == "Code"
+                    && comparison.right().as_string().as_str() == "A"
+        ));
 
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let filter_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
 
+        assert!(filter_after.contains(">Code</left>"), "{filter_after}");
         assert!(
-            filter_after.contains("<field>Code</field>"),
+            filter_after.contains("<right xsi:type=\"xs:string\">A</right>"),
             "{filter_after}"
         );
         assert!(
             filter_after.contains("FilterItemComparison"),
             "{filter_after}"
         );
-        assert!(
-            filter_after.contains("<left>ЭтоГруппа</left>"),
-            "{filter_after}"
-        );
-        assert!(filter_after.contains("<viewMode>Quick</viewMode>"));
+        assert!(!filter_after.contains(">Old</left>"));
+        assert!(filter_after.contains("<viewMode>Normal</viewMode>"));
         assert!(
             filter_after
-                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
+                .contains("<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>")
+        );
+        let filter_uuid = ibcmd_schema::bundled_dcs_filter_policy()?
+            .comparison_storage_record_type_uuid()
+            .to_string();
+        assert!(
+            parsed.trailing[0].contains(&format!("\"Filter\",{{\"#\",{filter_uuid},{{#base64:"))
         );
         Ok(())
     }
@@ -31471,8 +31879,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<MainTable>Catalog.Products</MainTable>
 				<ListSettings>
 					<dcsset:filter>
-						<dcsset:viewMode>Quick</dcsset:viewMode>
-						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
 					</dcsset:filter>
 					<dcsset:order>
 						<dcsset:item xsi:type="dcsset:OrderItemField">
@@ -31483,8 +31891,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
 					</dcsset:order>
 					<dcsset:conditionalAppearance>
-						<dcsset:viewMode>Compact</dcsset:viewMode>
-						<dcsset:userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>
 					</dcsset:conditionalAppearance>
 					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
 					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
@@ -31520,16 +31928,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
         assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
         assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
-        assert!(
-            parsed.trailing[0]
-                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
-        );
-        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
-        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
-        assert!(
-            filter_xml
-                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Filter\""));
         assert!(
             parsed.trailing[0]
                 .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
@@ -31545,15 +31944,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             order_xml
                 .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
         );
-        assert!(parsed.trailing[0].contains(
-            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
-        ));
-        let appearance_xml =
-            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
-        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
+        let conditional_appearance_policy =
+            ibcmd_schema::bundled_dcs_conditional_appearance_policy()?;
         assert!(
-            appearance_xml
-                .contains("<userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</userSettingID>")
+            !parsed.trailing[0].contains(conditional_appearance_policy.storage_property_name()),
+            "the platform-authenticated metadata-only shell has no physical storage record"
         );
         assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
         assert!(
@@ -34281,7 +34676,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_text_document_field() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
         )?;
         let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
 	<ChildItems>
@@ -34348,10 +34743,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_nested_new_text_document_field_with_context_menu_slots() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><Pages name="Tabs" id="1"><ChildItems><Page name="General" id="2"><ChildItems><TextDocumentField name="Notes" id="3"/></ChildItems></Page></ChildItems></Pages></ChildItems></Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let pages_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let page_fields = super::scan_braced_fields(&parsed.layout, pages_fields[12].start)?;
+        let text_fields = super::scan_braced_fields(&parsed.layout, page_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[text_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[text_fields[5].clone()], "7");
+        assert_eq!(&parsed.layout[text_fields[6].clone()], r#""Notes""#);
+        assert_eq!(text_fields.len(), 43);
+        assert_eq!(&parsed.layout[text_fields[41].clone()], "0");
+        assert_eq!(&parsed.layout[text_fields[42].clone()], "0");
+        let extracted = crate::mssql_dump::extract_form_body_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("nested TextDocumentField must remain exportable");
+        assert!(extracted.contains("<TextDocumentField name=\"Notes\" id=\"3\""));
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_existing_text_document_field_read_only() -> anyhow::Result<()> {
         for (value, expected_code) in [("true", "1"), ("false", "0")] {
             let base = super::deflate_raw(
-                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,2,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,2,2,0,2,{1,0},{1,0},1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
             )?;
             let xml = format!(
                 r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
@@ -36794,7 +37217,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let base = super::deflate_raw(b"{5,{\"not a form\"},\"module\"}")?;
         let error = super::parse_form_body_blob(&base).unwrap_err();
 
-        assert!(error.to_string().contains("type marker 4"));
+        // The refusal names the revision the record itself declared: the
+        // reader dispatches on that slot instead of matching one marker.
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported container revision 5"),
+            "{error}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_revision_three_form_body_container() -> anyhow::Result<()> {
+        let base = super::deflate_raw(b"{3,{49,0},\"module\",{0,0},{0,0},{0,0},{0,0},{0,0},0,0}")?;
+        let parsed = super::parse_form_body_blob(&base)?;
+
+        assert_eq!(parsed.revision, super::FormBodyRevision::V3);
+        assert_eq!(parsed.layout, "{49,0}");
+        assert_eq!(parsed.module_text, "module");
+        assert_eq!(parsed.trailing_fields, 7);
 
         Ok(())
     }

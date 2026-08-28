@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "base_fixture": "8.3.27.2214-xml-2.20-dcs-core",
+  "operation": "append-root-selected-item-auto",
+  "target": "Settings/selection",
+  "inserted_xml": "<dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/>",
+  "preserved_item_order": [
+    "SelectedItemField:Name",
+    "SelectedItemField:Amount",
+    "SelectedItemField:DoubleAmount"
+  ],
+  "source_template_sha256": "5a5c241f83667a55d413b7f515961ae3e1b08280e1aa7e148de052dd68bed02c",
+  "authority": "bounded_hypothesis_only; pinned_platform_output_is_the_oracle"
+}

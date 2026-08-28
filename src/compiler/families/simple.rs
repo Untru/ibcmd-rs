@@ -1268,13 +1268,32 @@ fn project_constant(
     }
     let synonyms = synonym_property(object, "Synonym")?;
     let comment = text_property(object, "Comment")?.to_owned();
-    let fields =
-        property(object, "Type")?
-            .as_record()
-            .ok_or(SimpleMetadataBuildError::InvalidModel {
+    // `Type` is a sequence of type records, one per declared type. This
+    // compile direction has native bytes for exactly one of them -- nothing
+    // observed says how the platform lays a multi-type constant's `Pattern`
+    // out -- so a longer sequence is refused rather than truncated to its
+    // first member.
+    let value_types = match property(object, "Type")?.kind() {
+        CanonicalValueKind::Sequence(values) => values,
+        _ => {
+            return Err(SimpleMetadataBuildError::InvalidModel {
                 object: uuid,
-                reason: "Constant Type is not a record",
-            })?;
+                reason: "Constant Type is not a sequence",
+            });
+        }
+    };
+    let [value_type_record] = value_types else {
+        return Err(SimpleMetadataBuildError::InvalidModel {
+            object: uuid,
+            reason: "Constant Type declares more than one type",
+        });
+    };
+    let fields = value_type_record
+        .as_record()
+        .ok_or(SimpleMetadataBuildError::InvalidModel {
+            object: uuid,
+            reason: "Constant Type is not a record",
+        })?;
     let kind = canonical_enum_field(
         fields.first(),
         uuid,

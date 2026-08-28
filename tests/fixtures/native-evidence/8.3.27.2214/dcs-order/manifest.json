@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-order",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 283,
+  "contract": "8.3.27-xml-2.20-dcs-settings-order-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-13",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "patch_build_policy": "exact build is experiment provenance; the component contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "standalone": {
+    "source_fixture": "../dcs-core/manifest.json",
+    "owner": "Report.DcsCorpus",
+    "body_key": "f4db0f6c-34f4-4449-995d-6265516e5fa8.0",
+    "unpacked_body_sha256": "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510",
+    "native_template_sha256": "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f",
+    "round_trips": 2,
+    "order": {
+      "items": [
+        { "type": "OrderItemField", "use": "omitted", "field": "Name", "order_type": "Asc" }
+      ],
+      "placement": "after-selection-before-structure-items"
+    }
+  },
+  "form": {
+    "retained_round_1_cf": {
+      "private_lab_artifact": "issue317/issue317.cf",
+      "size": 383001489,
+      "sha256": "5d305907226075a9b4ead24227d932b545a22c8fe649cf94e9a6cabf8161e12f"
+    },
+    "fresh_round_2_cf": {
+      "private_lab_artifact": "issue283-dcs-order-form-2214/r2.cf",
+      "size": 383001490,
+      "sha256": "605cba85f13b7e708406e53330a8fb8e0aa7d57287401af4c8bdb956a4616818"
+    },
+    "procedure": [
+      "Create a fresh isolated file infobase by loading the retained platform-saved round-1 CF with pinned ibcmd 8.3.27.2214.",
+      "Apply the configuration, save a new round-2 CF, and perform a native XML 2.20 export.",
+      "Inspect the exact owner, Form metadata, and Form body keys as explicit raw-deflate.",
+      "Compare the three Form native files and all three packed/unpacked rows with round 1."
+    ],
+    "owner": "BusinessProcess.Задание",
+    "form": "ФормаСписка",
+    "keys": {
+      "owner": "dad11c2e-08fc-4a6b-8829-8be6c64c15fc",
+      "metadata": "1a7c7427-bead-4655-9dd6-df6e722663c5",
+      "body": "1a7c7427-bead-4655-9dd6-df6e722663c5.0"
+    },
+    "raw_rows": {
+      "owner": { "packed_size": 5456, "packed_sha256": "1ce414849209b3f832baa90b171b14d5bf342518644c38c43408c467a524957e", "unpacked_size": 35599, "unpacked_sha256": "0e552316ec845f25a22a60070aef2c565d49142f7569545c00cdcc161d932bea", "observed_in_rounds": ["retained_round_1", "fresh_round_2"] },
+      "metadata": { "packed_size": 186, "packed_sha256": "abe5309440a9d7e50d250211796b9dd34e7be10de0372219d331f60e7eb94fa9", "unpacked_size": 299, "unpacked_sha256": "ab9384e3cb96f4f4f12bf78f7b9af93ed4d085202505f32751cc753567f5c418", "observed_in_rounds": ["retained_round_1", "fresh_round_2"] },
+      "body": { "packed_size": 7396, "packed_sha256": "fb6778ea7440b14d1767da125fe05a463b612070fa559451f687ebd0f6ad840c", "unpacked_size": 59145, "unpacked_sha256": "98c91a2a3069192fe455cca4507e1ba82d564c7d8df3620b3a76132f2016810b", "observed_in_rounds": ["retained_round_1", "fresh_round_2"] }
+    },
+    "native_files": [
+      { "path": "BusinessProcesses/Задание/Forms/ФормаСписка.xml", "size": 1623, "sha256": "09861a570d0dce07005c547337449884574cb6c03b929870a5cdfda74a34911d", "observed_in_rounds": ["retained_round_1", "fresh_round_2"] },
+      { "path": "BusinessProcesses/Задание/Forms/ФормаСписка/Ext/Form.xml", "size": 31615, "sha256": "9b5d317fd073d41ff929c9908500bc0e768e9280d64d08271301f0151eb1c2ce", "observed_in_rounds": ["retained_round_1", "fresh_round_2"] },
+      { "path": "BusinessProcesses/Задание/Forms/ФормаСписка/Ext/Form/Module.bsl", "size": 6917, "sha256": "2108760144e25d10539229e4f73ccf32bf8ebe39cd8c23fd6e6096d7b460be26", "observed_in_rounds": ["retained_round_1", "fresh_round_2"] }
+    ],
+    "minimal_public_fragments": {
+      "storage_order": { "path": "form-storage-order.xml.b64", "decoded_size": 441, "sha256": "72a0a00e980574e28edd9dfd7e4d0cfe9da5624c545f108ba602113f6c8caf17" },
+      "embedded_order": { "path": "form-embedded-order.xml.b64", "decoded_size": 384, "sha256": "828cbc03cf0a8f16cca8c85bfd76beea3645c685523262570362a19d2b0776f6" },
+      "metadata_only_order": { "path": "form-metadata-only-order.xml.b64", "decoded_size": 174, "sha256": "34c3fe0efa47667495fcf49b63374643aed3472a52edeed64a73677d299a4492" }
+    },
+    "order": {
+      "items": [
+        { "type": "OrderItemField", "use": false, "field": "Дата", "order_type": "Asc" }
+      ],
+      "view_mode": "Normal",
+      "user_setting_id": "88619765-ccb3-46c6-ac52-38e9c992ebd4",
+      "child_order": ["item(use,field,orderType)", "viewMode", "userSettingID"]
+    },
+    "supplemental_metadata_only_observation": {
+      "status": "platform_observed_private_locator_withheld",
+      "derivation": "The exact lexical fragment was byte-identical in retained and fresh native Form exports. Its private owner path is not published, so it authenticates only this fragment and is not bound to the public Form.xml hash above.",
+      "metadata_only": {
+        "items": 0,
+        "view_mode": "Normal",
+        "user_setting_id": "88619765-ccb3-46c6-ac52-38e9c992ebd4",
+        "path": "form-metadata-only-order.xml.b64",
+        "decoded_size": 174,
+        "sha256": "34c3fe0efa47667495fcf49b63374643aed3472a52edeed64a73677d299a4492"
+      }
+    },
+    "cross_evidence": {
+      "storage_order_record_type": "11743ff3-2db3-4cfc-9404-90ed8209437f",
+      "storage_record_status": "pending-independent-raw-locator",
+      "unica_desc": {
+        "repository": "https://github.com/Untru/unica",
+        "revision": "a527d40962d047c6922c903b37510b30f697da42",
+        "platform_version": "8.3.27.2074",
+        "proof": "explicit Desc root and group order passed two semantic platform round-trips",
+        "applicability": "same 8.3.27/XML 2.20 component contract; the patch build is provenance, not a dialect selector"
+      }
+    },
+    "private_artifact_policy": "The complete WMS Form body and CF remain only in the authorized Parallels lab; the repository retains exact hashes and the minimal DCS order fragments, not unrelated private configuration content."
+  },
+  "proven_claims": [
+    "Standalone and Form use one settings namespace and one OrderItemField semantic shape.",
+    "The standalone root order follows selection and precedes structure items.",
+    "A field item preserves optional explicit use=false before field and explicit Asc orderType.",
+    "Explicit Asc is byte-authenticated on 8.3.27.2214; explicit Desc is semantically authenticated by the public Unica 8.3.27.2074 two-round corpus under the same 8.3.27/XML 2.20 component contract.",
+    "The proven metadata-only Form order contains both viewMode and userSettingID with no items; no single-property cross-product is inferred.",
+    "Form order preserves items before optional viewMode and userSettingID.",
+    "Exact Form raw rows and the three selected native files are stable through a fresh pinned-platform round-trip."
+  ],
+  "non_claims": [
+    "No root OrderItemAuto, multiple-item emission, missing orderType, propertyless empty order, use=true, item viewMode, or duplicate behavior is inferred.",
+    "Nested StructureItem order evidence does not authorize root Auto emission.",
+    "Unica is not an XML or byte authority; it supplied the original standalone seed and cross-evidence only.",
+    "No whole-profile alias for build 8.3.27.2214 is inferred.",
+    "The retained private Form body is not redistributed by this corpus."
+  ]
+}

@@ -15,6 +15,7 @@ use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::model::{CanonicalObject, CanonicalObjectParts};
 use ibcmd_core::value::{CanonicalInteger, CanonicalValue, EnumToken, UnresolvedReference};
 
+use super::characteristics::project_characteristics;
 use super::common::decode_metadata_envelope_with_child_references;
 use super::common::{
     MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces, V8_NAMESPACE,
@@ -27,6 +28,7 @@ use super::language::{
 use super::registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
+use super::utility_objects::validate_supported_standard_attributes;
 use crate::{Attribute, AttributeKind, LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlWriter};
 
 const CATALOG: &str = "Catalog";
@@ -230,6 +232,23 @@ const NESTED_ATTRIBUTE_PROPERTIES: &[&str] = &[
     "Indexing",
     "FullTextSearch",
     "DataHistory",
+];
+
+/// Platform standard-attribute inventory of a `Catalog`, in emission order.
+///
+/// Evidenced by every platform `ibcmd config export` tree in the corpus and
+/// invariant across `Hierarchical` and `Owners`, matching the fixed native
+/// Catalog standard-attribute schema the export direction parses.
+const CATALOG_STANDARD_ATTRIBUTES: &[&str] = &[
+    "PredefinedDataName",
+    "Predefined",
+    "Ref",
+    "DeletionMark",
+    "IsFolder",
+    "Owner",
+    "Parent",
+    "Description",
+    "Code",
 ];
 
 const TABULAR_PROPERTIES: &[&str] = &[
@@ -583,9 +602,25 @@ fn project_root_properties(
         }
     }
 
-    for name in ["StandardAttributes", "Characteristics"] {
-        require_empty(properties[name], name)?;
+    if family == CATALOG {
+        // Platform trees emit the family-derived inventory at the platform
+        // defaults; the block carries no object data, so nothing is projected.
+        validate_supported_standard_attributes(
+            properties["StandardAttributes"],
+            CATALOG,
+            CATALOG_STANDARD_ATTRIBUTES,
+            uris,
+        )?;
+    } else {
+        // No `Document` tree in the evidence corpus carries a populated
+        // block, so its inventory and default profile stay unevidenced.
+        require_empty(
+            properties["StandardAttributes"],
+            DOCUMENT,
+            "StandardAttributes",
+        )?;
     }
+    project_characteristics(parts, properties["Characteristics"], uris)?;
     push_field_collection(parts, properties, "InputByString", uris)?;
     for name in [
         "ObjectPresentation",
@@ -743,6 +778,7 @@ pub(super) fn project_attribute(
     for name in ["Mask", "ChoiceForm"] {
         push_text(parts, &map, name)?;
     }
+    let scope = format!("{family} Attribute");
     for name in [
         "Format",
         "EditFormat",
@@ -755,7 +791,7 @@ pub(super) fn project_attribute(
         "LinkByType",
     ] {
         if let Some(element) = map.get(name) {
-            require_empty(element, name)?;
+            require_empty(element, &scope, name)?;
         }
     }
     Ok(())
@@ -841,8 +877,11 @@ pub(super) fn project_tabular_section(
     };
     let map = exact_property_map(properties, expected, uris)?;
     push_text(parts, &map, "Comment")?;
-    require_empty(map["ToolTip"], "ToolTip")?;
-    require_empty(map["StandardAttributes"], "StandardAttributes")?;
+    // No evidence tree carries a populated tabular-section block for these
+    // families, so both stay fail-closed.
+    let scope = format!("{family} TabularSection");
+    require_empty(map["ToolTip"], &scope, "ToolTip")?;
+    require_empty(map["StandardAttributes"], &scope, "StandardAttributes")?;
     push_enum(parts, &map, "FillChecking")?;
     if map.contains_key("Use") {
         push_enum(parts, &map, "Use")?;
@@ -865,7 +904,7 @@ pub(super) fn project_command(
     push_enum(parts, &map, "Representation")?;
     push_enum(parts, &map, "OnMainServerUnavalableBehavior")?;
     for name in ["CommandParameterType", "ToolTip", "Picture", "Shortcut"] {
-        require_empty(map[name], name)?;
+        require_empty(map[name], "embedded Command", name)?;
     }
     Ok(())
 }
@@ -1095,17 +1134,52 @@ pub(super) fn text_field(
     ))
 }
 
-pub(super) fn require_empty(element: &XmlElement, _name: &str) -> Result<(), MetadataDecodeError> {
-    if element.children().iter().any(|node| match node {
+/// True when `element` carries neither child elements nor non-blank text.
+pub(super) fn is_blank(element: &XmlElement) -> bool {
+    !element.children().iter().any(|node| match node {
         XmlNode::Element(_) => true,
         XmlNode::Text(text) => !text.value().trim().is_empty(),
         _ => false,
-    }) {
-        return Err(MetadataDecodeError::InvalidEnvelope(
-            "business object unevidenced complex property is not empty",
-        ));
+    })
+}
+
+/// Fail-closed gate for a complex property whose content the compile
+/// direction cannot represent.
+///
+/// `owner` names the enclosing shape and `property` the XML property, so the
+/// rejection identifies the exact coordinate that still needs evidence
+/// instead of reporting an anonymous "complex property".  `owner` is only
+/// materialised on the rejecting path.
+pub(super) fn require_empty(
+    element: &XmlElement,
+    owner: &str,
+    property: &'static str,
+) -> Result<(), MetadataDecodeError> {
+    if is_blank(element) {
+        return Ok(());
     }
-    Ok(())
+    Err(MetadataDecodeError::UnevidencedProperty {
+        owner: owner.to_owned(),
+        property,
+    })
+}
+
+/// Fail-closed gate for a property whose empty shape *is* the evidenced
+/// model, taken after the decoder has already established that it has no
+/// child elements.  Only stray text can trip it, which is a lexical defect
+/// rather than a missing compile model.
+pub(super) fn require_no_text(
+    element: &XmlElement,
+    owner: &str,
+    property: &'static str,
+) -> Result<(), MetadataDecodeError> {
+    if is_blank(element) {
+        return Ok(());
+    }
+    Err(MetadataDecodeError::UnexpectedContent {
+        owner: owner.to_owned(),
+        property,
+    })
 }
 
 pub(super) fn only_element_child<'a>(
@@ -1322,21 +1396,193 @@ mod tests {
     }
 
     #[test]
+    fn catalog_nonempty_characteristics_projects_and_round_trips_losslessly() {
+        let characteristics = "<Characteristics><xr:Characteristic><xr:CharacteristicTypes from=\"Catalog.TypeSource\"><xr:KeyField>0</xr:KeyField><xr:TypesFilterField>-1</xr:TypesFilterField><xr:TypesFilterValue xsi:type=\"xs:string\">safe</xr:TypesFilterValue><xr:DataPathField>0</xr:DataPathField><xr:MultipleValuesUseField>-1</xr:MultipleValuesUseField></xr:CharacteristicTypes><xr:CharacteristicValues from=\"Catalog.ValueSource\"><xr:ObjectField>0</xr:ObjectField><xr:TypeField>-1</xr:TypeField><xr:ValueField>0</xr:ValueField><xr:MultipleValuesKeyField>-1</xr:MultipleValuesKeyField><xr:MultipleValuesOrderField>0</xr:MultipleValuesOrderField></xr:CharacteristicValues></xr:Characteristic></Characteristics>";
+        let xml = String::from_utf8(catalog_xml())
+            .unwrap()
+            .replace(
+                "xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\"",
+                "xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"",
+            )
+            .replace("<Characteristics/>", characteristics);
+        let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        let envelope = decode_business_object(
+            &document,
+            ProfileId::parse("xml-2.20").unwrap(),
+            ObjectPath::root(),
+            CATALOG,
+        )
+        .unwrap();
+        assert!(
+            envelope
+                .root()
+                .properties()
+                .iter()
+                .any(|field| field.name().as_str() == "Characteristics")
+        );
+        let encoded =
+            encode_business_object(&envelope, &ProfileId::parse("xml-2.20").unwrap(), CATALOG)
+                .unwrap();
+        assert_eq!(encoded, xml.as_bytes());
+    }
+
+    #[test]
     fn nonempty_unevidenced_standard_attributes_fail_closed() {
         let xml = String::from_utf8(catalog_xml()).unwrap().replace(
             "<StandardAttributes/>",
             "<StandardAttributes><xr:StandardAttribute name=\"Code\"/></StandardAttributes>",
         );
         let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
-        assert!(
+        assert!(matches!(
             decode_business_object(
                 &document,
                 ProfileId::parse("xml-2.20").unwrap(),
                 ObjectPath::root(),
                 CATALOG,
-            )
-            .is_err()
+            ),
+            Err(MetadataDecodeError::UnevidencedStandardAttribute {
+                ref owner,
+                property: "StandardAttributes",
+                ..
+            }) if owner == CATALOG
+        ));
+    }
+
+    /// Platform `ibcmd config export` bytes for a `Catalog`.  This bundled
+    /// file is byte-identical to the `Catalogs/CorpusList.xml` of the
+    /// retained 8.3.27.2214 export tree, so it is platform evidence rather
+    /// than a clean-room construction.
+    const NATIVE_CATALOG: &[u8] = include_bytes!(concat!(
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "dcs-form-list-settings-server-state/seed/Catalogs/CorpusList.xml"
+    ));
+
+    fn decode_native_catalog(xml: &[u8]) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        let document = XmlReader::from_slice(xml).unwrap();
+        decode_business_object(
+            &document,
+            ProfileId::parse("xml-2.20").unwrap(),
+            ObjectPath::root(),
+            CATALOG,
+        )
+    }
+
+    fn native_catalog_text() -> String {
+        String::from_utf8(NATIVE_CATALOG.to_vec()).unwrap()
+    }
+
+    fn native_catalog_standard_attributes(text: &str) -> &str {
+        let start = text.find("<StandardAttributes>").unwrap();
+        let end = text.find("</StandardAttributes>").unwrap() + "</StandardAttributes>".len();
+        &text[start..end]
+    }
+
+    #[test]
+    fn native_catalog_standard_attributes_decode_and_round_trip_losslessly() {
+        let envelope = decode_native_catalog(NATIVE_CATALOG).unwrap();
+        let encoded =
+            encode_business_object(&envelope, &ProfileId::parse("xml-2.20").unwrap(), CATALOG)
+                .unwrap();
+        assert_eq!(encoded, NATIVE_CATALOG);
+    }
+
+    #[test]
+    fn native_catalog_default_standard_attributes_project_no_object_data() {
+        let text = native_catalog_text();
+        let emptied = text.replace(
+            native_catalog_standard_attributes(&text),
+            "<StandardAttributes/>",
         );
+        let populated = decode_native_catalog(NATIVE_CATALOG).unwrap();
+        let empty = decode_native_catalog(emptied.as_bytes()).unwrap();
+        assert_eq!(populated.root().properties(), empty.root().properties());
+        assert_eq!(populated.root().references(), empty.root().references());
+        assert_eq!(populated.descendants(), empty.descendants());
+    }
+
+    #[test]
+    fn native_catalog_standard_attribute_scalar_deviation_names_its_coordinate() {
+        let text = native_catalog_text();
+        let block = native_catalog_standard_attributes(&text);
+        let deviated = block.replacen(
+            "<xr:StandardAttribute name=\"Predefined\">\r\n\t\t\t\t\t<xr:LinkByType/>\r\n\t\t\t\t\t<xr:FillChecking>DontCheck</xr:FillChecking>",
+            "<xr:StandardAttribute name=\"Predefined\">\r\n\t\t\t\t\t<xr:LinkByType/>\r\n\t\t\t\t\t<xr:FillChecking>ShowError</xr:FillChecking>",
+            1,
+        );
+        assert_ne!(deviated, block);
+        let xml = text.replace(block, &deviated);
+        assert!(matches!(
+            decode_native_catalog(xml.as_bytes()),
+            Err(MetadataDecodeError::UnevidencedStandardAttribute {
+                ref owner,
+                property: "FillChecking",
+                expected: "DontCheck",
+                ref actual,
+            }) if owner == "Catalog StandardAttribute[Predefined]" && actual == "ShowError"
+        ));
+    }
+
+    #[test]
+    fn native_catalog_standard_attribute_tooltip_names_its_coordinate() {
+        let text = native_catalog_text();
+        let block = native_catalog_standard_attributes(&text);
+        let deviated = block.replacen(
+            "<xr:ToolTip/>",
+            "<xr:ToolTip><v8:item><v8:lang>ru</v8:lang><v8:content>x</v8:content></v8:item></xr:ToolTip>",
+            1,
+        );
+        assert_ne!(deviated, block);
+        let xml = text.replace(block, &deviated);
+        assert!(matches!(
+            decode_native_catalog(xml.as_bytes()),
+            Err(MetadataDecodeError::UnevidencedProperty {
+                ref owner,
+                property: "ToolTip",
+            }) if owner == "Catalog StandardAttribute[PredefinedDataName]"
+        ));
+    }
+
+    #[test]
+    fn native_catalog_standard_attribute_owner_type_reduction_is_name_bound() {
+        let text = native_catalog_text();
+        let block = native_catalog_standard_attributes(&text);
+        let deviated = block.replacen(
+            "<xr:TypeReductionMode>Deny</xr:TypeReductionMode>",
+            "<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>",
+            1,
+        );
+        assert_ne!(deviated, block);
+        let xml = text.replace(block, &deviated);
+        assert!(matches!(
+            decode_native_catalog(xml.as_bytes()),
+            Err(MetadataDecodeError::UnevidencedStandardAttribute {
+                ref owner,
+                property: "TypeReductionMode",
+                expected: "Deny",
+                ..
+            }) if owner == "Catalog StandardAttribute[Owner]"
+        ));
+    }
+
+    #[test]
+    fn document_standard_attributes_stay_fail_closed_with_named_coordinate() {
+        let xml = String::from_utf8(document_xml()).unwrap().replace(
+            "<StandardAttributes/>",
+            "<StandardAttributes><xr:StandardAttribute name=\"Number\"/></StandardAttributes>",
+        );
+        let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        assert!(matches!(
+            decode_business_object(
+                &document,
+                ProfileId::parse("xml-2.20").unwrap(),
+                ObjectPath::root(),
+                DOCUMENT,
+            ),
+            Err(MetadataDecodeError::UnevidencedProperty {
+                ref owner,
+                property: "StandardAttributes",
+            }) if owner == DOCUMENT
+        ));
     }
 
     #[test]

@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-link-parameter",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "E6-LINK-OPTIONAL-DESIGN.md Probe L1: add <parameter>LinkParam</parameter> and <parameterListAllowed>true</parameterListAllowed> immediately after destinationExpression inside the proven dataSetLink cohort of dcs-query-union-link. Lexical authorization: element names match EDT feature-semantics.json DataCompositionSchemaDataSetLink attribute features verbatim (xcore:verified, writer-inspection:pending prior to this probe), authorized by the four already-proven dataSetLink child names matching EDT feature names letter-for-letter.",
+    "path": "seed/Template.xml",
+    "size": 2582,
+    "sha256": "381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "c55d6ea5ece3eb6244a55f65fee14531ad3fcebba4c1809e2b7b7b3805506b03",
+    "round_2_cf_sha256": "58d1900f8b4d227522621515ccdf7e83d46920052670a238000a278f75c3316e",
+    "native_template_sha256": "381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698",
+    "packed_body_sha256": "5211a2ac9fa02d3351686f48963445e0062e2d174327fcaf47026a6f11a6b9ae",
+    "unpacked_body_sha256": "21d34dcc6dc9b85123dbd70ac72fba548682229db0927b16a402a05fbe6a2d8a",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 87431,
+      "sha256": "58d1900f8b4d227522621515ccdf7e83d46920052670a238000a278f75c3316e"
+    },
+    "native_template": {
+      "path": "native-template.xml.b64",
+      "decoded_size": 2582,
+      "sha256": "381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698"
+    },
+    "packed_body": {
+      "path": "raw-packed.bin.b64",
+      "decoded_size": 794,
+      "sha256": "5211a2ac9fa02d3351686f48963445e0062e2d174327fcaf47026a6f11a6b9ae"
+    },
+    "unpacked_body": {
+      "path": "raw-unpacked.bin.b64",
+      "decoded_size": 2998,
+      "sha256": "21d34dcc6dc9b85123dbd70ac72fba548682229db0927b16a402a05fbe6a2d8a"
+    }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [
+      1847,
+      864
+    ],
+    "primary_schema_sha256": "9a64955be3b904a8c25a3d10d3683e82824f706efc9018640a872a9d78753963",
+    "settings_sha256": "183a0cfa6326ca893c56663b07461497ec264ce45409844d656f32f1546c3734",
+    "trailing_area_schema_file_sha256": "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81",
+    "trailing_area_schema_file_size": 263
+  },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body (compile_dcs on the retained round-2 native Template.xml; the evidenced cohort parser requires platform storage order) overlaid via the common overlay APIs into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 3407,
+    "candidate_body_unpacked_sha256": "19e5ea7254220b8c3340b95f0aef88445de367bb3cad0fd9899a3c218c917fb9",
+    "candidate_cf_sha256": "af0ed7f0d6f6a55243e9e7423abf10cd4bf7f0f561a202d1b8a42d57547c14e5",
+    "platform_saved_cf_size": 87457,
+    "platform_saved_cf_sha256": "cb64ad80148a57b4e2c0617e10732625619f627c9bff2de30b2561327654377c",
+    "reexported_template_size": 2582,
+    "reexported_template_sha256": "381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698",
+    "reexport_matches_two_round_native_template": true
+  },
+  "cohort": {
+    "link_children_order_after_delta": [
+      "sourceDataSet",
+      "destinationDataSet",
+      "sourceExpression",
+      "destinationExpression",
+      "parameter",
+      "parameterListAllowed"
+    ],
+    "parameter_value": "LinkParam",
+    "parameter_list_allowed_value": "true",
+    "parameter_list_allowed_omitted": false
+  },
+  "negative_observations": [
+    "None observed for this coordinate in isolation: native re-export is byte-identical to the submitted seed, in the same order and position submitted, with parameterListAllowed=true retained exactly as given despite its EDT qualifier:unsettable annotation."
+  ],
+  "non_claims": [
+    "No claim about parameterListAllowed=false, or about parameter without parameterListAllowed (alternative (b) in the design was not needed).",
+    "No claim about insertion position other than immediately after destinationExpression (alternative (a) was not needed).",
+    "No claim about the fixed final canonical order of all 6 possible optional+proven link children combined -- see the sibling L2 draft manifest, where three more fields ARE reordered by the platform once present.",
+    "compiler_acceptance is intentionally omitted from this draft; not part of this probe session.",
+    "Provenance: produced in a probe/design session (scratchpad/design/E6-LINK-OPTIONAL-DESIGN.md), not yet reviewed or integrated."
+  ]
+}

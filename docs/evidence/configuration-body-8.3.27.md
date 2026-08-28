@@ -28,6 +28,17 @@ Both rows confirmed the same outer contract:
 {2,{Configuration UUID},7,<section 1>...<section 7>,{{0,"",""}}}
 ```
 
+The parse side decodes this same outer contract through a single shared
+envelope parser (`parse_configuration_root_envelope` in
+`src/mssql_dump/refs.rs`); no consumer re-derives the outer slot arithmetic.
+Two root-control tails are evidenced and accepted by the envelope: the bare
+`{{0,"",""}}` tail above (db-resident cohort, also what the bootstrap writer
+emits) and the checksummed `{{1,"",""},{<i32>}}` tail carried by all 19
+retained 8.3.27.2214 CF corpora; only the checksummed tail qualifies a root
+for byte-parity `InternalInfo`/`ChildObjects` emission. A simplified root
+shape without the matching section slots and tail (formerly used by some
+synthetic test fixtures) is not evidenced anywhere and fails closed.
+
 The exact section order and wrappers for layout 68 are:
 
 | Section | Class ID | Family slots | Wrapper before the family count |

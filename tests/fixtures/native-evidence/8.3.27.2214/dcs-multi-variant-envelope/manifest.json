@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-multi-variant-envelope",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 283,
+  "contract": "dcs-schema-template-envelope-positional-settings-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-13",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "extractor": {
+      "identity": "ibcmd-rs cf extract retained lab build",
+      "path": "C:/work/ibcmd-rs-selected-extract-2/target/debug/ibcmd-rs.exe",
+      "sha256": "5ec1be63f1a850c2673ee8ce7b896fb98934f363d86fff4e9d581b57cfcab722"
+    },
+    "database_kind": "two_fresh_isolated_file_infobases",
+    "database_locale": "ru_RU",
+    "patch_build_policy": "the contract is proven on exact 8.3.27.2214 and is consistent with retained 8.3.27.1989 evidence; no other patch build is inferred"
+  },
+  "seed": {
+    "path": "seed/unica-dcs-edit.json",
+    "size": 462,
+    "sha256": "d32bf50308d0af77243ac4a5b2b9d090ef9c32ddf5575e9583b679dbb785e881",
+    "authority": "hypothesis_only; pinned platform round 2 is the byte authority"
+  },
+  "rounds": {
+    "round_1_cf": {
+      "size": 81427,
+      "sha256": "de78c33dc31f49112f26bc9e880a079f3a8a122275ddea7e00f64a348c0807e6"
+    },
+    "round_2_cf": {
+      "size": 81427,
+      "sha256": "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4"
+    },
+    "round_1_template_sha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+    "round_2_template_sha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+    "round_1_packed_sha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c",
+    "round_2_packed_sha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c",
+    "round_1_unpacked_sha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87",
+    "round_2_unpacked_sha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87",
+    "selected_native_tree_inventory": [
+      {"path": "Reports/DcsCorpus.xml", "size": 2188, "sha256": "d3aa54cbac8d42f6e3a835aae76606a301a3a3cb175f958985ba661a58de9650"},
+      {"path": "Reports/DcsCorpus/Ext/ManagerModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"},
+      {"path": "Reports/DcsCorpus/Ext/ObjectModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"},
+      {"path": "Reports/DcsCorpus/Templates/MainSchema.xml", "size": 1262, "sha256": "92d72ca2e6fcedf3b0b4e6099b09a4fd31e365766b5d5df9806bca250faab62f"},
+      {"path": "Reports/DcsCorpus/Templates/MainSchema/Ext/Template.xml", "size": 4812, "sha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680"}
+    ],
+    "selected_native_tree_inventory_equal_between_rounds": true,
+    "template_equal_between_rounds": true,
+    "packed_equal_between_rounds": true,
+    "unpacked_equal_between_rounds": true
+  },
+  "configuration_cf": {
+    "storage": "base64",
+    "path": "configuration.cf.b64",
+    "encoded_size": 108573,
+    "encoded_sha256": "bc5a9f7823b061fdf285de591dec24696016c751afa0f88751967fb4604040e0",
+    "decoded_size": 81427,
+    "decoded_sha256": "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4"
+  },
+  "template": {
+    "owner_kind": "Report",
+    "owner_name": "DcsCorpus",
+    "owner_uuid": "688ec52f-a520-4868-95c1-832c78c4813c",
+    "name": "MainSchema",
+    "uuid": "f4db0f6c-34f4-4449-995d-6265516e5fa8",
+    "body_key": "f4db0f6c-34f4-4449-995d-6265516e5fa8.0",
+    "raw_entry": {
+      "compression": "raw-deflate",
+      "packed": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate.b64",
+        "encoded_size": 1397,
+        "encoded_sha256": "e618568d9979a1b8bd380488dd378029a6f157b691f023971d87208befa0eaff",
+        "decoded_size": 1046,
+        "decoded_sha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c"
+      },
+      "unpacked": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin.b64",
+        "encoded_size": 7641,
+        "encoded_sha256": "3ca3e131a41d7cac6cf3e4d0d60acc8acc4e5e1922cd394e44eef0a4687f0914",
+        "decoded_size": 5730,
+        "decoded_sha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87"
+      }
+    },
+    "native_xml": {
+      "path": "native-template.xml.b64",
+      "encoded_size": 6417,
+      "encoded_sha256": "94a3fe8358475179213c176c49f3615a16d195166174927961b21334cdb62020",
+      "decoded_size": 4812,
+      "decoded_sha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+      "export_path": "Reports/DcsCorpus/Templates/MainSchema/Ext/Template.xml"
+    }
+  },
+  "proven_shape": {
+    "body_layout": "dcs-schema-positional-settings-v1",
+    "header_marker": 0,
+    "settings_document_count": 2,
+    "header_bytes": 32,
+    "stored_document_lengths": [3467, 1142, 826],
+    "trailing_document_length": 263,
+    "document_roles": [
+      "PrimarySchemaFile",
+      "Settings[0]",
+      "Settings[1]",
+      "TerminalSchemaFile"
+    ],
+    "document_sha256": [
+      "d66470fbd49885773af38530faf2bc584136ca5ccfd4830c4520464fc40e06fa",
+      "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4",
+      "5447b605113dad84ded4b1ad6159428e5d769daea542db87d181041c5c04cae1",
+      "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81"
+    ],
+    "variant_names": ["Main", "Secondary Secondary"],
+    "source_variant_order_matches_external_settings_order": true,
+    "source_settings_placement": "direct child after name and presentation",
+    "storage_settings_placement": "external standalone Settings documents in direct settingsVariant order",
+    "terminal_schema_file_is_empty": true
+  },
+  "proven_claims": [
+    "The second little-endian u32 header field is the external Settings document count: it changed from one to two when a second direct settingsVariant was added.",
+    "For the attested one- and two-variant shapes, the header stores settings_count + 1 little-endian u64 lengths for PrimarySchemaFile and every external Settings document; TerminalSchemaFile consumes the remaining bytes.",
+    "Two external standalone Settings documents bind positionally to two direct root settingsVariant nodes and materialize as direct inline settings children in source order.",
+    "The native selected tree and packed and unpacked template body are byte-identical across two fresh ru_RU platform rounds.",
+    "The terminal empty SchemaFile is unchanged from dcs-core while the primary SchemaFile expands only for the second metadata shell."
+  ],
+  "non_claims": [
+    "No absent Settings document, duplicate variant name, empty name or presentation, more than two variants, defaultSettings, nested variant, or alternate positional binding is inferred.",
+    "No AreaTemplate, additional nonterminal SchemaFile, appearance side-table, appIndex, current-configuration reference, or reverse AreaTemplate writer is inferred.",
+    "No full typed DataCompositionSchema semantic model is inferred; the schema shell remains source-owned and only the evidenced envelope and Settings delegation are owned.",
+    "No arbitrary unknown schema child, cross-profile replay, EDT source roundtrip, or whole-profile 8.3.27 alias is inferred.",
+    "Unica generated only the hypothesis seed; pinned 8.3.27.2214 output is the authority."
+  ]
+}

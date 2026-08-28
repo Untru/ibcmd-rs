@@ -1,6 +1,6 @@
 //! Typed dispatch for base-free template bodies.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -8,8 +8,8 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::EffectiveProfile;
 
 use super::dcs::{
-    DcsBody, DcsCodecError, DcsCodecProfile, DcsTemplateKind, compile_evidenced_dcs,
-    decode_compatible_dcs, validate_raw_xml_root,
+    DcsBody, DcsCodecError, DcsCodecProfile, DcsTemplateKind,
+    compile_evidenced_dcs_with_references, decode_compatible_dcs, validate_raw_xml_root,
 };
 use super::mxl::{
     MxlBody, MxlCodecError, MxlCodecProfile, compile_evidenced_mxl, decode_compatible_mxl,
@@ -224,18 +224,51 @@ pub fn compile_template(
     compile_evidenced_template(kind, source)
 }
 
+/// Compiles a template body exactly like [`compile_template`], but also
+/// resolves a `DataCompositionSchema` custom-`StyleItem` style-color
+/// reference's semantic name back to its configuration-local storage uuid
+/// via `style_reference_types` (see
+/// [`super::dcs::compile_dcs_with_references`]). Every other `TemplateKind`
+/// and the standard `Named` style-reference form are unaffected: an empty
+/// map behaves identically to [`compile_template`].
+pub fn compile_template_with_references(
+    profile: &TemplateCodecProfile,
+    kind: TemplateKind,
+    source: TemplateSource<'_>,
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<Vec<u8>, TemplateCodecError> {
+    let _ = profile;
+    compile_evidenced_template_with_references(kind, source, style_reference_types)
+}
+
 pub(crate) fn compile_evidenced_template(
     kind: TemplateKind,
     source: TemplateSource<'_>,
 ) -> Result<Vec<u8>, TemplateCodecError> {
+    compile_evidenced_template_with_references(kind, source, &BTreeMap::new())
+}
+
+pub(crate) fn compile_evidenced_template_with_references(
+    kind: TemplateKind,
+    source: TemplateSource<'_>,
+    style_reference_types: &BTreeMap<String, String>,
+) -> Result<Vec<u8>, TemplateCodecError> {
     let blob = match (kind, source) {
         (TemplateKind::DataCompositionSchema, TemplateSource::Bytes(xml)) => {
-            compile_evidenced_dcs(DcsTemplateKind::Schema, xml)
-                .map_err(|error| TemplateCodecError::Dcs(error.to_string()))?
+            compile_evidenced_dcs_with_references(
+                DcsTemplateKind::Schema,
+                xml,
+                style_reference_types,
+            )
+            .map_err(|error| TemplateCodecError::Dcs(error.to_string()))?
         }
         (TemplateKind::DataCompositionAppearanceTemplate, TemplateSource::Bytes(xml)) => {
-            compile_evidenced_dcs(DcsTemplateKind::Appearance, xml)
-                .map_err(|error| TemplateCodecError::Dcs(error.to_string()))?
+            compile_evidenced_dcs_with_references(
+                DcsTemplateKind::Appearance,
+                xml,
+                style_reference_types,
+            )
+            .map_err(|error| TemplateCodecError::Dcs(error.to_string()))?
         }
         (TemplateKind::GraphicalSchema, TemplateSource::Bytes(xml)) => {
             validate_raw_xml_root(xml, "GraphicalSchema", Some(GRAPHICAL_SCHEMA_NS))

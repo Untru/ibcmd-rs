@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-register-generated-types",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 282,
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-12",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_isolated_file_infobases",
+    "vm": "Parallels Windows 11 ARM64; x86-64 platform under Windows emulation"
+  },
+  "seed": {
+    "kind": "unica_main_hypothesis_then_platform_attested",
+    "definition_path": "seed/unica-main-definition.json",
+    "definition_size": 941,
+    "definition_sha256": "e15ed25cf33b83eb5a48541b486133ce31c67baa6753dd09e3dfdb570959508f",
+    "unica_main_sha": "a527d40962d047c6922c903b37510b30f697da42",
+    "cf_init_executed_sha256": "74eda1f9e1043f453757a11adac8b55db7a563f24124074bbc17baec27bdae68",
+    "meta_compile_executed_sha256": "f32e88001babe250bf06dc2525a3c6e3ebb70ed293b12e764d2722370d55eff1",
+    "python_version": "3.14.3",
+    "lxml_version": "6.1.1",
+    "unica_public_handler_status": "already_emits_zero_without_extDimensionTypes_on_a527d40",
+    "explicit_correction": "maxExtDimensionCount=0",
+    "correction_reason": "The fresh Unica reference generator emitted 3 by default while its own hint path treated the default as 0; pinned 8.3.27.2214 rejected the uncorrected chart without ExtDimensionTypes."
+  },
+  "platform_attestation": {
+    "procedure": [
+      "Generate one minimal XML 2.20 source tree with the pinned Unica main hypothesis scripts.",
+      "Import and apply the source in a new isolated file infobase with pinned ibcmd 8.3.27.2214.",
+      "Save a 90645-byte CF, export only the two register objects and their two required plan objects, and extract their exact UUID elements as raw-deflate.",
+      "Load that CF into a second isolated file infobase, save a second CF, repeat the selected XML export and exact raw extraction.",
+      "Compare all four packed payloads, unpacked payloads, and selected native XML outputs byte-for-byte."
+    ],
+    "round_1_cf": {
+      "size": 90645,
+      "sha256": "1b6600fe61394a6c5e5b8e11e7b59fa134fcd1c3d8effc3132c93c21a4e4233a"
+    },
+    "round_2_cf": {
+      "size": 90704,
+      "sha256": "acd89b32e8403efcb919dfc2f6d4ca484b8ca6216eb717b255d44d549256b964"
+    },
+    "object_raw_pairs_equal_between_rounds": true,
+    "selected_native_xml_equal_between_rounds": true,
+    "selected_objects": 4
+  },
+  "objects": [
+    {
+      "kind": "AccountingRegister",
+      "name": "CorpusAccountingRegister",
+      "uuid": "8b6ea484-0164-4c68-a0cb-175a31c56186",
+      "raw_entry": {
+        "compression": "raw-deflate",
+        "packed": {
+          "path": "raw/8b6ea484-0164-4c68-a0cb-175a31c56186.deflate",
+          "size": 1854,
+          "sha256": "f57a55cef8c67835c466ad6ac08d5c9a279e326d499ead6b219d112c096d4a54"
+        },
+        "unpacked": {
+          "path": "raw/8b6ea484-0164-4c68-a0cb-175a31c56186.txt",
+          "size": 14454,
+          "sha256": "c50b678b13c2558088ea48762e4add19a4166a5a3c4d176e44b2fa9fd437f4f6"
+        }
+      },
+      "native_xml": {
+        "path": "native/AccountingRegisters/CorpusAccountingRegister.xml",
+        "size": 12503,
+        "sha256": "3ec72bf1f69e658f85b4fe785ea5e96cf32240be05106dc2974b4dbef6fb032e"
+      },
+      "generated_types_in_order": [
+        "AccountingRegisterRecord.CorpusAccountingRegister:Record",
+        "AccountingRegisterExtDimensions.CorpusAccountingRegister:ExtDimensions",
+        "AccountingRegisterRecordSet.CorpusAccountingRegister:RecordSet",
+        "AccountingRegisterRecordKey.CorpusAccountingRegister:RecordKey",
+        "AccountingRegisterSelection.CorpusAccountingRegister:Selection",
+        "AccountingRegisterList.CorpusAccountingRegister:List",
+        "AccountingRegisterManager.CorpusAccountingRegister:Manager"
+      ]
+    },
+    {
+      "kind": "CalculationRegister",
+      "name": "CorpusCalculationRegister",
+      "uuid": "5ad20ecf-0375-4218-b348-0534286973a5",
+      "raw_entry": {
+        "compression": "raw-deflate",
+        "packed": {
+          "path": "raw/5ad20ecf-0375-4218-b348-0534286973a5.deflate",
+          "size": 1999,
+          "sha256": "a7ff330491297f22b4a7d7784d2c2ac776ce7d2d75547786daf908acb8c0a940"
+        },
+        "unpacked": {
+          "path": "raw/5ad20ecf-0375-4218-b348-0534286973a5.txt",
+          "size": 25000,
+          "sha256": "df522317ae39662f57192fd9d25f520a4e68fe0242eebbd07b1b39e0d26fb89a"
+        }
+      },
+      "native_xml": {
+        "path": "native/CalculationRegisters/CorpusCalculationRegister.xml",
+        "size": 17626,
+        "sha256": "8742bbf6c54e5a110a1d54ccc4fa688602c4dd234763c210ae25f0d66c892119"
+      },
+      "generated_types_in_order": [
+        "CalculationRegisterRecord.CorpusCalculationRegister:Record",
+        "CalculationRegisterManager.CorpusCalculationRegister:Manager",
+        "CalculationRegisterSelection.CorpusCalculationRegister:Selection",
+        "CalculationRegisterList.CorpusCalculationRegister:List",
+        "CalculationRegisterRecordSet.CorpusCalculationRegister:RecordSet",
+        "CalculationRegisterRecordKey.CorpusCalculationRegister:RecordKey",
+        "RecalculationsManager.CorpusCalculationRegister:Recalcs"
+      ]
+    },
+    {
+      "kind": "ChartOfAccounts",
+      "name": "CorpusAccounts",
+      "uuid": "7671ada0-5cde-47a2-b49e-8de67818fb10",
+      "raw_entry": {
+        "compression": "raw-deflate",
+        "packed": {
+          "path": "raw/7671ada0-5cde-47a2-b49e-8de67818fb10.deflate",
+          "size": 1968,
+          "sha256": "467813bd8fed7c1c5901dbfa7a9eac45293361e1d5f42c37aae22f2b66493cfa"
+        },
+        "unpacked": {
+          "path": "raw/7671ada0-5cde-47a2-b49e-8de67818fb10.txt",
+          "size": 30912,
+          "sha256": "3b6553f9ef66d373457b5fcda2de4cf8585ad8ea3535454b936636ab4c217a20"
+        }
+      },
+      "native_xml": {
+        "path": "native/ChartsOfAccounts/CorpusAccounts.xml",
+        "size": 19927,
+        "sha256": "2b13dd60f0b4434ef673d901b9e6f3ec6b1da24ec4d393935d31ac4963cc3737"
+      },
+      "generated_types_in_order": [
+        "ChartOfAccountsObject.CorpusAccounts:Object",
+        "ChartOfAccountsRef.CorpusAccounts:Ref",
+        "ChartOfAccountsSelection.CorpusAccounts:Selection",
+        "ChartOfAccountsList.CorpusAccounts:List",
+        "ChartOfAccountsManager.CorpusAccounts:Manager",
+        "ChartOfAccountsExtDimensionTypes.CorpusAccounts:ExtDimensionTypes",
+        "ChartOfAccountsExtDimensionTypesRow.CorpusAccounts:ExtDimensionTypesRow"
+      ]
+    },
+    {
+      "kind": "ChartOfCalculationTypes",
+      "name": "CorpusCalculationTypes",
+      "uuid": "8c132029-d49c-49db-b12b-64519b64d755",
+      "raw_entry": {
+        "compression": "raw-deflate",
+        "packed": {
+          "path": "raw/8c132029-d49c-49db-b12b-64519b64d755.deflate",
+          "size": 1913,
+          "sha256": "bcc374c0e7e21e2f712fd7d5ea9c50471adf24590ea7a62f50fbfdf3b5c4af25"
+        },
+        "unpacked": {
+          "path": "raw/8c132029-d49c-49db-b12b-64519b64d755.txt",
+          "size": 16365,
+          "sha256": "6295f2983f300ef9e311324480bea88216cfd9df95c7a48697f5d76d5aeba3a1"
+        }
+      },
+      "native_xml": {
+        "path": "native/ChartsOfCalculationTypes/CorpusCalculationTypes.xml",
+        "size": 13331,
+        "sha256": "e055ef567f65a0e261c39d644c056ab7004a3e93192dca7cdecdfe887ba89b9a"
+      },
+      "generated_types_in_order": [
+        "ChartOfCalculationTypesObject.CorpusCalculationTypes:Object",
+        "ChartOfCalculationTypesRef.CorpusCalculationTypes:Ref",
+        "ChartOfCalculationTypesSelection.CorpusCalculationTypes:Selection",
+        "ChartOfCalculationTypesList.CorpusCalculationTypes:List",
+        "ChartOfCalculationTypesManager.CorpusCalculationTypes:Manager",
+        "DisplacingCalculationTypes.CorpusCalculationTypes:DisplacingCalculationTypes",
+        "DisplacingCalculationTypesRow.CorpusCalculationTypes:DisplacingCalculationTypesRow",
+        "BaseCalculationTypes.CorpusCalculationTypes:BaseCalculationTypes",
+        "BaseCalculationTypesRow.CorpusCalculationTypes:BaseCalculationTypesRow",
+        "LeadingCalculationTypes.CorpusCalculationTypes:LeadingCalculationTypes",
+        "LeadingCalculationTypesRow.CorpusCalculationTypes:LeadingCalculationTypesRow"
+      ]
+    }
+  ],
+  "proven_claims": [
+    "Pinned 8.3.27.2214 accepted and applied the corrected XML 2.20 seed in an isolated file infobase.",
+    "The exact packed and unpacked payloads for both registers and both required plans were stable across two independent platform rounds.",
+    "All four selected native XML outputs were byte-identical across both rounds.",
+    "Each register has seven generated types with exact identities, categories, and native XML order.",
+    "ChartOfAccounts has seven generated types, including ExtDimensionTypes and ExtDimensionTypesRow, while ChartOfCalculationTypes has eleven generated types in the recorded native order.",
+    "The ChartOfAccounts owner uses object code 32, 57 fields, header index 15, and MaxExtDimensionCount=0; ChartOfCalculationTypes uses object code 35, 63 fields, and header index 1."
+  ],
+  "non_claims": [
+    "Unica is not treated as an authority; its seed was corrected after the platform rejected an inconsistent default.",
+    "No production Unica defect is claimed: the public Rust handler on a527d40 already emits zero without ExtDimensionTypes; only its legacy reference-model fixture was stale.",
+    "The complete CF files and dependency objects are not committed.",
+    "The fixture is diagnostic-only and is never read as a production fallback.",
+    "No non-empty recalculation encoding or unrelated register property layout is inferred from this fixture.",
+    "No ChartOfCharacteristicTypes layout is inferred from these two plans."
+  ]
+}

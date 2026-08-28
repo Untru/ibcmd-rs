@@ -281,6 +281,30 @@ pub enum MetadataDecodeError {
     ProfileVersionMismatch {
         object_path: ObjectPath,
     },
+    /// A complex property carries content that the compile direction has no
+    /// evidenced model for. `owner` names the enclosing shape (family, child
+    /// object, or standard attribute) and `property` the exact XML property,
+    /// so the coordinate is identified without reading the decoder source.
+    UnevidencedProperty {
+        owner: String,
+        property: &'static str,
+    },
+    /// A property that every evidenced platform tree emits empty carries
+    /// stray text.  This is a lexical defect of the input, not a missing
+    /// compile model, and is reported apart from `UnevidencedProperty`.
+    UnexpectedContent {
+        owner: String,
+        property: &'static str,
+    },
+    /// A standard-attribute sub-property deviates from the platform default
+    /// profile, so the block carries object data the compile direction cannot
+    /// represent.  `expected` is the evidenced default, `actual` what was read.
+    UnevidencedStandardAttribute {
+        owner: String,
+        property: &'static str,
+        expected: &'static str,
+        actual: String,
+    },
 }
 impl Display for MetadataDecodeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -1443,7 +1467,28 @@ fn document_normalized_len(document: &XmlDocument) -> Result<usize, MetadataDeco
 }
 
 type NamespaceScope = BTreeMap<String, Rc<str>>;
-pub(super) type ResolvedNamespaces = BTreeMap<usize, Option<Rc<str>>>;
+pub(super) struct ResolvedNamespaces {
+    element_uris: BTreeMap<usize, Option<Rc<str>>>,
+    scopes: BTreeMap<usize, Rc<NamespaceScope>>,
+}
+
+impl ResolvedNamespaces {
+    fn new() -> Self {
+        Self {
+            element_uris: BTreeMap::new(),
+            scopes: BTreeMap::new(),
+        }
+    }
+
+    fn get(&self, key: &usize) -> Option<&Option<Rc<str>>> {
+        self.element_uris.get(key)
+    }
+
+    fn insert(&mut self, key: usize, uri: Option<Rc<str>>, scope: Rc<NamespaceScope>) {
+        self.element_uris.insert(key, uri);
+        self.scopes.insert(key, scope);
+    }
+}
 
 fn element_key(element: &XmlElement) -> usize {
     element as *const XmlElement as usize
@@ -1461,23 +1506,34 @@ pub(super) fn typed(
     element.name().local() == local && uri_of(element, uris) == expected
 }
 
+pub(super) fn namespace_uri_for_prefix<'a>(
+    element: &XmlElement,
+    prefix: &str,
+    uris: &'a ResolvedNamespaces,
+) -> Option<&'a str> {
+    uris.scopes
+        .get(&element_key(element))
+        .and_then(|scope| scope.get(prefix))
+        .map(Rc::as_ref)
+}
+
 pub(super) fn resolve_namespaces(
     root: &XmlElement,
 ) -> Result<ResolvedNamespaces, MetadataDecodeError> {
     let mut scope = NamespaceScope::new();
     scope.insert("xml".to_owned(), Rc::from(XML_NAMESPACE));
     let mut uris = ResolvedNamespaces::new();
-    collect_namespaces(root, &mut scope, &mut uris)?;
+    collect_namespaces(root, Rc::new(scope), &mut uris)?;
     Ok(uris)
 }
 
 fn collect_namespaces(
     element: &XmlElement,
-    scope: &mut NamespaceScope,
+    inherited_scope: Rc<NamespaceScope>,
     uris: &mut ResolvedNamespaces,
 ) -> Result<(), MetadataDecodeError> {
     let mut seen = BTreeSet::new();
-    let mut changes = Vec::new();
+    let mut declared_scope: Option<NamespaceScope> = None;
     for attribute in element.attributes() {
         match attribute.kind() {
             AttributeKind::Ordinary(name)
@@ -1512,23 +1568,26 @@ fn collect_namespaces(
                     ));
                 }
                 let owned_key = key.to_owned();
-                let previous = if uri.is_empty() {
-                    scope.remove(key)
+                let scope = declared_scope.get_or_insert_with(|| inherited_scope.as_ref().clone());
+                if uri.is_empty() {
+                    scope.remove(key);
                 } else {
-                    scope.insert(owned_key.clone(), Rc::from(uri))
-                };
-                changes.push((owned_key, previous));
+                    scope.insert(owned_key, Rc::from(uri));
+                }
             }
             AttributeKind::Ordinary(_) => {}
         }
     }
+    let scope = declared_scope
+        .map(Rc::new)
+        .unwrap_or_else(|| Rc::clone(&inherited_scope));
     let uri = match element.name().prefix() {
         Some(prefix) => Some(scope.get(prefix).cloned().ok_or(
             MetadataDecodeError::InvalidEnvelope("unbound element prefix"),
         )?),
         None => scope.get("").cloned(),
     };
-    uris.insert(element_key(element), uri);
+    uris.insert(element_key(element), uri, Rc::clone(&scope));
     {
         // Attribute expanded names use their explicit prefix binding only;
         // unlike element names, an unprefixed attribute has no namespace.
@@ -1551,14 +1610,7 @@ fn collect_namespaces(
     }
     for node in element.children() {
         if let XmlNode::Element(child) = node {
-            collect_namespaces(child, scope, uris)?;
-        }
-    }
-    for (key, previous) in changes.into_iter().rev() {
-        if let Some(previous) = previous {
-            scope.insert(key, previous);
-        } else {
-            scope.remove(key.as_str());
+            collect_namespaces(child, Rc::clone(&scope), uris)?;
         }
     }
     Ok(())
@@ -2108,14 +2160,18 @@ mod tests {
         );
         let uris = resolve_namespaces(&root).unwrap();
         let root_uri = uris.get(&element_key(&root)).unwrap().as_ref().unwrap();
+        let root_scope = uris.scopes.get(&element_key(&root)).unwrap();
         for node in root.children() {
             let XmlNode::Element(child) = node else {
                 unreachable!()
             };
             let child_uri = uris.get(&element_key(child)).unwrap().as_ref().unwrap();
             assert!(Rc::ptr_eq(root_uri, child_uri));
+            let child_scope = uris.scopes.get(&element_key(child)).unwrap();
+            assert!(Rc::ptr_eq(root_scope, child_scope));
         }
-        assert_eq!(Rc::strong_count(root_uri), root.children().len() + 1);
+        assert_eq!(Rc::strong_count(root_scope), root.children().len() + 1);
+        assert_eq!(Rc::strong_count(root_uri), root.children().len() + 2);
     }
 
     #[test]
