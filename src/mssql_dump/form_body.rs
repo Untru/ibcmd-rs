@@ -24783,7 +24783,29 @@ pub(super) fn parse_form_table_row_picture_data_path(
         [kind, uuid] if matches!(kind.trim(), "0" | "4") => {
             let uuid = parse_non_zero_uuid(uuid.trim())?;
             let reference = object_refs.get(&uuid)?;
-            form_metadata_attribute_suffix(reference)?
+            // A member named by its own metadata reference carries the name the
+            // configuration declares for it, and the platform writes that name.
+            // The alias table renames *standard* members, which a chain never
+            // names by uuid -- `form_metadata_attribute_suffix` accepts only a
+            // `…Attribute.<Name>` reference, and a standard attribute has no
+            // such reference -- so running the declared name through it can only
+            // rename a declaration after the platform has already spelled it.
+            //
+            // Evidence: over all 8 527 `<RowPictureDataPath>` values of the
+            // eight native stand trees, not one whose head is `Объект`/`Запись`
+            // and whose path is three segments long ends in an English standard
+            // name, and exactly one ends in a Russian standard spelling -- ERP
+            // УХ 3.2.12.6 `Catalogs/СправочникиБД/Forms/ФормаЭлемента`, written
+            // `Объект.НаборыРеквизитовИСведений.Предопределенный`, where
+            // `Предопределенный` (uuid f6743b85-…) is a declared attribute of
+            // that tabular section and not the catalogue's standard
+            // `Predefined`. The chain walker already spells a uuid-named member
+            // by its declared name with no alias step; this route was the one
+            // place that disagreed.
+            return Some(format!(
+                "{table_name}.{}",
+                form_metadata_attribute_suffix(reference)?
+            ));
         }
         _ => return None,
     };
