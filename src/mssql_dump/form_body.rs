@@ -24351,11 +24351,6 @@ const CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] =
 /// declares are left out because no bound slot in the corpora carries them, and
 /// the family's three standard *tabular sections* (`-10`, `-20`, `-30`) are not
 /// standard attributes and keep the route that already names them.
-const CHART_OF_CALCULATION_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
-    ("-4", "ActionPeriodIsBasic"),
-    ("-3", "Description"),
-    ("-2", "Code"),
-];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),
@@ -24424,6 +24419,15 @@ const INFORMATION_REGISTER_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Peri
 /// Note `-8` is `Predefined` here and `RegisterRecords` in the type-blind table
 /// of last resort, and `-10` is `BaseCalculationTypes` here and `Predefined`
 /// there: the family decides, which is why this table is read before that one.
+///
+/// Две ветки волны построили эту таблицу порознь — корпусную на три маркера
+/// и семенную на десять, — и слияние оставило семенную: она измерена на
+/// байтах платформы поэлементно и согласна с корпусной на всех трёх общих
+/// маркерах. Оговорка корпусной ветки сохранена: `-10`, `-20` и `-30` — это
+/// стандартные табличные части семейства, и до слияния их называл отдельный
+/// маршрут. Имя у обоих маршрутов одно, так что байты от переноса не едут;
+/// если когда-нибудь разойдутся — разводить надо маршрут, а не заводить
+/// вторую таблицу того же факта.
 const CHART_OF_CALCULATION_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Code"),
     ("-3", "Description"),
