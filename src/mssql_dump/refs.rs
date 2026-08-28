@@ -381,16 +381,6 @@ pub(super) fn build_metadata_field_declaration_index_from_texts(
             _ => {}
         }
     }
-    if let Ok(path) = std::env::var("IBCMD_UA_CONST_PROBE") {
-        let mut dump = String::new();
-        for (uuid, declared) in &index.constants {
-            dump.push_str(&format!(
-                "{uuid}\t{}\t{}\n",
-                declared.always_used, declared.value_storage
-            ));
-        }
-        let _ = std::fs::write(path, dump);
-    }
     index
 }
 
