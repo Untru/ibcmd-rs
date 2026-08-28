@@ -23944,6 +23944,10 @@ fn form_standard_attribute_table_for_type_reference(
             Some(TASK_OBJECT_STANDARD_ATTRIBUTES)
         }
         (
+            GeneratedMetadataOwnerFamily::ChartOfCalculationTypes,
+            GeneratedMetadataOwnerRole::Object,
+        ) => Some(CHART_OF_CALCULATION_TYPES_OBJECT_STANDARD_ATTRIBUTES),
+        (
             GeneratedMetadataOwnerFamily::ChartOfCharacteristicTypes,
             GeneratedMetadataOwnerRole::Object,
         ) => Some(CHART_OF_CHARACTERISTIC_TYPES_OBJECT_STANDARD_ATTRIBUTES),
@@ -24053,6 +24057,27 @@ const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
 /// carries in the eight stand corpora.
 const CHART_OF_ACCOUNTS_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] =
     &[("-7", "Code"), ("-8", "Description")];
+/// The standard attributes a chart of calculation types spells for the markers
+/// a form binding names them by.
+///
+/// The three rows are the three markers the eight stand corpora put through a
+/// bound slot on a `cfg:ChartOfCalculationTypesObject.*` attribute, each paired
+/// against the `<DataPath>` the platform writes for the item that carries it:
+/// `-2` is `Code` on all 3, `-3` is `Description` on all 3 and `-4` is
+/// `ActionPeriodIsBasic` on the 1 that carries it -- ERP УХ 3.2.12.6
+/// `ChartsOfCalculationTypes/Начисления/Forms/ФормаВидаРасчета`, CheckBoxField
+/// `ПериодДействияБазовый`, which was written with the item's own Russian name
+/// because no route could name the marker. All three agree with
+/// `CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES`, the table the family's own
+/// root writes `<StandardAttributes>` from; the four further markers that table
+/// declares are left out because no bound slot in the corpora carries them, and
+/// the family's three standard *tabular sections* (`-10`, `-20`, `-30`) are not
+/// standard attributes and keep the route that already names them.
+const CHART_OF_CALCULATION_TYPES_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-4", "ActionPeriodIsBasic"),
+    ("-3", "Description"),
+    ("-2", "Code"),
+];
 const TASK_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-2", "Number"),
     ("-3", "Date"),
