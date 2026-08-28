@@ -595,6 +595,17 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
             .command_set_excluded_commands
             .retain(|command| !FORM_TABLE_ROW_SET_EXCLUDED_COMMANDS.contains(command));
     }
+    // The table's own command set is the second reader of the other fact the
+    // root set already reads: a list names a standard command only when the
+    // list has it, and the list a table is shown over is the list to ask --
+    // not the form's main one. The root reader asks the same two questions of
+    // the same two functions.
+    retain_form_table_list_owned_commands(
+        &mut child_items,
+        &attributes,
+        &child_item_indexes.bound_attribute_id_by_table_id,
+        context.metadata_field_declarations,
+    );
     resolve_form_choice_form_references(
         &mut child_items,
         context.form_reference_index.unwrap_or(context.object_refs),
@@ -24779,25 +24790,122 @@ fn form_list_without_main_table_declares_standard_command(
     if settings.main_table.is_some() {
         return true;
     }
-    !matches!(
-        command,
-        "Change"
-            | "Copy"
-            | "Create"
-            | "CreateFolder"
-            | "Delete"
-            | "FindByCurrentValue"
-            | "HierarchicalList"
-            | "LevelDown"
-            | "LevelUp"
-            | "List"
-            | "MoveItem"
-            | "Post"
-            | "SetDateInterval"
-            | "SetDeletionMark"
-            | "Tree"
-            | "UndoPosting"
-    )
+    !FORM_LIST_MAIN_TABLE_ROW_COMMANDS.contains(&command)
+        && !FORM_ROOT_LIST_MAIN_TABLE_ONLY_COMMANDS.contains(&command)
+}
+
+/// The commands a dynamic list has only while a table stands behind it.
+///
+/// Twelve names, measured on the list itself rather than on the reader that
+/// asks. Census over the 6 515 native `<Table>` `<CommandSet>` blocks of the
+/// eight stand corpora, each table joined to the form attribute its own
+/// `<DataPath>` names: 84 of them are shown over a `cfg:DynamicList` that
+/// declares no `<MainTable>`, and **not one** of the 84 names any of these
+/// twelve, while the 2 033 tables over a list that does declare one name them
+/// 91..1 231 times each -- `Change` 684, `Copy` 1 231, `Create` 1 126,
+/// `CreateFolder` 144, `Delete` 855, `LevelDown` 161, `LevelUp` 161,
+/// `MoveItem` 154, `Post` 117, `SetDateInterval` 91, `SetDeletionMark` 378,
+/// `UndoPosting` 128. What the 84 do name is the list's own view and search
+/// commands -- `ListSettings` 39, `CopyToClipboard` 32, the two dynamic-list
+/// settings commands 30 each, `Refresh` 27, `CancelSearch` 26, `Find` 23,
+/// `OutputList` 20 -- so the set is not simply empty there.
+const FORM_LIST_MAIN_TABLE_ROW_COMMANDS: [&str; 12] = [
+    "Change",
+    "Copy",
+    "Create",
+    "CreateFolder",
+    "Delete",
+    "LevelDown",
+    "LevelUp",
+    "MoveItem",
+    "Post",
+    "SetDateInterval",
+    "SetDeletionMark",
+    "UndoPosting",
+];
+
+/// The four names the *root* command set additionally never carries over a
+/// main-table-less list, and which the table's own set does carry.
+///
+/// They are held apart from the twelve above rather than merged into them
+/// because the corpus separates them: the same census that finds 0/84 for the
+/// twelve finds `FindByCurrentValue` on 24 of the 84 tables and
+/// `HierarchicalList`, `List` and `Tree` on 5 each (`DataProcessors/
+/// РегистрацияИзмененийДляОбменаДанными/Forms/ВыборОбъектовОтбором`, table
+/// `Отбор`, in all five corpora that have forms). The root reader's own
+/// population is 30 root sets, too small to have met any of the four, so its
+/// sixteen-name list is kept exactly as measured there and is not widened onto
+/// a reader whose corpus contradicts it.
+const FORM_ROOT_LIST_MAIN_TABLE_ONLY_COMMANDS: [&str; 4] =
+    ["FindByCurrentValue", "HierarchicalList", "List", "Tree"];
+
+/// Whether the list a `<Table>` is shown over has the standard command this
+/// name spells.
+///
+/// The same two questions the root command set already asks about the form's
+/// *main* list, asked about the list *this* table is bound to. Both readers go
+/// through the one pair of functions so the two cannot drift apart: what the
+/// platform cannot name it leaves out of the set, at the table exactly as at
+/// the root.
+///
+/// Evidence for the hierarchy half at the table, the same 6 515 native table
+/// command sets joined to their list's `<MainTable>`: `HierarchicalList`,
+/// `LevelDown`, `LevelUp`, `List`, `MoveItem`, `Tree` and `CreateFolder` are
+/// written 98..144 times each on the 331 tables over a folder-hierarchy
+/// catalogue and 36..52 times (`CreateFolder` excepted, 0) on the 109 over an
+/// item-hierarchy one -- and **zero** times on the 484 over a catalogue that
+/// declares `<Hierarchical>false` and **zero** times on the 1 103 over a
+/// family with no hierarchy to declare (609 information register, 413
+/// document, 42 document journal, 18 accumulation register, 12 task, 4
+/// exchange plan, 4 business process, 1 enumeration). That is the same split,
+/// name for name, the root reader measured on its own 6 727 blocks.
+///
+/// A table over anything but a dynamic list -- a value table, a value tree, an
+/// object's tabular section -- has no list to ask about and is left exactly as
+/// it was.
+fn form_table_list_declares_standard_command(
+    command: &str,
+    settings: &FormDynamicListSettings,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> bool {
+    let main_table = settings.main_table.as_deref();
+    if main_table.is_none() {
+        return !FORM_LIST_MAIN_TABLE_ROW_COMMANDS.contains(&command);
+    }
+    form_list_owner_declares_standard_command(command, main_table, declarations)
+}
+
+/// Drop from every `<Table>`'s own `<CommandSet>` the standard commands the
+/// list behind that table does not have.
+fn retain_form_table_list_owned_commands(
+    items: &mut [FormChildItem],
+    attributes: &[FormAttribute],
+    bound_attribute_id_by_table_id: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) {
+    for item in items.iter_mut() {
+        if item.tag == "Table"
+            && !item.command_set_excluded_commands.is_empty()
+            && let Some(settings) = bound_attribute_id_by_table_id
+                .get(&item.id)
+                .and_then(|attribute_id| {
+                    attributes
+                        .iter()
+                        .find(|attribute| &attribute.id == attribute_id)
+                })
+                .and_then(|attribute| attribute.settings.as_ref())
+        {
+            item.command_set_excluded_commands.retain(|command| {
+                form_table_list_declares_standard_command(command, settings, declarations)
+            });
+        }
+        retain_form_table_list_owned_commands(
+            &mut item.child_items,
+            attributes,
+            bound_attribute_id_by_table_id,
+            declarations,
+        );
+    }
 }
 
 /// Whether the table showing the form's own main list declares its row set
