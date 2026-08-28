@@ -23,6 +23,82 @@ use crate::module_blob::{
     parse_simple_metadata_xml_properties,
 };
 
+#[test]
+fn form_absent_metadata_physical_path_defers_platform_grammar_families() {
+    let object_refs = BTreeMap::new();
+    assert_eq!(
+        form_body::resolve_form_absent_metadata_physical_data_path(
+            "{2,{1},{0,11111111-1111-4111-8111-111111111111}}",
+            &object_refs,
+        )
+        .as_deref(),
+        Some("1/0:11111111-1111-4111-8111-111111111111")
+    );
+
+    for family in [
+        "5bdad865-f2c5-434b-8041-ba4aad3b6687",
+        "e67e2953-cebe-4d97-bb93-12b17e6384f8",
+        "1ab44b24-3315-40a9-b495-f1f1227ac205",
+        "f77758c9-9fcd-490f-9bbd-1e446541f536",
+        "91162600-3161-4326-89a0-4a7cecd5092a",
+    ] {
+        assert_eq!(
+            form_body::resolve_form_absent_metadata_physical_data_path(
+                &format!("{{2,{{1}},{{0,{family}}}}}"),
+                &object_refs,
+            ),
+            None,
+            "platform grammar family {family} must stay with its logical resolver"
+        );
+    }
+}
+
+#[test]
+fn information_register_master_dimension_scan_keeps_only_a_proven_prefix() {
+    let complete = vec![
+        Some(("First".to_string(), true)),
+        Some(("Ordinary".to_string(), false)),
+        Some(("Second".to_string(), true)),
+    ];
+    assert_eq!(
+        information_register_known_master_dimension_prefix(&complete, 3, 3),
+        Some(vec!["First".to_string(), "Second".to_string()])
+    );
+    assert_eq!(
+        information_register_known_master_dimension_prefix(&[], 0, 0),
+        Some(Vec::new()),
+        "a completely decoded empty declaration is evidence"
+    );
+
+    let late_refusal = vec![
+        Some(("First".to_string(), true)),
+        Some(("Ordinary".to_string(), false)),
+        None,
+        Some(("UnprovenLater".to_string(), true)),
+    ];
+    assert_eq!(
+        information_register_known_master_dimension_prefix(&late_refusal, 4, 3),
+        Some(vec!["First".to_string()]),
+        "only master positions before the first refusal are stable"
+    );
+
+    let early_refusal = vec![
+        Some(("Ordinary".to_string(), false)),
+        None,
+        Some(("UnprovenLater".to_string(), true)),
+    ];
+    assert_eq!(
+        information_register_known_master_dimension_prefix(&early_refusal, 3, 2),
+        None,
+        "an empty partial prefix must not be mistaken for no master dimensions"
+    );
+    assert_eq!(
+        information_register_known_master_dimension_prefix(&complete, 4, 3),
+        None,
+        "a declaration-count mismatch proves no positional prefix"
+    );
+}
+
 /// Slots 3 upwards name the register's master dimensions positionally, in
 /// declaration order.
 ///
@@ -69,8 +145,8 @@ fn form_navigation_panel_slots_from_three_name_master_dimensions_in_order() {
     }
 }
 
-/// A slot past the last master dimension refuses rather than falling back to the
-/// nearest one: the platform writes nothing there.
+/// A slot past the last master dimension keeps its raw command identifier
+/// rather than falling back to the nearest one.
 #[test]
 fn form_navigation_panel_register_open_by_value_refuses_slot_past_last_master_dimension() {
     let register_uuid = "22222222-2222-4222-8222-222222222222".to_string();
@@ -100,7 +176,7 @@ fn form_navigation_panel_register_open_by_value_refuses_slot_past_last_master_di
             &master_dimensions,
             "Catalog.Products",
         ),
-        None
+        Some(format!("5:{register_uuid}"))
     );
 }
 
@@ -217,16 +293,18 @@ fn form_navigation_panel_resolves_standard_form_and_open_by_recorder_commands() 
     );
 }
 
-/// Only for a register that declares no master dimension at all - a shape the
-/// corpus never shows in this slot - does the older single-field reading apply,
-/// and it stays fail-closed on ambiguity there.
+/// A decoded register with no master dimensions does not borrow a matching
+/// field from the form owner. The empty declaration is evidence that the
+/// positional command has no name, so both field-index shapes keep the raw
+/// identifier. An unread declaration remains a refusal.
 #[test]
-fn form_navigation_panel_open_by_value_field_reading_is_limited_to_masterless_registers() {
+fn form_navigation_panel_open_by_value_requires_a_declared_master_dimension() {
     let register_uuid = "77777777-7777-4777-8777-777777777777".to_string();
     let object_refs = BTreeMap::from([(
         register_uuid.clone(),
         "InformationRegister.Queue".to_string(),
     )]);
+    let no_master_dimensions = BTreeMap::from([(register_uuid.clone(), Vec::<String>::new())]);
     let one_field = BTreeMap::from([(
         register_uuid.clone(),
         vec![InformationRegisterFieldReference {
@@ -239,10 +317,10 @@ fn form_navigation_panel_open_by_value_field_reading_is_limited_to_masterless_re
             &format!("{{3,{register_uuid}}}"),
             &object_refs,
             &one_field,
-            &BTreeMap::new(),
+            &no_master_dimensions,
             "Catalog.CurrentOwner",
         ),
-        Some("InformationRegister.Queue.StandardCommand.OpenByValue.Message".to_string())
+        Some(format!("3:{register_uuid}"))
     );
 
     let ambiguous = BTreeMap::from([(
@@ -260,10 +338,44 @@ fn form_navigation_panel_open_by_value_field_reading_is_limited_to_masterless_re
             &format!("{{3,{register_uuid}}}"),
             &object_refs,
             &ambiguous,
+            &no_master_dimensions,
+            "Catalog.CurrentOwner",
+        ),
+        Some(format!("3:{register_uuid}"))
+    );
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{3,{register_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             "Catalog.CurrentOwner",
         ),
-        None
+        None,
+        "an unread declaration must not be treated as an empty one"
+    );
+}
+
+#[test]
+fn form_navigation_panel_kind_8_is_a_raw_variant_not_a_dimension_position() {
+    let register_uuid = "88888888-8888-4888-8888-888888888888".to_string();
+    let object_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        "InformationRegister.RegisterProbe".to_string(),
+    )]);
+    let master_dimensions = BTreeMap::from([(
+        register_uuid.clone(),
+        (1..=6).map(|index| format!("Key{index}")).collect(),
+    )]);
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{8,{register_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            &master_dimensions,
+            "Catalog.CurrentOwner",
+        ),
+        Some(format!("8:{register_uuid}"))
     );
 }
 
@@ -8381,6 +8493,110 @@ fn extracts_root_command_set_table_and_form_standard_commands() {
 }
 
 #[test]
+fn document_owner_window_does_not_carry_write_and_close() {
+    let document_extension = FormMainAttributeExtension::Declared {
+        family: Some("DocumentObject".to_string()),
+        main_list_table_family: None,
+    };
+    let catalog_extension = FormMainAttributeExtension::Declared {
+        family: Some("CatalogObject".to_string()),
+        main_list_table_family: None,
+    };
+
+    assert!(!form_window_owns_standard_command(
+        "WriteAndClose",
+        &document_extension,
+        Some("LockOwnerWindow"),
+    ));
+    assert!(form_window_owns_standard_command(
+        "Write",
+        &document_extension,
+        Some("LockOwnerWindow"),
+    ));
+    assert!(form_window_owns_standard_command(
+        "WriteAndClose",
+        &document_extension,
+        None,
+    ));
+    assert!(form_window_owns_standard_command(
+        "WriteAndClose",
+        &catalog_extension,
+        Some("LockOwnerWindow"),
+    ));
+}
+
+#[test]
+fn set_date_interval_button_uses_the_main_list_table_family() {
+    let command = "{0,eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111}";
+    let register_list = FormMainAttributeExtension::Declared {
+        family: None,
+        main_list_table_family: Some("InformationRegister".to_string()),
+    };
+    let document_list = FormMainAttributeExtension::Declared {
+        family: None,
+        main_list_table_family: Some("Document".to_string()),
+    };
+    assert_eq!(
+        parse_form_button_command_name_with_main_attribute(
+            command,
+            &[],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &register_list,
+        )
+        .as_deref(),
+        Some("0:eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111")
+    );
+    assert_eq!(
+        parse_form_button_command_name_with_main_attribute(
+            command,
+            &[],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &document_list,
+        )
+        .as_deref(),
+        Some("Form.StandardCommand.SetDateInterval")
+    );
+    assert!(
+        form_extension_owns_standard_command("SetDateInterval", &register_list),
+        "the button-only separator must not alter the root command set"
+    );
+}
+
+#[test]
+fn table_delete_command_revision_uses_the_main_table_family() {
+    let register_table = FormTableCommandOwnership {
+        excluded_commands: Vec::new(),
+        row_set_unchangeable: false,
+        list_without_main_table: false,
+        main_table_family: Some("InformationRegister".to_string()),
+    };
+    let document_table = FormTableCommandOwnership {
+        main_table_family: Some("Document".to_string()),
+        ..register_table.clone()
+    };
+
+    assert!(!form_table_owns_button_standard_command(
+        "Delete",
+        "ec576e13-1e76-4c33-98aa-a33204514227",
+        &register_table,
+    ));
+    assert!(form_table_owns_button_standard_command(
+        "Delete",
+        "ec576e13-1e76-4c33-98aa-a33204514227",
+        &document_table,
+    ));
+    assert!(form_table_owns_button_standard_command(
+        "Delete",
+        "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+        &register_table,
+    ));
+}
+
+#[test]
 fn extracts_root_command_set_corpus_aliases() {
     let mut fields = vec![""; 21];
     fields[18] = "0";
@@ -9662,6 +9878,38 @@ fn normalizes_form_server_state_core_type_qnames_idempotently() {
 }
 
 #[test]
+fn normalizes_empty_form_server_state_design_time_value_as_nil() {
+    let self_closed = r#"<dcssch:value xsi:type="dcscor:DesignTimeValue"/>"#;
+    let open_close = r#"<dcssch:value xsi:type="dcscor:DesignTimeValue"></dcssch:value>"#;
+    let expected = r#"<dcssch:value xsi:nil="true"/>"#;
+    assert_eq!(normalize_form_server_state_inner_xml(self_closed), expected);
+    assert_eq!(normalize_form_server_state_inner_xml(open_close), expected);
+    assert_eq!(normalize_form_server_state_inner_xml(expected), expected);
+}
+
+#[test]
+fn parses_and_writes_group_selected_setting_presentation_generically() {
+    let values = parse_form_setting_localized_string(
+        r##"{"#",87024738-fc2a-4436-ada1-df79d395c424,{2,"ru","Caption","en","Caption EN"}}"##,
+    )
+    .expect("platform localized-string property");
+    assert_eq!(
+        values,
+        vec![
+            ("ru".to_string(), "Caption".to_string()),
+            ("en".to_string(), "Caption EN".to_string()),
+        ]
+    );
+    let settings = FormListSettings {
+        items_user_setting_presentation: values,
+        ..FormListSettings::default()
+    };
+    let xml = format_form_list_settings_xml(&settings).unwrap();
+    assert!(xml.contains("<dcsset:itemsUserSettingPresentation xsi:type=\"v8:LocalStringType\">"));
+    assert!(xml.contains("<v8:content>Caption EN</v8:content>"));
+}
+
+#[test]
 fn extracts_form_attributes_conditional_appearance_from_body_tail() {
     let encoded = include_str!(
         "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
@@ -9923,8 +10171,9 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
             }),
             spreadsheet_document_settings: None,
             type_description_settings: None,
-            unresolvable_field_item_ids: BTreeSet::new(),
-            field_item_twins: BTreeMap::new(),
+        unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
+        field_item_twins: BTreeMap::new(),
         }]);
 
     assert!(xml.contains(r#"<Settings xsi:type="DynamicList">"#));
@@ -10655,6 +10904,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
             )),
             items_view_mode: None,
             items_user_setting_id: Some("971fd96e-2ae3-41d5-9d7a-bad772efb890".to_string()),
+            items_user_setting_presentation: Vec::new(),
             group_items: None,
             data_parameters: None,
         },
@@ -10686,6 +10936,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }]);
 
@@ -10726,6 +10977,70 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
             "<dcsset:itemsUserSettingID>971fd96e-2ae3-41d5-9d7a-bad772efb890</dcsset:itemsUserSettingID>"
         ));
     assert!(!xml.contains("<dcsset:itemsViewMode>"), "{xml}");
+}
+
+#[test]
+fn omits_nil_data_parameter_value_for_nil_value_list_schema_parameter() {
+    let mut settings = FormListSettings {
+        data_parameters: Some(
+            "\t\t\t\t\t<dcsset:dataParameters>\r\n\
+             \t\t\t\t\t\t<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">\r\n\
+             \t\t\t\t\t\t\t<dcscor:use>false</dcscor:use>\r\n\
+             \t\t\t\t\t\t\t<dcscor:parameter>ListProbe</dcscor:parameter>\r\n\
+             \t\t\t\t\t\t\t<dcscor:value xsi:nil=\"true\"/>\r\n\
+             \t\t\t\t\t\t</dcscor:item>\r\n\
+             \t\t\t\t\t\t<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">\r\n\
+             \t\t\t\t\t\t\t<dcscor:use>false</dcscor:use>\r\n\
+             \t\t\t\t\t\t\t<dcscor:parameter>ScalarProbe</dcscor:parameter>\r\n\
+             \t\t\t\t\t\t\t<dcscor:value xsi:nil=\"true\"/>\r\n\
+             \t\t\t\t\t\t</dcscor:item>\r\n\
+             \t\t\t\t\t</dcsset:dataParameters>\r\n"
+                .to_string(),
+        ),
+        ..FormListSettings::default()
+    };
+    let server_state = r#"
+        <Parameter>
+            <dcssch:name>ListProbe</dcssch:name>
+            <dcssch:value xsi:nil="true"/>
+            <dcssch:valueListAllowed>true</dcssch:valueListAllowed>
+        </Parameter>
+        <Parameter>
+            <dcssch:name>ScalarProbe</dcssch:name>
+            <dcssch:value xsi:nil="true"/>
+        </Parameter>
+        <Parameter>
+            <dcssch:name>NonNilListProbe</dcssch:name>
+            <dcssch:value xsi:type="xs:string"/>
+            <dcssch:valueListAllowed>true</dcssch:valueListAllowed>
+        </Parameter>
+    "#;
+
+    form_body::reconcile_form_list_settings_data_parameter_values(
+        &mut settings,
+        Some(server_state),
+    );
+
+    let fragment = settings.data_parameters.unwrap();
+    let list_item = fragment
+        .split("<dcscor:parameter>ListProbe</dcscor:parameter>")
+        .nth(1)
+        .unwrap()
+        .split("</dcscor:item>")
+        .next()
+        .unwrap();
+    assert!(!list_item.contains("<dcscor:value"), "{fragment}");
+    let scalar_item = fragment
+        .split("<dcscor:parameter>ScalarProbe</dcscor:parameter>")
+        .nth(1)
+        .unwrap()
+        .split("</dcscor:item>")
+        .next()
+        .unwrap();
+    assert!(
+        scalar_item.contains(r#"<dcscor:value xsi:nil="true"/>"#),
+        "{fragment}"
+    );
 }
 
 /// Removes the `"<name>",<value>` pair from a raw 1C braced property bag,
@@ -11094,6 +11409,7 @@ fn formats_explicit_false_dynamic_data_read() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }]);
 
@@ -11246,13 +11562,16 @@ fn form_attribute_column_type_pattern_resolves_platform_references() {
         assert!(!xml.contains("xmlns:"), "no inline namespace: {xml}");
     }
 
-    // A genuinely unknown identifier stays a refusal, so no `<Type>` is invented.
+    // A genuinely unknown identifier is preserved physically as `<TypeId>`;
+    // it must not be invented into a named `<Type>` reference.
     assert_eq!(
         parse_form_attribute_column_type_pattern(
             r##"{"Pattern",{"#",00000000-0000-4000-8000-000000000009}}"##,
             &BTreeMap::new(),
         ),
-        None
+        Some(vec![ConstantValueType::TypeId {
+            type_id: "00000000-0000-4000-8000-000000000009".to_string(),
+        }])
     );
 }
 
@@ -11348,6 +11667,7 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     let data_path_by_binding_key = BTreeMap::from([
@@ -11427,6 +11747,7 @@ fn unnameable_form_attribute_saved_field_is_written_physically() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     apply_form_attribute_save_field_bindings(
@@ -11893,6 +12214,19 @@ fn marks_use_always_fields_a_manual_query_cannot_resolve() {
 }
 
 #[test]
+fn dynamic_list_field_names_resolve_case_insensitively() {
+    let universe = BTreeSet::from(["ApiValue".to_string(), "GroupField".to_string()]);
+    assert!(form_dynamic_list_field_name_is_resolvable(
+        "APIVALUE", None, &universe
+    ));
+    assert!(form_dynamic_list_field_name_is_resolvable(
+        "groupfield",
+        None,
+        &universe
+    ));
+}
+
+#[test]
 fn marks_use_always_fields_outside_an_auto_list_main_table() {
     let attribute = parse_form_attribute(
             r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,14,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Реквизит"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Реквизит"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","Ref"},"FiledsMapItemId1",{"N",2},"FiledsMapItemName1",{"S","Ref"},"FieldsMapItemId2",{"N",3},"FieldsMapItemName2",{"S","Пропавший"},"FiledsMapItemId2",{"N",3},"FiledsMapItemName2",{"S","Пропавший"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",2},"ReqMapFieldId2",{"N",3}},{0,0}}"##,
@@ -11918,6 +12252,94 @@ fn marks_use_always_fields_outside_an_auto_list_main_table() {
             "Список.Реквизит".to_string(),
         ]
     );
+}
+
+#[test]
+fn password_mode_field_is_outside_an_auto_list_universe() {
+    let record = r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,10,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Login"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Login"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","Password"},"FiledsMapItemId1",{"N",2},"FiledsMapItemName1",{"S","Password"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",2}},{0,0}}"##;
+    let object_refs = BTreeMap::from([
+        (
+            "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+            "InformationRegister.TestAuth".to_string(),
+        ),
+        (
+            "11111111-1111-4111-8111-111111111111".to_string(),
+            "InformationRegister.TestAuth.Dimension.Login".to_string(),
+        ),
+        (
+            "22222222-2222-4222-8222-222222222222".to_string(),
+            "InformationRegister.TestAuth.Dimension.Password".to_string(),
+        ),
+    ]);
+    let declarations = MetadataFieldDeclarationIndex::default()
+        .with_password_field("InformationRegister.TestAuth", "Password");
+
+    let attribute = parse_form_attribute_with_declarations(
+        record,
+        &BTreeMap::new(),
+        &object_refs,
+        &declarations,
+    )
+    .unwrap();
+
+    assert_eq!(
+        attribute.use_always,
+        vec!["~Список.Password".to_string(), "Список.Login".to_string()]
+    );
+}
+
+#[test]
+fn undeclared_final_scope_query_field_invalidates_the_available_field_universe() {
+    let record = r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,12,"QueryText",{"S","ВЫБРАТЬ Source.Known КАК Known, Source.Missing КАК Missing ИЗ Справочник.TestSource КАК Source"},"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Known"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Known"},"ReqMapFieldId0",{"N",1}},{0,0}}"##;
+    let object_refs = BTreeMap::from([
+        (
+            "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+            "Catalog.TestSource".to_string(),
+        ),
+        (
+            "11111111-1111-4111-8111-111111111111".to_string(),
+            "Catalog.TestSource.Attribute.Known".to_string(),
+        ),
+    ]);
+    let declarations =
+        MetadataFieldDeclarationIndex::default().with_data_fields("Catalog.TestSource", &["Known"]);
+
+    let attribute = parse_form_attribute_with_declarations(
+        record,
+        &BTreeMap::new(),
+        &object_refs,
+        &declarations,
+    )
+    .unwrap();
+
+    assert_eq!(attribute.use_always, vec!["~Список.Known".to_string()]);
+}
+
+#[test]
+fn register_moment_in_time_is_a_query_field_without_a_metadata_child() {
+    let record = r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,12,"QueryText",{"S","ВЫБРАТЬ Source.Known КАК Known, Source.МоментВремени КАК МоментВремени ИЗ РегистрСведений.TestSource КАК Source"},"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Known"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Known"},"ReqMapFieldId0",{"N",1}},{0,0}}"##;
+    let object_refs = BTreeMap::from([
+        (
+            "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+            "InformationRegister.TestSource".to_string(),
+        ),
+        (
+            "11111111-1111-4111-8111-111111111111".to_string(),
+            "InformationRegister.TestSource.Dimension.Known".to_string(),
+        ),
+    ]);
+    let declarations = MetadataFieldDeclarationIndex::default()
+        .with_data_fields("InformationRegister.TestSource", &["Known"]);
+
+    let attribute = parse_form_attribute_with_declarations(
+        record,
+        &BTreeMap::new(),
+        &object_refs,
+        &declarations,
+    )
+    .unwrap();
+
+    assert_eq!(attribute.use_always, vec!["Список.Known".to_string()]);
 }
 
 #[test]
@@ -12070,8 +12492,9 @@ fn reads_the_final_select_of_a_dynamic_list_query() {
         selection.aliases,
         BTreeSet::from([
             "Итог".to_string(),
-            // A plain dotted path names its post-source segments joined.
-            "СсылкаНаименование".to_string(),
+            // The source row's standard reference is a dereference step, not
+            // a result-name segment of its own.
+            "Наименование".to_string(),
             "Параметр".to_string(),
             "Пусто".to_string(),
         ])
@@ -12231,6 +12654,19 @@ fn formats_form_attribute_type_description_settings_from_element_type() {
     assert!(xml.contains("<v8:Type>xs:string</v8:Type>"), "{xml}");
     assert!(xml.contains("<v8:StringQualifiers>"), "{xml}");
     assert!(!xml.contains(r#"<Settings xsi:type="v8:TypeDescription"/>"#));
+
+    assert_eq!(
+        format_type_description_value_types_xml(
+            &[ConstantValueType::Reference {
+                reference: "d5p1:TextDocument".to_string()
+            }],
+            "\t"
+        ),
+        concat!(
+            "\t<v8:Type xmlns:d5p1=\"http://v8.1c.ru/8.1/data/txtedt\">",
+            "d5p1:TextDocument</v8:Type>\r\n"
+        )
+    );
 }
 
 #[test]
@@ -12399,6 +12835,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
             spreadsheet_document_settings: None,
             type_description_settings: None,
             unresolvable_field_item_ids: BTreeSet::new(),
+            invalid_nested_field_item_ids: BTreeSet::new(),
             field_item_twins: BTreeMap::new(),
         }
     }
@@ -12646,6 +13083,49 @@ fn extracts_empty_attribute_additional_columns_container() {
     .expect("attribute-level AdditionalColumns carries columns");
     assert_eq!(parsed.table, "ГрафикНачислений");
     assert_eq!(parsed.columns.len(), 1);
+}
+
+#[test]
+fn resolves_accounting_record_set_filter_additional_columns_member() {
+    let type_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let register_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let attribute = |id: &str, name: &str, reference: &str| {
+        parse_form_attribute(
+            &format!(
+                r##"{{9,{{{id}}},0,"{name}",{{1,0}},{{"Pattern",{{"#",{type_uuid}}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}},{{0,0}},{{0,0}}}}"##
+            ),
+            &BTreeMap::from([(type_uuid.to_string(), reference.to_string())]),
+            &BTreeMap::new(),
+        )
+        .unwrap()
+    };
+
+    let direct = parse_form_attribute_additional_columns_group(
+        r#"{0,{2,{31},{-60001}},0}"#,
+        &[attribute(
+            "31",
+            "RecordSet",
+            "cfg:AccountingRegisterRecordSet.TestLedger",
+        )],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &FormChildItemIndexes::default(),
+    )
+    .unwrap();
+    assert_eq!(direct.table, "RecordSet.Filter");
+
+    let nested = parse_form_attribute_additional_columns_group(
+        &format!(r#"{{0,{{4,{{1}},{{-8}},{{0,{register_uuid}}},{{-60001}}}},0}}"#),
+        &[attribute("1", "Object", "cfg:DocumentObject.TestDocument")],
+        &BTreeMap::new(),
+        &BTreeMap::from([(
+            register_uuid.to_string(),
+            "AccountingRegister.TestLedger".to_string(),
+        )]),
+        &FormChildItemIndexes::default(),
+    )
+    .unwrap();
+    assert_eq!(nested.table, "Object.RegisterRecords.TestLedger.Filter");
 }
 
 #[test]
@@ -12959,6 +13439,7 @@ fn extracts_form_child_items_from_layout_pairs() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     let object_refs = BTreeMap::from([(
@@ -14752,6 +15233,7 @@ fn extracts_wrapper55_table_user_settings_group() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     let group_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -16151,6 +16633,7 @@ fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     };
     let mut table_column_names_by_id = BTreeMap::new();
@@ -16311,6 +16794,7 @@ fn resolves_document_form_paths_from_the_typed_metadata_owner() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     };
     let owner = form_attribute_metadata_owner(&attribute);
@@ -16457,6 +16941,7 @@ fn typed_form_metadata_paths_cover_members_and_fail_closed() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     });
     assert_eq!(
@@ -16542,6 +17027,7 @@ fn indexes_direct_table_columns_from_their_structural_table_parent() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
 
@@ -16669,6 +17155,7 @@ fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     let object_refs = BTreeMap::from([(
@@ -16843,6 +17330,7 @@ fn extracts_nested_table_additional_columns_group() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     let mut indexes = FormChildItemIndexes::default();
@@ -16901,6 +17389,7 @@ fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_u
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     let mut indexes = FormChildItemIndexes::default();
@@ -16949,6 +17438,7 @@ fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }];
     let mut indexes = FormChildItemIndexes::default();
@@ -17051,6 +17541,7 @@ fn resolves_additional_columns_binding_per_owner_and_rejects_collisions() {
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     };
     let attributes = vec![attribute("1", "ОбъектА"), attribute("2", "ОбъектБ")];
@@ -24692,6 +25183,7 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     };
     let attribute_names = BTreeMap::from([("1".to_string(), "Object".to_string())]);
@@ -25388,6 +25880,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
             spreadsheet_document_settings: None,
             type_description_settings: None,
             unresolvable_field_item_ids: BTreeSet::new(),
+            invalid_nested_field_item_ids: BTreeSet::new(),
             field_item_twins: BTreeMap::new(),
         },
         FormAttribute {
@@ -25415,6 +25908,7 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
             spreadsheet_document_settings: None,
             type_description_settings: None,
             unresolvable_field_item_ids: BTreeSet::new(),
+            invalid_nested_field_item_ids: BTreeSet::new(),
             field_item_twins: BTreeMap::new(),
         },
     ];
@@ -26975,80 +27469,92 @@ fn parses_common_command_load_report_settings_picture() {
     assert_eq!(reference, Some("StdPicture.LoadReportSettings".to_string()));
     assert!(load_transparent);
     assert_eq!(
-        common_command_standard_picture_name("37cf7cc0-abad-4385-b597-6fd2d8dc085a"),
+        standard_picture_name("37cf7cc0-abad-4385-b597-6fd2d8dc085a"),
         Some("StdPicture.Task")
     );
     assert_eq!(
-        common_command_standard_picture_name("723765ab-0b92-4745-a621-1ba0f77c92c9"),
+        standard_picture_name("723765ab-0b92-4745-a621-1ba0f77c92c9"),
         Some("StdPicture.EventLog")
     );
     assert_eq!(
-        common_command_standard_picture_name("4fddea39-5129-4b4c-83fe-4e443cd61940"),
+        standard_picture_name("4fddea39-5129-4b4c-83fe-4e443cd61940"),
         Some("StdPicture.EventLogByUser")
     );
     assert_eq!(
-        common_command_standard_picture_name("ffab30f1-da11-44b5-b34c-24da22badcf4"),
+        standard_picture_name("ffab30f1-da11-44b5-b34c-24da22badcf4"),
         Some("StdPicture.Find")
     );
     assert_eq!(
-        common_command_standard_picture_name("91022b99-b610-48ad-954e-a297848081ce"),
+        standard_picture_name("91022b99-b610-48ad-954e-a297848081ce"),
         Some("StdPicture.SortListAsc")
     );
     assert_eq!(
-        common_command_standard_picture_name("1fa32fdb-a180-418f-a6eb-db7516b7a30b"),
+        standard_picture_name("1fa32fdb-a180-418f-a6eb-db7516b7a30b"),
         Some("StdPicture.SortListDesc")
     );
     assert_eq!(
-        common_command_standard_picture_name("18492a87-2fe4-44af-b218-304897fed020"),
+        standard_picture_name("18492a87-2fe4-44af-b218-304897fed020"),
         Some("StdPicture.MarkToDelete")
     );
     assert_eq!(
-        common_command_standard_picture_name("20ebc47b-f4d9-439c-acd3-fdc624fbac2a"),
+        standard_picture_name("20ebc47b-f4d9-439c-acd3-fdc624fbac2a"),
         Some("StdPicture.Post")
     );
     assert_eq!(
-        common_command_standard_picture_name("8f29e0e2-d5e6-41e8-a34d-9a0288156322"),
+        standard_picture_name("8f29e0e2-d5e6-41e8-a34d-9a0288156322"),
         Some("StdPicture.Reread")
     );
     assert_eq!(
-        common_command_standard_picture_name("db817ee1-fd28-4e7f-bb4a-53686b2b153c"),
+        standard_picture_name("db817ee1-fd28-4e7f-bb4a-53686b2b153c"),
         Some("StdPicture.Report")
     );
     assert_eq!(
-        common_command_standard_picture_name("1970a480-9b38-405e-9d9e-8209f3fad5f1"),
+        standard_picture_name("1970a480-9b38-405e-9d9e-8209f3fad5f1"),
         Some("StdPicture.ScheduledJob")
     );
     assert_eq!(
-        common_command_standard_picture_name("58174855-39be-462e-8723-cb2d95182146"),
+        standard_picture_name("58174855-39be-462e-8723-cb2d95182146"),
         Some("StdPicture.SetDateInterval")
     );
     assert_eq!(
-        common_command_standard_picture_name("942e0303-a3ec-4fe8-887c-5aea8516d424"),
+        standard_picture_name("942e0303-a3ec-4fe8-887c-5aea8516d424"),
         Some("StdPicture.ReportSettings")
     );
     assert_eq!(
-        common_command_standard_picture_name("fb7e9fb5-110b-41cb-adc6-753969ae1c81"),
+        standard_picture_name("fb7e9fb5-110b-41cb-adc6-753969ae1c81"),
         Some("StdPicture.ExpandAll")
     );
     assert_eq!(
-        common_command_standard_picture_name("27ee3053-952c-49e5-8261-9215098e0e9c"),
+        standard_picture_name("27ee3053-952c-49e5-8261-9215098e0e9c"),
         Some("StdPicture.CollapseAll")
     );
     assert_eq!(
-        common_command_standard_picture_name("5289d9a4-b012-4d54-9bce-50473fe29b57"),
+        standard_picture_name("5289d9a4-b012-4d54-9bce-50473fe29b57"),
         Some("StdPicture.DialogExclamation")
     );
     assert_eq!(
-        common_command_standard_picture_name("785362cb-3756-48ed-87d2-292ded17054a"),
+        standard_picture_name("785362cb-3756-48ed-87d2-292ded17054a"),
         Some("StdPicture.OpenFile")
     );
     assert_eq!(
-        common_command_standard_picture_name("23f940bf-7381-4c2b-85a1-e541ed428042"),
+        standard_picture_name("23f940bf-7381-4c2b-85a1-e541ed428042"),
         Some("StdPicture.SaveValues")
     );
     assert_eq!(
-        common_command_standard_picture_name("a7707ed1-39b0-418f-974d-4d500d27a9c6"),
+        standard_picture_name("a7707ed1-39b0-418f-974d-4d500d27a9c6"),
         Some("StdPicture.RestoreValues")
+    );
+    assert_eq!(
+        standard_picture_name("f3c1376a-d2ee-46c4-9e44-aa2f7dae31c4"),
+        Some("StdPicture.Chart")
+    );
+    assert_eq!(
+        standard_picture_name("d6eefec0-792a-4720-8933-e2a57f9e312c"),
+        Some("StdPicture.Resource")
+    );
+    assert_eq!(
+        parse_common_command_picture_value(r#"{4,1,{-100},"",-1,-1,1,0,""}"#, &BTreeMap::new()),
+        Some((Some("StdPicture.Select".to_string()), true))
     );
     let (delete_page_break_reference, delete_page_break_load_transparent) =
         parse_common_command_picture_value(
@@ -45831,7 +46337,7 @@ fn parses_detailed_information_register_command_picture_and_parameter_types() {
         ),
         ("caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb", "StdPicture.Setting"),
     ] {
-        assert_eq!(common_command_standard_picture_name(uuid), Some(expected));
+        assert_eq!(standard_picture_name(uuid), Some(expected));
         let descriptor = format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,1,0,\"\"}}");
         let properties = parse_command(&descriptor, &BTreeMap::new()).unwrap();
         assert_eq!(properties.picture_ref.as_deref(), Some(expected));
@@ -68849,6 +69355,12 @@ fn data_path_input_field(id: &str, name: &str, binding: &str) -> String {
     )
 }
 
+fn data_path_table_item(id: &str, name: &str, binding: &str) -> String {
+    format!(
+        r#"{{73,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,1,0,"{name}",0,0,1,{{1,0}},0,{binding},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}}"#
+    )
+}
+
 fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>) -> FormAttribute {
     FormAttribute {
         design_time_settings: None,
@@ -68872,6 +69384,7 @@ fn data_path_form_attribute(id: &str, name: &str, exact_type_uuid: Option<&str>)
         spreadsheet_document_settings: None,
         type_description_settings: None,
         unresolvable_field_item_ids: BTreeSet::new(),
+        invalid_nested_field_item_ids: BTreeSet::new(),
         field_item_twins: BTreeMap::new(),
     }
 }
@@ -68931,8 +69444,15 @@ fn data_path_child_items_xml(
         layout.push((*item).to_string());
     }
     let layout = layout.iter().map(String::as_str).collect::<Vec<_>>();
-    let indexes =
+    let mut indexes =
         collect_form_child_item_indexes_with_object_refs(&layout, attributes, object_refs, None);
+    collect_form_chain_walk_member_indexes(
+        &mut indexes,
+        attributes,
+        std::sync::Arc::new(BTreeMap::new()),
+        None,
+    );
+    collect_form_item_rooted_chain_roots(&mut indexes, attributes, object_refs);
     let items = extract_form_child_items(
         &layout,
         attributes,
@@ -68944,6 +69464,168 @@ fn data_path_child_items_xml(
         None,
     );
     format_form_child_items_xml(&items, 1)
+}
+
+fn nested_collection_attribute_for_test() -> FormAttribute {
+    let mut attribute = data_path_form_attribute("1", "Rows", None);
+    attribute.columns = vec![
+        FormAttributeColumn {
+            view_rights: None,
+            edit_rights: None,
+            fill_check: None,
+            id: "2".to_string(),
+            name: "Parents".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            explicit_empty_type: false,
+            functional_options: Vec::new(),
+        },
+        FormAttributeColumn {
+            view_rights: None,
+            edit_rights: None,
+            fill_check: None,
+            id: "5".to_string(),
+            name: "Children".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            explicit_empty_type: false,
+            functional_options: Vec::new(),
+        },
+        FormAttributeColumn {
+            view_rights: None,
+            edit_rights: None,
+            fill_check: None,
+            id: "3".to_string(),
+            name: "Hyperlink".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            explicit_empty_type: false,
+            functional_options: Vec::new(),
+        },
+    ];
+    attribute.additional_columns = vec![
+        FormAttributeAdditionalColumns {
+            table: "Rows.Parents".to_string(),
+            columns: vec![FormAttributeColumn {
+                view_rights: None,
+                edit_rights: None,
+                fill_check: None,
+                id: "5".to_string(),
+                name: "Children".to_string(),
+                title: Vec::new(),
+                value_types: Vec::new(),
+                explicit_empty_type: false,
+                functional_options: Vec::new(),
+            }],
+        },
+        FormAttributeAdditionalColumns {
+            table: "Rows.Parents.Children".to_string(),
+            columns: vec![FormAttributeColumn {
+                view_rights: None,
+                edit_rights: None,
+                fill_check: None,
+                id: "3".to_string(),
+                name: "Flag".to_string(),
+                title: Vec::new(),
+                value_types: Vec::new(),
+                explicit_empty_type: false,
+                functional_options: Vec::new(),
+            }],
+        },
+    ];
+    attribute
+}
+
+#[test]
+fn resolves_table_rooted_collection_chains_layer_by_layer() {
+    let scope = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let root = data_path_table_item("10", "RootTable", "{1,{1}}");
+    let parent = data_path_table_item(
+        "11",
+        "ParentTable",
+        "{2,{10,02023637-7868-4a5f-8576-835a76e0c9ba},{2}}",
+    );
+    let nested = data_path_table_item(
+        "12",
+        "NestedTable",
+        &format!("{{2,{{11,02023637-7868-4a5f-8576-835a76e0c9ba}},{{5,{scope}}}}}"),
+    );
+    let field = data_path_input_field(
+        "13",
+        "Flag",
+        &format!("{{3,{{11,02023637-7868-4a5f-8576-835a76e0c9ba}},{{5,{scope}}},{{3,{scope}}}}}"),
+    );
+    let xml = data_path_child_items_xml(
+        &[
+            root.as_str(),
+            parent.as_str(),
+            nested.as_str(),
+            field.as_str(),
+        ],
+        &[nested_collection_attribute_for_test()],
+        &BTreeMap::new(),
+    );
+
+    assert!(
+        xml.contains("<DataPath>Items.ParentTable.CurrentData.Children</DataPath>"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<DataPath>Items.ParentTable.CurrentData.Children.Flag</DataPath>"),
+        "{xml}"
+    );
+}
+
+#[test]
+fn resolves_scoped_use_always_members_in_the_nested_collection_namespace() {
+    let scope = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let mut attribute = nested_collection_attribute_for_test();
+    attribute.use_always = vec!["Rows.Parents.Children.Hyperlink".to_string()];
+    let mut attributes = vec![attribute];
+    let mut indexes = FormChildItemIndexes::default();
+    collect_form_chain_walk_member_indexes(
+        &mut indexes,
+        &attributes,
+        std::sync::Arc::new(BTreeMap::new()),
+        None,
+    );
+    let trailing = vec![
+        r#"{4,1,{9,{1},0,"Rows",{1,0},{"Pattern"},{0},{0},{0,1,{3,{2},{5,SCOPE},{3,SCOPE}}}},0}"#
+            .replace("SCOPE", scope),
+    ];
+
+    apply_form_attribute_scoped_use_always_bindings(
+        &mut attributes,
+        &trailing,
+        indexes.owner_scoped_bindings_for_test(),
+        &BTreeMap::new(),
+    );
+
+    assert_eq!(attributes[0].use_always, vec!["Rows.Parents.Children.Flag"]);
+}
+
+#[test]
+fn resolves_dynamic_list_field_map_member_for_additional_columns_table() {
+    let dynamic_list_uuid = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
+    let mut attribute = data_path_form_attribute("1", "TestList", Some(dynamic_list_uuid));
+    attribute.settings = Some(data_path_dynamic_list_settings(vec![
+        data_path_dynamic_list_field("12", "Details"),
+    ]));
+    let attributes = vec![attribute];
+    let indexes =
+        collect_form_child_item_indexes_with_object_refs(&[], &attributes, &BTreeMap::new(), None);
+    let group = parse_form_attribute_additional_columns_group(
+        r#"{0,{2,{1},{12}},1,{5,1,0,"Extra",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"#,
+        &attributes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &indexes,
+    )
+    .expect("dynamic-list map member declares the AdditionalColumns table");
+
+    assert_eq!(group.table, "TestList.Details");
+    assert_eq!(group.columns.len(), 1);
+    assert_eq!(group.columns[0].name, "Extra");
 }
 
 /// Column id `0` on a value-list attribute names its `Value` column, and only
@@ -68992,12 +69674,23 @@ fn resolves_form_item_owned_bindings_through_the_table_current_data_route() {
         "Описание",
         "{2,{1,02023637-7868-4a5f-8576-835a76e0c9ba},{40}}",
     );
+    let nested_field = data_path_input_field(
+        "16",
+        "LineNumber",
+        "{3,{1,02023637-7868-4a5f-8576-835a76e0c9ba},{41},{42}}",
+    );
     let mut attribute = data_path_form_attribute("1", "Список", Some(dynamic_list_uuid));
     attribute.settings = Some(data_path_dynamic_list_settings(vec![
         data_path_dynamic_list_field("40", "Описание"),
+        data_path_dynamic_list_field("41", "Детали"),
+        data_path_dynamic_list_field("42", "Детали.LineNumber"),
     ]));
 
-    let xml = data_path_child_items_xml(&[table, field.as_str()], &[attribute], &BTreeMap::new());
+    let xml = data_path_child_items_xml(
+        &[table, field.as_str(), nested_field.as_str()],
+        &[attribute],
+        &BTreeMap::new(),
+    );
     assert!(
         xml.contains("<DataPath>Items.Список.CurrentData.Описание</DataPath>"),
         "{xml}"
@@ -69005,6 +69698,134 @@ fn resolves_form_item_owned_bindings_through_the_table_current_data_route() {
     assert!(
         !xml.contains("<DataPath>Список.Описание</DataPath>"),
         "the form-item owner must not be read as an attribute id: {xml}"
+    );
+    assert!(
+        xml.contains("<DataPath>Items.Список.CurrentData.Детали.LineNumber</DataPath>"),
+        "the list-row marker is decided by the first map member, while later members retain the full nested path: {xml}"
+    );
+}
+
+#[test]
+fn marks_only_nested_dynamic_list_members_disproved_by_metadata() {
+    let object_refs = BTreeMap::from([
+        (
+            "11111111-1111-4111-8111-111111111111".to_string(),
+            "Catalog.TestLedger".to_string(),
+        ),
+        (
+            "22222222-2222-4222-8222-222222222222".to_string(),
+            "Catalog.TestLedger.TabularSection.Lines".to_string(),
+        ),
+        (
+            "33333333-3333-4333-8333-333333333333".to_string(),
+            "Catalog.TestLedger.TabularSection.Lines.Attribute.Account".to_string(),
+        ),
+    ]);
+    let declarations =
+        MetadataFieldDeclarationIndex::default().with_data_fields("Catalog.TestLedger", &["Lines"]);
+    assert_eq!(
+        form_dynamic_list_nested_field_is_declared(
+            "Catalog.TestLedger",
+            "Lines.Account",
+            &object_refs,
+            Some(&declarations),
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        form_dynamic_list_nested_field_is_declared(
+            "Catalog.TestLedger",
+            "Lines.Missing",
+            &object_refs,
+            Some(&declarations),
+        ),
+        Some(false)
+    );
+
+    let journal_declarations = MetadataFieldDeclarationIndex::default()
+        .with_data_fields("Document.First", &["Shared"])
+        .with_data_fields("Document.Second", &["Shared"])
+        .with_document_journal_documents(
+            "DocumentJournal.TestJournal",
+            &["Document.First", "Document.Second"],
+        );
+    assert_eq!(
+        form_dynamic_list_nested_field_is_declared(
+            "DocumentJournal.TestJournal",
+            "Ref.Shared",
+            &BTreeMap::new(),
+            Some(&journal_declarations),
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        form_dynamic_list_nested_field_is_declared(
+            "DocumentJournal.TestJournal",
+            "Ref.Missing",
+            &BTreeMap::new(),
+            Some(&journal_declarations),
+        ),
+        Some(false)
+    );
+
+    let main_table_uuid = "44444444-4444-4444-8444-444444444444";
+    let record = format!(
+        r##"{{9,{{3}},0,"TestList",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,10,"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{main_table_uuid}}},"FieldsMapItemId0",{{"N",14}},"FieldsMapItemName0",{{"S","Ref"}},"FieldsMapItemId1",{{"N",62}},"FieldsMapItemName1",{{"S","Ref.Missing"}}}},{{0,0}}}}"##
+    );
+    let parsed = parse_form_attribute_with_declarations(
+        &record,
+        &BTreeMap::new(),
+        &BTreeMap::from([(
+            main_table_uuid.to_string(),
+            "DocumentJournal.TestJournal".to_string(),
+        )]),
+        &journal_declarations,
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.invalid_nested_field_item_ids,
+        BTreeSet::from(["62".to_string()])
+    );
+
+    let dynamic_list_uuid = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
+    let mut attribute = data_path_form_attribute("1", "TestList", Some(dynamic_list_uuid));
+    attribute.settings = Some(data_path_dynamic_list_settings(vec![
+        data_path_dynamic_list_field("12", "Lines"),
+        data_path_dynamic_list_field("78", "Lines.Missing"),
+    ]));
+    attribute
+        .invalid_nested_field_item_ids
+        .insert("78".to_string());
+    assert_eq!(
+        data_path_owner_scoped_resolution("{3,{1},{12},{78}}", &[attribute.clone()]).as_deref(),
+        Some("~TestList.Lines.Missing")
+    );
+
+    let attribute_rooted = data_path_input_field("11", "MissingAttributePath", "{3,{1},{12},{78}}");
+    let xml = data_path_child_items_xml(
+        &[attribute_rooted.as_str()],
+        &[attribute.clone()],
+        &BTreeMap::new(),
+    );
+    assert!(
+        xml.contains("<DataPath>~TestList.Lines.Missing</DataPath>"),
+        "the marker-aware dynamic-list resolver must precede the generic chain walker: {xml}"
+    );
+
+    let table = data_path_table_item("9", "Rows", "{1,{1}}");
+    let nested = data_path_input_field(
+        "10",
+        "Missing",
+        "{3,{9,02023637-7868-4a5f-8576-835a76e0c9ba},{12},{78}}",
+    );
+    let xml = data_path_child_items_xml(
+        &[table.as_str(), nested.as_str()],
+        &[attribute],
+        &BTreeMap::new(),
+    );
+    assert!(
+        xml.contains("<DataPath>~Items.Rows.CurrentData.Lines.Missing</DataPath>"),
+        "{xml}"
     );
 }
 
@@ -72385,6 +73206,7 @@ fn a_label_field_writes_its_alignment_run_and_visual_tail_in_native_order() {
     label.control_border = Some(crate::form_schema::FormControlBorder {
         style: crate::form_schema::FormControlBorderStyle::Single,
         width: 1,
+        reference: None,
     });
     label.border_color = Some("style:ЦветРамки".to_string());
     label.text_color = Some("style:ЦветТекста".to_string());
@@ -72465,6 +73287,7 @@ fn the_smaller_owners_write_their_moved_properties_in_the_native_order() {
     decoration.control_border = Some(crate::form_schema::FormControlBorder {
         style: crate::form_schema::FormControlBorderStyle::Single,
         width: 1,
+        reference: None,
     });
     let xml = format_form_child_items_xml(&[decoration], 1);
     let at = owner_order_at(&xml);
@@ -74355,6 +75178,7 @@ fn border_colour_of_picture_and_formatted_document_fields_keeps_its_place() {
     picture.control_border = Some(crate::form_schema::FormControlBorder {
         style: crate::form_schema::FormControlBorderStyle::Single,
         width: 1,
+        reference: None,
     });
     picture.file_drag_mode = Some("AsFile");
     let xml = format_form_child_item_xml(&picture, 1, false);
@@ -74681,6 +75505,38 @@ fn accepts_the_declared_shifted_chart_field_layout() {
         schema.group_horizontal_align(&fields),
         Some(crate::form_schema::FormFieldGroupHorizontalAlign::Center)
     );
+
+    let progress_options = [
+        "4",
+        "32",
+        "1",
+        "1",
+        "0",
+        "0",
+        "100",
+        "0",
+        "0",
+        "1",
+        "{3,4,{0}}",
+        "1",
+        "0",
+        "0",
+        "1",
+        "0",
+    ];
+    assert_eq!(
+        crate::form_schema::FormSpecialFieldSchema::from_raw_layout(
+            "37",
+            60,
+            Some("9"),
+            1,
+            &progress_options,
+            Some("0"),
+        )
+        .expect("conditional-UserVisible prefix shifts the progress bar")
+        .xml_tag(),
+        "ProgressBarField"
+    );
 }
 
 /// The stored category alone is ambiguous for accounting registers. The
@@ -74690,38 +75546,38 @@ fn accepts_the_declared_shifted_chart_field_layout() {
 fn reconciles_an_ambiguous_main_table_category_with_its_query_source() {
     assert_eq!(
         reconcile_form_main_table_with_query_source(
-            Some("AccountingRegister.МСФО"),
-            Some("AccountingRegister.МСФО.RecordsWithExtDimensions".to_string()),
+            Some("AccountingRegister.TestLedger"),
+            Some("AccountingRegister.TestLedger.RecordsWithExtDimensions".to_string()),
             Some("3"),
-            Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.МСФО.Остатки КАК Остатки"),
+            Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.TestLedger.Остатки КАК Остатки"),
         ),
-        Some("AccountingRegister.МСФО.Balance".to_string())
+        Some("AccountingRegister.TestLedger.Balance".to_string())
     );
 
-    let categorized = Some("AccumulationRegister.СтоимостьВНАМСФО.Balance".to_string());
+    let categorized = Some("AccumulationRegister.TestStock.Balance".to_string());
     assert_eq!(
         reconcile_form_main_table_with_query_source(
-            Some("AccumulationRegister.СтоимостьВНАМСФО"),
+            Some("AccumulationRegister.TestStock"),
             categorized.clone(),
             Some("3"),
             Some(concat!(
-                "ВЫБРАТЬ Остатки.Сумма ИЗ РегистрНакопления.СтоимостьВНАМСФО.Остатки КАК Остатки ",
+                "ВЫБРАТЬ Остатки.Сумма ИЗ РегистрНакопления.TestStock.Остатки КАК Остатки ",
                 "ОБЪЕДИНИТЬ ВСЕ ВЫБРАТЬ Обороты.Сумма ИЗ ",
-                "РегистрНакопления.СтоимостьВНАМСФО.Обороты КАК Обороты"
+                "РегистрНакопления.TestStock.Обороты КАК Обороты"
             )),
         ),
         categorized
     );
 
-    let bare = Some("InformationRegister.РезультатыОбмена".to_string());
+    let bare = Some("InformationRegister.TestInfo".to_string());
     assert_eq!(
         reconcile_form_main_table_with_query_source(
-            Some("InformationRegister.РезультатыОбмена"),
+            Some("InformationRegister.TestInfo"),
             bare.clone(),
             Some("1"),
             Some(concat!(
-                "ВЫБРАТЬ Данные.Период ИЗ РегистрСведений.РезультатыОбмена КАК Данные ",
-                "ЛЕВОЕ СОЕДИНЕНИЕ РегистрСведений.РезультатыОбмена.СрезПоследних КАК Последние"
+                "ВЫБРАТЬ Данные.Период ИЗ РегистрСведений.TestInfo КАК Данные ",
+                "ЛЕВОЕ СОЕДИНЕНИЕ РегистрСведений.TestInfo.СрезПоследних КАК Последние"
             )),
         ),
         bare
@@ -74729,12 +75585,22 @@ fn reconciles_an_ambiguous_main_table_category_with_its_query_source() {
 
     assert_eq!(
         reconcile_form_main_table_with_query_source(
-            Some("AccountingRegister.МСФО"),
-            Some("AccountingRegister.МСФО".to_string()),
+            Some("AccountingRegister.TestLedger"),
+            Some("AccountingRegister.TestLedger".to_string()),
             None,
-            Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.МСФО.Остатки КАК Остатки"),
+            Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.TestLedger.Остатки КАК Остатки"),
         ),
-        Some("AccountingRegister.МСФО.Balance".to_string())
+        Some("AccountingRegister.TestLedger.Balance".to_string())
+    );
+
+    assert_eq!(
+        reconcile_form_main_table_with_query_source(
+            Some("AccountingRegister.TestRegister"),
+            Some("AccountingRegister.TestRegister".to_string()),
+            Some("4"),
+            Some("ВЫБРАТЬ Остатки.Сумма ИЗ РегистрБухгалтерии.TestRegister.Остатки КАК Остатки"),
+        ),
+        Some("AccountingRegister.TestRegister.Balance".to_string())
     );
 }
 
@@ -74769,6 +75635,162 @@ fn preserves_numeric_report_root_values_and_the_short_root_variant_appearance() 
         parse_form_control_color(r#"{3,4,{-1}}"#, &BTreeMap::new()),
         Some("auto".to_string())
     );
+}
+
+#[test]
+fn preserves_an_unresolved_form_pattern_member_as_type_id() {
+    let type_id = "192cda85-d2ea-40a8-85f7-1a52a22a1934";
+    let value_types = parse_form_type_pattern(
+        &format!(r##"{{"Pattern",{{"#",{type_id}}}}}"##),
+        &BTreeMap::new(),
+    )
+    .expect("well-formed unresolved form pattern");
+    assert_eq!(
+        value_types,
+        vec![ConstantValueType::TypeId {
+            type_id: type_id.to_string()
+        }]
+    );
+    assert_eq!(
+        format_form_metadata_types_xml(&value_types),
+        concat!(
+            "\t\t\t<Type>\r\n",
+            "\t\t\t\t<v8:TypeId>192cda85-d2ea-40a8-85f7-1a52a22a1934</v8:TypeId>\r\n",
+            "\t\t\t</Type>\r\n"
+        )
+    );
+
+    let known_column_types = parse_form_type_pattern(
+        r##"{"Pattern",{"#",f6841c6b-6c71-4c82-ae9e-d08b49db326c},{"#",7dd764b6-b22f-4712-8edc-c0d634340e60}}"##,
+        &BTreeMap::new(),
+    )
+    .expect("well-formed known column types");
+    assert_eq!(
+        format_form_metadata_types_xml(&known_column_types),
+        concat!(
+            "\t\t\t<Type>\r\n",
+            "\t\t\t\t<v8:Type>dcsset:Filter</v8:Type>\r\n",
+            "\t\t\t\t<v8:Type xmlns:d7p1=\"http://v8.1c.ru/8.3/data/entext\">",
+            "d7p1:ConditionalAppearance</v8:Type>\r\n",
+            "\t\t\t</Type>\r\n"
+        )
+    );
+}
+
+#[test]
+fn reads_extended_tooltip_display_importance_from_its_own_tail() {
+    let mut fields = vec!["0"; 34];
+    fields[32] = "2";
+    let schema = crate::form_schema::FormChildItemDisplayImportanceSchema::from_raw_layout(
+        "12",
+        fields.len(),
+        "ExtendedTooltip",
+        0,
+    )
+    .expect("declared extended-tooltip layout");
+    assert_eq!(schema.display_importance(&fields), Some("High"));
+
+    let tooltip = FormExtendedTooltip {
+        display_importance: Some("High"),
+        border_color: Some("style:BorderColor".to_string()),
+        ..FormExtendedTooltip::new("Подсказка".to_string(), "1".to_string())
+    };
+    assert_eq!(
+        format_form_extended_tooltip_xml(&tooltip, 0),
+        concat!(
+            "<ExtendedTooltip name=\"Подсказка\" id=\"1\" DisplayImportance=\"High\">\r\n",
+            "\t<BorderColor>style:BorderColor</BorderColor>\r\n",
+            "</ExtendedTooltip>\r\n"
+        )
+    );
+
+    let options = [
+        "5",
+        "0",
+        "0",
+        "3",
+        "0",
+        "{0,1,0}",
+        "{3,4,{0}}",
+        "{3,4,{0}}",
+        "{3,1,{-18},1,1,0}",
+    ];
+    let border_schema = crate::form_schema::FormControlBorderSchema::from_raw_layout(
+        "12",
+        36,
+        "LabelDecoration",
+        0,
+        Some("0"),
+        &options,
+    )
+    .expect("label-decoration border layout");
+    let tuple = split_1c_braced_fields(options[border_schema.border_option_slot()], 0).unwrap();
+    assert_eq!(
+        border_schema.non_default_tuple_border(&tuple),
+        Some(crate::form_schema::FormControlBorder {
+            style: crate::form_schema::FormControlBorderStyle::WithoutBorder,
+            width: 1,
+            reference: Some("style:ControlBorder")
+        })
+    );
+}
+
+#[test]
+fn reads_progress_bar_representation_from_its_option_revision() {
+    let mut options = vec!["1"; 16];
+    options[0] = "4";
+    options[8] = "0";
+    let schema = crate::form_schema::FormSpecialFieldSchema::from_raw_layout(
+        "37",
+        59,
+        Some("9"),
+        0,
+        &options,
+        Some("0"),
+    )
+    .expect("declared progress-bar layout");
+    assert_eq!(schema.representation(&options), Some("Broken"));
+    options[14] = "0";
+    assert_eq!(schema.auto_max_height(&options), Some(false));
+
+    options[8] = "1";
+    assert_eq!(schema.representation(&options), None);
+
+    let mut item = form_child_item_for_order_test("ProgressBarField");
+    item.representation = Some("Broken");
+    item.show_percent = Some(true);
+    let xml = format_form_child_item_xml(&item, 1, false);
+    assert_eq!(xml.matches("<Representation>").count(), 1, "{xml}");
+    assert_xml_order(
+        &xml,
+        &[
+            "<Representation>Broken</Representation>",
+            "<ShowPercent>true</ShowPercent>",
+        ],
+    );
+}
+
+#[test]
+fn reads_checkbox_item_height_from_the_revision_that_declares_it() {
+    let options = [
+        "11",
+        "0",
+        "{3,4,{0}}",
+        "{3,4,{0}}",
+        "2",
+        "{1,0}",
+        "{3,4,{0}}",
+        "{7,3,0,1,100}",
+        "0",
+        "0",
+        "1",
+        "0",
+        "2",
+    ];
+    let schema =
+        crate::form_schema::FormCheckBoxFieldSchema::from_raw_layout("37", 59, Some("3"), &options)
+            .expect("revision-11 checkbox layout");
+    assert_eq!(schema.item_height(&options).as_deref(), Some("1"));
 }
 
 /// An embedded spreadsheet document is a child of its `<Settings>` element, so

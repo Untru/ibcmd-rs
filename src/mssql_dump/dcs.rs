@@ -2148,8 +2148,7 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     // all is refused rather than passed through.
                     .or_else(|| {
                         let uuid = value.trim().strip_prefix("0:")?;
-                        let name = common_command_standard_picture_name(uuid)?
-                            .strip_prefix("StdPicture.")?;
+                        let name = standard_picture_name(uuid)?.strip_prefix("StdPicture.")?;
                         Some(format!("v8ui:{name}"))
                     })?
             } else if attr_name == "ref"

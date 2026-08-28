@@ -3115,7 +3115,7 @@ fn resolve_help_picture_reference(token: &str, refs: &BTreeMap<String, String>) 
     {
         return Some(reference.clone());
     }
-    common_command_standard_picture_name(uuid).map(str::to_string)
+    standard_picture_name(uuid).map(str::to_string)
 }
 
 fn help_standard_picture_by_negative_index(index: &str) -> Option<&'static str> {

@@ -6103,18 +6103,6 @@ fn parse_flowchart_picture_size(value: &str) -> Option<&'static str> {
     }
 }
 
-/// Standard platform pictures an item can point at by UUID. The mapping is
-/// platform-owned; each arm is read off the platform's own export of the
-/// scheme that carries it, with the observation count of ERP УХ 3.2.12.6
-/// following the arm.
-fn flowchart_standard_picture_reference(uuid: &str) -> Option<&'static str> {
-    match uuid {
-        "da0c4924-973c-4ef0-9dcf-f1fc3307e5e2" => Some("StdPicture.ChangeListItem"), // 19
-        "f3c1376a-d2ee-46c4-9e44-aa2f7dae31c4" => Some("StdPicture.Chart"),          // 4
-        _ => None,
-    }
-}
-
 /// The picture slot: `{4, kind, ...}`. Kind `0` is the empty picture the
 /// platform writes as `<Picture/>`; kind `1` names a standard platform
 /// picture by UUID; kind `3` carries the image inline as `#base64:` and is
@@ -6151,7 +6139,7 @@ fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
                 return None;
             }
             Some(FlowchartPicture::Ref {
-                reference: flowchart_standard_picture_reference(payload.get(1)?.trim())?,
+                reference: standard_picture_name(payload.get(1)?.trim())?,
                 load_transparent: parse_flowchart_flag(fields.get(6)?)?,
             })
         }
@@ -7476,9 +7464,9 @@ fn nested_command_headers_for_owner_from_text(
         // inside those spans there are only commands, and outside them there
         // are none. The code-9 arm is kept exactly as it was so this can only
         // add names, never move one.
-        (is_offset_inside_command_collection(text, marker_start)
+        is_offset_inside_command_collection(text, marker_start)
             || (is_offset_inside_metadata_object_code(text, marker_start, 9)
-                && register_child_object_tag(owner_kind, text, marker_start).is_none()))
+                && register_child_object_tag(owner_kind, text, marker_start).is_none())
     })
     .into_iter()
     .map(|(header, _)| header)
@@ -7771,7 +7759,7 @@ fn parse_information_register_command_picture_descriptor(
 /// `46598f81-…` arrives with the nineteen read off the ERP УХ bodies -- and a
 /// second copy of an entry is a second place for it to drift.
 fn information_register_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
-    common_command_standard_picture_name(uuid)
+    standard_picture_name(uuid)
 }
 
 fn parse_information_register_command_shortcut(value: &str) -> Option<Option<String>> {
@@ -9570,6 +9558,12 @@ pub(super) enum ConstantValueType {
     },
     ReferenceTypeSet {
         reference: String,
+    },
+    /// A form pattern can legally name a platform type that neither the
+    /// configuration index nor the platform-QName table knows. The platform
+    /// preserves that identifier instead of discarding the whole type block.
+    TypeId {
+        type_id: String,
     },
 }
 
@@ -32839,7 +32833,7 @@ fn parse_command_group_picture_value(
             {
                 return Some((Some(reference.clone()), load_transparent));
             }
-            if let Some(reference) = common_command_standard_picture_name(uuid) {
+            if let Some(reference) = standard_picture_name(uuid) {
                 return Some((Some(reference.to_string()), load_transparent));
             }
         }
@@ -32935,6 +32929,13 @@ fn parse_common_command_picture_value(
         if ref_fields.first()?.trim() == "-16" {
             return Some((Some("StdPicture.ZoomIn".to_string()), load_transparent));
         }
+        // The corpus-wide source difference leaves one further published
+        // negative picture code: `-100` is paired with `StdPicture.Select`.
+        // It occurs once; no other negative descriptor or native picture name
+        // remains unmatched after the already enumerated codes are removed.
+        if ref_fields.first()?.trim() == "-100" {
+            return Some((Some("StdPicture.Select".to_string()), load_transparent));
+        }
         // The last two codes the reference trees observe and this table did not
         // carry.  Census over all 12 895 ERP УХ 3.2.12.6 form layouts and all
         // 1 738 Документооборот КОРП 3.0.21.3 ones, pairing each layout's
@@ -32969,7 +32970,7 @@ fn parse_common_command_picture_value(
             let Some(uuid) = ref_fields.get(1).map(|field| field.trim()) else {
                 return Some((Some("0".to_string()), load_transparent));
             };
-            if let Some(reference) = common_command_standard_picture_name(uuid) {
+            if let Some(reference) = standard_picture_name(uuid) {
                 return Some((Some(reference.to_string()), load_transparent));
             }
             if let Some(reference) = object_refs.get(uuid)
@@ -33134,7 +33135,7 @@ fn parse_common_command_shortcut_value_with_style(
     Some(parts.join("+"))
 }
 
-fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
+fn standard_picture_name(uuid: &str) -> Option<&'static str> {
     // Platform standard picture UUIDs; these identifiers are independent of a configuration.
     match uuid.to_ascii_lowercase().as_str() {
         STD_PICTURE_INFORMATION_UUID => Some("StdPicture.Information"),
@@ -33374,6 +33375,14 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "a594c8a1-7218-420a-860f-7b493c5e65c4" => Some("StdPicture.Sort"),                  // 1
         "093dd4ed-e03c-4fc6-a95a-01f51379cccf" => Some("StdPicture.ActivateTask"),          // 1
         "26518e18-e364-475a-8026-e41134658b2a" => Some("StdPicture.SpreadsheetInsertPageBreak"), // 1
+        // These identities complete the same corpus-wide table for the two
+        // picture consumers that previously kept separate registries. `Chart`
+        // occurs four times in graphical schemes and once in a managed form;
+        // `Resource` occurs on two managed-form owners. Every occurrence has
+        // one native spelling and neither UUID is observed with another name.
+        "f3c1376a-d2ee-46c4-9e44-aa2f7dae31c4" => Some("StdPicture.Chart"), // 5
+        "d6eefec0-792a-4720-8933-e2a57f9e312c" => Some("StdPicture.Resource"), // 2
+        "da0c4924-973c-4ef0-9dcf-f1fc3307e5e2" => Some("StdPicture.ChangeListItem"), // 19
         _ => None,
     }
 }
@@ -34233,7 +34242,39 @@ fn parse_form_metadata_type_pattern(
     value: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    parse_metadata_type_pattern_with_builtin(value, type_index, form_builtin_type_reference)
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(1)
+        .map(|field| {
+            parse_metadata_type_pattern_element_with_builtin(
+                field,
+                type_index,
+                form_builtin_type_reference,
+            )
+            .or_else(|| {
+                let element = split_1c_braced_fields(field, 0)?;
+                let type_id = (element.first()?.trim() == r##""#""## && element.len() >= 2)
+                    .then(|| parse_uuid_field(element.get(1)?.trim()))
+                    .flatten()?;
+                crate::form_schema::form_attribute_column_builtin_type_reference(&type_id).map(
+                    |reference| ConstantValueType::Reference {
+                        reference: reference.to_owned(),
+                    },
+                )
+            })
+            .or_else(|| {
+                let element = split_1c_braced_fields(field, 0)?;
+                (element.first()?.trim() == r##""#""## && element.len() >= 2)
+                    .then(|| parse_uuid_field(element.get(1)?.trim()))
+                    .flatten()
+                    .map(|type_id| ConstantValueType::TypeId { type_id })
+            })
+        })
+        .collect()
 }
 
 fn parse_metadata_type_pattern_with_builtin(
@@ -41980,8 +42021,13 @@ fn format_type_description_value_types_xml(
     let nested = format!("{indent}\t");
     let mut xml = String::new();
     for value_type in value_types {
-        let tag_name = metadata_type_xml_tag(value_type);
-        let namespace_attr = metadata_type_xml_namespace_attr(value_type);
+        // This formatter is used only by a managed form's
+        // `Settings xsi:type="v8:TypeDescription"`; use the form QName table
+        // and its namespace declarations just like the attribute's own Type.
+        // The generic table omits the txtedt declaration, which would leave a
+        // `d5p1:TextDocument` value with an unbound prefix.
+        let tag_name = form_metadata_type_xml_tag(value_type);
+        let namespace_attr = form_metadata_type_xml_namespace_attr(value_type);
         xml.push_str(&format!(
             "{indent}<v8:{tag_name}{namespace_attr}>{}</v8:{tag_name}>\r\n",
             metadata_type_xml_name(value_type)
@@ -42119,6 +42165,7 @@ fn metadata_type_xml_tag(value_type: &ConstantValueType) -> &'static str {
     match value_type {
         ConstantValueType::Reference { reference } => constant_reference_type_tag(reference),
         ConstantValueType::ReferenceTypeSet { .. } => "TypeSet",
+        ConstantValueType::TypeId { .. } => "TypeId",
         _ => "Type",
     }
 }
@@ -42127,6 +42174,7 @@ fn form_metadata_type_xml_tag(value_type: &ConstantValueType) -> &'static str {
     match value_type {
         ConstantValueType::Reference { reference } => form_reference_type_tag(reference),
         ConstantValueType::ReferenceTypeSet { .. } => "TypeSet",
+        ConstantValueType::TypeId { .. } => "TypeId",
         _ => "Type",
     }
 }
@@ -42139,6 +42187,7 @@ fn metadata_type_xml_name(value_type: &ConstantValueType) -> String {
         ConstantValueType::DateTime { .. } => "xs:dateTime".to_string(),
         ConstantValueType::Reference { reference, .. }
         | ConstantValueType::ReferenceTypeSet { reference, .. } => reference.clone(),
+        ConstantValueType::TypeId { type_id } => type_id.clone(),
     }
 }
 
@@ -42185,6 +42234,12 @@ fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'st
             if reference == "d5p1:TextDocument" =>
         {
             r#" xmlns:d5p1="http://v8.1c.ru/8.1/data/txtedt""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == "d7p1:ConditionalAppearance" =>
+        {
+            r#" xmlns:d7p1="http://v8.1c.ru/8.3/data/entext""#
         }
         ConstantValueType::Reference { reference }
         | ConstantValueType::ReferenceTypeSet { reference }
@@ -42309,6 +42364,10 @@ fn format_constant_type_member_xml(value_type: &ConstantValueType) -> String {
                 escape_xml_text(reference)
             )
         }
+        ConstantValueType::TypeId { type_id } => format!(
+            "\t\t\t\t<v8:TypeId>{}</v8:TypeId>\r\n",
+            escape_xml_text(type_id)
+        ),
     }
 }
 

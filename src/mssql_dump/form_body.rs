@@ -396,8 +396,14 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         .iter()
         .find(|attribute| attribute.main_attribute && attribute.settings.is_some())
         .map(|attribute| attribute.id.clone());
+    let window_opening_mode = properties.window_opening_mode;
     properties.command_set_excluded_commands.retain(|command| {
         form_extension_owns_standard_command(command, &main_attribute_extension)
+            && form_window_owns_standard_command(
+                command,
+                &main_attribute_extension,
+                window_opening_mode,
+            )
             && form_list_owner_declares_standard_command(
                 command,
                 main_list_table,
@@ -558,6 +564,12 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &attributes,
         Arc::clone(context.field_type_refs),
         context.metadata_command_facts.map(Arc::clone),
+    );
+    apply_form_attribute_scoped_use_always_bindings(
+        &mut attributes,
+        &body.trailing,
+        &child_item_indexes.owner_scoped_bindings,
+        context.object_refs,
     );
     collect_form_item_rooted_chain_roots(&mut child_item_indexes, &attributes, context.object_refs);
     child_item_indexes.owner_scoped_bindings.form_main_attribute = main_attribute_extension;
@@ -1031,6 +1043,11 @@ pub(super) struct FormAttribute {
     /// list's resolvable-field universe. The platform marks a path onto one of
     /// them with a leading `~`, exactly as it does in `<UseAlways>`.
     pub(super) unresolvable_field_item_ids: BTreeSet<String>,
+    /// Field-map ids whose dotted path is structurally invalid: its first
+    /// member resolves, but the metadata value reached there does not declare
+    /// the following member. This is narrower than the top-level list
+    /// universe, which intentionally knows nothing about valid dereferences.
+    pub(super) invalid_nested_field_item_ids: BTreeSet<String>,
     /// The localized twin the field map remembers beside a field's own name,
     /// for the ids that carry one and spell it differently. A marked path names
     /// both, exactly as `<UseAlways>` already writes them.
@@ -1196,6 +1213,9 @@ pub(super) struct FormListSettings {
     pub(super) conditional_appearance: Option<FormListSettingsConditionalAppearance>,
     pub(super) items_view_mode: Option<String>,
     pub(super) items_user_setting_id: Option<String>,
+    /// Localized caption stored by the platform's
+    /// `GroupSelectedSettingPresentation` property.
+    pub(super) items_user_setting_presentation: Vec<(String, String)>,
     /// The grouping chain the `Group` storage document re-spells to, ready to
     /// splice. Held as the rendered fragment for the same reason the other
     /// children keep a `Transliterated` arm: the content is the platform's own
@@ -1351,6 +1371,7 @@ pub(super) struct FormExtendedTooltipTitle {
 pub(super) struct FormExtendedTooltip {
     pub(super) id: String,
     pub(super) name: String,
+    pub(super) display_importance: Option<&'static str>,
     pub(super) width: Option<String>,
     pub(super) auto_max_width: Option<bool>,
     pub(super) max_width: Option<String>,
@@ -1361,6 +1382,7 @@ pub(super) struct FormExtendedTooltip {
     pub(super) vertical_stretch: Option<bool>,
     pub(super) text_color: Option<String>,
     pub(super) back_color: Option<String>,
+    pub(super) border_color: Option<String>,
     pub(super) font_xml: Option<String>,
     pub(super) title: Option<FormExtendedTooltipTitle>,
     pub(super) title_height: Option<String>,
@@ -1392,6 +1414,7 @@ impl FormExtendedTooltip {
             || self.vertical_stretch.is_some()
             || self.text_color.is_some()
             || self.back_color.is_some()
+            || self.border_color.is_some()
             || self.font_xml.is_some()
             || self.title.is_some()
             || self.title_height.is_some()
@@ -3396,9 +3419,13 @@ pub(super) enum FormMainAttributeExtension {
     Unread,
     /// The form declares no main attribute at all, so it brings no extension.
     Absent,
-    /// A main attribute is declared; the payload is the family of the single
-    /// reference type it declares, or `None` when it declares anything else.
-    Declared(Option<String>),
+    /// A main attribute is declared. `family` is its single reference family,
+    /// when it has one; the list-query flag is stated independently because it
+    /// decides which form-level list commands can be constructed.
+    Declared {
+        family: Option<String>,
+        main_list_table_family: Option<String>,
+    },
 }
 
 /// The form's main-attribute state, read off the same attribute collection
@@ -3409,7 +3436,18 @@ pub(super) fn form_main_attribute_extension(
     if !attributes.iter().any(|attribute| attribute.main_attribute) {
         return FormMainAttributeExtension::Absent;
     }
-    FormMainAttributeExtension::Declared(form_root_write_extension(attributes))
+    let main = attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute)
+        .expect("the main attribute was checked above");
+    FormMainAttributeExtension::Declared {
+        family: form_root_write_extension(attributes),
+        main_list_table_family: main
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.main_table.as_deref())
+            .and_then(|table| table.split_once('.').map(|(family, _)| family.to_string())),
+    }
 }
 
 /// Whether the extension the form's main attribute brings owns the event this
@@ -4357,10 +4395,46 @@ fn parse_form_attribute_with_dcs_type_index(
             )
         })
         .unwrap_or_default();
+    // A top-level available-field universe cannot validate a dereference: it
+    // deliberately contains `Lines`, not every `Lines.Column`, and marking all
+    // dotted entries would therefore condemn valid nested paths. Record only
+    // the narrower negative fact the metadata graph can prove -- the head is a
+    // standard `Ref` or a declared tabular section, and the reached owner does
+    // not declare the terminal member.
+    let invalid_nested_field_item_ids = settings
+        .as_ref()
+        .and_then(|settings| {
+            let main_table = settings.main_table.as_deref()?;
+            let settings_fields = split_1c_braced_fields(fields.get(14)?.trim(), 0)?;
+            let mut field_name_by_item_id =
+                parse_form_dynamic_list_field_name_by_item_id(&settings_fields);
+            for field in &settings.fields {
+                if let Some(item_id) = &field.item_id {
+                    field_name_by_item_id
+                        .entry(item_id.clone())
+                        .or_insert_with(|| field.field.clone());
+                }
+            }
+            Some(
+                field_name_by_item_id
+                    .into_iter()
+                    .filter(|(_, field_name)| {
+                        form_dynamic_list_nested_field_is_declared(
+                            main_table,
+                            field_name,
+                            object_refs,
+                            declarations,
+                        ) == Some(false)
+                    })
+                    .map(|(item_id, _)| item_id)
+                    .collect::<BTreeSet<_>>(),
+            )
+        })
+        .unwrap_or_default();
     // The twin is remembered per field-map id, independently of whether the
     // field resolves: which of the two names gets written is the marker's
     // business, not the map's.
-    let field_item_twins = fields
+    let mut field_item_twins = fields
         .get(14)
         .and_then(|field| {
             let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -4376,6 +4450,31 @@ fn parse_form_attribute_with_dcs_type_index(
             )
         })
         .unwrap_or_default();
+    // Field names are matched case-insensitively, but the source spelling is
+    // the spelling of the list's field universe, not the field map's spelling.
+    // Keep that winning spelling beside the localized twin so the data-path
+    // resolver can publish it. The measured corpus contains case differences
+    // in both directions, so neither spelling is treated as intrinsically
+    // canonical.
+    if let Some(settings_field) = fields.get(14)
+        && let Some(settings_fields) = split_1c_braced_fields(settings_field.trim(), 0)
+        && let Some(universe) = form_dynamic_list_use_always_universe(
+            settings.as_ref(),
+            &settings_fields,
+            object_refs,
+            declarations,
+        )
+    {
+        for (item_id, field_name) in parse_form_dynamic_list_field_name_by_item_id(&settings_fields)
+        {
+            if let Some(canonical) = universe.iter().find(|candidate| {
+                form_data_path_name_eq_ignore_case(candidate, &field_name)
+                    && *candidate != &field_name
+            }) {
+                field_item_twins.insert(item_id, canonical.clone());
+            }
+        }
+    }
     Some(FormAttribute {
         id: id.to_string(),
         name,
@@ -4398,6 +4497,7 @@ fn parse_form_attribute_with_dcs_type_index(
         design_time_settings,
         type_description_settings,
         unresolvable_field_item_ids,
+        invalid_nested_field_item_ids,
         field_item_twins,
     })
 }
@@ -4648,6 +4748,10 @@ pub(super) fn form_object_standard_property_name(
     match (kind, code) {
         ("CatalogObject", -8) => Some("Ref"),
         ("DocumentObject", -8) => Some("RegisterRecords"),
+        // The record-set filter is a standard platform member. The complete
+        // corpus has the same marker both directly on an accounting-register
+        // record set and after a document's RegisterRecords member.
+        ("AccountingRegisterRecordSet", -60001) => Some("Filter"),
         _ => None,
     }
 }
@@ -4924,15 +5028,148 @@ pub(super) fn apply_form_attribute_additional_columns(
     order_form_attribute_additional_columns(attributes, &section_keys);
 }
 
+/// Re-resolves direct `UseAlways` entries whose members carry a collection
+/// scope UUID after `AdditionalColumns` has been indexed.
+///
+/// The initial attribute reader intentionally runs before that section is
+/// available. A scoped component such as `{n,<value-table-column scope>}` is
+/// therefore not the attribute's own column `n`; it is column `n` of the
+/// nested table reached so far. The ordinary bound-chain walker already owns
+/// that grammar, so this late pass replaces only the provisional path for
+/// entries that explicitly carry the scope marker and leaves every other
+/// `UseAlways` source untouched.
+pub(super) fn apply_form_attribute_scoped_use_always_bindings(
+    attributes: &mut [FormAttribute],
+    trailing: &[String],
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+) {
+    let Some(fields) = trailing
+        .first()
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return;
+    };
+    if fields.first().map(|field| field.trim()) != Some("4") {
+        return;
+    }
+    let Some(attribute_count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return;
+    };
+    for raw_attribute in fields.iter().skip(2).take(attribute_count) {
+        let Some(raw_fields) = split_1c_braced_fields(raw_attribute.trim(), 0) else {
+            continue;
+        };
+        let Some(attribute_id) = raw_fields
+            .get(1)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+            .and_then(|identity| identity.first().map(|field| field.trim().to_string()))
+        else {
+            continue;
+        };
+        let Some(attribute) = attributes
+            .iter_mut()
+            .find(|attribute| attribute.id == attribute_id)
+        else {
+            continue;
+        };
+        let Some(use_always) = raw_fields
+            .get(8)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        else {
+            continue;
+        };
+        if use_always.first().map(|field| field.trim()) != Some("0") {
+            continue;
+        }
+        let Some(count) = use_always
+            .get(1)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        let value_type = form_attribute_exact_single_type_reference(attribute).map(str::to_string);
+        let value_type_uuid = attribute.exact_single_type_uuid.clone();
+        for entry in use_always.iter().skip(2).take(count) {
+            let Some(entry_fields) = split_1c_braced_fields(entry.trim(), 0) else {
+                continue;
+            };
+            let Some(component_count) = entry_fields
+                .first()
+                .and_then(|field| field.trim().parse::<usize>().ok())
+            else {
+                continue;
+            };
+            if component_count == 0 || entry_fields.len() != component_count + 1 {
+                continue;
+            }
+            let Some(components) = entry_fields[1..]
+                .iter()
+                .map(|field| split_1c_braced_fields(field.trim(), 0))
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            if !components.iter().any(|component| {
+                matches!(component.as_slice(), [_, scope] if scope.trim().eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID))
+            }) {
+                continue;
+            }
+            let Some(old_suffix) = components
+                .iter()
+                .map(|component| {
+                    form_attribute_use_always_segment_name(
+                        component,
+                        &attribute.columns,
+                        object_refs,
+                        value_type.as_deref(),
+                        value_type_uuid.as_deref(),
+                    )
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(|parts| parts.join("."))
+            else {
+                continue;
+            };
+            let Some((resolved, _)) = walk_form_bound_chain_members(
+                &components,
+                &attribute.id,
+                value_type.as_deref(),
+                attribute.name.clone(),
+                attribute.name.clone(),
+                owner_scoped_bindings,
+                object_refs,
+                false,
+            ) else {
+                continue;
+            };
+            let provisional = format!("{}.{}", attribute.name, old_suffix);
+            if provisional == resolved {
+                continue;
+            }
+            attribute.use_always.retain(|path| path != &provisional);
+            if !attribute.use_always.contains(&resolved) {
+                attribute.use_always.push(resolved);
+            }
+        }
+        attribute.use_always.sort();
+    }
+}
+
 /// The platform does not write an attribute's `<AdditionalColumns>` groups in
 /// the order the record lists them: it writes them ordered by the uuid of the
 /// tabular section each group names.
 ///
-/// Census over all eight stand corpora of every `<Columns>` block holding more
-/// than one group whose tables are tabular sections of the attribute's own
-/// metadata object — 342 blocks, of which 330 belong to files that already
-/// match byte for byte: the platform's order is ascending by tabular-section
-/// uuid in every one, with no counter-example. Two rival readings were
+/// Census over all eight stand corpora of every attributable `<Columns>` block
+/// holding more than one group whose tables are tabular sections of the
+/// attribute's own metadata object: 333 blocks. The platform's order is
+/// ascending by tabular-section uuid in all 330 blocks whose attribute type is
+/// the enclosing object. Seven blocks include nested groups; each nested group
+/// remains adjacent to its top-level section and therefore carries that same
+/// sorting key. Two rival readings were
 /// refuted by the same census: the owner's declaration order (forward or
 /// reversed) is contradicted by 93 already-matching blocks, and "self-closed
 /// groups first" by 45.
@@ -5004,16 +5241,33 @@ pub(super) fn parse_form_attribute_additional_columns_group(
         .map(|field| parse_form_attribute_column(field, type_index, object_refs))
         .collect::<Option<Vec<_>>>()?;
     let mut tabular_section_uuid = None;
-    let (table, nested_binding_start) = match schema.binding_kind() {
-        FormAttributeAdditionalColumnsBindingKind::Attribute => (attribute.name.clone(), 2),
+    let (table, nested_binding_start, nested_value_type) = match schema.binding_kind() {
+        FormAttributeAdditionalColumnsBindingKind::Attribute => (attribute.name.clone(), 2, None),
         FormAttributeAdditionalColumnsBindingKind::Numeric => {
             let column_id = binding.first()?.trim();
-            let table = attribute
+            let column_name = attribute
                 .columns
                 .iter()
                 .find(|column| column.id == column_id)
-                .map(|column| format!("{}.{}", attribute.name, column.name))?;
-            (table, 3)
+                .map(|column| column.name.as_str())
+                .or_else(|| {
+                    let key = FormAttributeColumnKey {
+                        attribute_id: attribute_id.clone(),
+                        column_id: column_id.to_string(),
+                    };
+                    child_item_indexes
+                        .owner_scoped_bindings
+                        .attribute_columns
+                        .get(&key)
+                        .and_then(|name| name.as_deref())
+                })?;
+            // A numeric group can name either a declared value-table column
+            // or a dynamic-list field-map entry. Both are declarations of the
+            // same row member; the latter lives in the owner-scoped index
+            // because a DynamicList attribute has no `<Column>` declarations
+            // of its own. The table spelling is identical in both cases.
+            let table = format!("{}.{}", attribute.name, column_name);
+            (table, 3, None)
         }
         // A negative marker names a standard tabular section of the
         // attribute's own family, the same member and the same marker a bound
@@ -5031,7 +5285,7 @@ pub(super) fn parse_form_attribute_additional_columns_group(
             if let Some((_, section_name, _)) =
                 form_standard_tabular_section_for_type_reference(reference, marker)
             {
-                (format!("{}.{section_name}", attribute.name), 3)
+                (format!("{}.{section_name}", attribute.name), 3, None)
             } else {
                 // The marker names no standard tabular section but a standard
                 // *collection* of the attribute's own family, and the segment
@@ -5052,6 +5306,14 @@ pub(super) fn parse_form_attribute_additional_columns_group(
                 let collection =
                     form_object_standard_property_name(reference, marker.parse::<i64>().ok()?)?;
                 if collection != "RegisterRecords" {
+                    if target.len() == 3 {
+                        return Some(ParsedFormAttributeAdditionalColumnsGroup {
+                            attribute_id,
+                            table: format!("{}.{collection}", attribute.name),
+                            columns,
+                            tabular_section_uuid: None,
+                        });
+                    }
                     return None;
                 }
                 let member = split_1c_braced_fields(target.get(3)?.trim(), 0)?;
@@ -5072,6 +5334,7 @@ pub(super) fn parse_form_attribute_additional_columns_group(
                 (
                     format!("{}.{collection}.{register_name}", attribute.name),
                     4,
+                    Some(format!("cfg:{register_family}RecordSet.{register_name}")),
                 )
             }
         }
@@ -5093,20 +5356,18 @@ pub(super) fn parse_form_attribute_additional_columns_group(
                     )
                 })
             });
-            (table, 3)
+            (table, 3, None)
         }
     };
     let table = resolve_form_attribute_nested_additional_columns_table_path(
         attribute,
         table,
         target.get(nested_binding_start..)?,
+        nested_value_type.as_deref(),
     )?;
-    // Only a group whose table is still the whole tabular section keeps the
-    // ordering key: a nested segment addresses a column inside it, and the
-    // census that established the key covers no such group.
-    if nested_binding_start < target.len() {
-        tabular_section_uuid = None;
-    }
+    // A nested group inherits the key of its top-level tabular section. Stable
+    // sorting keeps groups within that section in their stored order while
+    // placing the complete section run against its siblings by UUID.
     Some(ParsedFormAttributeAdditionalColumnsGroup {
         attribute_id,
         table,
@@ -5121,9 +5382,20 @@ fn resolve_form_attribute_nested_additional_columns_table_path(
     attribute: &FormAttribute,
     mut table: String,
     bindings: &[&str],
+    mut value_type: Option<&str>,
 ) -> Option<String> {
     for binding in bindings {
         let binding = split_1c_braced_fields(binding.trim(), 0)?;
+        if let [marker] = binding.as_slice()
+            && let Some(current_type) = value_type
+            && let Ok(code) = marker.trim().parse::<i64>()
+            && let Some(member) = form_object_standard_property_name(current_type, code)
+        {
+            table.push('.');
+            table.push_str(member);
+            value_type = None;
+            continue;
+        }
         let [column_id, marker] = binding.as_slice() else {
             return None;
         };
@@ -5138,6 +5410,7 @@ fn resolve_form_attribute_nested_additional_columns_table_path(
             resolve_form_attribute_additional_column_name(attribute, &table, column_id.trim())?;
         table.push('.');
         table.push_str(column_name);
+        value_type = None;
     }
     Some(table)
 }
@@ -5425,6 +5698,10 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             "GroupSelectedSettingId" => {
                 list_settings.items_user_setting_id = parse_form_setting_string(window[1])
             }
+            "GroupSelectedSettingPresentation" => {
+                list_settings.items_user_setting_presentation =
+                    parse_form_setting_localized_string(window[1]).unwrap_or_default()
+            }
             "Group" => {
                 list_settings.group_items =
                     parse_form_list_settings_group_items(window[1], object_refs)
@@ -5473,6 +5750,10 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
     );
     fields.extend(parse_form_dynamic_list_field_map_items(&settings_fields));
     dedupe_form_dynamic_list_fields(&mut fields);
+    reconcile_form_list_settings_data_parameter_values(
+        &mut list_settings,
+        server_state_xml.as_deref(),
+    );
     if query_text.is_none()
         && main_table.is_none()
         && fields.is_empty()
@@ -5484,6 +5765,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
         && list_settings.conditional_appearance.is_none()
         && list_settings.items_view_mode.is_none()
         && list_settings.items_user_setting_id.is_none()
+        && list_settings.items_user_setting_presentation.is_empty()
     {
         return None;
     }
@@ -5505,6 +5787,202 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
         server_state_envelope,
         list_settings,
     })
+}
+
+/// Reconciles empty list-valued parameter overrides with the dynamic-list
+/// schema carried by `ServerState`.
+///
+/// An empty override is not published as `xsi:nil` when the corresponding
+/// schema parameter both has a nil default and allows a value list. This is a
+/// structural rule: across all eight validation corpora it selects all 32
+/// value-less `dataParameters` items and none of the 10 nil or 6 valued items.
+pub(super) fn reconcile_form_list_settings_data_parameter_values(
+    settings: &mut FormListSettings,
+    server_state_xml: Option<&str>,
+) {
+    let Some(fragment) = settings.data_parameters.as_mut() else {
+        return;
+    };
+    let parameter_names =
+        form_server_state_nil_value_list_parameter_names(server_state_xml.unwrap_or_default());
+    if parameter_names.is_empty() {
+        return;
+    }
+    *fragment = omit_nil_data_parameter_values(fragment, &parameter_names);
+}
+
+fn form_server_state_nil_value_list_parameter_names(xml: &str) -> BTreeSet<String> {
+    #[derive(Default)]
+    struct ParameterState {
+        name: Option<String>,
+        nil_default: bool,
+        value_list_allowed: bool,
+    }
+
+    fn local_name(name: &[u8]) -> &[u8] {
+        name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
+    }
+
+    fn has_true_nil_attribute(event: &quick_xml::events::BytesStart<'_>) -> bool {
+        event
+            .attributes()
+            .with_checks(false)
+            .flatten()
+            .any(|attribute| {
+                local_name(attribute.key.as_ref()) == b"nil" && attribute.value.as_ref() == b"true"
+            })
+    }
+
+    let mut reader = quick_xml::Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut parameter = None::<ParameterState>;
+    let mut text_target = None::<&'static str>;
+    let mut names = BTreeSet::new();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(event)) => match local_name(event.name().as_ref()) {
+                b"Parameter" => parameter = Some(ParameterState::default()),
+                b"name" if parameter.is_some() => text_target = Some("name"),
+                b"valueListAllowed" if parameter.is_some() => {
+                    text_target = Some("valueListAllowed")
+                }
+                b"value" if parameter.is_some() && has_true_nil_attribute(&event) => {
+                    parameter.as_mut().unwrap().nil_default = true;
+                }
+                _ => {}
+            },
+            Ok(Event::Empty(event)) => {
+                if local_name(event.name().as_ref()) == b"value"
+                    && parameter.is_some()
+                    && has_true_nil_attribute(&event)
+                {
+                    parameter.as_mut().unwrap().nil_default = true;
+                }
+            }
+            Ok(Event::Text(event)) if text_target.is_some() => {
+                let Ok(encoded) = std::str::from_utf8(event.as_ref()) else {
+                    return BTreeSet::new();
+                };
+                let Ok(value) = quick_xml::escape::unescape(encoded) else {
+                    return BTreeSet::new();
+                };
+                if let Some(parameter) = parameter.as_mut() {
+                    match text_target {
+                        Some("name") => parameter.name = Some(value.into_owned()),
+                        Some("valueListAllowed") => {
+                            parameter.value_list_allowed = value.as_ref() == "true"
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::End(event)) => match local_name(event.name().as_ref()) {
+                b"name" | b"valueListAllowed" => text_target = None,
+                b"Parameter" => {
+                    if let Some(parameter) = parameter.take()
+                        && parameter.nil_default
+                        && parameter.value_list_allowed
+                        && let Some(name) = parameter.name
+                    {
+                        names.insert(name);
+                    }
+                    text_target = None;
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(_) => return BTreeSet::new(),
+        }
+    }
+    names
+}
+
+fn omit_nil_data_parameter_values(fragment: &str, parameter_names: &BTreeSet<String>) -> String {
+    const ITEM_OPEN: &str = r#"<dcscor:item xsi:type="dcsset:SettingsParameterValue">"#;
+    const ITEM_CLOSE: &str = "</dcscor:item>";
+    const PARAMETER_OPEN: &str = "<dcscor:parameter>";
+    const PARAMETER_CLOSE: &str = "</dcscor:parameter>";
+    const NIL_VALUE: &str = r#"<dcscor:value xsi:nil="true"/>"#;
+
+    let mut output = String::with_capacity(fragment.len());
+    let mut remainder = fragment;
+    while let Some(item_start) = remainder.find(ITEM_OPEN) {
+        output.push_str(&remainder[..item_start]);
+        let item_remainder = &remainder[item_start..];
+        let Some(item_end) = item_remainder
+            .find(ITEM_CLOSE)
+            .map(|offset| offset + ITEM_CLOSE.len())
+        else {
+            output.push_str(item_remainder);
+            return output;
+        };
+        let item = &item_remainder[..item_end];
+        let parameter_name = item
+            .find(PARAMETER_OPEN)
+            .map(|offset| offset + PARAMETER_OPEN.len())
+            .and_then(|start| {
+                item[start..]
+                    .find(PARAMETER_CLOSE)
+                    .map(|length| &item[start..start + length])
+            })
+            .and_then(|encoded| quick_xml::escape::unescape(encoded).ok())
+            .map(|value| value.into_owned());
+        if parameter_name
+            .as_ref()
+            .is_some_and(|name| parameter_names.contains(name))
+            && let Some(value_start) = item.find(NIL_VALUE)
+        {
+            let line_start = item[..value_start]
+                .rfind('\n')
+                .map_or(0, |offset| offset + 1);
+            let value_end = value_start + NIL_VALUE.len();
+            if item[line_start..value_start]
+                .bytes()
+                .all(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                let line_end = if item[value_end..].starts_with("\r\n") {
+                    value_end + 2
+                } else if item[value_end..].starts_with('\n') {
+                    value_end + 1
+                } else {
+                    value_end
+                };
+                output.push_str(&item[..line_start]);
+                output.push_str(&item[line_end..]);
+            } else {
+                output.push_str(item);
+            }
+        } else {
+            output.push_str(item);
+        }
+        remainder = &item_remainder[item_end..];
+    }
+    output.push_str(remainder);
+    output
+}
+
+const FORM_LOCALIZED_STRING_TYPE_UUID: &str = "87024738-fc2a-4436-ada1-df79d395c424";
+
+pub(super) fn parse_form_setting_localized_string(field: &str) -> Option<Vec<(String, String)>> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let [marker, type_uuid, values] = fields.as_slice() else {
+        return None;
+    };
+    if parse_1c_quoted_string(marker.trim()).as_deref() != Some("#")
+        || !type_uuid
+            .trim()
+            .eq_ignore_ascii_case(FORM_LOCALIZED_STRING_TYPE_UUID)
+    {
+        return None;
+    }
+    let value_fields = split_1c_braced_fields(values.trim(), 0)?;
+    let count = value_fields.first()?.trim().parse::<usize>().ok()?;
+    if value_fields.len() != 1 + count.checked_mul(2)? {
+        return None;
+    }
+    let parsed = parse_form_localized_strings(values);
+    (parsed.len() == count).then_some(parsed)
 }
 
 pub(super) fn parse_form_dynamic_list_fields(field: &str) -> Vec<FormDynamicListField> {
@@ -6226,8 +6704,112 @@ pub(super) fn form_dynamic_list_field_name_is_resolvable(
     secondary_name: Option<&str>,
     universe: &BTreeSet<String>,
 ) -> bool {
-    universe.contains(field_name)
-        || secondary_name.is_some_and(|secondary| universe.contains(secondary))
+    universe
+        .iter()
+        .any(|candidate| form_data_path_name_eq_ignore_case(candidate, field_name))
+        || secondary_name.is_some_and(|secondary| {
+            universe
+                .iter()
+                .any(|candidate| form_data_path_name_eq_ignore_case(candidate, secondary))
+        })
+}
+
+fn form_data_path_name_eq_ignore_case(left: &str, right: &str) -> bool {
+    left == right || left.to_lowercase() == right.to_lowercase()
+}
+
+/// Whether a two-member field-map path is declared by the metadata value its
+/// head reaches.
+///
+/// `None` is a refusal: this reader intentionally handles only the two heads
+/// whose target is stated without type inference -- a table's standard `Ref`
+/// and one of its tabular sections. `Some(false)` is therefore strong negative
+/// evidence, not the absence of a guessed type.
+pub(super) fn form_dynamic_list_nested_field_is_declared(
+    main_table: &str,
+    field_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> Option<bool> {
+    let mut segments = field_name.split('.');
+    let head = segments.next()?;
+    let terminal = segments.next()?;
+    if segments.next().is_some() || head.is_empty() || terminal.is_empty() {
+        return None;
+    }
+    let (kind, _) = main_table.split_once('.')?;
+    if main_table.matches('.').count() != 1 {
+        return None;
+    }
+
+    let ref_head = form_dynamic_list_std_attribute_pairs(kind)?
+        .iter()
+        .find(|(_, english)| *english == "Ref")
+        .is_some_and(|(localized, english)| {
+            form_data_path_name_eq_ignore_case(head, localized)
+                || form_data_path_name_eq_ignore_case(head, english)
+        });
+    if ref_head {
+        let owners = if kind == "DocumentJournal" {
+            declarations?
+                .document_journal_documents(main_table)?
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        } else {
+            vec![main_table]
+        };
+        if owners.is_empty() {
+            return None;
+        }
+        return owners
+            .into_iter()
+            .map(|owner| form_metadata_owner_declares_direct_member(owner, terminal, declarations))
+            .collect::<Option<Vec<_>>>()
+            .map(|declared| declared.into_iter().all(|value| value));
+    }
+
+    let section = object_refs.values().find(|reference| {
+        reference
+            .strip_prefix(&format!("{main_table}.TabularSection."))
+            .is_some_and(|name| {
+                !name.contains('.') && form_data_path_name_eq_ignore_case(name, head)
+            })
+    })?;
+    if matches!(terminal, "LineNumber" | "НомерСтроки") {
+        return Some(true);
+    }
+    let prefix = format!("{section}.Attribute.");
+    Some(object_refs.values().any(|reference| {
+        reference.strip_prefix(&prefix).is_some_and(|name| {
+            !name.contains('.') && form_data_path_name_eq_ignore_case(name, terminal)
+        })
+    }))
+}
+
+fn form_metadata_owner_declares_direct_member(
+    owner: &str,
+    member: &str,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> Option<bool> {
+    let kind = owner.split_once('.')?.0;
+    if let Some(pairs) = form_dynamic_list_std_attribute_pairs(kind)
+        && pairs.iter().any(|(localized, english)| {
+            form_data_path_name_eq_ignore_case(member, localized)
+                || form_data_path_name_eq_ignore_case(member, english)
+        })
+    {
+        return Some(true);
+    }
+    let declarations = declarations?;
+    if declarations.declares_data_field(owner, member)? {
+        return Some(true);
+    }
+    Some(
+        declarations
+            .common_attribute(member)
+            .is_some_and(|attribute| attribute.covers(owner)),
+    )
 }
 
 /// The names a dynamic list can resolve against its data source, or `None` when
@@ -6273,7 +6855,9 @@ pub(super) fn form_dynamic_list_use_always_universe(
             universe = BTreeSet::new();
         } else {
             let selection = parse_form_dynamic_list_query_selection(query_text)?;
-            if form_dynamic_list_query_source_is_undeclared(&selection, declarations) {
+            if form_dynamic_list_query_source_is_undeclared(&selection, declarations)
+                || form_dynamic_list_query_selects_undeclared_field(&selection, declarations)
+            {
                 universe = BTreeSet::new();
             } else if !parse_form_dynamic_list_auto_fill_available_fields(settings_fields) {
                 universe = selection.extension.clone().unwrap_or_default();
@@ -6352,7 +6936,89 @@ pub(super) fn form_dynamic_list_use_always_universe(
             server_state_xml,
         ));
     }
+    if let (Some(main_table), Some(declarations)) = (settings.main_table.as_deref(), declarations) {
+        universe.retain(|field| !declarations.field_uses_password_mode(main_table, field));
+    }
     Some(universe)
+}
+
+/// Whether a plain field selected from a final-scope metadata source is not a
+/// field that table declares. Only paths and aliases parsed from the final
+/// select participate; temporary tables, subqueries and shadowed aliases are
+/// therefore outside this test rather than guessed from a text-wide map.
+fn form_dynamic_list_query_selects_undeclared_field(
+    selection: &FormDynamicListQuerySelection,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> bool {
+    let Some(declarations) = declarations else {
+        return false;
+    };
+    selection.paths.keys().any(|(alias, field)| {
+        let Some(table) = selection
+            .sources
+            .iter()
+            .find_map(|(reference, source_alias)| {
+                source_alias
+                    .as_deref()
+                    .is_some_and(|candidate| form_data_path_name_eq_ignore_case(candidate, alias))
+                    .then(|| reference.as_deref())
+                    .flatten()
+            })
+        else {
+            return false;
+        };
+        if table.matches('.').count() != 1 {
+            return false;
+        }
+        let Some((kind, _)) = table.split_once('.') else {
+            return false;
+        };
+        // This declaration index is complete enough to reject arbitrary data
+        // fields only for catalogues and information registers. Other query
+        // sources expose fields which are not metadata children in the owner
+        // graph (journal columns and the platform's calculated record fields,
+        // among others); treating the index's silence as a denial collapsed
+        // valid list universes. Refuse the verdict for those families until
+        // their complete field model is available.
+        if !matches!(kind, "Catalog" | "InformationRegister") {
+            return false;
+        }
+        // Presentation is a query-language field of a reference-valued row,
+        // not a child declared by the metadata owner.
+        if matches!(
+            field.to_uppercase().as_str(),
+            "ПРЕДСТАВЛЕНИЕ" | "PRESENTATION"
+        ) {
+            return false;
+        }
+        // A register row exposes its moment-in-time value through the query
+        // language although no metadata child declares it.
+        if kind == "InformationRegister"
+            && matches!(
+                field.to_uppercase().as_str(),
+                "МОМЕНТВРЕМЕНИ" | "POINTINTIME"
+            )
+        {
+            return false;
+        }
+        if let Some(pairs) = form_dynamic_list_std_attribute_pairs(kind)
+            && let Some((_, english)) = pairs.iter().find(|(russian, english)| {
+                form_data_path_name_eq_ignore_case(russian, field)
+                    || form_data_path_name_eq_ignore_case(english, field)
+            })
+        {
+            return declarations
+                .table(table)
+                .is_some_and(|declared| !declared.declares(english));
+        }
+        if declarations
+            .common_attribute(field)
+            .is_some_and(|content| content.covers(table))
+        {
+            return false;
+        }
+        declarations.declares_data_field(table, field) == Some(false)
+    })
 }
 
 /// The result column names one `*` item of a manual query's final selection
@@ -7187,6 +7853,19 @@ fn form_query_selection_item_alias(item: &[String]) -> Option<String> {
             }
             return Some(segments[0].clone());
         }
+        // Dereferencing the source row's standard reference does not become a
+        // result-name segment of its own. Thus `Source.Ref.State`/the localized
+        // spelling names `State`, while an ordinary nested member keeps the
+        // existing concatenation rule.
+        if segments.len() >= 3 && matches!(segments[1].to_uppercase().as_str(), "ССЫЛКА" | "REF")
+        {
+            return Some(
+                segments[2..]
+                    .iter()
+                    .map(|segment| segment.as_str())
+                    .collect(),
+            );
+        }
         return Some(segments[1..].iter().map(|s| s.as_str()).collect::<String>());
     }
     if item.len() >= 2 && item[item.len() - 2] == "." {
@@ -7684,7 +8363,15 @@ pub(super) fn parse_form_spreadsheet_document_settings(
     }
     let body_start = field.find("{8,")?;
     let body_end = scan_1c_braced_value(field, body_start)?;
-    let spreadsheet = parse_moxel_spreadsheet_text(&field[body_start..body_end], object_refs)?;
+    let mut spreadsheet = parse_moxel_spreadsheet_text(&field[body_start..body_end], object_refs)?;
+    // Group/header palette slots belong to the standalone spreadsheet
+    // projection. The same MOXCEL body embedded as a form attribute does not
+    // publish them: across all eight validation corpora, none of the 54 forms
+    // carrying an embedded SpreadsheetDocument has any of the four elements,
+    // including bodies whose raw slots differ from the role defaults. Keep the
+    // standalone decoder intact and apply the distinction at this contextual
+    // boundary.
+    spreadsheet.group_header_colors = [None, None, None, None];
     let document_xml = format_moxel_spreadsheet_xml(&spreadsheet);
     extract_moxel_document_inner_xml(&document_xml)
 }
@@ -8288,7 +8975,19 @@ fn normalize_form_server_state_inner_xml_with_dcs_type_index(
             r#"<ExpressionField xsi:type="dcssch:CalculatedField">"#,
             "<CalculatedField>",
         )
-        .replace("</ExpressionField>", "</CalculatedField>");
+        .replace("</ExpressionField>", "</CalculatedField>")
+        // A dynamic-list parameter with an empty design-time value carries no
+        // value. The platform publishes that structural state as xsi:nil,
+        // independently of the parameter and metadata object names. This
+        // ServerState path is separate from the primary DCS rewriter.
+        .replace(
+            r#"<dcssch:value xsi:type="dcscor:DesignTimeValue"/>"#,
+            r#"<dcssch:value xsi:nil="true"/>"#,
+        )
+        .replace(
+            r#"<dcssch:value xsi:type="dcscor:DesignTimeValue"></dcssch:value>"#,
+            r#"<dcssch:value xsi:nil="true"/>"#,
+        );
     rewrite_form_server_state_dcs_core_items(&mut normalized);
     rewrite_form_server_state_type_ids(&mut normalized, dcs_type_index);
     normalized
@@ -8693,10 +9392,10 @@ pub(super) fn reconcile_form_main_table_with_query_source(
     // stores that category and writes the bare register even though its query
     // also joins `SliceLast`.  With no stored category, however, the unique
     // virtual source is the only discriminator available: the dynamic list in
-    // `DataProcessors/ПодборВНА/Forms/Форма` has none and the platform writes
-    // `AccountingRegister.МСФО.Balance`.  Treating both bare-looking results
-    // alike fixes either form only by breaking the other.
-    if category.is_some() && categorized_main_table.as_deref() == Some(base) {
+    // Another category has no such constraint and lets a uniquely parsed
+    // virtual table from the query win. Treating all categorized bare results
+    // alike would make one of these two structural cases incorrect.
+    if category == Some("1") && categorized_main_table.as_deref() == Some(base) {
         return categorized_main_table;
     }
     let Some(selection) = parse_form_dynamic_list_query_selection(query) else {
@@ -9669,6 +10368,10 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// resolvable-field universe. A data path onto one of them carries the
     /// platform's `~` marker, the same marker `<UseAlways>` already writes.
     unresolvable_columns: BTreeSet<FormAttributeColumnKey>,
+    /// Dotted dynamic-list fields disproved by the metadata declaration graph,
+    /// kept separate from the top-level field universe so valid nested paths
+    /// are never marked merely because the universe is shallow.
+    invalid_nested_columns: BTreeSet<FormAttributeColumnKey>,
     /// The localized twin the field map remembers beside a column's own name.
     /// A marked path names both, the same pair `<UseAlways>` writes.
     column_twins: BTreeMap<FormAttributeColumnKey, String>,
@@ -9685,6 +10388,7 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// never names the attribute, so the marker it carries has to be looked up
     /// from the item side too.
     unresolvable_table_columns: BTreeSet<(String, String)>,
+    invalid_nested_table_columns: BTreeSet<(String, String)>,
 }
 
 /// The attribute-namespace root a chain rooted at a form item continues from.
@@ -9757,6 +10461,14 @@ fn collect_form_attribute_data_path_columns(
         for item_id in &attribute.unresolvable_field_item_ids {
             owner_scoped_bindings
                 .unresolvable_columns
+                .insert(FormAttributeColumnKey {
+                    attribute_id: attribute.id.clone(),
+                    column_id: item_id.clone(),
+                });
+        }
+        for item_id in &attribute.invalid_nested_field_item_ids {
+            owner_scoped_bindings
+                .invalid_nested_columns
                 .insert(FormAttributeColumnKey {
                     attribute_id: attribute.id.clone(),
                     column_id: item_id.clone(),
@@ -9974,6 +10686,51 @@ pub(super) fn collect_form_item_rooted_chain_roots(
                     attribute_path,
                 },
             );
+        }
+    }
+    // A nested table can bind to the current row of another table instead of
+    // directly to a form attribute. Resolve those roots layer by layer: each
+    // successful parent contributes the attribute namespace in which the
+    // child's remaining chain is interpreted. This is the same chain walk the
+    // eventual DataPath uses, but here we retain its declaration key rather
+    // than its `Items.<table>.CurrentData` presentation.
+    loop {
+        let mut discovered = Vec::new();
+        for (table_id, binding) in &indexes.table_binding_by_id {
+            if table_root.contains_key(table_id) {
+                continue;
+            }
+            let Some((parent_item_id, members)) = parse_form_item_rooted_chain(binding) else {
+                continue;
+            };
+            let Some(parent_root) = table_root.get(parent_item_id) else {
+                continue;
+            };
+            let Some((_, attribute_path)) = walk_form_bound_chain_members(
+                &members,
+                &parent_root.attribute_id,
+                None,
+                parent_root.attribute_path.clone(),
+                parent_root.attribute_path.clone(),
+                &indexes.owner_scoped_bindings,
+                object_refs,
+                false,
+            ) else {
+                continue;
+            };
+            discovered.push((
+                table_id.clone(),
+                FormTableChainRoot {
+                    attribute_id: parent_root.attribute_id.clone(),
+                    attribute_path,
+                },
+            ));
+        }
+        if discovered.is_empty() {
+            break;
+        }
+        for (table_id, root) in discovered {
+            table_root.insert(table_id, root);
         }
     }
     indexes.owner_scoped_bindings.table_root = table_root;
@@ -10294,6 +11051,19 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
         })
         .collect();
     indexes.owner_scoped_bindings.unresolvable_table_columns = unresolvable_table_columns;
+    let invalid_nested_table_columns = indexes
+        .bound_attribute_id_by_table_id
+        .iter()
+        .flat_map(|(table_id, attribute_id)| {
+            indexes
+                .owner_scoped_bindings
+                .invalid_nested_columns
+                .iter()
+                .filter(move |key| key.attribute_id == *attribute_id)
+                .map(move |key| (table_id.clone(), key.column_id.clone()))
+        })
+        .collect();
+    indexes.owner_scoped_bindings.invalid_nested_table_columns = invalid_nested_table_columns;
     indexes
 }
 
@@ -12131,6 +12901,8 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|field| parse_form_pages_representation(field))
         } else if tag == "Popup" {
             popup_schema.and_then(FormPopupSchema::representation)
+        } else if let Some((schema, options)) = special_field_layout.as_ref() {
+            schema.representation(options)
         } else {
             extended_group_options
                 .as_ref()
@@ -12742,7 +13514,10 @@ fn parse_form_child_item_with_metadata_owners(
         equal_columns_width: parse_form_radio_button_equal_columns_width(
             radio_button_options.as_deref(),
         ),
-        item_height: parse_form_radio_button_item_height(radio_button_options.as_deref()),
+        item_height: check_box_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.item_height(options))
+            .or_else(|| parse_form_radio_button_item_height(radio_button_options.as_deref())),
         // `Table` `VerticalScrollBar` shares the horizontal scroll bar's code map
         // (`0 -> DontUse`, `1 -> UseAlways`, `2 -> nothing`) in the plain
         // top-level slot 31, on all 4 410 attributable `Table` items.
@@ -13106,6 +13881,10 @@ fn parse_form_child_item_with_metadata_owners(
             .and_then(|field| parse_form_control_color(field, object_refs))
         {
             Some(value)
+        } else if tag == "TextDocumentField" {
+            form_document_field_geometry_options(tag, &fields)
+                .and_then(|(_, options)| options.get(7).copied())
+                .and_then(|field| parse_form_control_color(field, object_refs))
         } else if tag == "LabelDecoration" {
             label_decoration_options
                 .as_ref()
@@ -13641,6 +14420,8 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.auto_max_height())
+        } else if let Some((schema, options)) = special_field_layout.as_ref() {
+            schema.auto_max_height(options)
         } else if tag == "Table" {
             parse_form_table_off_flag(
                 tag,
@@ -17357,31 +18138,34 @@ fn resolve_form_type_link_chain(
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    resolve_form_item_scoped_current_data_path(
-        chain,
-        table_name_by_id,
-        table_column_names_by_id,
-        data_path_by_table_column,
-        object_refs,
-        owner_scoped_bindings,
-    )
-    .or_else(|| {
-        resolve_form_item_rooted_chain_data_path(
-            chain,
-            table_name_by_id,
-            owner_scoped_bindings,
-            object_refs,
-        )
-    })
-    .or_else(|| {
-        resolve_form_bound_chain_member_path(
-            chain,
-            attribute_metadata_owners_by_id,
-            owner_scoped_bindings,
-            object_refs,
-            false,
-        )
-    })
+    resolve_form_item_rooted_settings_composer_path(chain, table_name_by_id, owner_scoped_bindings)
+        .or_else(|| {
+            resolve_form_item_scoped_current_data_path(
+                chain,
+                table_name_by_id,
+                table_column_names_by_id,
+                data_path_by_table_column,
+                object_refs,
+                owner_scoped_bindings,
+            )
+        })
+        .or_else(|| {
+            resolve_form_item_rooted_chain_data_path(
+                chain,
+                table_name_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            )
+        })
+        .or_else(|| {
+            resolve_form_bound_chain_member_path(
+                chain,
+                attribute_metadata_owners_by_id,
+                owner_scoped_bindings,
+                object_refs,
+                false,
+            )
+        })
 }
 
 pub(super) fn parse_form_button_type(field: &str) -> Option<&'static str> {
@@ -20572,6 +21356,13 @@ pub(super) fn parse_form_child_item_extended_tooltip(
             return None;
         }
         let mut tooltip = FormExtendedTooltip::new(name, id.to_string());
+        tooltip.display_importance = FormChildItemDisplayImportanceSchema::from_raw_layout(
+            nested.first()?.trim(),
+            nested.len(),
+            "ExtendedTooltip",
+            0,
+        )
+        .and_then(|schema| schema.display_importance(nested));
         let Some(options) = nested
             .get(FormExtendedTooltipSchema::OPTIONS_SLOT)
             .and_then(|field| split_1c_braced_fields(field.trim(), 0))
@@ -20605,6 +21396,9 @@ pub(super) fn parse_form_child_item_extended_tooltip(
         };
         tooltip.back_color = options
             .get(FormExtendedTooltipSchema::BACK_COLOR_OPTION_SLOT)
+            .and_then(|field| parse_form_control_color(field.trim(), object_refs));
+        tooltip.border_color = options
+            .get(FormExtendedTooltipSchema::BORDER_COLOR_OPTION_SLOT)
             .and_then(|field| parse_form_control_color(field.trim(), object_refs));
         tooltip.width = extract_form_dimension(&nested, schema.width_slot());
         tooltip.auto_max_width = match nested
@@ -21514,6 +22308,37 @@ pub(super) fn parse_form_child_item_data_path(
     // tells the two apart.
     let aggregate_member = parent_data_path.is_none();
     let parse_bound_slot = |field: &str, aggregate: bool| {
+        // The direct `{2,{attribute},{column}}` record is the field map's own
+        // verdict, including both negative facts it carries: column zero on a
+        // dynamic list means that no DataPath is written, and an unresolved
+        // field is written with `~`.  Letting the more general chain walkers
+        // run first discarded those two verdicts and reconstructed an
+        // ordinary-looking path from the item's name.  Resolvable columns are
+        // unchanged because this is the same resolver the owner-scoped pass
+        // below already uses.
+        if owner_scoped_data_path {
+            let direct = resolve_form_attribute_column_data_path(
+                field,
+                attribute_metadata_owners_by_id,
+                owner_scoped_bindings,
+            );
+            if !matches!(direct, FormOwnerScopedDataPath::Unknown) {
+                return direct;
+            }
+        }
+        // A longer dynamic-list chain is also the field map's own verdict: its
+        // leaf entry spells the complete relative path and carries the
+        // independently proven invalid-nested marker. The resolver self-gates
+        // on a declared DynamicList attribute, so it must precede the generic
+        // member walker even for item schemas that predate owner-scoped paths.
+        let dynamic_list = resolve_form_dynamic_list_chain_data_path(
+            field,
+            attribute_metadata_owners_by_id,
+            owner_scoped_bindings,
+        );
+        if !matches!(dynamic_list, FormOwnerScopedDataPath::Unknown) {
+            return dynamic_list;
+        }
         let chain = FormOwnerScopedDataPath::from_option(
             resolve_form_settings_composer_chain_data_path(
                 field,
@@ -21542,6 +22367,12 @@ pub(super) fn parse_form_child_item_data_path(
                     object_refs,
                 )
             })
+            // A configuration metadata UUID absent from its declarations
+            // cannot be named. Preserve the physical chain before the generic
+            // member walker reconstructs a plausible name from neighbouring
+            // declarations. Runtime value-table markers are excluded by the
+            // resolver itself.
+            .or_else(|| resolve_form_absent_metadata_physical_data_path(field, object_refs))
             .or_else(|| {
                 resolve_form_bound_chain_member_path(
                     field,
@@ -21678,11 +22509,6 @@ pub(super) fn parse_form_child_item_data_path(
                     )
                 };
                 FormOwnerScopedDataPath::from_option(data_path)
-            })
-            .or_else(|| {
-                FormOwnerScopedDataPath::from_option(
-                    resolve_form_absent_metadata_physical_data_path(field, object_refs),
-                )
             })
     };
     let parse_direct_slot = |field: &str, aggregate: bool| {
@@ -21948,7 +22774,7 @@ pub(super) fn parse_form_child_item_data_path(
 ///
 /// Both slots used to fall through to the item's own name joined to its parent
 /// path -- a guess, and the wrong one on both.
-fn resolve_form_absent_metadata_physical_data_path(
+pub(super) fn resolve_form_absent_metadata_physical_data_path(
     field: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
@@ -21970,6 +22796,20 @@ fn resolve_form_absent_metadata_physical_data_path(
         let marker = marker.trim();
         marker.parse::<i64>().ok()?;
         let uuid = parse_non_zero_uuid(uuid.trim())?;
+        // These are platform grammar markers for runtime value-table members
+        // and generated accounting-register ext-dimension slots. They are
+        // intentionally absent from ordinary metadata declarations; the
+        // owner-aware chain walker names them logically.
+        if matches!(
+            uuid.as_str(),
+            FORM_VALUE_TABLE_COLUMN_BINDING_UUID
+                | FORM_VALUE_TABLE_INDEX_BINDING_UUID
+                | ACCOUNTING_REGISTER_EXT_DIMENSION_DR_FAMILY
+                | ACCOUNTING_REGISTER_EXT_DIMENSION_CR_FAMILY
+                | ACCOUNTING_REGISTER_EXT_DIMENSION_PLAIN_FAMILY
+        ) {
+            return None;
+        }
         if !object_refs.contains_key(&uuid) {
             absent = true;
         }
@@ -22279,7 +23119,12 @@ fn resolve_form_dynamic_list_chain_data_path(
     let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id) else {
         return FormOwnerScopedDataPath::Unknown;
     };
-    FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, field_name))
+    let marker = owner_scoped_bindings
+        .invalid_nested_columns
+        .contains(&key)
+        .then_some("~")
+        .unwrap_or_default();
+    FormOwnerScopedDataPath::Resolved(format!("{marker}{}.{}", attribute.name, field_name))
 }
 
 /// Splits a bound slot `{K,s1,…,sK}` into its `K` segments, each already split
@@ -23128,6 +23973,7 @@ fn walk_form_bound_chain_members(
     object_refs: &BTreeMap<String, String>,
     aggregate: bool,
 ) -> Option<(String, String)> {
+    let root_key = key.clone();
     // The only segment kind that states a type is a declared column, so a
     // dereferencing marker is answered only when it follows one directly.
     let mut reached_type: Option<&str> = None;
@@ -23259,13 +24105,51 @@ fn walk_form_bound_chain_members(
                     attribute_id: attribute_id.to_string(),
                     column_id: column_id.to_string(),
                 };
-                let name = owner_scoped_bindings
+                if let Some(name) = owner_scoped_bindings
                     .declared_columns
-                    .get(&lookup)?
-                    .as_ref()?;
-                for target in [&mut path, &mut key] {
-                    target.push('.');
-                    target.push_str(name);
+                    .get(&lookup)
+                    .and_then(|name| name.as_ref())
+                {
+                    for target in [&mut path, &mut key] {
+                        target.push('.');
+                        target.push_str(name);
+                    }
+                } else if owner_scoped_bindings
+                    .dynamic_list_attribute_ids
+                    .contains(attribute_id)
+                {
+                    // A dynamic-list field-map name is a complete path from
+                    // the list row, while a bound chain presents consecutive
+                    // prefixes of that path. Append only the delta from the
+                    // prefix already reached. The output spelling is
+                    // normalized one segment at a time (`НомерСтроки` ->
+                    // `LineNumber`), but the lookup key retains the map's raw
+                    // spelling for the next prefix comparison.
+                    let full = owner_scoped_bindings
+                        .attribute_columns
+                        .get(&lookup)?
+                        .as_ref()?;
+                    let relative = key
+                        .strip_prefix(&root_key)?
+                        .strip_prefix('.')
+                        .unwrap_or_default();
+                    let delta = if relative.is_empty() {
+                        full.as_str()
+                    } else {
+                        full.strip_prefix(relative)?.strip_prefix('.')?
+                    };
+                    if delta.is_empty() {
+                        return None;
+                    }
+                    for raw_name in delta.split('.') {
+                        let published = normalize_form_table_column_name(&key, raw_name);
+                        path.push('.');
+                        path.push_str(&published);
+                        key.push('.');
+                        key.push_str(raw_name);
+                    }
+                } else {
+                    return None;
                 }
                 reached_type = owner_scoped_bindings
                     .declared_column_types
@@ -23353,20 +24237,36 @@ fn resolve_form_item_rooted_chain_data_path(
         false,
     )
     .map(|(path, _)| {
-        // Only the member standing directly on the list row can carry the
-        // marker: a member past it is declared by the type the previous member
-        // reached, not by the list, so the list's universe says nothing about
-        // it.
-        let marker = members
-            .first()
+        // The top-level list universe can mark only the first member. A later
+        // member can mark the whole path too, but only when the independent
+        // metadata walk disproved that exact dereference; being absent from the
+        // deliberately shallow list universe is not enough.
+        let invalid_nested = members
+            .last()
             .map(Vec::as_slice)
             .and_then(|segment| match segment {
                 [column_id] => parse_form_chain_numeric_id(column_id),
                 _ => None,
             })
-            .map_or("", |column_id| {
-                form_table_column_unresolvable_marker(item_id, column_id, owner_scoped_bindings)
+            .is_some_and(|column_id| {
+                owner_scoped_bindings
+                    .invalid_nested_table_columns
+                    .contains(&(item_id.to_string(), column_id.to_string()))
             });
+        let marker = if invalid_nested {
+            "~"
+        } else {
+            members
+                .first()
+                .map(Vec::as_slice)
+                .and_then(|segment| match segment {
+                    [column_id] => parse_form_chain_numeric_id(column_id),
+                    _ => None,
+                })
+                .map_or("", |column_id| {
+                    form_table_column_unresolvable_marker(item_id, column_id, owner_scoped_bindings)
+                })
+        };
         format!("{marker}{path}")
     })
 }
@@ -23554,6 +24454,9 @@ fn form_settings_composer_row_type(
     match collection {
         FormSettingsComposerType::Settings => Some(FormSettingsComposerType::SettingsItem),
         FormSettingsComposerType::UserSettings => Some(FormSettingsComposerType::UserSettingsItem),
+        // A table over the filter collection exposes filter-item members on
+        // its CurrentData row; the same member table names `10002` LeftValue.
+        FormSettingsComposerType::Filter => Some(FormSettingsComposerType::Filter),
         _ => None,
     }
 }
@@ -24099,6 +25002,18 @@ fn resolve_form_attribute_column_data_path(
         column_id: column_id.to_string(),
     };
     let Some(column_name) = owner_scoped_bindings.attribute_columns.get(&key) else {
+        // A dynamic-list binding names its field-map id, not an arbitrary
+        // reusable binding key. When that id is absent from the map, the
+        // platform writes no DataPath at all; allowing the generic fallback to
+        // run can borrow an unrelated item's name for the same physical key.
+        // This is the non-zero counterpart of the explicitly absent id `0`
+        // handled above.
+        if owner_scoped_bindings
+            .dynamic_list_attribute_ids
+            .contains(attribute_id)
+        {
+            return FormOwnerScopedDataPath::Ambiguous;
+        }
         return FormOwnerScopedDataPath::Unknown;
     };
     let Some(column_name) = column_name else {
@@ -24115,7 +25030,12 @@ fn resolve_form_attribute_column_data_path(
     // written `~Список.РегистрационныйНомерЕРУЗ`, while the same field name
     // under a list that does resolve it is written without the marker.
     if !owner_scoped_bindings.unresolvable_columns.contains(&key) {
-        return FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, column_name));
+        let source_name = owner_scoped_bindings
+            .column_twins
+            .get(&key)
+            .filter(|candidate| form_data_path_name_eq_ignore_case(candidate, column_name))
+            .unwrap_or(column_name);
+        return FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, source_name));
     }
     // A marked field the map remembers a localized twin for is written under
     // both names, each carrying its own marker -- the same doubled spelling
@@ -25672,7 +26592,7 @@ pub(super) fn parse_form_button_command_name_with_main_attribute(
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
         if let Some(command_name) = form_standard_command_name(&uuid)
-            && form_extension_owns_standard_command(&command_name, main_attribute)
+            && form_button_extension_owns_standard_command(&command_name, main_attribute)
         {
             return Some(command_name);
         }
@@ -25707,8 +26627,8 @@ pub(super) fn parse_form_button_command_name_with_main_attribute(
     // record whose `kind` is 1 resolves to `Form.Item.Товары.…GetURL` under a
     // table owner and to `Catalog.СезонныеГруппы.…Create` under the family rule,
     // from the very same `kind`.
-    if let Some(owner) = standard_command_owner_name_by_id.get(kind)
-        && let Some(standard) = match owner.kind {
+    if let Some(owner) = standard_command_owner_name_by_id.get(kind) {
+        if let Some(standard) = match owner.kind {
             FormStandardCommandOwnerKind::FormattedDocument => {
                 form_formatted_document_standard_command_suffix(&uuid)
             }
@@ -25722,12 +26642,12 @@ pub(super) fn parse_form_button_command_name_with_main_attribute(
                 form_spreadsheet_document_standard_command_suffix(&uuid)
             }
             FormStandardCommandOwnerKind::Table => form_table_standard_command_suffix(&uuid),
+        } {
+            return Some(format!(
+                "Form.Item.{}.StandardCommand.{standard}",
+                owner.name
+            ));
         }
-    {
-        return Some(format!(
-            "Form.Item.{}.StandardCommand.{standard}",
-            owner.name
-        ));
     }
     if let Some(reference) = object_refs.get(&uuid)
         && let Some(command_name) = form_object_family_standard_command_name(
@@ -26120,7 +27040,7 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<String> {
 /// `NewWindow` 101, `LoadVariant` 36, `SaveVariant` 29, `Print` 20,
 /// `ReportSettings` 13, `ChangeVariant` 11, `StandardSettings` 5, `Save` 4 --
 /// `ReportObject` throughout), so the one list serves both readers.
-fn form_extension_owns_standard_command(
+pub(super) fn form_extension_owns_standard_command(
     command_name: &str,
     main_attribute: &FormMainAttributeExtension,
 ) -> bool {
@@ -26155,10 +27075,70 @@ fn form_extension_owns_standard_command(
     match main_attribute {
         FormMainAttributeExtension::Unread => true,
         FormMainAttributeExtension::Absent => false,
-        FormMainAttributeExtension::Declared(family) => {
+        FormMainAttributeExtension::Declared { family, .. } => {
             family.as_deref() != Some("DataProcessorObject")
         }
     }
+}
+
+/// Button-only refinement of the form-extension command ownership.
+///
+/// `SetDateInterval` is a form command on a document or document-journal list,
+/// but the same stored UUID stays physical when the main DynamicList is built
+/// over an information register. The root command-set grammar is independent
+/// and deliberately continues to use [`form_extension_owns_standard_command`].
+fn form_button_extension_owns_standard_command(
+    command_name: &str,
+    main_attribute: &FormMainAttributeExtension,
+) -> bool {
+    if !form_extension_owns_standard_command(command_name, main_attribute) {
+        return false;
+    }
+    let command = command_name
+        .strip_prefix("Form.StandardCommand.")
+        .unwrap_or(command_name);
+    !matches!(
+        (command, main_attribute),
+        (
+            "SetDateInterval",
+            FormMainAttributeExtension::Declared {
+                main_list_table_family: Some(table_family),
+                ..
+            }
+        ) if table_family == "InformationRegister"
+    )
+}
+
+/// Whether the form window can carry this command of its main-attribute
+/// extension.
+///
+/// A corpus join of every root command-set record containing the
+/// `WriteAndClose` platform UUID found 35 records whose main attribute is a
+/// `DocumentObject`. All 34 ordinary-window records emit `WriteAndClose`; the
+/// only owner-window-locking record omits it while retaining `Write` from the
+/// same two-member command set. Other extension families do carry
+/// `WriteAndClose` in an owner-window-locking form, so the decision is the
+/// combination of the command, extension family and window mode rather than a
+/// property of any one form or metadata object.
+pub(super) fn form_window_owns_standard_command(
+    command_name: &str,
+    main_attribute: &FormMainAttributeExtension,
+    window_opening_mode: Option<&str>,
+) -> bool {
+    let command = command_name
+        .strip_prefix("Form.StandardCommand.")
+        .unwrap_or(command_name);
+    !matches!(
+        (command, main_attribute, window_opening_mode),
+        (
+            "WriteAndClose",
+            FormMainAttributeExtension::Declared {
+                family: Some(family),
+                ..
+            },
+            Some("LockOwnerWindow")
+        ) if family == "DocumentObject"
+    )
 }
 
 /// The dynamic-list settings of the form's own main attribute, when it has
@@ -26529,14 +27509,20 @@ fn retain_form_table_list_owned_commands(
 /// Collected from the finished tree rather than from the item record, because
 /// two of the three answers are the very sets the table's own `<CommandSet>`
 /// reader has just produced.
-struct FormTableCommandOwnership {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct FormTableCommandOwnership {
     /// The names the table's own `<CommandSet>` excludes, as finally written.
-    excluded_commands: Vec<&'static str>,
+    pub(super) excluded_commands: Vec<&'static str>,
     /// The table shows a dynamic list whose row set the form declares
     /// unchangeable.
-    row_set_unchangeable: bool,
+    pub(super) row_set_unchangeable: bool,
     /// The table shows a dynamic list that declares no `<MainTable>`.
-    list_without_main_table: bool,
+    pub(super) list_without_main_table: bool,
+    /// The family of the dynamic list's declared main table, when one is
+    /// present. The command record itself carries only the table-item id, so
+    /// this is the structural fact that lets its system-command revision be
+    /// interpreted without consulting an object name.
+    pub(super) main_table_family: Option<String>,
 }
 
 /// Index every `<Table>` of the tree by its item id, which is exactly the
@@ -26564,6 +27550,11 @@ fn collect_form_table_command_ownership(
                     row_set_unchangeable: settings.is_some() && item.change_row_set == Some(false),
                     list_without_main_table: settings
                         .is_some_and(|settings| settings.main_table.is_none()),
+                    main_table_family: settings
+                        .and_then(|settings| settings.main_table.as_deref())
+                        .and_then(|table| {
+                            table.split_once('.').map(|(family, _)| family.to_string())
+                        }),
                 },
             );
         }
@@ -26617,8 +27608,9 @@ fn collect_form_table_command_ownership(
 /// `20:49602716-…` in `Reports/ПлатежныйКалендарьУХ/Forms/ФормаОтчета`
 /// (`Find`, `CancelSearch` and `OutputList`, all three excluded by that
 /// table's own `<CommandSet>`).
-fn form_table_owns_button_standard_command(
+pub(super) fn form_table_owns_button_standard_command(
     command: &str,
+    command_uuid: &str,
     ownership: &FormTableCommandOwnership,
 ) -> bool {
     if ownership.excluded_commands.contains(&command) {
@@ -26628,6 +27620,19 @@ fn form_table_owns_button_standard_command(
         return false;
     }
     if ownership.list_without_main_table && FORM_LIST_MAIN_TABLE_ROW_COMMANDS.contains(&command) {
+        return false;
+    }
+    // The platform has two system UUIDs that both render as a table `Delete`.
+    // Across the complete eight-corpus button population, the `ec576e13-...`
+    // revision occurs four times: it is named on a catalog table and two
+    // document tables, while the information-register table keeps the raw
+    // record. The numerous named register-table deletes use the other system
+    // UUID (`8d772f97-...`). This is therefore a command-revision/family rule,
+    // not an object-name or configuration rule.
+    if command == "Delete"
+        && command_uuid == "ec576e13-1e76-4c33-98aa-a33204514227"
+        && ownership.main_table_family.as_deref() == Some("InformationRegister")
+    {
         return false;
     }
     true
@@ -26653,7 +27658,7 @@ fn withhold_form_button_commands_the_table_lacks(
                     .and_then(|field| parse_non_zero_uuid(field.trim())),
             )
             && let Some(table) = ownership.get(kind)
-            && !form_table_owns_button_standard_command(command, table)
+            && !form_table_owns_button_standard_command(command, &uuid, table)
         {
             item.command_name = Some(form_command_record_sentinel(kind, &uuid));
         }
@@ -27875,6 +28880,13 @@ fn form_command_interface_command_named(
                 return Some(name);
             }
             let reference = context.object_refs.get(&uuid)?;
+            if is_top_level_reference_of_kind(reference, "InformationRegister")
+                && context
+                    .information_register_master_dimensions
+                    .contains_key(&uuid)
+            {
+                return Some(format!("{kind}:{uuid}"));
+            }
             // A catalog names its "create based on" command from slot 3, where a
             // document or business process names the same command from slot 2 --
             // and it reads the same empty-`<BasedOn>` declaration there.
@@ -27926,7 +28938,16 @@ fn form_command_interface_command_named(
                     },
                 );
             }
-            resolve_information_register_open_by_value_command(kind, target, context)
+            if let Some(name) =
+                resolve_information_register_open_by_value_command(kind, target, context)
+            {
+                return Some(name);
+            }
+            (is_top_level_reference_of_kind(reference, "InformationRegister")
+                && context
+                    .information_register_master_dimensions
+                    .contains_key(&uuid))
+            .then(|| format!("{kind}:{uuid}"))
         }
         // Slots 5, 6 and 7 carry nothing but this command; slots 3 and 4 share
         // theirs with the object commands handled above. The gate belongs here
@@ -27946,6 +28967,15 @@ fn form_command_interface_command_named(
             {
                 return Some(name);
             }
+            // These slots are positional open-by-value selectors. A real
+            // register with no master dimension at that position has no name
+            // for the command, so the platform keeps the record itself.
+            if context
+                .information_register_master_dimensions
+                .contains_key(&uuid)
+            {
+                return Some(format!("{kind}:{uuid}"));
+            }
             // A well-formed uuid that names nothing in this configuration is
             // the second case the platform cannot construct a name for, and it
             // keeps the raw `kind:uuid` sentinel for it too -- the same
@@ -27961,6 +28991,15 @@ fn form_command_interface_command_named(
             // unwritten.
             (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
         }
+        // Kind 8 is a raw command-interface variant, not another positional
+        // register dimension: one observed target declares six master
+        // dimensions, so interpreting 8 as `3 + position` would name the sixth
+        // one while the platform keeps the record itself. The same raw variant
+        // is observed with an undeclared target; in both states its complete
+        // representation is the pair it carries.
+        "8" => target
+            .and_then(parse_non_zero_uuid)
+            .map(|uuid| format!("8:{uuid}")),
         _ => None,
     }
 }
@@ -28004,16 +29043,9 @@ pub(super) fn parse_form_command_interface_command(
     // seven; in each case the refusal dropped the whole `<Item>`, and where the
     // refused item was the container's only one it dropped the container.
     //
-    // The two uuids that *do* name something stay refused here. Both are in
-    // ERP УХ 3.2.12.6 `Catalogs/Сценарии/Forms/ФормаЭлемента` --
-    // `5:f18047cf-…` (`InformationRegister.ПараметрыУчетаВНАМСФО`) and
-    // `8:50635584-…` (`InformationRegister.ПротоколыОбъектов`) -- and the
-    // platform writes the sentinel for them too. Dropping this condition would
-    // reproduce both, but it would also spell a sentinel for every record this
-    // reader merely fails to name -- a register whose open-by-value dimension
-    // is ambiguous, say -- where the platform does write a name. Those are two
-    // different states and nothing measured here separates them, so the two
-    // records stay unwritten rather than joined by fabricated ones.
+    // An identifier naming no object this configuration knows is provably
+    // opaque and stays raw. An existing target that merely failed one of the
+    // naming grammars is a different state and remains refused here.
     named.or_else(|| {
         let uuid = target.and_then(parse_non_zero_uuid)?;
         (!context.object_refs.contains_key(&uuid)).then(|| format!("{kind}:{uuid}"))
@@ -28105,18 +29137,10 @@ fn resolve_information_register_open_by_value_command(
             "{reference}.StandardCommand.OpenByValue.{dimension}"
         ));
     }
-    // A register that declares no master dimension at all is outside everything
-    // the corpus shows: no such record occurs in it, positionally or otherwise.
-    // The older reading - the register's one unambiguous field - is kept for that
-    // case rather than widened into it, and it cannot contradict the rule above
-    // because the two are reached on disjoint inputs.
-    let form_owner_reference = context.form_owner_reference?;
-    let field_reference = resolve_information_register_field_reference(
-        context.information_register_field_refs,
-        &uuid,
-        form_owner_reference,
-    )?;
-    form_information_register_open_by_value_reference(field_reference)
+    // With no declared master-dimension sequence, the positional selector has
+    // no target. The form owner is not a substitute declaration: fields may
+    // happen to refer to it, but this command record names none of them.
+    None
 }
 
 pub(super) fn resolve_information_register_field_reference<'a>(
@@ -29783,6 +30807,9 @@ fn format_form_control_border_xml(item: &FormChildItem, indent: usize) -> String
         return String::new();
     };
     let tab = "\t".repeat(indent);
+    if let Some(reference) = border.reference {
+        return format!("{tab}<Border ref=\"{}\"/>\r\n", escape_xml_text(reference));
+    }
     format!(
         "{tab}<Border width=\"{}\">\r\n\
 {tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{}</v8ui:style>\r\n\
@@ -30633,7 +31660,9 @@ pub(super) fn format_form_child_item_xml(
     // trails `RadioButtonType` (48), `ItemWidth` (19) and `ColumnsCount` (15) and
     // precedes `ChoiceList` (44), `Events` (46), `ContextMenu` and
     // `ExtendedTooltip`, with no counter-example.
-    if let Some(item_height) = &item.item_height {
+    if item.tag != "CheckBoxField"
+        && let Some(item_height) = &item.item_height
+    {
         xml.push_str(&format!(
             "{tab}\t<ItemHeight>{}</ItemHeight>\r\n",
             escape_xml_text(item_height)
@@ -30739,6 +31768,18 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<Height>{}</Height>\r\n",
             escape_xml_text(height)
+        ));
+    }
+    // Document-field colours follow their geometry. Across all 287 native
+    // `TextDocumentField` items in the eight corpora, option member 7 is the
+    // ordinary control-colour tuple: the sole non-default value publishes one
+    // `BackColor`, directly after `Height`; every unset tuple publishes none.
+    if item.tag == "TextDocumentField"
+        && let Some(back_color) = &item.back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BackColor>{}</BackColor>\r\n",
+            escape_xml_text(back_color)
         ));
     }
     // A `GraphicalSchemaField` writes `Edit` immediately behind its geometry
@@ -31128,6 +32169,18 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<MarkingAppearance>{}</MarkingAppearance>\r\n",
             escape_xml_text(marking_appearance)
+        ));
+    }
+    // Progress bars keep Representation in their scalar tail immediately
+    // before ShowPercent. Other controls use the common representation run.
+    if item.tag == "ProgressBarField"
+        && let Some(representation) = item.representation.filter(|representation| {
+            !form_child_item_representation_is_default(item.tag, representation)
+        })
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Representation>{}</Representation>\r\n",
+            escape_xml_text(representation)
         ));
     }
     if item.show_percent == Some(true) {
@@ -31602,7 +32655,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(command_source)
         ));
     }
-    if !matches!(item.tag, "Pages" | "Popup")
+    if !matches!(item.tag, "Pages" | "Popup" | "ProgressBarField")
         && let Some(representation) = item.representation.filter(|representation| {
             !form_child_item_representation_is_default(item.tag, representation)
         })
@@ -31679,6 +32732,17 @@ pub(super) fn format_form_child_item_xml(
             "EditFormat",
             &item.edit_format,
             indent + 1,
+        ));
+    }
+    // Check boxes keep `ItemHeight` in their scalar tail, after `EditFormat`
+    // and before `EqualItemsWidth`. Radio buttons use the earlier item-size
+    // run because their surrounding property order is different.
+    if item.tag == "CheckBoxField"
+        && let Some(item_height) = &item.item_height
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ItemHeight>{}</ItemHeight>\r\n",
+            escape_xml_text(item_height)
         ));
     }
     // A check box writes its `ItemTitleHeight` behind its own `EditFormat`, not
@@ -32303,6 +33367,8 @@ pub(super) fn format_form_child_item_xml(
             | "TextDocumentField"
             | "FormattedDocumentField"
             | "HTMLDocumentField"
+            // The spreadsheet field writes its tooltip from the early run
+            // above, ahead of its own `ToolTipRepresentation`.
             | "SpreadSheetDocumentField"
             | "Table"
             | "LabelDecoration"
@@ -32313,9 +33379,6 @@ pub(super) fn format_form_child_item_xml(
             | "Pages"
             | "Page"
             | "CommandBar"
-            // The spreadsheet field writes its tooltip from the early run
-            // above, ahead of its own `ToolTipRepresentation`.
-            | "SpreadSheetDocumentField"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -33563,18 +34626,25 @@ fn should_emit_form_picture_size(picture_size: &str) -> bool {
     picture_size != "RealSize"
 }
 
-fn format_form_extended_tooltip_xml(tooltip: &FormExtendedTooltip, indent: usize) -> String {
+pub(super) fn format_form_extended_tooltip_xml(
+    tooltip: &FormExtendedTooltip,
+    indent: usize,
+) -> String {
     let tab = "\t".repeat(indent);
+    let display_importance = tooltip
+        .display_importance
+        .map(|value| format!(" DisplayImportance=\"{}\"", escape_xml_text(value)))
+        .unwrap_or_default();
     if !tooltip.has_properties() {
         return format!(
-            "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
+            "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\"{display_importance}/>\r\n",
             escape_xml_text(&tooltip.name),
             escape_xml_text(&tooltip.id)
         );
     }
 
     let mut xml = format!(
-        "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\">\r\n",
+        "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\"{display_importance}>\r\n",
         escape_xml_text(&tooltip.name),
         escape_xml_text(&tooltip.id)
     );
@@ -33656,6 +34726,16 @@ fn format_form_extended_tooltip_property_xml(
             .back_color
             .as_ref()
             .map(|value| format!("{tab}<BackColor>{}</BackColor>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::BorderColor => tooltip
+            .border_color
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<BorderColor>{}</BorderColor>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormExtendedTooltipXmlProperty::Font => tooltip
             .font_xml
@@ -34398,6 +35478,7 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         )
         && settings.group_items.is_none()
         && settings.data_parameters.is_none()
+        && settings.items_user_setting_presentation.is_empty()
         && canonical_parts.tail().is_empty()
     {
         // No child renders. Whether the container itself is written is
@@ -34470,6 +35551,15 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         xml.push_str(group_items);
     }
     xml.push_str(canonical_parts.tail());
+    if !settings.items_user_setting_presentation.is_empty() {
+        xml.push_str(
+            "\t\t\t\t\t<dcsset:itemsUserSettingPresentation xsi:type=\"v8:LocalStringType\">\r\n",
+        );
+        for (lang, content) in &settings.items_user_setting_presentation {
+            push_form_localized_item(&mut xml, "\t\t\t\t\t", lang, content);
+        }
+        xml.push_str("\t\t\t\t\t</dcsset:itemsUserSettingPresentation>\r\n");
+    }
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
     Ok(xml)
 }

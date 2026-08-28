@@ -3081,6 +3081,10 @@ struct RewriteState {
     /// the same pattern `dcsset:outputParameters` has in the settings
     /// document (see `DcsEmptyElementAction` in `src/mssql_dump/dcs.rs`).
     omit_if_empty: bool,
+    /// Whether this is a `dcscor:value` typed as `DesignTimeValue`. If an
+    /// open/close spelling proves empty at the closing tag, the source form is
+    /// the same `xsi:nil` spelling used for a self-closed storage value.
+    empty_design_time_value: bool,
     /// Whether a child this element carried in storage was dropped on the way
     /// out -- an empty `appearance`/`inputParameters` placeholder, or an
     /// `appIndex` whose side-table entry carries nothing.
@@ -3114,6 +3118,7 @@ impl RewriteState {
             start_tag_begin_offset: 0,
             start_tag_end_offset: 0,
             omit_if_empty: false,
+            empty_design_time_value: false,
             dropped_child: false,
         }
     }
@@ -3397,7 +3402,13 @@ fn evidenced_named_type_sort_order(run: &[TypeSortKey]) -> Result<Vec<usize>, Dc
     // `CatalogRef.Пользователи` in that order in storage and in that same
     // order in the platform's own source, and its two other mixed literal runs
     // agree.
-    if builtins.is_empty() && literals.is_empty() {
+    // A family is the exception to the reference-only identity rule: it sorts
+    // after every concrete reference. The measured corpus includes a mixed
+    // run with a reference family between concrete references; the platform
+    // writes that family after the complete concrete-reference run.
+    // Stable-partitioning families to the tail leaves already ordered runs
+    // byte-identical.
+    if builtins.is_empty() && literals.is_empty() && families.is_empty() {
         return identity();
     }
     if references.is_empty() && families.is_empty() {
@@ -4125,6 +4136,16 @@ fn rewrite_tokens(
                         }
                         RewriteFrame::TypeId | RewriteFrame::AppIndex => {}
                         RewriteFrame::Element(emitted) => {
+                            let empty_design_time_value = state.empty_design_time_value
+                                && !state.saw_child
+                                && out[state.start_tag_end_offset..].trim().is_empty();
+                            if empty_design_time_value {
+                                out.truncate(state.start_tag_begin_offset);
+                                out.push('<');
+                                out.push_str(&emitted);
+                                out.push_str(" xsi:nil=\"true\"/>");
+                                continue;
+                            }
                             // Whitespace-only, not strictly zero-length: the
                             // storage document's own pretty-printing writes
                             // indentation text nodes even inside a childless
@@ -4685,15 +4706,15 @@ fn rewrite_tokens(
                 // ОсновнаяСхемаКомпоновкиДанных` stores `<value
                 // xmlns:dcscor="…" xsi:type="dcscor:DesignTimeValue"/>` and
                 // the platform exports `<value xsi:nil="true"/>`.
-                if start.self_closing
-                    && rendered_attribute_count == 1
+                let design_time_value = rendered_attribute_count == 1
+                    && local == "value"
                     && start.attributes.iter().any(|(key, value)| {
                         expanded_attribute_name(&scopes, key).as_deref()
                             == Some(XSI_TYPE_EXPANDED_NAME)
                             && expanded_qname(&scopes, value).as_deref()
                                 == Some(DESIGN_TIME_VALUE_EXPANDED_NAME)
-                    })
-                {
+                    });
+                if start.self_closing && design_time_value {
                     rendered = " xsi:nil=\"true\"".to_owned();
                 }
                 if start.self_closing && omit_if_empty {
@@ -4745,6 +4766,7 @@ fn rewrite_tokens(
                     state.start_tag_begin_offset = element_start;
                     state.start_tag_end_offset = start_tag_end_offset;
                     state.omit_if_empty = omit_if_empty;
+                    state.empty_design_time_value = design_time_value;
                     // `v8:Type`/`v8:TypeSet` content is a QName, so it moves
                     // to the source document's prefixes exactly like an
                     // `xsi:type` attribute does: a storage `StandardPeriod`
@@ -5093,6 +5115,19 @@ mod type_run_order_tests {
             ])
             .as_deref(),
             Ok("s.R.F")
+        );
+    }
+
+    #[test]
+    fn a_reference_family_falls_behind_a_reference_only_run_too() {
+        assert_eq!(
+            rewritten(&[
+                ("A", reference("10000000-0000-4000-8000-000000000000")),
+                ("F", TypeSortKey::Family),
+                ("B", reference("20000000-0000-4000-8000-000000000000")),
+            ])
+            .as_deref(),
+            Ok("A.B.F")
         );
     }
 
@@ -5616,6 +5651,33 @@ mod tests {
         .unwrap();
         let emitted = String::from_utf8(emitted).unwrap().replace("\r\n", "\n");
         assert_eq!(emitted.trim_end(), source.trim_end());
+    }
+
+    #[test]
+    fn empty_open_close_design_time_value_is_written_as_nil() {
+        let primary = String::from_utf8(core_primary()).unwrap();
+        let primary = primary.replacen(
+            "\t\t</dataSource>",
+            concat!(
+                "\t\t\t<value xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+                "xsi:type=\"dcscor:DesignTimeValue\"></value>\r\n",
+                "\t\t</dataSource>"
+            ),
+            1,
+        );
+        let source = String::from_utf8(core_source()).unwrap();
+        let emitted = rewrite_dcs_primary_schema_storage_document(
+            primary.as_bytes(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &[inline_settings(source.trim_start_matches('\u{feff}'))],
+        )
+        .unwrap();
+        let emitted = String::from_utf8(emitted).unwrap();
+        assert!(emitted.contains("<value xsi:nil=\"true\"/>"), "{emitted}");
+        assert!(!emitted.contains("DesignTimeValue"), "{emitted}");
     }
 
     #[test]

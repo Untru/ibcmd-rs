@@ -102,6 +102,10 @@ pub(crate) fn form_text_document_context_menu_child_is_valid(tag: &str) -> bool 
 const FORM_COLUMN_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     ("f6841c6b-6c71-4c82-ae9e-d08b49db326c", "dcsset:Filter"),
     (
+        "7dd764b6-b22f-4712-8edc-c0d634340e60",
+        "d7p1:ConditionalAppearance",
+    ),
+    (
         "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
         "dcsset:DataCompositionComparisonType",
     ),
@@ -2205,6 +2209,7 @@ pub(crate) enum FormExtendedTooltipXmlProperty {
     GroupVerticalAlign,
     HorizontalAlign,
     VerticalAlign,
+    BorderColor,
     BackColor,
     Events,
 }
@@ -2249,6 +2254,10 @@ pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProper
     FormExtendedTooltipXmlProperty::GroupVerticalAlign,
     FormExtendedTooltipXmlProperty::HorizontalAlign,
     FormExtendedTooltipXmlProperty::VerticalAlign,
+    // The sole native tooltip carrying `BorderColor` writes it after `Title`;
+    // it co-occurs with no later property, so it closes the alignment/title
+    // run immediately before the already-evidenced BackColor/Events tail.
+    FormExtendedTooltipXmlProperty::BorderColor,
     // A tooltip's `BackColor` closes its property block, immediately ahead of
     // `Events`.  Both native tooltips that carry one pin it from a different
     // side and neither is contradicted: one reads `TextColor`, `Title`,
@@ -2291,6 +2300,11 @@ impl FormExtendedTooltipSchema {
     /// tooltips the platform writes `<BackColor>` on -- `style:ToolTipBackColor`
     /// and `#FFDCDC`, value for value.
     pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 6;
+    /// The adjacent option member carries `BorderColor`. In the complete
+    /// measured population it departs from `{3,4,{0}}` once, as raw
+    /// `{3,3,{-22}}`; that same tooltip is the sole native item carrying
+    /// `style:BorderColor`.
+    pub(crate) const BORDER_COLOR_OPTION_SLOT: usize = 7;
     /// `Hyperlink` flag slot of the tooltip option tuple: `1` on exactly the 8
     /// native `ExtendedTooltip` items that carry `<Hyperlink>true</Hyperlink>`
     /// and `0` on the other 170 224.
@@ -2605,6 +2619,7 @@ impl FormControlBorderStyle {
 pub(crate) struct FormControlBorder {
     pub(crate) style: FormControlBorderStyle,
     pub(crate) width: u32,
+    pub(crate) reference: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -2696,6 +2711,27 @@ impl FormControlBorderSchema {
         Some(FormControlBorder {
             style: FormControlBorderStyle::from_raw_code(tuple.get(3)?)?,
             width: tuple.get(4)?.trim().parse::<u32>().ok()?,
+            reference: None,
+        })
+    }
+
+    /// The reference revision is a six-member tuple rather than the explicit
+    /// seven-member width/style revision. Across all eight layout trees the
+    /// exact tuple `{3,1,{-18},1,1,0}` occurs seven times; the native trees
+    /// contain exactly seven matching `<Border ref="style:ControlBorder"/>`
+    /// elements. No other reference code is claimed.
+    fn reference_border(tuple: &[&str]) -> Option<FormControlBorder> {
+        (tuple.len() == 6
+            && tuple.first().map(|field| field.trim()) == Some("3")
+            && tuple.get(1).map(|field| field.trim()) == Some("1")
+            && tuple.get(2).map(|field| field.trim()) == Some("{-18}")
+            && tuple.get(3).map(|field| field.trim()) == Some("1")
+            && tuple.get(4).map(|field| field.trim()) == Some("1")
+            && tuple.get(5).map(|field| field.trim()) == Some("0"))
+        .then_some(FormControlBorder {
+            style: FormControlBorderStyle::WithoutBorder,
+            width: 1,
+            reference: Some("style:ControlBorder"),
         })
     }
 
@@ -2704,8 +2740,10 @@ impl FormControlBorderSchema {
     /// `<Border>` satisfies one of the two and every record satisfying neither
     /// carries none, with no counter-example on any of the five owners.
     pub(crate) fn non_default_tuple_border(self, tuple: &[&str]) -> Option<FormControlBorder> {
-        self.tuple_border(tuple)
-            .filter(|border| border.style != self.default_style || border.width != 1)
+        Self::reference_border(tuple).or_else(|| {
+            self.tuple_border(tuple)
+                .filter(|border| border.style != self.default_style || border.width != 1)
+        })
     }
 }
 
@@ -2948,6 +2986,14 @@ impl FormChildItemDisplayImportanceSchema {
                 0,
             ) if field_count >= 29 => field_count.checked_sub(1)?,
             ("12", 36, "LabelDecoration" | "PictureDecoration", 0) => 34,
+            // An extended tooltip keeps the same importance ordinal at
+            // reverse offset two of its own 34-member wrapper-`12` record.
+            // Across every dumped layout of the eight stand corpora the tail
+            // `...,3,3,2,0` occurs exactly once. The native trees contain
+            // exactly one importance-bearing ExtendedTooltip, that same item
+            // written `High`. No other layout or native tree carries a
+            // non-default occurrence.
+            ("12", 34, "ExtendedTooltip", 0) => 32,
             // The three list additions keep the importance code in the last
             // member of their own 24-member wrapper-`5` record, exactly as the
             // wrapper-`22` containers do.  Across all 13 942 of them in UT
@@ -5156,6 +5202,12 @@ impl FormCheckBoxFieldSchema {
     /// All 20 386 observed check boxes place `ItemTitleHeight` in member 8:
     /// zero on the 20 385 absent values and `1` on the single written value.
     const ITEM_TITLE_HEIGHT_OPTION_SLOT: usize = 8;
+    /// `ItemHeight` of the 13-member revision-`11` tuple. Across all native
+    /// stand check boxes member 10 is zero except on one item, where it is `1`;
+    /// that is also the sole CheckBoxField carrying
+    /// `<ItemHeight>1</ItemHeight>`. The short revision does not expose this
+    /// coordinate and remains unread.
+    const ITEM_HEIGHT_OPTION_SLOT: usize = 10;
 
     pub(crate) fn top_level_offset_for_raw_layout(
         wrapper: &str,
@@ -5234,6 +5286,14 @@ impl FormCheckBoxFieldSchema {
 
     pub(crate) fn item_title_height(self, options: &[&str]) -> Option<String> {
         let value = options.get(Self::ITEM_TITLE_HEIGHT_OPTION_SLOT)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+    }
+
+    pub(crate) fn item_height(self, options: &[&str]) -> Option<String> {
+        if options.first().map(|field| field.trim()) != Some("11") || options.len() != 13 {
+            return None;
+        }
+        let value = options.get(Self::ITEM_HEIGHT_OPTION_SLOT)?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
     }
 
@@ -6816,10 +6876,6 @@ pub(crate) struct FormSpecialFieldSchema {
     /// The `GanttChartField` whose option bag declares revision `2`. Its
     /// properties are not published from it -- see `from_raw_layout`.
     gantt_short_option_revision: bool,
-    /// How many members the record carries past the shared 59-member field
-    /// layout, as the record's own slot 58 declares. `1` on a
-    /// `GanttChartField` that owns a nested `Table`, `0` everywhere else.
-    trailing_members: usize,
 }
 
 impl FormSpecialFieldSchema {
@@ -6832,9 +6888,10 @@ impl FormSpecialFieldSchema {
     /// last three are read at the record's `top_level_offset`, which the caller
     /// detects off the name slot.
     ///
-    /// The three original kinds keep the unshifted layout they were measured
-    /// on: their records are 59 members with the name at slot 6, so admitting
-    /// a shifted one would be a claim no observation backs.
+    /// Track bars and charts keep the unshifted layouts they were measured on.
+    /// Progress bars have one measured shifted record too: it is the ordinary
+    /// 59-member record with the conditional-UserVisible member inserted at
+    /// slot 5; the platform writes the complete ProgressBarField.
     ///
     /// `GanttChartField` is discriminator `12`. Census of the whole population
     /// the eight stand corpora have -- 20 items, one in Документооборот КОРП
@@ -6874,24 +6931,24 @@ impl FormSpecialFieldSchema {
     ) -> Option<Self> {
         let option_count = options.len();
         let option_kind = options.first().map(|field| field.trim());
-        let kind = match (
-            wrapper,
-            field_count,
-            top_level_offset,
-            discriminator,
-            option_count,
-            option_kind,
-        ) {
-            ("37", 59, 0, Some("9"), 16, Some("4")) => FormSpecialFieldKind::ProgressBar,
-            ("37", 59, 0, Some("10"), 18, Some("2")) => FormSpecialFieldKind::TrackBar,
-            ("37", _, _, Some("11"), 11, Some("1")) => FormSpecialFieldKind::Chart,
-            ("37", _, _, Some("12"), 16, Some("3")) | ("37", _, _, Some("12"), 12, Some("2")) => {
-                FormSpecialFieldKind::GanttChart
-            }
-            _ => return None,
-        };
+        let kind =
+            match (
+                wrapper,
+                field_count,
+                top_level_offset,
+                discriminator,
+                option_count,
+                option_kind,
+            ) {
+                ("37", 59, 0, Some("9"), 16, Some("4"))
+                | ("37", 60, 1, Some("9"), 16, Some("4")) => FormSpecialFieldKind::ProgressBar,
+                ("37", 59, 0, Some("10"), 18, Some("2")) => FormSpecialFieldKind::TrackBar,
+                ("37", _, _, Some("11"), 11, Some("1")) => FormSpecialFieldKind::Chart,
+                ("37", _, _, Some("12"), 16, Some("3"))
+                | ("37", _, _, Some("12"), 12, Some("2")) => FormSpecialFieldKind::GanttChart,
+                _ => return None,
+            };
         let mut gantt_short_option_revision = false;
-        let mut trailing_members = 0;
         if kind == FormSpecialFieldKind::Chart && field_count != 59 + top_level_offset {
             return None;
         }
@@ -6905,7 +6962,7 @@ impl FormSpecialFieldSchema {
             {
                 return None;
             }
-            trailing_members = match nested_item_count.map(str::trim) {
+            let trailing_members = match nested_item_count.map(str::trim) {
                 Some("0") => 0,
                 Some("1") => 1,
                 _ => return None,
@@ -6918,23 +6975,11 @@ impl FormSpecialFieldSchema {
             kind,
             top_level_offset,
             gantt_short_option_revision,
-            trailing_members,
         })
     }
 
     pub(crate) const fn gantt_short_option_revision(self) -> bool {
         self.gantt_short_option_revision
-    }
-
-    /// The record slot the nested `Table` a `GanttChartField` owns sits in, at
-    /// the record's own top-level offset, or `None` when the record declares
-    /// none.
-    pub(crate) const fn nested_item_slot(self, top_level_offset: usize) -> Option<usize> {
-        if self.trailing_members == 0 {
-            None
-        } else {
-            Some(59 + top_level_offset)
-        }
     }
 
     pub(crate) const fn xml_tag(self) -> &'static str {
@@ -7056,6 +7101,17 @@ impl FormSpecialFieldSchema {
         (options.get(slot).map(|field| field.trim()) == Some("0")).then_some(false)
     }
 
+    /// Progress-bar option member 14 is its `AutoMaxHeight` flag. Controlled
+    /// seeds that differ only by `<AutoMaxHeight>false</AutoMaxHeight>` move
+    /// this member from the default `1` to `0`; every other option member is
+    /// byte-identical. The full corpus agrees: the sole native `false` has `0`
+    /// here and all 148 omitted properties have `1`.
+    pub(crate) fn auto_max_height(self, options: &[&str]) -> Option<bool> {
+        (self.kind == FormSpecialFieldKind::ProgressBar
+            && options.get(14).map(|field| field.trim()) == Some("0"))
+        .then_some(false)
+    }
+
     /// The progress bar keeps `HorizontalStretch` in the same option member the
     /// track bar does.  Over all 42 `ProgressBarField` records the export walks,
     /// member 3 is `1` on the 39 bars the platform writes no
@@ -7136,6 +7192,18 @@ impl FormSpecialFieldSchema {
             (FormSpecialFieldKind::ProgressBar, Some("1"))
         )
         .then_some(true)
+    }
+
+    /// Progress-bar option member 8 is its representation code. Across all
+    /// 149 wrapper-`37` progress bars in the eight corpora it is `1` on the
+    /// 148 bars with no XML property and `0` on the sole bar whose native XML
+    /// says `Broken`. Other codes remain unread.
+    pub(crate) fn representation(self, options: &[&str]) -> Option<&'static str> {
+        matches!(
+            (self.kind, options.get(8).map(|field| field.trim())),
+            (FormSpecialFieldKind::ProgressBar, Some("0"))
+        )
+        .then_some("Broken")
     }
 }
 
@@ -7985,10 +8053,9 @@ impl FormTableSlot {
             // gate guards.  Over that configuration's 2 010 native tables the
             // slot reads `0` on 1 988 that write no `<RowInputMode>`, `2` on
             // exactly the 20 that write `AfterCurrentRow` and `3` on exactly
-            // the one that writes `BeforeCurrentRow`.  ERP УХ spells one more
-            // code for its single `EndOfWindow`, which stays unnamed and
-            // therefore still refused rather than guessed.
-            Self::RowInputMode => matches!(field.trim(), "0" | "2" | "3"),
+            // the one that writes `BeforeCurrentRow`. Code `1` occurs on the
+            // sole table the platform writes as `EndOfWindow`.
+            Self::RowInputMode => matches!(field.trim(), "0" | "1" | "2" | "3"),
             Self::HorizontalScrollBar => matches!(field.trim(), "0" | "1" | "2"),
             Self::InitialListView | Self::InitialTreeView => {
                 matches!(field.trim(), "0" | "1" | "2")
@@ -8752,6 +8819,7 @@ impl FormTableSchema {
 
     pub(crate) fn row_input_mode(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(FormTableSlot::RowInputMode.index())?.trim() {
+            "1" => Some("EndOfWindow"),
             "2" => Some("AfterCurrentRow"),
             "3" => Some("BeforeCurrentRow"),
             _ => None,
@@ -9673,5 +9741,13 @@ mod table_tail_property_tests {
         assert_eq!(schema.auto_mark_incomplete(&fields), None);
         assert_eq!(schema.output(&fields), None);
         assert_eq!(schema.max_rows_count(&fields), None);
+    }
+
+    #[test]
+    fn table_row_input_mode_one_is_end_of_window() {
+        let mut fields = table_fields(99);
+        fields[FormTableSlot::RowInputMode.index()] = "1";
+        let schema = FormTableSchema::from_raw_layout("55", "Table", &fields).unwrap();
+        assert_eq!(schema.row_input_mode(&fields), Some("EndOfWindow"));
     }
 }

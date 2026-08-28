@@ -268,6 +268,14 @@ pub(super) struct MetadataConstantDeclaration {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct MetadataFieldDeclarationIndex {
     tables: BTreeMap<String, MetadataTableStandardAttributes>,
+    /// Top-level data fields declared by each metadata table, folded to lower
+    /// case. The object-reference index supplies these names independently of
+    /// any query text, so query validation never infers declarations from use.
+    data_fields: BTreeMap<String, BTreeSet<String>>,
+    /// Declared fields whose metadata property enables password mode, keyed by
+    /// their owning table and folded field name. Password fields are excluded
+    /// from a dynamic list's automatically available fields by the platform.
+    password_fields: BTreeMap<String, BTreeSet<String>>,
     common_attributes: BTreeMap<String, MetadataCommonAttributeContent>,
     /// Every constant the configuration declares, by its own uuid -- the id a
     /// form's use-always record spells.
@@ -277,6 +285,10 @@ pub(super) struct MetadataFieldDeclarationIndex {
     /// `Перечисление.СтатусызаданийТорговымПредставителям` names the declared
     /// `Enum.СтатусыЗаданийТорговымПредставителям`.
     declared_tables: BTreeSet<String>,
+    /// Documents whose references form a document journal's heterogeneous
+    /// `Ref` value. A member behind that value is available only when every
+    /// registered document declares it.
+    document_journal_documents: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl MetadataFieldDeclarationIndex {
@@ -286,6 +298,18 @@ impl MetadataFieldDeclarationIndex {
 
     pub(super) fn common_attribute(&self, name: &str) -> Option<&MetadataCommonAttributeContent> {
         self.common_attributes.get(name)
+    }
+
+    pub(super) fn field_uses_password_mode(&self, table: &str, field: &str) -> bool {
+        self.password_fields
+            .get(table)
+            .is_some_and(|fields| fields.contains(&field.to_lowercase()))
+    }
+
+    pub(super) fn declares_data_field(&self, table: &str, field: &str) -> Option<bool> {
+        self.data_fields
+            .get(table)
+            .map(|fields| fields.contains(&field.to_lowercase()))
     }
 
     /// What the constant with this uuid declares, or `None` when this index
@@ -315,6 +339,10 @@ impl MetadataFieldDeclarationIndex {
         Some(self.declared_tables.contains(&reference.to_lowercase()))
     }
 
+    pub(super) fn document_journal_documents(&self, reference: &str) -> Option<&BTreeSet<String>> {
+        self.document_journal_documents.get(reference)
+    }
+
     #[cfg(test)]
     pub(super) fn with_table(
         mut self,
@@ -342,6 +370,40 @@ impl MetadataFieldDeclarationIndex {
         content: MetadataCommonAttributeContent,
     ) -> Self {
         self.common_attributes.insert(name.to_string(), content);
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_password_field(mut self, table: &str, field: &str) -> Self {
+        self.password_fields
+            .entry(table.to_string())
+            .or_default()
+            .insert(field.to_lowercase());
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_data_fields(mut self, table: &str, fields: &[&str]) -> Self {
+        self.data_fields.insert(
+            table.to_string(),
+            fields.iter().map(|field| field.to_lowercase()).collect(),
+        );
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_document_journal_documents(
+        mut self,
+        journal: &str,
+        documents: &[&str],
+    ) -> Self {
+        self.document_journal_documents.insert(
+            journal.to_string(),
+            documents
+                .iter()
+                .map(|document| (*document).to_string())
+                .collect(),
+        );
         self
     }
 }
@@ -384,6 +446,28 @@ pub(super) fn build_metadata_field_declaration_index_from_texts(
         .filter(|reference| reference.split('.').count() == 2)
         .map(|reference| reference.to_lowercase())
         .collect();
+    const DATA_FIELD_KINDS: &[&str] = &[
+        "Attribute",
+        "TabularSection",
+        "Dimension",
+        "Resource",
+        "AddressingAttribute",
+        "AccountingFlag",
+        "ExtDimensionAccountingFlag",
+        "EnumValue",
+    ];
+    for reference in object_refs.values() {
+        let parts = reference.split('.').collect::<Vec<_>>();
+        if parts.len() == 2 {
+            index.data_fields.entry(reference.clone()).or_default();
+        } else if parts.len() == 4 && DATA_FIELD_KINDS.contains(&parts[2]) {
+            index
+                .data_fields
+                .entry(format!("{}.{}", parts[0], parts[1]))
+                .or_default()
+                .insert(parts[3].to_lowercase());
+        }
+    }
     for row in rows {
         let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
             continue;
@@ -415,10 +499,108 @@ pub(super) fn build_metadata_field_declaration_index_from_texts(
                     index.constants.insert(header.uuid.clone(), declared);
                 }
             }
+            "DocumentJournal" => {
+                if let Some(documents) =
+                    document_journal_registered_documents_from_text(&row.text, header, object_refs)
+                {
+                    index.document_journal_documents.insert(
+                        format!("DocumentJournal.{}", header.name),
+                        documents.into_iter().collect(),
+                    );
+                }
+            }
             _ => {}
+        }
+        let owner_reference = format!("{kind}.{}", header.name);
+        let child_prefix = format!("{owner_reference}.");
+        for (child, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            let Some(reference) = object_refs.get(&child.uuid) else {
+                continue;
+            };
+            let Some(child_reference) = reference.strip_prefix(&child_prefix) else {
+                continue;
+            };
+            let Some((_child_kind, child_name)) = child_reference.split_once('.') else {
+                continue;
+            };
+            if child_name.is_empty() || child_name.contains('.') {
+                continue;
+            }
+            if metadata_child_declares_password_mode(&row.text, marker_start, &child.uuid)
+                == Some(true)
+            {
+                index
+                    .password_fields
+                    .entry(owner_reference.clone())
+                    .or_default()
+                    .insert(child_name.to_lowercase());
+            }
         }
     }
     index
+}
+
+/// Reads only the registered-document declaration from a document-journal
+/// owner record. The structural guards are the same ones used by the full
+/// journal decoder; keeping this smaller reader independent lets the form
+/// declaration index use the fact before form/template child indexes exist.
+fn document_journal_registered_documents_from_text(
+    text: &str,
+    header: &MetadataHeader,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let root_fields = split_information_register_braced_fields(text)?;
+    if root_fields.len() != 7
+        || root_fields.first()?.trim() != "1"
+        || root_fields.get(2)?.trim() != "4"
+    {
+        return None;
+    }
+    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+    if owner_fields.len() != 17
+        || owner_fields.first()?.trim() != "26"
+        || metadata_header_field_index(&owner_fields, &header.uuid) != Some(3)
+    {
+        return None;
+    }
+    let header_wrapper = split_information_register_braced_fields(owner_fields.get(3)?)?;
+    if header_wrapper.len() != 2 || header_wrapper.first()?.trim() != "0" {
+        return None;
+    }
+    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    if !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+    {
+        return None;
+    }
+    parse_document_journal_registered_documents(owner_fields.get(6)?, object_refs)
+}
+
+/// Reads the common metadata-child `PasswordMode` member without interpreting
+/// any owner- or field-specific names. The common property record places it
+/// immediately after the child header; candidates that do not expose the full
+/// common-property tail are refused.
+fn metadata_child_declares_password_mode(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+) -> Option<bool> {
+    for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
+        let Some(header_index) = metadata_header_field_index(&fields, child_uuid) else {
+            continue;
+        };
+        if fields.len() <= header_index + 13 {
+            continue;
+        }
+        if let Some(value) = parse_1c_bool_field(fields.get(header_index + 1).copied()) {
+            return Some(value);
+        }
+    }
+    None
 }
 
 /// Catalog properties read off the very slots
@@ -2036,16 +2218,26 @@ pub(super) fn build_information_register_master_dimension_index_from_texts(
         else {
             continue;
         };
-        let mut masters = Vec::new();
+        let dimension_prefix = format!("InformationRegister.{}.Dimension.", register.name);
+        let expected_dimensions = object_refs
+            .values()
+            .filter(|reference| {
+                reference
+                    .strip_prefix(&dimension_prefix)
+                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+            })
+            .count();
+        let mut decoded_dimensions = 0usize;
+        let mut dimension_scan = Vec::new();
         for (field, marker_start) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
         {
-            let Some(tag) =
-                register_child_object_tag("InformationRegister", &row.text, marker_start)
-            else {
-                continue;
-            };
-            if tag != "Dimension" {
+            let declared_dimension = object_refs.get(&field.uuid).is_some_and(|reference| {
+                reference
+                    .strip_prefix(&dimension_prefix)
+                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+            });
+            if !declared_dimension {
                 continue;
             }
             let Some((_, properties)) = parse_information_register_child_payload(
@@ -2053,23 +2245,55 @@ pub(super) fn build_information_register_master_dimension_index_from_texts(
                 marker_start,
                 &field,
                 &register.name,
-                tag,
+                "Dimension",
                 type_index,
                 object_refs,
                 form_refs,
                 preserve_raw_data_paths,
             ) else {
+                dimension_scan.push(None);
                 continue;
             };
-            if properties.master == Some(true) {
-                masters.push(field.name);
-            }
+            decoded_dimensions += 1;
+            dimension_scan.push(Some((field.name, properties.master == Some(true))));
         }
-        if !masters.is_empty() {
+        // An empty vector is a decoded declaration too: it proves the register
+        // has no master dimensions. It is inserted only when every dimension
+        // the owner graph declares was decoded, so parser silence can never be
+        // mistaken for an empty declaration.
+        if let Some(masters) = information_register_known_master_dimension_prefix(
+            &dimension_scan,
+            expected_dimensions,
+            decoded_dimensions,
+        ) {
             index.insert(register.uuid.clone(), masters);
         }
     }
     index
+}
+
+/// The master-dimension positions proven by a left-to-right declaration scan.
+///
+/// A complete scan proves the whole vector, including an empty one. An
+/// incomplete scan proves only master dimensions before its first refused
+/// declaration: a later refusal cannot change their positions, while anything
+/// after it may have been shifted by an unknown master and is discarded.
+pub(super) fn information_register_known_master_dimension_prefix(
+    scan: &[Option<(String, bool)>],
+    expected_dimensions: usize,
+    decoded_dimensions: usize,
+) -> Option<Vec<String>> {
+    if scan.len() != expected_dimensions {
+        return None;
+    }
+    let complete = decoded_dimensions == expected_dimensions && scan.iter().all(Option::is_some);
+    let prefix = scan
+        .iter()
+        .map_while(|entry| entry.as_ref())
+        .filter(|(_, master)| *master)
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    (complete || !prefix.is_empty()).then_some(prefix)
 }
 
 pub(super) fn build_information_register_field_reference_index_from_texts(
@@ -2213,6 +2437,9 @@ pub(super) fn metadata_declared_leaves_exclude_string(
                 | ConstantValueType::DateTime { .. }
                 | ConstantValueType::Reference { .. } => {}
                 ConstantValueType::String { .. } => excludes = false,
+                // An unresolved form type can itself be string-like; without
+                // its definition this predicate has no safe answer.
+                ConstantValueType::TypeId { .. } => return None,
                 ConstantValueType::ReferenceTypeSet { reference } => {
                     let leaves = type_set_leaves.get(reference)?;
                     if !visiting.insert(reference.clone()) {
