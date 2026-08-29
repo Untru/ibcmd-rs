@@ -1856,6 +1856,37 @@ pub(super) fn is_offset_inside_command_collection(text: &str, offset: usize) -> 
     is_offset_inside_any_list_marker(text, offset, &COMMAND_COLLECTION_LIST_MARKERS)
 }
 
+/// True inside the command collection declared by this owner family.
+///
+/// The metadata family is already known at every production call site.  Use
+/// that discriminator instead of searching the complete text once for every
+/// platform family marker.  Unknown families retain the broad fallback so a
+/// newly observed layout is not silently excluded.
+pub(super) fn is_offset_inside_owner_command_collection(
+    owner_kind: &str,
+    text: &str,
+    offset: usize,
+) -> bool {
+    let marker = match owner_kind {
+        "DataProcessor" => COMMAND_COLLECTION_LIST_MARKERS[0],
+        "Catalog" => COMMAND_COLLECTION_LIST_MARKERS[1],
+        "Document" => COMMAND_COLLECTION_LIST_MARKERS[2],
+        "InformationRegister" => COMMAND_COLLECTION_LIST_MARKERS[3],
+        "Report" => COMMAND_COLLECTION_LIST_MARKERS[4],
+        "DocumentJournal" => COMMAND_COLLECTION_LIST_MARKERS[5],
+        "ExchangePlan" => COMMAND_COLLECTION_LIST_MARKERS[6],
+        "BusinessProcess" => COMMAND_COLLECTION_LIST_MARKERS[7],
+        "Task" => COMMAND_COLLECTION_LIST_MARKERS[8],
+        "ChartOfAccounts" => COMMAND_COLLECTION_LIST_MARKERS[9],
+        "FilterCriterion" => COMMAND_COLLECTION_LIST_MARKERS[10],
+        "ChartOfCharacteristicTypes" => COMMAND_COLLECTION_LIST_MARKERS[11],
+        "AccountingRegister" => COMMAND_COLLECTION_LIST_MARKERS[12],
+        "AccumulationRegister" => COMMAND_COLLECTION_LIST_MARKERS[13],
+        _ => return is_offset_inside_command_collection(text, offset),
+    };
+    is_offset_inside_any_list_marker(text, offset, &[marker])
+}
+
 pub(super) fn is_offset_inside_accumulation_register_attribute_list(
     text: &str,
     offset: usize,
@@ -4446,4 +4477,52 @@ pub(super) fn parse_metadata_command_reference_blob(
     };
     let header = parse_metadata_header_from_text(&text, uuid)?;
     Some((kind.to_string(), header, text))
+}
+
+#[cfg(test)]
+mod command_collection_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn owner_specific_lookup_matches_the_broad_lookup_for_every_family() {
+        let kinds = [
+            "DataProcessor",
+            "Catalog",
+            "Document",
+            "InformationRegister",
+            "Report",
+            "DocumentJournal",
+            "ExchangePlan",
+            "BusinessProcess",
+            "Task",
+            "ChartOfAccounts",
+            "FilterCriterion",
+            "ChartOfCharacteristicTypes",
+            "AccountingRegister",
+            "AccumulationRegister",
+        ];
+
+        for (index, (kind, marker)) in kinds
+            .into_iter()
+            .zip(COMMAND_COLLECTION_LIST_MARKERS)
+            .enumerate()
+        {
+            let text = format!("prefix{marker}1,child}}suffix");
+            let offset = text.find("child").unwrap();
+            assert!(is_offset_inside_command_collection(&text, offset));
+            assert!(is_offset_inside_owner_command_collection(
+                kind, &text, offset
+            ));
+            assert!(!is_offset_inside_owner_command_collection(
+                kinds[(index + 1) % kinds.len()],
+                &text,
+                offset,
+            ));
+            assert!(is_offset_inside_owner_command_collection(
+                "UnknownOwnerFamily",
+                &text,
+                offset,
+            ));
+        }
+    }
 }

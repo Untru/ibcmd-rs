@@ -7720,7 +7720,7 @@ fn nested_command_headers_for_owner_from_text(
         // inside those spans there are only commands, and outside them there
         // are none. The code-9 arm is kept exactly as it was so this can only
         // add names, never move one.
-        is_offset_inside_command_collection(text, marker_start)
+        is_offset_inside_owner_command_collection(owner_kind, text, marker_start)
             || (is_offset_inside_metadata_object_code(text, marker_start, 9)
                 && register_child_object_tag(owner_kind, text, marker_start).is_none())
     })
@@ -7809,7 +7809,7 @@ fn parse_information_register_child_commands(
         // information registers lose their whole `<Command>` that way. The
         // property reader below already knows both the 13- and the 12-member
         // shape.
-        is_offset_inside_command_collection(text, marker_start)
+        is_offset_inside_owner_command_collection("InformationRegister", text, marker_start)
             || (is_offset_inside_metadata_object_code(text, marker_start, 9)
                 && register_child_object_tag("InformationRegister", text, marker_start).is_none())
     })
@@ -17168,7 +17168,7 @@ fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Opt
     // child collection. Four ERP УХ 3.2.12.6 information registers wrote such
     // a command twice: once as a header-only `<Resource>` it does not own and
     // never as the `<Command>` it is.
-    if is_offset_inside_command_collection(text, marker_start) {
+    if is_offset_inside_owner_command_collection(kind, text, marker_start) {
         return None;
     }
     if kind == "InformationRegister"
@@ -34876,8 +34876,17 @@ fn split_1c_braced_fields_bounded(
 }
 
 fn template_type_code_from_metadata_text(text: &str, uuid: &str) -> Option<u32> {
+    // Most callers parse nested headers from large metadata records.  Only
+    // the two template layouts can carry this field, so reject every other
+    // family before splitting the complete outer record.  Doing the split
+    // first made every nested child rescan its owner's full text even though
+    // the answer was necessarily `None`.
+    let object_code = parse_metadata_object_code(text)?;
+    if !matches!(object_code, 2 | 4) {
+        return None;
+    }
     let fields = metadata_object_fields(text)?;
-    match parse_metadata_object_code(text)? {
+    match object_code {
         2 if metadata_header_field_index(&fields, uuid) == Some(2) => {
             fields.get(1)?.trim().parse().ok()
         }
