@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
+use ibcmd_cf::archive::PackedCfArchive;
 use ibcmd_cf::export::{StorageExportEntryReport, StorageExportPlan, StorageExportReport};
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::characteristics::Characteristics;
@@ -1832,6 +1833,13 @@ pub struct StorageImageSourceExportReport {
     pub storage: StorageExportReport,
 }
 
+struct DirectStorageExportRecord {
+    logical_name: String,
+    logical_key: String,
+    part_count: usize,
+    packed_bytes: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct MssqlDumpManifest {
     server: String,
@@ -2319,6 +2327,7 @@ pub fn export_storage_image_to_source(
 ) -> Result<StorageImageSourceExportReport> {
     let plan = StorageExportPlan::from_image(image);
     let mut rows = Vec::with_capacity(plan.records().len());
+    let mut records = Vec::with_capacity(plan.records().len());
     let mut decoder_names = BTreeSet::new();
     for record in plan.records() {
         if !decoder_names.insert(record.logical_name()) {
@@ -2339,20 +2348,86 @@ pub fn export_storage_image_to_source(
                 record.logical_key()
             )
         })?;
-        #[cfg(test)]
-        let binary_hex = encode_hex_lower(payload.as_ref());
-        #[cfg(not(test))]
-        let binary_hex = String::new();
-        rows.push(ConfigRow {
+        let packed_bytes = payload.len();
+        rows.push(config_row_from_binary(BinaryConfigRow {
             file_name: record.logical_name().to_owned(),
             part_no: 0,
             data_size,
-            binary_hex,
-            #[cfg(not(test))]
-            binary: Some(payload.into_owned()),
+            binary: payload.into_owned(),
+        }));
+        records.push(DirectStorageExportRecord {
+            logical_name: record.logical_name().to_owned(),
+            logical_key: record.logical_key().to_owned(),
+            part_count: record.part_count(),
+            packed_bytes,
         });
     }
 
+    export_direct_storage_rows_to_source(
+        rows,
+        records,
+        image
+            .source_profile()
+            .map(|profile| profile.as_str().to_owned()),
+        plan.physical_entries(),
+        output_dir,
+        overwrite,
+        source_version,
+    )
+}
+
+/// Exports a packed-only CF projection without constructing or eagerly
+/// decoding a neutral [`StorageImage`]. Exact CF payload bytes move into the
+/// existing family-decoder pipeline once and remain bounded by the CF reader.
+pub fn export_packed_cf_archive_to_source(
+    archive: PackedCfArchive,
+    output_dir: &Path,
+    overwrite: bool,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<StorageImageSourceExportReport> {
+    let (_, source_profile, entries) = archive.into_parts();
+    let physical_entries = entries.len();
+    let mut rows = Vec::with_capacity(physical_entries);
+    let mut records = Vec::with_capacity(physical_entries);
+    for entry in entries {
+        let (name, payload) = entry.into_parts();
+        let packed_bytes = payload.len();
+        let data_size = i64::try_from(packed_bytes)
+            .with_context(|| format!("CF record `{name}` is too large for the row boundary"))?;
+        rows.push(config_row_from_binary(BinaryConfigRow {
+            file_name: name.clone(),
+            part_no: 0,
+            data_size,
+            binary: payload,
+        }));
+        records.push(DirectStorageExportRecord {
+            logical_name: name.clone(),
+            logical_key: name,
+            part_count: 1,
+            packed_bytes,
+        });
+    }
+
+    export_direct_storage_rows_to_source(
+        rows,
+        records,
+        Some(source_profile.as_str().to_owned()),
+        physical_entries,
+        output_dir,
+        overwrite,
+        source_version,
+    )
+}
+
+fn export_direct_storage_rows_to_source(
+    rows: Vec<ConfigRow>,
+    records: Vec<DirectStorageExportRecord>,
+    source_profile: Option<String>,
+    physical_entries: usize,
+    output_dir: &Path,
+    overwrite: bool,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<StorageImageSourceExportReport> {
     prepare_output_dir(output_dir, overwrite)?;
     // Reuses the same eligibility rule the streamed MSSQL pipeline uses
     // (`MssqlExportInventoryPlan::config_dump_info_eligible`,
@@ -2397,25 +2472,21 @@ pub fn export_storage_image_to_source(
         .map(|failure| (failure.file_name, failure.message))
         .collect::<BTreeMap<_, _>>();
 
-    let mut entries = Vec::with_capacity(plan.records().len());
-    for record in plan.records() {
-        let packed_bytes = record.packed_bytes().with_context(|| {
-            format!(
-                "failed to measure storage record `{}`",
-                record.logical_key()
-            )
-        })?;
-        if let Some(message) = failed.get(record.logical_name()) {
-            entries.push(StorageExportEntryReport::failed(
-                record,
-                packed_bytes,
+    let mut entries = Vec::with_capacity(records.len());
+    for record in &records {
+        if let Some(message) = failed.get(&record.logical_name) {
+            entries.push(StorageExportEntryReport::failed_packed(
+                record.logical_name.clone(),
+                record.logical_key.clone(),
+                record.part_count,
+                record.packed_bytes,
                 message.clone(),
             ));
             continue;
         }
 
         let outputs = successful
-            .get(record.logical_name())
+            .get(&record.logical_name)
             .into_iter()
             .flat_map(|manifest| {
                 [
@@ -2428,15 +2499,19 @@ pub fn export_storage_image_to_source(
             .cloned()
             .collect::<Vec<_>>();
         if outputs.is_empty() {
-            entries.push(StorageExportEntryReport::opaque(
-                record,
-                packed_bytes,
+            entries.push(StorageExportEntryReport::opaque_packed(
+                record.logical_name.clone(),
+                record.logical_key.clone(),
+                record.part_count,
+                record.packed_bytes,
                 "no legacy family decoder recognized this storage entry",
             ));
         } else {
-            entries.push(StorageExportEntryReport::supported(
-                record,
-                packed_bytes,
+            entries.push(StorageExportEntryReport::supported_packed(
+                record.logical_name.clone(),
+                record.logical_key.clone(),
+                record.part_count,
+                record.packed_bytes,
                 outputs,
             ));
         }
@@ -2448,7 +2523,12 @@ pub fn export_storage_image_to_source(
         output_dir: output_dir.to_path_buf(),
         source_version: source_version.as_str().to_owned(),
         files_written,
-        storage: StorageExportReport::new(image, &plan, entries),
+        storage: StorageExportReport::from_parts(
+            source_profile,
+            physical_entries,
+            records.len(),
+            entries,
+        ),
     })
 }
 

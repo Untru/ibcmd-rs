@@ -237,6 +237,63 @@ impl CfArchive {
     }
 }
 
+/// One top-level CF entry retaining only the representation source exporters
+/// consume. Unlike [`StorageEntry`], this does not claim to carry a decoded
+/// neutral payload and therefore never duplicates or eagerly inflates bytes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackedCfEntry {
+    name: String,
+    payload: Vec<u8>,
+}
+
+impl PackedCfEntry {
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (String, Vec<u8>) {
+        (self.name, self.payload)
+    }
+}
+
+/// Packed-only CF projection for source export. It preserves top-level order,
+/// exact names, exact bytes, profile identity, and bounded reader validation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackedCfArchive {
+    metadata: CfArchiveMetadata,
+    source_profile: StorageProfileId,
+    entries: Vec<PackedCfEntry>,
+}
+
+impl PackedCfArchive {
+    #[must_use]
+    pub const fn metadata(&self) -> &CfArchiveMetadata {
+        &self.metadata
+    }
+
+    #[must_use]
+    pub const fn source_profile(&self) -> &StorageProfileId {
+        &self.source_profile
+    }
+
+    #[must_use]
+    pub fn entries(&self) -> &[PackedCfEntry] {
+        &self.entries
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (CfArchiveMetadata, StorageProfileId, Vec<PackedCfEntry>) {
+        (self.metadata, self.source_profile, self.entries)
+    }
+}
+
 /// Decodes a CF archive using an explicit per-entry encoding resolver.
 ///
 /// Compression is never inferred from payload bytes or a dotted name. A
@@ -351,6 +408,33 @@ pub fn decode_archive_uniform<R: Read + Seek>(
     encoding: PayloadEncoding,
 ) -> Result<CfArchive, ArchiveDecodeError> {
     decode_archive(source, limits, source_profile, provenance, |_| encoding)
+}
+
+/// Reads the exact packed top-level records without eagerly decoding payloads.
+/// This is the source-export boundary: family decoders consume these same
+/// packed bytes later, so retaining a second unpacked copy here is redundant.
+pub fn decode_packed_archive<R: Read + Seek>(
+    source: R,
+    limits: ResourceLimits,
+    source_profile: StorageProfileId,
+) -> Result<PackedCfArchive, ArchiveDecodeError> {
+    let mut reader = StreamingReader::open(source, limits).map_err(ArchiveDecodeError::Reader)?;
+    reject_duplicate_names(reader.index())?;
+    let metadata = read_metadata(&mut reader)?;
+    let mut entries = Vec::with_capacity(reader.index().entries.len());
+    for index in 0..reader.index().entries.len() {
+        let name = reader.index().entries[index].name.clone();
+        let payload = reader
+            .read_entry_data(index)
+            .map_err(ArchiveDecodeError::Reader)?
+            .unwrap_or_default();
+        entries.push(PackedCfEntry { name, payload });
+    }
+    Ok(PackedCfArchive {
+        metadata,
+        source_profile,
+        entries,
+    })
 }
 
 fn reject_duplicate_names(index: &ContainerIndex) -> Result<(), ArchiveDecodeError> {
@@ -545,6 +629,7 @@ mod tests {
 
     use super::{
         ArchiveDecodeError, CfDataState, CfEntryAttributes, decode_archive, decode_archive_uniform,
+        decode_packed_archive,
     };
 
     fn origin(revision: &str) -> (StorageProfileId, StorageProvenance) {
@@ -633,6 +718,36 @@ mod tests {
                     }
                 );
             }
+        }
+    }
+
+    #[test]
+    fn packed_projection_preserves_exact_order_names_and_payloads() {
+        let bytes = decode_base64(include_str!(
+            "../../../tests/fixtures/cf/format15-clean-room.cf.b64"
+        ));
+        let (profile, provenance) = origin("format15-packed");
+        let full = decode_archive_uniform(
+            Cursor::new(&bytes),
+            ResourceLimits::default(),
+            profile.clone(),
+            provenance,
+            PayloadEncoding::RawDeflate,
+        )
+        .unwrap();
+        let packed = decode_packed_archive(
+            Cursor::new(bytes),
+            ResourceLimits::default(),
+            profile.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(packed.source_profile(), &profile);
+        assert_eq!(packed.metadata(), full.metadata());
+        assert_eq!(packed.entries().len(), full.image().entries().len());
+        for (packed, full) in packed.entries().iter().zip(full.image().entries()) {
+            assert_eq!(packed.name(), full.logical_name().as_str());
+            assert_eq!(packed.payload(), full.packed_payload());
         }
     }
 

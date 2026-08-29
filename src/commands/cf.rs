@@ -14,7 +14,7 @@ use std::{
 };
 
 use ibcmd_cf::{
-    archive::decode_archive_uniform,
+    archive::{decode_archive_uniform, decode_packed_archive},
     bootstrap::{BootstrapCfProfile, publish_bootstrap_patch_new},
     overlay::{OverlayCodec, OverlayReport, PublishOverlayError, publish_overlay_new},
     payload::{PayloadDecoder, PayloadEncoding, decode_payload},
@@ -752,25 +752,16 @@ fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
             format!("failed to open `{}`: {source}", args.input.display()),
         )
     })?;
-    let provenance = StorageProvenance::new("offline CF CLI export")
-        .expect("static CF export provenance is valid");
-    let archive = decode_archive_uniform(
-        source,
-        limits,
-        source_profile,
-        provenance,
-        payload_encoding(args.compression),
-    )
-    .map_err(|source| {
+    let archive = decode_packed_archive(source, limits, source_profile).map_err(|source| {
         export_failure(
             &args,
             profile.clone(),
             "invalid_archive",
-            format!("failed to decode CF archive: {source}"),
+            format!("failed to read packed CF archive: {source}"),
         )
     })?;
-    let export = mssql_dump::export_storage_image_to_source(
-        archive.image(),
+    let export = mssql_dump::export_packed_cf_archive_to_source(
+        archive,
         &args.output_dir,
         args.overwrite,
         args.source_version,
