@@ -1388,6 +1388,10 @@ pub struct MssqlActivateStagedExtensionArgs {
     /// Exact extension name from mssql-extension-list.
     #[arg(long)]
     pub extension: String,
+    /// Publication mode. Online keeps existing sessions on their loaded
+    /// generation; new sessions switch after platform polling.
+    #[arg(long, value_enum)]
+    pub mode: MssqlMainActivationModeArg,
     #[arg(long)]
     pub dry_run: bool,
     #[arg(long)]

@@ -287,8 +287,16 @@ pub fn activate_staged_extension(
         version: extension.registry_version,
         zipped_info: extension.zipped_info.clone(),
     };
+    let mode = match args.mode {
+        crate::cli::MssqlMainActivationModeArg::Exclusive => {
+            crate::mssql_extension_activation::ExtensionActivationMode::Exclusive
+        }
+        crate::cli::MssqlMainActivationModeArg::Online => {
+            crate::mssql_extension_activation::ExtensionActivationMode::Online
+        }
+    };
     let plan = crate::mssql_extension_activation::prepare_extension_activation(
-        crate::mssql_extension_activation::ExtensionActivationMode::Exclusive,
+        mode,
         snapshot,
         &stage,
         crate::mssql_extension_activation::ExtensionServiceMarkerSnapshot {

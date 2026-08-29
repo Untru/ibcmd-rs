@@ -27,8 +27,9 @@ const MAX_SCRIPT_BYTES: usize = 1024 * 1024 * 1024;
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionActivationMode {
     Exclusive,
-    /// Reserved in the API, but rejected until cache invalidation is evidenced.
-    OnlineExperimental,
+    /// Existing sessions keep their loaded generation. New sessions observe
+    /// the published generation after the 8.3.27 server polling interval.
+    Online,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -61,6 +62,7 @@ pub struct ExtensionActivationDryRun {
     pub touched_tables: Vec<String>,
     pub no_op: bool,
     pub live_cache_invalidation_verified: bool,
+    pub existing_sessions_retain_generation: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -144,7 +146,8 @@ impl ExtensionActivationPlan {
                     .collect()
             },
             no_op: self.no_op,
-            live_cache_invalidation_verified: false,
+            live_cache_invalidation_verified: self.mode == ExtensionActivationMode::Online,
+            existing_sessions_retain_generation: self.mode == ExtensionActivationMode::Online,
         }
     }
 
@@ -174,12 +177,6 @@ pub fn prepare_extension_activation(
     if !allow_non_lab {
         return Err(ExtensionActivationError::SafetyGate(
             "--allow-non-lab acknowledgement is required".to_owned(),
-        ));
-    }
-    if mode != ExtensionActivationMode::Exclusive {
-        return Err(ExtensionActivationError::SafetyGate(
-            "online extension activation is disabled: 8.3.27 live cache invalidation is not evidenced"
-                .to_owned(),
         ));
     }
     if snapshot.zipped_info.len() > MAX_REGISTRY_BYTES {
@@ -351,6 +348,9 @@ pub fn render_extension_activation_sql(
     let mut sql = String::new();
     writeln!(sql, "SET NOCOUNT ON;\nSET XACT_ABORT ON;\nSET TRANSACTION ISOLATION LEVEL SERIALIZABLE;\nUSE {db};\nBEGIN TRANSACTION;").unwrap();
     writeln!(sql, "DECLARE @LockResult int; EXEC @LockResult = sys.sp_getapplock @Resource=N'{}', @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=0; IF @LockResult < 0 THROW 57200, 'Extension activation lock unavailable', 1;", quote_string(&format!("ibcmd-rs:extension-activation:{}", plan.namespace_prefix))).unwrap();
+    if plan.mode == ExtensionActivationMode::Exclusive {
+        sql.push_str("IF EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE is_user_process=1 AND session_id<>@@SPID AND database_id=DB_ID()) THROW 57212, 'exclusive extension activation requires no other database sessions', 1;\n");
+    }
     writeln!(sql, "DECLARE @ExtensionId binary(16)=0x{}; DECLARE @ExpectedVersion binary(8)=0x{}; DECLARE @Before varbinary(max)=0x{}; DECLARE @After varbinary(max)=0x{};", hex(&plan.snapshot.extension_id), hex(&plan.snapshot.version), hex(&plan.snapshot.zipped_info), hex(&plan.registry_after)).unwrap();
     sql.push_str("IF (SELECT COUNT_BIG(*) FROM dbo._ExtensionsInfo WITH (UPDLOCK,HOLDLOCK) WHERE _IDRRef=@ExtensionId AND _Version=@ExpectedVersion AND DATALENGTH(_ExtensionZippedInfo)=DATALENGTH(@Before) AND _ExtensionZippedInfo=@Before) <> 1 THROW 57201, 'Extension registry optimistic predicate failed', 1;\n");
     writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.ConfigCASSave WITH (UPDLOCK,HOLDLOCK) WHERE FileName LIKE N'{}' ESCAPE N'~') <> {} THROW 57202, 'Selected ConfigCASSave prefix row count changed', 1;", quote_string(&pattern), plan.staged_rows.len()).unwrap();
@@ -596,6 +596,7 @@ mod tests {
         let script = render_extension_activation_sql("db]name", &plan).unwrap();
         assert!(script.sql().contains("SERIALIZABLE"));
         assert!(script.sql().contains("sp_getapplock"));
+        assert!(script.sql().contains("sys.dm_exec_sessions"));
         assert!(script.sql().contains("USE [db]]name]"));
         assert!(script.sql().contains("ConfigCASSave"));
         assert!(script.sql().contains("ESCAPE N'~'"));
@@ -616,18 +617,20 @@ mod tests {
     }
 
     #[test]
-    fn online_and_unacknowledged_writes_fail_closed() {
+    fn online_is_evidenced_and_unacknowledged_writes_fail_closed() {
         let (snapshot, stage) = fixture();
-        assert!(
-            prepare_extension_activation(
-                ExtensionActivationMode::OnlineExperimental,
-                snapshot.clone(),
-                &stage,
-                ExtensionServiceMarkerSnapshot { present: true },
-                true
-            )
-            .is_err()
-        );
+        let online = prepare_extension_activation(
+            ExtensionActivationMode::Online,
+            snapshot.clone(),
+            &stage,
+            ExtensionServiceMarkerSnapshot { present: true },
+            true,
+        )
+        .unwrap();
+        assert!(online.dry_run().live_cache_invalidation_verified);
+        assert!(online.dry_run().existing_sessions_retain_generation);
+        let online_sql = render_extension_activation_sql("db", &online).unwrap();
+        assert!(!online_sql.sql().contains("sys.dm_exec_sessions"));
         assert!(
             prepare_extension_activation(
                 ExtensionActivationMode::Exclusive,
