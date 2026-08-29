@@ -2747,59 +2747,124 @@ fn dump_table_rows_with_options_mode(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
-    let recalculation_refs = if extract_metadata_xml {
-        build_calculation_recalculation_reference_index(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let root_recalculation_refs = if extract_metadata_xml {
-        build_calculation_root_recalculation_reference_index(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let module_text_paths = if extract_module_text {
-        module_body_paths_from_texts(&rows, &metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let command_refs = if extract_metadata_xml {
-        build_command_interface_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let metadata_refs = Arc::new(if extract_metadata_xml {
-        build_metadata_command_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    });
+    let refs_for_standalone =
+        extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
+    let (
+        ((recalculation_refs, root_recalculation_refs), (module_text_paths, command_refs)),
+        ((metadata_refs, metadata_type_indexes), (form_refs, (template_refs, subsystem_refs))),
+    ) = parallel::install(|| {
+        rayon::join(
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_metadata_xml {
+                                    build_calculation_recalculation_reference_index(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                if extract_metadata_xml {
+                                    build_calculation_root_recalculation_reference_index(
+                                        metadata_texts,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_module_text {
+                                    module_body_paths_from_texts(&rows, metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                if extract_metadata_xml {
+                                    build_command_interface_reference_index_from_texts(
+                                        metadata_texts,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                        )
+                    },
+                )
+            },
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                Arc::new(if extract_metadata_xml {
+                                    build_metadata_command_reference_index_from_texts(
+                                        metadata_texts,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                })
+                            },
+                            || {
+                                if extract_metadata_xml || needs_source_layout_refs {
+                                    build_metadata_type_indexes_from_texts(metadata_texts)
+                                } else {
+                                    MetadataTypeIndexes::default()
+                                }
+                            },
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                if refs_for_standalone {
+                                    build_complete_form_source_reference_index(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                rayon::join(
+                                    || {
+                                        if refs_for_standalone {
+                                            build_template_source_reference_index_from_texts(
+                                                &rows,
+                                                metadata_texts,
+                                            )
+                                        } else {
+                                            BTreeMap::new()
+                                        }
+                                    },
+                                    || {
+                                        if refs_for_standalone {
+                                            build_subsystem_source_reference_index_from_texts(
+                                                metadata_texts,
+                                            )
+                                        } else {
+                                            BTreeMap::new()
+                                        }
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            },
+        )
+    })?;
     let MetadataTypeIndexes {
         references: type_index,
         reference_collisions: type_index_collisions,
         dcs: dcs_type_index,
-    } = if extract_metadata_xml || needs_source_layout_refs {
-        build_metadata_type_indexes_from_texts(&metadata_texts)
-    } else {
-        MetadataTypeIndexes::default()
-    };
+    } = metadata_type_indexes;
     let moxel_generated_types =
         build_moxel_generated_type_index(&type_index, &type_index_collisions);
-    let refs_for_standalone =
-        extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
-    let form_refs = if refs_for_standalone {
-        build_complete_form_source_reference_index(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let template_refs = if refs_for_standalone {
-        build_template_source_reference_index_from_texts(&rows, &metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let subsystem_refs = if refs_for_standalone {
-        build_subsystem_source_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
     let MetadataObjectReferenceIndexes {
         references: object_refs,
         resolutions: object_ref_resolutions,
@@ -2818,68 +2883,166 @@ fn dump_table_rows_with_options_mode(
     } else {
         MetadataObjectReferenceIndexes::default()
     };
-    let configuration_root_object_refs = if extract_metadata_xml {
-        build_configuration_root_object_reference_index_from_texts(&metadata_texts, &object_refs)
-    } else {
-        BTreeMap::new()
-    };
-    let role_rights_object_refs =
-        build_role_rights_object_reference_index(&object_refs, &form_refs);
-    let metadata_order = if extract_metadata_xml || needs_source_layout_refs {
-        build_metadata_order_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let field_refs = if extract_metadata_xml {
-        build_metadata_field_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let field_type_refs = Arc::new(if extract_metadata_xml {
-        build_metadata_field_type_reference_index_from_texts(metadata_texts, &type_index)
-    } else {
-        BTreeMap::new()
-    });
-    // One index, two readers: the information-register value-owner route and
-    // the `<FillValue>` writer both need what a named type set declares, so it
-    // is built once here and handed to both.
-    let type_set_leaves = if extract_metadata_xml {
-        build_metadata_type_set_leaf_index_from_texts(&metadata_texts, &type_index)
-    } else {
-        MetadataTypeSetLeafIndex::new()
-    };
+    let (
+        ((configuration_root_object_refs, role_rights_object_refs), (metadata_order, field_refs)),
+        (
+            (field_type_refs, type_set_leaves),
+            (
+                (information_register_master_dimensions, metadata_field_declarations),
+                (functional_option_refs, (help_refs, body_owners)),
+            ),
+        ),
+    ) = parallel::install(|| {
+        rayon::join(
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_metadata_xml {
+                                    build_configuration_root_object_reference_index_from_texts(
+                                        metadata_texts,
+                                        &object_refs,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || build_role_rights_object_reference_index(&object_refs, &form_refs),
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_metadata_xml || needs_source_layout_refs {
+                                    build_metadata_order_index_from_texts(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                if extract_metadata_xml {
+                                    build_metadata_field_reference_index_from_texts(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                        )
+                    },
+                )
+            },
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                Arc::new(if extract_metadata_xml {
+                                    build_metadata_field_type_reference_index_from_texts(
+                                        metadata_texts,
+                                        &type_index,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                })
+                            },
+                            || {
+                                // One index, two readers: the information-register
+                                // value-owner route and `<FillValue>` both need it.
+                                if extract_metadata_xml {
+                                    build_metadata_type_set_leaf_index_from_texts(
+                                        metadata_texts,
+                                        &type_index,
+                                    )
+                                } else {
+                                    MetadataTypeSetLeafIndex::new()
+                                }
+                            },
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                rayon::join(
+                                    || {
+                                        Arc::new(if extract_metadata_xml {
+                                            build_information_register_master_dimension_index_from_texts(
+                                                metadata_texts,
+                                                &type_index,
+                                                &object_refs,
+                                                &form_refs,
+                                                source_version == InfobaseConfigSourceVersion::V2_21,
+                                            )
+                                        } else {
+                                            InformationRegisterMasterDimensionIndex::new()
+                                        })
+                                    },
+                                    || {
+                                        if extract_metadata_xml {
+                                            build_metadata_field_declaration_index_from_texts(
+                                                metadata_texts,
+                                                &object_refs,
+                                            )
+                                        } else {
+                                            MetadataFieldDeclarationIndex::default()
+                                        }
+                                    },
+                                )
+                            },
+                            || {
+                                rayon::join(
+                                    || {
+                                        if extract_metadata_xml {
+                                            build_functional_option_reference_index_from_texts(
+                                                metadata_texts,
+                                                &object_refs,
+                                                &form_refs,
+                                                &template_refs,
+                                                &subsystem_refs,
+                                            )
+                                        } else {
+                                            BTreeMap::new()
+                                        }
+                                    },
+                                    || {
+                                        rayon::join(
+                                            || {
+                                                if extract_metadata_xml {
+                                                    build_help_reference_index(
+                                                        &object_refs,
+                                                        &form_refs,
+                                                        &template_refs,
+                                                        &subsystem_refs,
+                                                    )
+                                                } else {
+                                                    BTreeMap::new()
+                                                }
+                                            },
+                                            || {
+                                                if extract_metadata_xml || needs_source_layout_refs
+                                                {
+                                                    build_body_owner_source_index_from_texts(
+                                                        metadata_texts,
+                                                        &subsystem_refs,
+                                                    )
+                                                } else {
+                                                    BTreeMap::new()
+                                                }
+                                            },
+                                        )
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            },
+        )
+    })?;
     let information_register_field_refs = if extract_metadata_xml {
         build_information_register_field_reference_index_from_texts(
             &metadata_texts,
             &type_index,
             &type_set_leaves,
-        )
-    } else {
-        BTreeMap::new()
-    };
-    let information_register_master_dimensions = Arc::new(if extract_metadata_xml {
-        build_information_register_master_dimension_index_from_texts(
-            metadata_texts,
-            &type_index,
-            &object_refs,
-            &form_refs,
-            source_version == InfobaseConfigSourceVersion::V2_21,
-        )
-    } else {
-        InformationRegisterMasterDimensionIndex::new()
-    });
-    let metadata_field_declarations = if extract_metadata_xml {
-        build_metadata_field_declaration_index_from_texts(&metadata_texts, &object_refs)
-    } else {
-        MetadataFieldDeclarationIndex::default()
-    };
-    let functional_option_refs = if extract_metadata_xml {
-        build_functional_option_reference_index_from_texts(
-            &metadata_texts,
-            &object_refs,
-            &form_refs,
-            &template_refs,
-            &subsystem_refs,
         )
     } else {
         BTreeMap::new()
@@ -2915,11 +3078,6 @@ fn dump_table_rows_with_options_mode(
         &form_refs,
         &template_refs,
     );
-    let help_refs = if extract_metadata_xml {
-        build_help_reference_index(&object_refs, &form_refs, &template_refs, &subsystem_refs)
-    } else {
-        BTreeMap::new()
-    };
     let standalone_refs = if needs_standalone_refs
         && source_assets
             .values()
@@ -2948,11 +3106,6 @@ fn dump_table_rows_with_options_mode(
         }
     } else {
         StandaloneContentReferences::default()
-    };
-    let body_owners = if extract_metadata_xml || needs_source_layout_refs {
-        build_body_owner_source_index_from_texts(&metadata_texts, &subsystem_refs)
-    } else {
-        BTreeMap::new()
     };
     let needs_predefined_item_refs =
         predefined_data_needs_item_references(&file_names_owned, &body_owners);
@@ -4511,14 +4664,26 @@ struct MetadataTextRowsAudit {
 
 fn build_metadata_text_rows_audited(rows: &[ConfigRow]) -> MetadataTextRowsAudit {
     let mut audit = MetadataTextRowsAudit::default();
-    for row in rows.iter().filter(|row| !row.file_name.contains('.')) {
-        let row_audit = match row.binary_bytes() {
-            Ok(bytes) => metadata_text_row_audit_from_blob(&row.file_name, &bytes),
-            Err(_) => MetadataTextRowAudit::Miss(MetadataExtractionMiss {
-                file_name: row.file_name.clone(),
-                reason: MetadataExtractionMissReason::Inflate,
-            }),
-        };
+    // `map` over this indexed iterator collects in source order, so only the
+    // expensive independent inflate/parse work is parallel; collision and
+    // diagnostic ordering below remains byte-for-byte deterministic.
+    let row_audits = parallel::install_memory_bound_or_inline(|| {
+        rows.par_iter()
+            .map(|row| {
+                if row.file_name.contains('.') {
+                    return None;
+                }
+                Some(match row.binary_bytes() {
+                    Ok(bytes) => metadata_text_row_audit_from_blob(&row.file_name, &bytes),
+                    Err(_) => MetadataTextRowAudit::Miss(MetadataExtractionMiss {
+                        file_name: row.file_name.clone(),
+                        reason: MetadataExtractionMissReason::Inflate,
+                    }),
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    for row_audit in row_audits.into_iter().flatten() {
         match row_audit {
             MetadataTextRowAudit::Extracted(mut metadata) => {
                 normalize_direct_form_metadata(&mut metadata);

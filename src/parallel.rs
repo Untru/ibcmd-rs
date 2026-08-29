@@ -3,7 +3,9 @@ use rayon::ThreadPoolBuilder;
 use std::sync::OnceLock;
 
 const MAX_WORKERS: usize = 16;
+const MAX_MEMORY_BOUND_WORKERS: usize = 4;
 static THREAD_POOL: OnceLock<Result<rayon::ThreadPool, String>> = OnceLock::new();
+static MEMORY_BOUND_THREAD_POOL: OnceLock<Result<rayon::ThreadPool, String>> = OnceLock::new();
 
 pub fn bounded_worker_count() -> usize {
     bounded_worker_count_from(
@@ -24,11 +26,37 @@ where
     Ok(thread_pool()?.install(work))
 }
 
+/// Runs expansion-heavy work in a narrower pool so multiple large decoded
+/// payloads cannot multiply the retained-memory budget by the CPU pool width.
+/// Pool creation remains an optimization rather than a correctness dependency.
+pub(crate) fn install_memory_bound_or_inline<F, R>(work: F) -> R
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
+{
+    match memory_bound_thread_pool() {
+        Ok(pool) => pool.install(work),
+        Err(_) => work(),
+    }
+}
+
 fn thread_pool() -> Result<&'static rayon::ThreadPool> {
     THREAD_POOL
         .get_or_init(|| {
             ThreadPoolBuilder::new()
                 .num_threads(bounded_worker_count())
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| anyhow::anyhow!(error.clone()))
+}
+
+fn memory_bound_thread_pool() -> Result<&'static rayon::ThreadPool> {
+    MEMORY_BOUND_THREAD_POOL
+        .get_or_init(|| {
+            ThreadPoolBuilder::new()
+                .num_threads(bounded_worker_count().min(MAX_MEMORY_BOUND_WORKERS))
                 .build()
                 .map_err(|error| error.to_string())
         })
