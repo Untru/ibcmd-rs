@@ -13,6 +13,10 @@ pub(super) struct ConfigRow {
     pub(super) part_no: i32,
     pub(super) data_size: i64,
     pub(super) binary_hex: String,
+    /// Raw BCP/CF bytes bypass the legacy SQL hex boundary in production.
+    /// Unit fixtures keep constructing the historical compact row shape.
+    #[cfg(not(test))]
+    pub(super) binary: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]

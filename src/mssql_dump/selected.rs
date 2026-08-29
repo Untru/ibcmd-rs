@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     ConfigRow, MetadataCommandReference, MetadataTextRow, command_interface_placement_name,
-    command_interface_reference_entries_from_text, command_interface_standard_command, decode_hex,
+    command_interface_reference_entries_from_text, command_interface_standard_command,
     inflate_raw_deflate, is_form_metadata_text, is_template_metadata_text, is_uuid_text,
     metadata_kind_needs_form_template_reference_indexes, metadata_text_row_from_text,
     nested_command_headers_from_text, parse_command_interface_common_flag,
@@ -234,7 +234,7 @@ pub(super) fn selected_configuration_direct_metadata_reference_file_names(
         if !matches!(suffix, "9" | "a") {
             continue;
         }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         let Ok(inflated) = inflate_raw_deflate(&bytes) else {
@@ -282,7 +282,7 @@ pub(super) fn selected_body_direct_reference_file_names(rows: &[ConfigRow]) -> B
         ) {
             continue;
         }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         let Ok(inflated) = inflate_raw_deflate(&bytes) else {
@@ -317,7 +317,7 @@ pub(super) fn selected_configuration_command_interface_command_refs(
         if suffix != "9" {
             continue;
         }
-        let bytes = decode_hex(&row.binary_hex).ok()?;
+        let bytes = row.binary_bytes().ok()?;
         refs.extend(command_interface_command_refs_from_blob(&bytes)?);
     }
     Some(refs)
@@ -483,7 +483,7 @@ pub(super) fn selected_command_owner_metadata_rows(
     let mut owner_index_by_command = BTreeMap::new();
     let mut owner_rows = Vec::new();
     for (row_index, row) in rows.iter().enumerate() {
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         let Ok(inflated) = inflate_raw_deflate(&bytes) else {
@@ -530,7 +530,7 @@ pub(super) fn selected_owner_metadata_rows_for_uuids(
     let mut found = BTreeSet::new();
     let mut owner_rows = Vec::new();
     for row in rows {
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         let Ok(inflated) = inflate_raw_deflate(&bytes) else {

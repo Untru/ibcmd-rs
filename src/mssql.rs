@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use ibcmd_core::artifact::StorageProfileId;
 use ibcmd_core::storage::{
     MultipartIdentity, StorageKey, StoragePatchEntry, StoragePatchOutcome, StoragePatchTarget,
@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::adapters::mssql_legacy::LEGACY_MSSQL_STORAGE_PROFILE_ID;
 use crate::cli::{
-    InfobaseConfigSourceVersion, MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs,
-    MssqlDeltaExportArgs, MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
+    InfobaseConfigSourceVersion, MssqlActivationDiffArgs, MssqlActivationSnapshotArgs,
+    MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs,
+    MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
     MssqlStageAccumulationRegisterObjectArgs, MssqlStageBotObjectArgs,
     MssqlStageBusinessProcessObjectArgs, MssqlStageCalculationRegisterObjectArgs,
     MssqlStageCatalogObjectArgs, MssqlStageChartOfAccountsObjectArgs,
@@ -298,6 +299,51 @@ pub struct ConfigSaveRowDigest {
     pub data_size: i64,
     pub binary_bytes: i64,
     pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MssqlActivationSnapshot {
+    pub schema_version: u32,
+    pub database: String,
+    pub tables: Vec<StorageTableManifest>,
+    pub config_rows: Vec<ConfigSaveRowDigest>,
+    pub config_save_rows: Vec<ConfigSaveRowDigest>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlActivationSnapshotReport {
+    pub output: PathBuf,
+    pub snapshot: MssqlActivationSnapshot,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlActivationDiffReport {
+    pub before_database: String,
+    pub after_database: String,
+    pub tables: Vec<MssqlActivationTableDiff>,
+    pub config_rows: MssqlActivationRowsDiff,
+    pub config_save_rows: MssqlActivationRowsDiff,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlActivationTableDiff {
+    pub table_name: String,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub changed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlActivationRowsDiff {
+    pub inserted: Vec<ConfigSaveRowDigest>,
+    pub deleted: Vec<ConfigSaveRowDigest>,
+    pub changed: Vec<MssqlActivationRowChange>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlActivationRowChange {
+    pub before: ConfigSaveRowDigest,
+    pub after: ConfigSaveRowDigest,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -729,6 +775,99 @@ pub fn compare_databases(args: &MssqlCompareArgs) -> Result<MssqlCompareReport> 
     let left = load_table_shapes(&args.sqlcmd, &args.server, &args.left)?;
     let right = load_table_shapes(&args.sqlcmd, &args.server, &args.right)?;
     Ok(compare_shapes(&args.left, &args.right, &left, &right))
+}
+
+/// Capture only direct SQL state.  It deliberately does not call 1C tooling
+/// and is intended to bracket one controlled dynamic-update experiment.
+pub fn capture_activation_snapshot(
+    args: &MssqlActivationSnapshotArgs,
+) -> Result<MssqlActivationSnapshotReport> {
+    if args.output.exists() {
+        bail!(
+            "activation snapshot already exists: {}",
+            args.output.display()
+        );
+    }
+    let snapshot = MssqlActivationSnapshot {
+        schema_version: 1,
+        database: args.database.clone(),
+        tables: ["Config", "ConfigSave", "Params"]
+            .into_iter()
+            .map(|table| storage_table_stats(&args.sqlcmd, &args.server, &args.database, table))
+            .collect::<Result<Vec<_>>>()?,
+        config_rows: config_row_digests(&args.sqlcmd, &args.server, &args.database, "Config")?,
+        config_save_rows: config_row_digests(
+            &args.sqlcmd,
+            &args.server,
+            &args.database,
+            "ConfigSave",
+        )?,
+    };
+    let text = serde_json::to_string_pretty(&snapshot)?;
+    fs::write(&args.output, text)
+        .with_context(|| format!("failed to write {}", args.output.display()))?;
+    Ok(MssqlActivationSnapshotReport {
+        output: args.output.clone(),
+        snapshot,
+    })
+}
+
+pub fn diff_activation_snapshots(
+    args: &MssqlActivationDiffArgs,
+) -> Result<MssqlActivationDiffReport> {
+    let before: MssqlActivationSnapshot = serde_json::from_slice(
+        &fs::read(&args.before)
+            .with_context(|| format!("failed to read {}", args.before.display()))?,
+    )
+    .with_context(|| format!("failed to parse {}", args.before.display()))?;
+    let after: MssqlActivationSnapshot = serde_json::from_slice(
+        &fs::read(&args.after)
+            .with_context(|| format!("failed to read {}", args.after.display()))?,
+    )
+    .with_context(|| format!("failed to parse {}", args.after.display()))?;
+    if before.schema_version != 1 || after.schema_version != 1 {
+        bail!("unsupported activation snapshot schema version");
+    }
+    let table = |snapshot: &MssqlActivationSnapshot, name: &str| {
+        snapshot
+            .tables
+            .iter()
+            .find(|item| item.table_name == name)
+            .cloned()
+    };
+    let tables = ["Config", "ConfigSave", "Params"]
+        .into_iter()
+        .map(|name| {
+            let before =
+                table(&before, name).ok_or_else(|| anyhow!("snapshot is missing table {name}"))?;
+            let after =
+                table(&after, name).ok_or_else(|| anyhow!("snapshot is missing table {name}"))?;
+            let changed = before.row_count != after.row_count
+                || before.binary_bytes != after.binary_bytes
+                || before.row_checksum != after.row_checksum;
+            Ok(MssqlActivationTableDiff {
+                table_name: name.to_string(),
+                before,
+                after,
+                changed,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(MssqlActivationDiffReport {
+        before_database: before.database,
+        after_database: after.database,
+        tables,
+        config_rows: diff_activation_rows(before.config_rows, after.config_rows),
+        config_save_rows: diff_activation_rows(before.config_save_rows, after.config_save_rows),
+    })
+}
+
+pub fn write_activation_diff(report: &MssqlActivationDiffReport, output: &Path) -> Result<()> {
+    if output.exists() {
+        bail!("activation diff already exists: {}", output.display());
+    }
+    fs::write(output, serde_json::to_string_pretty(report)?)
+        .with_context(|| format!("failed to write {}", output.display()))
 }
 
 fn require_non_lab_confirmation(allowed: bool, action: &str) -> Result<()> {
@@ -5769,6 +5908,15 @@ fn configsave_row_digests(
     server: &str,
     database: &str,
 ) -> Result<Vec<ConfigSaveRowDigest>> {
+    config_row_digests(sqlcmd, server, database, "ConfigSave")
+}
+
+fn config_row_digests(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    table: &str,
+) -> Result<Vec<ConfigSaveRowDigest>> {
     let sql = format!(
         "SET NOCOUNT ON; USE {db};\n\
          SELECT FileName AS file_name,\n\
@@ -5776,15 +5924,59 @@ fn configsave_row_digests(
                 DataSize AS data_size,\n\
                 DATALENGTH(BinaryData) AS binary_bytes,\n\
                 CONVERT(varchar(64), HASHBYTES('SHA2_256', BinaryData), 2) AS sha256\n\
-         FROM ConfigSave\n\
+         FROM {table_ident}\n\
          ORDER BY FileName, PartNo\n\
          FOR JSON PATH;",
         db = quote_ident(database),
+        table_ident = quote_ident(table),
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(&stdout, &format!("configsave_row_digests({database})"))?;
+    let json = extract_json_array(&stdout, &format!("config_row_digests({table}, {database})"))?;
     serde_json::from_str(&json)
-        .with_context(|| format!("failed to parse ConfigSave digests JSON for {database}"))
+        .with_context(|| format!("failed to parse {table} digests JSON for {database}"))
+}
+
+fn diff_activation_rows(
+    before: Vec<ConfigSaveRowDigest>,
+    after: Vec<ConfigSaveRowDigest>,
+) -> MssqlActivationRowsDiff {
+    let key = |row: &ConfigSaveRowDigest| (row.file_name.clone(), row.part_no);
+    let before = before
+        .into_iter()
+        .map(|row| (key(&row), row))
+        .collect::<BTreeMap<_, _>>();
+    let after = after
+        .into_iter()
+        .map(|row| (key(&row), row))
+        .collect::<BTreeMap<_, _>>();
+    let inserted = after
+        .iter()
+        .filter(|(key, _)| !before.contains_key(*key))
+        .map(|(_, row)| row.clone())
+        .collect();
+    let deleted = before
+        .iter()
+        .filter(|(key, _)| !after.contains_key(*key))
+        .map(|(_, row)| row.clone())
+        .collect();
+    let changed = before
+        .iter()
+        .filter_map(|(key, before)| {
+            let after = after.get(key)?;
+            (before.data_size != after.data_size
+                || before.binary_bytes != after.binary_bytes
+                || before.sha256 != after.sha256)
+                .then(|| MssqlActivationRowChange {
+                    before: before.clone(),
+                    after: after.clone(),
+                })
+        })
+        .collect();
+    MssqlActivationRowsDiff {
+        inserted,
+        deleted,
+        changed,
+    }
 }
 
 fn fetch_config_blobs_for_files(
@@ -7216,12 +7408,12 @@ mod tests {
         DeltaBundleManifest, PreparedCommonModuleObjectStage, PreparedCommonModuleStage,
         PreparedMetadataBodyStage, PreparedMetadataObjectStage, StorageBundleManifest,
         StorageTableManifest, TableShape, build_source_stage_batches, compare_shapes,
-        compare_storage_table_manifests, encode_hex, filter_source_paths_by_prefix,
-        infer_common_module_text_path, is_root_common_module_xml, is_root_metadata_xml,
-        is_stage_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
-        source_common_module_xmls, source_metadata_xmls, source_stage_batch_reports,
-        source_xml_version_from_bytes, validate_delta_manifest, validate_selected_source_versions,
-        validate_storage_manifest,
+        compare_storage_table_manifests, diff_activation_rows, encode_hex,
+        filter_source_paths_by_prefix, infer_common_module_text_path, is_root_common_module_xml,
+        is_root_metadata_xml, is_stage_metadata_xml, quote_ident, quote_string,
+        require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
+        source_stage_batch_reports, source_xml_version_from_bytes, validate_delta_manifest,
+        validate_selected_source_versions, validate_storage_manifest,
     };
     use crate::cli::InfobaseConfigSourceVersion;
     use crate::compiler::bodies::template::TemplateKind;
@@ -13751,5 +13943,28 @@ mod tests {
         assert!(!args.contains(&"-E".to_string()));
         assert!(args.windows(2).any(|pair| pair == ["-U", "stage-user"]));
         assert!(args.windows(2).any(|pair| pair == ["-P", "stage-secret"]));
+    }
+
+    #[test]
+    fn activation_row_diff_keeps_insert_delete_and_changed_rows_separate() {
+        let row = |file_name: &str, part_no: i32, sha256: &str| ConfigSaveRowDigest {
+            file_name: file_name.to_string(),
+            part_no,
+            data_size: 10,
+            binary_bytes: 10,
+            sha256: sha256.to_string(),
+        };
+        let diff = diff_activation_rows(
+            vec![row("old", 0, "aaa"), row("changed", 0, "bbb")],
+            vec![row("changed", 0, "ccc"), row("new", 0, "ddd")],
+        );
+
+        assert_eq!(diff.inserted.len(), 1);
+        assert_eq!(diff.inserted[0].file_name, "new");
+        assert_eq!(diff.deleted.len(), 1);
+        assert_eq!(diff.deleted[0].file_name, "old");
+        assert_eq!(diff.changed.len(), 1);
+        assert_eq!(diff.changed[0].before.sha256, "bbb");
+        assert_eq!(diff.changed[0].after.sha256, "ccc");
     }
 }

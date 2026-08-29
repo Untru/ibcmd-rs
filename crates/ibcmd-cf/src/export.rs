@@ -208,6 +208,63 @@ impl StorageExportEntryReport {
         )
     }
 
+    #[must_use]
+    pub fn supported_packed(
+        logical_name: impl Into<String>,
+        logical_key: impl Into<String>,
+        part_count: usize,
+        packed_bytes: usize,
+        outputs: Vec<String>,
+    ) -> Self {
+        Self::new_values(
+            logical_name,
+            logical_key,
+            part_count,
+            packed_bytes,
+            StorageExportDisposition::Supported,
+            outputs,
+            None,
+        )
+    }
+
+    #[must_use]
+    pub fn opaque_packed(
+        logical_name: impl Into<String>,
+        logical_key: impl Into<String>,
+        part_count: usize,
+        packed_bytes: usize,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::new_values(
+            logical_name,
+            logical_key,
+            part_count,
+            packed_bytes,
+            StorageExportDisposition::Opaque,
+            Vec::new(),
+            Some(message.into()),
+        )
+    }
+
+    #[must_use]
+    pub fn failed_packed(
+        logical_name: impl Into<String>,
+        logical_key: impl Into<String>,
+        part_count: usize,
+        packed_bytes: usize,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::new_values(
+            logical_name,
+            logical_key,
+            part_count,
+            packed_bytes,
+            StorageExportDisposition::Failed,
+            Vec::new(),
+            Some(message.into()),
+        )
+    }
+
     fn new(
         record: &StorageExportRecord<'_>,
         packed_bytes: usize,
@@ -215,10 +272,30 @@ impl StorageExportEntryReport {
         outputs: Vec<String>,
         message: Option<String>,
     ) -> Self {
+        Self::new_values(
+            record.logical_name(),
+            record.logical_key(),
+            record.part_count(),
+            packed_bytes,
+            disposition,
+            outputs,
+            message,
+        )
+    }
+
+    fn new_values(
+        logical_name: impl Into<String>,
+        logical_key: impl Into<String>,
+        part_count: usize,
+        packed_bytes: usize,
+        disposition: StorageExportDisposition,
+        outputs: Vec<String>,
+        message: Option<String>,
+    ) -> Self {
         Self {
-            logical_name: record.logical_name().to_owned(),
-            logical_key: record.logical_key().to_owned(),
-            part_count: record.part_count(),
+            logical_name: logical_name.into(),
+            logical_key: logical_key.into(),
+            part_count,
             packed_bytes,
             disposition,
             outputs,
@@ -248,6 +325,23 @@ impl StorageExportReport {
         plan: &StorageExportPlan<'_>,
         entries: Vec<StorageExportEntryReport>,
     ) -> Self {
+        Self::from_parts(
+            image
+                .source_profile()
+                .map(|profile| profile.as_str().to_owned()),
+            plan.physical_entries(),
+            plan.records().len(),
+            entries,
+        )
+    }
+
+    #[must_use]
+    pub fn from_parts(
+        source_profile: Option<String>,
+        physical_entries: usize,
+        logical_entries: usize,
+        entries: Vec<StorageExportEntryReport>,
+    ) -> Self {
         let supported = entries
             .iter()
             .filter(|entry| entry.disposition == StorageExportDisposition::Supported)
@@ -262,11 +356,9 @@ impl StorageExportReport {
             .count();
         Self {
             schema_version: 1,
-            source_profile: image
-                .source_profile()
-                .map(|profile| profile.as_str().to_owned()),
-            physical_entries: plan.physical_entries(),
-            logical_entries: plan.records().len(),
+            source_profile,
+            physical_entries,
+            logical_entries,
             supported,
             opaque,
             failed,

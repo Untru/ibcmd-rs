@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Read;
@@ -7,6 +8,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
+use ibcmd_cf::archive::PackedCfArchive;
 use ibcmd_cf::export::{StorageExportEntryReport, StorageExportPlan, StorageExportReport};
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::characteristics::Characteristics;
@@ -1831,6 +1833,13 @@ pub struct StorageImageSourceExportReport {
     pub storage: StorageExportReport,
 }
 
+struct DirectStorageExportRecord {
+    logical_name: String,
+    logical_key: String,
+    part_count: usize,
+    packed_bytes: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct MssqlDumpManifest {
     server: String,
@@ -2318,6 +2327,7 @@ pub fn export_storage_image_to_source(
 ) -> Result<StorageImageSourceExportReport> {
     let plan = StorageExportPlan::from_image(image);
     let mut rows = Vec::with_capacity(plan.records().len());
+    let mut records = Vec::with_capacity(plan.records().len());
     let mut decoder_names = BTreeSet::new();
     for record in plan.records() {
         if !decoder_names.insert(record.logical_name()) {
@@ -2338,14 +2348,86 @@ pub fn export_storage_image_to_source(
                 record.logical_key()
             )
         })?;
-        rows.push(ConfigRow {
+        let packed_bytes = payload.len();
+        rows.push(config_row_from_binary(BinaryConfigRow {
             file_name: record.logical_name().to_owned(),
             part_no: 0,
             data_size,
-            binary_hex: encode_hex_lower(payload.as_ref()),
+            binary: payload.into_owned(),
+        }));
+        records.push(DirectStorageExportRecord {
+            logical_name: record.logical_name().to_owned(),
+            logical_key: record.logical_key().to_owned(),
+            part_count: record.part_count(),
+            packed_bytes,
         });
     }
 
+    export_direct_storage_rows_to_source(
+        rows,
+        records,
+        image
+            .source_profile()
+            .map(|profile| profile.as_str().to_owned()),
+        plan.physical_entries(),
+        output_dir,
+        overwrite,
+        source_version,
+    )
+}
+
+/// Exports a packed-only CF projection without constructing or eagerly
+/// decoding a neutral [`StorageImage`]. Exact CF payload bytes move into the
+/// existing family-decoder pipeline once and remain bounded by the CF reader.
+pub fn export_packed_cf_archive_to_source(
+    archive: PackedCfArchive,
+    output_dir: &Path,
+    overwrite: bool,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<StorageImageSourceExportReport> {
+    let (_, source_profile, entries) = archive.into_parts();
+    let physical_entries = entries.len();
+    let mut rows = Vec::with_capacity(physical_entries);
+    let mut records = Vec::with_capacity(physical_entries);
+    for entry in entries {
+        let (name, payload) = entry.into_parts();
+        let packed_bytes = payload.len();
+        let data_size = i64::try_from(packed_bytes)
+            .with_context(|| format!("CF record `{name}` is too large for the row boundary"))?;
+        rows.push(config_row_from_binary(BinaryConfigRow {
+            file_name: name.clone(),
+            part_no: 0,
+            data_size,
+            binary: payload,
+        }));
+        records.push(DirectStorageExportRecord {
+            logical_name: name.clone(),
+            logical_key: name,
+            part_count: 1,
+            packed_bytes,
+        });
+    }
+
+    export_direct_storage_rows_to_source(
+        rows,
+        records,
+        Some(source_profile.as_str().to_owned()),
+        physical_entries,
+        output_dir,
+        overwrite,
+        source_version,
+    )
+}
+
+fn export_direct_storage_rows_to_source(
+    rows: Vec<ConfigRow>,
+    records: Vec<DirectStorageExportRecord>,
+    source_profile: Option<String>,
+    physical_entries: usize,
+    output_dir: &Path,
+    overwrite: bool,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<StorageImageSourceExportReport> {
     prepare_output_dir(output_dir, overwrite)?;
     // Reuses the same eligibility rule the streamed MSSQL pipeline uses
     // (`MssqlExportInventoryPlan::config_dump_info_eligible`,
@@ -2390,25 +2472,21 @@ pub fn export_storage_image_to_source(
         .map(|failure| (failure.file_name, failure.message))
         .collect::<BTreeMap<_, _>>();
 
-    let mut entries = Vec::with_capacity(plan.records().len());
-    for record in plan.records() {
-        let packed_bytes = record.packed_bytes().with_context(|| {
-            format!(
-                "failed to measure storage record `{}`",
-                record.logical_key()
-            )
-        })?;
-        if let Some(message) = failed.get(record.logical_name()) {
-            entries.push(StorageExportEntryReport::failed(
-                record,
-                packed_bytes,
+    let mut entries = Vec::with_capacity(records.len());
+    for record in &records {
+        if let Some(message) = failed.get(&record.logical_name) {
+            entries.push(StorageExportEntryReport::failed_packed(
+                record.logical_name.clone(),
+                record.logical_key.clone(),
+                record.part_count,
+                record.packed_bytes,
                 message.clone(),
             ));
             continue;
         }
 
         let outputs = successful
-            .get(record.logical_name())
+            .get(&record.logical_name)
             .into_iter()
             .flat_map(|manifest| {
                 [
@@ -2421,15 +2499,19 @@ pub fn export_storage_image_to_source(
             .cloned()
             .collect::<Vec<_>>();
         if outputs.is_empty() {
-            entries.push(StorageExportEntryReport::opaque(
-                record,
-                packed_bytes,
+            entries.push(StorageExportEntryReport::opaque_packed(
+                record.logical_name.clone(),
+                record.logical_key.clone(),
+                record.part_count,
+                record.packed_bytes,
                 "no legacy family decoder recognized this storage entry",
             ));
         } else {
-            entries.push(StorageExportEntryReport::supported(
-                record,
-                packed_bytes,
+            entries.push(StorageExportEntryReport::supported_packed(
+                record.logical_name.clone(),
+                record.logical_key.clone(),
+                record.part_count,
+                record.packed_bytes,
                 outputs,
             ));
         }
@@ -2441,7 +2523,12 @@ pub fn export_storage_image_to_source(
         output_dir: output_dir.to_path_buf(),
         source_version: source_version.as_str().to_owned(),
         files_written,
-        storage: StorageExportReport::new(image, &plan, entries),
+        storage: StorageExportReport::from_parts(
+            source_profile,
+            physical_entries,
+            records.len(),
+            entries,
+        ),
     })
 }
 
@@ -2740,59 +2827,124 @@ fn dump_table_rows_with_options_mode(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
-    let recalculation_refs = if extract_metadata_xml {
-        build_calculation_recalculation_reference_index(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let root_recalculation_refs = if extract_metadata_xml {
-        build_calculation_root_recalculation_reference_index(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let module_text_paths = if extract_module_text {
-        module_body_paths_from_texts(&rows, &metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let command_refs = if extract_metadata_xml {
-        build_command_interface_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let metadata_refs = Arc::new(if extract_metadata_xml {
-        build_metadata_command_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    });
+    let refs_for_standalone =
+        extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
+    let (
+        ((recalculation_refs, root_recalculation_refs), (module_text_paths, command_refs)),
+        ((metadata_refs, metadata_type_indexes), (form_refs, (template_refs, subsystem_refs))),
+    ) = parallel::install(|| {
+        rayon::join(
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_metadata_xml {
+                                    build_calculation_recalculation_reference_index(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                if extract_metadata_xml {
+                                    build_calculation_root_recalculation_reference_index(
+                                        metadata_texts,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_module_text {
+                                    module_body_paths_from_texts(&rows, metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                if extract_metadata_xml {
+                                    build_command_interface_reference_index_from_texts(
+                                        metadata_texts,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                        )
+                    },
+                )
+            },
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                Arc::new(if extract_metadata_xml {
+                                    build_metadata_command_reference_index_from_texts(
+                                        metadata_texts,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                })
+                            },
+                            || {
+                                if extract_metadata_xml || needs_source_layout_refs {
+                                    build_metadata_type_indexes_from_texts(metadata_texts)
+                                } else {
+                                    MetadataTypeIndexes::default()
+                                }
+                            },
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                if refs_for_standalone {
+                                    build_complete_form_source_reference_index(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                rayon::join(
+                                    || {
+                                        if refs_for_standalone {
+                                            build_template_source_reference_index_from_texts(
+                                                &rows,
+                                                metadata_texts,
+                                            )
+                                        } else {
+                                            BTreeMap::new()
+                                        }
+                                    },
+                                    || {
+                                        if refs_for_standalone {
+                                            build_subsystem_source_reference_index_from_texts(
+                                                metadata_texts,
+                                            )
+                                        } else {
+                                            BTreeMap::new()
+                                        }
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            },
+        )
+    })?;
     let MetadataTypeIndexes {
         references: type_index,
         reference_collisions: type_index_collisions,
         dcs: dcs_type_index,
-    } = if extract_metadata_xml || needs_source_layout_refs {
-        build_metadata_type_indexes_from_texts(&metadata_texts)
-    } else {
-        MetadataTypeIndexes::default()
-    };
+    } = metadata_type_indexes;
     let moxel_generated_types =
         build_moxel_generated_type_index(&type_index, &type_index_collisions);
-    let refs_for_standalone =
-        extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
-    let form_refs = if refs_for_standalone {
-        build_complete_form_source_reference_index(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let template_refs = if refs_for_standalone {
-        build_template_source_reference_index_from_texts(&rows, &metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let subsystem_refs = if refs_for_standalone {
-        build_subsystem_source_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
     let MetadataObjectReferenceIndexes {
         references: object_refs,
         resolutions: object_ref_resolutions,
@@ -2811,68 +2963,166 @@ fn dump_table_rows_with_options_mode(
     } else {
         MetadataObjectReferenceIndexes::default()
     };
-    let configuration_root_object_refs = if extract_metadata_xml {
-        build_configuration_root_object_reference_index_from_texts(&metadata_texts, &object_refs)
-    } else {
-        BTreeMap::new()
-    };
-    let role_rights_object_refs =
-        build_role_rights_object_reference_index(&object_refs, &form_refs);
-    let metadata_order = if extract_metadata_xml || needs_source_layout_refs {
-        build_metadata_order_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let field_refs = if extract_metadata_xml {
-        build_metadata_field_reference_index_from_texts(&metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
-    let field_type_refs = Arc::new(if extract_metadata_xml {
-        build_metadata_field_type_reference_index_from_texts(metadata_texts, &type_index)
-    } else {
-        BTreeMap::new()
-    });
-    // One index, two readers: the information-register value-owner route and
-    // the `<FillValue>` writer both need what a named type set declares, so it
-    // is built once here and handed to both.
-    let type_set_leaves = if extract_metadata_xml {
-        build_metadata_type_set_leaf_index_from_texts(&metadata_texts, &type_index)
-    } else {
-        MetadataTypeSetLeafIndex::new()
-    };
+    let (
+        ((configuration_root_object_refs, role_rights_object_refs), (metadata_order, field_refs)),
+        (
+            (field_type_refs, type_set_leaves),
+            (
+                (information_register_master_dimensions, metadata_field_declarations),
+                (functional_option_refs, (help_refs, body_owners)),
+            ),
+        ),
+    ) = parallel::install(|| {
+        rayon::join(
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_metadata_xml {
+                                    build_configuration_root_object_reference_index_from_texts(
+                                        metadata_texts,
+                                        &object_refs,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || build_role_rights_object_reference_index(&object_refs, &form_refs),
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                if extract_metadata_xml || needs_source_layout_refs {
+                                    build_metadata_order_index_from_texts(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                            || {
+                                if extract_metadata_xml {
+                                    build_metadata_field_reference_index_from_texts(metadata_texts)
+                                } else {
+                                    BTreeMap::new()
+                                }
+                            },
+                        )
+                    },
+                )
+            },
+            || {
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || {
+                                Arc::new(if extract_metadata_xml {
+                                    build_metadata_field_type_reference_index_from_texts(
+                                        metadata_texts,
+                                        &type_index,
+                                    )
+                                } else {
+                                    BTreeMap::new()
+                                })
+                            },
+                            || {
+                                // One index, two readers: the information-register
+                                // value-owner route and `<FillValue>` both need it.
+                                if extract_metadata_xml {
+                                    build_metadata_type_set_leaf_index_from_texts(
+                                        metadata_texts,
+                                        &type_index,
+                                    )
+                                } else {
+                                    MetadataTypeSetLeafIndex::new()
+                                }
+                            },
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || {
+                                rayon::join(
+                                    || {
+                                        Arc::new(if extract_metadata_xml {
+                                            build_information_register_master_dimension_index_from_texts(
+                                                metadata_texts,
+                                                &type_index,
+                                                &object_refs,
+                                                &form_refs,
+                                                source_version == InfobaseConfigSourceVersion::V2_21,
+                                            )
+                                        } else {
+                                            InformationRegisterMasterDimensionIndex::new()
+                                        })
+                                    },
+                                    || {
+                                        if extract_metadata_xml {
+                                            build_metadata_field_declaration_index_from_texts(
+                                                metadata_texts,
+                                                &object_refs,
+                                            )
+                                        } else {
+                                            MetadataFieldDeclarationIndex::default()
+                                        }
+                                    },
+                                )
+                            },
+                            || {
+                                rayon::join(
+                                    || {
+                                        if extract_metadata_xml {
+                                            build_functional_option_reference_index_from_texts(
+                                                metadata_texts,
+                                                &object_refs,
+                                                &form_refs,
+                                                &template_refs,
+                                                &subsystem_refs,
+                                            )
+                                        } else {
+                                            BTreeMap::new()
+                                        }
+                                    },
+                                    || {
+                                        rayon::join(
+                                            || {
+                                                if extract_metadata_xml {
+                                                    build_help_reference_index(
+                                                        &object_refs,
+                                                        &form_refs,
+                                                        &template_refs,
+                                                        &subsystem_refs,
+                                                    )
+                                                } else {
+                                                    BTreeMap::new()
+                                                }
+                                            },
+                                            || {
+                                                if extract_metadata_xml || needs_source_layout_refs
+                                                {
+                                                    build_body_owner_source_index_from_texts(
+                                                        metadata_texts,
+                                                        &subsystem_refs,
+                                                    )
+                                                } else {
+                                                    BTreeMap::new()
+                                                }
+                                            },
+                                        )
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            },
+        )
+    })?;
     let information_register_field_refs = if extract_metadata_xml {
         build_information_register_field_reference_index_from_texts(
             &metadata_texts,
             &type_index,
             &type_set_leaves,
-        )
-    } else {
-        BTreeMap::new()
-    };
-    let information_register_master_dimensions = Arc::new(if extract_metadata_xml {
-        build_information_register_master_dimension_index_from_texts(
-            metadata_texts,
-            &type_index,
-            &object_refs,
-            &form_refs,
-            source_version == InfobaseConfigSourceVersion::V2_21,
-        )
-    } else {
-        InformationRegisterMasterDimensionIndex::new()
-    });
-    let metadata_field_declarations = if extract_metadata_xml {
-        build_metadata_field_declaration_index_from_texts(&metadata_texts, &object_refs)
-    } else {
-        MetadataFieldDeclarationIndex::default()
-    };
-    let functional_option_refs = if extract_metadata_xml {
-        build_functional_option_reference_index_from_texts(
-            &metadata_texts,
-            &object_refs,
-            &form_refs,
-            &template_refs,
-            &subsystem_refs,
         )
     } else {
         BTreeMap::new()
@@ -2908,11 +3158,6 @@ fn dump_table_rows_with_options_mode(
         &form_refs,
         &template_refs,
     );
-    let help_refs = if extract_metadata_xml {
-        build_help_reference_index(&object_refs, &form_refs, &template_refs, &subsystem_refs)
-    } else {
-        BTreeMap::new()
-    };
     let standalone_refs = if needs_standalone_refs
         && source_assets
             .values()
@@ -2941,11 +3186,6 @@ fn dump_table_rows_with_options_mode(
         }
     } else {
         StandaloneContentReferences::default()
-    };
-    let body_owners = if extract_metadata_xml || needs_source_layout_refs {
-        build_body_owner_source_index_from_texts(&metadata_texts, &subsystem_refs)
-    } else {
-        BTreeMap::new()
     };
     let needs_predefined_item_refs =
         predefined_data_needs_item_references(&file_names_owned, &body_owners);
@@ -3171,8 +3411,9 @@ fn dump_table_rows_with_options_mode(
                 bail!("Config versions row was fetched more than once");
             }
             versions_blob = Some(
-                decode_hex(&row.binary_hex)
-                    .with_context(|| "Config versions row is not valid hex".to_string())?,
+                row.binary_bytes()
+                    .with_context(|| "Config versions row is not valid hex".to_string())?
+                    .into_owned(),
             );
         }
 
@@ -4488,6 +4729,8 @@ fn rows_for_source_indexes(
             part_no: header.part_no,
             data_size: header.data_size,
             binary_hex: String::new(),
+            #[cfg(not(test))]
+            binary: None,
         });
     }
     rows
@@ -4501,14 +4744,26 @@ struct MetadataTextRowsAudit {
 
 fn build_metadata_text_rows_audited(rows: &[ConfigRow]) -> MetadataTextRowsAudit {
     let mut audit = MetadataTextRowsAudit::default();
-    for row in rows.iter().filter(|row| !row.file_name.contains('.')) {
-        let row_audit = match decode_hex(&row.binary_hex) {
-            Ok(bytes) => metadata_text_row_audit_from_blob(&row.file_name, &bytes),
-            Err(_) => MetadataTextRowAudit::Miss(MetadataExtractionMiss {
-                file_name: row.file_name.clone(),
-                reason: MetadataExtractionMissReason::Inflate,
-            }),
-        };
+    // `map` over this indexed iterator collects in source order, so only the
+    // expensive independent inflate/parse work is parallel; collision and
+    // diagnostic ordering below remains byte-for-byte deterministic.
+    let row_audits = parallel::install_memory_bound_or_inline(|| {
+        rows.par_iter()
+            .map(|row| {
+                if row.file_name.contains('.') {
+                    return None;
+                }
+                Some(match row.binary_bytes() {
+                    Ok(bytes) => metadata_text_row_audit_from_blob(&row.file_name, &bytes),
+                    Err(_) => MetadataTextRowAudit::Miss(MetadataExtractionMiss {
+                        file_name: row.file_name.clone(),
+                        reason: MetadataExtractionMissReason::Inflate,
+                    }),
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    for row_audit in row_audits.into_iter().flatten() {
         match row_audit {
             MetadataTextRowAudit::Extracted(mut metadata) => {
                 normalize_direct_form_metadata(&mut metadata);
@@ -4832,7 +5087,7 @@ fn business_process_flowchart_predefined_owner_ids(
         if !flowchart_file_names.contains(&row.file_name) {
             continue;
         }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         let Ok(inflated) = inflate_raw_deflate(&bytes) else {
@@ -4891,7 +5146,8 @@ fn merge_config_rows_by_file_name(
 }
 
 fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<DumpedRow> {
-    let bytes = decode_hex(&row.binary_hex)
+    let bytes = row
+        .binary_bytes()
         .with_context(|| format!("failed to decode {} row {}", context.table, row.file_name))?;
     dump_table_row_bytes(context, &row.file_name, row.part_no, row.data_size, &bytes)
 }
@@ -7464,7 +7720,7 @@ fn nested_command_headers_for_owner_from_text(
         // inside those spans there are only commands, and outside them there
         // are none. The code-9 arm is kept exactly as it was so this can only
         // add names, never move one.
-        is_offset_inside_command_collection(text, marker_start)
+        is_offset_inside_owner_command_collection(owner_kind, text, marker_start)
             || (is_offset_inside_metadata_object_code(text, marker_start, 9)
                 && register_child_object_tag(owner_kind, text, marker_start).is_none())
     })
@@ -7553,7 +7809,7 @@ fn parse_information_register_child_commands(
         // information registers lose their whole `<Command>` that way. The
         // property reader below already knows both the 13- and the 12-member
         // shape.
-        is_offset_inside_command_collection(text, marker_start)
+        is_offset_inside_owner_command_collection("InformationRegister", text, marker_start)
             || (is_offset_inside_metadata_object_code(text, marker_start, 9)
                 && register_child_object_tag("InformationRegister", text, marker_start).is_none())
     })
@@ -16912,7 +17168,7 @@ fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Opt
     // child collection. Four ERP УХ 3.2.12.6 information registers wrote such
     // a command twice: once as a header-only `<Resource>` it does not own and
     // never as the `<Command>` it is.
-    if is_offset_inside_command_collection(text, marker_start) {
+    if is_offset_inside_owner_command_collection(kind, text, marker_start) {
         return None;
     }
     if kind == "InformationRegister"
@@ -34620,8 +34876,17 @@ fn split_1c_braced_fields_bounded(
 }
 
 fn template_type_code_from_metadata_text(text: &str, uuid: &str) -> Option<u32> {
+    // Most callers parse nested headers from large metadata records.  Only
+    // the two template layouts can carry this field, so reject every other
+    // family before splitting the complete outer record.  Doing the split
+    // first made every nested child rescan its owner's full text even though
+    // the answer was necessarily `None`.
+    let object_code = parse_metadata_object_code(text)?;
+    if !matches!(object_code, 2 | 4) {
+        return None;
+    }
     let fields = metadata_object_fields(text)?;
-    match parse_metadata_object_code(text)? {
+    match object_code {
         2 if metadata_header_field_index(&fields, uuid) == Some(2) => {
             fields.get(1)?.trim().parse().ok()
         }
@@ -42591,6 +42856,7 @@ fn inflate_raw_deflate(input: &[u8]) -> Result<Vec<u8>> {
     Ok(output)
 }
 
+#[cfg(test)]
 fn encode_hex_lower(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -42613,6 +42879,24 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>> {
                 .with_context(|| format!("invalid hex byte at offset {index}"))
         })
         .collect()
+}
+
+impl ConfigRow {
+    fn binary_bytes(&self) -> Result<Cow<'_, [u8]>> {
+        #[cfg(not(test))]
+        if let Some(bytes) = self.binary.as_deref() {
+            return Ok(Cow::Borrowed(bytes));
+        }
+        decode_hex(&self.binary_hex).map(Cow::Owned)
+    }
+
+    fn binary_is_empty(&self) -> bool {
+        #[cfg(not(test))]
+        if let Some(bytes) = self.binary.as_deref() {
+            return bytes.is_empty();
+        }
+        self.binary_hex.is_empty()
+    }
 }
 
 #[cfg(test)]

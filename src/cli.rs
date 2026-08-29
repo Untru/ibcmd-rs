@@ -77,6 +77,10 @@ pub enum Commands {
     StorageMap(TraceAnalyzeArgs),
     /// Compare two SQL Server 1C databases by table shape and row counts.
     MssqlCompare(MssqlCompareArgs),
+    /// Capture direct-SQL evidence needed to reverse the ConfigSave activation protocol.
+    MssqlActivationSnapshot(MssqlActivationSnapshotArgs),
+    /// Diff two activation snapshots without connecting to SQL Server.
+    MssqlActivationDiff(MssqlActivationDiffArgs),
     /// Dry-run source load parity and bootstrap base-blob readiness without writing ConfigSave.
     MssqlAuditSourceParity(MssqlAuditSourceParityArgs),
     /// Clone a SQL Server database with backup/restore.
@@ -1258,6 +1262,35 @@ pub struct MssqlCompareArgs {
     #[arg(long)]
     pub right: String,
     /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlActivationSnapshotArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Database to inspect. This command is read-only.
+    #[arg(long)]
+    pub database: String,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// JSON destination. Existing files are never replaced.
+    #[arg(short, long)]
+    pub output: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlActivationDiffArgs {
+    /// Snapshot taken before activation.
+    #[arg(long)]
+    pub before: PathBuf,
+    /// Snapshot taken after activation.
+    #[arg(long)]
+    pub after: PathBuf,
+    /// Optional JSON destination. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 }

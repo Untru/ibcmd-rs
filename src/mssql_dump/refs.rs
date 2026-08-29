@@ -1856,6 +1856,37 @@ pub(super) fn is_offset_inside_command_collection(text: &str, offset: usize) -> 
     is_offset_inside_any_list_marker(text, offset, &COMMAND_COLLECTION_LIST_MARKERS)
 }
 
+/// True inside the command collection declared by this owner family.
+///
+/// The metadata family is already known at every production call site.  Use
+/// that discriminator instead of searching the complete text once for every
+/// platform family marker.  Unknown families retain the broad fallback so a
+/// newly observed layout is not silently excluded.
+pub(super) fn is_offset_inside_owner_command_collection(
+    owner_kind: &str,
+    text: &str,
+    offset: usize,
+) -> bool {
+    let marker = match owner_kind {
+        "DataProcessor" => COMMAND_COLLECTION_LIST_MARKERS[0],
+        "Catalog" => COMMAND_COLLECTION_LIST_MARKERS[1],
+        "Document" => COMMAND_COLLECTION_LIST_MARKERS[2],
+        "InformationRegister" => COMMAND_COLLECTION_LIST_MARKERS[3],
+        "Report" => COMMAND_COLLECTION_LIST_MARKERS[4],
+        "DocumentJournal" => COMMAND_COLLECTION_LIST_MARKERS[5],
+        "ExchangePlan" => COMMAND_COLLECTION_LIST_MARKERS[6],
+        "BusinessProcess" => COMMAND_COLLECTION_LIST_MARKERS[7],
+        "Task" => COMMAND_COLLECTION_LIST_MARKERS[8],
+        "ChartOfAccounts" => COMMAND_COLLECTION_LIST_MARKERS[9],
+        "FilterCriterion" => COMMAND_COLLECTION_LIST_MARKERS[10],
+        "ChartOfCharacteristicTypes" => COMMAND_COLLECTION_LIST_MARKERS[11],
+        "AccountingRegister" => COMMAND_COLLECTION_LIST_MARKERS[12],
+        "AccumulationRegister" => COMMAND_COLLECTION_LIST_MARKERS[13],
+        _ => return is_offset_inside_command_collection(text, offset),
+    };
+    is_offset_inside_any_list_marker(text, offset, &[marker])
+}
+
 pub(super) fn is_offset_inside_accumulation_register_attribute_list(
     text: &str,
     offset: usize,
@@ -2301,42 +2332,27 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
     type_index: &BTreeMap<String, String>,
     type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> InformationRegisterFieldReferenceIndex {
+    let row_fields = parallel::install(|| {
+        rows.par_iter()
+            .filter_map(|row| {
+                information_register_field_reference_entries(row, type_index, type_set_leaves)
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        rows.iter()
+            .filter_map(|row| {
+                information_register_field_reference_entries(row, type_index, type_set_leaves)
+            })
+            .collect()
+    });
     let mut fields_by_register = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
-    for row in rows {
-        let (Some("InformationRegister"), Some(register)) =
-            (row.kind.as_deref(), row.header.as_ref())
-        else {
-            continue;
-        };
-        for (field, marker_start) in
-            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
-        {
-            let Some(tag) =
-                register_child_object_tag("InformationRegister", &row.text, marker_start)
-            else {
-                continue;
-            };
-            let Some(value_types) = parse_information_register_child_value_types(
-                &row.text,
-                marker_start,
-                &field,
-                tag,
-                type_index,
-            ) else {
-                continue;
-            };
-            let value_owner_references =
-                information_register_value_owner_references(&value_types, type_set_leaves);
-            if value_owner_references.is_empty() {
-                continue;
-            }
+    for (register_uuid, fields) in row_fields {
+        for (field_reference, value_owner_references) in fields {
             fields_by_register
-                .entry(register.uuid.clone())
+                .entry(register_uuid.clone())
                 .or_default()
-                .entry(format!(
-                    "InformationRegister.{}.{tag}.{}",
-                    register.name, field.name
-                ))
+                .entry(field_reference)
                 .or_default()
                 .extend(value_owner_references);
         }
@@ -2358,6 +2374,45 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
             )
         })
         .collect()
+}
+
+fn information_register_field_reference_entries(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) -> Option<(String, Vec<(String, BTreeSet<String>)>)> {
+    let (Some("InformationRegister"), Some(register)) = (row.kind.as_deref(), row.header.as_ref())
+    else {
+        return None;
+    };
+    let mut entries = Vec::new();
+    for (field, marker_start) in
+        nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+    {
+        let Some(tag) = register_child_object_tag("InformationRegister", &row.text, marker_start)
+        else {
+            continue;
+        };
+        let Some(value_types) = parse_information_register_child_value_types(
+            &row.text,
+            marker_start,
+            &field,
+            tag,
+            type_index,
+        ) else {
+            continue;
+        };
+        let value_owner_references =
+            information_register_value_owner_references(&value_types, type_set_leaves);
+        if value_owner_references.is_empty() {
+            continue;
+        }
+        entries.push((
+            format!("InformationRegister.{}.{tag}.{}", register.name, field.name),
+            value_owner_references,
+        ));
+    }
+    (!entries.is_empty()).then(|| (register.uuid.clone(), entries))
 }
 
 /// The leaves every *named type set* of the configuration declares.
@@ -2731,7 +2786,7 @@ pub(super) fn build_template_source_reference_index_from_texts(
             .or_else(|| {
                 rows_by_file_name
                     .get(body_id.as_str())
-                    .and_then(|row| decode_hex(&row.binary_hex).ok())
+                    .and_then(|row| row.binary_bytes().ok())
                     .and_then(|bytes| infer_template_type_from_body(&bytes))
             })
             .unwrap_or("BinaryData");
@@ -2991,7 +3046,7 @@ pub(super) fn form_help_asset_paths(
                 continue;
             }
             if let Some(row) = rows_by_file_name.get(*body_id)
-                && let Ok(bytes) = decode_hex(&row.binary_hex)
+                && let Ok(bytes) = row.binary_bytes()
                 && parse_help_blob_pages(&bytes).is_some()
             {
                 paths.insert(
@@ -4446,4 +4501,52 @@ pub(super) fn parse_metadata_command_reference_blob(
     };
     let header = parse_metadata_header_from_text(&text, uuid)?;
     Some((kind.to_string(), header, text))
+}
+
+#[cfg(test)]
+mod command_collection_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn owner_specific_lookup_matches_the_broad_lookup_for_every_family() {
+        let kinds = [
+            "DataProcessor",
+            "Catalog",
+            "Document",
+            "InformationRegister",
+            "Report",
+            "DocumentJournal",
+            "ExchangePlan",
+            "BusinessProcess",
+            "Task",
+            "ChartOfAccounts",
+            "FilterCriterion",
+            "ChartOfCharacteristicTypes",
+            "AccountingRegister",
+            "AccumulationRegister",
+        ];
+
+        for (index, (kind, marker)) in kinds
+            .into_iter()
+            .zip(COMMAND_COLLECTION_LIST_MARKERS)
+            .enumerate()
+        {
+            let text = format!("prefix{marker}1,child}}suffix");
+            let offset = text.find("child").unwrap();
+            assert!(is_offset_inside_command_collection(&text, offset));
+            assert!(is_offset_inside_owner_command_collection(
+                kind, &text, offset
+            ));
+            assert!(!is_offset_inside_owner_command_collection(
+                kinds[(index + 1) % kinds.len()],
+                &text,
+                offset,
+            ));
+            assert!(is_offset_inside_owner_command_collection(
+                "UnknownOwnerFamily",
+                &text,
+                offset,
+            ));
+        }
+    }
 }

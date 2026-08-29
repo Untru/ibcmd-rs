@@ -1049,6 +1049,25 @@ cargo run -- mssql-stage-source-common-module-objects --database target_db --sou
 cargo run -- mssql-stage-source-objects --database target_db --source-root C:\full\xml-sources --source-version 2.21 --replace-config-save --allow-non-lab
 ```
 
+### Контракт собственной онлайн-активации
+
+`mssql-activation-snapshot` и `mssql-activation-diff` не запускают 1С и не
+изменяют базу. Они фиксируют прямое SQL-состояние `Config`, `ConfigSave` и
+`Params`, включая SHA-256 каждой строки `Config`/`ConfigSave`. Снимите первый
+файл после нашего staging, второй — после одного контролируемого динамического
+обновления на клоне, затем получите точный набор изменённых строк:
+
+```powershell
+cargo run -- mssql-activation-snapshot --database online_clone -o before.json
+# здесь выполняется один эталонный динамический update на изолированном клоне
+cargo run -- mssql-activation-snapshot --database online_clone -o after.json
+cargo run -- mssql-activation-diff --before before.json --after after.json -o activation-diff.json
+```
+
+Этот артефакт — вход для собственной SQL-реализации promote/инвалидации; сама
+активация в `ibcmd-rs` будет добавлена только после того, как этот протокол
+будет подтверждён экспериментом.
+
 ### Совместимость с клиентом bcp
 
 Команды `mssql-storage-*` и `mssql-delta-*` запускают `bcp` как внешний процесс.

@@ -107,7 +107,7 @@ pub(super) fn standalone_content_reference_uuids_from_config_rows(
         if !row.file_name.ends_with(".f") {
             continue;
         }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         refs.extend(standalone_content_reference_uuids_from_blob(&bytes));
@@ -850,7 +850,7 @@ pub(super) fn source_asset_paths_with_indexes(
             let interface_id = format!("{metadata_id}.{suffix}");
             let is_selected_header = rows_by_file_name
                 .get(interface_id.as_str())
-                .is_some_and(|row| row.binary_hex.is_empty());
+                .is_some_and(|row| row.binary_is_empty());
             // A decoded-but-entirely-empty root command interface (wire
             // shape `{7,0,0,0,0,0,0}`) is a record the platform tracks by
             // identity without ever rendering a file for -- confirmed
@@ -862,7 +862,7 @@ pub(super) fn source_asset_paths_with_indexes(
             let is_command_interface = is_selected_header
                 || rows_by_file_name
                     .get(interface_id.as_str())
-                    .and_then(|row| decode_hex(&row.binary_hex).ok())
+                    .and_then(|row| row.binary_bytes().ok())
                     .is_some_and(|bytes| {
                         parse_command_interface_blob(&bytes, &command_refs, &metadata_refs)
                             .is_some_and(|interface| !interface.is_empty())
@@ -878,20 +878,43 @@ pub(super) fn source_asset_paths_with_indexes(
             }
         }
     }
-    for row in metadata_texts {
-        let Some(discovery) = source_assets_from_metadata_text_inner(
-            row,
-            &file_names,
-            &rows_by_file_name,
-            &command_refs,
-            &metadata_refs,
-            &role_rights_object_refs,
-            &field_refs,
-            &type_index,
-            &subsystem_refs,
-        ) else {
-            continue;
-        };
+    let discoveries = parallel::install(|| {
+        metadata_texts
+            .par_iter()
+            .map(|row| {
+                source_assets_from_metadata_text_inner(
+                    row,
+                    &file_names,
+                    &rows_by_file_name,
+                    &command_refs,
+                    &metadata_refs,
+                    &role_rights_object_refs,
+                    &field_refs,
+                    &type_index,
+                    &subsystem_refs,
+                )
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        metadata_texts
+            .iter()
+            .map(|row| {
+                source_assets_from_metadata_text_inner(
+                    row,
+                    &file_names,
+                    &rows_by_file_name,
+                    &command_refs,
+                    &metadata_refs,
+                    &role_rights_object_refs,
+                    &field_refs,
+                    &type_index,
+                    &subsystem_refs,
+                )
+            })
+            .collect()
+    });
+    for discovery in discoveries.into_iter().flatten() {
         for (body_id, asset) in discovery.assets {
             paths.insert(body_id, asset);
         }
@@ -921,27 +944,47 @@ pub(super) fn source_asset_discovery_misses(
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> BTreeMap<String, String> {
+    let row_misses = parallel::install(|| {
+        metadata_texts
+            .par_iter()
+            .filter(|row| row.folder.is_some())
+            .map(|row| {
+                source_asset_discovery_misses_for_metadata_row(
+                    row,
+                    file_names,
+                    rows_by_file_name,
+                    command_refs,
+                    metadata_refs,
+                    object_refs,
+                    field_refs,
+                    type_index,
+                    subsystem_refs,
+                )
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        metadata_texts
+            .iter()
+            .filter(|row| row.folder.is_some())
+            .map(|row| {
+                source_asset_discovery_misses_for_metadata_row(
+                    row,
+                    file_names,
+                    rows_by_file_name,
+                    command_refs,
+                    metadata_refs,
+                    object_refs,
+                    field_refs,
+                    type_index,
+                    subsystem_refs,
+                )
+            })
+            .collect()
+    });
     let mut misses = BTreeMap::new();
-    for row in metadata_texts.iter().filter(|row| row.folder.is_some()) {
-        match source_assets_from_metadata_text_inner(
-            row,
-            file_names,
-            rows_by_file_name,
-            command_refs,
-            metadata_refs,
-            object_refs,
-            field_refs,
-            type_index,
-            subsystem_refs,
-        ) {
-            Some(discovery) => misses.extend(discovery.misses),
-            None => {
-                misses.insert(
-                    row.file_name.clone(),
-                    "metadata_source_asset_relation_unclassified".to_string(),
-                );
-            }
-        }
+    for row_misses in row_misses {
+        misses.extend(row_misses);
     }
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
@@ -964,7 +1007,7 @@ pub(super) fn source_asset_discovery_misses(
             }
             let parsed = rows_by_file_name
                 .get(body_id.as_str())
-                .and_then(|row| decode_hex(&row.binary_hex).ok())
+                .and_then(|row| row.binary_bytes().ok())
                 .is_some_and(|bytes| {
                     parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
                 });
@@ -983,7 +1026,7 @@ pub(super) fn source_asset_discovery_misses(
         }
         let parsed = rows_by_file_name
             .get(help_id.as_str())
-            .and_then(|row| decode_hex(&row.binary_hex).ok())
+            .and_then(|row| row.binary_bytes().ok())
             .is_some_and(|bytes| parse_help_blob_pages(&bytes).is_some());
         if !parsed {
             misses.insert(help_id, "form_help_decoder_failed".to_string());
@@ -1001,6 +1044,37 @@ pub(super) fn source_asset_discovery_misses(
         }
     }
     misses
+}
+
+#[allow(clippy::too_many_arguments)]
+fn source_asset_discovery_misses_for_metadata_row(
+    row: &MetadataTextRow,
+    file_names: &BTreeSet<&str>,
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    match source_assets_from_metadata_text_inner(
+        row,
+        file_names,
+        rows_by_file_name,
+        command_refs,
+        metadata_refs,
+        object_refs,
+        field_refs,
+        type_index,
+        subsystem_refs,
+    ) {
+        Some(discovery) => discovery.misses,
+        None => BTreeMap::from([(
+            row.file_name.clone(),
+            "metadata_source_asset_relation_unclassified".to_string(),
+        )]),
+    }
 }
 
 pub(super) fn template_body_asset_paths(
@@ -1277,7 +1351,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 .ok()?;
             let relation_result = rows_by_file_name
                 .get(body_id.as_str())
-                .and_then(|row| decode_hex(&row.binary_hex).ok())
+                .and_then(|row| row.binary_bytes().ok())
                 .map(|bytes| {
                     owner_bound_source_asset(
                         route,
@@ -1364,7 +1438,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
         }
         let decoded = rows_by_file_name
             .get(body_id.as_str())
-            .and_then(|row| decode_hex(&row.binary_hex).ok())
+            .and_then(|row| row.binary_bytes().ok())
             .and_then(|bytes| parse_command_interface_blob(&bytes, command_refs, metadata_refs));
         match decoded {
             // Mirrors the identical `CommandInterface::is_empty` check in
@@ -1424,7 +1498,8 @@ pub(super) fn source_assets_from_metadata_text_inner(
             continue;
         }
         let is_preferred_help = *body_id == preferred_help_body_id;
-        let help_parsed = decode_hex(&body_row.binary_hex)
+        let help_parsed = body_row
+            .binary_bytes()
             .ok()
             .is_some_and(|help_bytes| parse_help_blob_pages(&help_bytes).is_some());
         if help_parsed {
@@ -1447,7 +1522,8 @@ pub(super) fn source_assets_from_metadata_text_inner(
         if let Some(model) = predefined_data_source_model(kind)
             && Some(row_id.suffix_component()) == predefined_data_suffix(kind)
         {
-            let decoded = decode_hex(&body_row.binary_hex)
+            let decoded = body_row
+                .binary_bytes()
                 .ok()
                 .and_then(|bytes| parse_predefined_data_blob_with_model(&bytes, type_index, model));
             match decoded {
@@ -3233,7 +3309,7 @@ pub(super) fn build_predefined_item_reference_index(
 ) -> Result<BTreeMap<String, String>> {
     let rows_by_file_name = rows
         .iter()
-        .filter(|row| !row.binary_hex.is_empty())
+        .filter(|row| !row.binary_is_empty())
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
     let mut index = BTreeMap::new();
@@ -3250,7 +3326,8 @@ pub(super) fn build_predefined_item_reference_index(
         let Some(row) = rows_by_file_name.get(file_name.as_str()) else {
             continue;
         };
-        let bytes = decode_hex(&row.binary_hex)
+        let bytes = row
+            .binary_bytes()
             .with_context(|| format!("failed to decode predefined data row {file_name}"))?;
         let Some(items) = parse_predefined_data_blob_with_model(&bytes, type_index, model) else {
             continue;
@@ -3286,7 +3363,7 @@ pub(super) fn build_form_predefined_item_reference_index(
 ) -> BTreeMap<String, String> {
     let rows_by_file_name = rows
         .iter()
-        .filter(|row| !row.binary_hex.is_empty())
+        .filter(|row| !row.binary_is_empty())
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
     let mut index = BTreeMap::new();
@@ -3300,7 +3377,7 @@ pub(super) fn build_form_predefined_item_reference_index(
         let Some(row) = rows_by_file_name.get(format!("{owner_uuid}.{suffix}").as_str()) else {
             continue;
         };
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+        let Ok(bytes) = row.binary_bytes() else {
             continue;
         };
         let Some(items) = parse_predefined_data_blob_with_model(&bytes, type_index, model) else {
