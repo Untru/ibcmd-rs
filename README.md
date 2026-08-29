@@ -1033,6 +1033,8 @@ cargo run -- mssql-load-extension --database lab_clone --extension MyExtension -
 cargo run -- mssql-load-extension --database lab_clone --all-extensions -i C:\repo\extensions --replace-staging --allow-non-lab --sqlcmd-trust-cert
 cargo run -- mssql-load-extension --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --path-prefix CommonModules/Tools --dry-run --allow-non-lab --sqlcmd-trust-cert
 cargo run -- mssql-apply-source-change --database lab_clone --source-root C:\repo\extensions\MyExtension --path CommonModules/Tools/Ext/Module.bsl --extension MyExtension --mode online --dry-run --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-apply-source-change --database lab_clone --source-root C:\\repo\\main --path CommonModules/Tools/Ext/Module.bsl --mode online --dry-run --sqlcmd-trust-cert
+cargo run -- mssql-apply-source-change --database lab_clone --source-root C:\\repo\\main --path CommonForms/MyForm/Ext/Form/Module.bsl --mode online --allow-non-lab --sqlcmd-trust-cert
 cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
 cargo run -- storage-map .\trace\events.xml -o storage-map.json
@@ -1076,12 +1078,21 @@ CAS-корень без записи. Публикацию выполняет `m
 неявно: для локального сервера с самоподписанным сертификатом отдельно укажите
 `--sqlcmd-trust-cert`.
 
-`mssql-apply-source-change` объединяет экспорт активного состояния,
+`mssql-apply-source-change` объединяет ограниченное чтение активного состояния,
 fail-closed классификацию одного существующего BSL/form body, staging и
-`online`/`exclusive` публикацию. Для расширения путь проверен на 8.3.27.2214:
-целевой модуль побайтово совпал с входом, а 156 остальных файлов не изменились.
-Для основной конфигурации команда сохраняет строгий global source-asset gate
-и может отказать на opaque assets.
+`online`/`exclusive` публикацию. Для основной конфигурации полное дерево больше
+не выгружается: UUID владельца определяется по исходному XML, а из `Config`
+читаются только строка владельца и строка выбранного тела. После онлайн-
+публикации команда разрешает последний alias именно этого объекта по всей
+истории `DynamicallyUpdated`, поэтому повторное применение корректно становится
+no-op. Модуль формы компилируется отдельно от `Form.xml` и не пересобирает
+разметку формы.
+
+Путь общего модуля основной конфигурации проверен на 8.3.27.2214: две выбранные
+строки, онлайн-публикация за 5,5 с и повторный no-op за 3,06 с. Изменённый модуль
+формы успешно прошёл bounded dry-run с двумя подготовленными Config-строками.
+Полное изменение `Form.xml` остаётся fail-closed, если выбранная форма использует
+ещё не поддержанный facet компилятора; модули уровня `Configuration` пока также
 
 Сейчас гарантирован round-trip деревьев, выгруженных этой же реализацией, с
 сохранением неизвестных тел метаданных из активного CAS. На тестовой копии базы

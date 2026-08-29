@@ -24,9 +24,21 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 ## Main module
 
 - DynamicallyUpdated is now classified as a service row, so it no longer fails the versions object inventory check.
-- High-level main dry-run remains fail-closed because the BSP export reports unrelated incomplete source-asset candidates.
-- The global require_complete_source_assets gate was not weakened.
-- Therefore task 6 must remain open for main until a bounded selected-owner export is implemented or the safety policy is explicitly changed.
+- The high-level command now resolves the source owner UUID before SQL access and reads exactly the owner and body rows instead of the full BSP tree.
+- No-op on CommonModules/_ДемоЗаметки selected exactly ab132638-5188-470d-9432-de85f2b2c7d8 and .0 and completed in 4.685 s before any dynamic history existed.
+- Online apply published generation 719baa18-69ed-439a-8962-1de53d98e05e -> 968a0bc0-969b-4bf2-b9ef-19d0e8bf8ce4 in 5.500 s and produced a recovery artifact.
+- Online publication intentionally retains ordinary Config rows and publishes generation aliases. A raw ordinary-row export therefore shows the old body; the activation SQL verifies the staged hashes under the aliases.
+- The high-level reader now resolves the newest alias for the selected object across the complete Config/Params dynamic history. Repeating the applied source returned no-op in 3.058 s.
+- A different module absent from the newest generation correctly fell back to its ordinary row and returned no-op in 5.185 s.
+
+## Main form module
+
+- CommonForms/_ДемоПримечание selected exactly a627e390-8fad-4a95-afe6-674f54813188 and .0.
+- The initial selected dump exposed global form-index uncertainty caused by unrelated forms and the prior module alias. Exact selected-row, owner-identity, and emitted-path checks now admit only the evidenced target form note and reject every other target diagnostic.
+- A changed Form/Module.bsl initially attempted to rebuild Form.xml and hit unsupported Form.StandardCommand.Cancel. Module-only compile now removes Form.xml from the temporary compiler tree after classification, preserving the active layout and replacing only module text.
+- The resulting dry-run prepared one metadata object, one body row, one batch, and zero prepare failures. No SQL write occurred.
+- A live online form-module write was requested but the external approval reviewer required a new explicit user confirmation for that mutating command, so it was not retried.
+- Full Form.xml changes remain fail-closed on unsupported compiler facets.
 
 ## Tests and build
 
@@ -39,8 +51,8 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 
 ## Remaining closure blockers
 
-- Bounded selected-owner active export for high-level main apply.
+- Live online main-form module write and repeated alias no-op after explicit approval.
 - Full native XML parity for extension-only properties/adopted mappings remains false in mssql-dump-extension.
-- Main-form and extension-form high-level live smoke.
+- Full Form.xml and extension-form high-level live smoke.
 - Explicit SQL-auth/trust review for the legacy main staging path.
 - Existing unrelated red form-decoder regression tests.
