@@ -40,6 +40,7 @@ pub struct SourceFileDigest {
     path: String,
     size_bytes: u64,
     sha256: [u8; SHA256_BYTES],
+    verified_bytes: Option<Vec<u8>>,
 }
 
 impl SourceFileDigest {
@@ -53,12 +54,15 @@ impl SourceFileDigest {
             path,
             size_bytes,
             sha256,
+            verified_bytes: None,
         })
     }
 
     pub fn for_bytes(path: impl Into<String>, bytes: &[u8]) -> Result<Self, SourceChangeError> {
         let digest: [u8; SHA256_BYTES] = Sha256::digest(bytes).into();
-        Self::new(path, bytes.len() as u64, digest)
+        let mut file = Self::new(path, bytes.len() as u64, digest)?;
+        file.verified_bytes = Some(bytes.to_vec());
+        Ok(file)
     }
 
     pub fn path(&self) -> &str {
@@ -71,6 +75,10 @@ impl SourceFileDigest {
 
     pub const fn sha256(&self) -> &[u8; SHA256_BYTES] {
         &self.sha256
+    }
+
+    fn verified_bytes(&self) -> Option<&[u8]> {
+        self.verified_bytes.as_deref()
     }
 }
 
@@ -125,7 +133,7 @@ impl HeldSourceRoot {
         let canonical_root = canonical_directory(root)?;
         #[cfg(windows)]
         let root_guard = open_root_guard(&canonical_root)?;
-        let baseline = capture_inventory(&canonical_root, limits)?;
+        let baseline = capture_inventory(&canonical_root, limits, &BTreeSet::new())?;
         Ok(Self {
             requested_root: root.to_path_buf(),
             canonical_root,
@@ -149,7 +157,7 @@ impl HeldSourceRoot {
         if !paths_equal_windows(&current_root, &self.canonical_root) {
             return Err(SourceChangeError::HeldRootChanged);
         }
-        capture_inventory(&current_root, self.limits)
+        capture_inventory(&current_root, self.limits, &BTreeSet::new())
     }
 
     pub fn classify_current(
@@ -159,7 +167,12 @@ impl HeldSourceRoot {
         mode: ActivationMode,
     ) -> Result<SourceActivationInput, SourceChangeError> {
         let selected = resolve_selected_path(&self.canonical_root, selected_path)?;
-        let current = self.capture_current()?;
+        let retention = candidate_retention_paths(&selected);
+        let current_root = canonical_directory(&self.requested_root)?;
+        if !paths_equal_windows(&current_root, &self.canonical_root) {
+            return Err(SourceChangeError::HeldRootChanged);
+        }
+        let current = capture_inventory(&current_root, self.limits, &retention)?;
         classify_source_change(&self.baseline, &current, &selected, target, mode)
     }
 }
@@ -220,6 +233,31 @@ pub struct SourceActivationInput {
     body: SourceBodyKind,
     changed_paths: Vec<String>,
     state: SourceChangeState,
+    verified_sources: Vec<VerifiedSourceFile>,
+}
+
+/// Bytes pinned to the inventory digest used by the classifier.
+///
+/// Compilation must consume these bytes, never reopen the source path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedSourceFile {
+    path: String,
+    sha256: [u8; SHA256_BYTES],
+    bytes: Vec<u8>,
+}
+
+impl VerifiedSourceFile {
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub const fn sha256(&self) -> &[u8; SHA256_BYTES] {
+        &self.sha256
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 impl SourceActivationInput {
@@ -249,6 +287,17 @@ impl SourceActivationInput {
 
     pub const fn is_no_op(&self) -> bool {
         matches!(self.state, SourceChangeState::NoOp)
+    }
+
+    pub fn verified_sources(&self) -> &[VerifiedSourceFile] {
+        &self.verified_sources
+    }
+
+    pub fn verified_source(&self, path: &str) -> Option<&VerifiedSourceFile> {
+        let key = windows_path_key(path);
+        self.verified_sources
+            .iter()
+            .find(|source| windows_path_key(&source.path) == key)
     }
 }
 
@@ -294,6 +343,30 @@ pub fn classify_source_change(
         return Err(SourceChangeError::SelectedBodyIsNotChanged);
     }
 
+    let mut verified_sources = Vec::new();
+    for key in &closure {
+        let source = proposed
+            .by_windows_key
+            .get(key)
+            .expect("the validated closure contains existing proposed files");
+        let bytes = source
+            .verified_bytes()
+            .ok_or_else(|| SourceChangeError::UnverifiedSourceBytes(source.path.clone()))?;
+        let digest: [u8; SHA256_BYTES] = Sha256::digest(bytes).into();
+        if bytes.len() as u64 != source.size_bytes || digest != source.sha256 {
+            return Err(SourceChangeError::UnverifiedSourceBytes(
+                source.path.clone(),
+            ));
+        }
+        verified_sources.push(VerifiedSourceFile {
+            path: source.path.clone(),
+            sha256: digest,
+            bytes: bytes.to_vec(),
+        });
+    }
+    verified_sources
+        .sort_by(|left, right| windows_path_key(&left.path).cmp(&windows_path_key(&right.path)));
+
     Ok(SourceActivationInput {
         target,
         mode,
@@ -305,7 +378,19 @@ pub fn classify_source_change(
             SourceChangeState::Changed
         },
         changed_paths,
+        verified_sources,
     })
+}
+
+fn candidate_retention_paths(selected: &str) -> BTreeSet<String> {
+    let mut paths = BTreeSet::from([windows_path_key(selected)]);
+    let parts = selected.split('/').collect::<Vec<_>>();
+    if let Some(form_dir_len) = managed_form_dir_len(&parts) {
+        let form_dir = parts[..form_dir_len].join("/");
+        paths.insert(windows_path_key(&format!("{form_dir}/Ext/Form.xml")));
+        paths.insert(windows_path_key(&format!("{form_dir}/Ext/Form/Module.bsl")));
+    }
+    paths
 }
 
 /// Deterministic byte comparison used after compilation.
@@ -364,6 +449,13 @@ fn classify_supported_body(
         let form_dir = parts[..form_dir_len].join("/");
         let descriptor = format!("{form_dir}.xml");
         let form_body = format!("{form_dir}/Ext/Form.xml");
+        if form_dir_len == 4 {
+            require_existing(
+                inventory,
+                &format!("{}/{}.xml", parts[0], parts[1]),
+                "top-level metadata owner descriptor",
+            )?;
+        }
         require_existing(inventory, &descriptor, "managed-form descriptor")?;
         require_existing(inventory, &form_body, "managed-form body")?;
         let module = format!("{form_dir}/Ext/Form/Module.bsl");
@@ -394,6 +486,13 @@ fn classify_supported_body(
     } else {
         format!("{}.xml", owner_parts.join("/"))
     };
+    if owner_parts.len() == 4 {
+        require_existing(
+            inventory,
+            &format!("{}/{}.xml", owner_parts[0], owner_parts[1]),
+            "top-level metadata owner descriptor",
+        )?;
+    }
     require_existing(inventory, &descriptor, "module owner descriptor")?;
     Ok(SourceBodyKind::Module {
         owner_descriptor: inventory
@@ -419,8 +518,34 @@ fn managed_form_dir_len(parts: &[&str]) -> Option<usize> {
         return None;
     }
     let is_common_form = form_dir_len == 2 && parts[0] == "CommonForms";
-    let is_owned_form = form_dir_len >= 2 && parts[form_dir_len - 2] == "Forms";
+    let is_owned_form =
+        form_dir_len == 4 && parts[2] == "Forms" && form_owner_collection_is_supported(parts[0]);
     (is_common_form || is_owned_form).then_some(form_dir_len)
+}
+
+fn form_owner_collection_is_supported(collection: &str) -> bool {
+    matches!(
+        collection,
+        "Catalogs"
+            | "Documents"
+            | "Reports"
+            | "DataProcessors"
+            | "ExchangePlans"
+            | "BusinessProcesses"
+            | "Tasks"
+            | "SettingsStorages"
+            | "FilterCriteria"
+            | "Constants"
+            | "Sequences"
+            | "InformationRegisters"
+            | "AccumulationRegisters"
+            | "AccountingRegisters"
+            | "CalculationRegisters"
+            | "DocumentJournals"
+            | "ChartsOfAccounts"
+            | "ChartsOfCalculationTypes"
+            | "ChartsOfCharacteristicTypes"
+    )
 }
 
 fn generic_module_owner<'a>(parts: &'a [&'a str]) -> Option<(&'a [&'a str], &'a str)> {
@@ -455,61 +580,86 @@ fn module_owner_is_supported(owner: &[&str], file_name: &str) -> bool {
                 | "SessionModule.bsl"
         );
     }
-    let collection = owner.get(owner.len().saturating_sub(2)).copied();
+    let (collection, is_top_level_owner, is_owned_command) = match owner {
+        [collection, _name] => (Some(*collection), true, false),
+        [collection, _owner, "Commands", _command] => (Some(*collection), false, true),
+        _ => return false,
+    };
     match file_name {
         "Module.bsl" => matches!(
-            collection,
-            Some("CommonModules" | "HTTPServices" | "WebServices" | "Bots" | "IntegrationServices")
+            (collection, is_top_level_owner),
+            (
+                Some(
+                    "CommonModules"
+                        | "HTTPServices"
+                        | "WebServices"
+                        | "Bots"
+                        | "IntegrationServices"
+                ),
+                true
+            )
         ),
-        "CommandModule.bsl" => matches!(collection, Some("Commands" | "CommonCommands")),
-        "ValueManagerModule.bsl" => collection == Some("Constants"),
+        "CommandModule.bsl" => {
+            (is_top_level_owner && collection == Some("CommonCommands"))
+                || (is_owned_command && collection.is_some_and(form_owner_collection_is_supported))
+        }
+        "ValueManagerModule.bsl" => is_top_level_owner && collection == Some("Constants"),
         "RecordSetModule.bsl" => matches!(
-            collection,
-            Some(
-                "Sequences"
-                    | "AccountingRegisters"
-                    | "AccumulationRegisters"
-                    | "CalculationRegisters"
-                    | "InformationRegisters"
+            (collection, is_top_level_owner),
+            (
+                Some(
+                    "Sequences"
+                        | "AccountingRegisters"
+                        | "AccumulationRegisters"
+                        | "CalculationRegisters"
+                        | "InformationRegisters"
+                ),
+                true
             )
         ),
         "ObjectModule.bsl" => matches!(
-            collection,
-            Some(
-                "Catalogs"
-                    | "Reports"
-                    | "DataProcessors"
-                    | "Documents"
-                    | "ExchangePlans"
-                    | "Tasks"
-                    | "BusinessProcesses"
-                    | "ChartsOfAccounts"
-                    | "ChartsOfCalculationTypes"
-                    | "ChartsOfCharacteristicTypes"
+            (collection, is_top_level_owner),
+            (
+                Some(
+                    "Catalogs"
+                        | "Reports"
+                        | "DataProcessors"
+                        | "Documents"
+                        | "ExchangePlans"
+                        | "Tasks"
+                        | "BusinessProcesses"
+                        | "ChartsOfAccounts"
+                        | "ChartsOfCalculationTypes"
+                        | "ChartsOfCharacteristicTypes"
+                ),
+                true
             )
         ),
         "ManagerModule.bsl" => matches!(
-            collection,
-            Some(
-                "FilterCriteria"
-                    | "Constants"
-                    | "SettingsStorages"
-                    | "Catalogs"
-                    | "Reports"
-                    | "DataProcessors"
-                    | "Documents"
-                    | "Enums"
-                    | "ExchangePlans"
-                    | "AccountingRegisters"
-                    | "AccumulationRegisters"
-                    | "CalculationRegisters"
-                    | "InformationRegisters"
-                    | "DocumentJournals"
-                    | "Tasks"
-                    | "BusinessProcesses"
-                    | "ChartsOfAccounts"
-                    | "ChartsOfCalculationTypes"
-                    | "ChartsOfCharacteristicTypes"
+            (collection, is_top_level_owner),
+            (
+                Some(
+                    "FilterCriteria"
+                        | "Constants"
+                        | "SettingsStorages"
+                        | "Catalogs"
+                        | "Reports"
+                        | "DataProcessors"
+                        | "Documents"
+                        | "Enums"
+                        | "ExchangePlans"
+                        | "AccountingRegisters"
+                        | "AccumulationRegisters"
+                        | "CalculationRegisters"
+                        | "InformationRegisters"
+                        | "DocumentJournals"
+                        | "Tasks"
+                        | "BusinessProcesses"
+                        | "ChartsOfAccounts"
+                        | "ChartsOfCalculationTypes"
+                        | "ChartsOfCharacteristicTypes"
+                ),
+                true
             )
         ),
         _ => false,
@@ -550,6 +700,7 @@ fn require_existing(
 fn capture_inventory(
     canonical_root: &Path,
     limits: SourceInventoryLimits,
+    retain_bytes: &BTreeSet<String>,
 ) -> Result<SourceInventory, SourceChangeError> {
     let mut files = Vec::new();
     let mut total = 0_u64;
@@ -558,7 +709,7 @@ fn capture_inventory(
         if entry.path() == canonical_root {
             continue;
         }
-        if entry.file_type().is_symlink() {
+        if entry.file_type().is_symlink() || path_has_reparse_attribute(entry.path())? {
             return Err(SourceChangeError::LinkOrReparsePoint(
                 entry.path().display().to_string(),
             ));
@@ -594,6 +745,8 @@ fn capture_inventory(
         let mut file = fs::File::open(&canonical_file)
             .map_err(|error| SourceChangeError::Io(error.to_string()))?;
         let mut hasher = Sha256::new();
+        let retain = retain_bytes.contains(&windows_path_key(&relative));
+        let mut retained = retain.then(|| Vec::with_capacity(metadata.len() as usize));
         let mut buffer = [0_u8; 64 * 1024];
         let mut read_total = 0_u64;
         loop {
@@ -608,15 +761,22 @@ fn capture_inventory(
                 return Err(SourceChangeError::FileChangedDuringRead(relative));
             }
             hasher.update(&buffer[..read]);
+            if let Some(bytes) = &mut retained {
+                bytes.extend_from_slice(&buffer[..read]);
+            }
         }
-        if read_total != metadata.len() {
+        let post_metadata = file
+            .metadata()
+            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
+        if read_total != metadata.len()
+            || post_metadata.len() != metadata.len()
+            || metadata.modified().ok() != post_metadata.modified().ok()
+        {
             return Err(SourceChangeError::FileChangedDuringRead(relative));
         }
-        files.push(SourceFileDigest::new(
-            relative,
-            read_total,
-            hasher.finalize().into(),
-        )?);
+        let mut source = SourceFileDigest::new(relative, read_total, hasher.finalize().into())?;
+        source.verified_bytes = retained;
+        files.push(source);
     }
     SourceInventory::from_files(files)
 }
@@ -649,12 +809,34 @@ fn resolve_selected_path(root: &Path, selected: &Path) -> Result<String, SourceC
 }
 
 fn canonical_directory(path: &Path) -> Result<PathBuf, SourceChangeError> {
+    if path_has_reparse_attribute(path)? {
+        return Err(SourceChangeError::LinkOrReparsePoint(
+            path.display().to_string(),
+        ));
+    }
     let canonical =
         fs::canonicalize(path).map_err(|error| SourceChangeError::Io(error.to_string()))?;
     if !canonical.is_dir() {
         return Err(SourceChangeError::SourceRootIsNotDirectory);
     }
     Ok(canonical)
+}
+
+#[cfg(windows)]
+fn path_has_reparse_attribute(path: &Path) -> Result<bool, SourceChangeError> {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    let metadata =
+        fs::symlink_metadata(path).map_err(|error| SourceChangeError::Io(error.to_string()))?;
+    Ok(metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+}
+
+#[cfg(not(windows))]
+fn path_has_reparse_attribute(path: &Path) -> Result<bool, SourceChangeError> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|error| SourceChangeError::Io(error.to_string()))?;
+    Ok(metadata.file_type().is_symlink())
 }
 
 #[cfg(windows)]
@@ -753,7 +935,8 @@ fn validate_windows_component(component: &str) -> Result<(), SourceChangeError> 
             .or_else(|| stem.strip_prefix("lpt"))
             .is_some_and(|number| {
                 matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
-            });
+            })
+        || ["com¹", "com²", "com³", "lpt¹", "lpt²", "lpt³"].contains(&stem.as_str());
     if reserved || looks_like_dos_alias {
         return Err(SourceChangeError::UnsafeWindowsComponent(
             component.to_owned(),
@@ -805,6 +988,7 @@ pub enum SourceChangeError {
     SelectedBodyWasRemoved(String),
     UnsupportedSourcePath(String),
     MissingRequiredPeer { role: &'static str, path: String },
+    UnverifiedSourceBytes(String),
     SourceTreeShapeChanged { additions: usize, removals: usize },
     ChangesOutsideClosure(Vec<String>),
     SelectedBodyIsNotChanged,
@@ -866,6 +1050,10 @@ impl Display for SourceChangeError {
             Self::MissingRequiredPeer { role, path } => {
                 write!(formatter, "missing existing {role} `{path}`")
             }
+            Self::UnverifiedSourceBytes(path) => write!(
+                formatter,
+                "proposed source bytes are absent or do not match the verified digest: `{path}`"
+            ),
             Self::SourceTreeShapeChanged {
                 additions,
                 removals,
@@ -1139,6 +1327,110 @@ mod tests {
     }
 
     #[test]
+    fn rejects_fake_nested_native_collection_names() {
+        for selected in [
+            "Catalogs/Goods/CommonModules/Fake/Ext/Module.bsl",
+            "Catalogs/Goods/Nested/Forms/Card/Ext/Form.xml",
+            "Catalogs/Goods/Nested/Commands/Run/Ext/CommandModule.bsl",
+        ] {
+            let descriptor = selected
+                .strip_suffix("/Ext/Module.bsl")
+                .or_else(|| selected.strip_suffix("/Ext/Form.xml"))
+                .or_else(|| selected.strip_suffix("/Ext/CommandModule.bsl"))
+                .unwrap();
+            let descriptor = format!("{descriptor}.xml");
+            let tree = SourceInventory::from_files(vec![
+                file(selected, "body"),
+                file(&descriptor, "descriptor"),
+            ])
+            .unwrap();
+            assert!(
+                matches!(
+                    classify_source_change(
+                        &tree,
+                        &tree,
+                        selected,
+                        ActivationTarget::Main,
+                        ActivationMode::Online,
+                    ),
+                    Err(SourceChangeError::UnsupportedSourcePath(_))
+                ),
+                "{selected}"
+            );
+        }
+    }
+
+    #[test]
+    fn owned_command_requires_native_shape_and_both_descriptors() {
+        let active = inventory(&[
+            ("Catalogs/Goods.xml", "owner"),
+            ("Catalogs/Goods/Commands/Recount.xml", "command"),
+            (
+                "Catalogs/Goods/Commands/Recount/Ext/CommandModule.bsl",
+                "old",
+            ),
+        ]);
+        let proposed = inventory(&[
+            ("Catalogs/Goods.xml", "owner"),
+            ("Catalogs/Goods/Commands/Recount.xml", "command"),
+            (
+                "Catalogs/Goods/Commands/Recount/Ext/CommandModule.bsl",
+                "new",
+            ),
+        ]);
+        assert!(
+            classify_source_change(
+                &active,
+                &proposed,
+                "Catalogs/Goods/Commands/Recount/Ext/CommandModule.bsl",
+                ActivationTarget::Main,
+                ActivationMode::Online,
+            )
+            .is_ok()
+        );
+
+        let without_owner = inventory(&[
+            ("Catalogs/Goods/Commands/Recount.xml", "command"),
+            (
+                "Catalogs/Goods/Commands/Recount/Ext/CommandModule.bsl",
+                "old",
+            ),
+        ]);
+        assert!(matches!(
+            classify_source_change(
+                &without_owner,
+                &without_owner,
+                "Catalogs/Goods/Commands/Recount/Ext/CommandModule.bsl",
+                ActivationTarget::Main,
+                ActivationMode::Online,
+            ),
+            Err(SourceChangeError::MissingRequiredPeer { .. })
+        ));
+    }
+
+    #[test]
+    fn activation_input_rejects_digest_only_proposed_source() {
+        let active = common_module("old");
+        let digest: [u8; SHA256_BYTES] = Sha256::digest(b"new").into();
+        let proposed = SourceInventory::from_files(vec![
+            file("Configuration.xml", "root"),
+            file("CommonModules/Work.xml", "metadata"),
+            SourceFileDigest::new("CommonModules/Work/Ext/Module.bsl", 3, digest).unwrap(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            classify_source_change(
+                &active,
+                &proposed,
+                "CommonModules/Work/Ext/Module.bsl",
+                ActivationTarget::Main,
+                ActivationMode::Online,
+            ),
+            Err(SourceChangeError::UnverifiedSourceBytes(_))
+        ));
+    }
+
+    #[test]
     fn windows_case_aliases_collide_and_spelling_drift_is_rejected() {
         assert!(matches!(
             SourceInventory::from_files(vec![
@@ -1175,6 +1467,12 @@ mod tests {
             "../outside.bsl",
             "a//b.bsl",
             "COMMON~1/file.bsl",
+            "COM¹/file.bsl",
+            "COM²/file.bsl",
+            "COM³/file.bsl",
+            "LPT¹/file.bsl",
+            "LPT²/file.bsl",
+            "LPT³/file.bsl",
         ] {
             assert!(SourceFileDigest::for_bytes(path, b"x").is_err(), "{path}");
         }
@@ -1212,6 +1510,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(plan.state(), SourceChangeState::Changed);
+        let verified = plan
+            .verified_source("CommonModules/Work/Ext/Module.bsl")
+            .unwrap();
+        assert_eq!(verified.bytes(), b"new");
+        // A same-size rewrite after classification cannot alter the bytes
+        // handed to compilation.
+        fs::write(root.join("CommonModules/Work/Ext/Module.bsl"), "bad").unwrap();
+        assert_eq!(verified.bytes(), b"new");
         drop(held);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1266,5 +1572,46 @@ mod tests {
         .unwrap_err();
         assert!(matches!(error, SourceChangeError::InventoryLimit(_)));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_root_and_entry_reparse_points_when_symlinks_are_available() {
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+
+        let base = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-reparse-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let real = base.join("real");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("Configuration.xml"), "root").unwrap();
+
+        let root_link = base.join("root-link");
+        if symlink_dir(&real, &root_link).is_ok() {
+            assert!(matches!(
+                HeldSourceRoot::open(&root_link, SourceInventoryLimits::default()),
+                Err(SourceChangeError::LinkOrReparsePoint(_))
+            ));
+        }
+
+        let entry_link = real.join("linked.xml");
+        let target = base.join("target.xml");
+        fs::write(&target, "target").unwrap();
+        if symlink_file(&target, &entry_link).is_ok() {
+            assert!(matches!(
+                HeldSourceRoot::open(&real, SourceInventoryLimits::default()),
+                Err(SourceChangeError::LinkOrReparsePoint(_))
+            ));
+            fs::remove_file(&entry_link).unwrap();
+        }
+        if root_link.exists() {
+            fs::remove_dir(&root_link).unwrap();
+        }
+        fs::remove_dir_all(base).unwrap();
     }
 }
