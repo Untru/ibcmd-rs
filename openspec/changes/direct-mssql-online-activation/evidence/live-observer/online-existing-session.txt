@@ -1,0 +1,12 @@
+platform=8.3.27.2214
+cluster_server=localhost:2541
+ras=localhost:2545
+infobase=ibcmd_rs_activation_main_20260829
+observer_process_id=101420
+observer_session_id=3
+observer_session_uuid=50fb177f-5531-41ee-aadf-4e3d9034d63d
+session_started_at=2026-08-29T12:22:05
+direct_generation=42aa2212-fdac-4c1f-b159-b76669e8cdf8
+observation_after_direct_publish=29.08.2026 12:24:10|before-server-direct-activation
+result=existing session remained connected and retained its loaded generation
+native_control_result=the native dynamic apply exhibited the same retained-session behavior

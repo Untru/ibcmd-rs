@@ -1,0 +1,8 @@
+platform=8.3.27.2214
+cluster_server=localhost:2541
+ras=localhost:2545
+infobase=ibcmd_rs_activation_main_20260829
+session_id=1
+session_uuid=bedf6725-c7fb-423a-82be-b85b97b16b6c
+process_id=106792
+observation=29.08.2026 12:10:22|before-direct-activation

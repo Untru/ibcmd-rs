@@ -1,0 +1,180 @@
+{
+  "before_database": "ibcmd_rs_activation_main_20260829",
+  "after_database": "ibcmd_rs_activation_main_20260829",
+  "tables": [
+    {
+      "table_name": "Config",
+      "before": {
+        "table_name": "Config",
+        "file_name": "Config.bcp",
+        "row_count": 9841,
+        "binary_bytes": 80657761,
+        "row_checksum": -598018797
+      },
+      "after": {
+        "table_name": "Config",
+        "file_name": "Config.bcp",
+        "row_count": 9845,
+        "binary_bytes": 81002646,
+        "row_checksum": -1461541654
+      },
+      "changed": true
+    },
+    {
+      "table_name": "ConfigSave",
+      "before": {
+        "table_name": "ConfigSave",
+        "file_name": "ConfigSave.bcp",
+        "row_count": 5,
+        "binary_bytes": 344913,
+        "row_checksum": -177237476
+      },
+      "after": {
+        "table_name": "ConfigSave",
+        "file_name": "ConfigSave.bcp",
+        "row_count": 0,
+        "binary_bytes": 0
+      },
+      "changed": true
+    },
+    {
+      "table_name": "Params",
+      "before": {
+        "table_name": "Params",
+        "file_name": "Params.bcp",
+        "row_count": 38,
+        "binary_bytes": 4252598,
+        "row_checksum": 2083023630
+      },
+      "after": {
+        "table_name": "Params",
+        "file_name": "Params.bcp",
+        "row_count": 39,
+        "binary_bytes": 4253484,
+        "row_checksum": -1693627983
+      },
+      "changed": true
+    }
+  ],
+  "config_rows": {
+    "inserted": [
+      {
+        "file_name": "DynamicallyUpdated",
+        "part_no": 0,
+        "data_size": 45,
+        "binary_bytes": 45,
+        "sha256": "FB075AD8B19ED0AA38234457D7072448CE2B5612CCA80552506F968CD27D63DB"
+      },
+      {
+        "file_name": "b27aebc8-f190-4658-a81d-fd1406905f39_dynupdate_d66867e4-febb-4c6e-9ef1-230dac3e25fa",
+        "part_no": 0,
+        "data_size": 173,
+        "binary_bytes": 173,
+        "sha256": "818F2FC535E6940753B3650BD5F8A2BF872419A7E6E3DCB35D1D9BA346BD6D6F"
+      },
+      {
+        "file_name": "b27aebc8-f190-4658-a81d-fd1406905f39_dynupdate_d66867e4-febb-4c6e-9ef1-230dac3e25fa.0",
+        "part_no": 0,
+        "data_size": 466,
+        "binary_bytes": 466,
+        "sha256": "273DB3EC438FD88E04503C994C081834706992A78929DDD437BEEB05288703CB"
+      },
+      {
+        "file_name": "versions_dynupdate_d66867e4-febb-4c6e-9ef1-230dac3e25fa",
+        "part_no": 0,
+        "data_size": 344201,
+        "binary_bytes": 344201,
+        "sha256": "3DE62F6C8CB5523E4B693C41D125E1353F8EA3DF4E24B14C60046B6D1433A5B6"
+      }
+    ],
+    "deleted": [],
+    "changed": []
+  },
+  "config_save_rows": {
+    "inserted": [],
+    "deleted": [
+      {
+        "file_name": "b27aebc8-f190-4658-a81d-fd1406905f39",
+        "part_no": 0,
+        "data_size": 173,
+        "binary_bytes": 173,
+        "sha256": "818F2FC535E6940753B3650BD5F8A2BF872419A7E6E3DCB35D1D9BA346BD6D6F"
+      },
+      {
+        "file_name": "b27aebc8-f190-4658-a81d-fd1406905f39.0",
+        "part_no": 0,
+        "data_size": 466,
+        "binary_bytes": 466,
+        "sha256": "273DB3EC438FD88E04503C994C081834706992A78929DDD437BEEB05288703CB"
+      },
+      {
+        "file_name": "root",
+        "part_no": 0,
+        "data_size": 45,
+        "binary_bytes": 45,
+        "sha256": "ADFE2E91D2EFB05910281F6EFBB026ADFA876AA812D082C7F9E755028632A256"
+      },
+      {
+        "file_name": "version",
+        "part_no": 0,
+        "data_size": 28,
+        "binary_bytes": 28,
+        "sha256": "EC6D68D22CDFA563A8FA7B32B6C827ABC9B84B1C0FEBC543EFC70E450459B795"
+      },
+      {
+        "file_name": "versions",
+        "part_no": 0,
+        "data_size": 344201,
+        "binary_bytes": 344201,
+        "sha256": "3DE62F6C8CB5523E4B693C41D125E1353F8EA3DF4E24B14C60046B6D1433A5B6"
+      }
+    ],
+    "changed": []
+  },
+  "params_rows": {
+    "inserted": [
+      {
+        "file_name": "DynamicallyUpdated",
+        "part_no": 0,
+        "data_size": 82,
+        "binary_bytes": 82,
+        "sha256": "DE02DB8AEFCFAD7B58CB35C969341EE7ED942CCFAC3383A6F8F9595D7C565EDB"
+      }
+    ],
+    "deleted": [],
+    "changed": [
+      {
+        "before": {
+          "file_name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+          "part_no": 0,
+          "data_size": 23386,
+          "binary_bytes": 23386,
+          "sha256": "166E16977656AC4D4B8A84A5A35EAC48ABD016EBD0CCA4B897D2F1C6B9A9C608"
+        },
+        "after": {
+          "file_name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+          "part_no": 0,
+          "data_size": 24190,
+          "binary_bytes": 24190,
+          "sha256": "D7DDCF5B7C02F86EEB2A94F9B19F1F2C7C3E6D3B31B9C9DF7611F572DA1A5458"
+        }
+      },
+      {
+        "before": {
+          "file_name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+          "part_no": 0,
+          "data_size": 94,
+          "binary_bytes": 94,
+          "sha256": "B93BE3777FC3FA127C7735F6FC9567461A100F4286692D2802A0EEDA2017D202"
+        },
+        "after": {
+          "file_name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+          "part_no": 0,
+          "data_size": 94,
+          "binary_bytes": 94,
+          "sha256": "C9A403D2C5D7D85AE90A6D3185430D32DC09D3301266FFE58C8E0A4D5A1113F8"
+        }
+      }
+    ]
+  }
+}
