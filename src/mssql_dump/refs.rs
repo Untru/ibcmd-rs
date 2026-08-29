@@ -2332,42 +2332,27 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
     type_index: &BTreeMap<String, String>,
     type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> InformationRegisterFieldReferenceIndex {
+    let row_fields = parallel::install(|| {
+        rows.par_iter()
+            .filter_map(|row| {
+                information_register_field_reference_entries(row, type_index, type_set_leaves)
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        rows.iter()
+            .filter_map(|row| {
+                information_register_field_reference_entries(row, type_index, type_set_leaves)
+            })
+            .collect()
+    });
     let mut fields_by_register = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
-    for row in rows {
-        let (Some("InformationRegister"), Some(register)) =
-            (row.kind.as_deref(), row.header.as_ref())
-        else {
-            continue;
-        };
-        for (field, marker_start) in
-            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
-        {
-            let Some(tag) =
-                register_child_object_tag("InformationRegister", &row.text, marker_start)
-            else {
-                continue;
-            };
-            let Some(value_types) = parse_information_register_child_value_types(
-                &row.text,
-                marker_start,
-                &field,
-                tag,
-                type_index,
-            ) else {
-                continue;
-            };
-            let value_owner_references =
-                information_register_value_owner_references(&value_types, type_set_leaves);
-            if value_owner_references.is_empty() {
-                continue;
-            }
+    for (register_uuid, fields) in row_fields {
+        for (field_reference, value_owner_references) in fields {
             fields_by_register
-                .entry(register.uuid.clone())
+                .entry(register_uuid.clone())
                 .or_default()
-                .entry(format!(
-                    "InformationRegister.{}.{tag}.{}",
-                    register.name, field.name
-                ))
+                .entry(field_reference)
                 .or_default()
                 .extend(value_owner_references);
         }
@@ -2389,6 +2374,45 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
             )
         })
         .collect()
+}
+
+fn information_register_field_reference_entries(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) -> Option<(String, Vec<(String, BTreeSet<String>)>)> {
+    let (Some("InformationRegister"), Some(register)) = (row.kind.as_deref(), row.header.as_ref())
+    else {
+        return None;
+    };
+    let mut entries = Vec::new();
+    for (field, marker_start) in
+        nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+    {
+        let Some(tag) = register_child_object_tag("InformationRegister", &row.text, marker_start)
+        else {
+            continue;
+        };
+        let Some(value_types) = parse_information_register_child_value_types(
+            &row.text,
+            marker_start,
+            &field,
+            tag,
+            type_index,
+        ) else {
+            continue;
+        };
+        let value_owner_references =
+            information_register_value_owner_references(&value_types, type_set_leaves);
+        if value_owner_references.is_empty() {
+            continue;
+        }
+        entries.push((
+            format!("InformationRegister.{}.{tag}.{}", register.name, field.name),
+            value_owner_references,
+        ));
+    }
+    (!entries.is_empty()).then(|| (register.uuid.clone(), entries))
 }
 
 /// The leaves every *named type set* of the configuration declares.

@@ -878,20 +878,43 @@ pub(super) fn source_asset_paths_with_indexes(
             }
         }
     }
-    for row in metadata_texts {
-        let Some(discovery) = source_assets_from_metadata_text_inner(
-            row,
-            &file_names,
-            &rows_by_file_name,
-            &command_refs,
-            &metadata_refs,
-            &role_rights_object_refs,
-            &field_refs,
-            &type_index,
-            &subsystem_refs,
-        ) else {
-            continue;
-        };
+    let discoveries = parallel::install(|| {
+        metadata_texts
+            .par_iter()
+            .map(|row| {
+                source_assets_from_metadata_text_inner(
+                    row,
+                    &file_names,
+                    &rows_by_file_name,
+                    &command_refs,
+                    &metadata_refs,
+                    &role_rights_object_refs,
+                    &field_refs,
+                    &type_index,
+                    &subsystem_refs,
+                )
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        metadata_texts
+            .iter()
+            .map(|row| {
+                source_assets_from_metadata_text_inner(
+                    row,
+                    &file_names,
+                    &rows_by_file_name,
+                    &command_refs,
+                    &metadata_refs,
+                    &role_rights_object_refs,
+                    &field_refs,
+                    &type_index,
+                    &subsystem_refs,
+                )
+            })
+            .collect()
+    });
+    for discovery in discoveries.into_iter().flatten() {
         for (body_id, asset) in discovery.assets {
             paths.insert(body_id, asset);
         }
@@ -921,27 +944,47 @@ pub(super) fn source_asset_discovery_misses(
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> BTreeMap<String, String> {
+    let row_misses = parallel::install(|| {
+        metadata_texts
+            .par_iter()
+            .filter(|row| row.folder.is_some())
+            .map(|row| {
+                source_asset_discovery_misses_for_metadata_row(
+                    row,
+                    file_names,
+                    rows_by_file_name,
+                    command_refs,
+                    metadata_refs,
+                    object_refs,
+                    field_refs,
+                    type_index,
+                    subsystem_refs,
+                )
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        metadata_texts
+            .iter()
+            .filter(|row| row.folder.is_some())
+            .map(|row| {
+                source_asset_discovery_misses_for_metadata_row(
+                    row,
+                    file_names,
+                    rows_by_file_name,
+                    command_refs,
+                    metadata_refs,
+                    object_refs,
+                    field_refs,
+                    type_index,
+                    subsystem_refs,
+                )
+            })
+            .collect()
+    });
     let mut misses = BTreeMap::new();
-    for row in metadata_texts.iter().filter(|row| row.folder.is_some()) {
-        match source_assets_from_metadata_text_inner(
-            row,
-            file_names,
-            rows_by_file_name,
-            command_refs,
-            metadata_refs,
-            object_refs,
-            field_refs,
-            type_index,
-            subsystem_refs,
-        ) {
-            Some(discovery) => misses.extend(discovery.misses),
-            None => {
-                misses.insert(
-                    row.file_name.clone(),
-                    "metadata_source_asset_relation_unclassified".to_string(),
-                );
-            }
-        }
+    for row_misses in row_misses {
+        misses.extend(row_misses);
     }
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
@@ -1001,6 +1044,37 @@ pub(super) fn source_asset_discovery_misses(
         }
     }
     misses
+}
+
+#[allow(clippy::too_many_arguments)]
+fn source_asset_discovery_misses_for_metadata_row(
+    row: &MetadataTextRow,
+    file_names: &BTreeSet<&str>,
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    match source_assets_from_metadata_text_inner(
+        row,
+        file_names,
+        rows_by_file_name,
+        command_refs,
+        metadata_refs,
+        object_refs,
+        field_refs,
+        type_index,
+        subsystem_refs,
+    ) {
+        Some(discovery) => discovery.misses,
+        None => BTreeMap::from([(
+            row.file_name.clone(),
+            "metadata_source_asset_relation_unclassified".to_string(),
+        )]),
+    }
 }
 
 pub(super) fn template_body_asset_paths(
